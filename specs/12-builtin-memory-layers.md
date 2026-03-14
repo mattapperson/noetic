@@ -1,0 +1,249 @@
+# Built-In Memory Layers
+
+> **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
+> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+
+---
+
+These are informative reference implementations. They are NOT special-cased in the runtime — they use the same `MemoryLayer` interface as custom layers.
+
+---
+
+## `workingMemory()`
+
+Always-available structured or freeform state, injected near the top of the View.
+
+```typescript
+interface WorkingMemoryConfig {
+  scope?: 'thread' | 'resource';
+  schema?: ZodType;
+  template?: string;
+  readOnly?: boolean;
+}
+
+function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'working-memory'` |
+| **slot** | `Slot.WORKING_MEMORY` (100) |
+| **scope** | `config.scope ?? 'thread'` |
+| **budget** | `{ min: 200, max: 1500 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+**Behavior:**
+- `init`: Loads state from `ScopedStorage`. Defaults to `{}` (schema) or `''` (freeform).
+- `recall`: Renders state as `<working_memory>` block. Returns `null` if empty.
+- `store`: Watches for `updateWorkingMemory` tool calls. Validates against schema if provided. Deep-merges structured state.
+- `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
+
+---
+
+## `semanticRecall()`
+
+Vector-search over past messages, injected for relevant context.
+
+```typescript
+interface SemanticRecallConfig {
+  vectorStore: VectorStore;
+  embedder: Embedder;
+  topK?: number;
+  contextWindow?: number | { before: number; after: number };
+  minScore?: number;
+  scope?: 'thread' | 'resource' | 'global';
+}
+
+function semanticRecall(config: SemanticRecallConfig): MemoryLayer<void>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'semantic-recall'` |
+| **slot** | `Slot.SEMANTIC_RECALL` (400) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 0, max: 4000 }` |
+| **hooks** | `recall`, `store` |
+
+**Behavior:**
+- `recall`: Embeds query, searches vector store, expands with context window, trims to budget. Returns `<semantic_recall>` block.
+- `store`: Embeds new `user`/`assistant` events and upserts to vector store.
+
+### Supporting Types
+
+```typescript
+interface VectorStore {
+  search(embedding: number[], opts: { topK: number; filter: unknown; minScore: number }): Promise<VectorResult[]>;
+  upsert(entry: { id: string; embedding: number[]; metadata: unknown }): Promise<void>;
+}
+
+interface Embedder {
+  embed(text: string): Promise<number[]>;
+}
+```
+
+---
+
+## `observationalMemory()`
+
+Distills conversation into concise observations using a background LLM call.
+
+```typescript
+interface ObservationalMemoryConfig {
+  bufferThreshold?: number;    // tokens before observer runs, default 2000
+  maxObservations?: number;    // max kept, default 50 (compaction beyond)
+  observerModel?: string;      // default: haiku
+  observerPrompt?: string;
+  scope?: 'thread' | 'resource';
+}
+
+function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<ObservationalState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'observational-memory'` |
+| **slot** | `Slot.OBSERVATIONS` (200) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 500, max: 2500 }` |
+| **timeouts** | `{ store: 60_000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+**Behavior:**
+- `init`: Loads versioned state from storage.
+- `recall`: Renders observations as `<observations>` bullet list.
+- `store`: Accumulates tokens. When threshold reached, runs observer LLM on unprocessed events. Compacts if over `maxObservations`.
+- `onSpawn`: Clones observations to child.
+
+---
+
+## `episodicMemory()`
+
+Records execution summaries and retrieves relevant past experiences.
+
+```typescript
+interface EpisodicMemoryConfig {
+  store: EpisodicStore;
+  embedder: Embedder;
+  retrieval?: 'embedding' | 'recency' | 'both';
+  maxEpisodes?: number;
+  scope?: 'resource' | 'global';
+}
+
+function episodicMemory(config: EpisodicMemoryConfig): MemoryLayer<void>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'episodic-memory'` |
+| **slot** | `Slot.EPISODIC` (300) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 0, max: 2000 }` |
+| **hooks** | `recall`, `onComplete` |
+
+**Behavior:**
+- `recall`: Retrieves by embedding similarity, recency, or both. Deduplicates. Returns `<past_experiences>` block.
+- `onComplete`: Creates episode summary, embeds it, saves to store.
+
+### Supporting Types
+
+```typescript
+interface EpisodicStore {
+  searchByEmbedding(embedding: number[], opts: unknown): Promise<Episode[]>;
+  getRecent(opts: unknown): Promise<Episode[]>;
+  save(episode: Episode, embedding: number[]): Promise<void>;
+}
+
+interface Episode {
+  id: string;
+  summary: string;
+  timestamp: number;
+  outcome: ExecutionOutcome;
+}
+```
+
+---
+
+## `durableTaskState()`
+
+Persists task-level artifacts (files modified, progress checkpoints, git commits) across spawn boundaries. This replaces a standalone `Persistence` interface — all state that survives across fresh-context iterations is managed uniformly through memory layers.
+
+```typescript
+interface DurableTaskStateConfig {
+  baseDir?: string;          // default '.orchid/tasks'
+  gitCommit?: boolean;       // default false
+  schema?: ZodType;
+  serializer?: {
+    serialize: (state: unknown) => Promise<Buffer | string>;
+    deserialize: (data: Buffer | string) => Promise<unknown>;
+  };
+}
+
+function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableTaskState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'durable-task-state'` |
+| **slot** | `Slot.WORKING_MEMORY + 10` (110) |
+| **scope** | `'execution'` |
+| **budget** | `{ min: 100, max: 800 }` |
+| **timeouts** | `{ store: 30_000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete` |
+
+**Behavior:**
+- `init`: Loads from storage, falls back to disk (crash recovery).
+- `recall`: Renders current state, files modified, recent checkpoints as `<task_state>` block.
+- `store`: Extracts state updates from response. Writes to disk + storage. Optional git commit.
+- `onSpawn`: **Always** provides child state (unlike other layers that may return `null`).
+- `onReturn`: Merges child files/checkpoints/data back into parent.
+- `onComplete`: Final checkpoint with outcome label. Git commit if enabled.
+
+**Key design:** Always crosses spawn boundaries. Dual persistence (disk + storage). Git integration is optional. Recalls into the View so the LLM can see progress.
+
+---
+
+## Custom Layer Examples (Informative)
+
+### RAG Knowledge Base
+
+```typescript
+function ragMemory(config: {
+  retriever: DocumentRetriever;
+  maxChunks: number;
+  reranker?: Reranker;
+}): MemoryLayer<void>
+```
+
+Slot `Slot.RAG` (350), scope `'global'`, budget `{ min: 0, max: 6000 }`. Recall-only — searches, optionally re-ranks, trims to budget.
+
+### Entity Graph
+
+```typescript
+function entityMemory(config: { extractorModel?: string }): MemoryLayer<EntityGraphState>
+```
+
+Slot `Slot.ENTITY` (150), scope `'resource'`. Extracts entities from new events in `store`, renders relevant entities in `recall`.
+
+### Shared Swarm Memory
+
+```typescript
+function sharedSwarmMemory(config: { channel: PubSubChannel }): MemoryLayer<SwarmState>
+```
+
+Slot `380`, scope `'execution'`. Subscribes to peer findings in `init`, drains in `recall`, publishes in `store`, cleans up in `dispose`. Uses `onSpawn`/`onReturn` for parent-child finding merge.
+
+---
+
+## Checklist for Custom Layer Authors
+
+1. Pick a unique `id`. Namespace it: `'mycompany/layer-name'`.
+2. Choose the narrowest `scope`. Don't use `'global'` if `'resource'` suffices.
+3. Implement `init` if you have state. Use `void` for `TState` if stateless.
+4. Use `ctx.tokenize()`. Don't bring your own tokenizer.
+5. Respect the `budget` parameter in `recall()`. Trim your output to fit.
+6. Handle errors in external calls. The timeout policy is a safety net.
+7. Use JSON-serializable state. No `Map`, `Set`, `Date` objects.
+8. Version your state if you plan to evolve the schema.
+9. Clean up in `dispose()`. Close connections, cancel subscriptions.
+10. Test with the layer disabled. Your agent should work (degraded) without any single layer.

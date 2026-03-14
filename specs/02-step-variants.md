@@ -1,0 +1,134 @@
+# Step Variants: `run`, `llm`, `tool`
+
+> **Depends On:** `01-step-type` (Step<I,O>, execute)
+> **Exports:** `step.run()`, `step.llm()`, `step.tool()`, `StepRunOpts`, `StepLLMOpts`, `StepToolOpts`, `Tool`, `RetryPolicy`, `ModelParams`
+
+---
+
+## Variant: `run` — Arbitrary Async Work
+
+Pure computation. The runtime can retry freely, cache results, and doesn't need to track token usage.
+
+```typescript
+interface StepRunOpts<I, O> {
+  id: string;
+  execute: (input: I, ctx: Context) => Promise<O>;
+  retry?: RetryPolicy;
+}
+
+interface RetryPolicy {
+  maxAttempts: number;
+  backoff: 'fixed' | 'linear' | 'exponential';
+  initialDelay: number;  // ms
+}
+```
+
+```typescript
+const fetchData = step.run({
+  id: 'fetch-user-data',
+  execute: async (userId: string, ctx) => {
+    const response = await fetch(`/api/users/${userId}`);
+    return response.json();
+  },
+  retry: { maxAttempts: 3, backoff: 'exponential', initialDelay: 1000 },
+});
+```
+
+---
+
+## Variant: `llm` — Single LLM Call
+
+Costs tokens, needs model routing (OpenRouter, gateway, etc.), generates trace metadata with GenAI semantic conventions. Output may contain tool calls that drive the next iteration.
+
+```typescript
+interface StepLLMOpts<O> {
+  id: string;
+  model: string;              // e.g. 'anthropic/claude-sonnet-4-20250514'
+  system?: string;
+  tools?: Tool[];             // tools available for THIS call
+  output?: ZodType<O>;        // structured output schema
+  params?: ModelParams;       // temperature, topP, etc.
+}
+
+interface ModelParams {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+```
+
+```typescript
+const analyze = step.llm({
+  id: 'analyze-code',
+  model: 'anthropic/claude-sonnet-4-20250514',
+  system: 'You are a code reviewer. Analyze the code for bugs.',
+  tools: [searchTool, readFileTool],
+  output: z.object({
+    bugs: z.array(z.object({ line: z.number(), description: z.string() })),
+    severity: z.enum(['low', 'medium', 'high', 'critical']),
+  }),
+});
+```
+
+The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
+
+```typescript
+const result = await execute(analyze, codeSnippet, ctx);
+// result is { bugs: Bug[], severity: Severity }
+
+// Metadata on ctx.lastStepMeta:
+// { toolCalls: ToolCall[], usage: { inputTokens: number; outputTokens: number }, cost: number }
+```
+
+### What the LLM Actually Sees: The View
+
+An `llm` step does NOT simply send the `system` prompt and the raw input. The runtime assembles a **View** — the complete message array sent to the model — via the Memory Layer system (see `11-memory-layer-system`). Before each LLM call, the runtime:
+
+1. Runs `recall()` on each memory layer to gather contextual content.
+2. Assembles system prompt + memory layer outputs (ordered by slot) + conversation history into the View.
+3. Sends the View to the model.
+4. After the response, runs `store()` on each memory layer to persist learnings.
+
+The `system` field on `StepLLMOpts` becomes the agent's base instructions within the View. Memory layers inject additional context around it.
+
+---
+
+## Variant: `tool` — Single Tool Execution
+
+May have side effects, may need human approval before execution (preventive gating), and may need sandboxing.
+
+```typescript
+interface StepToolOpts<I, O> {
+  id: string;
+  tool: Tool<I, O>;
+  args?: Partial<I>;  // can override LLM-provided args
+}
+```
+
+---
+
+## The `Tool` Type
+
+```typescript
+interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
+  name: string;
+  description: string;
+  input: I;
+  output: O;
+  execute: (args: z.infer<I>, ctx: Context) => Promise<z.infer<O>>;
+  needsApproval?: boolean;  // preventive gating, not reactive throwing
+}
+```
+
+---
+
+## Why Three Execution Variants?
+
+The runtime needs to treat them differently:
+
+- **LLM steps** have cost implications, need model routing, produce telemetry with GenAI semantic conventions, and their output may contain tool calls that drive the next iteration.
+- **Tool steps** may have side effects, may need human approval before execution, and may need sandboxing.
+- **Run steps** are pure computation — the runtime can retry freely, cache results, and doesn't need to track token usage.
+
+A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.
