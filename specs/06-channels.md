@@ -65,6 +65,21 @@ Channels are scoped to an execution tree. A channel created in a parent is acces
 
 Channels are created on first reference and garbage-collected when the execution tree completes. Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 messages). When the buffer is full, senders block (back-pressure). Topic channels are ephemeral — messages are delivered to currently-waiting receivers and dropped if no one is listening.
 
+### Default Timeout and Deadlock Prevention
+
+All `recv` calls have a **default timeout of 30 seconds**. If no data arrives within the timeout, the runtime throws `channel_timeout` (see `09-error-model`). Callers may override the default:
+
+```typescript
+ctx.recv(findings, { timeout: 60_000 }); // 60s
+ctx.recv(status, { timeout: 0 });         // no timeout (use with caution)
+```
+
+Setting `timeout: 0` disables the timeout — this is an explicit opt-in to potential deadlock. The runtime SHOULD emit a warning when `timeout: 0` is used.
+
+### Back-Pressure
+
+When a queue channel's buffer reaches `capacity`, `send` returns a `Promise` that resolves when space is available (a consumer calls `recv`). Like `recv`, back-pressure `send` is subject to the default 30-second timeout. If the timeout fires, the runtime throws `channel_timeout` with the channel name. This prevents silent deadlocks where a producer and consumer are both blocked.
+
 ### Blocking Model
 
 `recv` returns a `Promise` that resolves when data is available. This works because `recv` is only called inside `step.execute`, which is already async. The runtime manages a waiter queue:

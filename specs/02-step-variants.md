@@ -71,6 +71,17 @@ const analyze = step.llm({
 });
 ```
 
+### Tool Call Execution
+
+The `executeLLM` function delegates to the OpenRouter SDK's `callModel`, which handles the tool call loop internally. When the model response contains tool calls:
+
+1. `callModel` executes each tool call using the `Tool.execute` function.
+2. Tool results are appended to the conversation.
+3. The model is called again with the updated conversation.
+4. This repeats until the model responds without tool calls or a terminal condition is met.
+
+The runtime does NOT implement its own tool call loop — `callModel` owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether `callModel`'s internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
+
 The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
 
 ```typescript

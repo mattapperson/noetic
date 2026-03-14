@@ -92,8 +92,17 @@ const dynamicSearch = fork({
 });
 ```
 
+### State Isolation
+
+Each forked path receives a **deep clone** of the parent's `Context.state`. Mutations in one path do NOT affect other paths or the parent. After the fork completes:
+
+- **`mode: 'all'`** / **`mode: 'settle'`** — The `merge` function receives the merged results. The parent's `Context.state` is NOT automatically updated from child mutations. If child state changes need to propagate, the `merge` function must return them as part of `O`.
+- **`mode: 'race'`** — The winning path's `Context.state` replaces the parent's state.
+
+This mirrors `spawn`'s deep-clone guarantee (see `04-spawn`) and prevents race conditions between concurrent paths.
+
 ### Error Behavior
 
 - **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results.
-- **`mode: 'settle'`** — Never throws. Failed paths appear as `{ status: 'rejected' }` in the merge function's `SettleResult[]`.
+- **`mode: 'settle'`** — Never throws. Failed paths appear as `{ status: 'rejected' }` in the merge function's `SettleResult[]`. If ALL paths reject, the merge function still runs with an array of all-rejected `SettleResult` entries — it is the merge function's responsibility to handle this case (e.g., by throwing).
 - **`mode: 'race'`** — First success wins. If all fail, throw `fork_partial`.

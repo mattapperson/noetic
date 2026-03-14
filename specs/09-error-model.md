@@ -55,8 +55,25 @@ The LLM returned text that didn't match the Zod schema. Includes the `raw` text 
 
 ### Cancellation
 
-`cancelled` is thrown when `runtime.cancel()` is called on a context. Propagates to all children in the execution tree. Cancelled executions still run `onComplete` and `dispose` on their memory layers (see `11-memory-layer-system`).
+`cancelled` is thrown when `runtime.cancel()` is called on a context.
+
+#### Propagation Semantics
+
+Cancellation walks the execution tree depth-first from the cancelled context:
+
+1. **Children first.** The runtime cancels all child contexts (spawned or forked) before cancelling the target context. This ensures cleanup runs bottom-up.
+2. **Blocking operations.** Any pending `recv` or back-pressure `send` on a channel immediately rejects with `{ kind: 'cancelled' }`. The blocked Promise resolves with the error — it does not hang.
+3. **Fork paths.** In `race` mode, non-winning paths are cancelled using the same mechanism. In `all`/`settle` mode, if cancellation arrives mid-fork, all paths are cancelled and the fork throws `cancelled` (not `fork_partial`).
+4. **Loop iterations.** If cancellation arrives during a loop body, the current iteration's step is cancelled. The loop does NOT run another iteration. `onError` is NOT consulted — cancellation is not a retriable error.
+5. **Memory layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a memory layer hook is in-progress when cancellation arrives, the hook is allowed to complete (up to its timeout) before `onComplete`/`dispose` run.
+6. **In-progress `store()` calls.** Concurrent `store()` calls are allowed to settle (they use `Promise.allSettled`). The runtime does not abort them — they may write partial results, which is acceptable because `store` is idempotent by convention.
+
+#### Cancellation is Idempotent
+
+Calling `runtime.cancel()` on an already-cancelled context is a no-op.
 
 ### Budget Exceeded
 
-Thrown by `until` predicates (`maxCost`, `maxSteps`, `maxDuration`) when limits are breached. Includes the `field`, `limit`, and `actual` values for diagnostics.
+Budget limits (`maxCost`, `maxSteps`, `maxDuration`) are enforced by `until` predicates, which return `Verdict` objects — they do NOT throw. The `budget_exceeded` error kind exists for cases where budget enforcement happens **outside** a loop's `until` predicate — for example, when the runtime itself detects that an agent-level budget (set on `AgentConfig`) has been exceeded between steps. In that case, the runtime throws `budget_exceeded` directly.
+
+Within a loop, the `until` predicate returns `{ stop: true, reason: 'Cost $X exceeded budget $Y' }` and the loop terminates normally. The `budget_exceeded` error is only thrown when there is no `until` predicate to catch the overage.
