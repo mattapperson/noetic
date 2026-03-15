@@ -82,3 +82,7 @@ export { durableTaskState } from './memory/layers/durable-task-state';
 export type { DurableTaskStateConfig } from './memory/layers/durable-task-state';
 export { observationalMemory } from './memory/layers/observational-memory';
 export type { ObservationalMemoryConfig } from './memory/layers/observational-memory';
+
+export { SpanImpl } from './observability/span-impl';
+export { NoopExporter, InMemoryExporter, setTraceExporter, getTraceExporter } from './observability/trace-exporter';
+export { GenAI, ToolAttr } from './observability/genai-attributes';
