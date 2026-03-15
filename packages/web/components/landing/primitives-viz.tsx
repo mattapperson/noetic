@@ -11,7 +11,7 @@ interface Primitive {
   description: string;
   signature: string;
   color: 'cyan' | 'green' | 'amber';
-  colSpan: number;
+  colSpan: 1 | 2;
 }
 
 const PRIMITIVES: Primitive[] = [
@@ -77,21 +77,13 @@ export function PrimitivesViz(): ReactNode {
     >
       <SectionHeader label="primitives" title="Seven Primitives. Any Pattern." />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '1px',
-          background: 'var(--color-tui-border)',
-          border: '1px solid var(--color-tui-border)',
-        }}
-      >
-        {PRIMITIVES.map((p) => (
+      <div className="tui-bento primitives-grid">
+        {PRIMITIVES.map((primitive) => (
           <motion.div
-            key={p.name}
+            key={primitive.name}
             whileHover={HOVER_BG}
+            data-col-span={primitive.colSpan}
             style={{
-              gridColumn: `span ${p.colSpan}`,
               background: 'var(--color-tui-surface)',
               padding: '20px',
               transition: 'background 0.1s',
@@ -105,7 +97,7 @@ export function PrimitivesViz(): ReactNode {
                 marginBottom: '8px',
               }}
             >
-              <TuiBadge color={p.color}>{p.name}</TuiBadge>
+              <TuiBadge color={primitive.color}>{primitive.name}</TuiBadge>
             </div>
             <p
               style={{
@@ -114,7 +106,7 @@ export function PrimitivesViz(): ReactNode {
                 margin: '0 0 8px',
               }}
             >
-              {p.description}
+              {primitive.description}
             </p>
             <code
               style={{
@@ -122,7 +114,7 @@ export function PrimitivesViz(): ReactNode {
                 color: 'var(--color-tui-muted)',
               }}
             >
-              {p.signature}
+              {primitive.signature}
             </code>
           </motion.div>
         ))}

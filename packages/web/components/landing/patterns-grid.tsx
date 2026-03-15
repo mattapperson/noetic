@@ -90,15 +90,7 @@ export function PatternsGrid(): ReactNode {
     >
       <SectionHeader label="batteries included" title="Built-in Patterns" />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '1px',
-          background: 'var(--color-tui-border)',
-          border: '1px solid var(--color-tui-border)',
-        }}
-      >
+      <div className="tui-bento patterns-grid">
         {PATTERNS.map((pattern) => (
           <Link
             key={pattern.name}
