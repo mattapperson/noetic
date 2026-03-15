@@ -32,6 +32,24 @@ describe('assembleView', () => {
     expect(view).toHaveLength(5);
   });
 
+  it('windowSize: 0 is treated as unset, returning full history', () => {
+    const history = Array.from({ length: 5 }, (_, i) => makeMessage('user', `msg-${i}`));
+    const view = assembleView([], [], history, { tokenBudget: 10000, responseReserve: 1000, overflow: 'sliding_window', windowSize: 0 });
+    // windowSize of 0 is treated as no window constraint; all items are returned
+    expect(view).toHaveLength(5);
+  });
+
+  it('windowSize > history length returns all items', () => {
+    const history = [makeMessage('user', 'only')];
+    const view = assembleView([], [], history, { tokenBudget: 10000, responseReserve: 1000, overflow: 'sliding_window', windowSize: 100 });
+    expect(view).toHaveLength(1);
+  });
+
+  it('all three input arrays empty returns empty array', () => {
+    const view = assembleView([], [], []);
+    expect(view).toEqual([]);
+  });
+
   it('handles truncate overflow', () => {
     const history = Array.from({ length: 5 }, (_, i) => makeMessage('user', `msg-${i}`));
     const view = assembleView([], [], history, { tokenBudget: 10000, responseReserve: 1000, overflow: 'truncate' });

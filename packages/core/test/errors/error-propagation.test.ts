@@ -14,7 +14,7 @@ describe('Error propagation', () => {
         until: until.maxSteps(5),
       };
       const ctx = new ContextImpl();
-      expect(execute(step, 'go', ctx)).rejects.toThrow();
+      await expect(execute(step, 'go', ctx)).rejects.toThrow();
     });
 
     it('onError retry re-runs', async () => {

@@ -90,7 +90,7 @@ describe('workingMemory layer', () => {
     });
     expect(result).toBeDefined();
     expect((result as any).state.notes).toBe('updated');
-    expect((result as any).state.existing).toBe(true); // deep merged
+    expect((result as any).state.existing).toBe(true); // shallow merged via spread
   });
 
   it('store does not update in readOnly mode', async () => {
@@ -126,6 +126,21 @@ describe('workingMemory layer', () => {
       spawnOpts: { contextIn: 'none', contextOut: 'none' },
     });
     expect(result).toBeNull();
+  });
+
+  it('store performs shallow merge (nested objects overwritten)', async () => {
+    const layer = workingMemory();
+    const funcCall: FunctionCallItem = {
+      id: 'fc1', status: 'completed', type: 'function_call',
+      call_id: 'c1', name: 'updateWorkingMemory', arguments: '{"nested":{"a":99}}',
+    };
+    const result = await layer.hooks.store!({
+      newItems: [funcCall], log: makeItemLog(),
+      response: { items: [funcCall], usage: { inputTokens: 0, outputTokens: 0 } },
+      ctx: makeCtx(), state: { nested: { a: 1, b: 2 } },
+    });
+    // Shallow merge: nested object is replaced entirely, b is lost
+    expect((result as any).state.nested).toEqual({ a: 99 });
   });
 
   it('respects custom scope config', () => {

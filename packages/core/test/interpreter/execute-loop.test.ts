@@ -390,6 +390,63 @@ describe('executeLoop', () => {
     expect(capturedHistory).toEqual([8, 9, 10]);
   });
 
+  it('onError skip on first iteration (no previous output) continues', async () => {
+    let callCount = 0;
+    const loopStep: StepLoop<string, string> = {
+      kind: 'loop',
+      id: 'skip-first-loop',
+      body: {
+        kind: 'run',
+        id: 'fail-then-ok',
+        execute: async (input: string) => {
+          callCount++;
+          if (callCount === 1) {
+            throw new OrchidErrorImpl({
+              kind: 'step_failed',
+              stepId: 'fail-then-ok',
+              cause: new Error('first fail'),
+              retriesExhausted: false,
+            });
+          }
+          return 'success';
+        },
+      },
+      // On first error with no previous output: skip → continue (stepCount stays 0).
+      // Second call succeeds: stepCount increments to 1, satisfying maxSteps(1).
+      until: until.maxSteps(1),
+      onError: () => 'skip',
+    };
+
+    const ctx = new ContextImpl();
+    const result = await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
+    expect(result).toBe('success');
+    expect(callCount).toBe(2);
+  });
+
+  it('negative maxIterations throws validation error', async () => {
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'neg-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => input + 1,
+      },
+      until: until.maxSteps(5),
+      maxIterations: -1,
+    };
+    const ctx = new ContextImpl();
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('step_failed');
+      expect(oe.cause.message).toContain('Invalid maxIterations');
+    }
+  });
+
   it('uses verified predicate with feedback', async () => {
     let iteration = 0;
     const feedbacks: (string | undefined)[] = [];

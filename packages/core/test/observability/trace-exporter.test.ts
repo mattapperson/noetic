@@ -3,10 +3,15 @@ import { NoopExporter, InMemoryExporter } from '../../src/observability/trace-ex
 import { SpanImpl } from '../../src/observability/span-impl';
 
 describe('NoopExporter', () => {
-  it('export does nothing', async () => {
+  it('export resolves without error', async () => {
     const exporter = new NoopExporter();
-    await exporter.export([new SpanImpl('test', null)]);
-    // No error
+    const result = await exporter.export([new SpanImpl('test', null)]);
+    expect(result).toBeUndefined();
+  });
+
+  it('has no spans property', () => {
+    const exporter = new NoopExporter();
+    expect((exporter as any).spans).toBeUndefined();
   });
 });
 

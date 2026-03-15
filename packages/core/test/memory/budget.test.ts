@@ -20,7 +20,7 @@ describe('allocateBudgets', () => {
   it('reserves 40% for history', () => {
     const layers = [makeLayer('a', { min: 0, max: 5000 })];
     const { historyBudget } = allocateBudgets(layers, 10000, 0, 0);
-    expect(historyBudget).toBeGreaterThan(0);
+    expect(historyBudget).toBe(4000);
   });
 
   it('handles zero available budget', () => {
@@ -36,15 +36,32 @@ describe('allocateBudgets', () => {
       makeLayer('b', { min: 0, max: 1000 }),
     ];
     const { allocations } = allocateBudgets(layers, 10000, 0, 0);
-    // 'a' has 3x the headroom so should get 3x the share
-    expect(allocations[0].allocated).toBeGreaterThan(allocations[1].allocated);
+    // 60% of 10000 = 6000 for layers; a gets 3/4 = 4500 capped to 3000, b gets 1/4 = 1500 capped to 1000
+    expect(allocations[0].allocated).toBe(3000);
+    expect(allocations[1].allocated).toBe(1000);
   });
 
   it('handles numeric budget config', () => {
     const layers = [makeLayer('a', 500)];
     const { allocations } = allocateBudgets(layers, 10000, 0, 0);
-    expect(allocations[0].allocated).toBeGreaterThanOrEqual(0);
-    expect(allocations[0].allocated).toBeLessThanOrEqual(500);
+    expect(allocations[0].allocated).toBe(500);
+  });
+
+  it('Infinity headroom layers split equally', () => {
+    const layers = [makeLayer('a', 'auto'), makeLayer('b', 'auto')];
+    const { allocations } = allocateBudgets(layers, 10000, 0, 0);
+    // 60% of 10000 = 6000 for layers, split equally between 2 auto layers
+    expect(allocations[0].allocated).toBe(3000);
+    expect(allocations[1].allocated).toBe(3000);
+  });
+
+  it('negative available budget yields all zero allocations', () => {
+    const layers = [makeLayer('a', { min: 200, max: 1000 }), makeLayer('b', 'auto')];
+    // systemPromptTokens + responseReserve > totalBudget
+    const { allocations, historyBudget } = allocateBudgets(layers, 100, 5000, 5000);
+    expect(allocations[0].allocated).toBe(0);
+    expect(allocations[1].allocated).toBe(0);
+    expect(historyBudget).toBe(0);
   });
 
   it('handles auto budget config', () => {

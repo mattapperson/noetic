@@ -44,6 +44,36 @@ describe('durableTaskState', () => {
     expect(result!.childState).not.toBe(parentState);
   });
 
+  it('store hook accumulates checkpoints', async () => {
+    const layer = durableTaskState();
+    const state = { checkpoints: [], files: [], data: {} };
+    const result1 = await layer.hooks.store!({
+      newItems: [], log: { items: [], append: () => {} } as any,
+      response: { items: [], usage: { inputTokens: 0, outputTokens: 0 } },
+      ctx: makeCtx(), state,
+    });
+    const result2 = await layer.hooks.store!({
+      newItems: [], log: { items: [], append: () => {} } as any,
+      response: { items: [], usage: { inputTokens: 0, outputTokens: 0 } },
+      ctx: makeCtx(), state: (result1 as any).state,
+    });
+    const finalState = (result2 as any).state;
+    expect(finalState.checkpoints).toHaveLength(2);
+    expect(finalState.checkpoints[0]).toHaveProperty('timestamp');
+    expect(finalState.checkpoints[0]).toHaveProperty('depth');
+  });
+
+  it('onReturn with conflicting keys: child overwrites parent', async () => {
+    const layer = durableTaskState();
+    const parentState = { checkpoints: [], files: [], data: { key: 'parent-value' } };
+    const childState = { checkpoints: [], files: [], data: { key: 'child-value' } };
+    const result = await layer.hooks.onReturn!({
+      childState, childLog: { items: [], append: () => {} } as any, parentState, result: 'done',
+    });
+    // { ...parent.data, ...child.data } → child overwrites
+    expect((result as any).parentState.data.key).toBe('child-value');
+  });
+
   it('onReturn merges child artifacts back', async () => {
     const layer = durableTaskState();
     const parentState = { checkpoints: [{ timestamp: 1, depth: 0 }], files: ['a.ts'], data: { x: 1 } };

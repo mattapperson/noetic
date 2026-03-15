@@ -213,6 +213,46 @@ describe('until predicates', () => {
     });
   });
 
+  describe('converged edge cases', () => {
+    it('similar-but-not-identical strings do not converge (exact equality only)', async () => {
+      const pred = until.converged({ threshold: 0.9 });
+      await pred(makeSnap({ lastText: 'hello world' }));
+      const verdict = await pred(makeSnap({ lastText: 'hello worl' }));
+      // threshold is ignored; uses exact string equality
+      expect(verdict.stop).toBe(false);
+    });
+
+    it('two instances track independently', async () => {
+      const pred1 = until.converged({ threshold: 0.9 });
+      const pred2 = until.converged({ threshold: 0.9 });
+      await pred1(makeSnap({ lastText: 'a' }));
+      await pred2(makeSnap({ lastText: 'x' }));
+      // pred1 sees 'a' again → converged; pred2 sees 'y' → not converged
+      const v1 = await pred1(makeSnap({ lastText: 'a' }));
+      const v2 = await pred2(makeSnap({ lastText: 'y' }));
+      expect(v1.stop).toBe(true);
+      expect(v2.stop).toBe(false);
+    });
+  });
+
+  describe('maxSteps edge cases', () => {
+    it('maxSteps(0) stops immediately', async () => {
+      const pred = until.maxSteps(0);
+      const verdict = await pred(makeSnap({ stepCount: 0 }));
+      // stepCount >= 0 is always true
+      expect(verdict.stop).toBe(true);
+    });
+  });
+
+  describe('outputContains edge cases', () => {
+    it('outputContains empty string always stops', async () => {
+      const pred = until.outputContains('');
+      const verdict = await pred(makeSnap({ lastText: 'anything' }));
+      // 'anything'.includes('') is true
+      expect(verdict.stop).toBe(true);
+    });
+  });
+
   describe('error handling', () => {
     it('throwing predicate propagates', () => {
       const pred = until.custom(() => {
@@ -224,6 +264,22 @@ describe('until predicates', () => {
 });
 
 describe('combinators', () => {
+  describe('any() edge cases', () => {
+    it('any() with zero predicates returns stop: false', async () => {
+      const pred = any();
+      const verdict = await pred(makeSnap());
+      expect(verdict.stop).toBe(false);
+    });
+  });
+
+  describe('all() edge cases', () => {
+    it('all() with zero predicates returns stop: true', async () => {
+      const pred = all();
+      const verdict = await pred(makeSnap());
+      expect(verdict.stop).toBe(true);
+    });
+  });
+
   describe('any()', () => {
     it('stops when any predicate fires', async () => {
       const pred = any(until.maxSteps(5), until.maxCost(1.0));

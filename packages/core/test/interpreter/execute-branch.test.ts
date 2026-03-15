@@ -30,6 +30,28 @@ describe('executeBranch', () => {
     expect(result).toBe('passthrough');
   });
 
+  it('route function throws — error propagates unwrapped', async () => {
+    const step: StepBranch<string, string> = {
+      kind: 'branch', id: 'throw-test',
+      route: () => { throw new Error('route exploded'); },
+    };
+    await expect(executeBranch(step, 'input', new ContextImpl(), simpleExecute)).rejects.toThrow('route exploded');
+  });
+
+  it('route receives context as second arg', async () => {
+    let capturedCtx: Context | undefined;
+    const step: StepBranch<string, string> = {
+      kind: 'branch', id: 'ctx-test',
+      route: (_input, ctx) => {
+        capturedCtx = ctx;
+        return { kind: 'run', id: 'inner', execute: async () => 'done' };
+      },
+    };
+    const ctx = new ContextImpl();
+    await executeBranch(step, 'test', ctx, simpleExecute);
+    expect(capturedCtx).toBe(ctx);
+  });
+
   it('selected step is executed with correct input', async () => {
     let receivedInput = '';
     const step: StepBranch<string, string> = {

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { compilePlan, adaptivePlan } from '../../src/patterns/plans';
 import type { PlanNode } from '../../src/patterns/plans';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import { execute } from '../../src/interpreter/execute';
 import type { Context } from '../../src/types/context';
 
 describe('compilePlan', () => {
@@ -41,6 +42,53 @@ describe('compilePlan', () => {
   it('throws on unknown agent', () => {
     const plan: PlanNode = { id: 't', description: 'd', assignee: 'unknown', execution: 'sequential' };
     expect(() => compilePlan(plan, {})).toThrow('Unknown agent: unknown');
+  });
+
+  it('parallel execution mode runs all children', async () => {
+    const results: string[] = [];
+    const plan: PlanNode = {
+      id: 'root', description: 'Root', assignee: 'worker', execution: 'parallel',
+      children: [
+        { id: 'p1', description: 'Parallel 1', assignee: 'worker', execution: 'sequential' },
+        { id: 'p2', description: 'Parallel 2', assignee: 'worker', execution: 'sequential' },
+      ],
+    };
+    const agents = {
+      worker: (prompt: string) => ({
+        kind: 'run' as const, id: `w-${prompt}`,
+        execute: async (input: string) => { results.push(prompt); return `done: ${prompt}`; },
+      }),
+    };
+    const compiled = compilePlan(plan, agents);
+    await execute(compiled, 'start', new ContextImpl());
+    expect(results).toContain('Parallel 1');
+    expect(results).toContain('Parallel 2');
+    expect(results).toHaveLength(2);
+  });
+
+  it('deeply nested plan trees', async () => {
+    const results: string[] = [];
+    const plan: PlanNode = {
+      id: 'root', description: 'Root', assignee: 'worker', execution: 'sequential',
+      children: [
+        {
+          id: 'child', description: 'Child', assignee: 'worker', execution: 'sequential',
+          children: [
+            { id: 'grandchild-1', description: 'GC1', assignee: 'worker', execution: 'sequential' },
+            { id: 'grandchild-2', description: 'GC2', assignee: 'worker', execution: 'sequential' },
+          ],
+        },
+      ],
+    };
+    const agents = {
+      worker: (prompt: string) => ({
+        kind: 'run' as const, id: `w-${prompt}`,
+        execute: async (input: string) => { results.push(prompt); return `${input} -> ${prompt}`; },
+      }),
+    };
+    const compiled = compilePlan(plan, agents);
+    await execute(compiled, 'start', new ContextImpl());
+    expect(results).toEqual(['GC1', 'GC2']);
   });
 });
 
@@ -86,6 +134,7 @@ describe('adaptivePlan', () => {
     const result = await (step as any).execute('goal', new ContextImpl());
     expect(result).toBe('success');
     expect(planCount).toBe(3);
+    expect(execCount).toBe(3);
   });
 
   it('enforces maxRevisions', async () => {
@@ -100,6 +149,29 @@ describe('adaptivePlan', () => {
       }),
     };
     const step = adaptivePlan({ planner, agents, maxRevisions: 2 });
-    expect((step as any).execute('goal', new ContextImpl())).rejects.toThrow('always fails');
+    await expect((step as any).execute('goal', new ContextImpl())).rejects.toThrow('always fails');
+  });
+
+  it('planner throws propagates error', async () => {
+    const planner = {
+      kind: 'run' as const, id: 'planner',
+      execute: async () => { throw new Error('planner exploded'); },
+    };
+    const agents = {
+      worker: () => ({ kind: 'run' as const, id: 'w', execute: async () => 'ok' }),
+    };
+    const step = adaptivePlan({ planner, agents, maxRevisions: 3 });
+    await expect((step as any).execute('goal', new ContextImpl())).rejects.toThrow('planner exploded');
+  });
+
+  it('non-run planner without executeStep throws', async () => {
+    const planner = {
+      kind: 'loop' as const, id: 'planner',
+      body: { kind: 'run' as const, id: 'b', execute: async () => ({}) },
+      until: () => ({ stop: true }),
+    };
+    const agents = {};
+    const step = adaptivePlan({ planner: planner as any, agents, maxRevisions: 1 });
+    await expect((step as any).execute('goal', new ContextImpl())).rejects.toThrow('Planner must be a run step');
   });
 });

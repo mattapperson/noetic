@@ -84,6 +84,56 @@ describe('ChannelStore', () => {
     });
   });
 
+  describe('value mode recv edge cases', () => {
+    it('recv returns immediately when value already exists', async () => {
+      const store = new ChannelStore();
+      const ch = channel('v-immediate', { schema: z.number(), mode: 'value' });
+      store.send(ch, 42);
+      const result = await store.recv(ch, 500);
+      expect(result).toBe(42);
+    });
+  });
+
+  describe('queue mode recv edge cases', () => {
+    it('timeout <= 0 on recv hangs (does not resolve)', async () => {
+      const store = new ChannelStore();
+      const ch = channel('hang', { schema: z.string(), mode: 'queue' });
+      // Race recv(timeout=0) against a short timer to prove it hangs
+      const result = await Promise.race([
+        store.recv(ch, 0).then(() => 'resolved'),
+        new Promise<string>(r => setTimeout(() => r('timed-out'), 10)),
+      ]);
+      expect(result).toBe('timed-out');
+    });
+
+    it('multiple concurrent recv waiters: only first wakes per send', async () => {
+      const store = new ChannelStore();
+      const ch = channel('multi-recv', { schema: z.number(), mode: 'queue' });
+      const p1 = store.recv(ch, 500);
+      const p2 = store.recv(ch, 500);
+      store.send(ch, 1);
+      store.send(ch, 2);
+      expect(await p1).toBe(1);
+      expect(await p2).toBe(2);
+    });
+  });
+
+  describe('topic mode edge cases', () => {
+    it('non-positive timeout warns and clamps to MAX', async () => {
+      const warnSpy = spyOn(console, 'warn');
+      const store = new ChannelStore();
+      const ch = channel('topic-neg', { schema: z.string(), mode: 'topic' });
+      // We can't wait for MAX_TOPIC_TIMEOUT, so just verify the warning fires
+      // and that a send still resolves the recv
+      const p = store.recv(ch, -1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('non-positive timeout');
+      store.send(ch, 'ok');
+      expect(await p).toBe('ok');
+      warnSpy.mockRestore();
+    });
+  });
+
   describe('timeout', () => {
     it('recv throws channel_timeout', async () => {
       const store = new ChannelStore();

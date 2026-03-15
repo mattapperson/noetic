@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'bun:test';
 import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import { isOrchidError } from '../../src/errors/orchid-error';
 import type { StepSpawn } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
 import type { Item, MessageItem } from '../../src/types/items';
+import { z } from 'zod';
 
 const simpleExecute = async <I, O>(step: any, input: I, ctx: Context): Promise<O> => {
   if (step.kind === 'run') return step.execute(input, ctx);
@@ -175,6 +177,92 @@ describe('executeSpawn', () => {
       await executeSpawn(step, '', parentCtx, simpleExecute);
       expect(parentCtx.depth).toBe(0);
       expect(childDepth).toBe(1);
+    });
+  });
+
+  describe('child step throws', () => {
+    it('error propagates from executeSpawn', async () => {
+      const parentCtx = new ContextImpl();
+      const step: StepSpawn<string, string> = {
+        kind: 'spawn', id: 'throw-test',
+        child: {
+          kind: 'run', id: 'child-run',
+          execute: async () => { throw new Error('child boom'); },
+        },
+        contextIn: { strategy: 'fresh' },
+        contextOut: { strategy: 'full' },
+      };
+      await expect(executeSpawn(step, '', parentCtx, simpleExecute)).rejects.toThrow('child boom');
+    });
+  });
+
+  describe('contextIn: subset with empty parent', () => {
+    it('select receives empty array', async () => {
+      const parentCtx = new ContextImpl();
+      let receivedItems: readonly Item[] = [];
+      const step: StepSpawn<string, string> = {
+        kind: 'spawn', id: 'empty-subset',
+        child: {
+          kind: 'run', id: 'child-run',
+          execute: async () => 'done',
+        },
+        contextIn: {
+          strategy: 'subset',
+          select: (items) => { receivedItems = items; return []; },
+        },
+        contextOut: { strategy: 'full' },
+      };
+      await executeSpawn(step, '', parentCtx, simpleExecute);
+      expect(receivedItems).toHaveLength(0);
+    });
+  });
+
+  describe('contextOut: schema validation failure', () => {
+    it('throws llm_parse_error on schema mismatch', async () => {
+      const parentCtx = new ContextImpl();
+      const step: StepSpawn<string, string> = {
+        kind: 'spawn', id: 'schema-fail',
+        child: {
+          kind: 'run', id: 'child-run',
+          execute: async () => 'not-a-number',
+        },
+        contextIn: { strategy: 'fresh' },
+        // Intentionally pass z.number() schema against a string output to trigger
+        // the runtime parse failure path — `as any` bypasses the generic type constraint.
+        contextOut: { strategy: 'schema', schema: z.number() as any },
+      };
+      try {
+        await executeSpawn(step, '', parentCtx, simpleExecute);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        expect(isOrchidError(e)).toBe(true);
+        expect((e as any).orchidError.kind).toBe('llm_parse_error');
+      }
+    });
+  });
+
+  describe('contextOut: summary when callModel fails', () => {
+    it('throws spawn_summary_failed with childOutput', async () => {
+      const parentCtx = new ContextImpl();
+      const step: StepSpawn<string, string> = {
+        kind: 'spawn', id: 'sum-fail',
+        child: {
+          kind: 'run', id: 'child-run',
+          execute: async () => 'child-data',
+        },
+        contextIn: { strategy: 'fresh' },
+        contextOut: { strategy: 'summary' },
+      };
+      const failingCallModel = async () => { throw new Error('LLM down'); };
+      try {
+        await executeSpawn(step, '', parentCtx, simpleExecute, failingCallModel);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        expect(isOrchidError(e)).toBe(true);
+        const oe = (e as any).orchidError;
+        expect(oe.kind).toBe('spawn_summary_failed');
+        expect(oe.childOutput).toBe('child-data');
+      }
     });
   });
 

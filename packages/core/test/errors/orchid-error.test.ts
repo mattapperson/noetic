@@ -81,6 +81,14 @@ describe('OrchidError', () => {
     });
   });
 
+  describe('formatMessage default branch', () => {
+    it('unknown kind produces fallback message', () => {
+      const e = new OrchidErrorImpl({ kind: 'totally_unknown' } as any);
+      expect(e.message).toContain('OrchidError');
+      expect(e.message).toContain('totally_unknown');
+    });
+  });
+
   describe('isOrchidError guard', () => {
     it('returns true for OrchidErrorImpl', () => {
       const e = new OrchidErrorImpl({ kind: 'cancelled' });

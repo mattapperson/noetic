@@ -105,6 +105,64 @@ describe('executeFork', () => {
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
 
+    it('concurrency: 1 forces serial execution', async () => {
+      let maxConcurrent = 0;
+      let current = 0;
+      const makeTimedPath = (id: string) => ({
+        kind: 'run' as const, id,
+        execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 5)); current--; return id; },
+      });
+      const step: StepForkAll<string, string> = {
+        kind: 'fork',
+        id: 'serial-test',
+        mode: 'all',
+        paths: () => [makeTimedPath('a'), makeTimedPath('b'), makeTimedPath('c')],
+        merge: (r) => r.join(','),
+        concurrency: 1,
+      };
+      const ctx = new ContextImpl();
+      const result = await executeFork(step, '', ctx, simpleExecute);
+      expect(maxConcurrent).toBe(1);
+      expect(result).toBe('a,b,c');
+    });
+
+    it('paths() receives input and context', async () => {
+      let capturedInput: string | undefined;
+      let capturedCtx: Context | undefined;
+      const step: StepForkAll<string, string> = {
+        kind: 'fork',
+        id: 'args-test',
+        mode: 'all',
+        paths: (input, ctx) => {
+          capturedInput = input;
+          capturedCtx = ctx;
+          return [{ kind: 'run', id: 'a', execute: async () => 'done' }];
+        },
+        merge: (r) => r.join(','),
+      };
+      const ctx = new ContextImpl();
+      await executeFork(step, 'test-input', ctx, simpleExecute);
+      expect(capturedInput).toBe('test-input');
+      expect(capturedCtx).toBe(ctx);
+    });
+
+    it('merge() receives context as second arg', async () => {
+      let capturedCtx: Context | undefined;
+      const step: StepForkAll<string, string> = {
+        kind: 'fork',
+        id: 'merge-ctx-test',
+        mode: 'all',
+        paths: () => [{ kind: 'run', id: 'a', execute: async () => 'done' }],
+        merge: (results, ctx) => {
+          capturedCtx = ctx;
+          return results.join(',');
+        },
+      };
+      const ctx = new ContextImpl();
+      await executeFork(step, '', ctx, simpleExecute);
+      expect(capturedCtx).toBe(ctx);
+    });
+
     it('handles empty paths', async () => {
       const step: StepForkAll<string, string> = {
         kind: 'fork',
