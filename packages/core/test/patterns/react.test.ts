@@ -1,24 +1,34 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
+import { z } from 'zod';
 import { react } from '../../src/patterns/react';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
 import type { LLMResponse } from '../../src/types/common';
-import type { Item, FunctionCallItem, FunctionCallOutputItem, MessageItem } from '../../src/types/items';
-import { z } from 'zod';
+import type { FunctionCallItem, FunctionCallOutputItem, MessageItem } from '../../src/types/items';
 
 describe('ReAct pattern', () => {
   it('creates a loop step with correct structure', () => {
     const searchTool = {
       name: 'search',
       description: 'Search the web',
-      input: z.object({ query: z.string() }),
-      output: z.object({ results: z.array(z.string()) }),
-      execute: async (args: { query: string }) => ({ results: ['result1'] }),
+      input: z.object({
+        query: z.string(),
+      }),
+      output: z.object({
+        results: z.array(z.string()),
+      }),
+      execute: async (_args: { query: string }) => ({
+        results: [
+          'result1',
+        ],
+      }),
     };
 
     const reactStep = react({
       model: 'gpt-4',
       system: 'You are a helpful assistant',
-      tools: [searchTool],
+      tools: [
+        searchTool,
+      ],
       maxSteps: 5,
     });
 
@@ -31,16 +41,21 @@ describe('ReAct pattern', () => {
     const searchTool = {
       name: 'search',
       description: 'Search the web',
-      input: z.object({ query: z.string() }),
-      output: z.object({ results: z.array(z.string()) }),
-      execute: async (args: { query: string }) => ({ results: [`found: ${args.query}`] }),
+      input: z.object({
+        query: z.string(),
+      }),
+      output: z.object({
+        results: z.array(z.string()),
+      }),
+      execute: async (args: { query: string }) => ({
+        results: [
+          `found: ${args.query}`,
+        ],
+      }),
     };
 
     let callCount = 0;
-    const mockCallModel = async (
-      model: string,
-      items: ReadonlyArray<Item>,
-    ): Promise<LLMResponse> => {
+    const mockCallModel = async (): Promise<LLMResponse> => {
       callCount++;
 
       if (callCount === 1) {
@@ -67,10 +82,18 @@ describe('ReAct pattern', () => {
               status: 'completed',
               type: 'message',
               role: 'assistant',
-              content: [{ type: 'output_text', text: 'I searched and found results.' }],
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'I searched and found results.',
+                },
+              ],
             } as MessageItem,
           ],
-          usage: { inputTokens: 50, outputTokens: 30 },
+          usage: {
+            inputTokens: 50,
+            outputTokens: 30,
+          },
           cost: 0.001,
         };
       }
@@ -83,20 +106,32 @@ describe('ReAct pattern', () => {
             status: 'completed',
             type: 'message',
             role: 'assistant',
-            content: [{ type: 'output_text', text: 'Based on my search, here is the answer.' }],
+            content: [
+              {
+                type: 'output_text',
+                text: 'Based on my search, here is the answer.',
+              },
+            ],
           } as MessageItem,
         ],
-        usage: { inputTokens: 80, outputTokens: 40 },
+        usage: {
+          inputTokens: 80,
+          outputTokens: 40,
+        },
         cost: 0.002,
       };
     };
 
-    const runtime = new InMemoryRuntime({ callModel: mockCallModel });
+    const runtime = new InMemoryRuntime({
+      callModel: mockCallModel,
+    });
     const ctx = runtime.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
-      tools: [searchTool],
+      tools: [
+        searchTool,
+      ],
       maxSteps: 10,
     });
 
@@ -141,23 +176,35 @@ describe('ReAct pattern', () => {
             status: 'completed',
             type: 'message',
             role: 'assistant',
-            content: [{ type: 'output_text', text: `Step ${callCount}` }],
+            content: [
+              {
+                type: 'output_text',
+                text: `Step ${callCount}`,
+              },
+            ],
           } as MessageItem,
         ],
-        usage: { inputTokens: 10, outputTokens: 10 },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 10,
+        },
       };
     };
 
-    const runtime = new InMemoryRuntime({ callModel: mockCallModel });
+    const runtime = new InMemoryRuntime({
+      callModel: mockCallModel,
+    });
     const ctx = runtime.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
-      tools: [tool],
+      tools: [
+        tool,
+      ],
       maxSteps: 3,
     });
 
-    const result = await runtime.execute(reactStep, 'go', ctx);
+    const _result = await runtime.execute(reactStep, 'go', ctx);
     expect(callCount).toBe(3); // Stopped at maxSteps
   });
 
@@ -181,19 +228,31 @@ describe('ReAct pattern', () => {
             status: 'completed',
             type: 'message',
             role: 'assistant',
-            content: [{ type: 'output_text', text: 'No tools needed' }],
+            content: [
+              {
+                type: 'output_text',
+                text: 'No tools needed',
+              },
+            ],
           } as MessageItem,
         ],
-        usage: { inputTokens: 10, outputTokens: 10 },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 10,
+        },
       };
     };
 
-    const runtime = new InMemoryRuntime({ callModel: mockCallModel });
+    const runtime = new InMemoryRuntime({
+      callModel: mockCallModel,
+    });
     const ctx = runtime.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
-      tools: [tool],
+      tools: [
+        tool,
+      ],
       maxSteps: 10,
     });
 
@@ -207,7 +266,9 @@ describe('ReAct pattern', () => {
     const tool = {
       name: 'search',
       description: 'Search',
-      input: z.object({ q: z.string() }),
+      input: z.object({
+        q: z.string(),
+      }),
       output: z.string(),
       execute: async () => 'found',
     };
@@ -218,27 +279,75 @@ describe('ReAct pattern', () => {
       if (callCount === 1) {
         return {
           items: [
-            { id: 'fc1', status: 'completed', type: 'function_call', call_id: 'c1', name: 'search', arguments: '{"q":"x"}' } as FunctionCallItem,
-            { id: 'fco1', status: 'completed', type: 'function_call_output', call_id: 'c1', output: '"found"' } as FunctionCallOutputItem,
-            { id: 'm1', status: 'completed', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'searching' }] } as MessageItem,
+            {
+              id: 'fc1',
+              status: 'completed',
+              type: 'function_call',
+              call_id: 'c1',
+              name: 'search',
+              arguments: '{"q":"x"}',
+            } as FunctionCallItem,
+            {
+              id: 'fco1',
+              status: 'completed',
+              type: 'function_call_output',
+              call_id: 'c1',
+              output: '"found"',
+            } as FunctionCallOutputItem,
+            {
+              id: 'm1',
+              status: 'completed',
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'searching',
+                },
+              ],
+            } as MessageItem,
           ],
-          usage: { inputTokens: 100, outputTokens: 50 },
+          usage: {
+            inputTokens: 100,
+            outputTokens: 50,
+          },
           cost: 0.01,
         };
       }
       return {
         items: [
-          { id: 'm2', status: 'completed', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } as MessageItem,
+          {
+            id: 'm2',
+            status: 'completed',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'output_text',
+                text: 'done',
+              },
+            ],
+          } as MessageItem,
         ],
-        usage: { inputTokens: 200, outputTokens: 100 },
+        usage: {
+          inputTokens: 200,
+          outputTokens: 100,
+        },
         cost: 0.02,
       };
     };
 
-    const runtime = new InMemoryRuntime({ callModel: mockCallModel });
+    const runtime = new InMemoryRuntime({
+      callModel: mockCallModel,
+    });
     const ctx = runtime.createContext();
 
-    const reactStep = react({ model: 'gpt-4', tools: [tool] });
+    const reactStep = react({
+      model: 'gpt-4',
+      tools: [
+        tool,
+      ],
+    });
     await runtime.execute(reactStep, 'test', ctx);
 
     expect(ctx.tokens.input).toBe(300);

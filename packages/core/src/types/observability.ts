@@ -16,7 +16,14 @@ export interface MemoryTraceSpan {
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
   durationMs: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
-  budget?: { allocated: number; used: number; yielded: number };
+  budget?: {
+    allocated: number;
+    used: number;
+    yielded: number;
+  };
   itemCount?: number;
-  error?: { message: string; stack?: string };
+  error?: {
+    message: string;
+    stack?: string;
+  };
 }

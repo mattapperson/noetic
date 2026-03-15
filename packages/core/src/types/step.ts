@@ -1,13 +1,17 @@
 import type { ZodType } from 'zod';
+import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
 import type { Context } from './context';
-import type { ModelParams, RetryPolicy, Tool, StepMeta } from './common';
 import type { OrchidError } from './error';
 import type { Item } from './items';
 
 // Until predicate types
 export interface Snapshot {
   stepCount: number;
-  tokens: { input: number; output: number; total: number };
+  tokens: {
+    input: number;
+    output: number;
+    total: number;
+  };
   elapsed: number;
   cost: number;
   lastOutput: unknown;
@@ -27,15 +31,34 @@ export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
 // Context strategies for spawn
 export type ContextInStrategy =
-  | { strategy: 'inherit' }
-  | { strategy: 'fresh' }
-  | { strategy: 'subset'; select: (parentItems: Item[], parentState: unknown) => Item[] }
-  | { strategy: 'custom'; build: (input: unknown, parentCtx: Context) => Item[] };
+  | {
+      strategy: 'inherit';
+    }
+  | {
+      strategy: 'fresh';
+    }
+  | {
+      strategy: 'subset';
+      select: (parentItems: Item[], parentState: unknown) => Item[];
+    }
+  | {
+      strategy: 'custom';
+      build: (input: unknown, parentCtx: Context) => Item[];
+    };
 
 export type ContextOutStrategy<O> =
-  | { strategy: 'full' }
-  | { strategy: 'summary'; model?: string; prompt?: string }
-  | { strategy: 'schema'; schema: ZodType<O> };
+  | {
+      strategy: 'full';
+    }
+  | {
+      strategy: 'summary';
+      model?: string;
+      prompt?: string;
+    }
+  | {
+      strategy: 'schema';
+      schema: ZodType<O>;
+    };
 
 // Settle result for fork
 export interface SettleResult<O> {
@@ -62,7 +85,7 @@ export interface StepRun<I, O> {
   retry?: RetryPolicy;
 }
 
-export interface StepLLM<I, O> {
+export interface StepLLM<_I, O> {
   kind: 'llm';
   id: string;
   model: string;
@@ -86,10 +109,7 @@ export interface StepBranch<I, O> {
 }
 
 // Fork with type-safe mode variants
-export type StepFork<I, O> =
-  | StepForkRace<I, O>
-  | StepForkAll<I, O>
-  | StepForkSettle<I, O>;
+export type StepFork<I, O> = StepForkRace<I, O> | StepForkAll<I, O> | StepForkSettle<I, O>;
 
 export interface StepForkRace<I, O> {
   kind: 'fork';

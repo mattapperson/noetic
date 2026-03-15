@@ -1,41 +1,22 @@
-import type { StepLLM } from '../types/step';
-import type { Context } from '../types/context';
-import type { LLMResponse, StepMeta, Tool, ModelParams } from '../types/common';
-import type { Item, MessageItem, FunctionCallItem } from '../types/items';
+import type { ZodType } from 'zod';
+import { ZodError } from 'zod';
 import { OrchidErrorImpl } from '../errors/orchid-error';
-import { isMutableContext, isAssistantMessage, isOutputText } from './typeguards';
-import { ZodError, type ZodType } from 'zod';
+import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
+import type { Context } from '../types/context';
+import type { FunctionCallItem, Item } from '../types/items';
+import type { StepLLM } from '../types/step';
+import { createMessage, extractAssistantText } from './message-helpers';
+import { isMutableContext } from './typeguards';
 
-export type CallModelFn = (
-  model: string,
-  items: ReadonlyArray<Item>,
-  tools?: Tool[],
-  params?: ModelParams,
-  output?: ZodType,
-) => Promise<LLMResponse>;
-
-function createUserMessage(text: string): MessageItem {
-  return {
-    id: crypto.randomUUID(),
-    status: 'completed',
-    type: 'message',
-    role: 'user',
-    content: [{ type: 'input_text', text }],
-  };
+export interface CallModelParams {
+  model: string;
+  items: ReadonlyArray<Item>;
+  tools?: Tool[];
+  params?: ModelParams;
+  output?: ZodType;
 }
 
-function extractAssistantText(items: Item[]): string {
-  const lastTextItem = [...items]
-    .reverse()
-    .find(isAssistantMessage);
-
-  if (!lastTextItem) return '';
-
-  return lastTextItem.content
-    ?.filter(isOutputText)
-    ?.map((c) => c.text)
-    ?.join('') ?? '';
-}
+export type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
 
 export async function executeLLM<I, O>(
   step: StepLLM<I, O>,
@@ -45,17 +26,17 @@ export async function executeLLM<I, O>(
 ): Promise<O> {
   // Add the input as a user message if it's a non-empty string
   if (typeof input === 'string' && input.length > 0) {
-    ctx.itemLog.append(createUserMessage(input));
+    ctx.itemLog.append(createMessage(input, 'user'));
   }
 
   // Call the model
-  const response = await callModel(
-    step.model,
-    ctx.itemLog.items,
-    step.tools,
-    step.params,
-    step.output,
-  );
+  const response = await callModel({
+    model: step.model,
+    items: ctx.itemLog.items,
+    tools: step.tools,
+    params: step.params,
+    output: step.output,
+  });
 
   // Append response items to ItemLog
   for (const item of response.items) {
@@ -63,9 +44,7 @@ export async function executeLLM<I, O>(
   }
 
   // Extract tool calls from response
-  const toolCalls = response.items.filter(
-    (i): i is FunctionCallItem => i.type === 'function_call',
-  );
+  const toolCalls = response.items.filter((i): i is FunctionCallItem => i.type === 'function_call');
 
   // Build step metadata
   const meta: StepMeta = {

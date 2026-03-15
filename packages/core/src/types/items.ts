@@ -4,9 +4,18 @@ export interface ItemBase {
 }
 
 export type ContentPart =
-  | { type: 'output_text'; text: string }
-  | { type: 'input_text'; text: string }
-  | { type: 'refusal'; refusal: string };
+  | {
+      type: 'output_text';
+      text: string;
+    }
+  | {
+      type: 'input_text';
+      text: string;
+    }
+  | {
+      type: 'refusal';
+      refusal: string;
+    };
 
 export interface MessageItem extends ItemBase {
   readonly type: 'message';

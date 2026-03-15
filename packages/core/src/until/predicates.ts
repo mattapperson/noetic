@@ -1,8 +1,12 @@
-import type { Until, Snapshot, Verdict } from '../types/step';
+import type { Snapshot, Until, Verdict } from '../types/step';
 
-export type VerifyFn = (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
+export type VerifyFn = (output: unknown) => Promise<{
+  pass: boolean;
+  feedback?: string;
+}>;
 export interface ConvergeOpts {
-  threshold: number;
+  /** No-op — reserved for future similarity-based convergence. Currently uses exact string equality regardless of value. */
+  threshold?: number;
 }
 
 export const until = {
@@ -29,7 +33,11 @@ export const until = {
 
   noToolCalls(): Until {
     return (snap: Snapshot): Verdict => {
-      if (snap.stepCount < 1) return { stop: false };
+      if (snap.stepCount < 1) {
+        return {
+          stop: false,
+        };
+      }
       const meta = snap.lastStepMeta;
       const hasToolCalls = meta?.toolCalls && meta.toolCalls.length > 0;
       return {
@@ -50,13 +58,15 @@ export const until = {
     };
   },
 
-  converged(opts: ConvergeOpts): Until {
+  converged(_opts: ConvergeOpts): Until {
     let previousOutput: string | null = null;
     return (snap: Snapshot): Verdict => {
       const currentText = snap.lastText;
       if (previousOutput === null) {
         previousOutput = currentText;
-        return { stop: false };
+        return {
+          stop: false,
+        };
       }
       const similar = currentText === previousOutput;
       previousOutput = currentText;
@@ -70,9 +80,7 @@ export const until = {
   outputContains(marker: string): Until {
     return (snap: Snapshot): Verdict => ({
       stop: snap.lastText.includes(marker),
-      reason: snap.lastText.includes(marker)
-        ? `Output contains marker: ${marker}`
-        : undefined,
+      reason: snap.lastText.includes(marker) ? `Output contains marker: ${marker}` : undefined,
     });
   },
 

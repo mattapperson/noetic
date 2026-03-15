@@ -1,13 +1,24 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { ItemLogImpl } from '../../src/runtime/item-log-impl';
-import type { MessageItem, FunctionCallItem, FunctionCallOutputItem, ReasoningItem, ExtensionItem } from '../../src/types/items';
+import type {
+  ExtensionItem,
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  MessageItem,
+  ReasoningItem,
+} from '../../src/types/items';
 
 const makeMessage = (id: string, role: 'user' | 'assistant' = 'user'): MessageItem => ({
   id,
   type: 'message',
   status: 'completed',
   role,
-  content: [{ type: 'input_text', text: `hello ${id}` }],
+  content: [
+    {
+      type: 'input_text',
+      text: `hello ${id}`,
+    },
+  ],
 });
 
 const makeFunctionCall = (id: string): FunctionCallItem => ({
@@ -79,13 +90,20 @@ describe('ItemLogImpl', () => {
       id: 'r1',
       type: 'reasoning',
       status: 'completed',
-      content: [{ type: 'output_text', text: 'thinking...' }],
+      content: [
+        {
+          type: 'output_text',
+          text: 'thinking...',
+        },
+      ],
     };
     const ext: ExtensionItem = {
       id: 'e1',
       type: 'x-custom_type',
       status: 'completed',
-      data: { foo: 'bar' },
+      data: {
+        foo: 'bar',
+      },
     };
 
     log.append(msg);

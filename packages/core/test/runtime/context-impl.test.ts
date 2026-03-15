@@ -1,7 +1,7 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Channel } from '../../src/types/channel';
-import type { Item, MessageItem } from '../../src/types/items';
+import type { MessageItem } from '../../src/types/items';
 
 function makeTestItem(): MessageItem {
   return {
@@ -9,7 +9,12 @@ function makeTestItem(): MessageItem {
     status: 'completed',
     type: 'message',
     role: 'user',
-    content: [{ type: 'input_text', text: 'hello' }],
+    content: [
+      {
+        type: 'input_text',
+        text: 'hello',
+      },
+    ],
   };
 }
 
@@ -19,22 +24,38 @@ describe('ContextImpl', () => {
     expect(ctx.id).toBeTruthy();
     expect(typeof ctx.id).toBe('string');
     expect(ctx.stepCount).toBe(0);
-    expect(ctx.tokens).toEqual({ input: 0, output: 0, total: 0 });
+    expect(ctx.tokens).toEqual({
+      input: 0,
+      output: 0,
+      total: 0,
+    });
     expect(ctx.cost).toBe(0);
     expect(ctx.parent).toBeNull();
     expect(ctx.depth).toBe(0);
   });
 
   test('mutable state: can set and read back state', () => {
-    const ctx = new ContextImpl({ state: { count: 1 } });
-    expect(ctx.state).toEqual({ count: 1 });
-    ctx.state = { count: 42 };
-    expect(ctx.state).toEqual({ count: 42 });
+    const ctx = new ContextImpl({
+      state: {
+        count: 1,
+      },
+    });
+    expect(ctx.state).toEqual({
+      count: 1,
+    });
+    ctx.state = {
+      count: 42,
+    };
+    expect(ctx.state).toEqual({
+      count: 42,
+    });
   });
 
   test('parent/depth tracking: child has depth=1', () => {
     const parent = new ContextImpl();
-    const child = new ContextImpl({ parent });
+    const child = new ContextImpl({
+      parent,
+    });
     expect(child.parent).toBe(parent);
     expect(child.depth).toBe(1);
   });
@@ -69,8 +90,12 @@ describe('ContextImpl', () => {
   test('lastStepMeta starts null, can be set', () => {
     const ctx = new ContextImpl();
     expect(ctx.lastStepMeta).toBeNull();
-    (ctx as any).lastStepMeta = { cost: 0.01 };
-    expect(ctx.lastStepMeta).toEqual({ cost: 0.01 });
+    ctx.lastStepMeta = {
+      cost: 0.01,
+    };
+    expect(ctx.lastStepMeta).toEqual({
+      cost: 0.01,
+    });
   });
 
   test('threadId is generated if not provided, or uses provided value', () => {
@@ -78,7 +103,9 @@ describe('ContextImpl', () => {
     expect(ctx1.threadId).toBeTruthy();
     expect(typeof ctx1.threadId).toBe('string');
 
-    const ctx2 = new ContextImpl({ threadId: 'my-thread' });
+    const ctx2 = new ContextImpl({
+      threadId: 'my-thread',
+    });
     expect(ctx2.threadId).toBe('my-thread');
   });
 
@@ -86,7 +113,9 @@ describe('ContextImpl', () => {
     const ctx1 = new ContextImpl();
     expect(ctx1.resourceId).toBeUndefined();
 
-    const ctx2 = new ContextImpl({ resourceId: 'res-123' });
+    const ctx2 = new ContextImpl({
+      resourceId: 'res-123',
+    });
     expect(ctx2.resourceId).toBe('res-123');
   });
 
@@ -121,7 +150,11 @@ describe('ContextImpl', () => {
 
   test('items can be provided at construction', () => {
     const item = makeTestItem();
-    const ctx = new ContextImpl({ items: [item] });
+    const ctx = new ContextImpl({
+      items: [
+        item,
+      ],
+    });
     expect(ctx.itemLog.items).toHaveLength(1);
     expect(ctx.itemLog.items[0]).toBe(item);
   });

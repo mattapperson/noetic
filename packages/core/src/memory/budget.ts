@@ -1,22 +1,97 @@
-import type { MemoryLayer, BudgetConfig } from '../types/memory';
-import type { Context } from '../types/context';
 import { OrchidErrorImpl } from '../errors/orchid-error';
+import type { Context } from '../types/context';
+import type { BudgetConfig, MemoryLayer } from '../types/memory';
 
 export interface BudgetAllocation {
   layerId: string;
   allocated: number;
 }
 
-export function allocateBudgets(
-  layers: MemoryLayer[],
-  totalBudget: number,
-  systemPromptTokens: number,
-  responseReserve: number,
-): { allocations: BudgetAllocation[]; historyBudget: number } {
+function extractMin(config: BudgetConfig | undefined): number {
+  if (config && typeof config === 'object' && 'min' in config) {
+    return config.min;
+  }
+  return 0;
+}
+
+function extractMax(config: BudgetConfig | undefined): number {
+  if (config === 'auto') {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (typeof config === 'number') {
+    return config;
+  }
+  if (config && typeof config === 'object' && 'min' in config) {
+    return config.max;
+  }
+  return 0;
+}
+
+interface ComputeShareOpts {
+  headroom: number;
+  layerPool: number;
+  infiniteCount: number;
+  finiteTotal: number;
+  totalMax: number;
+  allHeadrooms: number[];
+  layerIndex: number;
+}
+
+function computeShare({
+  headroom,
+  layerPool,
+  infiniteCount,
+  finiteTotal,
+  totalMax,
+  allHeadrooms,
+  layerIndex,
+}: ComputeShareOpts): number {
+  if (!Number.isFinite(headroom)) {
+    // All infinite-headroom layers split the pool after finite layers take their share.
+    // `infiniteCount >= 1` is guaranteed here since headroom is infinite.
+    const finiteUsed = Number.isFinite(totalMax)
+      ? 0
+      : allHeadrooms.reduce(
+          (sum, m, j) =>
+            Number.isFinite(m) && j !== layerIndex
+              ? sum + Math.min(m, (m / (finiteTotal || 1)) * layerPool)
+              : sum,
+          0,
+        );
+    return (layerPool - finiteUsed) / infiniteCount;
+  }
+
+  if (Number.isFinite(totalMax)) {
+    return (headroom / totalMax) * layerPool;
+  }
+
+  // Mix of finite and infinite: finite layers share half the pool proportionally.
+  return finiteTotal > 0 ? (headroom / finiteTotal) * (layerPool * 0.5) : 0;
+}
+
+interface AllocateBudgetsOpts {
+  layers: MemoryLayer[];
+  totalBudget: number;
+  systemPromptTokens: number;
+  responseReserve: number;
+}
+
+export function allocateBudgets({
+  layers,
+  totalBudget,
+  systemPromptTokens,
+  responseReserve,
+}: AllocateBudgetsOpts): {
+  allocations: BudgetAllocation[];
+  historyBudget: number;
+} {
   const available = totalBudget - responseReserve - systemPromptTokens;
   if (available <= 0) {
     return {
-      allocations: layers.map(l => ({ layerId: l.id, allocated: 0 })),
+      allocations: layers.map((l) => ({
+        layerId: l.id,
+        allocated: 0,
+      })),
       historyBudget: 0,
     };
   }
@@ -26,14 +101,11 @@ export function allocateBudgets(
   const allocations: BudgetAllocation[] = [];
 
   for (const layer of layers) {
-    const config = layer.budget;
-    let min = 0;
-    if (typeof config === 'number') {
-      min = 0;
-    } else if (config && typeof config === 'object' && 'min' in config) {
-      min = config.min;
-    }
-    allocations.push({ layerId: layer.id, allocated: min });
+    const min = extractMin(layer.budget);
+    allocations.push({
+      layerId: layer.id,
+      allocated: min,
+    });
     remaining -= min;
   }
 
@@ -41,53 +113,38 @@ export function allocateBudgets(
   const layerPool = remaining * 0.6;
   const historyBudget = remaining * 0.4;
 
-  // Distribute layerPool proportionally to max headroom
+  // Compute headroom per layer (how much above the minimum each layer can absorb)
   let totalMax = 0;
-  const maxes: number[] = [];
+  const headrooms: number[] = [];
   for (let i = 0; i < layers.length; i++) {
-    const config = layers[i].budget;
-    let max = 0;
-    if (typeof config === 'number') {
-      max = config;
-    } else if (config && typeof config === 'object' && 'min' in config) {
-      max = config.max;
-    } else if (config === 'auto') {
-      max = Infinity;
-    }
+    const max = extractMax(layers[i].budget);
     const headroom = Math.max(0, max - allocations[i].allocated);
-    maxes.push(headroom);
+    headrooms.push(headroom);
     totalMax += headroom;
   }
 
   if (totalMax > 0) {
-    // Count infinite headroom layers for equal distribution
-    const infiniteCount = maxes.filter(m => !isFinite(m)).length;
-    const finiteTotal = maxes.reduce((sum, m) => (isFinite(m) ? sum + m : sum), 0);
+    const infiniteCount = headrooms.filter((h) => !Number.isFinite(h)).length;
+    const finiteTotal = headrooms.reduce((sum, h) => (Number.isFinite(h) ? sum + h : sum), 0);
 
-    for (let i = 0; i < layers.length; i++) {
-      let share: number;
-      if (!isFinite(maxes[i])) {
-        // Infinite headroom layers split remaining pool equally
-        if (infiniteCount > 0) {
-          const finiteUsed = isFinite(totalMax)
-            ? 0
-            : maxes.reduce((sum, m, j) => (isFinite(m) && j !== i ? sum + Math.min(m, (m / (finiteTotal || 1)) * layerPool) : sum), 0);
-          share = (layerPool - finiteUsed) / infiniteCount;
-        } else {
-          share = layerPool / layers.length;
-        }
-      } else if (isFinite(totalMax)) {
-        share = (maxes[i] / totalMax) * layerPool;
-      } else {
-        // Mix of finite and infinite: finite layers get proportional to their max from half the pool
-        share = finiteTotal > 0 ? (maxes[i] / finiteTotal) * (layerPool * 0.5) : 0;
-      }
-      const extra = Math.min(share, maxes[i]);
-      allocations[i].allocated += extra;
+    for (let i = 0; i < headrooms.length; i++) {
+      const share = computeShare({
+        headroom: headrooms[i],
+        layerPool,
+        infiniteCount,
+        finiteTotal,
+        totalMax,
+        allHeadrooms: headrooms,
+        layerIndex: i,
+      });
+      allocations[i].allocated += Math.min(share, headrooms[i]);
     }
   }
 
-  return { allocations, historyBudget: Math.max(0, historyBudget) };
+  return {
+    allocations,
+    historyBudget: Math.max(0, historyBudget),
+  };
 }
 
 export interface BudgetLimits {

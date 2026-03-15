@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'bun:test';
-import { executeLoop } from '../../src/interpreter/execute-loop';
-import { until } from '../../src/until/predicates';
+import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
-import type { StepLoop } from '../../src/types/step';
-import type { Context } from '../../src/types/context';
+import { executeLoop } from '../../src/interpreter/execute-loop';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import type { Snapshot, StepLoop } from '../../src/types/step';
+import { until } from '../../src/until/predicates';
 import { simpleExecute as simpleExecuteStep } from '../_helpers';
 
 describe('executeLoop', () => {
@@ -62,7 +62,7 @@ describe('executeLoop', () => {
       body: {
         kind: 'run',
         id: 'flaky',
-        execute: async (input: string) => {
+        execute: async (_input: string) => {
           attempts++;
           if (attempts <= 2) {
             throw new OrchidErrorImpl({
@@ -141,7 +141,7 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
+      assert(isOrchidError(e));
     }
   });
 
@@ -170,7 +170,7 @@ describe('executeLoop', () => {
   });
 
   it('snapshot population is correct', async () => {
-    let capturedSnapshot: any = null;
+    let capturedSnapshot: Snapshot | null = null;
     const loopStep: StepLoop<string, string> = {
       kind: 'loop',
       id: 'snap-loop',
@@ -181,19 +181,24 @@ describe('executeLoop', () => {
       },
       until: (snap) => {
         capturedSnapshot = snap;
-        return { stop: snap.stepCount >= 1 };
+        return {
+          stop: snap.stepCount >= 1,
+        };
       },
     };
 
     const ctx = new ContextImpl();
     await executeLoop(loopStep, 'test', ctx, simpleExecuteStep);
 
-    expect(capturedSnapshot).not.toBeNull();
-    expect(capturedSnapshot.stepCount).toBe(1);
-    expect(capturedSnapshot.lastOutput).toBe('output-test');
-    expect(capturedSnapshot.lastText).toBe('output-test');
-    expect(capturedSnapshot.history).toHaveLength(1);
-    expect(capturedSnapshot.depth).toBe(0);
+    // capturedSnapshot is assigned inside the `until` callback, so TS cannot narrow
+    // the outer `let` binding. We assert non-null then access via a typed local.
+    assert(capturedSnapshot !== null);
+    const snap: Snapshot = capturedSnapshot;
+    expect(snap.stepCount).toBe(1);
+    expect(snap.lastOutput).toBe('output-test');
+    expect(snap.lastText).toBe('output-test');
+    expect(snap.history).toHaveLength(1);
+    expect(snap.depth).toBe(0);
   });
 
   it('enforces maxIterations ceiling', async () => {
@@ -205,7 +210,9 @@ describe('executeLoop', () => {
         id: 'inc',
         execute: async (input: number) => input + 1,
       },
-      until: () => ({ stop: false }), // never stops
+      until: () => ({
+        stop: false,
+      }), // never stops
       maxIterations: 5,
     };
 
@@ -214,9 +221,9 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      const oe = (e as any).orchidError;
-      expect(oe.kind).toBe('step_failed');
+      assert(isOrchidError(e));
+      const oe = e.orchidError;
+      assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('maximum iterations');
     }
   });
@@ -234,7 +241,9 @@ describe('executeLoop', () => {
           return input + 1;
         },
       },
-      until: () => ({ stop: false }), // never stops
+      until: () => ({
+        stop: false,
+      }), // never stops
     };
 
     const ctx = new ContextImpl();
@@ -242,8 +251,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      expect(count).toBe(1000);
+      assert(isOrchidError(e));
+      expect(count).toBe(1_000);
     }
   });
 
@@ -275,7 +284,7 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
+      assert(isOrchidError(e));
       expect(attempts).toBe(10); // capped by maxIterations
     }
   });
@@ -291,7 +300,9 @@ describe('executeLoop', () => {
         id: 'inc',
         execute: async (input: number) => {
           count++;
-          if (count === 2) ctx.abort('stop now');
+          if (count === 2) {
+            ctx.abort('stop now');
+          }
           return input + 1;
         },
       },
@@ -302,8 +313,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      const oe = (e as any).orchidError;
+      assert(isOrchidError(e));
+      const oe = e.orchidError;
       expect(oe.kind).toBe('cancelled');
       expect(count).toBe(2);
     }
@@ -319,16 +330,16 @@ describe('executeLoop', () => {
         execute: async (input: number) => input + 1,
       },
       until: until.maxSteps(5),
-      maxIterations: NaN,
+      maxIterations: Number.NaN,
     };
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      const oe = (e as any).orchidError;
-      expect(oe.kind).toBe('step_failed');
+      assert(isOrchidError(e));
+      const oe = e.orchidError;
+      assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
     }
   });
@@ -350,9 +361,9 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      const oe = (e as any).orchidError;
-      expect(oe.kind).toBe('step_failed');
+      assert(isOrchidError(e));
+      const oe = e.orchidError;
+      assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
     }
   });
@@ -369,7 +380,9 @@ describe('executeLoop', () => {
       },
       until: (snap) => {
         capturedHistory = snap.history;
-        return { stop: snap.stepCount >= 10 };
+        return {
+          stop: snap.stepCount >= 10,
+        };
       },
       maxHistorySize: 3,
     };
@@ -377,7 +390,11 @@ describe('executeLoop', () => {
     await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
     // History should only contain the last 3 items
     expect(capturedHistory).toHaveLength(3);
-    expect(capturedHistory).toEqual([8, 9, 10]);
+    expect(capturedHistory).toEqual([
+      8,
+      9,
+      10,
+    ]);
   });
 
   it('onError skip on first iteration (no previous output) continues', async () => {
@@ -388,7 +405,7 @@ describe('executeLoop', () => {
       body: {
         kind: 'run',
         id: 'fail-then-ok',
-        execute: async (input: string) => {
+        execute: async (_input: string) => {
           callCount++;
           if (callCount === 1) {
             throw new OrchidErrorImpl({
@@ -430,9 +447,9 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      const oe = (e as any).orchidError;
-      expect(oe.kind).toBe('step_failed');
+      assert(isOrchidError(e));
+      const oe = e.orchidError;
+      assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
     }
   });
@@ -447,16 +464,23 @@ describe('executeLoop', () => {
       body: {
         kind: 'run',
         id: 'attempt',
-        execute: async (input: string) => {
+        execute: async (_input: string) => {
           iteration++;
           return iteration >= 3 ? 'correct' : 'wrong';
         },
       },
       until: until.verified(async (output) => {
-        if (output === 'correct') return { pass: true };
-        return { pass: false, feedback: 'Not correct yet' };
+        if (output === 'correct') {
+          return {
+            pass: true,
+          };
+        }
+        return {
+          pass: false,
+          feedback: 'Not correct yet',
+        };
       }),
-      prepareNext: (output, verdict) => {
+      prepareNext: (_output, verdict) => {
         feedbacks.push(verdict.feedback);
         return verdict.feedback ?? 'continue';
       },

@@ -1,5 +1,5 @@
+import type { StepMeta, TokenUsage } from './common';
 import type { Context } from './context';
-import type { TokenUsage, StepMeta } from './common';
 
 /**
  * Internal-only interface for interpreter code that needs to mutate Context fields.

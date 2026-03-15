@@ -1,8 +1,10 @@
-import type { Channel, ExternalChannel, ChannelHandle } from '../types/channel';
 import { OrchidErrorImpl } from '../errors/orchid-error';
+import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 
 function isExternalChannel<T>(ch: Channel<T>): ch is ExternalChannel<T> {
-  return 'external' in ch && (ch as { external?: unknown }).external === true;
+  // SAFETY: Channel<T> does not declare `external`. The `in` check confirms it
+  // exists at runtime before we access it, narrowing to ExternalChannel<T>.
+  return 'external' in ch && (ch as ExternalChannel<T>).external === true;
 }
 
 const MAX_TOPIC_TIMEOUT = 300_000; // 5 minutes
@@ -12,32 +14,38 @@ interface ChannelState<T> {
   // value mode
   currentValue?: T;
   hasValue: boolean;
-  valueWaiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }>;
+  valueWaiters: Array<{
+    resolve: (v: T) => void;
+    reject: (e: Error) => void;
+  }>;
   // queue mode
   queue: T[];
   capacity: number;
-  queueWaiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }>;
+  queueWaiters: Array<{
+    resolve: (v: T) => void;
+    reject: (e: Error) => void;
+  }>;
   // topic mode
   topicSubscribers: Set<(value: T) => void>;
 }
 
 export class ChannelStore {
-  private channels = new Map<string, ChannelState<any>>();
+  private channels = new Map<string, ChannelState<unknown>>();
   private closedExecutions = new Set<string>();
 
   private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
-    let state = this.channels.get(channel.name);
+    let state = this.channels.get(channel.name) as ChannelState<T> | undefined;
     if (!state) {
       state = {
         mode: channel.mode,
         hasValue: false,
         valueWaiters: [],
         queue: [],
-        capacity: channel.capacity ?? 1000,
+        capacity: channel.capacity ?? 1_000,
         queueWaiters: [],
         topicSubscribers: new Set(),
       };
-      this.channels.set(channel.name, state);
+      this.channels.set(channel.name, state as ChannelState<unknown>);
     }
     return state;
   }
@@ -78,7 +86,7 @@ export class ChannelStore {
     }
   }
 
-  async recv<T>(channel: Channel<T>, timeout: number = 30000): Promise<T> {
+  async recv<T>(channel: Channel<T>, timeout = 30_000): Promise<T> {
     const state = this.getOrCreate(channel);
 
     switch (state.mode) {
@@ -107,7 +115,13 @@ export class ChannelStore {
         return new Promise<T>((resolve, reject) => {
           const timer = setTimeout(() => {
             state.topicSubscribers.delete(handler);
-            reject(new OrchidErrorImpl({ kind: 'channel_timeout', channelName: channel.name, timeout: effectiveTimeout }));
+            reject(
+              new OrchidErrorImpl({
+                kind: 'channel_timeout',
+                channelName: channel.name,
+                timeout: effectiveTimeout,
+              }),
+            );
           }, effectiveTimeout);
 
           const handler = (value: T) => {
@@ -135,17 +149,25 @@ export class ChannelStore {
   }
 
   private waitWithTimeout<T>(
-    waiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }>,
+    waiters: Array<{
+      resolve: (v: T) => void;
+      reject: (e: Error) => void;
+    }>,
     channelName: string,
     timeout: number,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const wrappedResolve = (v: T) => {
-        if (timer) clearTimeout(timer);
+        if (timer) {
+          clearTimeout(timer);
+        }
         resolve(v);
       };
-      const entry = { resolve: wrappedResolve, reject };
+      const entry = {
+        resolve: wrappedResolve,
+        reject,
+      };
       waiters.push(entry);
 
       if (timeout > 0) {
@@ -153,7 +175,13 @@ export class ChannelStore {
           const idx = waiters.indexOf(entry);
           if (idx >= 0) {
             waiters.splice(idx, 1);
-            reject(new OrchidErrorImpl({ kind: 'channel_timeout', channelName, timeout }));
+            reject(
+              new OrchidErrorImpl({
+                kind: 'channel_timeout',
+                channelName,
+                timeout,
+              }),
+            );
           }
         }, timeout);
       }
@@ -163,11 +191,16 @@ export class ChannelStore {
   getHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
     const store = this;
     return {
-      get closed() { return store.closedExecutions.has(executionId); },
+      get closed() {
+        return store.closedExecutions.has(executionId);
+      },
       channel,
       send(value: T) {
         if (store.closedExecutions.has(executionId)) {
-          throw new OrchidErrorImpl({ kind: 'channel_closed', channelName: channel.name });
+          throw new OrchidErrorImpl({
+            kind: 'channel_closed',
+            channelName: channel.name,
+          });
         }
         store.send(channel, value);
       },

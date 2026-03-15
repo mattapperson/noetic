@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'bun:test';
-import { fork, branch } from '../../src/builders/control-flow-builders';
-import type { Step, SettleResult } from '../../src/types/step';
+import { describe, expect, it } from 'bun:test';
+import { branch, fork } from '../../src/builders/control-flow-builders';
+import type { SettleResult } from '../../src/types/step';
+import { makeMockContext } from '../_helpers';
 
 describe('fork builder', () => {
   it('creates race mode fork', () => {
@@ -8,8 +9,16 @@ describe('fork builder', () => {
       id: 'race-test',
       mode: 'race',
       paths: () => [
-        { kind: 'run', id: 'a', execute: async (i: string) => i },
-        { kind: 'run', id: 'b', execute: async (i: string) => i },
+        {
+          kind: 'run',
+          id: 'a',
+          execute: async (i: string) => i,
+        },
+        {
+          kind: 'run',
+          id: 'b',
+          execute: async (i: string) => i,
+        },
       ],
     });
     expect(f.kind).toBe('fork');
@@ -22,14 +31,25 @@ describe('fork builder', () => {
       id: 'all-test',
       mode: 'all',
       paths: () => [
-        { kind: 'run', id: 'a', execute: async (i: string) => i },
+        {
+          kind: 'run',
+          id: 'a',
+          execute: async (i: string) => i,
+        },
       ],
       merge: (results) => results.join(','),
     });
     expect(f.kind).toBe('fork');
     expect(f.mode).toBe('all');
     expect(f.merge).toBeFunction();
-    const merged = f.merge(['a', 'b', 'c'], {} as any);
+    const merged = f.merge(
+      [
+        'a',
+        'b',
+        'c',
+      ],
+      makeMockContext(),
+    );
     expect(merged).toBe('a,b,c');
   });
 
@@ -38,7 +58,11 @@ describe('fork builder', () => {
       id: 'settle-test',
       mode: 'settle',
       paths: () => [
-        { kind: 'run', id: 'a', execute: async (i: string) => i },
+        {
+          kind: 'run',
+          id: 'a',
+          execute: async (i: string) => i,
+        },
       ],
       merge: (results: SettleResult<string>[]) =>
         results
@@ -62,27 +86,33 @@ describe('fork builder', () => {
   });
 
   it('throws on empty id', () => {
-    expect(() => fork<string, string>({
-      id: '',
-      mode: 'race',
-      paths: () => [],
-    })).toThrow('non-empty id');
+    expect(() =>
+      fork<string, string>({
+        id: '',
+        mode: 'race',
+        paths: () => [],
+      }),
+    ).toThrow('non-empty id');
   });
 
   it('throws when all mode lacks merge', () => {
-    expect(() => fork<string, string>({
+    // Cast via unknown to intentionally bypass type safety and test runtime validation
+    const badOpts = {
       id: 'test',
       mode: 'all',
       paths: () => [],
-    } as any)).toThrow('merge function');
+    } as unknown as Parameters<typeof fork<string, string>>[0];
+    expect(() => fork<string, string>(badOpts)).toThrow('merge function');
   });
 
   it('throws when settle mode lacks merge', () => {
-    expect(() => fork<string, string>({
+    // Cast via unknown to intentionally bypass type safety and test runtime validation
+    const badOpts = {
       id: 'test',
       mode: 'settle',
       paths: () => [],
-    } as any)).toThrow('merge function');
+    } as unknown as Parameters<typeof fork<string, string>>[0];
+    expect(() => fork<string, string>(badOpts)).toThrow('merge function');
   });
 
   it('paths is a function', () => {
@@ -90,11 +120,15 @@ describe('fork builder', () => {
       id: 'fn-test',
       mode: 'race',
       paths: (input) => [
-        { kind: 'run', id: `path-${input}`, execute: async (i: number) => i * 2 },
+        {
+          kind: 'run',
+          id: `path-${input}`,
+          execute: async (i: number) => i * 2,
+        },
       ],
     });
     expect(f.paths).toBeFunction();
-    const paths = f.paths(5, {} as any);
+    const paths = f.paths(5, makeMockContext());
     expect(paths).toHaveLength(1);
     expect(paths[0].kind).toBe('run');
     expect(paths[0].id).toBe('path-5');
@@ -103,16 +137,21 @@ describe('fork builder', () => {
 
 describe('branch builder', () => {
   it('throws on empty id', () => {
-    expect(() => branch<string, string>({
-      id: '',
-      route: () => null,
-    })).toThrow('non-empty id');
+    expect(() =>
+      branch<string, string>({
+        id: '',
+        route: () => null,
+      }),
+    ).toThrow('non-empty id');
   });
 
   it('throws on missing route', () => {
-    expect(() => branch<string, string>({
+    // Cast via unknown to intentionally bypass type safety and test runtime validation
+    type RouteOpts = Parameters<typeof branch<string, string>>[0];
+    const badOpts = {
       id: 'test',
-      route: undefined as any,
-    })).toThrow('route function');
+      route: undefined,
+    } as unknown as RouteOpts;
+    expect(() => branch<string, string>(badOpts)).toThrow('route function');
   });
 });

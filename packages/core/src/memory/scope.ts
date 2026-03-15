@@ -1,4 +1,4 @@
-import type { MemoryScope, ExecutionContext, ScopedStorage, StorageAdapter } from '../types/memory';
+import type { ExecutionContext, MemoryScope, ScopedStorage, StorageAdapter } from '../types/memory';
 
 export function resolveScopeKey(scope: MemoryScope, ctx: ExecutionContext): string {
   switch (scope) {
@@ -32,7 +32,7 @@ export function createScopedStorage(
     async list(keyPrefix?: string): Promise<string[]> {
       const fullPrefix = keyPrefix ? `${prefix}${keyPrefix}` : prefix;
       const keys = await storage.list(fullPrefix);
-      return keys.map(k => (k.startsWith(prefix) ? k.slice(prefix.length) : k));
+      return keys.map((k) => (k.startsWith(prefix) ? k.slice(prefix.length) : k));
     },
   };
 }

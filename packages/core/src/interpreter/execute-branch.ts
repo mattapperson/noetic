@@ -1,5 +1,5 @@
-import type { StepBranch, ExecuteStepFn } from '../types/step';
 import type { Context } from '../types/context';
+import type { ExecuteStepFn, StepBranch } from '../types/step';
 
 export async function executeBranch<I, O>(
   step: StepBranch<I, O>,

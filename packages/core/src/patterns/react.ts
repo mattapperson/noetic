@@ -1,8 +1,8 @@
 import { step } from '../builders/step-builders';
-import { until } from '../until/predicates';
-import { any } from '../until/combinators';
 import type { Tool } from '../types/common';
 import type { StepLoop } from '../types/step';
+import { any } from '../until/combinators';
+import { until } from '../until/predicates';
 
 export function react(opts: {
   model: string;
@@ -25,7 +25,11 @@ export function react(opts: {
     until: any(
       until.noToolCalls(),
       until.maxSteps(opts.maxSteps ?? 10),
-      ...(opts.maxCost ? [until.maxCost(opts.maxCost)] : []),
+      ...(opts.maxCost
+        ? [
+            until.maxCost(opts.maxCost),
+          ]
+        : []),
     ),
   };
 }

@@ -1,25 +1,41 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
+import { z } from 'zod';
+import { isOrchidError } from '../../src/errors/orchid-error';
+import type { CallModelParams } from '../../src/interpreter/execute-llm';
 import { executeLLM } from '../../src/interpreter/execute-llm';
-import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
 import type { MessageItem } from '../../src/types/items';
 import type { StepLLM } from '../../src/types/step';
-import { z } from 'zod';
 import { makeMockContext as createMockCtx, makeLLMResponse } from '../_helpers';
 
 describe('executeLLM', () => {
   it('calls callModel and returns text output', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
-      items: [{
-        id: 'resp-1',
-        status: 'completed' as const,
-        type: 'message' as const,
-        role: 'assistant' as const,
-        content: [{ type: 'output_text' as const, text: 'Hello world' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 5 },
+      items: [
+        {
+          id: 'resp-1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'Hello world',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     });
 
     const result = await executeLLM(step, 'hi', ctx, callModel);
@@ -27,27 +43,45 @@ describe('executeLLM', () => {
   });
 
   it('appends input as user message to ItemLog', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
-      items: [{
-        id: 'resp-1',
-        status: 'completed' as const,
-        type: 'message' as const,
-        role: 'assistant' as const,
-        content: [{ type: 'output_text' as const, text: 'Hello' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 5 },
+      items: [
+        {
+          id: 'resp-1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'Hello',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
-    const userItems = ctx.itemLog.items.filter(i => (i as MessageItem).role === 'user');
+    const userItems = ctx.itemLog.items.filter((i) => (i as MessageItem).role === 'user');
     expect(userItems).toHaveLength(1);
   });
 
   it('appends response items to ItemLog', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const responseItem: MessageItem = {
@@ -55,46 +89,90 @@ describe('executeLLM', () => {
       status: 'completed',
       type: 'message',
       role: 'assistant',
-      content: [{ type: 'output_text', text: 'Hello' }],
+      content: [
+        {
+          type: 'output_text',
+          text: 'Hello',
+        },
+      ],
     };
 
     const callModel = async () => ({
-      items: [responseItem],
-      usage: { inputTokens: 10, outputTokens: 5 },
+      items: [
+        responseItem,
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
-    const assistantItems = ctx.itemLog.items.filter(i => (i as MessageItem).role === 'assistant');
+    const assistantItems = ctx.itemLog.items.filter((i) => (i as MessageItem).role === 'assistant');
     expect(assistantItems).toHaveLength(1);
   });
 
   it('does not append user message for empty string input', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const, content: [{ type: 'output_text' as const, text: 'ok' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 5 },
+      items: [
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'ok',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     });
 
     await executeLLM(step, '', ctx, callModel);
-    const userItems = ctx.itemLog.items.filter(i => (i as MessageItem).role === 'user');
+    const userItems = ctx.itemLog.items.filter((i) => (i as MessageItem).role === 'user');
     expect(userItems).toHaveLength(0);
   });
 
   it('sets ctx.lastStepMeta with usage', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const, content: [{ type: 'output_text' as const, text: 'ok' }],
-      }],
-      usage: { inputTokens: 100, outputTokens: 50 },
+      items: [
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'ok',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+      },
       cost: 0.01,
     });
 
@@ -105,15 +183,32 @@ describe('executeLLM', () => {
   });
 
   it('accumulates token usage on context', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const, content: [{ type: 'output_text' as const, text: 'ok' }],
-      }],
-      usage: { inputTokens: 100, outputTokens: 50 },
+      items: [
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'ok',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+      },
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
@@ -123,95 +218,172 @@ describe('executeLLM', () => {
   });
 
   it('parses output with Zod schema', async () => {
-    const schema = z.object({ answer: z.string(), confidence: z.number() });
-    const step: StepLLM<string, z.infer<typeof schema>> = {
-      kind: 'llm', id: 'test', model: 'gpt-4', output: schema,
-    };
-    const ctx = createMockCtx();
-
-    const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const,
-        content: [{ type: 'output_text' as const, text: '{"answer":"42","confidence":0.95}' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 20 },
+    const schema = z.object({
+      answer: z.string(),
+      confidence: z.number(),
     });
-
-    const result = await executeLLM(step, 'hi', ctx, callModel);
-    expect(result).toEqual({ answer: '42', confidence: 0.95 });
-  });
-
-  it('throws llm_parse_error on invalid JSON', async () => {
-    const schema = z.object({ answer: z.string() });
     const step: StepLLM<string, z.infer<typeof schema>> = {
-      kind: 'llm', id: 'parse-fail', model: 'gpt-4', output: schema,
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+      output: schema,
     };
-    const ctx = createMockCtx();
-
-    const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const,
-        content: [{ type: 'output_text' as const, text: 'not json at all' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 20 },
-    });
-
-    try {
-      await executeLLM(step, 'hi', ctx, callModel);
-      expect.unreachable('should have thrown');
-    } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      expect((e as OrchidErrorImpl).orchidError.kind).toBe('llm_parse_error');
-    }
-  });
-
-  it('throws llm_parse_error on schema validation failure', async () => {
-    const schema = z.object({ answer: z.string() });
-    const step: StepLLM<string, z.infer<typeof schema>> = {
-      kind: 'llm', id: 'parse-fail', model: 'gpt-4', output: schema,
-    };
-    const ctx = createMockCtx();
-
-    const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const,
-        content: [{ type: 'output_text' as const, text: '{"wrong":"field"}' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 20 },
-    });
-
-    try {
-      await executeLLM(step, 'hi', ctx, callModel);
-      expect.unreachable('should have thrown');
-    } catch (e) {
-      expect(isOrchidError(e)).toBe(true);
-      expect((e as OrchidErrorImpl).orchidError.kind).toBe('llm_parse_error');
-    }
-  });
-
-  it('identifies tool calls in response', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
       items: [
         {
-          id: 'fc1', status: 'completed' as const, type: 'function_call' as const,
-          call_id: 'call_1', name: 'search', arguments: '{"q":"test"}',
-        },
-        {
-          id: 'fco1', status: 'completed' as const, type: 'function_call_output' as const,
-          call_id: 'call_1', output: '{"results":[]}',
-        },
-        {
-          id: 'r1', status: 'completed' as const, type: 'message' as const,
-          role: 'assistant' as const, content: [{ type: 'output_text' as const, text: 'done' }],
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: '{"answer":"42","confidence":0.95}',
+            },
+          ],
         },
       ],
-      usage: { inputTokens: 10, outputTokens: 20 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+      },
+    });
+
+    const result = await executeLLM(step, 'hi', ctx, callModel);
+    expect(result).toEqual({
+      answer: '42',
+      confidence: 0.95,
+    });
+  });
+
+  it('throws llm_parse_error on invalid JSON', async () => {
+    const schema = z.object({
+      answer: z.string(),
+    });
+    const step: StepLLM<string, z.infer<typeof schema>> = {
+      kind: 'llm',
+      id: 'parse-fail',
+      model: 'gpt-4',
+      output: schema,
+    };
+    const ctx = createMockCtx();
+
+    const callModel = async () => ({
+      items: [
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'not json at all',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+      },
+    });
+
+    try {
+      await executeLLM(step, 'hi', ctx, callModel);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isOrchidError(e));
+      expect(e.orchidError.kind).toBe('llm_parse_error');
+    }
+  });
+
+  it('throws llm_parse_error on schema validation failure', async () => {
+    const schema = z.object({
+      answer: z.string(),
+    });
+    const step: StepLLM<string, z.infer<typeof schema>> = {
+      kind: 'llm',
+      id: 'parse-fail',
+      model: 'gpt-4',
+      output: schema,
+    };
+    const ctx = createMockCtx();
+
+    const callModel = async () => ({
+      items: [
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: '{"wrong":"field"}',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+      },
+    });
+
+    try {
+      await executeLLM(step, 'hi', ctx, callModel);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isOrchidError(e));
+      expect(e.orchidError.kind).toBe('llm_parse_error');
+    }
+  });
+
+  it('identifies tool calls in response', async () => {
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
+    const ctx = createMockCtx();
+
+    const callModel = async () => ({
+      items: [
+        {
+          id: 'fc1',
+          status: 'completed' as const,
+          type: 'function_call' as const,
+          call_id: 'call_1',
+          name: 'search',
+          arguments: '{"q":"test"}',
+        },
+        {
+          id: 'fco1',
+          status: 'completed' as const,
+          type: 'function_call_output' as const,
+          call_id: 'call_1',
+          output: '{"results":[]}',
+        },
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'done',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+      },
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
@@ -220,47 +392,85 @@ describe('executeLLM', () => {
   });
 
   it('passes model, items, tools, params, and output to callModel', async () => {
-    const schema = z.object({ x: z.number() });
+    const schema = z.object({
+      x: z.number(),
+    });
     const step: StepLLM<string, z.infer<typeof schema>> = {
-      kind: 'llm', id: 'test', model: 'claude-3',
-      params: { temperature: 0.5 },
+      kind: 'llm',
+      id: 'test',
+      model: 'claude-3',
+      params: {
+        temperature: 0.5,
+      },
       output: schema,
     };
     const ctx = createMockCtx();
 
-    let capturedArgs: any;
-    const callModel = async (model: string, items: any, tools: any, params: any, output: any) => {
-      capturedArgs = { model, items, tools, params, output };
+    let capturedArgs: CallModelParams | undefined;
+    const callModel = async (p: CallModelParams) => {
+      capturedArgs = p;
       return {
-        items: [{
-          id: 'r1', status: 'completed' as const, type: 'message' as const,
-          role: 'assistant' as const,
-          content: [{ type: 'output_text' as const, text: '{"x":1}' }],
-        }],
-        usage: { inputTokens: 10, outputTokens: 5 },
+        items: [
+          {
+            id: 'r1',
+            status: 'completed' as const,
+            type: 'message' as const,
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'output_text' as const,
+                text: '{"x":1}',
+              },
+            ],
+          },
+        ],
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+        },
       };
     };
 
     await executeLLM(step, 'hi', ctx, callModel);
+    assert(capturedArgs !== undefined);
     expect(capturedArgs.model).toBe('claude-3');
-    expect(capturedArgs.params).toEqual({ temperature: 0.5 });
+    expect(capturedArgs.params).toEqual({
+      temperature: 0.5,
+    });
     expect(capturedArgs.output).toBe(schema);
     expect(capturedArgs.items).toBeDefined();
     expect(Array.isArray(capturedArgs.items)).toBe(true);
   });
 
   it('stores responseItems in lastStepMeta', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
-    const responseItems = [{
-      id: 'r1', status: 'completed' as const, type: 'message' as const,
-      role: 'assistant' as const, content: [{ type: 'output_text' as const, text: 'ok' }],
-    }];
+    const responseItems = [
+      {
+        id: 'r1',
+        status: 'completed' as const,
+        type: 'message' as const,
+        role: 'assistant' as const,
+        content: [
+          {
+            type: 'output_text' as const,
+            text: 'ok',
+          },
+        ],
+      },
+    ];
 
     const callModel = async () => ({
       items: responseItems,
-      usage: { inputTokens: 10, outputTokens: 5 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
@@ -268,15 +478,32 @@ describe('executeLLM', () => {
   });
 
   it('accumulates cost on context', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
 
     const callModel = async () => ({
-      items: [{
-        id: 'r1', status: 'completed' as const, type: 'message' as const,
-        role: 'assistant' as const, content: [{ type: 'output_text' as const, text: 'ok' }],
-      }],
-      usage: { inputTokens: 10, outputTokens: 5 },
+      items: [
+        {
+          id: 'r1',
+          status: 'completed' as const,
+          type: 'message' as const,
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: 'ok',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
       cost: 0.05,
     });
 
@@ -285,20 +512,39 @@ describe('executeLLM', () => {
   });
 
   it('does not create user message for non-string input', async () => {
-    const step: StepLLM<{ data: number }, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const step: StepLLM<
+      {
+        data: number;
+      },
+      string
+    > = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
     const ctx = createMockCtx();
     const callModel = async () => makeLLMResponse('ok');
-    await executeLLM(step, { data: 42 } as any, ctx, callModel);
-    const userItems = ctx.itemLog.items.filter(i => (i as any).role === 'user');
+    const input: {
+      data: number;
+    } = {
+      data: 42,
+    };
+    await executeLLM(step, input, ctx, callModel);
+    const userItems = ctx.itemLog.items.filter((i) => i.type === 'message' && i.role === 'user');
     expect(userItems).toHaveLength(0);
   });
 
   it('handles empty tools array', async () => {
-    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4', tools: [] };
+    const step: StepLLM<string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+      tools: [],
+    };
     const ctx = createMockCtx();
-    let capturedTools: any;
-    const callModel = async (_m: string, _items: any, tools: any) => {
-      capturedTools = tools;
+    let capturedTools: CallModelParams['tools'];
+    const callModel = async (p: CallModelParams) => {
+      capturedTools = p.tools;
       return makeLLMResponse('ok');
     };
     await executeLLM(step, 'hi', ctx, callModel);

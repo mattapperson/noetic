@@ -1,6 +1,6 @@
 import type { ZodTypeAny, z } from 'zod';
-import type { Item, FunctionCallItem } from './items';
 import type { Context } from './context';
+import type { FunctionCallItem, Item } from './items';
 
 export interface RetryPolicy {
   maxAttempts: number;
@@ -33,13 +33,21 @@ export interface TokenUsage {
 
 export interface StepMeta {
   toolCalls?: FunctionCallItem[];
-  usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens?: number;
+  };
   cost?: number;
   responseItems?: ReadonlyArray<Item>;
 }
 
 export interface LLMResponse {
   items: Item[];
-  usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens?: number;
+  };
   cost?: number;
 }

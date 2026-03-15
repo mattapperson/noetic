@@ -1,13 +1,13 @@
-import type { StepRun } from '../types/step';
-import type { Context } from '../types/context';
-import type { RetryPolicy } from '../types/common';
 import { OrchidErrorImpl } from '../errors/orchid-error';
+import type { RetryPolicy } from '../types/common';
+import type { Context } from '../types/context';
+import type { StepRun } from '../types/step';
 
 export async function executeRun<I, O>(step: StepRun<I, O>, input: I, ctx: Context): Promise<O> {
   const retry = step.retry;
   const maxAttempts = retry?.maxAttempts ?? 1;
 
-  let lastError: Error | null = null;
+  let lastError = new Error('No attempts executed');
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -17,7 +17,7 @@ export async function executeRun<I, O>(step: StepRun<I, O>, input: I, ctx: Conte
 
       if (attempt < maxAttempts - 1 && retry) {
         const delay = computeDelay(retry, attempt);
-        await new Promise(r => setTimeout(r, delay));
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
@@ -25,7 +25,7 @@ export async function executeRun<I, O>(step: StepRun<I, O>, input: I, ctx: Conte
   throw new OrchidErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
-    cause: lastError!,
+    cause: lastError,
     retriesExhausted: maxAttempts > 1,
   });
 }
@@ -40,7 +40,7 @@ function computeDelay(retry: RetryPolicy, attempt: number): number {
       delay = retry.initialDelay * (attempt + 1);
       break;
     case 'exponential':
-      delay = retry.initialDelay * Math.pow(2, attempt);
+      delay = retry.initialDelay * 2 ** attempt;
       break;
   }
   return Math.min(delay, retry.maxDelay ?? 30_000);

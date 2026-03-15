@@ -1,23 +1,37 @@
-import type { Step, StepFork, StepForkAll, StepForkRace, StepForkSettle, SettleResult, ExecuteStepFn } from '../types/step';
+import { isOrchidError, OrchidErrorImpl } from '../errors/orchid-error';
+import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
 import type { OrchidError } from '../types/error';
-import { ContextImpl } from '../runtime/context-impl';
-import { OrchidErrorImpl, isOrchidError } from '../errors/orchid-error';
-import { isContextImpl } from './typeguards';
+import type {
+  ExecuteStepFn,
+  SettleResult,
+  Step,
+  StepFork,
+  StepForkAll,
+  StepForkRace,
+  StepForkSettle,
+} from '../types/step';
 import { cloneWithGuard } from './clone-guard';
+import { isContextImpl } from './typeguards';
 
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();
   const resourceId = isContextImpl(ctx) ? ctx.resourceId : undefined;
 
-  return Array.from({ length: count }, () =>
-    new ContextImpl({
-      parent: ctx,
-      items: [...ctx.itemLog.items],
-      state: cloneWithGuard(ctx.state, `Fork '${stepId}'`),
-      threadId,
-      resourceId,
-    }),
+  return Array.from(
+    {
+      length: count,
+    },
+    () =>
+      new ContextImpl({
+        parent: ctx,
+        items: [
+          ...ctx.itemLog.items,
+        ],
+        state: cloneWithGuard(ctx.state, `Fork '${stepId}'`),
+        threadId,
+        resourceId,
+      }),
   );
 }
 
@@ -32,7 +46,8 @@ export async function executeFork<I, O>(
   if (paths.length === 0) {
     if (step.mode === 'all') {
       return step.merge([], ctx);
-    } else if (step.mode === 'settle') {
+    }
+    if (step.mode === 'settle') {
       return step.merge([], ctx);
     }
     throw new OrchidErrorImpl({
@@ -77,23 +92,42 @@ async function runWithConcurrency<T>(
       const index = nextIndex++;
       try {
         const value = await tasks[index]();
-        results[index] = { status: 'fulfilled', value };
+        results[index] = {
+          status: 'fulfilled',
+          value,
+        };
       } catch (reason) {
-        results[index] = { status: 'rejected', reason };
+        results[index] = {
+          status: 'rejected',
+          reason,
+        };
       }
     }
   }
 
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => runNext());
+  const workers = Array.from(
+    {
+      length: Math.min(concurrency, tasks.length),
+    },
+    () => runNext(),
+  );
   await Promise.all(workers);
   return results;
 }
 
-interface StepResult<T> { stepId: string; value: T }
-interface StepError { stepId: string; error: OrchidError }
+interface StepResult<T> {
+  stepId: string;
+  value: T;
+}
+interface StepError {
+  stepId: string;
+  error: OrchidError;
+}
 
 function toOrchidError(err: unknown, stepId: string): OrchidError {
-  if (isOrchidError(err)) return err.orchidError;
+  if (isOrchidError(err)) {
+    return err.orchidError;
+  }
   return {
     kind: 'step_failed',
     stepId,
@@ -102,19 +136,36 @@ function toOrchidError(err: unknown, stepId: string): OrchidError {
   };
 }
 
-function classifyResults<T>(settled: PromiseSettledResult<T>[], paths: { id: string }[]): { succeeded: StepResult<T>[]; failed: StepError[] } {
+function classifyResults<T>(
+  settled: PromiseSettledResult<T>[],
+  paths: {
+    id: string;
+  }[],
+): {
+  succeeded: StepResult<T>[];
+  failed: StepError[];
+} {
   const succeeded: StepResult<T>[] = [];
   const failed: StepError[] = [];
 
   settled.forEach((result, i) => {
     if (result.status === 'fulfilled') {
-      succeeded.push({ stepId: paths[i].id, value: result.value });
+      succeeded.push({
+        stepId: paths[i].id,
+        value: result.value,
+      });
     } else {
-      failed.push({ stepId: paths[i].id, error: toOrchidError(result.reason, paths[i].id) });
+      failed.push({
+        stepId: paths[i].id,
+        error: toOrchidError(result.reason, paths[i].id),
+      });
     }
   });
 
-  return { succeeded, failed };
+  return {
+    succeeded,
+    failed,
+  };
 }
 
 async function executeAll<I, O>(
@@ -139,7 +190,7 @@ async function executeAll<I, O>(
     });
   }
 
-  const results: O[] = succeeded.map(s => s.value);
+  const results: O[] = succeeded.map((s) => s.value);
   return step.merge(results, ctx);
 }
 
@@ -160,12 +211,16 @@ async function executeRace<I, O>(
     const totalPaths = paths.length;
 
     function startNext(): void {
-      if (settled || nextIndex >= totalPaths) return;
+      if (settled || nextIndex >= totalPaths) {
+        return;
+      }
       const i = nextIndex++;
 
       executeStep<I, O>(paths[i], input, childContexts[i])
         .then((result) => {
-          if (settled) return;
+          if (settled) {
+            return;
+          }
           settled = true;
           // Winner's state replaces parent's
           if (isContextImpl(ctx)) {
@@ -181,7 +236,10 @@ async function executeRace<I, O>(
         })
         .catch((err: unknown) => {
           failedCount++;
-          errors.push({ stepId: paths[i].id, error: toOrchidError(err, paths[i].id) });
+          errors.push({
+            stepId: paths[i].id,
+            error: toOrchidError(err, paths[i].id),
+          });
 
           // Start next task if available
           if (!settled) {
@@ -190,12 +248,14 @@ async function executeRace<I, O>(
 
           if (failedCount === totalPaths && !settled) {
             settled = true;
-            reject(new OrchidErrorImpl({
-              kind: 'fork_partial',
-              stepId: step.id,
-              succeeded: [],
-              failed: errors,
-            }));
+            reject(
+              new OrchidErrorImpl({
+                kind: 'fork_partial',
+                stepId: step.id,
+                succeeded: [],
+                failed: errors,
+              }),
+            );
           }
         });
     }
@@ -227,13 +287,12 @@ async function executeSettle<I, O>(
         status: 'fulfilled' as const,
         value: result.value,
       };
-    } else {
-      return {
-        stepId: paths[i].id,
-        status: 'rejected' as const,
-        error: toOrchidError(result.reason, paths[i].id),
-      };
     }
+    return {
+      stepId: paths[i].id,
+      status: 'rejected' as const,
+      error: toOrchidError(result.reason, paths[i].id),
+    };
   });
 
   return step.merge(results, _ctx);

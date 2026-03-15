@@ -1,7 +1,6 @@
-import type { ZodType } from 'zod';
-import type { Item } from './items';
-import type { ItemLog } from './context';
 import type { LLMResponse } from './common';
+import type { ItemLog } from './context';
+import type { Item } from './items';
 
 // Slot constants
 export const Slot = {
@@ -18,7 +17,10 @@ export type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
 
 export type BudgetConfig =
   | number
-  | { min: number; max: number }
+  | {
+      min: number;
+      max: number;
+    }
   | 'auto';
 
 export interface LayerTimeouts {
@@ -135,9 +137,9 @@ export interface DisposeParams<TState> {
 export interface MemoryHooks<TState = unknown> {
   init?: (params: InitParams) => Promise<InitResult<TState>>;
   recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | null>;
-  store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | void>;
+  store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
-  onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | void>;
+  onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
   onComplete?: (params: CompleteParams<TState>) => Promise<void>;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
 }

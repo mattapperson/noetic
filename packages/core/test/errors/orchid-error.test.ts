@@ -1,42 +1,83 @@
-import { describe, it, expect } from 'bun:test';
-import { OrchidErrorImpl, isOrchidError } from '../../src/errors/orchid-error';
+import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
+import { ZodError, z } from 'zod';
+import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
 import type { OrchidError } from '../../src/types/error';
-import { z, ZodError } from 'zod';
 
 describe('OrchidError', () => {
   describe('constructors for each kind', () => {
     it('step_failed', () => {
-      const e = new OrchidErrorImpl({ kind: 'step_failed', stepId: 'test', cause: new Error('boom'), retriesExhausted: true });
+      const e = new OrchidErrorImpl({
+        kind: 'step_failed',
+        stepId: 'test',
+        cause: new Error('boom'),
+        retriesExhausted: true,
+      });
       expect(e.orchidError.kind).toBe('step_failed');
       expect(e.message).toContain("Step 'test' failed");
       expect(e.message).toContain('boom');
     });
 
     it('llm_refused', () => {
-      const e = new OrchidErrorImpl({ kind: 'llm_refused', stepId: 'llm-1', refusal: 'I cannot help with that' });
+      const e = new OrchidErrorImpl({
+        kind: 'llm_refused',
+        stepId: 'llm-1',
+        refusal: 'I cannot help with that',
+      });
       expect(e.orchidError.kind).toBe('llm_refused');
       expect(e.message).toContain('refused');
     });
 
     it('llm_parse_error', () => {
-      const schema = z.object({ x: z.number() });
-      const zodError = new ZodError([{ code: 'custom', message: 'invalid', path: [] }]);
-      const e = new OrchidErrorImpl({ kind: 'llm_parse_error', stepId: 'p', raw: 'bad', schema, zodError });
+      const schema = z.object({
+        x: z.number(),
+      });
+      const zodError = new ZodError([
+        {
+          code: 'custom',
+          message: 'invalid',
+          path: [],
+        },
+      ]);
+      const e = new OrchidErrorImpl({
+        kind: 'llm_parse_error',
+        stepId: 'p',
+        raw: 'bad',
+        schema,
+        zodError,
+      });
       expect(e.orchidError.kind).toBe('llm_parse_error');
       expect(e.message).toContain('parse error');
     });
 
     it('llm_rate_limit', () => {
-      const e = new OrchidErrorImpl({ kind: 'llm_rate_limit', stepId: 'rl', retryAfter: 5000 });
+      const e = new OrchidErrorImpl({
+        kind: 'llm_rate_limit',
+        stepId: 'rl',
+        retryAfter: 5_000,
+      });
       expect(e.orchidError.kind).toBe('llm_rate_limit');
       expect(e.message).toContain('rate limited');
     });
 
     it('fork_partial', () => {
       const e = new OrchidErrorImpl({
-        kind: 'fork_partial', stepId: 'fork-1',
-        succeeded: [{ stepId: 'a', value: 'ok' }],
-        failed: [{ stepId: 'b', error: { kind: 'cancelled' } as OrchidError }],
+        kind: 'fork_partial',
+        stepId: 'fork-1',
+        succeeded: [
+          {
+            stepId: 'a',
+            value: 'ok',
+          },
+        ],
+        failed: [
+          {
+            stepId: 'b',
+            error: {
+              kind: 'cancelled',
+            } as OrchidError,
+          },
+        ],
       });
       expect(e.orchidError.kind).toBe('fork_partial');
       expect(e.message).toContain('1 succeeded');
@@ -44,38 +85,58 @@ describe('OrchidError', () => {
     });
 
     it('spawn_summary_failed', () => {
-      const e = new OrchidErrorImpl({ kind: 'spawn_summary_failed', stepId: 's', childOutput: 'data', summaryCause: new Error('LLM down') });
-      expect(e.orchidError.kind).toBe('spawn_summary_failed');
-      if (e.orchidError.kind === 'spawn_summary_failed') {
-        expect(e.orchidError.childOutput).toBe('data');
-      }
+      const e = new OrchidErrorImpl({
+        kind: 'spawn_summary_failed',
+        stepId: 's',
+        childOutput: 'data',
+        summaryCause: new Error('LLM down'),
+      });
+      assert(e.orchidError.kind === 'spawn_summary_failed');
+      expect(e.orchidError.childOutput).toBe('data');
     });
 
     it('channel_timeout', () => {
-      const e = new OrchidErrorImpl({ kind: 'channel_timeout', channelName: 'ch1', timeout: 30000 });
+      const e = new OrchidErrorImpl({
+        kind: 'channel_timeout',
+        channelName: 'ch1',
+        timeout: 30_000,
+      });
       expect(e.orchidError.kind).toBe('channel_timeout');
       expect(e.message).toContain('30000ms');
     });
 
     it('channel_closed', () => {
-      const e = new OrchidErrorImpl({ kind: 'channel_closed', channelName: 'ch1' });
+      const e = new OrchidErrorImpl({
+        kind: 'channel_closed',
+        channelName: 'ch1',
+      });
       expect(e.orchidError.kind).toBe('channel_closed');
       expect(e.message).toContain('closed');
     });
 
     it('cancelled', () => {
-      const e = new OrchidErrorImpl({ kind: 'cancelled', reason: 'user abort' });
+      const e = new OrchidErrorImpl({
+        kind: 'cancelled',
+        reason: 'user abort',
+      });
       expect(e.orchidError.kind).toBe('cancelled');
       expect(e.message).toContain('user abort');
     });
 
     it('cancelled without reason', () => {
-      const e = new OrchidErrorImpl({ kind: 'cancelled' });
+      const e = new OrchidErrorImpl({
+        kind: 'cancelled',
+      });
       expect(e.message).toContain('Cancelled');
     });
 
     it('budget_exceeded', () => {
-      const e = new OrchidErrorImpl({ kind: 'budget_exceeded', field: 'cost', limit: 1.0, actual: 1.5 });
+      const e = new OrchidErrorImpl({
+        kind: 'budget_exceeded',
+        field: 'cost',
+        limit: 1.0,
+        actual: 1.5,
+      });
       expect(e.orchidError.kind).toBe('budget_exceeded');
       expect(e.message).toContain('cost');
     });
@@ -83,7 +144,9 @@ describe('OrchidError', () => {
 
   describe('formatMessage default branch', () => {
     it('unknown kind produces fallback message', () => {
-      const e = new OrchidErrorImpl({ kind: 'totally_unknown' } as any);
+      const e = new OrchidErrorImpl({
+        kind: 'totally_unknown',
+      } as unknown as ConstructorParameters<typeof OrchidErrorImpl>[0]);
       expect(e.message).toContain('OrchidError');
       expect(e.message).toContain('totally_unknown');
     });
@@ -91,7 +154,9 @@ describe('OrchidError', () => {
 
   describe('isOrchidError guard', () => {
     it('returns true for OrchidErrorImpl', () => {
-      const e = new OrchidErrorImpl({ kind: 'cancelled' });
+      const e = new OrchidErrorImpl({
+        kind: 'cancelled',
+      });
       expect(isOrchidError(e)).toBe(true);
     });
 
@@ -109,13 +174,22 @@ describe('OrchidError', () => {
   describe('serializable', () => {
     it('orchidError is serializable to JSON', () => {
       const e = new OrchidErrorImpl({
-        kind: 'step_failed', stepId: 'test',
-        cause: new Error('boom'), retriesExhausted: true,
+        kind: 'step_failed',
+        stepId: 'test',
+        cause: new Error('boom'),
+        retriesExhausted: true,
       });
-      const serialized = JSON.parse(JSON.stringify(e.orchidError, (key, value) => {
-        if (value instanceof Error) return { message: value.message, name: value.name };
-        return value;
-      }));
+      const serialized = JSON.parse(
+        JSON.stringify(e.orchidError, (_key, value) => {
+          if (value instanceof Error) {
+            return {
+              message: value.message,
+              name: value.name,
+            };
+          }
+          return value;
+        }),
+      );
       expect(serialized.kind).toBe('step_failed');
       expect(serialized.stepId).toBe('test');
     });
@@ -123,20 +197,26 @@ describe('OrchidError', () => {
 
   describe('extends Error', () => {
     it('is instanceof Error', () => {
-      const e = new OrchidErrorImpl({ kind: 'cancelled' });
+      const e = new OrchidErrorImpl({
+        kind: 'cancelled',
+      });
       expect(e instanceof Error).toBe(true);
     });
 
     it('has name OrchidError', () => {
-      const e = new OrchidErrorImpl({ kind: 'cancelled' });
+      const e = new OrchidErrorImpl({
+        kind: 'cancelled',
+      });
       expect(e.name).toBe('OrchidError');
     });
 
     it('can be caught in try/catch', () => {
       try {
-        throw new OrchidErrorImpl({ kind: 'cancelled' });
+        throw new OrchidErrorImpl({
+          kind: 'cancelled',
+        });
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
+        assert(isOrchidError(e));
       }
     });
   });

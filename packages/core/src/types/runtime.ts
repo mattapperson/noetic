@@ -1,11 +1,11 @@
 import type { ZodType } from 'zod';
-import type { Step } from './step';
-import type { Context, ItemLog } from './context';
+import type { Channel, ChannelHandle, ExternalChannel } from './channel';
+import type { LLMResponse, Tool } from './common';
+import type { Context } from './context';
 import type { Item } from './items';
-import type { Tool, LLMResponse, StepMeta } from './common';
-import type { Channel, ExternalChannel, ChannelHandle } from './channel';
-import type { MemoryLayer, StorageAdapter, ProjectionPolicy } from './memory';
+import type { MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span } from './observability';
+import type { Step } from './step';
 
 export interface AgentHooks {
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
@@ -35,7 +35,13 @@ export interface Runtime {
     resourceId?: string;
   }): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
-  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  recv<T>(
+    channel: Channel<T>,
+    ctx: Context,
+    opts?: {
+      timeout?: number;
+    },
+  ): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;

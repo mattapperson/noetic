@@ -1,7 +1,7 @@
-import type { Item } from './items';
-import type { TokenUsage, StepMeta } from './common';
-import type { Span } from './observability';
 import type { Channel } from './channel';
+import type { StepMeta, TokenUsage } from './common';
+import type { Item } from './items';
+import type { Span } from './observability';
 
 export interface ItemLog {
   readonly items: ReadonlyArray<Item>;
@@ -22,7 +22,12 @@ export interface Context {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
-  recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
+  recv<T>(
+    channel: Channel<T>,
+    opts?: {
+      timeout?: number;
+    },
+  ): Promise<T>;
   send<T>(channel: Channel<T>, value: T): void;
   tryRecv<T>(channel: Channel<T>): T | null;
   readonly aborted: boolean;

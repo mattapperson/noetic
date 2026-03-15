@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'bun:test';
-import { step } from '../../src/builders/step-builders';
+import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
+import { step } from '../../src/builders/step-builders';
+import { makeMockContext } from '../_helpers';
 
 describe('step builders', () => {
   it('step.run() produces correct shape', async () => {
@@ -12,7 +13,7 @@ describe('step builders', () => {
     expect(s.id).toBe('my-run');
     expect(s.execute).toBeFunction();
     expect(s.retry).toBeUndefined();
-    const result = await s.execute('hello', {} as any);
+    const result = await s.execute('hello', makeMockContext());
     expect(result).toBe(5);
   });
 
@@ -20,9 +21,17 @@ describe('step builders', () => {
     const s = step.run({
       id: 'retry-run',
       execute: async (input: string) => input,
-      retry: { maxAttempts: 3, backoff: 'exponential', initialDelay: 100 },
+      retry: {
+        maxAttempts: 3,
+        backoff: 'exponential',
+        initialDelay: 100,
+      },
     });
-    expect(s.retry).toEqual({ maxAttempts: 3, backoff: 'exponential', initialDelay: 100 });
+    expect(s.retry).toEqual({
+      maxAttempts: 3,
+      backoff: 'exponential',
+      initialDelay: 100,
+    });
   });
 
   it('step.llm() produces correct shape', () => {
@@ -38,7 +47,9 @@ describe('step builders', () => {
   });
 
   it('step.llm() with output schema', () => {
-    const schema = z.object({ answer: z.string() });
+    const schema = z.object({
+      answer: z.string(),
+    });
     const s = step.llm({
       id: 'structured-llm',
       model: 'gpt-4',
@@ -51,14 +62,22 @@ describe('step builders', () => {
     const tool = {
       name: 'search',
       description: 'Search the web',
-      input: z.object({ query: z.string() }),
-      output: z.object({ results: z.array(z.string()) }),
-      execute: async () => ({ results: [] }),
+      input: z.object({
+        query: z.string(),
+      }),
+      output: z.object({
+        results: z.array(z.string()),
+      }),
+      execute: async () => ({
+        results: [],
+      }),
     };
     const s = step.llm({
       id: 'tool-llm',
       model: 'gpt-4',
-      tools: [tool],
+      tools: [
+        tool,
+      ],
     });
     expect(s.tools).toHaveLength(1);
     expect(s.tools![0]).toBe(tool);
@@ -68,9 +87,15 @@ describe('step builders', () => {
     const myTool = {
       name: 'calculator',
       description: 'Calculate',
-      input: z.object({ expression: z.string() }),
-      output: z.object({ result: z.number() }),
-      execute: async () => ({ result: 42 }),
+      input: z.object({
+        expression: z.string(),
+      }),
+      output: z.object({
+        result: z.number(),
+      }),
+      execute: async () => ({
+        result: 42,
+      }),
     };
     const s = step.tool({
       id: 'my-tool',
@@ -82,50 +107,103 @@ describe('step builders', () => {
   });
 
   it('step.run() throws on empty id', () => {
-    expect(() => step.run({ id: '', execute: async () => {} })).toThrow('non-empty id');
-    expect(() => step.run({ id: '  ', execute: async () => {} })).toThrow('non-empty id');
+    expect(() =>
+      step.run({
+        id: '',
+        execute: async () => {},
+      }),
+    ).toThrow('non-empty id');
+    expect(() =>
+      step.run({
+        id: '  ',
+        execute: async () => {},
+      }),
+    ).toThrow('non-empty id');
   });
 
   it('step.run() throws on missing execute', () => {
-    expect(() => step.run({ id: 'test', execute: undefined as any })).toThrow('execute function');
+    // Cast via unknown to test runtime validation without bypassing with any
+    type RunOpts = Parameters<typeof step.run<string, number>>[0];
+    const badOpts = {
+      id: 'test',
+      execute: undefined,
+    } as unknown as RunOpts;
+    expect(() => step.run(badOpts)).toThrow('execute function');
   });
 
   it('step.llm() throws on empty id', () => {
-    expect(() => step.llm({ id: '', model: 'gpt-4' })).toThrow('non-empty id');
+    expect(() =>
+      step.llm({
+        id: '',
+        model: 'gpt-4',
+      }),
+    ).toThrow('non-empty id');
   });
 
   it('step.llm() throws on empty model', () => {
-    expect(() => step.llm({ id: 'test', model: '' })).toThrow('non-empty model');
+    expect(() =>
+      step.llm({
+        id: 'test',
+        model: '',
+      }),
+    ).toThrow('non-empty model');
   });
 
   it('step.tool() throws on empty id', () => {
     const myTool = {
       name: 'calc',
       description: 'Calc',
-      input: z.object({ x: z.string() }),
-      output: z.object({ r: z.number() }),
-      execute: async () => ({ r: 1 }),
+      input: z.object({
+        x: z.string(),
+      }),
+      output: z.object({
+        r: z.number(),
+      }),
+      execute: async () => ({
+        r: 1,
+      }),
     };
-    expect(() => step.tool({ id: '', tool: myTool })).toThrow('non-empty id');
+    expect(() =>
+      step.tool({
+        id: '',
+        tool: myTool,
+      }),
+    ).toThrow('non-empty id');
   });
 
   it('step.tool() throws on missing tool', () => {
-    expect(() => step.tool({ id: 'test', tool: undefined as any })).toThrow('requires a tool');
+    // Cast via unknown to test runtime validation without bypassing with any
+    type ToolOpts = Parameters<typeof step.tool<string, number>>[0];
+    const badOpts = {
+      id: 'test',
+      tool: undefined,
+    } as unknown as ToolOpts;
+    expect(() => step.tool(badOpts)).toThrow('requires a tool');
   });
 
   it('step.tool() with args', () => {
     const myTool = {
       name: 'calculator',
       description: 'Calculate',
-      input: z.object({ expression: z.string() }),
-      output: z.object({ result: z.number() }),
-      execute: async () => ({ result: 42 }),
+      input: z.object({
+        expression: z.string(),
+      }),
+      output: z.object({
+        result: z.number(),
+      }),
+      execute: async () => ({
+        result: 42,
+      }),
     };
     const s = step.tool({
       id: 'my-tool',
       tool: myTool,
-      args: { expression: '2+2' },
+      args: {
+        expression: '2+2',
+      },
     });
-    expect(s.args).toEqual({ expression: '2+2' });
+    expect(s.args).toEqual({
+      expression: '2+2',
+    });
   });
 });

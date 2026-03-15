@@ -11,7 +11,10 @@ function estimateSize(value: unknown): number {
 export function cloneWithGuard<T>(
   value: T,
   label: string,
-  opts?: { warnBytes?: number; maxBytes?: number },
+  opts?: {
+    warnBytes?: number;
+    maxBytes?: number;
+  },
 ): T {
   const warnBytes = opts?.warnBytes ?? DEFAULT_WARN_BYTES;
   const size = estimateSize(value);
@@ -19,7 +22,7 @@ export function cloneWithGuard<T>(
   if (size > warnBytes) {
     console.warn(
       `[orchid] ${label}: state size (~${Math.round(size / 1024 / 1024)}MB) exceeds ${Math.round(warnBytes / 1024 / 1024)}MB threshold. ` +
-      `Consider reducing state size to avoid performance issues.`,
+        'Consider reducing state size to avoid performance issues.',
     );
   }
 

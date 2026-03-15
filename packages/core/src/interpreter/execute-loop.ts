@@ -1,11 +1,11 @@
-import type { StepLoop, Snapshot, Verdict } from '../types/step';
-import type { Context } from '../types/context';
 import { isOrchidError, OrchidErrorImpl } from '../errors/orchid-error';
+import type { Context } from '../types/context';
+import type { ExecuteStepFn, Snapshot, StepLoop, Verdict } from '../types/step';
 import { isMutableContext } from './typeguards';
 
-import type { Step, ExecuteStepFn } from '../types/step';
-
-function hasTextField(value: unknown): value is { text: unknown } {
+function hasTextField(value: unknown): value is {
+  text: unknown;
+} {
   return typeof value === 'object' && value !== null && 'text' in value;
 }
 
@@ -21,7 +21,7 @@ export async function executeLoop<I, O>(
   const history: unknown[] = [];
   const startTime = Date.now();
   let stepCount = 0;
-  const maxIterations = step.maxIterations ?? 1000;
+  const maxIterations = step.maxIterations ?? 1_000;
   const maxHistory = step.maxHistorySize ?? 100;
   let totalIterations = 0;
 
@@ -61,26 +61,21 @@ export async function executeLoop<I, O>(
       output = await executeStep<I, O>(step.body, currentInput, ctx);
       stepCount++;
     } catch (e) {
-      // Handle error with onError callback
-      if (step.onError && isOrchidError(e)) {
-        const action = step.onError(e.orchidError, ctx);
-        if (action === 'retry') {
-          continue; // re-run same iteration (totalIterations already incremented)
-        } else if (action === 'skip') {
-          stepCount++;
-          // Use last successful output if available
-          if (lastOutput !== undefined) {
-            output = lastOutput;
-          } else {
-            continue; // skip if no previous output
-          }
-        } else {
-          // abort - propagate error
-          throw e;
-        }
-      } else {
-        throw e; // no handler or not an OrchidError
+      if (!step.onError || !isOrchidError(e)) {
+        throw e;
       }
+      const action = step.onError(e.orchidError, ctx);
+      if (action === 'retry') {
+        continue;
+      }
+      if (action !== 'skip') {
+        throw e;
+      }
+      stepCount++;
+      if (lastOutput === undefined) {
+        continue;
+      }
+      output = lastOutput;
     }
 
     lastOutput = output;
@@ -103,12 +98,16 @@ export async function executeLoop<I, O>(
     // Build snapshot
     const snapshot: Snapshot = {
       stepCount,
-      tokens: { ...ctx.tokens },
+      tokens: {
+        ...ctx.tokens,
+      },
       elapsed: Date.now() - startTime,
       cost: ctx.cost,
       lastOutput: output,
       lastText,
-      history: [...history],
+      history: [
+        ...history,
+      ],
       depth: ctx.depth,
       lastStepMeta: isMutableContext(ctx) ? ctx.lastStepMeta : null,
     };

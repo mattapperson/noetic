@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type { SettleResult } from '../../src/index';
 import { Slot } from '../../src/index';
 
@@ -25,7 +25,10 @@ describe('Type definitions', () => {
       const rejected: SettleResult<string> = {
         stepId: 's2',
         status: 'rejected',
-        error: { kind: 'cancelled', reason: 'test' },
+        error: {
+          kind: 'cancelled',
+          reason: 'test',
+        },
       };
       expect(fulfilled.status).toBe('fulfilled');
       expect(fulfilled.value).toBe('result');

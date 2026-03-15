@@ -1,11 +1,13 @@
-import type { Context } from '../types/context';
-import type { MutableContext } from '../types/mutable-context';
-import type { MessageItem, ContentPart } from '../types/items';
 import { ContextImpl } from '../runtime/context-impl';
+import type { Context } from '../types/context';
+import type { ContentPart, MessageItem } from '../types/items';
+import type { MutableContext } from '../types/mutable-context';
 
 export function isMutableContext(ctx: Context): ctx is MutableContext {
   // Check if the context has writable mutable fields (ContextImpl or compatible mock)
-  if (ctx instanceof ContextImpl) return true;
+  if (ctx instanceof ContextImpl) {
+    return true;
+  }
   // Duck-type check: verify the fields we need to mutate are present and writable
   const desc = Object.getOwnPropertyDescriptor(ctx, 'stepCount');
   return desc !== undefined && desc.writable !== false;
@@ -26,7 +28,12 @@ export function isAssistantMessage(item: unknown): item is MessageItem {
   );
 }
 
-export function isOutputText(part: ContentPart): part is Extract<ContentPart, { type: 'output_text' }> {
+export function isOutputText(part: ContentPart): part is Extract<
+  ContentPart,
+  {
+    type: 'output_text';
+  }
+> {
   return part.type === 'output_text';
 }
 

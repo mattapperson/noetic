@@ -1,17 +1,27 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { StepBranch, Step } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
+import type { StepBranch } from '../../src/types/step';
 import { simpleExecute } from '../_helpers';
 
 describe('executeBranch', () => {
   it('route selects a step and executes it', async () => {
     const step: StepBranch<string, string> = {
-      kind: 'branch', id: 'test',
-      route: (input) => input === 'a'
-        ? { kind: 'run', id: 'path-a', execute: async () => 'chose A' }
-        : { kind: 'run', id: 'path-b', execute: async () => 'chose B' },
+      kind: 'branch',
+      id: 'test',
+      route: (input) =>
+        input === 'a'
+          ? {
+              kind: 'run',
+              id: 'path-a',
+              execute: async () => 'chose A',
+            }
+          : {
+              kind: 'run',
+              id: 'path-b',
+              execute: async () => 'chose B',
+            },
     };
     const ctx = new ContextImpl();
     expect(await executeBranch(step, 'a', ctx, simpleExecute)).toBe('chose A');
@@ -20,7 +30,9 @@ describe('executeBranch', () => {
 
   it('null route is no-op, returns input', async () => {
     const step: StepBranch<string, string> = {
-      kind: 'branch', id: 'noop', route: () => null,
+      kind: 'branch',
+      id: 'noop',
+      route: () => null,
     };
     const result = await executeBranch(step, 'passthrough', new ContextImpl(), simpleExecute);
     expect(result).toBe('passthrough');
@@ -28,19 +40,29 @@ describe('executeBranch', () => {
 
   it('route function throws — error propagates unwrapped', async () => {
     const step: StepBranch<string, string> = {
-      kind: 'branch', id: 'throw-test',
-      route: () => { throw new Error('route exploded'); },
+      kind: 'branch',
+      id: 'throw-test',
+      route: () => {
+        throw new Error('route exploded');
+      },
     };
-    await expect(executeBranch(step, 'input', new ContextImpl(), simpleExecute)).rejects.toThrow('route exploded');
+    await expect(executeBranch(step, 'input', new ContextImpl(), simpleExecute)).rejects.toThrow(
+      'route exploded',
+    );
   });
 
   it('route receives context as second arg', async () => {
     let capturedCtx: Context | undefined;
     const step: StepBranch<string, string> = {
-      kind: 'branch', id: 'ctx-test',
+      kind: 'branch',
+      id: 'ctx-test',
       route: (_input, ctx) => {
         capturedCtx = ctx;
-        return { kind: 'run', id: 'inner', execute: async () => 'done' };
+        return {
+          kind: 'run',
+          id: 'inner',
+          execute: async () => 'done',
+        };
       },
     };
     const ctx = new ContextImpl();
@@ -51,10 +73,15 @@ describe('executeBranch', () => {
   it('selected step is executed with correct input', async () => {
     let receivedInput = '';
     const step: StepBranch<string, string> = {
-      kind: 'branch', id: 'input-test',
+      kind: 'branch',
+      id: 'input-test',
       route: () => ({
-        kind: 'run', id: 'inner',
-        execute: async (input: string) => { receivedInput = input; return 'done'; },
+        kind: 'run',
+        id: 'inner',
+        execute: async (input: string) => {
+          receivedInput = input;
+          return 'done';
+        },
       }),
     };
     await executeBranch(step, 'my-input', new ContextImpl(), simpleExecute);

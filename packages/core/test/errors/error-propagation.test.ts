@@ -1,16 +1,24 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
+import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { OrchidErrorImpl, isOrchidError } from '../../src/errors/orchid-error';
-import type { Step, StepLoop } from '../../src/types/step';
+import type { SettleResult, Step, StepLoop } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
 
 describe('Error propagation', () => {
   describe('loop error handling', () => {
     it('default propagates error', async () => {
       const step: StepLoop<string, string> = {
-        kind: 'loop', id: 'test-loop',
-        body: { kind: 'run', id: 'fail', execute: async () => { throw new Error('body fail'); } },
+        kind: 'loop',
+        id: 'test-loop',
+        body: {
+          kind: 'run',
+          id: 'fail',
+          execute: async () => {
+            throw new Error('body fail');
+          },
+        },
         until: until.maxSteps(5),
       };
       const ctx = new ContextImpl();
@@ -20,12 +28,21 @@ describe('Error propagation', () => {
     it('onError retry re-runs', async () => {
       let attempts = 0;
       const step: StepLoop<string, string> = {
-        kind: 'loop', id: 'retry-loop',
+        kind: 'loop',
+        id: 'retry-loop',
         body: {
-          kind: 'run', id: 'flaky',
+          kind: 'run',
+          id: 'flaky',
           execute: async () => {
             attempts++;
-            if (attempts < 3) throw new OrchidErrorImpl({ kind: 'step_failed', stepId: 'flaky', cause: new Error('flaky'), retriesExhausted: false });
+            if (attempts < 3) {
+              throw new OrchidErrorImpl({
+                kind: 'step_failed',
+                stepId: 'flaky',
+                cause: new Error('flaky'),
+                retriesExhausted: false,
+              });
+            }
             return 'ok';
           },
         },
@@ -41,9 +58,19 @@ describe('Error propagation', () => {
     it('until predicate throw treated as stop', async () => {
       let bodyCount = 0;
       const step: StepLoop<string, string> = {
-        kind: 'loop', id: 'pred-throw',
-        body: { kind: 'run', id: 'inc', execute: async () => { bodyCount++; return 'ok'; } },
-        until: () => { throw new Error('predicate boom'); },
+        kind: 'loop',
+        id: 'pred-throw',
+        body: {
+          kind: 'run',
+          id: 'inc',
+          execute: async () => {
+            bodyCount++;
+            return 'ok';
+          },
+        },
+        until: () => {
+          throw new Error('predicate boom');
+        },
       };
       const ctx = new ContextImpl();
       const result = await execute(step, '', ctx);
@@ -55,10 +82,22 @@ describe('Error propagation', () => {
   describe('fork error handling', () => {
     it('all mode throws fork_partial on failure', async () => {
       const step: Step<string, string> = {
-        kind: 'fork', id: 'fail-fork', mode: 'all',
+        kind: 'fork',
+        id: 'fail-fork',
+        mode: 'all',
         paths: () => [
-          { kind: 'run', id: 'ok', execute: async () => 'success' },
-          { kind: 'run', id: 'fail', execute: async () => { throw new Error('boom'); } },
+          {
+            kind: 'run',
+            id: 'ok',
+            execute: async () => 'success',
+          },
+          {
+            kind: 'run',
+            id: 'fail',
+            execute: async () => {
+              throw new Error('boom');
+            },
+          },
         ],
         merge: (r) => r.join(','),
       };
@@ -67,19 +106,32 @@ describe('Error propagation', () => {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
-        expect((e as OrchidErrorImpl).orchidError.kind).toBe('fork_partial');
+        assert(isOrchidError(e));
+        expect(e.orchidError.kind).toBe('fork_partial');
       }
     });
 
     it('settle mode never throws', async () => {
       const step: Step<string, string> = {
-        kind: 'fork', id: 'settle-fork', mode: 'settle',
+        kind: 'fork',
+        id: 'settle-fork',
+        mode: 'settle',
         paths: () => [
-          { kind: 'run', id: 'ok', execute: async () => 'yes' },
-          { kind: 'run', id: 'fail', execute: async () => { throw new Error('no'); } },
+          {
+            kind: 'run',
+            id: 'ok',
+            execute: async () => 'yes',
+          },
+          {
+            kind: 'run',
+            id: 'fail',
+            execute: async () => {
+              throw new Error('no');
+            },
+          },
         ],
-        merge: (results: any[]) => `${results.filter(r => r.status === 'fulfilled').length} ok`,
+        merge: (results: SettleResult<string>[]) =>
+          `${results.filter((r) => r.status === 'fulfilled').length} ok`,
       };
       const ctx = new ContextImpl();
       const result = await execute(step, '', ctx);
@@ -88,10 +140,24 @@ describe('Error propagation', () => {
 
     it('race mode all-fail throws fork_partial', async () => {
       const step: Step<string, string> = {
-        kind: 'fork', id: 'race-fail', mode: 'race',
+        kind: 'fork',
+        id: 'race-fail',
+        mode: 'race',
         paths: () => [
-          { kind: 'run', id: 'a', execute: async () => { throw new Error('a'); } },
-          { kind: 'run', id: 'b', execute: async () => { throw new Error('b'); } },
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async () => {
+              throw new Error('a');
+            },
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async () => {
+              throw new Error('b');
+            },
+          },
         ],
       };
       const ctx = new ContextImpl();
@@ -99,8 +165,8 @@ describe('Error propagation', () => {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
-        expect((e as OrchidErrorImpl).orchidError.kind).toBe('fork_partial');
+        assert(isOrchidError(e));
+        expect(e.orchidError.kind).toBe('fork_partial');
       }
     });
   });
@@ -108,23 +174,32 @@ describe('Error propagation', () => {
   describe('spawn errors', () => {
     it('spawn_summary_failed preserves childOutput', async () => {
       const step: Step<string, string> = {
-        kind: 'spawn', id: 'sum-fail',
-        child: { kind: 'run', id: 'child', execute: async () => 'child-data' },
-        contextIn: { strategy: 'fresh' },
-        contextOut: { strategy: 'summary' },
+        kind: 'spawn',
+        id: 'sum-fail',
+        child: {
+          kind: 'run',
+          id: 'child',
+          execute: async () => 'child-data',
+        },
+        contextIn: {
+          strategy: 'fresh',
+        },
+        contextOut: {
+          strategy: 'summary',
+        },
       };
       const ctx = new ContextImpl();
-      const mockCallModel = async () => { throw new Error('LLM down'); };
+      const mockCallModel = async () => {
+        throw new Error('LLM down');
+      };
       try {
         await execute(step, '', ctx, mockCallModel);
         expect.unreachable('should have thrown');
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
-        const oe = (e as OrchidErrorImpl).orchidError;
-        expect(oe.kind).toBe('spawn_summary_failed');
-        if (oe.kind === 'spawn_summary_failed') {
-          expect(oe.childOutput).toBe('child-data');
-        }
+        assert(isOrchidError(e));
+        const oe = e.orchidError;
+        assert(oe.kind === 'spawn_summary_failed');
+        expect(oe.childOutput).toBe('child-data');
       }
     });
   });

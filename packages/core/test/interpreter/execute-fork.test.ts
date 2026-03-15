@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
+import { isOrchidError } from '../../src/errors/orchid-error';
 import { executeFork } from '../../src/interpreter/execute-fork';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { OrchidErrorImpl, isOrchidError } from '../../src/errors/orchid-error';
-import type { StepForkAll, StepForkRace, StepForkSettle, SettleResult } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
+import type { SettleResult, StepForkAll, StepForkRace, StepForkSettle } from '../../src/types/step';
 import { simpleExecute } from '../_helpers';
 
 describe('executeFork', () => {
@@ -14,8 +15,16 @@ describe('executeFork', () => {
         id: 'all-test',
         mode: 'all',
         paths: () => [
-          { kind: 'run', id: 'a', execute: async (i: number) => i * 2 },
-          { kind: 'run', id: 'b', execute: async (i: number) => i * 3 },
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async (i: number) => i * 2,
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async (i: number) => i * 3,
+          },
         ],
         merge: (results) => results.reduce((a, b) => a + b, 0),
       };
@@ -30,8 +39,18 @@ describe('executeFork', () => {
         id: 'fail-test',
         mode: 'all',
         paths: () => [
-          { kind: 'run', id: 'ok', execute: async () => 'success' },
-          { kind: 'run', id: 'fail', execute: async () => { throw new Error('boom'); } },
+          {
+            kind: 'run',
+            id: 'ok',
+            execute: async () => 'success',
+          },
+          {
+            kind: 'run',
+            id: 'fail',
+            execute: async () => {
+              throw new Error('boom');
+            },
+          },
         ],
         merge: (results) => results.join(','),
       };
@@ -40,14 +59,12 @@ describe('executeFork', () => {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
-        const oe = (e as OrchidErrorImpl).orchidError;
-        expect(oe.kind).toBe('fork_partial');
-        if (oe.kind === 'fork_partial') {
-          expect(oe.succeeded).toHaveLength(1);
-          expect(oe.succeeded[0].stepId).toBe('ok');
-          expect(oe.failed).toHaveLength(1);
-        }
+        assert(isOrchidError(e));
+        const oe = e.orchidError;
+        assert(oe.kind === 'fork_partial');
+        expect(oe.succeeded).toHaveLength(1);
+        expect(oe.succeeded[0].stepId).toBe('ok');
+        expect(oe.failed).toHaveLength(1);
       }
     });
 
@@ -58,14 +75,19 @@ describe('executeFork', () => {
         mode: 'all',
         paths: () => [
           {
-            kind: 'run', id: 'a',
+            kind: 'run',
+            id: 'a',
+            // Fork gives child contexts; state is writable via Context interface
             execute: async (_: string, ctx: Context) => {
-              (ctx as any).state = { modified: 'by-a' };
+              ctx.state = {
+                modified: 'by-a',
+              };
               return 'a';
             },
           },
           {
-            kind: 'run', id: 'b',
+            kind: 'run',
+            id: 'b',
             execute: async (_: string, ctx: Context) => {
               // Should NOT see a's mutation
               return JSON.stringify(ctx.state);
@@ -74,15 +96,20 @@ describe('executeFork', () => {
         ],
         merge: (results) => results.join('|'),
       };
-      const ctx = new ContextImpl({ state: { original: true } });
+      const ctx = new ContextImpl({
+        state: {
+          original: true,
+        },
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       // b should see the original state, not a's mutation
       const bResult = result.split('|')[1];
-      const bState = JSON.parse(bResult);
+      const bState = JSON.parse(bResult) as Record<string, unknown>;
       expect(bState.modified).toBeUndefined();
       expect(bState.original).toBe(true);
       // Parent state should also be unchanged
-      expect((ctx.state as any).original).toBe(true);
+      const parentState = ctx.state as Record<string, unknown>;
+      expect(parentState.original).toBe(true);
     });
 
     it('respects concurrency limit', async () => {
@@ -93,9 +120,39 @@ describe('executeFork', () => {
         id: 'conc-test',
         mode: 'all',
         paths: () => [
-          { kind: 'run', id: 'a', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'a'; } },
-          { kind: 'run', id: 'b', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'b'; } },
-          { kind: 'run', id: 'c', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'c'; } },
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async () => {
+              current++;
+              maxConcurrent = Math.max(maxConcurrent, current);
+              await new Promise((r) => setTimeout(r, 50));
+              current--;
+              return 'a';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async () => {
+              current++;
+              maxConcurrent = Math.max(maxConcurrent, current);
+              await new Promise((r) => setTimeout(r, 50));
+              current--;
+              return 'b';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'c',
+            execute: async () => {
+              current++;
+              maxConcurrent = Math.max(maxConcurrent, current);
+              await new Promise((r) => setTimeout(r, 50));
+              current--;
+              return 'c';
+            },
+          },
         ],
         merge: (r) => r.join(','),
         concurrency: 2,
@@ -109,14 +166,25 @@ describe('executeFork', () => {
       let maxConcurrent = 0;
       let current = 0;
       const makeTimedPath = (id: string) => ({
-        kind: 'run' as const, id,
-        execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 5)); current--; return id; },
+        kind: 'run' as const,
+        id,
+        execute: async () => {
+          current++;
+          maxConcurrent = Math.max(maxConcurrent, current);
+          await new Promise((r) => setTimeout(r, 5));
+          current--;
+          return id;
+        },
       });
       const step: StepForkAll<string, string> = {
         kind: 'fork',
         id: 'serial-test',
         mode: 'all',
-        paths: () => [makeTimedPath('a'), makeTimedPath('b'), makeTimedPath('c')],
+        paths: () => [
+          makeTimedPath('a'),
+          makeTimedPath('b'),
+          makeTimedPath('c'),
+        ],
         merge: (r) => r.join(','),
         concurrency: 1,
       };
@@ -136,7 +204,13 @@ describe('executeFork', () => {
         paths: (input, ctx) => {
           capturedInput = input;
           capturedCtx = ctx;
-          return [{ kind: 'run', id: 'a', execute: async () => 'done' }];
+          return [
+            {
+              kind: 'run',
+              id: 'a',
+              execute: async () => 'done',
+            },
+          ];
         },
         merge: (r) => r.join(','),
       };
@@ -152,7 +226,13 @@ describe('executeFork', () => {
         kind: 'fork',
         id: 'merge-ctx-test',
         mode: 'all',
-        paths: () => [{ kind: 'run', id: 'a', execute: async () => 'done' }],
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async () => 'done',
+          },
+        ],
         merge: (results, ctx) => {
           capturedCtx = ctx;
           return results.join(',');
@@ -184,8 +264,22 @@ describe('executeFork', () => {
         id: 'race-test',
         mode: 'race',
         paths: () => [
-          { kind: 'run', id: 'slow', execute: async () => { await new Promise(r => setTimeout(r, 200)); return 'slow'; } },
-          { kind: 'run', id: 'fast', execute: async () => { await new Promise(r => setTimeout(r, 10)); return 'fast'; } },
+          {
+            kind: 'run',
+            id: 'slow',
+            execute: async () => {
+              await new Promise((r) => setTimeout(r, 200));
+              return 'slow';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'fast',
+            execute: async () => {
+              await new Promise((r) => setTimeout(r, 10));
+              return 'fast';
+            },
+          },
         ],
       };
       const ctx = new ContextImpl();
@@ -199,33 +293,71 @@ describe('executeFork', () => {
         id: 'state-test',
         mode: 'race',
         paths: () => [
-          { kind: 'run', id: 'winner', execute: async (_: string, ctx: Context) => { (ctx as any).state = { winner: true }; return 'won'; } },
-          { kind: 'run', id: 'loser', execute: async () => { await new Promise(r => setTimeout(r, 200)); return 'lost'; } },
+          {
+            kind: 'run',
+            id: 'winner',
+            // Fork gives child contexts; state is writable via Context interface
+            execute: async (_: string, ctx: Context) => {
+              ctx.state = {
+                winner: true,
+              };
+              return 'won';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'loser',
+            execute: async () => {
+              await new Promise((r) => setTimeout(r, 200));
+              return 'lost';
+            },
+          },
         ],
       };
-      const ctx = new ContextImpl({ state: { original: true } });
+      const ctx = new ContextImpl({
+        state: {
+          original: true,
+        },
+      });
       await executeFork(step, '', ctx, simpleExecute);
-      expect((ctx.state as any).winner).toBe(true);
+      const finalState = ctx.state as Record<string, unknown>;
+      expect(finalState.winner).toBe(true);
     });
 
     it('aborts loser contexts after winner resolves', async () => {
-      const childContexts: ContextImpl[] = [];
+      const childContexts: Context[] = [];
       const step: StepForkRace<string, string> = {
         kind: 'fork',
         id: 'abort-test',
         mode: 'race',
         paths: () => [
-          { kind: 'run', id: 'fast', execute: async (_: string, ctx: Context) => { childContexts.push(ctx as ContextImpl); return 'winner'; } },
-          { kind: 'run', id: 'slow', execute: async (_: string, ctx: Context) => { childContexts.push(ctx as ContextImpl); await new Promise(r => setTimeout(r, 200)); return 'loser'; } },
+          {
+            kind: 'run',
+            id: 'fast',
+            // Fork gives child contexts; captured to check abort state
+            execute: async (_: string, ctx: Context) => {
+              childContexts.push(ctx);
+              return 'winner';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'slow',
+            execute: async (_: string, ctx: Context) => {
+              childContexts.push(ctx);
+              await new Promise((r) => setTimeout(r, 200));
+              return 'loser';
+            },
+          },
         ],
       };
       const ctx = new ContextImpl();
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('winner');
       // Allow time for abort to propagate
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 50));
       // The losing context should have been aborted
-      const loserCtx = childContexts.find(c => c.aborted);
+      const loserCtx = childContexts.find((c) => c.aborted);
       expect(loserCtx).toBeDefined();
     });
 
@@ -237,9 +369,39 @@ describe('executeFork', () => {
         id: 'race-conc-test',
         mode: 'race',
         paths: () => [
-          { kind: 'run', id: 'a', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'a'; } },
-          { kind: 'run', id: 'b', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'b'; } },
-          { kind: 'run', id: 'c', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'c'; } },
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async () => {
+              current++;
+              maxConcurrent = Math.max(maxConcurrent, current);
+              await new Promise((r) => setTimeout(r, 50));
+              current--;
+              return 'a';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async () => {
+              current++;
+              maxConcurrent = Math.max(maxConcurrent, current);
+              await new Promise((r) => setTimeout(r, 50));
+              current--;
+              return 'b';
+            },
+          },
+          {
+            kind: 'run',
+            id: 'c',
+            execute: async () => {
+              current++;
+              maxConcurrent = Math.max(maxConcurrent, current);
+              await new Promise((r) => setTimeout(r, 50));
+              current--;
+              return 'c';
+            },
+          },
         ],
         concurrency: 2,
       };
@@ -254,8 +416,20 @@ describe('executeFork', () => {
         id: 'all-fail',
         mode: 'race',
         paths: () => [
-          { kind: 'run', id: 'a', execute: async () => { throw new Error('fail a'); } },
-          { kind: 'run', id: 'b', execute: async () => { throw new Error('fail b'); } },
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async () => {
+              throw new Error('fail a');
+            },
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async () => {
+              throw new Error('fail b');
+            },
+          },
         ],
       };
       const ctx = new ContextImpl();
@@ -263,13 +437,11 @@ describe('executeFork', () => {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
-        const oe = (e as OrchidErrorImpl).orchidError;
-        expect(oe.kind).toBe('fork_partial');
-        if (oe.kind === 'fork_partial') {
-          expect(oe.succeeded).toHaveLength(0);
-          expect(oe.failed).toHaveLength(2);
-        }
+        assert(isOrchidError(e));
+        const oe = e.orchidError;
+        assert(oe.kind === 'fork_partial');
+        expect(oe.succeeded).toHaveLength(0);
+        expect(oe.failed).toHaveLength(2);
       }
     });
 
@@ -285,9 +457,8 @@ describe('executeFork', () => {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
-        expect(isOrchidError(e)).toBe(true);
-        const oe = (e as OrchidErrorImpl).orchidError;
-        expect(oe.kind).toBe('fork_partial');
+        assert(isOrchidError(e));
+        expect(e.orchidError.kind).toBe('fork_partial');
       }
     });
   });
@@ -299,12 +470,22 @@ describe('executeFork', () => {
         id: 'settle-test',
         mode: 'settle',
         paths: () => [
-          { kind: 'run', id: 'ok', execute: async () => 'success' },
-          { kind: 'run', id: 'fail', execute: async () => { throw new Error('boom'); } },
+          {
+            kind: 'run',
+            id: 'ok',
+            execute: async () => 'success',
+          },
+          {
+            kind: 'run',
+            id: 'fail',
+            execute: async () => {
+              throw new Error('boom');
+            },
+          },
         ],
         merge: (results: SettleResult<string>[]) => {
-          const fulfilled = results.filter(r => r.status === 'fulfilled');
-          const rejected = results.filter(r => r.status === 'rejected');
+          const fulfilled = results.filter((r) => r.status === 'fulfilled');
+          const rejected = results.filter((r) => r.status === 'rejected');
           return `${fulfilled.length} ok, ${rejected.length} failed`;
         },
       };
@@ -320,8 +501,18 @@ describe('executeFork', () => {
         id: 'shape-test',
         mode: 'settle',
         paths: () => [
-          { kind: 'run', id: 'a', execute: async () => 'value-a' },
-          { kind: 'run', id: 'b', execute: async () => { throw new Error('err-b'); } },
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async () => 'value-a',
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async () => {
+              throw new Error('err-b');
+            },
+          },
         ],
         merge: (results: SettleResult<string>[]) => {
           capturedResults = results;
@@ -332,11 +523,11 @@ describe('executeFork', () => {
       await executeFork(step, '', ctx, simpleExecute);
 
       expect(capturedResults).toHaveLength(2);
-      const fulfilled = capturedResults.find(r => r.status === 'fulfilled')!;
+      const fulfilled = capturedResults.find((r) => r.status === 'fulfilled')!;
       expect(fulfilled.stepId).toBe('a');
       expect(fulfilled.value).toBe('value-a');
 
-      const rejected = capturedResults.find(r => r.status === 'rejected')!;
+      const rejected = capturedResults.find((r) => r.status === 'rejected')!;
       expect(rejected.stepId).toBe('b');
       expect(rejected.error!.kind).toBe('step_failed');
     });

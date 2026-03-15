@@ -1,7 +1,7 @@
-import type { Context } from '../types/context';
-import type { RetryPolicy, ModelParams, Tool } from '../types/common';
-import type { StepRun, StepLLM, StepTool } from '../types/step';
 import type { ZodType } from 'zod';
+import type { ModelParams, RetryPolicy, Tool } from '../types/common';
+import type { Context } from '../types/context';
+import type { StepLLM, StepRun, StepTool } from '../types/step';
 
 export const step = {
   run<I, O>(opts: {
@@ -9,9 +9,16 @@ export const step = {
     execute: (input: I, ctx: Context) => Promise<O>;
     retry?: RetryPolicy;
   }): StepRun<I, O> {
-    if (!opts.id || opts.id.trim() === '') throw new Error('step.run requires a non-empty id');
-    if (!opts.execute) throw new Error('step.run requires an execute function');
-    return { kind: 'run', ...opts };
+    if (!opts.id || opts.id.trim() === '') {
+      throw new Error('step.run requires a non-empty id');
+    }
+    if (!opts.execute) {
+      throw new Error('step.run requires an execute function');
+    }
+    return {
+      kind: 'run',
+      ...opts,
+    };
   },
 
   llm<I, O>(opts: {
@@ -22,9 +29,16 @@ export const step = {
     output?: ZodType<O>;
     params?: ModelParams;
   }): StepLLM<I, O> {
-    if (!opts.id || opts.id.trim() === '') throw new Error('step.llm requires a non-empty id');
-    if (!opts.model || opts.model.trim() === '') throw new Error('step.llm requires a non-empty model');
-    return { kind: 'llm', ...opts };
+    if (!opts.id || opts.id.trim() === '') {
+      throw new Error('step.llm requires a non-empty id');
+    }
+    if (!opts.model || opts.model.trim() === '') {
+      throw new Error('step.llm requires a non-empty model');
+    }
+    return {
+      kind: 'llm',
+      ...opts,
+    };
   },
 
   tool<I, O>(opts: {
@@ -32,8 +46,15 @@ export const step = {
     tool: Tool<ZodType<I>, ZodType<O>>;
     args?: Partial<I>;
   }): StepTool<I, O> {
-    if (!opts.id || opts.id.trim() === '') throw new Error('step.tool requires a non-empty id');
-    if (!opts.tool) throw new Error('step.tool requires a tool');
-    return { kind: 'tool', ...opts };
+    if (!opts.id || opts.id.trim() === '') {
+      throw new Error('step.tool requires a non-empty id');
+    }
+    if (!opts.tool) {
+      throw new Error('step.tool requires a tool');
+    }
+    return {
+      kind: 'tool',
+      ...opts,
+    };
   },
 };

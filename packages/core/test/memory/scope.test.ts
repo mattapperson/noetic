@@ -1,9 +1,15 @@
-import { describe, it, expect } from 'bun:test';
-import { resolveScopeKey, createScopedStorage } from '../../src/memory/scope';
-import type { ExecutionContext, StorageAdapter } from '../../src/types/memory';
+import { describe, expect, it } from 'bun:test';
+import { createScopedStorage, resolveScopeKey } from '../../src/memory/scope';
+import type { ExecutionContext } from '../../src/types/memory';
+import { makeStorage } from '../_helpers';
 
 describe('resolveScopeKey', () => {
-  const ctx: ExecutionContext = { executionId: 'exec-1', threadId: 'thread-1', resourceId: 'user-1', depth: 0 };
+  const ctx: ExecutionContext = {
+    executionId: 'exec-1',
+    threadId: 'thread-1',
+    resourceId: 'user-1',
+    depth: 0,
+  };
 
   it('thread scope returns threadId', () => {
     expect(resolveScopeKey('thread', ctx)).toBe('thread-1');
@@ -14,7 +20,12 @@ describe('resolveScopeKey', () => {
   });
 
   it('resource scope falls back to threadId', () => {
-    expect(resolveScopeKey('resource', { ...ctx, resourceId: undefined })).toBe('thread-1');
+    expect(
+      resolveScopeKey('resource', {
+        ...ctx,
+        resourceId: undefined,
+      }),
+    ).toBe('thread-1');
   });
 
   it('global scope returns __global__', () => {
@@ -28,29 +39,28 @@ describe('resolveScopeKey', () => {
 
 describe('createScopedStorage', () => {
   it('namespaces keys', async () => {
-    const store = new Map<string, unknown>();
-    const adapter: StorageAdapter = {
-      async get(key) { return (store.get(key) as any) ?? null; },
-      async set(key, value) { store.set(key, value); },
-      async delete(key) { store.delete(key); },
-      async list(prefix) { return [...store.keys()].filter(k => k.startsWith(prefix)); },
-    };
-    const scoped = createScopedStorage(adapter, 'working-memory', 'thread-1');
-    await scoped.set('state', { foo: 'bar' });
-    expect(store.has('layers/working-memory/thread-1/state')).toBe(true);
-    expect(await scoped.get<{ foo: string }>('state')).toEqual({ foo: 'bar' });
+    const rawStore = makeStorage();
+    const scoped = createScopedStorage(rawStore, 'working-memory', 'thread-1');
+    await scoped.set('state', {
+      foo: 'bar',
+    });
+    const raw = await rawStore.get<{
+      foo: string;
+    }>('layers/working-memory/thread-1/state');
+    expect(raw).toBeDefined();
+    expect(
+      await scoped.get<{
+        foo: string;
+      }>('state'),
+    ).toEqual({
+      foo: 'bar',
+    });
   });
 
   it('cross-scope isolation', async () => {
-    const store = new Map<string, unknown>();
-    const adapter: StorageAdapter = {
-      async get(key) { return (store.get(key) as any) ?? null; },
-      async set(key, value) { store.set(key, value); },
-      async delete(key) { store.delete(key); },
-      async list(prefix) { return [...store.keys()].filter(k => k.startsWith(prefix)); },
-    };
-    const scoped1 = createScopedStorage(adapter, 'layer-1', 'scope-a');
-    const scoped2 = createScopedStorage(adapter, 'layer-1', 'scope-b');
+    const rawStore = makeStorage();
+    const scoped1 = createScopedStorage(rawStore, 'layer-1', 'scope-a');
+    const scoped2 = createScopedStorage(rawStore, 'layer-1', 'scope-b');
     await scoped1.set('data', 'value-a');
     await scoped2.set('data', 'value-b');
     expect(await scoped1.get<string>('data')).toBe('value-a');
@@ -58,28 +68,16 @@ describe('createScopedStorage', () => {
   });
 
   it('delete removes namespaced key', async () => {
-    const store = new Map<string, unknown>();
-    const adapter: StorageAdapter = {
-      async get(key) { return (store.get(key) as any) ?? null; },
-      async set(key, value) { store.set(key, value); },
-      async delete(key) { store.delete(key); },
-      async list(prefix) { return [...store.keys()].filter(k => k.startsWith(prefix)); },
-    };
-    const scoped = createScopedStorage(adapter, 'layer-1', 'scope-a');
+    const rawStore = makeStorage();
+    const scoped = createScopedStorage(rawStore, 'layer-1', 'scope-a');
     await scoped.set('data', 'value');
     await scoped.delete('data');
     expect(await scoped.get('data')).toBeNull();
   });
 
   it('list strips prefix from returned keys', async () => {
-    const store = new Map<string, unknown>();
-    const adapter: StorageAdapter = {
-      async get(key) { return (store.get(key) as any) ?? null; },
-      async set(key, value) { store.set(key, value); },
-      async delete(key) { store.delete(key); },
-      async list(prefix) { return [...store.keys()].filter(k => k.startsWith(prefix)); },
-    };
-    const scoped = createScopedStorage(adapter, 'layer-1', 'scope-a');
+    const rawStore = makeStorage();
+    const scoped = createScopedStorage(rawStore, 'layer-1', 'scope-a');
     await scoped.set('key1', 'v1');
     await scoped.set('key2', 'v2');
     const keys = await scoped.list();

@@ -8,7 +8,7 @@ export { isOrchidError, OrchidErrorImpl } from './errors/orchid-error';
 export { execute } from './interpreter/execute';
 export { executeBranch } from './interpreter/execute-branch';
 export { executeFork } from './interpreter/execute-fork';
-export type { CallModelFn } from './interpreter/execute-llm';
+export type { CallModelFn, CallModelParams } from './interpreter/execute-llm';
 export { executeLLM } from './interpreter/execute-llm';
 export { executeLoop } from './interpreter/execute-loop';
 export { executeRun } from './interpreter/execute-run';

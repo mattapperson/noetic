@@ -1,23 +1,11 @@
-import type { StepSpawn } from '../types/step';
-import type { Context } from '../types/context';
-import type { CallModelFn } from './execute-llm';
-import type { Item, MessageItem } from '../types/items';
-import { ContextImpl } from '../runtime/context-impl';
 import { OrchidErrorImpl } from '../errors/orchid-error';
-import { isContextImpl, isAssistantMessage, isOutputText } from './typeguards';
+import { ContextImpl } from '../runtime/context-impl';
+import type { Context } from '../types/context';
+import type { Item } from '../types/items';
+import type { ExecuteStepFn, StepSpawn } from '../types/step';
 import { cloneWithGuard } from './clone-guard';
-
-import type { Step, ExecuteStepFn } from '../types/step';
-
-function createUserMessage(text: string): MessageItem {
-  return {
-    id: crypto.randomUUID(),
-    status: 'completed',
-    type: 'message',
-    role: 'user',
-    content: [{ type: 'input_text', text }],
-  };
-}
+import type { CallModelFn } from './execute-llm';
+import { createMessage, extractAssistantText } from './message-helpers';
 
 export async function executeSpawn<I, O>(
   step: StepSpawn<I, O>,
@@ -31,13 +19,20 @@ export async function executeSpawn<I, O>(
 
   switch (step.contextIn.strategy) {
     case 'inherit':
-      childItems = [...ctx.itemLog.items];
+      childItems = [
+        ...ctx.itemLog.items,
+      ];
       break;
     case 'fresh':
       childItems = [];
       break;
     case 'subset':
-      childItems = step.contextIn.select([...ctx.itemLog.items], ctx.state);
+      childItems = step.contextIn.select(
+        [
+          ...ctx.itemLog.items,
+        ],
+        ctx.state,
+      );
       break;
     case 'custom':
       childItems = step.contextIn.build(input, ctx);
@@ -49,8 +44,8 @@ export async function executeSpawn<I, O>(
     parent: ctx,
     items: childItems,
     state: cloneWithGuard(ctx.state, `Spawn '${step.id}'`),
-    threadId: isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID(),
-    resourceId: isContextImpl(ctx) ? ctx.resourceId : undefined,
+    threadId: ctx.threadId,
+    resourceId: ctx.resourceId,
   });
 
   // Execute the child step
@@ -62,26 +57,25 @@ export async function executeSpawn<I, O>(
       return childOutput;
 
     case 'summary': {
-      if (!callModel) throw new OrchidErrorImpl({
-        kind: 'step_failed',
-        stepId: step.id,
-        cause: new Error('callModel required for summary contextOut'),
-        retriesExhausted: false,
-      });
+      if (!callModel) {
+        throw new OrchidErrorImpl({
+          kind: 'step_failed',
+          stepId: step.id,
+          cause: new Error('callModel required for summary contextOut'),
+          retriesExhausted: false,
+        });
+      }
       const summaryModel = step.contextOut.model ?? 'gpt-4';
       const summaryPrompt = step.contextOut.prompt ?? 'Summarize the above conversation concisely.';
 
-      childCtx.itemLog.append(createUserMessage(summaryPrompt));
+      childCtx.itemLog.append(createMessage(summaryPrompt, 'user'));
 
       try {
-        const response = await callModel(summaryModel, childCtx.itemLog.items);
-        const lastMsg = [...response.items]
-          .reverse()
-          .find(isAssistantMessage);
-        const text = lastMsg?.content
-          ?.filter(isOutputText)
-          ?.map((c) => c.text)
-          ?.join('') ?? '';
+        const response = await callModel({
+          model: summaryModel,
+          items: childCtx.itemLog.items,
+        });
+        const text = extractAssistantText(response.items);
         // SAFETY: O is string for summary strategy — the summarization model returns text,
         // and callers using summary contextOut expect string output.
         return text as unknown as O;

@@ -1,10 +1,15 @@
-import { describe, it, expect } from 'bun:test';
-import { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, createLayerStateStore } from '../../src/memory/layer-lifecycle';
-import type { LayerStateStore } from '../../src/memory/layer-lifecycle';
-import type { MemoryLayer } from '../../src/types/memory';
+import { describe, expect, it } from 'bun:test';
+import {
+  completeLayers,
+  createLayerStateStore,
+  disposeLayers,
+  initLayers,
+  recallLayers,
+  storeLayers,
+} from '../../src/memory/layer-lifecycle';
 import type { LLMResponse } from '../../src/types/common';
-import { Slot } from '../../src/types/memory';
-import { makeStorage, makeCtx, makeItemLog } from '../_helpers';
+import type { MemoryLayer } from '../../src/types/memory';
+import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 describe('layer-lifecycle', () => {
   it('init sequential, sets state', async () => {
@@ -12,19 +17,44 @@ describe('layer-lifecycle', () => {
     const order: string[] = [];
     const layers: MemoryLayer[] = [
       {
-        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
-          init: async () => { order.push('a'); return { state: { a: true } }; },
+        id: 'a',
+        name: 'A',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => {
+            order.push('a');
+            return {
+              state: {
+                a: true,
+              },
+            };
+          },
         },
       },
       {
-        id: 'b', name: 'B', slot: 200, scope: 'thread', hooks: {
-          init: async () => { order.push('b'); return { state: { b: true } }; },
+        id: 'b',
+        name: 'B',
+        slot: 200,
+        scope: 'thread',
+        hooks: {
+          init: async () => {
+            order.push('b');
+            return {
+              state: {
+                b: true,
+              },
+            };
+          },
         },
       },
     ];
     const ctx = makeCtx();
     await initLayers(layers, ctx, makeStorage(), store);
-    expect(order).toEqual(['a', 'b']);
+    expect(order).toEqual([
+      'a',
+      'b',
+    ]);
   });
 
   it('recall in slot order', async () => {
@@ -32,22 +62,65 @@ describe('layer-lifecycle', () => {
     const order: string[] = [];
     const layers: MemoryLayer[] = [
       {
-        id: 'high', name: 'High', slot: 300, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          recall: async () => { order.push('high'); return { items: [], tokenCount: 0 }; },
+        id: 'high',
+        name: 'High',
+        slot: 300,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          recall: async () => {
+            order.push('high');
+            return {
+              items: [],
+              tokenCount: 0,
+            };
+          },
         },
       },
       {
-        id: 'low', name: 'Low', slot: 100, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          recall: async () => { order.push('low'); return { items: [], tokenCount: 0 }; },
+        id: 'low',
+        name: 'Low',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          recall: async () => {
+            order.push('low');
+            return {
+              items: [],
+              tokenCount: 0,
+            };
+          },
         },
       },
     ];
     const ctx = makeCtx();
     await initLayers(layers, ctx, makeStorage(), store);
-    await recallLayers(layers, 'query', ctx, makeItemLog(), new Map([['high', 1000], ['low', 1000]]), store);
-    expect(order).toEqual(['low', 'high']); // slot order ascending
+    await recallLayers(
+      layers,
+      'query',
+      ctx,
+      makeItemLog(),
+      new Map([
+        [
+          'high',
+          1_000,
+        ],
+        [
+          'low',
+          1_000,
+        ],
+      ]),
+      store,
+    );
+    expect(order).toEqual([
+      'low',
+      'high',
+    ]); // slot order ascending
   });
 
   it('store sequential', async () => {
@@ -55,23 +128,54 @@ describe('layer-lifecycle', () => {
     const order: string[] = [];
     const layers: MemoryLayer[] = [
       {
-        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          store: async () => { order.push('a'); return { state: {} }; },
+        id: 'a',
+        name: 'A',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          store: async () => {
+            order.push('a');
+            return {
+              state: {},
+            };
+          },
         },
       },
       {
-        id: 'b', name: 'B', slot: 200, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          store: async () => { order.push('b'); return { state: {} }; },
+        id: 'b',
+        name: 'B',
+        slot: 200,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          store: async () => {
+            order.push('b');
+            return {
+              state: {},
+            };
+          },
         },
       },
     ];
     const ctx = makeCtx();
     await initLayers(layers, ctx, makeStorage(), store);
-    const response: LLMResponse = { items: [], usage: { inputTokens: 0, outputTokens: 0 } };
+    const response: LLMResponse = {
+      items: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
     await storeLayers(layers, response, ctx, makeItemLog(), store);
-    expect(order).toEqual(['a', 'b']); // sequential order
+    expect(order).toEqual([
+      'a',
+      'b',
+    ]); // sequential order
   });
 
   it('dispose in reverse order', async () => {
@@ -79,22 +183,41 @@ describe('layer-lifecycle', () => {
     const order: string[] = [];
     const layers: MemoryLayer[] = [
       {
-        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          dispose: async () => { order.push('a'); },
+        id: 'a',
+        name: 'A',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          dispose: async () => {
+            order.push('a');
+          },
         },
       },
       {
-        id: 'b', name: 'B', slot: 200, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          dispose: async () => { order.push('b'); },
+        id: 'b',
+        name: 'B',
+        slot: 200,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          dispose: async () => {
+            order.push('b');
+          },
         },
       },
     ];
     const ctx = makeCtx();
     await initLayers(layers, ctx, makeStorage(), store);
     await disposeLayers(layers, ctx, store);
-    expect(order).toEqual(['b', 'a']); // reverse
+    expect(order).toEqual([
+      'b',
+      'a',
+    ]); // reverse
   });
 
   it('onComplete always runs', async () => {
@@ -102,9 +225,17 @@ describe('layer-lifecycle', () => {
     let completed = false;
     const layers: MemoryLayer[] = [
       {
-        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
-          init: async () => ({ state: {} }),
-          onComplete: async () => { completed = true; },
+        id: 'a',
+        name: 'A',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          onComplete: async () => {
+            completed = true;
+          },
         },
       },
     ];
@@ -118,15 +249,36 @@ describe('layer-lifecycle', () => {
     const store = createLayerStateStore();
     const layers: MemoryLayer[] = [
       {
-        id: 'broken', name: 'Broken', slot: 100, scope: 'thread', hooks: {
-          init: async () => { throw new Error('init failed'); },
-          recall: async () => ({ items: [], tokenCount: 0 }),
+        id: 'broken',
+        name: 'Broken',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => {
+            throw new Error('init failed');
+          },
+          recall: async () => ({
+            items: [],
+            tokenCount: 0,
+          }),
         },
       },
     ];
     const ctx = makeCtx();
     await initLayers(layers, ctx, makeStorage(), store);
-    const results = await recallLayers(layers, 'q', ctx, makeItemLog(), new Map([['broken', 1000]]), store);
+    const results = await recallLayers(
+      layers,
+      'q',
+      ctx,
+      makeItemLog(),
+      new Map([
+        [
+          'broken',
+          1_000,
+        ],
+      ]),
+      store,
+    );
     expect(results).toHaveLength(0); // skipped because init failed
   });
 
@@ -134,37 +286,75 @@ describe('layer-lifecycle', () => {
     const store = createLayerStateStore();
     const layers: MemoryLayer[] = [
       {
-        id: 'slow', name: 'Slow', slot: 100, scope: 'thread',
-        timeouts: { recall: 50 },
+        id: 'slow',
+        name: 'Slow',
+        slot: 100,
+        scope: 'thread',
+        timeouts: {
+          recall: 50,
+        },
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
-            await new Promise(r => setTimeout(r, 200));
-            return { items: [], tokenCount: 0 };
+            await new Promise((r) => setTimeout(r, 200));
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
     ];
     const ctx = makeCtx();
     await initLayers(layers, ctx, makeStorage(), store);
-    const results = await recallLayers(layers, 'q', ctx, makeItemLog(), new Map([['slow', 1000]]), store);
+    const results = await recallLayers(
+      layers,
+      'q',
+      ctx,
+      makeItemLog(),
+      new Map([
+        [
+          'slow',
+          1_000,
+        ],
+      ]),
+      store,
+    );
     expect(results).toHaveLength(0);
   });
 
   it('diagnostic callback invoked on init error', async () => {
-    const errors: { layerId: string; hook: string; error: unknown }[] = [];
+    const errors: {
+      layerId: string;
+      hook: string;
+      error: unknown;
+    }[] = [];
     const store = createLayerStateStore((layerId, hook, error) => {
-      errors.push({ layerId, hook, error });
+      errors.push({
+        layerId,
+        hook,
+        error,
+      });
     });
 
     const layers: MemoryLayer[] = [
       {
-        id: 'broken', name: 'Broken', slot: 100, scope: 'thread', hooks: {
-          init: async () => { throw new Error('init failed'); },
+        id: 'broken',
+        name: 'Broken',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => {
+            throw new Error('init failed');
+          },
         },
       },
     ];
-    const ctx = makeCtx({ executionId: 'exec-diag' });
+    const ctx = makeCtx({
+      executionId: 'exec-diag',
+    });
     await initLayers(layers, ctx, makeStorage(), store);
     expect(errors).toHaveLength(1);
     expect(errors[0].layerId).toBe('broken');
@@ -173,20 +363,46 @@ describe('layer-lifecycle', () => {
   });
 
   it('diagnostic callback invoked on recall error', async () => {
-    const errors: { layerId: string; hook: string }[] = [];
+    const errors: {
+      layerId: string;
+      hook: string;
+    }[] = [];
     const store = createLayerStateStore((layerId, hook) => {
-      errors.push({ layerId, hook });
+      errors.push({
+        layerId,
+        hook,
+      });
     });
 
     const layers: MemoryLayer[] = [
       {
-        id: 'recall-fail', name: 'RecallFail', slot: 100, scope: 'thread', hooks: {
-          recall: async () => { throw new Error('recall boom'); return { items: [], tokenCount: 0 }; },
+        id: 'recall-fail',
+        name: 'RecallFail',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          recall: async () => {
+            throw new Error('recall boom');
+          },
         },
       },
     ];
-    const ctx = makeCtx({ executionId: 'exec-diag-recall' });
-    const results = await recallLayers(layers, 'q', ctx, makeItemLog(), new Map([['recall-fail', 1000]]), store);
+    const ctx = makeCtx({
+      executionId: 'exec-diag-recall',
+    });
+    const results = await recallLayers(
+      layers,
+      'q',
+      ctx,
+      makeItemLog(),
+      new Map([
+        [
+          'recall-fail',
+          1_000,
+        ],
+      ]),
+      store,
+    );
     expect(results).toHaveLength(0);
     expect(errors).toHaveLength(1);
     expect(errors[0].hook).toBe('recall');
@@ -196,17 +412,34 @@ describe('layer-lifecycle', () => {
     const store = createLayerStateStore();
     const layers: MemoryLayer[] = [
       {
-        id: 'fast', name: 'Fast', slot: 100, scope: 'thread',
-        timeouts: { init: 5000 },
+        id: 'fast',
+        name: 'Fast',
+        slot: 100,
+        scope: 'thread',
+        timeouts: {
+          init: 5_000,
+        },
         hooks: {
-          init: async () => ({ state: { fast: true } }),
+          init: async () => ({
+            state: {
+              fast: true,
+            },
+          }),
         },
       },
     ];
-    const ctx = makeCtx({ executionId: 'exec-timer' });
+    const ctx = makeCtx({
+      executionId: 'exec-timer',
+    });
     await initLayers(layers, ctx, makeStorage(), store);
     // If we get here without hanging, the timer was properly cleaned up
-    expect(store.get<{ fast: boolean }>('exec-timer', 'fast')).toEqual({ fast: true });
+    expect(
+      store.get<{
+        fast: boolean;
+      }>('exec-timer', 'fast'),
+    ).toEqual({
+      fast: true,
+    });
     await disposeLayers(layers, ctx, store);
   });
 
@@ -214,14 +447,30 @@ describe('layer-lifecycle', () => {
     const store = createLayerStateStore();
     const layers: MemoryLayer[] = [
       {
-        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
-          init: async () => ({ state: { x: 1 } }),
+        id: 'a',
+        name: 'A',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {
+              x: 1,
+            },
+          }),
         },
       },
     ];
-    const ctx = makeCtx({ executionId: 'exec-cleanup-2' });
+    const ctx = makeCtx({
+      executionId: 'exec-cleanup-2',
+    });
     await initLayers(layers, ctx, makeStorage(), store);
-    expect(store.get<{ x: number }>('exec-cleanup-2', 'a')).toEqual({ x: 1 });
+    expect(
+      store.get<{
+        x: number;
+      }>('exec-cleanup-2', 'a'),
+    ).toEqual({
+      x: 1,
+    });
     store.cleanup('exec-cleanup-2');
     expect(store.get('exec-cleanup-2', 'a')).toBeUndefined();
     // Second call should not throw
@@ -233,14 +482,30 @@ describe('layer-lifecycle', () => {
     const store = createLayerStateStore();
     const layers: MemoryLayer[] = [
       {
-        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
-          init: async () => ({ state: { x: 1 } }),
+        id: 'a',
+        name: 'A',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {
+              x: 1,
+            },
+          }),
         },
       },
     ];
-    const ctx = makeCtx({ executionId: 'exec-cleanup' });
+    const ctx = makeCtx({
+      executionId: 'exec-cleanup',
+    });
     await initLayers(layers, ctx, makeStorage(), store);
-    expect(store.get<{ x: number }>('exec-cleanup', 'a')).toEqual({ x: 1 });
+    expect(
+      store.get<{
+        x: number;
+      }>('exec-cleanup', 'a'),
+    ).toEqual({
+      x: 1,
+    });
     await disposeLayers(layers, ctx, store);
     expect(store.get('exec-cleanup', 'a')).toBeUndefined();
   });

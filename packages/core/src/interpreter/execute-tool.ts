@@ -1,6 +1,6 @@
-import type { StepTool } from '../types/step';
-import type { Context } from '../types/context';
 import { OrchidErrorImpl } from '../errors/orchid-error';
+import type { Context } from '../types/context';
+import type { StepTool } from '../types/step';
 
 export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Context): Promise<O> {
   // Merge step.args with input (step.args takes precedence as overrides, input as base)

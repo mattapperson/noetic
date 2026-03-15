@@ -8,7 +8,11 @@ export class SpanImpl implements Span {
   readonly startTime: number;
   endTime?: number;
   readonly attributes: Map<string, string | number | boolean> = new Map();
-  readonly events: Array<{ name: string; timestamp: number; attributes?: Record<string, string | number | boolean> }> = [];
+  readonly events: Array<{
+    name: string;
+    timestamp: number;
+    attributes?: Record<string, string | number | boolean>;
+  }> = [];
 
   constructor(name: string, parent: Span | null, traceId?: string) {
     this.name = name;
@@ -23,7 +27,11 @@ export class SpanImpl implements Span {
   }
 
   addEvent(name: string, attributes?: Record<string, string | number | boolean>): void {
-    this.events.push({ name, timestamp: Date.now(), attributes });
+    this.events.push({
+      name,
+      timestamp: Date.now(),
+      attributes,
+    });
   }
 
   end(): void {

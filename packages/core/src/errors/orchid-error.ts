@@ -36,7 +36,16 @@ function formatMessage(error: OrchidError): string {
       return `Cancelled${error.reason ? `: ${error.reason}` : ''}`;
     case 'budget_exceeded':
       return `Budget exceeded: ${error.field} limit ${error.limit}, actual ${error.actual}`;
-    default:
-      return `OrchidError: ${(error as any).kind}`;
+    default: {
+      const _exhaustive: never = error;
+      void _exhaustive;
+      return `OrchidError: unknown (${
+        (
+          error as {
+            kind: string;
+          }
+        ).kind
+      })`;
+    }
   }
 }

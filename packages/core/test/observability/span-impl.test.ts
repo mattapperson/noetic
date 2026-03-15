@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { SpanImpl } from '../../src/observability/span-impl';
 
 describe('SpanImpl', () => {
@@ -31,7 +31,9 @@ describe('SpanImpl', () => {
 
   it('addEvent records events', () => {
     const span = new SpanImpl('test', null);
-    span.addEvent('start', { step: 'init' });
+    span.addEvent('start', {
+      step: 'init',
+    });
     span.addEvent('end');
     expect(span.events).toHaveLength(2);
     expect(span.events[0].name).toBe('start');
