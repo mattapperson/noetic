@@ -78,3 +78,7 @@ export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers } 
 export { assembleView } from './memory/projector';
 export { workingMemory } from './memory/layers/working-memory';
 export type { WorkingMemoryConfig } from './memory/layers/working-memory';
+
+export { SpanImpl } from './observability/span-impl';
+export { NoopExporter, InMemoryExporter, setTraceExporter, getTraceExporter } from './observability/trace-exporter';
+export { GenAI, ToolAttr } from './observability/genai-attributes';
