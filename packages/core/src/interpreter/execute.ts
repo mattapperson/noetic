@@ -31,7 +31,7 @@ export async function execute<I, O>(
     }
     case 'spawn': {
       const { executeSpawn } = await import('./execute-spawn');
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel), callModel);
     }
     case 'loop': {
       // Import executeLoop dynamically to avoid circular dependency
