@@ -1,7 +1,5 @@
-import type { StepBranch } from '../types/step';
+import type { StepBranch, ExecuteStepFn } from '../types/step';
 import type { Context } from '../types/context';
-
-export type ExecuteStepFn = <I, O>(step: any, input: I, ctx: Context) => Promise<O>;
 
 export async function executeBranch<I, O>(
   step: StepBranch<I, O>,
@@ -11,7 +9,8 @@ export async function executeBranch<I, O>(
 ): Promise<O> {
   const selected = step.route(input, ctx);
   if (selected === null) {
-    // No-op - return input as output
+    // SAFETY: requires I assignable to O for null route — when no branch is selected,
+    // the input passes through. Callers must ensure I is compatible with O.
     return input as unknown as O;
   }
   return executeStep<I, O>(selected, input, ctx);

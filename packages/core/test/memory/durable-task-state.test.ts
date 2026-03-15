@@ -36,7 +36,7 @@ describe('durableTaskState', () => {
 
   it('onSpawn always provides child state', async () => {
     const layer = durableTaskState();
-    const parentState = { checkpoints: [{ timestamp: 1 }], files: ['a.ts'], data: { key: 'val' } };
+    const parentState = { checkpoints: [{ timestamp: 1, depth: 0 }], files: ['a.ts'], data: { key: 'val' } };
     const result = await layer.hooks.onSpawn!({ parentState, childCtx: makeCtx(), spawnOpts: { contextIn: 'fresh', contextOut: 'full' } });
     expect(result).not.toBeNull();
     expect(result!.childState).toEqual(parentState);
@@ -46,8 +46,8 @@ describe('durableTaskState', () => {
 
   it('onReturn merges child artifacts back', async () => {
     const layer = durableTaskState();
-    const parentState = { checkpoints: [{ timestamp: 1 }], files: ['a.ts'], data: { x: 1 } };
-    const childState = { checkpoints: [{ timestamp: 2 }], files: ['b.ts'], data: { y: 2 } };
+    const parentState = { checkpoints: [{ timestamp: 1, depth: 0 }], files: ['a.ts'], data: { x: 1 } };
+    const childState = { checkpoints: [{ timestamp: 2, depth: 0 }], files: ['b.ts'], data: { y: 2 } };
     const result = await layer.hooks.onReturn!({
       childState, childLog: { items: [], append: () => {} } as any, parentState, result: 'done',
     });

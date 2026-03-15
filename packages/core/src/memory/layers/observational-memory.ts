@@ -1,6 +1,13 @@
 import type { MemoryLayer } from '../../types/memory';
 import type { MessageItem } from '../../types/items';
 import { Slot } from '../../types/memory';
+import { isOutputText } from '../../interpreter/typeguards';
+
+export interface ObservationalState {
+  observations: string[];
+  buffer: string[];
+  version: number;
+}
 
 export interface ObservationalMemoryConfig {
   bufferThreshold?: number;
@@ -8,7 +15,7 @@ export interface ObservationalMemoryConfig {
   scope?: 'thread' | 'resource';
 }
 
-export function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer {
+export function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<ObservationalState> {
   const maxObs = config?.maxObservations ?? 20;
   const threshold = config?.bufferThreshold ?? 5;
 
@@ -21,14 +28,13 @@ export function observationalMemory(config?: ObservationalMemoryConfig): MemoryL
     timeouts: { store: 60_000 },
     hooks: {
       async init({ storage }) {
-        const saved = await storage.get<unknown>('state');
+        const saved = await storage.get<ObservationalState>('state');
         return { state: saved ?? { observations: [], buffer: [], version: 0 } };
       },
 
       async recall({ state }) {
-        const s = state as any;
-        if (!s?.observations?.length) return null;
-        const bullets = s.observations.map((o: string) => `- ${o}`).join('\n');
+        if (!state?.observations?.length) return null;
+        const bullets = state.observations.map((o: string) => `- ${o}`).join('\n');
         const text = `<observations>\n${bullets}\n</observations>`;
         const item: MessageItem = {
           id: crypto.randomUUID(),
@@ -41,11 +47,11 @@ export function observationalMemory(config?: ObservationalMemoryConfig): MemoryL
       },
 
       async store({ newItems, state }) {
-        const s = (state as any) ?? { observations: [], buffer: [], version: 0 };
+        const s: ObservationalState = state ?? { observations: [], buffer: [], version: 0 };
         // Accumulate new items into buffer
         const textItems = newItems
           .filter((i): i is MessageItem => i.type === 'message')
-          .map(i => i.content.filter(c => c.type === 'output_text').map(c => (c as any).text).join(''))
+          .map(i => i.content.filter(isOutputText).map(c => c.text).join(''))
           .filter(t => t.length > 0);
 
         const newBuffer = [...s.buffer, ...textItems];

@@ -30,7 +30,7 @@ export const until = {
   noToolCalls(): Until {
     return (snap: Snapshot): Verdict => {
       if (snap.stepCount < 1) return { stop: false };
-      const meta = (snap as any).lastStepMeta;
+      const meta = snap.lastStepMeta;
       const hasToolCalls = meta?.toolCalls && meta.toolCalls.length > 0;
       return {
         stop: !hasToolCalls,

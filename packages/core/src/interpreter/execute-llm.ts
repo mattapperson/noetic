@@ -116,9 +116,8 @@ export async function executeLLM<I, O>(
     }
   }
 
-  // When no Zod output schema is provided, the LLM step returns raw text.
-  // This is inherent to the Step<I, O> contract — callers without an output schema
-  // receive string. The type system cannot express this without changing the Step contract.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- design limitation
+  // SAFETY: O is string when step.output is undefined — callers without an output schema
+  // receive raw text. The type system cannot express "O = string when output is omitted"
+  // without conditional types that would complicate the entire Step contract.
   return lastText as unknown as O;
 }

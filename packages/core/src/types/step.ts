@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
 import type { Context } from './context';
-import type { ModelParams, RetryPolicy, Tool } from './common';
+import type { ModelParams, RetryPolicy, Tool, StepMeta } from './common';
 import type { OrchidError } from './error';
 import type { Item } from './items';
 
@@ -14,6 +14,7 @@ export interface Snapshot {
   lastText: string;
   history: unknown[];
   depth: number;
+  lastStepMeta?: StepMeta | null;
 }
 
 export interface Verdict {
@@ -74,7 +75,7 @@ export interface StepLLM<I, O> {
 export interface StepTool<I, O> {
   kind: 'tool';
   id: string;
-  tool: Tool;
+  tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
 }
 
@@ -135,3 +136,5 @@ export interface StepLoop<I, O> {
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
   onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
+
+export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;

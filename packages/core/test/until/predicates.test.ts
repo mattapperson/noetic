@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { until } from '../../src/until/predicates';
 import { any, all } from '../../src/until/combinators';
 import type { Snapshot } from '../../src/types/step';
+import type { FunctionCallItem } from '../../src/types/items';
 
 function makeSnap(overrides?: Partial<Snapshot>): Snapshot {
   return {
@@ -98,7 +99,7 @@ describe('until predicates', () => {
       const pred = until.noToolCalls();
       const snap = {
         ...makeSnap({ stepCount: 2 }),
-        lastStepMeta: { toolCalls: [] as unknown[] },
+        lastStepMeta: { toolCalls: [] as FunctionCallItem[] },
       };
       const verdict = await pred(snap);
       expect(verdict.stop).toBe(true);
@@ -112,8 +113,8 @@ describe('until predicates', () => {
           toolCalls: [
             {
               id: '1',
-              status: 'completed',
-              type: 'function_call',
+              status: 'completed' as const,
+              type: 'function_call' as const,
               call_id: 'c1',
               name: 'search',
               arguments: '{}',

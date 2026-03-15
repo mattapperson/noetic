@@ -4,7 +4,7 @@ import { OrchidErrorImpl } from '../errors/orchid-error';
 
 export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Context): Promise<O> {
   // Merge step.args with input (step.args takes precedence as overrides, input as base)
-  const args = step.args ? { ...(input as any), ...step.args } : input;
+  const args = step.args ? Object.assign({}, input, step.args) : input;
 
   // Validate input against tool's schema
   const parseResult = step.tool.input.safeParse(args);
@@ -20,7 +20,7 @@ export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Con
   // Execute the tool
   try {
     const result = await step.tool.execute(parseResult.data, ctx);
-    return result as O;
+    return result;
   } catch (e) {
     throw new OrchidErrorImpl({
       kind: 'step_failed',

@@ -83,9 +83,9 @@ describe('ItemLogImpl', () => {
     };
     const ext: ExtensionItem = {
       id: 'e1',
-      type: 'custom_type',
+      type: 'x-custom_type',
       status: 'completed',
-      payload: { foo: 'bar' },
+      data: { foo: 'bar' },
     };
 
     log.append(msg);
@@ -106,6 +106,6 @@ describe('ItemLogImpl', () => {
     expect(log.items[1].type).toBe('function_call');
     expect(log.items[2].type).toBe('function_call_output');
     expect(log.items[3].type).toBe('reasoning');
-    expect(log.items[4].type).toBe('custom_type');
+    expect(log.items[4].type).toBe('x-custom_type');
   });
 });

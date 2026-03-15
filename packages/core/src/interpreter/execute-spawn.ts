@@ -7,9 +7,7 @@ import { OrchidErrorImpl } from '../errors/orchid-error';
 import { isContextImpl, isAssistantMessage, isOutputText } from './typeguards';
 import { cloneWithGuard } from './clone-guard';
 
-import type { Step } from '../types/step';
-
-export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
+import type { Step, ExecuteStepFn } from '../types/step';
 
 function createUserMessage(text: string): MessageItem {
   return {
@@ -84,7 +82,8 @@ export async function executeSpawn<I, O>(
           ?.filter(isOutputText)
           ?.map((c) => c.text)
           ?.join('') ?? '';
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- design: summary text returned as O
+        // SAFETY: O is string for summary strategy — the summarization model returns text,
+        // and callers using summary contextOut expect string output.
         return text as unknown as O;
       } catch (e) {
         throw new OrchidErrorImpl({

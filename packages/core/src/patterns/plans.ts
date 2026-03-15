@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Step } from '../types/step';
+import type { Step, ExecuteStepFn } from '../types/step';
 import type { Context } from '../types/context';
 import { fork } from '../builders/control-flow-builders';
 
@@ -28,8 +28,6 @@ export interface PlanConstraints {
   requireApproval?: string[];
   validate?: (taskId: string, input: unknown, ctx: Context) => Promise<boolean>;
 }
-
-export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
 
 export function compilePlan<O>(
   plan: PlanNode,

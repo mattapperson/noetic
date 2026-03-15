@@ -1,12 +1,10 @@
-import type { Step, StepFork, StepForkAll, StepForkRace, StepForkSettle, SettleResult } from '../types/step';
+import type { Step, StepFork, StepForkAll, StepForkRace, StepForkSettle, SettleResult, ExecuteStepFn } from '../types/step';
 import type { Context } from '../types/context';
 import type { OrchidError } from '../types/error';
 import { ContextImpl } from '../runtime/context-impl';
 import { OrchidErrorImpl, isOrchidError } from '../errors/orchid-error';
 import { isContextImpl } from './typeguards';
 import { cloneWithGuard } from './clone-guard';
-
-export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
 
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();

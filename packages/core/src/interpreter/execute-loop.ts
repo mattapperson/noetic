@@ -3,9 +3,7 @@ import type { Context } from '../types/context';
 import { isOrchidError, OrchidErrorImpl } from '../errors/orchid-error';
 import { isMutableContext } from './typeguards';
 
-import type { Step } from '../types/step';
-
-export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
+import type { Step, ExecuteStepFn } from '../types/step';
 
 function hasTextField(value: unknown): value is { text: unknown } {
   return typeof value === 'object' && value !== null && 'text' in value;
@@ -103,7 +101,7 @@ export async function executeLoop<I, O>(
     }
 
     // Build snapshot
-    const snapshot: Snapshot & { lastStepMeta?: unknown } = {
+    const snapshot: Snapshot = {
       stepCount,
       tokens: { ...ctx.tokens },
       elapsed: Date.now() - startTime,
@@ -143,7 +141,8 @@ export async function executeLoop<I, O>(
     if (step.prepareNext) {
       currentInput = step.prepareNext(output, verdict, ctx);
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- design: output reused as input
+      // SAFETY: requires I === O when prepareNext is omitted — the loop feeds output
+      // back as input. Callers must ensure I and O are compatible types.
       currentInput = output as unknown as I;
     }
   }

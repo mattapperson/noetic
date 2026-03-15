@@ -1,6 +1,10 @@
 import type { Channel, ExternalChannel, ChannelHandle } from '../types/channel';
 import { OrchidErrorImpl } from '../errors/orchid-error';
 
+function isExternalChannel<T>(ch: Channel<T>): ch is ExternalChannel<T> {
+  return 'external' in ch && (ch as { external?: unknown }).external === true;
+}
+
 const MAX_TOPIC_TIMEOUT = 300_000; // 5 minutes
 
 interface ChannelState<T> {
@@ -59,7 +63,7 @@ export class ChannelStore {
           console.warn(
             `[orchid] Channel '${channel.name}': queue at capacity (${state.capacity}), dropping message.`,
           );
-          if ((channel as any).external) {
+          if (isExternalChannel(channel)) {
             state.queue.shift();
             state.queue.push(value);
           }

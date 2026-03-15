@@ -35,8 +35,8 @@ export interface ReasoningItem extends ItemBase {
 }
 
 export interface ExtensionItem extends ItemBase {
-  readonly type: string;
-  readonly [key: string]: unknown;
+  readonly type: `x-${string}`;
+  readonly data: Record<string, unknown>;
 }
 
 export type Item =

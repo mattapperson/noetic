@@ -2,11 +2,16 @@ import type { MemoryLayer } from '../../types/memory';
 import type { MessageItem } from '../../types/items';
 import { Slot } from '../../types/memory';
 
-export interface DurableTaskStateConfig {
-  schema?: any;
+export interface DurableTaskState {
+  checkpoints: Array<{ timestamp: number; depth: number }>;
+  files: string[];
+  data: Record<string, unknown>;
 }
 
-export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
+// Reserved for future configuration options (e.g. custom storage key, schema validation)
+export interface DurableTaskStateConfig {}
+
+export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableTaskState> {
   return {
     id: 'durable-task-state',
     name: 'Durable Task State',
@@ -16,7 +21,7 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
     timeouts: { store: 30_000 },
     hooks: {
       async init({ storage }) {
-        const saved = await storage.get<unknown>('state');
+        const saved = await storage.get<DurableTaskState>('state');
         return { state: saved ?? { checkpoints: [], files: [], data: {} } };
       },
 
@@ -34,11 +39,11 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
       },
 
       async store({ state, ctx }) {
-        const currentState = (state as any) ?? { checkpoints: [], files: [], data: {} };
+        const currentState: DurableTaskState = state ?? { checkpoints: [], files: [], data: {} };
         // Add a checkpoint for each store call
-        const newState = {
+        const newState: DurableTaskState = {
           ...currentState,
-          checkpoints: [...(currentState.checkpoints ?? []), { timestamp: Date.now(), depth: ctx.depth }],
+          checkpoints: [...currentState.checkpoints, { timestamp: Date.now(), depth: ctx.depth }],
         };
         return { state: newState };
       },
@@ -50,18 +55,14 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
 
       async onReturn({ childState, parentState }) {
         // Merge child artifacts back to parent
-        const parent = parentState as any;
-        const child = childState as any;
         return {
           parentState: {
-            ...parent,
-            checkpoints: [...(parent.checkpoints ?? []), ...(child.checkpoints ?? [])],
-            files: [...new Set([...(parent.files ?? []), ...(child.files ?? [])])],
-            data: { ...parent.data, ...child.data },
+            checkpoints: [...parentState.checkpoints, ...childState.checkpoints],
+            files: [...new Set([...parentState.files, ...childState.files])],
+            data: { ...parentState.data, ...childState.data },
           },
         };
       },
-
-},
+    },
   };
 }

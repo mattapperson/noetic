@@ -29,7 +29,7 @@ export const step = {
 
   tool<I, O>(opts: {
     id: string;
-    tool: Tool;
+    tool: Tool<ZodType<I>, ZodType<O>>;
     args?: Partial<I>;
   }): StepTool<I, O> {
     if (!opts.id || opts.id.trim() === '') throw new Error('step.tool requires a non-empty id');

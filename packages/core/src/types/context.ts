@@ -8,13 +8,13 @@ export interface ItemLog {
   append(item: Item): void;
 }
 
-export interface Context<TState = unknown> {
+export interface Context {
   readonly id: string;
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
-  state: TState;
+  state: unknown;
   readonly parent: Context | null;
   readonly depth: number;
   readonly span: Span;

@@ -53,7 +53,7 @@ export { executeLLM } from './interpreter/execute-llm';
 export type { CallModelFn } from './interpreter/execute-llm';
 export { executeTool } from './interpreter/execute-tool';
 export { executeLoop } from './interpreter/execute-loop';
-export type { ExecuteStepFn } from './interpreter/execute-loop';
+export type { ExecuteStepFn } from './types/step';
 export { executeBranch } from './interpreter/execute-branch';
 export { executeFork } from './interpreter/execute-fork';
 export { executeSpawn } from './interpreter/execute-spawn';
@@ -69,7 +69,7 @@ export { react } from './patterns/react';
 export { ralphWiggum } from './patterns/ralph-wiggum';
 
 export { compilePlan, adaptivePlan, PlanNodeSchema } from './patterns/plans';
-export type { PlanNode, PlanConstraints, ExecuteStepFn as PlanExecuteStepFn } from './patterns/plans';
+export type { PlanNode, PlanConstraints } from './patterns/plans';
 
 export { resolveScopeKey, createScopedStorage } from './memory/scope';
 export { allocateBudgets, checkBudget } from './memory/budget';
@@ -78,11 +78,11 @@ export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, s
 export type { LayerStateStore } from './memory/layer-lifecycle';
 export { assembleView } from './memory/projector';
 export { workingMemory } from './memory/layers/working-memory';
-export type { WorkingMemoryConfig } from './memory/layers/working-memory';
+export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 export { durableTaskState } from './memory/layers/durable-task-state';
-export type { DurableTaskStateConfig } from './memory/layers/durable-task-state';
+export type { DurableTaskStateConfig, DurableTaskState } from './memory/layers/durable-task-state';
 export { observationalMemory } from './memory/layers/observational-memory';
-export type { ObservationalMemoryConfig } from './memory/layers/observational-memory';
+export type { ObservationalMemoryConfig, ObservationalState } from './memory/layers/observational-memory';
 
 export { SpanImpl } from './observability/span-impl';
 export { NoopExporter, InMemoryExporter } from './observability/trace-exporter';

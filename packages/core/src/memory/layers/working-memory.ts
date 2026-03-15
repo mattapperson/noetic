@@ -3,6 +3,8 @@ import type { MessageItem, FunctionCallItem } from '../../types/items';
 import { Slot } from '../../types/memory';
 import type { ZodType } from 'zod';
 
+export type WorkingMemoryState = string | Record<string, unknown>;
+
 export interface WorkingMemoryConfig {
   scope?: 'thread' | 'resource';
   schema?: ZodType;
@@ -10,7 +12,7 @@ export interface WorkingMemoryConfig {
   readOnly?: boolean;
 }
 
-export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer {
+export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryState> {
   const scope: MemoryScope = config?.scope ?? 'thread';
 
   return {
@@ -21,8 +23,8 @@ export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer {
     budget: { min: 200, max: 1500 },
     hooks: {
       async init({ storage }) {
-        const saved = await storage.get<unknown>('state');
-        const state = saved ?? (config?.schema ? {} : '');
+        const saved = await storage.get<WorkingMemoryState>('state');
+        const state: WorkingMemoryState = saved ?? (config?.schema ? {} : '');
         return { state };
       },
 
@@ -30,7 +32,7 @@ export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer {
         if (
           !state ||
           (typeof state === 'string' && !state) ||
-          (typeof state === 'object' && Object.keys(state as Record<string, unknown>).length === 0)
+          (typeof state === 'object' && Object.keys(state).length === 0)
         ) {
           return null;
         }
@@ -55,13 +57,15 @@ export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer {
             (item as FunctionCallItem).name === 'updateWorkingMemory'
           ) {
             try {
-              const args = JSON.parse((item as FunctionCallItem).arguments);
+              const raw = JSON.parse((item as FunctionCallItem).arguments);
+              if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
+              const { __proto__: _p, constructor: _c, ...safeArgs } = raw;
               if (typeof state === 'object' && state !== null) {
                 // Deep merge
-                const newState = { ...(state as Record<string, unknown>), ...args };
+                const newState = { ...state, ...safeArgs };
                 return { state: newState };
               } else {
-                return { state: args };
+                return { state: safeArgs };
               }
             } catch {
               // Invalid JSON, skip
