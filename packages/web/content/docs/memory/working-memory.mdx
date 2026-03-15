@@ -1,0 +1,99 @@
+---
+title: Working Memory
+description: A scratchpad memory layer that persists structured or free-form notes across turns within a single execution.
+---
+
+## Overview
+
+Working Memory is the simplest built-in memory layer. It acts as a scratchpad that the agent can read and write each turn. The LLM sees the current state as a `<working_memory>` block in the prompt, and updates it by calling an `updateWorkingMemory` tool.
+
+- **Slot**: `100` (`Slot.WORKING_MEMORY`)
+- **Default scope**: `execution`
+- **Default budget**: `{ min: 200, max: 1500 }`
+
+## Usage
+
+```ts
+import { workingMemory } from '@orchid/core';
+
+const layer = workingMemory({
+  scope: 'thread',
+  readOnly: false,
+});
+```
+
+Register the layer in your agent config:
+
+```ts
+const agent: AgentConfig = {
+  name: 'assistant',
+  description: 'A helpful assistant',
+  model: 'gpt-4o',
+  instructions: 'You are a helpful assistant.',
+  memory: [layer],
+  storage: myStorageAdapter,
+};
+```
+
+## Configuration
+
+```ts
+interface WorkingMemoryConfig {
+  scope?: 'thread' | 'resource';
+  schema?: ZodType;
+  template?: string;
+  readOnly?: boolean;
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `scope` | `'thread' \| 'resource'` | `'thread'` | Persistence boundary |
+| `schema` | `ZodType` | -- | Optional Zod schema for structured state (state becomes `Record<string, unknown>`) |
+| `template` | `string` | -- | Initial template content |
+| `readOnly` | `boolean` | `false` | When `true`, the `store` hook skips updates |
+
+## State Type
+
+```ts
+type WorkingMemoryState = string | Record<string, unknown>;
+```
+
+When no `schema` is provided, state is a plain string. When a schema is provided, state is an object and updates are shallow-merged.
+
+## How It Works
+
+### init
+
+Loads saved state from `ScopedStorage`. Falls back to an empty string (no schema) or empty object (with schema).
+
+### recall
+
+If state is non-empty, wraps it in a `<working_memory>` XML block and injects it as a `developer` message item.
+
+### store
+
+Watches for `updateWorkingMemory` function calls in the LLM response. When found, parses the JSON arguments and shallow-merges them into the current state. Prototype keys (`__proto__`, `constructor`) are stripped for safety.
+
+If `readOnly` is `true`, the store hook is a no-op.
+
+### onSpawn
+
+When scope is `'resource'`, the parent state is deep-cloned to the child. For `'thread'` scope, children do not inherit working memory.
+
+## Example: Structured Scratchpad
+
+```ts
+import { z } from 'zod';
+import { workingMemory } from '@orchid/core';
+
+const layer = workingMemory({
+  schema: z.object({
+    currentGoal: z.string(),
+    completedSteps: z.array(z.string()),
+    blockers: z.array(z.string()),
+  }),
+});
+```
+
+The LLM can then call `updateWorkingMemory({ currentGoal: 'Deploy v2', completedSteps: ['write tests'] })` to update specific fields without overwriting the rest.

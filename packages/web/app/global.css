@@ -1,0 +1,84 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+@theme {
+  --color-tui-bg: #050505;
+  --color-tui-surface: #080808;
+  --color-tui-surface-hover: #0d0d0d;
+  --color-tui-fg: #f8fafc;
+  --color-tui-secondary: #94a3b8;
+  --color-tui-muted: #475569;
+  --color-tui-green: #39ff14;
+  --color-tui-amber: #ffb000;
+  --color-tui-cyan: #38bdf8;
+  --color-tui-border: #1a1a1a;
+  --color-tui-highlight: #1a1a2e;
+  --radius: 4px;
+}
+
+@layer base {
+  :root {
+    --background: var(--color-tui-bg);
+    --foreground: var(--color-tui-fg);
+  }
+
+  body {
+    background: var(--color-tui-bg);
+    color: var(--color-tui-fg);
+    font-family: "JetBrains Mono", monospace;
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes scanlines {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 4px;
+  }
+}
+
+.tui-cursor {
+  animation: blink 1s step-end infinite;
+}
+
+.tui-scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.05) 2px,
+    rgba(0, 0, 0, 0.05) 4px
+  );
+  pointer-events: none;
+}
+
+.tui-glow {
+  text-shadow:
+    0 0 10px rgba(57, 255, 20, 0.5),
+    0 0 20px rgba(57, 255, 20, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tui-cursor {
+    animation: none;
+  }
+
+  .tui-scanlines::after {
+    display: none;
+  }
+}

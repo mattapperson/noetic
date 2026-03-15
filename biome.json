@@ -18,7 +18,10 @@
     "includes": [
       "**",
       "!**/*.json",
-      "!.grit/tests"
+      "!.grit/tests",
+      "!packages/web/.source",
+      "!packages/web/.next",
+      "!packages/web/next-env.d.ts"
     ]
   },
   "formatter": {
@@ -86,6 +89,12 @@
       "security": {
         "recommended": true
       }
+    }
+  },
+  "css": {
+    "parser": {
+      "cssModules": true,
+      "tailwindDirectives": true
     }
   },
   "javascript": {

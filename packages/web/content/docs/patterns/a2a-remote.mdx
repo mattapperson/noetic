@@ -1,0 +1,132 @@
+---
+title: A2A Remote
+description: External channels for inter-process agent communication, enabling agents running in separate processes or machines to exchange messages.
+---
+
+## Overview
+
+A2A (Agent-to-Agent) Remote extends the channel pattern across process boundaries. Using `ExternalChannel` and `ChannelHandle`, agents in different processes, containers, or machines can communicate through the same typed channel interface.
+
+## ExternalChannel
+
+An `ExternalChannel` is a channel marked with `external: true`. The runtime exposes it via `getChannelHandle()`, which returns a `ChannelHandle` that external code can use to send messages into the agent's execution.
+
+```ts
+interface ExternalChannel<T> extends Channel<T> {
+  readonly external: true;
+}
+
+interface ChannelHandle<T> {
+  send(value: T): void;
+  readonly closed: boolean;
+  readonly channel: Channel<T>;
+}
+```
+
+## Creating an External Channel
+
+```ts
+import { channel } from '@orchid/core';
+import { z } from 'zod';
+
+const taskChannel = channel({
+  name: 'remote-task',
+  schema: z.object({
+    taskId: z.string(),
+    payload: z.string(),
+    priority: z.number(),
+  }),
+  mode: 'queue',
+  external: true,
+});
+```
+
+## Getting a Channel Handle
+
+The runtime provides handles for external channels tied to a specific execution:
+
+```ts
+const handle = runtime.getChannelHandle(taskChannel, executionId);
+
+// Send from outside the agent
+handle.send({
+  taskId: 'task-123',
+  payload: 'Process this data',
+  priority: 1,
+});
+
+// Check if the channel is still open
+if (!handle.closed) {
+  handle.send(anotherMessage);
+}
+```
+
+## Example: Cross-Process Communication
+
+### Process A (Orchestrator)
+
+```ts
+import { channel, step } from '@orchid/core';
+import { z } from 'zod';
+
+const resultChannel = channel({
+  name: 'worker-results',
+  schema: z.object({ result: z.string() }),
+  mode: 'queue',
+  external: true,
+});
+
+// Agent waits for results from remote workers
+const orchestrator = step.run({
+  id: 'orchestrator',
+  execute: async (input: string, ctx) => {
+    // Dispatch work to remote agents (via HTTP, message queue, etc.)
+    await dispatchToWorkers(input);
+
+    // Wait for results via the external channel
+    const result1 = await ctx.recv(resultChannel, { timeout: 60_000 });
+    const result2 = await ctx.recv(resultChannel, { timeout: 60_000 });
+
+    return `${result1.result}\n${result2.result}`;
+  },
+});
+```
+
+### Process B (Worker)
+
+```ts
+// Worker process gets a handle to the orchestrator's channel
+const handle = runtime.getChannelHandle(resultChannel, orchestratorExecutionId);
+
+// After completing work, send result back
+handle.send({ result: 'Processed batch 1' });
+```
+
+## ExternalChannel vs Channel
+
+| Feature | Channel | ExternalChannel |
+|---|---|---|
+| Scope | In-process | Cross-process |
+| `external` flag | `false` (default) | `true` |
+| Handle API | `ctx.send()` / `ctx.recv()` | `runtime.getChannelHandle()` |
+| Transport | In-memory | Implementation-dependent |
+
+## When to Use
+
+- Microservice architectures where agents run in separate services
+- Distributed agent systems across multiple machines
+- Integration with external systems that need to feed data into running agents
+- Long-running agents that receive events from external sources
+
+## Tips
+
+- External channels use the same Zod schema validation as internal channels. Messages are validated when sent.
+- Always check `handle.closed` before sending. The channel closes when the agent's execution completes.
+- Use `'queue'` mode for reliable delivery where order matters.
+- Use `'topic'` mode when multiple agents need to receive the same messages.
+- Set appropriate timeouts on `recv` calls to handle cases where remote agents are slow or unavailable.
+
+## Related
+
+- [Channels](/docs/channels) -- channel fundamentals
+- [Dual Agent](/docs/patterns/dual-agent) -- in-process agent communication

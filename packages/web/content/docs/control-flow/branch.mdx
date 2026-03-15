@@ -1,0 +1,130 @@
+---
+title: branch
+description: Conditional routing -- pick one step to execute or skip entirely.
+---
+
+## Quick Example
+
+```ts
+import { branch, step } from '@orchid/core';
+
+const triageAgent = branch({
+  id: 'triage',
+  route: (input: string, ctx) => {
+    if (input.includes('urgent')) {
+      return step.llm({
+        id: 'urgent-handler',
+        model: 'gpt-4o',
+        system: 'Handle this urgent request immediately.',
+      });
+    }
+    if (input.includes('ignore')) {
+      return null; // skip -- no step executed
+    }
+    return step.llm({
+      id: 'default-handler',
+      model: 'gpt-4o-mini',
+      system: 'Handle this routine request.',
+    });
+  },
+});
+```
+
+## What It Does
+
+`branch` is a runtime router. Its `route` function receives the step input and context, and returns either:
+
+- A `Step` to execute, or
+- `null` to skip (the input passes through as-is).
+
+This is the idiomatic way to add conditional logic to an Orchid pipeline. Instead of if/else blocks around step calls, you express the decision as data.
+
+## API Reference
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `route` | `(input: I, ctx: Context) => Step<I, O> \| null` | Yes | Function that picks the step to run |
+
+## How Null Routes Work
+
+When `route` returns `null`, the branch is skipped entirely. The input value is passed through as the output. This is useful for optional processing steps.
+
+```ts
+import { branch, step } from '@orchid/core';
+
+const maybeTranslate = branch({
+  id: 'maybe-translate',
+  route: (input: { text: string; lang: string }) => {
+    if (input.lang === 'en') {
+      return null; // already English, skip
+    }
+    return step.llm({
+      id: 'translate',
+      model: 'gpt-4o',
+      system: `Translate the following text to English.`,
+    });
+  },
+});
+```
+
+## Dynamic Step Creation
+
+The `route` function creates steps at runtime, so you can parameterize them based on input.
+
+```ts
+import { branch, step } from '@orchid/core';
+
+const modelPicker = branch({
+  id: 'model-picker',
+  route: (input: { task: string; budget: 'low' | 'high' }) => {
+    const model = input.budget === 'high' ? 'gpt-4o' : 'gpt-4o-mini';
+    return step.llm({
+      id: `${input.task}-llm`,
+      model,
+      system: `Perform the following task: ${input.task}`,
+    });
+  },
+});
+```
+
+## Nesting Branches
+
+Branches can return other branches, forks, or any other step type.
+
+```ts
+import { branch, fork, step } from '@orchid/core';
+
+const nested = branch({
+  id: 'outer',
+  route: (input: string) => {
+    if (input === 'compare') {
+      return fork({
+        id: 'compare-models',
+        mode: 'all',
+        paths: () => [
+          step.llm({
+            id: 'model-a',
+            model: 'gpt-4o',
+          }),
+          step.llm({
+            id: 'model-b',
+            model: 'gpt-4o-mini',
+          }),
+        ],
+        merge: (results) => results.join('\n---\n'),
+      });
+    }
+    return step.llm({
+      id: 'single',
+      model: 'gpt-4o',
+    });
+  },
+});
+```
+
+## Related
+
+- [fork](/docs/control-flow/fork) -- parallel execution for when you need multiple paths at once.
+- [Steps](/docs/steps) -- the step types you can return from a route function.
+- [Loop & Until](/docs/loop-and-until) -- combine branching with iteration.

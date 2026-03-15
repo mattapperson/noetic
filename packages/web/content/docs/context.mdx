@@ -1,0 +1,214 @@
+---
+title: Context & Event Log
+description: The Context object tracks execution state, metrics, and conversation history.
+---
+
+## Quick Example
+
+```ts
+import { step } from '@orchid/core';
+
+const greet = step.run('greet', async (input: string, ctx) => {
+  console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
+  console.log(`Tokens so far: ${ctx.tokens.total}`);
+
+  // Append a user message to the event log
+  ctx.itemLog.append({
+    id: crypto.randomUUID(),
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: input }],
+    status: 'completed',
+  });
+
+  return `Hello, ${input}!`;
+});
+```
+
+Every step in Orchid receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
+
+## Context Interface
+
+| Property | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique identifier for this execution. |
+| `stepCount` | `number` | Number of steps executed so far. |
+| `tokens` | [`TokenUsage`](#tokenusage) | Cumulative token counts (input, output, total). |
+| `elapsed` | `number` | Wall-clock milliseconds since context creation. |
+| `cost` | `number` | Cumulative cost estimate for LLM calls. |
+| `state` | `TState` | Mutable, generic state object. You can read and write to this freely. |
+| `parent` | `Context \| null` | Parent context when running inside a spawn. |
+| `depth` | `number` | Nesting depth (0 for root). |
+| `span` | [`Span`](/docs/observability) | The active tracing span for this execution. |
+| `threadId` | `string` | Conversation thread identifier. |
+| `resourceId` | `string \| undefined` | Optional resource identifier (e.g., a user or tenant ID). |
+| `itemLog` | [`ItemLog`](#itemlog) | The conversation event log. |
+| `lastStepMeta` | `StepMeta \| null` | Metadata from the most recently completed step (tool calls, usage, cost). |
+
+### TokenUsage
+
+```ts
+interface TokenUsage {
+  input: number;
+  output: number;
+  total: number;
+}
+```
+
+## Item Log
+
+The `ItemLog` is an append-only log of every message, tool call, and reasoning trace produced during an execution.
+
+```ts
+interface ItemLog {
+  readonly items: ReadonlyArray<Item>;
+  append(item: Item): void;
+}
+```
+
+- **`items`** -- read the full history at any time.
+- **`append(item)`** -- add a new item. The runtime also appends items automatically after each LLM step.
+
+## Channel Methods
+
+Context exposes three methods for communicating over [Channels](/docs/channels):
+
+| Method | Signature | Description |
+|---|---|---|
+| `recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for the next value. Throws `channel_timeout` if the timeout expires. |
+| `send` | `send<T>(channel: Channel<T>, value: T): void` | Push a value into a channel. |
+| `tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
+
+```ts
+import { channel } from '@orchid/core';
+import { z } from 'zod';
+
+const approvals = channel('approvals', {
+  schema: z.boolean(),
+  mode: 'queue',
+});
+
+// Inside a step:
+ctx.send(approvals, true);
+const approved = await ctx.recv(approvals, { timeout: 5_000 });
+const maybe = ctx.tryRecv(approvals); // null if empty
+```
+
+## Lifecycle Controls
+
+### Checkpoint
+
+```ts
+await ctx.checkpoint();
+```
+
+Persists the current execution state so it can be restored later. In the `InMemoryRuntime` this is a no-op; durable runtimes use it for crash recovery.
+
+### Complete
+
+```ts
+ctx.complete(finalValue);
+```
+
+Signals that the execution has a result and should stop. After calling `complete`:
+
+| Property | Value |
+|---|---|
+| `ctx.completed` | `true` |
+| `ctx.completionValue` | The value you passed |
+
+### Abort
+
+```ts
+ctx.abort('user cancelled');
+```
+
+Signals that the execution should be cancelled. After calling `abort`:
+
+| Property | Value |
+|---|---|
+| `ctx.aborted` | `true` |
+| `ctx.abortReason` | The reason string you passed |
+
+Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` error if set.
+
+## Item Types
+
+Every entry in the item log is one of these discriminated union variants. All items share a base shape:
+
+```ts
+interface ItemBase {
+  readonly id: string;
+  readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
+}
+```
+
+### MessageItem
+
+```ts
+interface MessageItem extends ItemBase {
+  readonly type: 'message';
+  readonly role: 'user' | 'assistant' | 'system' | 'developer';
+  readonly content: ContentPart[];
+}
+```
+
+### FunctionCallItem
+
+```ts
+interface FunctionCallItem extends ItemBase {
+  readonly type: 'function_call';
+  readonly call_id: string;
+  readonly name: string;
+  readonly arguments: string;
+}
+```
+
+### FunctionCallOutputItem
+
+```ts
+interface FunctionCallOutputItem extends ItemBase {
+  readonly type: 'function_call_output';
+  readonly call_id: string;
+  readonly output: string;
+}
+```
+
+### ReasoningItem
+
+```ts
+interface ReasoningItem extends ItemBase {
+  readonly type: 'reasoning';
+  readonly content: ContentPart[];
+  readonly summary?: ContentPart[];
+  readonly encrypted_content?: string;
+}
+```
+
+### ExtensionItem
+
+Custom item types prefixed with `x-`:
+
+```ts
+interface ExtensionItem extends ItemBase {
+  readonly type: `x-${string}`;
+  readonly data: Record<string, unknown>;
+}
+```
+
+### ContentPart
+
+Content arrays use these discriminated variants:
+
+| `type` | Fields | Purpose |
+|---|---|---|
+| `output_text` | `text: string` | Model-generated text |
+| `input_text` | `text: string` | User-provided text |
+| `refusal` | `refusal: string` | Model refusal message |
+
+## Related Pages
+
+- [Runtime](/docs/runtime) -- creates and manages contexts.
+- [Channels](/docs/channels) -- typed messaging between steps.
+- [Observability](/docs/observability) -- the `span` property and tracing.
+- [Error Model](/docs/errors) -- errors thrown when abort or timeout occurs.

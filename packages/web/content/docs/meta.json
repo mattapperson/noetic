@@ -1,0 +1,25 @@
+{
+  "title": "Orchid",
+  "pages": [
+    "index",
+    "overview",
+    "---Primitives---",
+    "steps",
+    "control-flow",
+    "spawn",
+    "loop-and-until",
+    "channels",
+    "---Infrastructure---",
+    "context",
+    "runtime",
+    "errors",
+    "observability",
+    "---Memory---",
+    "memory",
+    "---Patterns---",
+    "patterns",
+    "---Reference---",
+    "design-decisions",
+    "api"
+  ]
+}

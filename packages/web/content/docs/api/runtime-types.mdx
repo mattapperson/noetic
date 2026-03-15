@@ -1,0 +1,136 @@
+---
+title: Runtime Types
+description: Type definitions for the Runtime interface, AgentConfig, and related runtime types in Orchid.
+---
+
+## Runtime
+
+The core execution engine interface.
+
+```ts
+interface Runtime {
+  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+  createContext(opts?: CreateContextOpts): Context;
+  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
+  getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
+  checkpoint(ctx: Context): Promise<void>;
+  restore(executionId: string): Promise<Context | null>;
+  cancel(ctx: Context, reason?: string): Promise<void>;
+  createSpan(name: string, parent: Span | null): Span;
+}
+```
+
+### Runtime Methods
+
+| Method | Description |
+|---|---|
+| `execute(step, input, ctx)` | Execute a step with the given input and context |
+| `createContext(opts?)` | Create a new execution context |
+| `send(channel, value, ctx)` | Send a value to a channel |
+| `recv(channel, ctx, opts?)` | Receive from a channel (blocking) |
+| `tryRecv(channel, ctx)` | Non-blocking receive |
+| `getChannelHandle(channel, executionId)` | Get external channel handle |
+| `initLayers(layers, ctx, storage)` | Initialize memory layers |
+| `recallLayers(layers, input, ctx)` | Run recall on all layers |
+| `storeLayers(layers, response, ctx)` | Run store on all layers |
+| `disposeLayers(layers, ctx)` | Dispose all layers |
+| `assembleView(agent, input, ctx)` | Merge all layer outputs into prompt items |
+| `checkpoint(ctx)` | Persist current execution state |
+| `restore(executionId)` | Restore a previously checkpointed context |
+| `cancel(ctx, reason?)` | Cancel an execution |
+| `createSpan(name, parent)` | Create an observability span |
+
+## AgentConfig
+
+Declarative configuration for an agent.
+
+```ts
+interface AgentConfig {
+  name: string;
+  description: string;
+  model: string;
+  instructions: string | (() => string | Promise<string>);
+  tools?: Tool[];
+  outputSchema?: ZodType;
+  memory?: MemoryLayer[];
+  storage?: StorageAdapter;
+  projection?: ProjectionPolicy;
+  hooks?: AgentHooks;
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | yes | Agent name |
+| `description` | `string` | yes | Agent description |
+| `model` | `string` | yes | Default model identifier |
+| `instructions` | `string \| (() => string \| Promise<string>)` | yes | System instructions (static or dynamic) |
+| `tools` | `Tool[]` | no | Available tools |
+| `outputSchema` | `ZodType` | no | Structured output schema |
+| `memory` | `MemoryLayer[]` | no | Memory layers to attach |
+| `storage` | `StorageAdapter` | no | Storage backend for memory persistence |
+| `projection` | `ProjectionPolicy` | no | Token budget and overflow policy |
+| `hooks` | `AgentHooks` | no | Before/after step hooks |
+
+## AgentHooks
+
+```ts
+interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+```
+
+| Hook | Parameters | Description |
+|---|---|---|
+| `beforeStep` | `(step, ctx)` | Called before each step executes |
+| `afterStep` | `(step, result, ctx)` | Called after each step completes |
+
+## RecallLayerOutput
+
+The output from a single memory layer's recall hook.
+
+```ts
+interface RecallLayerOutput {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `layerId` | `string` | Which layer produced this output |
+| `items` | `Item[]` | Items to inject into the prompt |
+| `tokenCount` | `number` | Token cost of the items |
+
+## LLMResponse
+
+The response from an LLM call.
+
+```ts
+interface LLMResponse {
+  items: Item[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens?: number;
+  };
+  cost?: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `items` | `Item[]` | Response items (messages, function calls, etc.) |
+| `usage.inputTokens` | `number` | Input tokens consumed |
+| `usage.outputTokens` | `number` | Output tokens generated |
+| `usage.cachedTokens` | `number` | Cached tokens used (optional) |
+| `cost` | `number` | Cost in USD (optional) |

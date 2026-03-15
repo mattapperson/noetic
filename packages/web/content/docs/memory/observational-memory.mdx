@@ -1,0 +1,107 @@
+---
+title: Observational Memory
+description: A memory layer that automatically extracts and distills facts from conversation history using a configurable observer function.
+---
+
+## Overview
+
+Observational Memory accumulates conversation text into a buffer, and when the buffer crosses a token threshold, distills the content into a list of observations. These observations persist across turns and are injected as an `<observations>` block in the prompt.
+
+- **Slot**: `200` (`Slot.OBSERVATIONS`)
+- **Default scope**: `resource`
+- **Default budget**: `{ min: 500, max: 2500 }`
+- **Store timeout**: `60000` ms
+
+## Usage
+
+```ts
+import { observationalMemory } from '@orchid/core';
+
+const layer = observationalMemory({
+  bufferThreshold: 2000,
+  maxObservations: 50,
+  observer: async (buffer) => {
+    // Call an LLM or use heuristics to extract facts
+    return ['User prefers TypeScript', 'Project uses Bun'];
+  },
+});
+```
+
+## Configuration
+
+```ts
+interface ObservationalMemoryConfig {
+  bufferThreshold?: number;
+  maxObservations?: number;
+  scope?: 'thread' | 'resource';
+  observer?: ObserverFn;
+}
+
+type ObserverFn = (buffer: string[]) => Promise<string[]>;
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `bufferThreshold` | `number` | `2000` | Token count threshold before distillation triggers |
+| `maxObservations` | `number` | `50` | Maximum stored observations (oldest are evicted) |
+| `scope` | `'thread' \| 'resource'` | `'resource'` | Persistence boundary |
+| `observer` | `ObserverFn` | fallback | Custom function that distills buffer text into observation strings |
+
+## State Type
+
+```ts
+interface ObservationalState {
+  observations: string[];
+  buffer: string[];
+  bufferTokens: number;
+  version: number;
+}
+```
+
+| Field | Type | Purpose |
+|---|---|---|
+| `observations` | `string[]` | Distilled facts shown to the LLM |
+| `buffer` | `string[]` | Accumulated text not yet distilled |
+| `bufferTokens` | `number` | Token count of the current buffer |
+| `version` | `number` | Increments each time distillation runs |
+
+## How It Works
+
+### init
+
+Loads saved `ObservationalState` from scoped storage. Falls back to empty arrays and zero counters.
+
+### recall
+
+If observations exist, formats them as a bulleted list inside an `<observations>` XML block and injects it as a `developer` message.
+
+### store
+
+1. Extracts text content from new `message` items in the LLM response.
+2. Appends the text to the buffer and updates the token count.
+3. When `bufferTokens` reaches `bufferThreshold`, calls the `observer` function with the full buffer.
+4. The observer returns distilled observation strings, which are appended to the observations list (capped at `maxObservations`).
+5. The buffer resets to empty.
+
+If no custom `observer` is provided, a simple fallback records `"Processed N items"`.
+
+### onSpawn
+
+Deep-clones the parent state to the child, so spawned agents inherit existing observations.
+
+## Example: LLM-Powered Observer
+
+```ts
+import { observationalMemory } from '@orchid/core';
+
+const layer = observationalMemory({
+  observer: async (buffer) => {
+    const text = buffer.join('\n');
+    // Use any LLM call to extract structured facts
+    const facts = await extractFacts(text);
+    return facts;
+  },
+  bufferThreshold: 3000,
+  maxObservations: 100,
+});
+```

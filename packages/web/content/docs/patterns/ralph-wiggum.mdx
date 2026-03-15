@@ -1,0 +1,123 @@
+---
+title: Ralph Wiggum
+description: A self-refining agent pattern that runs ReAct repeatedly with fresh context until a verification function passes.
+---
+
+## Overview
+
+Ralph Wiggum is a self-refining agent pattern. It runs a full ReAct loop inside a `spawn` (fresh context each time), checks the output with a `verify` function, and if verification fails, feeds the feedback into the next iteration. This continues until verification passes or the iteration limit is reached.
+
+The name is a playful reference -- like Ralph Wiggum, it keeps trying until it gets it right.
+
+## Signature
+
+```ts
+function ralphWiggum(opts: {
+  model: string;
+  system: string;
+  tools: Tool[];
+  verify: VerifyFn;
+  maxIterations?: number;
+  innerMaxSteps?: number;
+}): StepLoop<string, string>
+```
+
+| Parameter | Type | Default | Purpose |
+|---|---|---|---|
+| `model` | `string` | -- | Model identifier |
+| `system` | `string` | -- | System prompt |
+| `tools` | `Tool[]` | -- | Available tools |
+| `verify` | `VerifyFn` | -- | Function that checks if the output is acceptable |
+| `maxIterations` | `number` | `50` | Maximum outer loop iterations |
+| `innerMaxSteps` | `number` | `20` | Maximum steps per inner ReAct loop |
+
+### VerifyFn
+
+```ts
+type VerifyFn = (output: unknown) => Promise<{
+  pass: boolean;
+  feedback?: string;
+}>;
+```
+
+The `feedback` string is prepended to the next iteration's input, giving the agent specific guidance on what to fix.
+
+## Example
+
+```ts
+import { ralphWiggum } from '@orchid/core';
+
+const agent = ralphWiggum({
+  model: 'gpt-4o',
+  system: 'Write a Python function that sorts a list using merge sort.',
+  tools: [codeExecutionTool],
+  verify: async (output) => {
+    const code = String(output);
+    const hasFunction = code.includes('def merge_sort');
+    const hasRecursion = code.includes('merge_sort(');
+    return {
+      pass: hasFunction && hasRecursion,
+      feedback: !hasFunction
+        ? 'Output must define a merge_sort function.'
+        : 'Function must use recursion.',
+    };
+  },
+  maxIterations: 5,
+  innerMaxSteps: 10,
+});
+```
+
+## How It Works
+
+1. The outer loop spawns a fresh ReAct agent with `contextIn: 'fresh'`.
+2. The inner ReAct agent runs to completion (up to `innerMaxSteps`).
+3. The output is checked with `until.verified(verify)`.
+4. If verification fails, `prepareNext` injects the feedback: `"Previous attempt feedback: {feedback}\nContinue working."`.
+5. A new spawn starts with fresh context but the feedback from the previous attempt.
+6. This repeats until `verify` returns `{ pass: true }` or `maxIterations` is reached.
+
+```ts
+function ralphWiggum(opts) {
+  const inner = react({
+    model: opts.model,
+    system: opts.system,
+    tools: opts.tools,
+    maxSteps: opts.innerMaxSteps ?? 20,
+  });
+
+  return {
+    kind: 'loop',
+    id: 'ralph-wiggum-loop',
+    body: spawn({
+      id: 'ralph-iteration',
+      child: inner,
+      contextIn: { strategy: 'fresh' },
+      contextOut: { strategy: 'full' },
+    }),
+    until: any(
+      until.verified(opts.verify),
+      until.maxSteps(opts.maxIterations ?? 50),
+    ),
+    prepareNext: (_output, verdict) => {
+      if (verdict.feedback) {
+        return `Previous attempt feedback: ${verdict.feedback}\nContinue working.`;
+      }
+      return 'Continue working on the task.';
+    },
+  };
+}
+```
+
+## When to Use
+
+- Code generation where output must pass tests
+- Content that must meet specific quality criteria
+- Any task where you can programmatically verify correctness
+- Tasks where the LLM benefits from seeing what went wrong
+
+## Tips
+
+- Keep `verify` fast -- it runs on every iteration.
+- Use specific `feedback` strings. Vague feedback like "try again" wastes iterations.
+- Set `innerMaxSteps` high enough for the inner agent to finish, but low enough to avoid runaway costs.
+- Fresh context on each iteration prevents the agent from getting stuck in a rut.

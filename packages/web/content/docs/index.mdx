@@ -1,0 +1,63 @@
+---
+title: Getting Started
+description: Install Orchid and build your first agent in under 5 minutes.
+---
+
+## Installation
+
+```package-install
+npm i @orchid/core
+```
+
+Or with your preferred package manager:
+
+```bash
+bun add @orchid/core
+pnpm add @orchid/core
+```
+
+## Your First Agent
+
+Build a ReAct agent in under 10 lines. This agent loops over an LLM step, calling tools until the model decides it has the answer.
+
+```ts
+import { z } from 'zod';
+import { react, step, until } from '@orchid/core';
+
+const searchTool = {
+  name: 'search',
+  description: 'Search the web for information',
+  input: z.object({
+    query: z.string(),
+  }),
+  output: z.object({
+    result: z.string(),
+  }),
+  execute: async (args) => {
+    return { result: `Results for: ${args.query}` };
+  },
+};
+
+const agent = react({
+  model: 'gpt-4o',
+  system: 'You are a helpful research assistant.',
+  tools: [searchTool],
+  maxSteps: 5,
+});
+```
+
+The `react` pattern composes three primitives under the hood: `step.llm`, `until.noToolCalls`, and a `loop`. You can build the same thing yourself for full control -- see [Loop & Until](/docs/loop-and-until).
+
+## What Happens When You Run It
+
+1. The LLM receives the system prompt and user input.
+2. If the model calls a tool, Orchid executes it and feeds the result back.
+3. The loop repeats until the model responds without tool calls, or the step limit is reached.
+4. The final text output is returned.
+
+## Next Steps
+
+- [Overview](/docs/overview) -- understand Orchid's philosophy and the 7 primitives.
+- [Steps](/docs/steps) -- learn about `step.run`, `step.llm`, and `step.tool`.
+- [Control Flow](/docs/control-flow) -- branch and fork for conditional and parallel logic.
+- [Loop & Until](/docs/loop-and-until) -- iteration with termination predicates.

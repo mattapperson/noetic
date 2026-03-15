@@ -1,0 +1,122 @@
+---
+title: step.llm
+description: Call a language model with tools, structured output, and system prompts.
+---
+
+## Quick Example
+
+```ts
+import { step } from '@orchid/core';
+
+const chat = step.llm({
+  id: 'chat',
+  model: 'gpt-4o',
+  system: 'You are a helpful assistant.',
+});
+```
+
+## What It Does
+
+`step.llm` calls a language model. You provide the model name and optionally a system prompt, tools, structured output schema, and generation parameters. The interpreter handles message formatting, tool execution loops, and response parsing.
+
+## API Reference
+
+### Options
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `model` | `string` | Yes | Model identifier (e.g. `'gpt-4o'`, `'claude-sonnet-4-20250514'`) |
+| `system` | `string` | No | System prompt prepended to the conversation |
+| `tools` | `Tool[]` | No | Tools the model may call |
+| `output` | `ZodType<O>` | No | Zod schema for structured output |
+| `params` | `ModelParams` | No | Generation parameters |
+
+### ModelParams
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `temperature` | `number` | Sampling temperature |
+| `topP` | `number` | Nucleus sampling threshold |
+| `maxTokens` | `number` | Maximum tokens to generate |
+| `stopSequences` | `string[]` | Stop sequences |
+
+### Tool Interface
+
+Tools passed to `step.llm` follow the standard Orchid `Tool` interface. See [step.tool](/docs/steps/tool) for the full definition.
+
+## Structured Output
+
+Provide a Zod schema to `output` and the model response will be parsed and validated at runtime.
+
+```ts
+import { z } from 'zod';
+import { step } from '@orchid/core';
+
+const extract = step.llm({
+  id: 'extract-entities',
+  model: 'gpt-4o',
+  system: 'Extract named entities from the text.',
+  output: z.object({
+    people: z.array(z.string()),
+    places: z.array(z.string()),
+    organizations: z.array(z.string()),
+  }),
+});
+```
+
+If the model response does not match the schema, a validation error is thrown.
+
+## With Tools
+
+```ts
+import { z } from 'zod';
+import { step } from '@orchid/core';
+
+const searchTool = {
+  name: 'search',
+  description: 'Search the knowledge base',
+  input: z.object({
+    query: z.string(),
+  }),
+  output: z.object({
+    results: z.array(z.string()),
+  }),
+  execute: async (args) => {
+    return {
+      results: ['Result 1', 'Result 2'],
+    };
+  },
+};
+
+const researcher = step.llm({
+  id: 'research',
+  model: 'gpt-4o',
+  system: 'Answer the question using the search tool.',
+  tools: [searchTool],
+});
+```
+
+When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/loop-and-until) with `until.noToolCalls()`.
+
+## Tuning Generation
+
+```ts
+import { step } from '@orchid/core';
+
+const creative = step.llm({
+  id: 'brainstorm',
+  model: 'gpt-4o',
+  system: 'Generate creative ideas.',
+  params: {
+    temperature: 0.9,
+    maxTokens: 2e3,
+  },
+});
+```
+
+## Related
+
+- [step.run](/docs/steps/run) -- custom async logic.
+- [step.tool](/docs/steps/tool) -- invoke a tool directly without an LLM.
+- [Loop & Until](/docs/loop-and-until) -- wrap an LLM step in a ReAct-style loop.

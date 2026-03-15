@@ -1,0 +1,253 @@
+---
+title: spawn
+description: Run a child step in an isolated context with configurable input and output strategies.
+---
+
+## Quick Example
+
+```ts
+import { spawn, step } from '@orchid/core';
+
+const isolated = spawn({
+  id: 'sub-agent',
+  child: step.llm({
+    id: 'researcher',
+    model: 'gpt-4o',
+    system: 'Research the topic thoroughly.',
+  }),
+  contextIn: {
+    strategy: 'fresh',
+  },
+  contextOut: {
+    strategy: 'full',
+  },
+});
+```
+
+## What It Does
+
+`spawn` runs a child step in an isolated context. The child gets its own conversation history and memory scope, preventing it from polluting the parent context. You control what goes in (`contextIn`) and what comes back out (`contextOut`).
+
+This is the primitive for sub-agents, delegation, and sandboxed execution.
+
+## API Reference
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `child` | `Step<I, O>` | Yes | The step to execute in isolation |
+| `contextIn` | `ContextInStrategy` | Yes | How to build the child's initial context |
+| `contextOut` | `ContextOutStrategy<O>` | Yes | How to extract output from the child |
+| `timeout` | `number` | No | Timeout in milliseconds |
+
+## Context-In Strategies
+
+Control what the child step sees when it starts.
+
+| Strategy | Description |
+| --- | --- |
+| `inherit` | Copy the parent's full conversation history |
+| `fresh` | Start with an empty context |
+| `subset` | Select specific items from the parent's history |
+| `custom` | Build context items from scratch using input and parent context |
+
+### inherit
+
+The child sees the full parent conversation. Use when the child needs all prior context.
+
+```ts
+const spawned = spawn({
+  id: 'full-context-child',
+  child: myStep,
+  contextIn: {
+    strategy: 'inherit',
+  },
+  contextOut: {
+    strategy: 'full',
+  },
+});
+```
+
+### fresh
+
+The child starts with a blank slate. Use for independent tasks.
+
+```ts
+const spawned = spawn({
+  id: 'clean-child',
+  child: myStep,
+  contextIn: {
+    strategy: 'fresh',
+  },
+  contextOut: {
+    strategy: 'full',
+  },
+});
+```
+
+### subset
+
+Select specific items from the parent's conversation history.
+
+```ts
+const spawned = spawn({
+  id: 'selective-child',
+  child: myStep,
+  contextIn: {
+    strategy: 'subset',
+    select: (parentItems, parentState) => {
+      // Only include the last 5 messages
+      return parentItems.slice(-5);
+    },
+  },
+  contextOut: {
+    strategy: 'full',
+  },
+});
+```
+
+### custom
+
+Build the child's context from scratch.
+
+```ts
+const spawned = spawn({
+  id: 'custom-child',
+  child: myStep,
+  contextIn: {
+    strategy: 'custom',
+    build: (input, parentCtx) => {
+      return [
+        {
+          kind: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: `Research this: ${input}`,
+            },
+          ],
+        },
+      ];
+    },
+  },
+  contextOut: {
+    strategy: 'full',
+  },
+});
+```
+
+## Context-Out Strategies
+
+Control what the parent receives from the child.
+
+| Strategy | Description |
+| --- | --- |
+| `full` | Return the raw child output as-is |
+| `summary` | Summarize the child's output using an LLM |
+| `schema` | Parse and validate the child's output with a Zod schema |
+
+### full
+
+Pass the child's output directly back to the parent.
+
+```ts
+contextOut: {
+  strategy: 'full',
+}
+```
+
+### summary
+
+Use an LLM to summarize the child's output before returning it. Useful when the child produces verbose output.
+
+```ts
+contextOut: {
+  strategy: 'summary',
+  model: 'gpt-4o-mini',
+  prompt: 'Summarize the research findings in 2-3 sentences.',
+}
+```
+
+### schema
+
+Validate the child's output against a Zod schema.
+
+```ts
+import { z } from 'zod';
+
+contextOut: {
+  strategy: 'schema',
+  schema: z.object({
+    answer: z.string(),
+    confidence: z.number(),
+  }),
+}
+```
+
+## Timeout
+
+Set a maximum execution time for the child. If the timeout is exceeded, the spawn throws an error.
+
+```ts
+const spawned = spawn({
+  id: 'time-limited',
+  child: myStep,
+  contextIn: {
+    strategy: 'fresh',
+  },
+  contextOut: {
+    strategy: 'full',
+  },
+  timeout: 3e4, // 30 seconds
+});
+```
+
+## Real-World Example: Research Delegation
+
+```ts
+import { spawn, step, until } from '@orchid/core';
+
+const researchAgent = spawn({
+  id: 'delegated-research',
+  child: {
+    kind: 'loop',
+    id: 'research-loop',
+    body: step.llm({
+      id: 'researcher-llm',
+      model: 'gpt-4o',
+      system: 'You are a research assistant. Use tools to find information.',
+      tools: [searchTool, fetchTool],
+    }),
+    until: until.noToolCalls(),
+    maxIterations: 10,
+  },
+  contextIn: {
+    strategy: 'custom',
+    build: (topic) => [
+      {
+        kind: 'message',
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: `Research the following topic: ${topic}`,
+          },
+        ],
+      },
+    ],
+  },
+  contextOut: {
+    strategy: 'summary',
+    model: 'gpt-4o-mini',
+    prompt: 'Summarize the key findings from the research.',
+  },
+  timeout: 6e4, // 60 seconds
+});
+```
+
+## Related
+
+- [fork](/docs/control-flow/fork) -- parallel execution without context isolation.
+- [Loop & Until](/docs/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
+- [Overview](/docs/overview) -- how spawn fits into the seven primitives.

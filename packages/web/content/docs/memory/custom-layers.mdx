@@ -1,0 +1,242 @@
+---
+title: Custom Memory Layers
+description: How to build your own memory layer by implementing MemoryHooks, choosing a slot and scope, and configuring budgets and timeouts.
+---
+
+## Overview
+
+Every built-in memory layer is just a `MemoryLayer` object. You can build your own by implementing the same interface. This guide walks through each decision point.
+
+## Step 1: Define Your State Type
+
+Your layer manages a single state object of type `TState`. Define what you need to track:
+
+```ts
+interface MyLayerState {
+  entries: string[];
+  lastUpdated: number;
+}
+```
+
+## Step 2: Choose a Slot
+
+The slot determines where your layer's output appears in the assembled prompt. Lower slots appear first.
+
+```ts
+import { Slot } from '@orchid/core';
+
+// Use a built-in constant...
+const slot = Slot.PROCEDURAL; // 250
+
+// ...or pick your own number
+const slot = 275; // between PROCEDURAL and EPISODIC
+```
+
+Built-in slot constants for reference:
+
+| Constant | Value |
+|---|---|
+| `WORKING_MEMORY` | `100` |
+| `ENTITY` | `150` |
+| `OBSERVATIONS` | `200` |
+| `PROCEDURAL` | `250` |
+| `EPISODIC` | `300` |
+| `RAG` | `350` |
+| `SEMANTIC_RECALL` | `400` |
+
+## Step 3: Choose a Scope
+
+Scope controls when state is shared or isolated:
+
+| Scope | Use When |
+|---|---|
+| `'execution'` | State should not survive past the current run |
+| `'thread'` | State should persist per conversation thread |
+| `'resource'` | State should be shared across threads for the same resource |
+| `'global'` | State should be shared across everything |
+
+## Step 4: Configure the Budget
+
+The budget controls how many tokens your layer can inject during `recall`:
+
+```ts
+// Fixed budget
+budget: 500
+
+// Range budget -- allocator distributes spare tokens
+budget: { min: 200, max: 1500 }
+
+// Let the runtime decide
+budget: 'auto'
+```
+
+## Step 5: Implement Hooks
+
+Implement only the hooks you need. All hooks are optional.
+
+```ts
+import type { MemoryLayer, MemoryHooks } from '@orchid/core';
+
+function myCustomLayer(): MemoryLayer<MyLayerState> {
+  return {
+    id: 'my-custom-layer',
+    name: 'My Custom Layer',
+    slot: 275,
+    scope: 'thread',
+    budget: { min: 200, max: 1000 },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<MyLayerState>('state');
+        return {
+          state: saved ?? { entries: [], lastUpdated: 0 },
+        };
+      },
+
+      async recall({ state, budget }) {
+        if (!state.entries.length) return null;
+
+        const text = state.entries.join('\n');
+        const content = `<my_context>\n${text}\n</my_context>`;
+
+        return {
+          items: [{
+            id: 'my-layer-recall',
+            type: 'message' as const,
+            role: 'developer' as const,
+            status: 'completed' as const,
+            content: [{ type: 'input_text' as const, text: content }],
+          }],
+          tokenCount: Math.ceil(content.length / 4),
+        };
+      },
+
+      async store({ newItems, state }) {
+        // Extract relevant data from the LLM response
+        const texts = newItems
+          .filter((i) => i.type === 'message')
+          .flatMap((i) => i.content)
+          .filter((c) => c.type === 'output_text')
+          .map((c) => c.text);
+
+        if (!texts.length) return;
+
+        return {
+          state: {
+            entries: [...state.entries, ...texts],
+            lastUpdated: Date.now(),
+          },
+        };
+      },
+
+      async onComplete({ state, outcome }) {
+        // Optionally finalize state based on outcome
+        return {
+          state: {
+            ...state,
+            lastUpdated: Date.now(),
+          },
+        };
+      },
+    },
+  };
+}
+```
+
+## Step 6: Set Timeouts (Optional)
+
+If any hook makes network calls or runs LLM inference, set a timeout to prevent hangs:
+
+```ts
+timeouts: {
+  store: 30_000,   // 30 seconds for store
+  recall: 10_000,  // 10 seconds for recall
+}
+```
+
+## Step 7: Register with AgentConfig
+
+```ts
+import type { AgentConfig } from '@orchid/core';
+
+const agent: AgentConfig = {
+  name: 'my-agent',
+  description: 'An agent with custom memory',
+  model: 'gpt-4o',
+  instructions: 'You are a helpful assistant.',
+  memory: [
+    workingMemory(),
+    myCustomLayer(),
+    observationalMemory(),
+  ],
+  storage: myStorageAdapter,
+  projection: {
+    tokenBudget: 8000,
+    responseReserve: 4000,
+    overflow: 'truncate',
+  },
+};
+```
+
+Layers are ordered by slot number regardless of array order. The runtime calls each layer's hooks in slot order.
+
+## Hook Parameter Reference
+
+### InitParams
+
+| Field | Type |
+|---|---|
+| `storage` | `ScopedStorage` |
+| `scopeKey` | `string` |
+| `ctx` | `ExecutionContext` |
+
+### RecallParams
+
+| Field | Type |
+|---|---|
+| `log` | `ItemLog` |
+| `query` | `string` |
+| `ctx` | `ExecutionContext` |
+| `state` | `TState` |
+| `budget` | `number` |
+
+### StoreParams
+
+| Field | Type |
+|---|---|
+| `newItems` | `Item[]` |
+| `log` | `ItemLog` |
+| `response` | `LLMResponse` |
+| `ctx` | `ExecutionContext` |
+| `state` | `TState` |
+
+### SpawnParams
+
+| Field | Type |
+|---|---|
+| `parentState` | `TState` |
+| `childCtx` | `ExecutionContext` |
+| `spawnOpts` | `SpawnOptions` |
+
+### ReturnParams
+
+| Field | Type |
+|---|---|
+| `childState` | `TState` |
+| `childLog` | `ItemLog` |
+| `parentState` | `TState` |
+| `result` | `unknown` |
+
+### CompleteParams
+
+| Field | Type |
+|---|---|
+| `log` | `ItemLog` |
+| `ctx` | `ExecutionContext` |
+| `state` | `TState` |
+| `outcome` | `ExecutionOutcome` |
+
+### DisposeParams
+
+| Field | Type |
+|---|---|
+| `state` | `TState` |

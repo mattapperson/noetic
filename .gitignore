@@ -1,1 +1,6 @@
 node_modules/
+.next/
+packages/web/.next/
+packages/web/.source/
+packages/web/next-env.d.ts
+*.lock

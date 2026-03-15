@@ -1,0 +1,211 @@
+---
+title: Runtime
+description: The Runtime interface executes steps, manages context, and coordinates memory and channels.
+---
+
+## Quick Example
+
+```ts
+import { InMemoryRuntime, step } from '@orchid/core';
+
+const runtime = new InMemoryRuntime();
+const ctx = runtime.createContext({ state: { count: 0 } });
+
+const add = step.run('add', async (n: number, ctx) => {
+  return n + 1;
+});
+
+const result = await runtime.execute(add, 5, ctx);
+// result === 6
+```
+
+The Runtime is the execution engine at the heart of Orchid. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `InMemoryRuntime` or implement the `Runtime` interface for durable, distributed, or custom execution environments.
+
+## Runtime Interface
+
+```ts
+interface Runtime {
+  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+  createContext(opts?: CreateContextOpts): Context;
+
+  // Channels
+  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
+  getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+
+  // Memory
+  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
+
+  // Durability
+  checkpoint(ctx: Context): Promise<void>;
+  restore(executionId: string): Promise<Context | null>;
+  cancel(ctx: Context, reason?: string): Promise<void>;
+
+  // Tracing
+  createSpan(name: string, parent: Span | null): Span;
+}
+```
+
+### Core Methods
+
+| Method | Description |
+|---|---|
+| `execute(step, input, ctx)` | Run a single step with the given input and context. Returns the step output. |
+| `createContext(opts?)` | Create a new execution context. Options let you set parent, initial items, state, threadId, and resourceId. |
+
+### createContext Options
+
+| Option | Type | Description |
+|---|---|---|
+| `parent` | `Context` | Parent context (for spawn). |
+| `items` | `Item[]` | Pre-seed the item log. |
+| `state` | `unknown` | Initial mutable state. |
+| `threadId` | `string` | Conversation thread identifier. |
+| `resourceId` | `string` | Optional resource/tenant identifier. |
+
+### Channel Methods
+
+| Method | Description |
+|---|---|
+| `send(channel, value, ctx)` | Push a value into a channel. |
+| `recv(channel, ctx, opts?)` | Wait for a value from a channel. Supports `timeout`. |
+| `tryRecv(channel, ctx)` | Non-blocking read. Returns `null` if nothing is available. |
+| `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
+
+### Memory Methods
+
+The runtime coordinates [memory layer](/docs/memory) lifecycle hooks:
+
+| Method | Description |
+|---|---|
+| `initLayers` | Initialize layers at the start of an agent run. Loads persisted state from storage. |
+| `recallLayers` | Query layers for relevant items given an input string. Returns `RecallLayerOutput[]`. |
+| `storeLayers` | Write new items from an LLM response into layers. |
+| `disposeLayers` | Clean up layers at the end of a run. |
+| `assembleView` | Combine item log and recalled memory into the final item list sent to the model. |
+
+### RecallLayerOutput
+
+```ts
+interface RecallLayerOutput {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
+```
+
+### Durability Methods
+
+| Method | Description |
+|---|---|
+| `checkpoint(ctx)` | Persist execution state for crash recovery. |
+| `restore(executionId)` | Restore a previously checkpointed context. Returns `null` if not found. |
+| `cancel(ctx, reason?)` | Cancel a running execution. |
+
+### Tracing
+
+| Method | Description |
+|---|---|
+| `createSpan(name, parent)` | Create a new [tracing span](/docs/observability). Links to a parent span when provided. |
+
+## InMemoryRuntime
+
+`InMemoryRuntime` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
+
+```ts
+import { InMemoryRuntime, InMemoryExporter } from '@orchid/core';
+
+const exporter = new InMemoryExporter();
+const runtime = new InMemoryRuntime({
+  traceExporter: exporter,
+});
+```
+
+### Constructor Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `callModel` | `CallModelFn` | `undefined` | Custom function that calls the LLM. Required for `step.llm` execution. |
+| `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
+| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
+
+Key behaviors of `InMemoryRuntime`:
+
+- **`checkpoint`** is a no-op (no persistence).
+- **`restore`** always returns `null`.
+- **`assembleView`** returns a copy of the current item log.
+
+## AgentConfig
+
+`AgentConfig` defines the full configuration for an agent. Patterns like `react` build one internally, but you can construct it directly for full control.
+
+```ts
+interface AgentConfig {
+  name: string;
+  description: string;
+  model: string;
+  instructions: string | (() => string | Promise<string>);
+  tools?: Tool[];
+  outputSchema?: ZodType;
+  memory?: MemoryLayer[];
+  storage?: StorageAdapter;
+  projection?: ProjectionPolicy;
+  hooks?: AgentHooks;
+}
+```
+
+| Field | Description |
+|---|---|
+| `name` | Human-readable agent name. |
+| `description` | What the agent does (used in spawn summaries). |
+| `model` | LLM model identifier (e.g., `'gpt-4o'`). |
+| `instructions` | System prompt. Can be a string or an async function for dynamic prompts. |
+| `tools` | Array of tools the agent can call. |
+| `outputSchema` | Zod schema for structured output validation. |
+| `memory` | Memory layers to attach to this agent. |
+| `storage` | Storage adapter for memory persistence. |
+| `projection` | Policy controlling how memory is projected into the context window. |
+| `hooks` | Lifecycle hooks (see below). |
+
+## AgentHooks
+
+```ts
+interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+```
+
+| Hook | When it fires | Typical use |
+|---|---|---|
+| `beforeStep` | Before each step executes. | Logging, injecting state, guard checks. |
+| `afterStep` | After each step completes. | Metrics collection, state updates, audit logging. |
+
+```ts
+const config: AgentConfig = {
+  name: 'researcher',
+  description: 'Searches the web and summarizes findings.',
+  model: 'gpt-4o',
+  instructions: 'You are a research assistant.',
+  hooks: {
+    async beforeStep(step, ctx) {
+      console.log(`Starting step ${step.id} (depth ${ctx.depth})`);
+    },
+    async afterStep(step, result, ctx) {
+      console.log(`Step ${step.id} used ${ctx.tokens.total} tokens`);
+    },
+  },
+};
+```
+
+## Related Pages
+
+- [Context & Event Log](/docs/context) -- the context object the runtime creates.
+- [Channels](/docs/channels) -- channel send/recv methods on the runtime.
+- [Memory](/docs/memory) -- memory layers managed by the runtime.
+- [Observability](/docs/observability) -- tracing spans created by `createSpan`.

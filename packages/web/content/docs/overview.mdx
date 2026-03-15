@@ -1,0 +1,71 @@
+---
+title: Overview
+description: Orchid is a TypeScript agent framework built on seven composable primitives.
+---
+
+## Philosophy
+
+Most frameworks give you a pre-built agent to tweak. Orchid gives you the primitives to build agents from scratch -- or grab a batteries-included pattern to start fast.
+
+Every agent is a composition of small, typed building blocks. There is no hidden control flow, no magic base class, and no runtime surprises. You describe _what_ your agent does; the interpreter figures out _how_ to run it.
+
+## The Seven Primitives
+
+Orchid's entire execution model is built from seven primitives. Each one is a `Step` -- a typed, serializable unit of work.
+
+| Primitive | Kind | Purpose |
+| --- | --- | --- |
+| [`step.run`](/docs/steps/run) | `run` | Execute arbitrary async code |
+| [`step.llm`](/docs/steps/llm) | `llm` | Call a language model |
+| [`step.tool`](/docs/steps/tool) | `tool` | Invoke a single tool directly |
+| [`branch`](/docs/control-flow/branch) | `branch` | Conditional routing -- pick one step or skip |
+| [`fork`](/docs/control-flow/fork) | `fork` | Parallel execution -- race, all, or settle |
+| [`spawn`](/docs/spawn) | `spawn` | Isolated child execution with context strategies |
+| [`loop`](/docs/loop-and-until) | `loop` | Repeat a step until a predicate says stop |
+
+## How They Compose
+
+Primitives nest freely. A `loop` body can be an `llm` step, a `branch`, or even another `loop`. A `fork` can fan out into spawned sub-agents. The type system keeps inputs and outputs aligned at every boundary.
+
+```ts
+import { branch, fork, spawn, step, until } from '@orchid/core';
+
+// A branch that picks between two LLM steps
+const router = branch({
+  id: 'pick-model',
+  route: (input, ctx) => {
+    if (input.includes('code')) {
+      return step.llm({
+        id: 'code-llm',
+        model: 'gpt-4o',
+      });
+    }
+    return step.llm({
+      id: 'chat-llm',
+      model: 'gpt-4o-mini',
+    });
+  },
+});
+```
+
+## Beyond Primitives
+
+### Memory System
+
+Orchid ships with a layered memory system -- working memory, observational memory, and durable task state. Memory layers participate in spawn/return lifecycles and project context into LLM-friendly views.
+
+### Patterns
+
+Pre-composed agent patterns like `react` and `adaptivePlan` give you production-ready agents in a single function call. They are built entirely from the same primitives you use directly.
+
+### Runtime
+
+The `InMemoryRuntime` orchestrates execution, manages context, and wires up observability. Swap in your own `Runtime` implementation for persistence, queuing, or distributed execution.
+
+## Next Steps
+
+- [Getting Started](/docs) -- install and run your first agent.
+- [Steps](/docs/steps) -- deep dive into `run`, `llm`, and `tool`.
+- [Control Flow](/docs/control-flow) -- branching and forking.
+- [Spawn](/docs/spawn) -- isolated child agents.
+- [Loop & Until](/docs/loop-and-until) -- iteration and termination.

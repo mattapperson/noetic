@@ -1,0 +1,280 @@
+---
+title: Loop & Until
+description: Repeat a step until a termination predicate says stop.
+---
+
+## Quick Example
+
+```ts
+import { step, until } from '@orchid/core';
+
+const agent = {
+  kind: 'loop',
+  id: 'chat-loop',
+  body: step.llm({
+    id: 'chat',
+    model: 'gpt-4o',
+    system: 'You are a helpful assistant.',
+    tools: [searchTool],
+  }),
+  until: until.noToolCalls(),
+  maxIterations: 10,
+} as const;
+```
+
+The loop executes its `body` step repeatedly. After each iteration, a `Snapshot` of the current state is passed to the `until` predicate. When the predicate returns `{ stop: true }`, the loop exits and returns the last output.
+
+## Loop API Reference
+
+| Property | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `id` | `string` | Yes | -- | Unique step identifier |
+| `body` | `Step<I, O>` | Yes | -- | The step to repeat |
+| `until` | `Until` | Yes | -- | Predicate that decides when to stop |
+| `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries) |
+| `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array |
+| `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | No | -- | Transform output into next iteration's input |
+| `onError` | `(error: OrchidError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body step |
+
+## The Snapshot
+
+Every time the `until` predicate is called, it receives a `Snapshot` of the loop's current state.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `stepCount` | `number` | Number of successful body executions |
+| `tokens` | `{ input: number; output: number; total: number }` | Cumulative token usage |
+| `elapsed` | `number` | Milliseconds since the loop started |
+| `cost` | `number` | Cumulative cost in USD |
+| `lastOutput` | `unknown` | The most recent body output |
+| `lastText` | `string` | Text representation of the last output |
+| `history` | `unknown[]` | Array of all body outputs (bounded by `maxHistorySize`) |
+| `depth` | `number` | Current nesting depth |
+| `lastStepMeta` | `StepMeta \| null` | Metadata from the last step (tool calls, usage, etc.) |
+
+## The Verdict
+
+The `until` predicate returns a `Verdict` telling the loop what to do.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `stop` | `boolean` | `true` to exit the loop, `false` to continue |
+| `reason` | `string \| undefined` | Human-readable explanation of why the loop stopped |
+| `feedback` | `string \| undefined` | Feedback injected into the next iteration (used by `until.verified`) |
+
+## Built-in Predicates
+
+Orchid ships with several ready-made predicates on the `until` object.
+
+### until.noToolCalls()
+
+Stop when the LLM responds without calling any tools. This is the core of the ReAct pattern.
+
+```ts
+import { until } from '@orchid/core';
+
+const predicate = until.noToolCalls();
+```
+
+### until.maxSteps(n)
+
+Stop after `n` successful body executions.
+
+```ts
+const predicate = until.maxSteps(5);
+```
+
+### until.maxCost(usd)
+
+Stop when cumulative cost reaches the threshold.
+
+```ts
+const predicate = until.maxCost(0.50);
+```
+
+### until.maxDuration(ms)
+
+Stop when elapsed time exceeds the limit.
+
+```ts
+const predicate = until.maxDuration(3e4); // 30 seconds
+```
+
+### until.verified(fn)
+
+Stop when a verification function confirms the output is correct. The function receives the last output and returns `{ pass, feedback }`.
+
+```ts
+const predicate = until.verified(async (output) => {
+  const isValid = await validate(output);
+  return {
+    pass: isValid,
+    feedback: isValid ? undefined : 'Output did not pass validation. Try again.',
+  };
+});
+```
+
+When `pass` is `false`, the `feedback` string is available on the `Verdict` for use in `prepareNext`.
+
+### until.converged(opts)
+
+Stop when the output stabilizes (consecutive outputs are identical).
+
+```ts
+const predicate = until.converged({});
+```
+
+### until.outputContains(marker)
+
+Stop when the output text contains a specific marker string.
+
+```ts
+const predicate = until.outputContains('FINAL ANSWER:');
+```
+
+### until.custom(fn)
+
+Pass through a raw `Until` function for full control.
+
+```ts
+const predicate = until.custom((snap) => ({
+  stop: snap.stepCount > 3 && snap.cost > 0.10,
+  reason: 'Custom condition met',
+}));
+```
+
+## Combinators: all() and any()
+
+Combine multiple predicates with logical operators.
+
+### any(...predicates)
+
+Stop when **any one** of the predicates says stop. This is a logical OR.
+
+```ts
+import { any, until } from '@orchid/core';
+
+const stopCondition = any(
+  until.noToolCalls(),
+  until.maxSteps(10),
+  until.maxCost(1.00),
+);
+```
+
+### all(...predicates)
+
+Stop when **every** predicate says stop. This is a logical AND.
+
+```ts
+import { all, until } from '@orchid/core';
+
+const stopCondition = all(
+  until.maxSteps(3),
+  until.verified(async (output) => ({
+    pass: output !== null,
+  })),
+);
+```
+
+## Preparing the Next Iteration
+
+By default, the body's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
+
+```ts
+import { until } from '@orchid/core';
+
+const loop = {
+  kind: 'loop',
+  id: 'refine-loop',
+  body: step.llm({
+    id: 'refiner',
+    model: 'gpt-4o',
+    system: 'Improve the draft based on feedback.',
+  }),
+  until: until.verified(async (output) => {
+    const score = await evaluate(output);
+    return {
+      pass: score > 0.9,
+      feedback: `Score: ${score}. Improve clarity and detail.`,
+    };
+  }),
+  prepareNext: (output, verdict, ctx) => {
+    if (verdict.feedback) {
+      return `Previous draft:\n${output}\n\nFeedback: ${verdict.feedback}`;
+    }
+    return output;
+  },
+  maxIterations: 5,
+} as const;
+```
+
+## Error Handling
+
+The `onError` callback lets you decide what happens when the body step throws.
+
+| Return Value | Behavior |
+| --- | --- |
+| `'retry'` | Re-execute the body step immediately (counts toward `maxIterations`) |
+| `'skip'` | Skip this iteration, use the previous output, and continue |
+| `'abort'` | Re-throw the error, terminating the loop |
+
+```ts
+const loop = {
+  kind: 'loop',
+  id: 'resilient-loop',
+  body: myStep,
+  until: until.maxSteps(5),
+  onError: (error, ctx) => {
+    if (error.kind === 'step_failed') {
+      return 'retry';
+    }
+    return 'abort';
+  },
+};
+```
+
+If `onError` is not provided, errors propagate immediately.
+
+## The ReAct Pattern
+
+The built-in `react()` helper is just a loop with `until.noToolCalls()`.
+
+```ts
+import { react } from '@orchid/core';
+
+const agent = react({
+  model: 'gpt-4o',
+  system: 'You are a helpful assistant.',
+  tools: [searchTool, calculatorTool],
+  maxSteps: 10,
+  maxCost: 1.00,
+});
+```
+
+This is equivalent to:
+
+```ts
+import { any, step, until } from '@orchid/core';
+
+const agent = {
+  kind: 'loop',
+  id: 'react-loop',
+  body: step.llm({
+    id: 'react-step',
+    model: 'gpt-4o',
+    system: 'You are a helpful assistant.',
+    tools: [searchTool, calculatorTool],
+  }),
+  until: any(
+    until.noToolCalls(),
+    until.maxSteps(10),
+    until.maxCost(1.00),
+  ),
+};
+```
+
+## Related
+
+- [Steps](/docs/steps) -- the step types you can use as a loop body.
+- [Spawn](/docs/spawn) -- run a loop in an isolated child context.
+- [Control Flow](/docs/control-flow) -- branch and fork for non-iterative control flow.

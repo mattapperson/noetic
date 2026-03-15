@@ -1,0 +1,118 @@
+---
+title: Episodic Memory
+description: A memory layer that stores and retrieves summaries of past conversation episodes for long-running agents.
+---
+
+## Overview
+
+Episodic Memory captures summaries of past conversations or execution episodes. When an agent runs across many sessions, episodic memory gives it awareness of what happened previously without replaying full conversation logs.
+
+- **Slot**: `300` (`Slot.EPISODIC`)
+- **Scope**: `resource`
+
+## Concept
+
+Each time an agent completes an execution, the `onComplete` hook generates a summary of the conversation and stores it as an episode. On future runs, the `recall` hook retrieves the most recent or most relevant episodes and injects them into the prompt, giving the agent temporal context.
+
+## Building an Episodic Memory Layer
+
+Orchid provides the slot constant and lifecycle hooks. You implement the layer with your preferred summarization and retrieval strategy:
+
+```ts
+import type { MemoryLayer } from '@orchid/core';
+import { Slot } from '@orchid/core';
+
+interface Episode {
+  id: string;
+  summary: string;
+  timestamp: number;
+  outcome: string;
+  tokenCount: number;
+}
+
+interface EpisodicState {
+  episodes: Episode[];
+}
+
+interface EpisodicMemoryConfig {
+  maxEpisodes?: number;
+  summarize: (items: ReadonlyArray<unknown>) => Promise<string>;
+}
+
+function episodicMemory(config: EpisodicMemoryConfig): MemoryLayer<EpisodicState> {
+  const maxEpisodes = config.maxEpisodes ?? 20;
+
+  return {
+    id: 'episodic-memory',
+    name: 'Episodic Memory',
+    slot: Slot.EPISODIC,
+    scope: 'resource',
+    budget: { min: 300, max: 2000 },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<EpisodicState>('state');
+        return {
+          state: saved ?? { episodes: [] },
+        };
+      },
+
+      async recall({ state, budget }) {
+        if (!state.episodes.length) return null;
+
+        // Select recent episodes that fit within budget
+        const selected: Episode[] = [];
+        let tokens = 0;
+        for (const ep of [...state.episodes].reverse()) {
+          if (tokens + ep.tokenCount > budget) break;
+          selected.unshift(ep);
+          tokens += ep.tokenCount;
+        }
+
+        const text = selected
+          .map((ep) => `[${new Date(ep.timestamp).toISOString()}] ${ep.summary}`)
+          .join('\n');
+        const content = `<episodes>\n${text}\n</episodes>`;
+
+        return {
+          items: [{
+            id: 'episodic-recall',
+            type: 'message' as const,
+            role: 'developer' as const,
+            status: 'completed' as const,
+            content: [{ type: 'input_text' as const, text: content }],
+          }],
+          tokenCount: tokens,
+        };
+      },
+
+      async onComplete({ log, state, outcome }) {
+        const summary = await config.summarize(log.items);
+        const episode: Episode = {
+          id: crypto.randomUUID(),
+          summary,
+          timestamp: Date.now(),
+          outcome,
+          tokenCount: Math.ceil(summary.length / 4),
+        };
+
+        return {
+          state: {
+            episodes: [...state.episodes, episode].slice(-maxEpisodes),
+          },
+        };
+      },
+    },
+  };
+}
+```
+
+## Key Design Points
+
+- **Summarization**: The `onComplete` hook is where you summarize the conversation. This can be an LLM call, a heuristic, or a simple truncation.
+- **Budget-aware recall**: The `recall` hook selects episodes that fit within the allocated token budget, prioritizing recent episodes.
+- **Scope**: Using `'resource'` scope means episodes are shared across threads tied to the same resource. Use `'global'` if you want cross-resource episode sharing.
+
+## Next Steps
+
+- [Semantic Recall](/docs/memory/semantic-recall) -- vector-indexed retrieval for larger knowledge bases
+- [Custom Layers](/docs/memory/custom-layers) -- full guide to implementing any memory layer

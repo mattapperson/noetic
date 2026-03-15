@@ -1,0 +1,131 @@
+---
+title: step.tool
+description: Invoke a single tool directly as a typed step.
+---
+
+## Quick Example
+
+```ts
+import { z } from 'zod';
+import { step } from '@orchid/core';
+
+const calculator = {
+  name: 'add',
+  description: 'Add two numbers',
+  input: z.object({
+    a: z.number(),
+    b: z.number(),
+  }),
+  output: z.object({
+    sum: z.number(),
+  }),
+  execute: async (args) => ({
+    sum: args.a + args.b,
+  }),
+};
+
+const addStep = step.tool({
+  id: 'add-numbers',
+  tool: calculator,
+  args: {
+    a: 10,
+  },
+});
+```
+
+## What It Does
+
+`step.tool` invokes a single tool without going through an LLM. This is useful when you know exactly which tool to call -- for example, after a branch routes to a known action, or as part of a deterministic pipeline.
+
+The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input.
+
+## The Tool Interface
+
+Every tool in Orchid follows the same interface, whether it is passed to `step.llm` or invoked directly via `step.tool`.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | Yes | Tool name (used in LLM function calling) |
+| `description` | `string` | Yes | Human-readable description for the model |
+| `input` | `ZodType<I>` | Yes | Zod schema defining the tool's input |
+| `output` | `ZodType<O>` | Yes | Zod schema defining the tool's output |
+| `execute` | `(args: I, ctx: Context) => Promise<O>` | Yes | The function that runs the tool |
+| `needsApproval` | `boolean` | No | If `true`, the runtime should ask for human approval before executing |
+
+## API Reference
+
+### step.tool Options
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `tool` | `Tool<ZodType<I>, ZodType<O>>` | Yes | The tool to invoke |
+| `args` | `Partial<I>` | No | Preset arguments merged with step input |
+
+## Defining a Tool
+
+```ts
+import { z } from 'zod';
+
+import type { Tool } from '@orchid/core';
+
+const fetchUrl: Tool<typeof UrlInput, typeof UrlOutput> = {
+  name: 'fetch-url',
+  description: 'Fetch the contents of a URL',
+  input: z.object({
+    url: z.string().url(),
+  }),
+  output: z.object({
+    body: z.string(),
+    status: z.number(),
+  }),
+  execute: async (args) => {
+    const res = await fetch(args.url);
+    return {
+      body: await res.text(),
+      status: res.status,
+    };
+  },
+};
+
+const UrlInput = z.object({
+  url: z.string().url(),
+});
+const UrlOutput = z.object({
+  body: z.string(),
+  status: z.number(),
+});
+```
+
+## Human-in-the-Loop Approval
+
+Set `needsApproval: true` on a tool to signal that the runtime should pause and request human confirmation before executing it.
+
+```ts
+import { z } from 'zod';
+
+const deleteTool = {
+  name: 'delete-record',
+  description: 'Permanently delete a database record',
+  input: z.object({
+    recordId: z.string(),
+  }),
+  output: z.object({
+    deleted: z.boolean(),
+  }),
+  execute: async (args) => {
+    // Only runs after approval
+    await db.delete(args.recordId);
+    return {
+      deleted: true,
+    };
+  },
+  needsApproval: true,
+};
+```
+
+## Related
+
+- [step.llm](/docs/steps/llm) -- pass tools to an LLM and let the model decide when to call them.
+- [step.run](/docs/steps/run) -- for arbitrary async logic that is not a tool.
+- [Steps overview](/docs/steps) -- comparison of all three step types.

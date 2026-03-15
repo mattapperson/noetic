@@ -1,0 +1,100 @@
+---
+title: Recursive LLM
+description: Use spawn with fresh context to delegate recursive sub-tasks to child agents that run independently.
+---
+
+## Overview
+
+The Recursive LLM pattern uses `spawn()` with `contextIn: { strategy: 'fresh' }` to create child agents that start with a clean context. This is useful when a task naturally decomposes into sub-problems that should be solved independently.
+
+## Pattern
+
+```ts
+import { spawn, react } from '@orchid/core';
+
+const subTaskAgent = react({
+  model: 'gpt-4o',
+  system: 'Solve the given sub-task.',
+  tools: [searchTool, codeTool],
+  maxSteps: 10,
+});
+
+const recursiveStep = spawn({
+  id: 'recursive-subtask',
+  child: subTaskAgent,
+  contextIn: { strategy: 'fresh' },
+  contextOut: { strategy: 'summary', model: 'gpt-4o' },
+});
+```
+
+## Context Strategies
+
+The key to this pattern is the `contextIn` strategy:
+
+| Strategy | Behavior |
+|---|---|
+| `'fresh'` | Child starts with empty context -- only receives the input string |
+| `'inherit'` | Child gets a copy of the parent's full conversation history |
+| `'subset'` | Child gets a filtered selection of parent items |
+| `'custom'` | You build the child's initial items from scratch |
+
+For recursive decomposition, `'fresh'` is almost always the right choice. It prevents the child from being overwhelmed by the parent's context and keeps token costs down.
+
+## Context Out Strategies
+
+Control how the child's output returns to the parent:
+
+| Strategy | Behavior |
+|---|---|
+| `'full'` | Return the child's raw output as-is |
+| `'summary'` | Summarize the child's output using an LLM call |
+| `'schema'` | Parse the child's output through a Zod schema |
+
+## Example: Divide and Conquer
+
+```ts
+import { spawn, react, step, fork } from '@orchid/core';
+
+// The main agent decides how to decompose the problem
+const mainAgent = step.run({
+  id: 'decompose',
+  execute: async (input: string, ctx) => {
+    // Use an LLM to decompose the task
+    const subtasks = await decompose(input);
+
+    // Fork to handle each subtask in parallel
+    const results = await Promise.all(
+      subtasks.map((task) =>
+        ctx.recv(/* channel with subtask result */)
+      ),
+    );
+
+    return results.join('\n');
+  },
+});
+
+// Each subtask runs in fresh context
+const subtaskStep = spawn({
+  id: 'solve-subtask',
+  child: react({
+    model: 'gpt-4o',
+    tools: [searchTool],
+  }),
+  contextIn: { strategy: 'fresh' },
+  contextOut: { strategy: 'summary', model: 'gpt-4o' },
+  timeout: 60_000,
+});
+```
+
+## When to Use
+
+- Problems that decompose into independent sub-problems
+- Tasks where sub-agents should not see each other's work
+- Deep reasoning chains where each step benefits from a clean slate
+- Cost control -- fresh context means smaller prompts for sub-agents
+
+## Tips
+
+- Use `contextOut: { strategy: 'summary' }` to compress child results before returning them to the parent. This keeps the parent's context from growing unboundedly.
+- Set a `timeout` on the spawn to prevent runaway sub-tasks.
+- Combine with `fork({ mode: 'all' })` to run multiple recursive sub-tasks in parallel.
