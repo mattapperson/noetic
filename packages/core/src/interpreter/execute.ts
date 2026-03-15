@@ -63,7 +63,7 @@ export async function execute<I, O>(
     case 'fork':
       return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel), callModel);
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
     case 'loop':
       return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
     default: {

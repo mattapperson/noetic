@@ -135,10 +135,6 @@ describe('observationalMemory', () => {
     const result = await layer.hooks.onSpawn!({
       parentState,
       childCtx: makeCtx(),
-      spawnOpts: {
-        contextIn: 'fresh',
-        contextOut: 'full',
-      },
     });
     expect(result!.childState).toEqual(parentState);
     expect(result!.childState).not.toBe(parentState);

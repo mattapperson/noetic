@@ -99,8 +99,7 @@ Fork has three mode variants, each a separate interface.
 | `kind` | `'spawn'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `child` | `Step<I, O>` | yes | Child step to execute |
-| `contextIn` | `ContextInStrategy` | yes | How the child inherits context |
-| `contextOut` | `ContextOutStrategy<O>` | yes | How the child's output is extracted |
+| `memory` | `MemoryLayer[]` | no | Spawn-local memory layers |
 | `timeout` | `number` | no | Timeout in milliseconds |
 
 ## StepLoop
@@ -126,25 +125,6 @@ Fork has three mode variants, each a separate interface.
 | `status` | `'fulfilled' \| 'rejected'` | Outcome |
 | `value` | `O` | Present if fulfilled |
 | `error` | `NoeticError` | Present if rejected |
-
-### ContextInStrategy
-
-```ts
-type ContextInStrategy =
-  | { strategy: 'inherit' }
-  | { strategy: 'fresh' }
-  | { strategy: 'subset'; select: (parentItems: Item[], parentState: unknown) => Item[] }
-  | { strategy: 'custom'; build: (input: unknown, parentCtx: Context) => Item[] };
-```
-
-### ContextOutStrategy
-
-```ts
-type ContextOutStrategy<O> =
-  | { strategy: 'full' }
-  | { strategy: 'summary'; model?: string; prompt?: string }
-  | { strategy: 'schema'; schema: ZodType<O> };
-```
 
 ### RetryPolicy
 

@@ -1,24 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { assembleView } from '../../src/memory/projector';
 import type { MessageItem } from '../../src/types/items';
-
-function makeMessage(
-  role: 'system' | 'developer' | 'user' | 'assistant',
-  text: string,
-): MessageItem {
-  return {
-    id: `msg-${text}`,
-    status: 'completed',
-    type: 'message',
-    role,
-    content: [
-      {
-        type: 'input_text',
-        text,
-      },
-    ],
-  };
-}
+import { makeMessage } from '../_helpers';
 
 describe('assembleView', () => {
   it('concatenates system + layer + history', () => {
@@ -32,7 +15,11 @@ describe('assembleView', () => {
       makeMessage('user', 'hello'),
       makeMessage('assistant', 'hi'),
     ];
-    const view = assembleView(sys, layers, history);
+    const view = assembleView({
+      systemPromptItems: sys,
+      layerOutputItems: layers,
+      historyItems: history,
+    });
     expect(view).toHaveLength(4);
     expect((view[0] as MessageItem).role).toBe('system');
     expect((view[1] as MessageItem).role).toBe('developer');
@@ -46,11 +33,16 @@ describe('assembleView', () => {
       },
       (_, i) => makeMessage('user', `msg-${i}`),
     );
-    const view = assembleView([], [], history, {
-      tokenBudget: 10_000,
-      responseReserve: 1_000,
-      overflow: 'sliding_window',
-      windowSize: 3,
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: [],
+      historyItems: history,
+      policy: {
+        tokenBudget: 1e4,
+        responseReserve: 1e3,
+        overflow: 'sliding_window',
+        windowSize: 3,
+      },
     });
     // system(0) + layers(0) + window(3)
     expect(view).toHaveLength(3);
@@ -67,7 +59,11 @@ describe('assembleView', () => {
       },
       (_, i) => makeMessage('user', `msg-${i}`),
     );
-    const view = assembleView([], [], history);
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: [],
+      historyItems: history,
+    });
     expect(view).toHaveLength(5);
   });
 
@@ -78,11 +74,16 @@ describe('assembleView', () => {
       },
       (_, i) => makeMessage('user', `msg-${i}`),
     );
-    const view = assembleView([], [], history, {
-      tokenBudget: 10_000,
-      responseReserve: 1_000,
-      overflow: 'sliding_window',
-      windowSize: 0,
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: [],
+      historyItems: history,
+      policy: {
+        tokenBudget: 1e4,
+        responseReserve: 1e3,
+        overflow: 'sliding_window',
+        windowSize: 0,
+      },
     });
     // windowSize of 0 is treated as no window constraint; all items are returned
     expect(view).toHaveLength(5);
@@ -92,17 +93,26 @@ describe('assembleView', () => {
     const history = [
       makeMessage('user', 'only'),
     ];
-    const view = assembleView([], [], history, {
-      tokenBudget: 10_000,
-      responseReserve: 1_000,
-      overflow: 'sliding_window',
-      windowSize: 100,
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: [],
+      historyItems: history,
+      policy: {
+        tokenBudget: 1e4,
+        responseReserve: 1e3,
+        overflow: 'sliding_window',
+        windowSize: 100,
+      },
     });
     expect(view).toHaveLength(1);
   });
 
   it('all three input arrays empty returns empty array', () => {
-    const view = assembleView([], [], []);
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: [],
+      historyItems: [],
+    });
     expect(view).toEqual([]);
   });
 
@@ -113,10 +123,15 @@ describe('assembleView', () => {
       },
       (_, i) => makeMessage('user', `msg-${i}`),
     );
-    const view = assembleView([], [], history, {
-      tokenBudget: 10_000,
-      responseReserve: 1_000,
-      overflow: 'truncate',
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: [],
+      historyItems: history,
+      policy: {
+        tokenBudget: 1e4,
+        responseReserve: 1e3,
+        overflow: 'truncate',
+      },
     });
     expect(view).toHaveLength(5);
   });

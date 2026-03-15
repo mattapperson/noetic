@@ -12,6 +12,7 @@ export type { CallModelFn, CallModelParams } from './interpreter/execute-llm';
 export { executeLLM } from './interpreter/execute-llm';
 export { executeLoop } from './interpreter/execute-loop';
 export { executeRun } from './interpreter/execute-run';
+export type { ExecuteSpawnOpts } from './interpreter/execute-spawn';
 export { executeSpawn } from './interpreter/execute-spawn';
 export { executeTool } from './interpreter/execute-tool';
 export type { BudgetAllocation, BudgetLimits } from './memory/budget';
@@ -89,7 +90,6 @@ export type {
   ReturnParams,
   ReturnResult,
   ScopedStorage,
-  SpawnOptions,
   SpawnParams,
   SpawnResult,
   StorageAdapter,
@@ -100,8 +100,6 @@ export { Slot } from './types/memory';
 export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability';
 export type { AgentConfig, AgentHooks, RecallLayerOutput, Runtime } from './types/runtime';
 export type {
-  ContextInStrategy,
-  ContextOutStrategy,
   ExecuteStepFn,
   SettleResult,
   Snapshot,

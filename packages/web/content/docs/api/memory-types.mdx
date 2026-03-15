@@ -128,7 +128,6 @@ interface MemoryHooks<TState = unknown> {
 |---|---|---|
 | `parentState` | `TState` | Parent layer state |
 | `childCtx` | `ExecutionContext` | Child execution context |
-| `spawnOpts` | `SpawnOptions` | Spawn configuration |
 
 ### SpawnResult
 
@@ -151,6 +150,7 @@ interface MemoryHooks<TState = unknown> {
 | Field | Type | Description |
 |---|---|---|
 | `parentState` | `TState` | Updated parent state |
+| `result` | `unknown` | Transformed result for pipeline (optional) |
 
 ### CompleteParams
 
@@ -194,13 +194,6 @@ interface ExecutionContext {
   };
 }
 ```
-
-## SpawnOptions
-
-| Field | Type | Description |
-|---|---|---|
-| `contextIn` | `string` | Context input strategy name |
-| `contextOut` | `string` | Context output strategy name |
 
 ## LayerTimeouts
 

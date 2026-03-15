@@ -118,11 +118,11 @@ describe('layer-lifecycle', () => {
       budgets: new Map([
         [
           'high',
-          1_000,
+          1e3,
         ],
         [
           'low',
-          1_000,
+          1e3,
         ],
       ]),
       store,
@@ -265,6 +265,7 @@ describe('layer-lifecycle', () => {
           }),
           onComplete: async () => {
             completed = true;
+            return undefined;
           },
         },
       },
@@ -320,7 +321,7 @@ describe('layer-lifecycle', () => {
       budgets: new Map([
         [
           'broken',
-          1_000,
+          1e3,
         ],
       ]),
       store,
@@ -368,7 +369,7 @@ describe('layer-lifecycle', () => {
       budgets: new Map([
         [
           'slow',
-          1_000,
+          1e3,
         ],
       ]),
       store,
@@ -454,7 +455,7 @@ describe('layer-lifecycle', () => {
       budgets: new Map([
         [
           'recall-fail',
-          1_000,
+          1e3,
         ],
       ]),
       store,
@@ -473,7 +474,7 @@ describe('layer-lifecycle', () => {
         slot: 100,
         scope: 'thread',
         timeouts: {
-          init: 5_000,
+          init: 5e3,
         },
         hooks: {
           init: async () => ({

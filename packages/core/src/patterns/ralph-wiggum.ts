@@ -27,12 +27,6 @@ export function ralphWiggum(opts: {
     body: spawn<string, string>({
       id: 'ralph-iteration',
       child: inner,
-      contextIn: {
-        strategy: 'fresh',
-      },
-      contextOut: {
-        strategy: 'full',
-      },
     }),
     until: any(until.verified(opts.verify), until.maxSteps(opts.maxIterations ?? 50)),
     prepareNext: (_output, verdict) => {

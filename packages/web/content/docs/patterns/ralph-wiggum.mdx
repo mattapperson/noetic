@@ -69,7 +69,7 @@ const agent = ralphWiggum({
 
 ## How It Works
 
-1. The outer loop spawns a fresh ReAct agent with `contextIn: 'fresh'`.
+1. The outer loop spawns with empty context.
 2. The inner ReAct agent runs to completion (up to `innerMaxSteps`).
 3. The output is checked with `until.verified(verify)`.
 4. If verification fails, `prepareNext` injects the feedback: `"Previous attempt feedback: {feedback}\nContinue working."`.
@@ -91,8 +91,6 @@ function ralphWiggum(opts) {
     body: spawn({
       id: 'ralph-iteration',
       child: inner,
-      contextIn: { strategy: 'fresh' },
-      contextOut: { strategy: 'full' },
     }),
     until: any(
       until.verified(opts.verify),

@@ -16,7 +16,7 @@ type Step<I, O> =
   | { kind: 'tool';   id: string; tool: Tool; args?: unknown }
   | { kind: 'branch'; id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';   id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
-  | { kind: 'spawn';  id: string; child: Step<I, O>; contextIn: ContextInStrategy; contextOut: ContextOutStrategy<O>; timeout?: number }
+  | { kind: 'spawn';  id: string; child: Step<I, O>; memory?: MemoryLayer[]; timeout?: number }
   | { kind: 'loop';   id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
@@ -71,6 +71,6 @@ This means `Step<I, O>` is an honest contract: input `I`, output `O`, always. Th
 - `Context` type referenced here is defined in `07-context-and-event-log`
 - `RetryPolicy`, `ModelParams`, `Tool` are defined in `02-step-variants`
 - `MergeFn`, `SettleResult` are defined in `03-control-flow`
-- `ContextInStrategy`, `ContextOutStrategy` are defined in `04-spawn`
+- `MemoryLayer` is defined in `11-memory-layer-system`
 - `Until`, `Verdict` are defined in `05-loop-and-until`
 - `NoeticError` is defined in `09-error-model`

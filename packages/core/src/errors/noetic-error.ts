@@ -26,8 +26,6 @@ function formatMessage(error: NoeticError): string {
       return `LLM rate limited at step '${error.stepId}'${error.retryAfter ? ` (retry after ${error.retryAfter}ms)` : ''}`;
     case 'fork_partial':
       return `Fork '${error.stepId}' partial failure: ${error.succeeded.length} succeeded, ${error.failed.length} failed`;
-    case 'spawn_summary_failed':
-      return `Spawn '${error.stepId}' summary failed: ${error.summaryCause.message}`;
     case 'channel_timeout':
       return `Channel '${error.channelName}' timed out after ${error.timeout}ms`;
     case 'channel_closed':
@@ -39,13 +37,7 @@ function formatMessage(error: NoeticError): string {
     default: {
       const _exhaustive: never = error;
       void _exhaustive;
-      return `NoeticError: unknown (${
-        (
-          error as {
-            kind: string;
-          }
-        ).kind
-      })`;
+      return 'NoeticError: unknown kind';
     }
   }
 }

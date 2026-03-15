@@ -1,10 +1,10 @@
-import type { ContextInStrategy, ContextOutStrategy, Step, StepSpawn } from '../types/step';
+import type { MemoryLayer } from '../types/memory';
+import type { Step, StepSpawn } from '../types/step';
 
 export function spawn<I, O>(opts: {
   id: string;
   child: Step<I, O>;
-  contextIn: ContextInStrategy;
-  contextOut: ContextOutStrategy<O>;
+  memory?: MemoryLayer[];
   timeout?: number;
 }): StepSpawn<I, O> {
   if (!opts.id || !opts.id.trim()) {

@@ -1,11 +1,11 @@
 ---
 title: Recursive LLM
-description: Use spawn with fresh context to delegate recursive sub-tasks to child agents that run independently.
+description: Use spawn to delegate recursive sub-tasks to child agents that run independently with empty context.
 ---
 
 ## Overview
 
-The Recursive LLM pattern uses `spawn()` with `contextIn: { strategy: 'fresh' }` to create child agents that start with a clean context. This is useful when a task naturally decomposes into sub-problems that should be solved independently.
+The Recursive LLM pattern uses `spawn()` to create child agents that start with an empty `ItemLog`. Since spawn provides full isolation by default, the child runs independently without inheriting the parent's conversation history. Memory layers can be attached to control what the child sees and how results flow back.
 
 ## Pattern
 
@@ -22,33 +22,49 @@ const subTaskAgent = react({
 const recursiveStep = spawn({
   id: 'recursive-subtask',
   child: subTaskAgent,
-  contextIn: { strategy: 'fresh' },
-  contextOut: { strategy: 'summary', model: 'gpt-4o' },
 });
 ```
 
-## Context Strategies
+## Controlling Child Context with Memory Layers
 
-The key to this pattern is the `contextIn` strategy:
+Memory layers give you fine-grained control over what the child sees and how results return to the parent.
 
-| Strategy | Behavior |
-|---|---|
-| `'fresh'` | Child starts with empty context -- only receives the input string |
-| `'inherit'` | Child gets a copy of the parent's full conversation history |
-| `'subset'` | Child gets a filtered selection of parent items |
-| `'custom'` | You build the child's initial items from scratch |
+**`onSpawn` hooks** inject items into the child's initial context. Use these to provide instructions, background knowledge, or a curated subset of the parent's history.
 
-For recursive decomposition, `'fresh'` is almost always the right choice. It prevents the child from being overwhelmed by the parent's context and keeps token costs down.
+**`onReturn` hooks** transform the child's results before they reach the parent. Use these to summarize verbose output, extract structured data, or update parent state.
 
-## Context Out Strategies
-
-Control how the child's output returns to the parent:
-
-| Strategy | Behavior |
-|---|---|
-| `'full'` | Return the child's raw output as-is |
-| `'summary'` | Summarize the child's output using an LLM call |
-| `'schema'` | Parse the child's output through a Zod schema |
+```ts
+const recursiveStep = spawn({
+  id: 'recursive-subtask',
+  child: subTaskAgent,
+  memory: [
+    {
+      id: 'task-briefing',
+      name: 'Task Briefing',
+      slot: 100,
+      scope: 'execution',
+      hooks: {
+        onSpawn: async ({ parentState }) => ({
+          childState: null,
+          items: [
+            {
+              kind: 'message',
+              role: 'user',
+              content: [
+                { type: 'input_text', text: `Sub-task: ${parentState.task}` },
+              ],
+            },
+          ],
+        }),
+        onReturn: async ({ result, parentState }) => ({
+          parentState: { ...parentState, subResult: result },
+          result: result,
+        }),
+      },
+    },
+  ],
+});
+```
 
 ## Example: Divide and Conquer
 
@@ -73,16 +89,14 @@ const mainAgent = step.run({
   },
 });
 
-// Each subtask runs in fresh context
+// Each subtask runs in isolated context
 const subtaskStep = spawn({
   id: 'solve-subtask',
   child: react({
     model: 'gpt-4o',
     tools: [searchTool],
   }),
-  contextIn: { strategy: 'fresh' },
-  contextOut: { strategy: 'summary', model: 'gpt-4o' },
-  timeout: 60_000,
+  timeout: 6e4,
 });
 ```
 
@@ -91,10 +105,10 @@ const subtaskStep = spawn({
 - Problems that decompose into independent sub-problems
 - Tasks where sub-agents should not see each other's work
 - Deep reasoning chains where each step benefits from a clean slate
-- Cost control -- fresh context means smaller prompts for sub-agents
+- Cost control -- empty context means smaller prompts for sub-agents
 
 ## Tips
 
-- Use `contextOut: { strategy: 'summary' }` to compress child results before returning them to the parent. This keeps the parent's context from growing unboundedly.
+- Attach a memory layer with an `onReturn` hook to compress child results before they flow back to the parent. This keeps the parent's context from growing unboundedly.
 - Set a `timeout` on the spawn to prevent runaway sub-tasks.
 - Combine with `fork({ mode: 'all' })` to run multiple recursive sub-tasks in parallel.

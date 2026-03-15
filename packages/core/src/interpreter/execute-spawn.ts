@@ -1,45 +1,133 @@
-import { NoeticErrorImpl } from '../errors/noetic-error';
+import type { LayerStateStore } from '../memory/layer-lifecycle';
+import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
 import type { Item } from '../types/items';
+import type { ExecutionContext, MemoryLayer } from '../types/memory';
 import type { ExecuteStepFn, StepSpawn } from '../types/step';
 import { cloneWithGuard } from './clone-guard';
-import type { CallModelFn } from './execute-llm';
-import { createMessage, extractAssistantText } from './message-helpers';
+
+//#region Types
+
+export interface ExecuteSpawnOpts {
+  layerStore?: LayerStateStore;
+  parentLayers?: MemoryLayer[];
+}
+
+interface CollectSpawnItemsParams {
+  layers: MemoryLayer[];
+  parentExecutionCtx: ExecutionContext;
+  childExecutionCtx: ExecutionContext;
+  layerStore: LayerStateStore;
+}
+
+//#endregion
+
+//#region Constants
+
+/** Naive token estimate shared across all spawn execution contexts. */
+const naiveTokenize = (text: string): number => Math.ceil(text.length / 4);
+
+/** No-op trace shared across all spawn execution contexts. */
+const noopTrace = {
+  setAttribute(): void {},
+  addEvent(): void {},
+} as const;
+
+//#endregion
+
+//#region Helper Functions
+
+function resolveLayersForSpawn<I, O>(
+  step: StepSpawn<I, O>,
+  parentLayers?: MemoryLayer[],
+): MemoryLayer[] {
+  if (step.memory) {
+    return step.memory;
+  }
+  return parentLayers ?? [];
+}
+
+function buildChildExecutionContext(ctx: Context): ExecutionContext {
+  return {
+    executionId: crypto.randomUUID(),
+    threadId: ctx.threadId,
+    resourceId: ctx.resourceId,
+    depth: ctx.depth + 1,
+    stepNumber: 0,
+    tokenUsage: {
+      input: 0,
+      output: 0,
+    },
+    cost: 0,
+    tokenize: naiveTokenize,
+    trace: noopTrace,
+  };
+}
+
+function buildParentExecutionContext(ctx: Context): ExecutionContext {
+  return {
+    executionId: ctx.id,
+    threadId: ctx.threadId,
+    resourceId: ctx.resourceId,
+    depth: ctx.depth,
+    stepNumber: ctx.stepCount,
+    tokenUsage: {
+      input: ctx.tokens.input,
+      output: ctx.tokens.output,
+    },
+    cost: ctx.cost,
+    tokenize: naiveTokenize,
+    trace: noopTrace,
+  };
+}
+
+async function collectSpawnItems({
+  layers,
+  parentExecutionCtx,
+  childExecutionCtx,
+  layerStore,
+}: CollectSpawnItemsParams): Promise<Item[]> {
+  const spawnResults = await spawnLayers({
+    layers,
+    parentCtx: parentExecutionCtx,
+    childCtx: childExecutionCtx,
+    store: layerStore,
+  });
+
+  return spawnResults.flatMap((r) => r.items);
+}
+
+//#endregion
+
+//#region Public API
 
 export async function executeSpawn<I, O>(
   step: StepSpawn<I, O>,
   input: I,
   ctx: Context,
   executeStep: ExecuteStepFn,
-  callModel?: CallModelFn,
+  opts?: ExecuteSpawnOpts,
 ): Promise<O> {
-  // Build child context based on contextIn strategy
-  let childItems: Item[] = [];
+  const layers = resolveLayersForSpawn(step, opts?.parentLayers);
+  const childExecutionCtx = buildChildExecutionContext(ctx);
+  const layerStore = opts?.layerStore;
+  const hasLayers = layers.length > 0 && layerStore !== undefined;
 
-  switch (step.contextIn.strategy) {
-    case 'inherit':
-      childItems = [
-        ...ctx.itemLog.items,
-      ];
-      break;
-    case 'fresh':
-      childItems = [];
-      break;
-    case 'subset':
-      childItems = step.contextIn.select(
-        [
-          ...ctx.itemLog.items,
-        ],
-        ctx.state,
-      );
-      break;
-    case 'custom':
-      childItems = step.contextIn.build(input, ctx);
-      break;
+  // Collect items from memory layers via onSpawn hooks
+  let childItems: Item[] = [];
+  let parentExecutionCtx: ExecutionContext | undefined;
+  if (hasLayers) {
+    parentExecutionCtx = buildParentExecutionContext(ctx);
+    childItems = await collectSpawnItems({
+      layers,
+      parentExecutionCtx,
+      childExecutionCtx,
+      layerStore,
+    });
   }
 
-  // Create child context with deep-cloned state
+  // Create child context — empty by default, layers provide items via onSpawn
   const childCtx = new ContextImpl({
     parent: ctx,
     items: childItems,
@@ -48,69 +136,36 @@ export async function executeSpawn<I, O>(
     resourceId: ctx.resourceId,
   });
 
-  // Execute the child step
-  const childOutput = await executeStep<I, O>(step.child, input, childCtx);
+  try {
+    // Execute the child step
+    const childOutput = await executeStep<I, O>(step.child, input, childCtx);
 
-  // Handle contextOut strategy
-  switch (step.contextOut.strategy) {
-    case 'full':
+    // Pipeline result through layer onReturn hooks
+    if (!hasLayers || !parentExecutionCtx) {
       return childOutput;
-
-    case 'summary': {
-      if (!callModel) {
-        throw new NoeticErrorImpl({
-          kind: 'step_failed',
-          stepId: step.id,
-          cause: new Error('callModel required for summary contextOut'),
-          retriesExhausted: false,
-        });
-      }
-      const summaryModel = step.contextOut.model ?? 'gpt-4';
-      const summaryPrompt = step.contextOut.prompt ?? 'Summarize the above conversation concisely.';
-
-      childCtx.itemLog.append(createMessage(summaryPrompt, 'user'));
-
-      try {
-        const response = await callModel({
-          model: summaryModel,
-          items: childCtx.itemLog.items,
-        });
-        const text = extractAssistantText(response.items);
-        // SAFETY: O is string for summary strategy — the summarization model returns text,
-        // and callers using summary contextOut expect string output.
-        return text as unknown as O;
-      } catch (e) {
-        throw new NoeticErrorImpl({
-          kind: 'spawn_summary_failed',
-          stepId: step.id,
-          childOutput: childOutput,
-          summaryCause: e instanceof Error ? e : new Error(String(e)),
-        });
-      }
     }
 
-    case 'schema': {
-      const parseResult = step.contextOut.schema.safeParse(childOutput);
-      if (parseResult.success) {
-        return parseResult.data;
-      }
-      throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
-        stepId: step.id,
-        raw: JSON.stringify(childOutput),
-        schema: step.contextOut.schema,
-        zodError: parseResult.error,
-      });
-    }
+    // SAFETY: returnLayers pipelines `result` through each layer's onReturn hook.
+    // The initial value is childOutput (typed O from executeStep). Layers may transform
+    // the value but are responsible for maintaining the O contract. TypeScript cannot
+    // express "unknown that was originally O and was only transformed by O-preserving hooks"
+    // without dependent types, so we cast at the framework boundary.
+    const pipelinedResult = await returnLayers({
+      layers,
+      parentCtx: parentExecutionCtx,
+      childCtx: childExecutionCtx,
+      childLog: childCtx.itemLog,
+      result: childOutput,
+      store: layerStore,
+    });
 
-    default: {
-      const _exhaustive: never = step.contextOut;
-      throw new NoeticErrorImpl({
-        kind: 'step_failed',
-        stepId: step.id,
-        cause: new Error('Unknown contextOut strategy'),
-        retriesExhausted: false,
-      });
+    return pipelinedResult as O;
+  } finally {
+    // Clean up child execution state to prevent memory leaks — runs on success and error
+    if (hasLayers) {
+      layerStore.cleanup(childExecutionCtx.executionId);
     }
   }
 }
+
+//#endregion

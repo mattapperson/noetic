@@ -1,202 +1,62 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { z } from 'zod';
-import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeSpawn } from '../../src/interpreter/execute-spawn';
+import { createLayerStateStore } from '../../src/memory/layer-lifecycle';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
-import type { Item, MessageItem } from '../../src/types/items';
+import type { Item } from '../../src/types/items';
+import type { MemoryLayer } from '../../src/types/memory';
+import { Slot } from '../../src/types/memory';
 import type { StepSpawn } from '../../src/types/step';
-import { simpleExecute } from '../_helpers';
+import { makeMessage, simpleExecute } from '../_helpers';
+
+//#region Helper Functions
+
+function makeSpawnStep<I, O>(
+  id: string,
+  execute: (input: I, ctx: Context) => Promise<O>,
+  overrides?: Partial<Pick<StepSpawn<I, O>, 'memory' | 'timeout'>>,
+): StepSpawn<I, O> {
+  return {
+    kind: 'spawn',
+    id,
+    child: {
+      kind: 'run',
+      id: `${id}-child`,
+      execute,
+    },
+    ...overrides,
+  };
+}
+
+function makeLayer(id: string, slot: number, hooks: MemoryLayer['hooks']): MemoryLayer {
+  return {
+    id,
+    name: id,
+    slot,
+    scope: 'execution',
+    hooks,
+  };
+}
+
+//#endregion
+
+//#region Tests
 
 describe('executeSpawn', () => {
-  describe('contextIn: inherit', () => {
-    it('copies parent ItemLog items to child', async () => {
+  describe('default spawn (no memory)', () => {
+    it('starts child with empty ItemLog', async () => {
       const parentCtx = new ContextImpl();
-      const parentItem: MessageItem = {
-        id: 'p1',
-        status: 'completed',
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: 'hello',
-          },
-        ],
-      };
-      parentCtx.itemLog.append(parentItem);
-
-      let childItemCount = 0;
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async (_: string, ctx: Context) => {
-            childItemCount = ctx.itemLog.items.length;
-            return 'done';
-          },
-        },
-        contextIn: {
-          strategy: 'inherit',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
-
-      await executeSpawn(step, 'input', parentCtx, simpleExecute);
-      expect(childItemCount).toBe(1); // inherited parent's item
-    });
-  });
-
-  describe('contextIn: fresh', () => {
-    it('starts with empty ItemLog', async () => {
-      const parentCtx = new ContextImpl();
-      const freshItem: MessageItem = {
-        id: 'p1',
-        status: 'completed',
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: 'hello',
-          },
-        ],
-      };
-      parentCtx.itemLog.append(freshItem);
+      parentCtx.itemLog.append(makeMessage('user', 'hello', 'p1'));
 
       let childItemCount = -1;
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async (_: string, ctx: Context) => {
-            childItemCount = ctx.itemLog.items.length;
-            return 'done';
-          },
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
-
-      await executeSpawn(step, 'input', parentCtx, simpleExecute);
-      expect(childItemCount).toBe(0); // fresh = empty
-    });
-  });
-
-  describe('contextIn: subset', () => {
-    it('filters parent items via selector', async () => {
-      const parentCtx = new ContextImpl();
-      const userItem: MessageItem = {
-        id: 'p1',
-        status: 'completed',
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: 'hello',
-          },
-        ],
-      };
-      const assistantItem: MessageItem = {
-        id: 'p2',
-        status: 'completed',
-        type: 'message',
-        role: 'assistant',
-        content: [
-          {
-            type: 'output_text',
-            text: 'hi',
-          },
-        ],
-      };
-      parentCtx.itemLog.append(userItem);
-      parentCtx.itemLog.append(assistantItem);
-
-      let childItems: readonly Item[] = [];
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async (_: string, ctx: Context) => {
-            childItems = ctx.itemLog.items;
-            return 'done';
-          },
-        },
-        contextIn: {
-          strategy: 'subset',
-          select: (items) =>
-            items.filter(
-              (i): i is MessageItem => i.type === 'message' && (i as MessageItem).role === 'user',
-            ),
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
-
-      await executeSpawn(step, 'input', parentCtx, simpleExecute);
-      expect(childItems).toHaveLength(1);
-    });
-  });
-
-  describe('contextIn: custom', () => {
-    it('builds arbitrary items', async () => {
-      const parentCtx = new ContextImpl();
-      let childItems: readonly Item[] = [];
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async (_: string, ctx: Context) => {
-            childItems = ctx.itemLog.items;
-            return 'done';
-          },
-        },
-        contextIn: {
-          strategy: 'custom',
-          build: (input, _parentCtx): MessageItem[] => [
-            {
-              id: 'custom-1',
-              status: 'completed',
-              type: 'message',
-              role: 'system',
-              content: [
-                {
-                  type: 'input_text',
-                  text: `Custom: ${input}`,
-                },
-              ],
-            },
-          ],
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
-
-      await executeSpawn(step, 'hello', parentCtx, simpleExecute);
-      expect(childItems).toHaveLength(1);
-      const firstItem = childItems[0] as MessageItem;
-      expect(firstItem.content[0]).toEqual({
-        type: 'input_text',
-        text: 'Custom: hello',
+      const step = makeSpawnStep<string, string>('empty-spawn', async (_input, ctx) => {
+        childItemCount = ctx.itemLog.items.length;
+        return 'done';
       });
+
+      await executeSpawn(step, 'input', parentCtx, simpleExecute);
+      expect(childItemCount).toBe(0);
     });
   });
 
@@ -208,39 +68,27 @@ describe('executeSpawn', () => {
           val: string;
         };
       };
+
+      const initialState = {
+        count: 0,
+        nested: {
+          val: 'original',
+        },
+      } satisfies TestState;
+
       const parentCtx = new ContextImpl({
-        state: {
-          count: 0,
-          nested: {
-            val: 'original',
-          },
-        } satisfies TestState,
+        state: initialState,
       });
 
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          // Spawn provides child contexts; state is writable via Context interface
-          execute: async (_: string, ctx: Context) => {
-            const childState = ctx.state as TestState;
-            childState.count = 99;
-            childState.nested.val = 'modified';
-            return 'done';
-          },
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
+      const step = makeSpawnStep<string, string>('state-test', async (_input, ctx) => {
+        const childState = ctx.state as TestState;
+        childState.count = 99;
+        childState.nested.val = 'modified';
+        return 'done';
+      });
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
-      // Parent state should be unchanged
+
       const parentState = parentCtx.state as TestState;
       expect(parentState.count).toBe(0);
       expect(parentState.nested.val).toBe('original');
@@ -252,24 +100,10 @@ describe('executeSpawn', () => {
       const parentCtx = new ContextImpl();
       let childDepth = -1;
 
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async (_: string, ctx: Context) => {
-            childDepth = ctx.depth;
-            return 'done';
-          },
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
+      const step = makeSpawnStep<string, string>('depth-test', async (_input, ctx) => {
+        childDepth = ctx.depth;
+        return 'done';
+      });
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
       expect(parentCtx.depth).toBe(0);
@@ -277,144 +111,226 @@ describe('executeSpawn', () => {
     });
   });
 
-  describe('child step throws', () => {
-    it('error propagates from executeSpawn', async () => {
+  describe('child step error', () => {
+    it('propagates from executeSpawn', async () => {
       const parentCtx = new ContextImpl();
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'throw-test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async () => {
-            throw new Error('child boom');
-          },
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
+      const step = makeSpawnStep<string, string>('error-test', async () => {
+        throw new Error('child boom');
+      });
+
       await expect(executeSpawn(step, '', parentCtx, simpleExecute)).rejects.toThrow('child boom');
     });
   });
 
-  describe('contextIn: subset with empty parent', () => {
-    it('select receives empty array', async () => {
+  describe('memory layers with onSpawn', () => {
+    it('provides items to child via onSpawn hook', async () => {
       const parentCtx = new ContextImpl();
-      let receivedItems: readonly Item[] = [];
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'empty-subset',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async () => 'done',
+      const layerStore = createLayerStateStore();
+      const parentExecId = parentCtx.id;
+
+      // Pre-seed state for the layer so onSpawn can read it
+      layerStore.set(parentExecId, 'recall-layer', {
+        seeded: true,
+      });
+
+      const spawnItem = makeMessage('user', 'from layer', 'spawn-1');
+      const layer = makeLayer('recall-layer', Slot.WORKING_MEMORY, {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+          items: [
+            spawnItem,
+          ],
+        }),
+      });
+
+      let childItems: readonly Item[] = [];
+      const step = makeSpawnStep<string, string>(
+        'layer-spawn',
+        async (_input, ctx) => {
+          childItems = ctx.itemLog.items;
+          return 'done';
         },
-        contextIn: {
-          strategy: 'subset',
-          select: (items) => {
-            receivedItems = items;
-            return [];
-          },
+        {
+          memory: [
+            layer,
+          ],
         },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
-      await executeSpawn(step, '', parentCtx, simpleExecute);
-      expect(receivedItems).toHaveLength(0);
+      );
+
+      await executeSpawn(step, 'input', parentCtx, simpleExecute, {
+        layerStore,
+        parentLayers: [
+          layer,
+        ],
+      });
+
+      expect(childItems).toHaveLength(1);
+      const firstItem = childItems[0];
+      assert(firstItem !== undefined);
+      expect(firstItem.id).toBe('spawn-1');
     });
   });
 
-  describe('contextOut: schema validation failure', () => {
-    it('throws llm_parse_error on schema mismatch', async () => {
+  describe('result pipeline through onReturn layers', () => {
+    it('transforms result via onReturn hook', async () => {
       const parentCtx = new ContextImpl();
-      type SchemaOutOpts = Parameters<typeof executeSpawn>[0];
-      // Intentionally pass z.number() schema against a string output to trigger
-      // the runtime parse failure path — bypasses generic type constraint via unknown.
-      const step = {
-        kind: 'spawn' as const,
-        id: 'schema-fail',
-        child: {
-          kind: 'run' as const,
-          id: 'child-run',
-          execute: async () => 'not-a-number',
-        },
-        contextIn: {
-          strategy: 'fresh' as const,
-        },
-        contextOut: {
-          strategy: 'schema' as const,
-          schema: z.number(),
-        },
-      } as unknown as SchemaOutOpts;
-      try {
-        await executeSpawn(step, '', parentCtx, simpleExecute);
-        expect.unreachable('should have thrown');
-      } catch (e) {
-        assert(isNoeticError(e));
-        expect(e.noeticError.kind).toBe('llm_parse_error');
-      }
+      const layerStore = createLayerStateStore();
+      const parentExecId = parentCtx.id;
+
+      layerStore.set(parentExecId, 'transform-layer', {
+        active: true,
+      });
+
+      const layer = makeLayer('transform-layer', Slot.WORKING_MEMORY, {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+        }),
+        onReturn: async ({ parentState, result }) => ({
+          parentState,
+          result: `transformed:${result}`,
+        }),
+      });
+
+      const step = makeSpawnStep<string, string>('pipeline-test', async () => 'raw-output', {
+        memory: [
+          layer,
+        ],
+      });
+
+      const result = await executeSpawn(step, '', parentCtx, simpleExecute, {
+        layerStore,
+        parentLayers: [
+          layer,
+        ],
+      });
+
+      expect(result).toBe('transformed:raw-output');
     });
   });
 
-  describe('contextOut: summary when callModel fails', () => {
-    it('throws spawn_summary_failed with childOutput', async () => {
+  describe('spawn-local memory replaces parent layers', () => {
+    it('uses step.memory instead of parentLayers', async () => {
       const parentCtx = new ContextImpl();
-      const step: StepSpawn<string, string> = {
-        kind: 'spawn',
-        id: 'sum-fail',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async () => 'child-data',
+      const layerStore = createLayerStateStore();
+      const parentExecId = parentCtx.id;
+
+      const parentLayer = makeLayer('parent-layer', Slot.WORKING_MEMORY, {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+          items: [
+            makeMessage('user', 'from parent', 'parent-item'),
+          ],
+        }),
+      });
+
+      const spawnLayer = makeLayer('spawn-layer', Slot.OBSERVATIONS, {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+          items: [
+            makeMessage('user', 'from spawn', 'spawn-item'),
+          ],
+        }),
+      });
+
+      // Seed state for both layers
+      layerStore.set(parentExecId, 'parent-layer', {
+        v: 1,
+      });
+      layerStore.set(parentExecId, 'spawn-layer', {
+        v: 2,
+      });
+
+      let childItems: readonly Item[] = [];
+      const step = makeSpawnStep<string, string>(
+        'replace-test',
+        async (_input, ctx) => {
+          childItems = ctx.itemLog.items;
+          return 'done';
         },
-        contextIn: {
-          strategy: 'fresh',
+        {
+          memory: [
+            spawnLayer,
+          ],
         },
-        contextOut: {
-          strategy: 'summary',
-        },
-      };
-      const failingCallModel = async () => {
-        throw new Error('LLM down');
-      };
-      try {
-        await executeSpawn(step, '', parentCtx, simpleExecute, failingCallModel);
-        expect.unreachable('should have thrown');
-      } catch (e) {
-        assert(isNoeticError(e));
-        const oe = e.noeticError;
-        assert(oe.kind === 'spawn_summary_failed');
-        expect(oe.childOutput).toBe('child-data');
-      }
+      );
+
+      await executeSpawn(step, '', parentCtx, simpleExecute, {
+        layerStore,
+        parentLayers: [
+          parentLayer,
+        ],
+      });
+
+      // Only spawn-layer items should appear, not parent-layer
+      expect(childItems).toHaveLength(1);
+      const item = childItems[0];
+      assert(item !== undefined);
+      expect(item.id).toBe('spawn-item');
     });
   });
 
-  describe('contextOut: full', () => {
-    it('returns child output directly', async () => {
+  describe('slot-ordered item merging from multiple layers', () => {
+    it('merges items sorted by slot number', async () => {
       const parentCtx = new ContextImpl();
-      const step: StepSpawn<string, number> = {
-        kind: 'spawn',
-        id: 'test',
-        child: {
-          kind: 'run',
-          id: 'child-run',
-          execute: async (input: string) => input.length,
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
-      };
+      const layerStore = createLayerStateStore();
+      const parentExecId = parentCtx.id;
 
-      const result = await executeSpawn(step, 'hello', parentCtx, simpleExecute);
-      expect(result).toBe(5);
+      const highSlotLayer = makeLayer('high-slot', Slot.EPISODIC, {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+          items: [
+            makeMessage('user', 'episodic', 'high-item'),
+          ],
+        }),
+      });
+
+      const lowSlotLayer = makeLayer('low-slot', Slot.WORKING_MEMORY, {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+          items: [
+            makeMessage('user', 'working', 'low-item'),
+          ],
+        }),
+      });
+
+      // Seed state
+      layerStore.set(parentExecId, 'high-slot', {
+        v: 1,
+      });
+      layerStore.set(parentExecId, 'low-slot', {
+        v: 2,
+      });
+
+      let childItems: readonly Item[] = [];
+      // Pass layers in reverse slot order to verify sorting
+      const step = makeSpawnStep<string, string>(
+        'merge-test',
+        async (_input, ctx) => {
+          childItems = ctx.itemLog.items;
+          return 'done';
+        },
+        {
+          memory: [
+            highSlotLayer,
+            lowSlotLayer,
+          ],
+        },
+      );
+
+      await executeSpawn(step, '', parentCtx, simpleExecute, {
+        layerStore,
+      });
+
+      expect(childItems).toHaveLength(2);
+      const first = childItems[0];
+      const second = childItems[1];
+      assert(first !== undefined);
+      assert(second !== undefined);
+      // Lower slot (WORKING_MEMORY=100) should come before higher slot (EPISODIC=300)
+      expect(first.id).toBe('low-item');
+      expect(second.id).toBe('high-item');
     });
   });
 });
+
+//#endregion

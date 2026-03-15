@@ -170,37 +170,4 @@ describe('Error propagation', () => {
       }
     });
   });
-
-  describe('spawn errors', () => {
-    it('spawn_summary_failed preserves childOutput', async () => {
-      const step: Step<string, string> = {
-        kind: 'spawn',
-        id: 'sum-fail',
-        child: {
-          kind: 'run',
-          id: 'child',
-          execute: async () => 'child-data',
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'summary',
-        },
-      };
-      const ctx = new ContextImpl();
-      const mockCallModel = async () => {
-        throw new Error('LLM down');
-      };
-      try {
-        await execute(step, '', ctx, mockCallModel);
-        expect.unreachable('should have thrown');
-      } catch (e) {
-        assert(isNoeticError(e));
-        const oe = e.noeticError;
-        assert(oe.kind === 'spawn_summary_failed');
-        expect(oe.childOutput).toBe('child-data');
-      }
-    });
-  });
 });

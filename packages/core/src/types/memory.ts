@@ -107,15 +107,9 @@ export interface StoreResult<TState> {
   state: TState;
 }
 
-export interface SpawnOptions {
-  contextIn: string;
-  contextOut: string;
-}
-
 export interface SpawnParams<TState> {
   parentState: TState;
   childCtx: ExecutionContext;
-  spawnOpts: SpawnOptions;
 }
 
 export interface SpawnResult<TState> {
@@ -132,6 +126,7 @@ export interface ReturnParams<TState> {
 
 export interface ReturnResult<TState> {
   parentState: TState;
+  result?: unknown;
 }
 
 export interface CompleteParams<TState> {
@@ -152,9 +147,12 @@ export interface MemoryHooks<TState = unknown> {
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
-  onComplete?: (params: CompleteParams<TState>) => Promise<void | {
-    state: TState;
-  }>;
+  onComplete?: (params: CompleteParams<TState>) => Promise<
+    | undefined
+    | {
+        state: TState;
+      }
+  >;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
 }
 

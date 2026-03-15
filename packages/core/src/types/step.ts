@@ -2,7 +2,7 @@ import type { ZodType } from 'zod';
 import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
-import type { Item } from './items';
+import type { MemoryLayer } from './memory';
 
 // Until predicate types
 export interface Snapshot {
@@ -28,37 +28,6 @@ export interface Verdict {
 }
 
 export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
-
-// Context strategies for spawn
-export type ContextInStrategy =
-  | {
-      strategy: 'inherit';
-    }
-  | {
-      strategy: 'fresh';
-    }
-  | {
-      strategy: 'subset';
-      select: (parentItems: Item[], parentState: unknown) => Item[];
-    }
-  | {
-      strategy: 'custom';
-      build: (input: unknown, parentCtx: Context) => Item[];
-    };
-
-export type ContextOutStrategy<O> =
-  | {
-      strategy: 'full';
-    }
-  | {
-      strategy: 'summary';
-      model?: string;
-      prompt?: string;
-    }
-  | {
-      strategy: 'schema';
-      schema: ZodType<O>;
-    };
 
 // Settle result for fork
 export interface SettleResult<O> {
@@ -141,8 +110,7 @@ export interface StepSpawn<I, O> {
   kind: 'spawn';
   id: string;
   child: Step<I, O>;
-  contextIn: ContextInStrategy;
-  contextOut: ContextOutStrategy<O>;
+  memory?: MemoryLayer[];
   timeout?: number;
 }
 

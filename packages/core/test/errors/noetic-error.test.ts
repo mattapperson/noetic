@@ -54,7 +54,7 @@ describe('NoeticError', () => {
       const e = new NoeticErrorImpl({
         kind: 'llm_rate_limit',
         stepId: 'rl',
-        retryAfter: 5_000,
+        retryAfter: 5e3,
       });
       expect(e.noeticError.kind).toBe('llm_rate_limit');
       expect(e.message).toContain('rate limited');
@@ -84,22 +84,11 @@ describe('NoeticError', () => {
       expect(e.message).toContain('1 failed');
     });
 
-    it('spawn_summary_failed', () => {
-      const e = new NoeticErrorImpl({
-        kind: 'spawn_summary_failed',
-        stepId: 's',
-        childOutput: 'data',
-        summaryCause: new Error('LLM down'),
-      });
-      assert(e.noeticError.kind === 'spawn_summary_failed');
-      expect(e.noeticError.childOutput).toBe('data');
-    });
-
     it('channel_timeout', () => {
       const e = new NoeticErrorImpl({
         kind: 'channel_timeout',
         channelName: 'ch1',
-        timeout: 30_000,
+        timeout: 3e4,
       });
       expect(e.noeticError.kind).toBe('channel_timeout');
       expect(e.message).toContain('30000ms');
@@ -148,7 +137,7 @@ describe('NoeticError', () => {
         kind: 'totally_unknown',
       } as unknown as ConstructorParameters<typeof NoeticErrorImpl>[0]);
       expect(e.message).toContain('NoeticError');
-      expect(e.message).toContain('totally_unknown');
+      expect(e.message).toContain('unknown kind');
     });
   });
 

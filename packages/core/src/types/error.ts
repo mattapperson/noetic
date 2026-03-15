@@ -37,12 +37,6 @@ export type NoeticError =
       }>;
     }
   | {
-      kind: 'spawn_summary_failed';
-      stepId: string;
-      childOutput: unknown;
-      summaryCause: Error;
-    }
-  | {
       kind: 'channel_timeout';
       channelName: string;
       timeout: number;

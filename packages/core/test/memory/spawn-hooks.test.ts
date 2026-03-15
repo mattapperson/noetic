@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import {
   createLayerStateStore,
   initLayers,
@@ -23,13 +24,16 @@ describe('spawnLayers', () => {
               data: 'parent',
             },
           }),
-          onSpawn: async ({ parentState }) => ({
-            childState: {
-              ...(parentState as Record<string, unknown>),
-              spawned: true,
-            },
-            items: [],
-          }),
+          onSpawn: async ({ parentState }) => {
+            const state = parentState as Record<string, unknown>;
+            return {
+              childState: {
+                ...state,
+                spawned: true,
+              },
+              items: [],
+            };
+          },
         },
       },
     ];
@@ -51,15 +55,12 @@ describe('spawnLayers', () => {
       layers,
       parentCtx,
       childCtx,
-      spawnOpts: {
-        contextIn: 'fresh',
-        contextOut: 'full',
-      },
       store,
     });
 
     expect(results).toHaveLength(1);
-    expect((results[0].childState as Record<string, unknown>).spawned).toBe(true);
+    const childState = results[0].childState as Record<string, unknown>;
+    expect(childState.spawned).toBe(true);
   });
 });
 
@@ -84,11 +85,15 @@ describe('returnLayers', () => {
           onSpawn: async ({ parentState }) => ({
             childState: structuredClone(parentState),
           }),
-          onReturn: async ({ childState, parentState }) => ({
-            parentState: {
-              count: (parentState as CountState).count + (childState as CountState).count,
-            } satisfies CountState,
-          }),
+          onReturn: async ({ childState, parentState }) => {
+            const parent = parentState as CountState;
+            const child = childState as CountState;
+            return {
+              parentState: {
+                count: parent.count + child.count,
+              } satisfies CountState,
+            };
+          },
         },
       },
     ];
@@ -110,10 +115,6 @@ describe('returnLayers', () => {
       layers,
       parentCtx,
       childCtx,
-      spawnOpts: {
-        contextIn: 'fresh',
-        contextOut: 'full',
-      },
       store,
     });
 
@@ -122,7 +123,7 @@ describe('returnLayers', () => {
       count: 5,
     });
 
-    await returnLayers({
+    const returnResult = await returnLayers({
       layers,
       parentCtx,
       childCtx,
@@ -132,7 +133,9 @@ describe('returnLayers', () => {
     });
 
     const parentState = store.get<CountState>('parent2', 'test');
-    expect(parentState?.count).toBe(5); // 0 + 5
+    assert(parentState !== undefined);
+    expect(parentState.count).toBe(5); // 0 + 5
+    expect(returnResult).toBe('done');
   });
 
   it('missing onSpawn hook returns empty results', async () => {
@@ -169,10 +172,6 @@ describe('returnLayers', () => {
       layers,
       parentCtx,
       childCtx,
-      spawnOpts: {
-        contextIn: 'fresh',
-        contextOut: 'full',
-      },
       store,
     });
     expect(results).toHaveLength(0);
@@ -213,12 +212,90 @@ describe('returnLayers', () => {
       layers,
       parentCtx,
       childCtx,
-      spawnOpts: {
-        contextIn: 'fresh',
-        contextOut: 'full',
-      },
       store,
     });
     expect(results).toHaveLength(0);
+  });
+
+  it('onReturn transforms result through the pipeline', async () => {
+    type TagState = {
+      tag: string;
+    };
+    const store = createLayerStateStore();
+    const layers: MemoryLayer[] = [
+      {
+        id: 'layer-a',
+        name: 'LayerA',
+        slot: 100,
+        scope: 'execution',
+        hooks: {
+          init: async () => ({
+            state: {
+              tag: 'a',
+            } satisfies TagState,
+          }),
+          onSpawn: async ({ parentState }) => ({
+            childState: structuredClone(parentState),
+          }),
+          onReturn: async ({ parentState, result }) => ({
+            parentState,
+            result: `${String(result)}+a`,
+          }),
+        },
+      },
+      {
+        id: 'layer-b',
+        name: 'LayerB',
+        slot: 200,
+        scope: 'execution',
+        hooks: {
+          init: async () => ({
+            state: {
+              tag: 'b',
+            } satisfies TagState,
+          }),
+          onSpawn: async ({ parentState }) => ({
+            childState: structuredClone(parentState),
+          }),
+          onReturn: async ({ parentState, result }) => ({
+            parentState,
+            result: `${String(result)}+b`,
+          }),
+        },
+      },
+    ];
+
+    const parentCtx = makeCtx({
+      executionId: 'parent-pipeline',
+    });
+    const childCtx = makeCtx({
+      executionId: 'child-pipeline',
+      depth: 1,
+    });
+
+    await initLayers({
+      layers,
+      ctx: parentCtx,
+      storage: makeStorage(),
+      store,
+    });
+    await spawnLayers({
+      layers,
+      parentCtx,
+      childCtx,
+      store,
+    });
+
+    const returnResult = await returnLayers({
+      layers,
+      parentCtx,
+      childCtx,
+      childLog: makeItemLog(),
+      result: 'seed',
+      store,
+    });
+
+    // Each layer appends its tag: seed -> seed+a -> seed+a+b
+    expect(returnResult).toBe('seed+a+b');
   });
 });

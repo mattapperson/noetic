@@ -160,10 +160,6 @@ describe('workingMemory layer', () => {
         data: 'parent',
       },
       childCtx: makeCtx(),
-      spawnOpts: {
-        contextIn: 'none',
-        contextOut: 'none',
-      },
     });
     expect(result!.childState).toEqual({
       data: 'parent',
@@ -179,10 +175,6 @@ describe('workingMemory layer', () => {
         data: 'parent',
       },
       childCtx: makeCtx(),
-      spawnOpts: {
-        contextIn: 'none',
-        contextOut: 'none',
-      },
     });
     expect(result).toBeNull();
   });

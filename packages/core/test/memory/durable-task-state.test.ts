@@ -60,10 +60,6 @@ describe('durableTaskState', () => {
     const result = await layer.hooks.onSpawn!({
       parentState,
       childCtx: makeCtx(),
-      spawnOpts: {
-        contextIn: 'fresh',
-        contextOut: 'full',
-      },
     });
     expect(result).not.toBeNull();
     expect(result!.childState).toEqual(parentState);

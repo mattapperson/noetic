@@ -1,7 +1,7 @@
 import type { LLMResponse } from '../types/common';
 import type { ItemLog } from '../types/context';
 import type { Item } from '../types/items';
-import type { ExecutionContext, MemoryLayer, SpawnOptions, StorageAdapter } from '../types/memory';
+import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import { createScopedStorage, resolveScopeKey } from './scope';
 
 //#region Types
@@ -41,7 +41,6 @@ interface SpawnLayersParams {
   layers: MemoryLayer[];
   parentCtx: ExecutionContext;
   childCtx: ExecutionContext;
-  spawnOpts: SpawnOptions;
   store: LayerStateStore;
 }
 
@@ -83,10 +82,12 @@ export function createLayerStateStore(
       return states.get(executionId)?.get(layerId) as T | undefined;
     },
     set<T>(executionId: string, layerId: string, state: T): void {
-      if (!states.has(executionId)) {
-        states.set(executionId, new Map());
+      let execMap = states.get(executionId);
+      if (!execMap) {
+        execMap = new Map();
+        states.set(executionId, execMap);
       }
-      states.get(executionId)!.set(layerId, state);
+      execMap.set(layerId, state);
     },
     cleanup(executionId: string): void {
       states.delete(executionId);
@@ -121,7 +122,7 @@ export async function initLayers({ layers, ctx, storage, store }: InitLayersPara
     const scopeKey = resolveScopeKey(layer.scope, ctx);
     const scopedStorage = createScopedStorage(storage, layer.id, scopeKey);
     try {
-      const timeout = layer.timeouts?.init ?? 10_000;
+      const timeout = layer.timeouts?.init ?? 1e4;
       const result = await withTimeout(
         layer.hooks.init({
           storage: scopedStorage,
@@ -171,7 +172,7 @@ export async function recallLayers({
 
     const budget = budgets.get(layer.id) ?? 0;
     try {
-      const timeout = layer.timeouts?.recall ?? 5_000;
+      const timeout = layer.timeouts?.recall ?? 5e3;
       const result = await withTimeout(
         layer.hooks.recall({
           log,
@@ -230,7 +231,7 @@ export async function storeLayers({
 
   await Promise.allSettled(
     snapshots.map(async ({ layer, state, storeFn }) => {
-      const timeout = layer.timeouts?.store ?? 30_000;
+      const timeout = layer.timeouts?.store ?? 3e4;
       try {
         const result = await withTimeout(
           storeFn({
@@ -263,7 +264,7 @@ export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams)
     }
     const state = store.get(ctx.executionId, layer.id);
     try {
-      const timeout = layer.timeouts?.dispose ?? 5_000;
+      const timeout = layer.timeouts?.dispose ?? 5e3;
       await withTimeout(
         layer.hooks.dispose({
           state,
@@ -281,7 +282,6 @@ export async function spawnLayers({
   layers,
   parentCtx,
   childCtx,
-  spawnOpts,
   store,
 }: SpawnLayersParams): Promise<
   {
@@ -295,7 +295,10 @@ export async function spawnLayers({
     childState: unknown;
     items: Item[];
   }[] = [];
-  for (const layer of layers) {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  for (const layer of sorted) {
     if (!layer.hooks.onSpawn) {
       continue;
     }
@@ -304,12 +307,11 @@ export async function spawnLayers({
       continue;
     }
     try {
-      const timeout = layer.timeouts?.onSpawn ?? 10_000;
+      const timeout = layer.timeouts?.onSpawn ?? 1e4;
       const result = await withTimeout(
         layer.hooks.onSpawn({
           parentState,
           childCtx,
-          spawnOpts,
         }),
         timeout,
       );
@@ -335,8 +337,13 @@ export async function returnLayers({
   childLog,
   result,
   store,
-}: ReturnLayersParams): Promise<void> {
-  for (const layer of layers) {
+}: ReturnLayersParams): Promise<unknown> {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  let currentResult: unknown = result;
+
+  for (const layer of sorted) {
     if (!layer.hooks.onReturn) {
       continue;
     }
@@ -346,23 +353,28 @@ export async function returnLayers({
       continue;
     }
     try {
-      const timeout = layer.timeouts?.onReturn ?? 10_000;
+      const timeout = layer.timeouts?.onReturn ?? 1e4;
       const returnResult = await withTimeout(
         layer.hooks.onReturn({
           childState,
           childLog,
           parentState,
-          result,
+          result: currentResult,
         }),
         timeout,
       );
       if (returnResult?.parentState !== undefined) {
         store.set(parentCtx.executionId, layer.id, returnResult.parentState);
       }
+      if (returnResult?.result !== undefined) {
+        currentResult = returnResult.result;
+      }
     } catch (e) {
       store.diagnostic(layer.id, 'onReturn', e);
     }
   }
+
+  return currentResult;
 }
 
 export async function completeLayers({
@@ -378,7 +390,7 @@ export async function completeLayers({
     }
     const state = store.get(ctx.executionId, layer.id);
     try {
-      const timeout = layer.timeouts?.onComplete ?? 30_000;
+      const timeout = layer.timeouts?.onComplete ?? 3e4;
       const result = await withTimeout(
         layer.hooks.onComplete({
           log,

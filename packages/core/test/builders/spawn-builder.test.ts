@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { spawn } from '../../src/builders/spawn-builder';
+import type { MemoryLayer } from '../../src/types/memory';
 
 describe('spawn builder', () => {
   it('creates correct step shape', () => {
@@ -10,17 +12,9 @@ describe('spawn builder', () => {
         id: 'child',
         execute: async (i: string) => i,
       },
-      contextIn: {
-        strategy: 'fresh',
-      },
-      contextOut: {
-        strategy: 'full',
-      },
     });
     expect(s.kind).toBe('spawn');
     expect(s.id).toBe('test-spawn');
-    expect(s.contextIn.strategy).toBe('fresh');
-    expect(s.contextOut.strategy).toBe('full');
   });
 
   it('supports timeout option', () => {
@@ -31,15 +25,9 @@ describe('spawn builder', () => {
         id: 'child',
         execute: async (i: string) => i,
       },
-      contextIn: {
-        strategy: 'inherit',
-      },
-      contextOut: {
-        strategy: 'full',
-      },
-      timeout: 5_000,
+      timeout: 5e3,
     });
-    expect(s.timeout).toBe(5_000);
+    expect(s.timeout).toBe(5e3);
   });
 
   it('throws on empty id', () => {
@@ -50,12 +38,6 @@ describe('spawn builder', () => {
           kind: 'run',
           id: 'child',
           execute: async (i: string) => i,
-        },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
         },
       }),
     ).toThrow('non-empty id');
@@ -70,29 +52,43 @@ describe('spawn builder', () => {
           id: 'child',
           execute: async (i: string) => i,
         },
-        contextIn: {
-          strategy: 'fresh',
-        },
-        contextOut: {
-          strategy: 'full',
-        },
       }),
     ).toThrow('non-empty id');
   });
 
   it('throws on missing child', () => {
-    // Cast via unknown to test runtime validation without bypassing with any
     type SpawnOpts = Parameters<typeof spawn>[0];
+    // Cast via unknown to test runtime validation
     const badOpts = {
       id: 'test',
       child: undefined,
-      contextIn: {
-        strategy: 'fresh' as const,
-      },
-      contextOut: {
-        strategy: 'full' as const,
-      },
     } as unknown as SpawnOpts;
     expect(() => spawn(badOpts)).toThrow('child step');
+  });
+
+  it('supports optional memory field', () => {
+    const layer = {
+      id: 'test-layer',
+      name: 'Test Layer',
+      slot: 100,
+      scope: 'thread',
+      hooks: {},
+    } satisfies MemoryLayer;
+
+    const s = spawn({
+      id: 'memory-spawn',
+      child: {
+        kind: 'run',
+        id: 'child',
+        execute: async (i: string) => i,
+      },
+      memory: [
+        layer,
+      ],
+    });
+
+    assert(s.memory !== undefined);
+    expect(s.memory).toHaveLength(1);
+    expect(s.memory[0].id).toBe('test-layer');
   });
 });

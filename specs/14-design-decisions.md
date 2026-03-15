@@ -23,9 +23,9 @@ We chose to keep `O` as the business value and put execution metadata on the con
 
 We chose mandatory `merge` for `all` and `settle` modes (see `03-control-flow`) to keep the `Step<I, O>` contract honest. The alternative — returning `ForkResult<O>[]` — leaks fork semantics into downstream steps that shouldn't need to know they're consuming forked output. The tradeoff: every fork requires a merge function, even when the merge is trivial.
 
-## Two-axis context strategy vs. single enum
+## Two-axis context strategy vs. single enum (superseded)
 
-We chose `contextIn` x `contextOut` as two independent axes (see `04-spawn`). The original design used a single string enum (`'accumulate' | 'fresh' | 'episodic' | 'windowed'`) that hid enormous complexity behind four words. The tradeoff: more verbose configuration, but every combination is explicit, configurable, and type-safe.
+We originally chose `contextIn` x `contextOut` as two independent axes. The original design before that used a single string enum (`'accumulate' | 'fresh' | 'episodic' | 'windowed'`) that hid enormous complexity behind four words. Both approaches were **superseded by memory layers** — see "Memory layers replace contextIn/contextOut on spawn" below.
 
 ## Error taxonomy vs. generic `Error` propagation
 
@@ -65,7 +65,7 @@ We chose `ChannelHandle<T>` as a typed, lifecycle-aware write surface for extern
 
 ## External channels survive fresh boundaries
 
-External channels are scoped to the **root execution**, not individual spawn boundaries (see `06-channels`). A `contextIn: 'fresh'` spawn clears the ItemLog and internal channels, but external channels remain accessible. This is analogous to `scope: 'resource'` memory layers — they represent user-level communication that should persist regardless of how the agent structures its internal execution. The alternative — resetting external channels on fresh spawn — would break human-in-the-loop patterns where a user sends messages to a running agent that uses fresh-context iterations internally.
+External channels are scoped to the **root execution**, not individual spawn boundaries (see `06-channels`). A spawn starts with an empty ItemLog and clears internal channels, but external channels remain accessible. This is analogous to `scope: 'resource'` memory layers — they represent user-level communication that should persist regardless of how the agent structures its internal execution. The alternative — resetting external channels on spawn — would break human-in-the-loop patterns where a user sends messages to a running agent that uses fresh-context iterations internally.
 
 ## `developer` role for memory layer output vs. `system` for agent instructions
 
@@ -74,3 +74,11 @@ OpenResponses distinguishes `system` (user-authored instructions) from `develope
 ## Options object for `channel()` factory
 
 We moved from positional `channel(name, schema, mode)` to `channel(name, { schema, mode, ... })` (see `06-channels`). The positional form would grow unwieldy as we add `external`, `capacity`, and future options. The options object is more extensible, consistent with other builders (`step.llm({...})`, `spawn({...})`), and avoids a growing positional parameter list. The tradeoff: slightly more verbose for the simplest case, but the API is self-documenting and won't need breaking changes when new options are added.
+
+## Memory layers replace contextIn/contextOut on spawn
+
+We chose to remove `contextIn` and `contextOut` from `StepSpawn` and unify context flow under the memory layer system (see `04-spawn`, `11-memory-layer-system`). Previously, spawn had two independent strategy axes controlling ItemLog flow, while memory layers had `onSpawn`/`onReturn` hooks that were never called from `executeSpawn`. The two systems were disconnected.
+
+The new design: child starts with an empty ItemLog by default. Memory layers provide items via `onSpawn` and transform results via `onReturn`. An optional `memory` field on `StepSpawn` provides spawn-local layers that replace parent layer propagation for full isolation.
+
+The tradeoff: users who previously relied on `contextIn: 'inherit'` or `contextIn: 'subset'` must now write a memory layer to achieve the same effect. But the benefit is a single, composable system for all context flow — no more two-axis configuration, no more implicit interaction between ItemLog strategies and layer hooks.
