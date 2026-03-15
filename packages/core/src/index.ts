@@ -43,3 +43,6 @@ export type {
 export { ContextImpl } from './runtime/context-impl';
 
 export { step } from './builders/step-builders';
+
+export { executeRun } from './interpreter/execute-run';
+export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
