@@ -1,0 +1,56 @@
+import type { ZodType } from 'zod';
+import type { Step } from './step';
+import type { Context, ItemLog } from './context';
+import type { Item } from './items';
+import type { Tool, LLMResponse, StepMeta } from './common';
+import type { Channel, ExternalChannel, ChannelHandle } from './channel';
+import type { MemoryLayer, StorageAdapter, ProjectionPolicy } from './memory';
+import type { Span } from './observability';
+
+export interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+
+export interface AgentConfig {
+  name: string;
+  description: string;
+  model: string;
+  instructions: string | (() => string | Promise<string>);
+  tools?: Tool[];
+  outputSchema?: ZodType;
+  memory?: MemoryLayer[];
+  storage?: StorageAdapter;
+  projection?: ProjectionPolicy;
+  hooks?: AgentHooks;
+}
+
+export interface Runtime {
+  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+  createContext(opts?: {
+    parent?: Context;
+    items?: Item[];
+    state?: unknown;
+    threadId?: string;
+    resourceId?: string;
+  }): Context;
+  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
+  getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
+  checkpoint(ctx: Context): Promise<void>;
+  restore(executionId: string): Promise<Context | null>;
+  cancel(ctx: Context, reason?: string): Promise<void>;
+  createSpan(name: string, parent: Span | null): Span;
+}
+
+export interface RecallLayerOutput {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
