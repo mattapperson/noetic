@@ -43,7 +43,7 @@ export type {
 export { ContextImpl } from './runtime/context-impl';
 
 export { step } from './builders/step-builders';
-export { fork } from './builders/control-flow-builders';
+export { fork, branch } from './builders/control-flow-builders';
 export { spawn } from './builders/spawn-builder';
 export { channel } from './builders/channel-builder';
 export { ChannelStore } from './runtime/channel-store';
@@ -54,6 +54,7 @@ export type { CallModelFn } from './interpreter/execute-llm';
 export { executeTool } from './interpreter/execute-tool';
 export { executeLoop } from './interpreter/execute-loop';
 export type { ExecuteStepFn } from './interpreter/execute-loop';
+export { executeBranch } from './interpreter/execute-branch';
 export { executeFork } from './interpreter/execute-fork';
 export { executeSpawn } from './interpreter/execute-spawn';
 export { execute } from './interpreter/execute';
@@ -66,3 +67,6 @@ export { any, all } from './until/combinators';
 
 export { react } from './patterns/react';
 export { ralphWiggum } from './patterns/ralph-wiggum';
+
+export { compilePlan, adaptivePlan, PlanNodeSchema } from './patterns/plans';
+export type { PlanNode, PlanConstraints } from './patterns/plans';

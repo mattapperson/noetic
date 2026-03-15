@@ -22,9 +22,10 @@ export async function execute<I, O>(
       return executeLLM(step, input, ctx, callModel);
     case 'tool':
       return executeTool(step, input, ctx);
-    case 'branch':
-      // Will be implemented in Stage 6
-      throw new Error('Branch not yet implemented');
+    case 'branch': {
+      const { executeBranch } = await import('./execute-branch');
+      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+    }
     case 'fork': {
       const { executeFork } = await import('./execute-fork');
       return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));

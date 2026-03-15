@@ -74,12 +74,13 @@ describe('execute() switch', () => {
     expect(ctx.stepCount).toBe(2);
   });
 
-  it('throws for unimplemented step kinds', async () => {
+  it('branch step routes correctly', async () => {
     const ctx = new ContextImpl();
     const branchStep: Step<string, string> = {
       kind: 'branch', id: 'b', route: () => null,
     };
-    expect(execute(branchStep, '', ctx)).rejects.toThrow('not yet implemented');
+    const result = await execute(branchStep, 'hello', ctx);
+    expect(result).toBe('hello');
   });
 });
 

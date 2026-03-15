@@ -1,5 +1,5 @@
 import type { Context } from '../types/context';
-import type { Step, StepForkRace, StepForkAll, StepForkSettle, SettleResult } from '../types/step';
+import type { Step, StepBranch, StepForkRace, StepForkAll, StepForkSettle, SettleResult } from '../types/step';
 
 // Fork builder with overloads for type safety
 export function fork<I, O>(opts: {
@@ -27,4 +27,11 @@ export function fork<I, O>(opts: {
 
 export function fork<I, O>(opts: any): any {
   return { kind: 'fork', ...opts };
+}
+
+export function branch<I, O>(opts: {
+  id: string;
+  route: (input: I, ctx: Context) => Step<I, O> | null;
+}): StepBranch<I, O> {
+  return { kind: 'branch', ...opts };
 }
