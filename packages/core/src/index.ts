@@ -50,6 +50,7 @@ export type { CallModelFn } from './interpreter/execute-llm';
 export { executeTool } from './interpreter/execute-tool';
 export { executeLoop } from './interpreter/execute-loop';
 export type { ExecuteStepFn } from './interpreter/execute-loop';
+export { executeFork } from './interpreter/execute-fork';
 export { execute } from './interpreter/execute';
 export { InMemoryRuntime } from './runtime/in-memory-runtime';
 export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
