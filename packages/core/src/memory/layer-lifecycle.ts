@@ -158,8 +158,8 @@ export async function spawnLayers(
         setLayerState(childCtx.executionId, layer.id, result.childState);
         results.push({ layerId: layer.id, childState: result.childState, items: result.items ?? [] });
       }
-    } catch (e) {
-      console.warn(`Memory layer '${layer.id}' onSpawn failed:`, e);
+    } catch (_e) {
+      // onSpawn error -> skip layer
     }
   }
   return results;
@@ -187,8 +187,8 @@ export async function returnLayers(
       if (returnResult?.parentState !== undefined) {
         setLayerState(parentCtx.executionId, layer.id, returnResult.parentState);
       }
-    } catch (e) {
-      console.warn(`Memory layer '${layer.id}' onReturn failed:`, e);
+    } catch (_e) {
+      // onReturn error -> continue
     }
   }
 }

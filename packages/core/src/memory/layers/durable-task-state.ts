@@ -20,7 +20,7 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
         return { state: saved ?? { checkpoints: [], files: [], data: {} } };
       },
 
-      async recall({ state, budget }) {
+      async recall({ state }) {
         if (!state) return null;
         const text = `<task_state>\n${JSON.stringify(state, null, 2)}\n</task_state>`;
         const item: MessageItem = {
@@ -33,8 +33,7 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
         return { items: [item], tokenCount: Math.ceil(text.length / 4) };
       },
 
-      async store({ newItems, state, ctx }) {
-        // Look for state update patterns in the response
+      async store({ state, ctx }) {
         const currentState = (state as any) ?? { checkpoints: [], files: [], data: {} };
         // Add a checkpoint for each store call
         const newState = {
@@ -49,7 +48,7 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
         return { childState: structuredClone(parentState), items: [] };
       },
 
-      async onReturn({ childState, parentState, result }) {
+      async onReturn({ childState, parentState }) {
         // Merge child artifacts back to parent
         const parent = parentState as any;
         const child = childState as any;
@@ -63,9 +62,6 @@ export function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer {
         };
       },
 
-      async onComplete({ state, ctx, outcome }) {
-        // Final checkpoint
-      },
-    },
+},
   };
 }
