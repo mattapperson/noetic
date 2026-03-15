@@ -34,6 +34,8 @@ export type {
 
 export { Slot } from './types/memory';
 
+export { ItemLogImpl } from './runtime/item-log-impl';
+
 export type {
   Runtime, AgentConfig, AgentHooks, RecallLayerOutput
 } from './types/runtime';
