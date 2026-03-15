@@ -3,6 +3,7 @@ import type { Item } from '../types/items';
 import type { TokenUsage, StepMeta } from '../types/common';
 import type { Span } from '../types/observability';
 import type { Channel } from '../types/channel';
+import type { ChannelStore } from './channel-store';
 
 class NoopSpan implements Span {
   readonly traceId = crypto.randomUUID();
@@ -38,6 +39,7 @@ export class ContextImpl implements Context {
   lastStepMeta: StepMeta | null = null;
 
   private readonly _createdAt: number;
+  private readonly channelStore?: ChannelStore;
 
   constructor(opts?: {
     parent?: Context;
@@ -46,6 +48,7 @@ export class ContextImpl implements Context {
     threadId?: string;
     resourceId?: string;
     span?: Span;
+    channelStore?: ChannelStore;
   }) {
     this.id = crypto.randomUUID();
     this._createdAt = Date.now();
@@ -55,6 +58,7 @@ export class ContextImpl implements Context {
     this.span = opts?.span ?? new NoopSpan();
     this.threadId = opts?.threadId ?? crypto.randomUUID();
     this.resourceId = opts?.resourceId;
+    this.channelStore = opts?.channelStore;
 
     const log = new ItemLogImpl();
     if (opts?.items) {
@@ -69,16 +73,25 @@ export class ContextImpl implements Context {
     return Date.now() - this._createdAt;
   }
 
-  recv<T>(_channel: Channel<T>, _opts?: { timeout?: number }): Promise<T> {
-    return Promise.reject(new Error('Not implemented'));
+  recv<T>(ch: Channel<T>, opts?: { timeout?: number }): Promise<T> {
+    if (!this.channelStore) {
+      return Promise.reject(new Error('No channel store configured'));
+    }
+    return this.channelStore.recv(ch, opts?.timeout);
   }
 
-  send<T>(_channel: Channel<T>, _value: T): void {
-    throw new Error('Not implemented');
+  send<T>(ch: Channel<T>, value: T): void {
+    if (!this.channelStore) {
+      throw new Error('No channel store configured');
+    }
+    this.channelStore.send(ch, value);
   }
 
-  tryRecv<T>(_channel: Channel<T>): T | null {
-    throw new Error('Not implemented');
+  tryRecv<T>(ch: Channel<T>): T | null {
+    if (!this.channelStore) {
+      throw new Error('No channel store configured');
+    }
+    return this.channelStore.tryRecv(ch);
   }
 
   async checkpoint(): Promise<void> {}

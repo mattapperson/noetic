@@ -45,6 +45,8 @@ export { ContextImpl } from './runtime/context-impl';
 export { step } from './builders/step-builders';
 export { fork } from './builders/control-flow-builders';
 export { spawn } from './builders/spawn-builder';
+export { channel } from './builders/channel-builder';
+export { ChannelStore } from './runtime/channel-store';
 
 export { executeRun } from './interpreter/execute-run';
 export { executeLLM } from './interpreter/execute-llm';

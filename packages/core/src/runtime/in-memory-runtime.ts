@@ -9,13 +9,16 @@ import type { AgentConfig, RecallLayerOutput } from '../types/runtime';
 import type { Span } from '../types/observability';
 import type { CallModelFn } from '../interpreter/execute-llm';
 import { ContextImpl } from './context-impl';
+import { ChannelStore } from './channel-store';
 import { execute } from '../interpreter/execute';
 
 export class InMemoryRuntime implements Runtime {
   private callModel?: CallModelFn;
+  private readonly channelStore: ChannelStore;
 
   constructor(opts?: { callModel?: CallModelFn }) {
     this.callModel = opts?.callModel;
+    this.channelStore = new ChannelStore();
   }
 
   async execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
@@ -29,24 +32,23 @@ export class InMemoryRuntime implements Runtime {
     threadId?: string;
     resourceId?: string;
   }): Context {
-    return new ContextImpl(opts);
+    return new ContextImpl({ ...opts, channelStore: this.channelStore });
   }
 
-  // Channel operations - stubs for now
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void {
-    throw new Error('Channels not yet implemented');
+  send<T>(channel: Channel<T>, value: T, _ctx: Context): void {
+    this.channelStore.send(channel, value);
   }
 
-  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T> {
-    throw new Error('Channels not yet implemented');
+  recv<T>(channel: Channel<T>, _ctx: Context, opts?: { timeout?: number }): Promise<T> {
+    return this.channelStore.recv(channel, opts?.timeout);
   }
 
-  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null {
-    throw new Error('Channels not yet implemented');
+  tryRecv<T>(channel: Channel<T>, _ctx: Context): T | null {
+    return this.channelStore.tryRecv(channel);
   }
 
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
-    throw new Error('Channels not yet implemented');
+    return this.channelStore.getHandle(channel, executionId);
   }
 
   // Memory layer operations - stubs

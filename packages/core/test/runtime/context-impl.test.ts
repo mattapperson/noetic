@@ -58,12 +58,12 @@ describe('ContextImpl', () => {
     expect(ctx.itemLog.items[0]).toBe(item);
   });
 
-  test('channel methods throw "Not implemented"', () => {
+  test('channel methods throw when no channel store configured', () => {
     const ctx = new ContextImpl();
     const fakeChannel = {} as Channel<unknown>;
-    expect(() => ctx.send(fakeChannel, 'val')).toThrow('Not implemented');
-    expect(() => ctx.tryRecv(fakeChannel)).toThrow('Not implemented');
-    expect(ctx.recv(fakeChannel)).rejects.toThrow('Not implemented');
+    expect(() => ctx.send(fakeChannel, 'val')).toThrow('No channel store configured');
+    expect(() => ctx.tryRecv(fakeChannel)).toThrow('No channel store configured');
+    expect(ctx.recv(fakeChannel)).rejects.toThrow('No channel store configured');
   });
 
   test('lastStepMeta starts null, can be set', () => {

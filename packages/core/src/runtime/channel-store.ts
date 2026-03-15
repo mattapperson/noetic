@@ -1,0 +1,156 @@
+import type { Channel, ExternalChannel, ChannelHandle } from '../types/channel';
+import { OrchidErrorImpl } from '../errors/orchid-error';
+
+interface ChannelState<T> {
+  mode: 'value' | 'queue' | 'topic';
+  // value mode
+  currentValue?: T;
+  hasValue: boolean;
+  valueWaiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }>;
+  // queue mode
+  queue: T[];
+  capacity: number;
+  queueWaiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }>;
+  // topic mode
+  topicSubscribers: Set<(value: T) => void>;
+}
+
+export class ChannelStore {
+  private channels = new Map<string, ChannelState<any>>();
+  private closedExecutions = new Set<string>();
+
+  private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
+    let state = this.channels.get(channel.name);
+    if (!state) {
+      state = {
+        mode: channel.mode,
+        hasValue: false,
+        valueWaiters: [],
+        queue: [],
+        capacity: channel.capacity ?? 1000,
+        queueWaiters: [],
+        topicSubscribers: new Set(),
+      };
+      this.channels.set(channel.name, state);
+    }
+    return state;
+  }
+
+  send<T>(channel: Channel<T>, value: T): void {
+    const state = this.getOrCreate(channel);
+
+    switch (state.mode) {
+      case 'value':
+        state.currentValue = value;
+        state.hasValue = true;
+        if (state.valueWaiters.length > 0) {
+          state.valueWaiters.shift()!.resolve(value);
+        }
+        break;
+      case 'queue':
+        if (state.queueWaiters.length > 0) {
+          state.queueWaiters.shift()!.resolve(value);
+        } else if (state.queue.length < state.capacity) {
+          state.queue.push(value);
+        } else {
+          // At capacity
+          if ((channel as any).external) {
+            state.queue.shift();
+            state.queue.push(value);
+          }
+          // For internal, drop the new value
+        }
+        break;
+      case 'topic':
+        for (const sub of state.topicSubscribers) {
+          sub(value);
+        }
+        break;
+    }
+  }
+
+  async recv<T>(channel: Channel<T>, timeout: number = 30000): Promise<T> {
+    const state = this.getOrCreate(channel);
+
+    switch (state.mode) {
+      case 'value':
+        if (state.hasValue) {
+          return state.currentValue as T;
+        }
+        return this.waitWithTimeout(state.valueWaiters, channel.name, timeout);
+
+      case 'queue':
+        if (state.queue.length > 0) {
+          return state.queue.shift()!;
+        }
+        return this.waitWithTimeout(state.queueWaiters, channel.name, timeout);
+
+      case 'topic':
+        return new Promise<T>((resolve, reject) => {
+          const timer = timeout > 0 ? setTimeout(() => {
+            state.topicSubscribers.delete(handler);
+            reject(new OrchidErrorImpl({ kind: 'channel_timeout', channelName: channel.name, timeout }));
+          }, timeout) : null;
+
+          const handler = (value: T) => {
+            if (timer) clearTimeout(timer);
+            state.topicSubscribers.delete(handler);
+            resolve(value);
+          };
+          state.topicSubscribers.add(handler);
+        });
+    }
+  }
+
+  tryRecv<T>(channel: Channel<T>): T | null {
+    const state = this.getOrCreate(channel);
+
+    switch (state.mode) {
+      case 'value':
+        return state.hasValue ? (state.currentValue as T) : null;
+      case 'queue':
+        return state.queue.length > 0 ? state.queue.shift()! : null;
+      case 'topic':
+        return null;
+    }
+  }
+
+  private waitWithTimeout<T>(
+    waiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }>,
+    channelName: string,
+    timeout: number,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const entry = { resolve, reject };
+      waiters.push(entry);
+
+      if (timeout > 0) {
+        setTimeout(() => {
+          const idx = waiters.indexOf(entry);
+          if (idx >= 0) {
+            waiters.splice(idx, 1);
+            reject(new OrchidErrorImpl({ kind: 'channel_timeout', channelName, timeout }));
+          }
+        }, timeout);
+      }
+    });
+  }
+
+  getHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
+    const store = this;
+    return {
+      get closed() { return store.closedExecutions.has(executionId); },
+      channel,
+      send(value: T) {
+        if (store.closedExecutions.has(executionId)) {
+          throw new OrchidErrorImpl({ kind: 'channel_closed', channelName: channel.name });
+        }
+        store.send(channel, value);
+      },
+    };
+  }
+
+  closeExecution(executionId: string): void {
+    this.closedExecutions.add(executionId);
+  }
+}
