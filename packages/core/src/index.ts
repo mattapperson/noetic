@@ -37,3 +37,5 @@ export { Slot } from './types/memory';
 export type {
   Runtime, AgentConfig, AgentHooks, RecallLayerOutput
 } from './types/runtime';
+
+export { ContextImpl } from './runtime/context-impl';
