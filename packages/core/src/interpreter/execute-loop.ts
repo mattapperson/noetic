@@ -1,7 +1,6 @@
 import type { StepLoop, Snapshot, Verdict } from '../types/step';
 import type { Context } from '../types/context';
-import type { OrchidError } from '../types/error';
-import { OrchidErrorImpl, isOrchidError } from '../errors/orchid-error';
+import { isOrchidError } from '../errors/orchid-error';
 
 export type ExecuteStepFn = <I, O>(step: any, input: I, ctx: Context) => Promise<O>;
 
@@ -53,10 +52,10 @@ export async function executeLoop<I, O>(
     // Extract text from output for snapshot
     if (typeof output === 'string') {
       lastText = output;
-    } else if (output && typeof output === 'object' && 'text' in (output as any)) {
-      lastText = String((output as any).text);
+    } else if (output && typeof output === 'object' && 'text' in output) {
+      lastText = String((output as Record<string, unknown>).text);
     } else {
-      lastText = typeof output === 'undefined' ? '' : JSON.stringify(output);
+      lastText = output === undefined ? '' : JSON.stringify(output);
     }
 
     // Build snapshot
