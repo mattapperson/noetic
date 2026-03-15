@@ -10,6 +10,9 @@
   "peerDependencies": {
     "zod": "^3.23.0"
   },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
   "scripts": {
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
