@@ -1,7 +1,7 @@
-# Context and Event Log
+# Context and Item Log
 
-> **Depends On:** `06-channels` (Channel — for send/recv signatures), `10-observability` (Span)
-> **Exports:** `Context`, `EventLog`, `Message`, `StepMeta`, `TokenUsage`
+> **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `10-observability` (Span)
+> **Exports:** `Context`, `ItemLog`, `Item`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `ExtensionItem`, `ContentPart`, `StepMeta`, `TokenUsage`, `LLMResponse`
 
 ---
 
@@ -25,8 +25,8 @@ interface Context<TState = unknown> {
   readonly threadId: string;     // stable across calls in the same conversation
   readonly resourceId?: string;  // user, entity, or resource identifier
 
-  // The Event Log — append-only record of all messages in this execution
-  readonly eventLog: EventLog;
+  // The Item Log — append-only record of all items in this execution
+  readonly itemLog: ItemLog;
 
   // Last step execution metadata (tool calls, token usage, cost)
   readonly lastStepMeta: StepMeta | null;
@@ -34,6 +34,9 @@ interface Context<TState = unknown> {
   // Channel operations (thin wrappers over runtime.send/recv, see 06-channels)
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
   send<T>(channel: Channel<T>, value: T): void;
+
+  // Non-blocking channel read (see 06-channels)
+  tryRecv<T>(channel: Channel<T>): T | null;
 
   // Lifecycle
   checkpoint(): Promise<void>;
@@ -44,36 +47,70 @@ interface Context<TState = unknown> {
 
 ---
 
-## `EventLog`
+## `ItemLog`
 
-The append-only record of all conversation events in an execution. It is NOT directly sent to the LLM. The Projector (see `11-memory-layer-system`) renders it into the View alongside memory layer outputs, applying overflow policies when the log exceeds the token budget.
+The append-only record of all conversation items in an execution. It is NOT directly sent to the LLM. The Projector (see `11-memory-layer-system`) renders it into the View alongside memory layer outputs, applying overflow policies when the log exceeds the token budget.
 
 ```typescript
-interface EventLog {
-  readonly events: ReadonlyArray<Event>;
-  append(event: Event): void;
-}
-
-interface Event {
-  readonly id: number;           // monotonically increasing within the log
-  readonly kind: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system';
-  readonly content: unknown;
-  readonly timestamp: number;    // Unix ms
+interface ItemLog {
+  readonly items: ReadonlyArray<Item>;
+  append(item: Item): void;
 }
 ```
 
 ---
 
-## `Message`
+## `Item` Type Hierarchy
 
-The basic message type used throughout the system — in the View, in Event Log projections, and in `contextIn` strategies.
+Items are the native data format aligned with OpenResponses. They serve as both the record of what happened and the input to `callModel`, eliminating impedance mismatch between the framework's internal state and the model API.
 
 ```typescript
-interface Message {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | ContentBlock[];
-  toolCallId?: string;
-  name?: string;
+type Item =
+  | MessageItem
+  | FunctionCallItem
+  | FunctionCallOutputItem
+  | ReasoningItem
+  | ExtensionItem;
+
+interface ItemBase {
+  readonly id: string;           // unique string (UUIDv7)
+  readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
+}
+
+interface MessageItem extends ItemBase {
+  readonly type: 'message';
+  readonly role: 'user' | 'assistant' | 'system' | 'developer';
+  readonly content: ContentPart[];
+}
+
+type ContentPart =
+  | { type: 'output_text'; text: string }
+  | { type: 'input_text'; text: string }
+  | { type: 'refusal'; refusal: string };
+
+interface FunctionCallItem extends ItemBase {
+  readonly type: 'function_call';
+  readonly call_id: string;
+  readonly name: string;
+  readonly arguments: string;     // JSON string per OpenResponses
+}
+
+interface FunctionCallOutputItem extends ItemBase {
+  readonly type: 'function_call_output';
+  readonly call_id: string;
+  readonly output: string;
+}
+
+interface ReasoningItem extends ItemBase {
+  readonly type: 'reasoning';
+  readonly content: ContentPart[];
+  readonly summary?: ContentPart[];
+  readonly encrypted_content?: string;
+}
+
+interface ExtensionItem extends ItemBase {
+  readonly type: string;
+  readonly [key: string]: unknown;
 }
 ```
 
@@ -85,15 +122,10 @@ Execution metadata from the most recent step. Available on `ctx.lastStepMeta` af
 
 ```typescript
 interface StepMeta {
-  toolCalls?: ToolCall[];
-  usage?: { inputTokens: number; outputTokens: number };
+  toolCalls?: FunctionCallItem[];
+  usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   cost?: number;  // USD
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  input: unknown;
+  responseItems?: ReadonlyArray<Item>;
 }
 
 interface TokenUsage {
@@ -105,13 +137,26 @@ interface TokenUsage {
 
 ---
 
+## `LLMResponse`
+
+Framework abstraction over the model result. Contains the response items and token usage from a single LLM call.
+
+```typescript
+interface LLMResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+}
+```
+
+---
+
 ## Key Relationships
 
 - **`parent`** enables spawn-tree traversal. The `depth` field enables recursive patterns with depth limits.
 - **`span`** means every step is automatically traced without user instrumentation (see `10-observability`).
 - **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).
-- **`eventLog`** is the raw record. The View (what the LLM sees) is a projection of it plus memory layer outputs.
+- **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus memory layer outputs.
 
 ## Circular Reference with Channels
 
-`Context` has `send`/`recv` methods typed with `Channel<T>` (from `06-channels`), while channel scope rules reference `Context` for execution-tree scoping. This is resolved at the type level by co-defining both interfaces in the same package. In the specs, both files cross-reference each other.
+`Context` has `send`/`recv`/`tryRecv` methods typed with `Channel<T>` (from `06-channels`), while channel scope rules reference `Context` for execution-tree scoping. This is resolved at the type level by co-defining both interfaces in the same package. In the specs, both files cross-reference each other.

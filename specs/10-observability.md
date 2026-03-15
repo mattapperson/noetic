@@ -102,8 +102,8 @@ interface MemoryTraceSpan {
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   /** For recall: tokens allocated vs. tokens used. */
   budget?: { allocated: number; used: number; yielded: number };
-  /** For recall: number of messages injected. */
-  messageCount?: number;
+  /** For recall: number of items injected. */
+  itemCount?: number;
   /** Error details if status is 'error' or 'timeout'. */
   error?: { message: string; stack?: string };
 }

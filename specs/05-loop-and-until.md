@@ -19,7 +19,7 @@ interface LoopOpts<I, O> {
 }
 ```
 
-`prepareNext` is how feedback flows from the `until` verdict back into the next iteration's input. For ReAct, it's not needed (the runtime accumulates messages). For Ralph Wiggum, it injects verification failure feedback:
+`prepareNext` is how feedback flows from the `until` verdict back into the next iteration's input. For ReAct, it's not needed (the runtime accumulates items). For Ralph Wiggum, it injects verification failure feedback:
 
 ```typescript
 prepareNext: (output, verdict, ctx) => {
@@ -38,7 +38,7 @@ prepareNext: (output, verdict, ctx) => {
 
 ### Memory Layer Interaction
 
-On each loop iteration, the full memory layer lifecycle runs: `recall()` before the LLM call, `store()` after. This means memory layers (working memory, observations, etc.) can evolve across iterations even though the Event Log grows linearly.
+On each loop iteration, the full memory layer lifecycle runs: `recall()` before the LLM call, `store()` after. This means memory layers (working memory, observations, etc.) can evolve across iterations even though the ItemLog grows linearly.
 
 ---
 

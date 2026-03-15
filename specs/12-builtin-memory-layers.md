@@ -7,6 +7,8 @@
 
 These are informative reference implementations. They are NOT special-cased in the runtime — they use the same `MemoryLayer` interface as custom layers.
 
+All layers return `Item[]` from `recall` — each block is a `MessageItem` with `role: developer` (framework-injected context, distinct from user-authored `system` instructions).
+
 ---
 
 ## `workingMemory()`
@@ -34,15 +36,15 @@ function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryS
 
 **Behavior:**
 - `init`: Loads state from `ScopedStorage`. Defaults to `{}` (schema) or `''` (freeform).
-- `recall`: Renders state as `<working_memory>` block. Returns `null` if empty.
-- `store`: Watches for `updateWorkingMemory` tool calls. Validates against schema if provided. Deep-merges structured state.
+- `recall`: Renders state as `<working_memory>` block in a `MessageItem` with `role: developer`. Returns `null` if empty.
+- `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Validates against schema if provided. Deep-merges structured state.
 - `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
 
 ---
 
 ## `semanticRecall()`
 
-Vector-search over past messages, injected for relevant context.
+Vector-search over past items, injected for relevant context.
 
 ```typescript
 interface SemanticRecallConfig {
@@ -66,8 +68,8 @@ function semanticRecall(config: SemanticRecallConfig): MemoryLayer<void>
 | **hooks** | `recall`, `store` |
 
 **Behavior:**
-- `recall`: Embeds query, searches vector store, expands with context window, trims to budget. Returns `<semantic_recall>` block.
-- `store`: Embeds new `user`/`assistant` events and upserts to vector store.
+- `recall`: Embeds query, searches vector store, expands with context window, trims to budget. Returns `<semantic_recall>` block in a `MessageItem` with `role: developer`.
+- `store`: Embeds items where `item.type === 'message'` and upserts to vector store.
 
 ### Supporting Types
 
@@ -111,8 +113,8 @@ function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<Ob
 
 **Behavior:**
 - `init`: Loads versioned state from storage.
-- `recall`: Renders observations as `<observations>` bullet list.
-- `store`: Accumulates tokens. When threshold reached, runs observer LLM on unprocessed events. Compacts if over `maxObservations`.
+- `recall`: Renders observations as `<observations>` bullet list in a `MessageItem` with `role: developer`.
+- `store`: Accumulates tokens. When threshold reached, runs observer LLM on unprocessed items. Compacts if over `maxObservations`.
 - `onSpawn`: Clones observations to child.
 
 ---
@@ -142,7 +144,7 @@ function episodicMemory(config: EpisodicMemoryConfig): MemoryLayer<void>
 | **hooks** | `recall`, `onComplete` |
 
 **Behavior:**
-- `recall`: Retrieves by embedding similarity, recency, or both. Deduplicates. Returns `<past_experiences>` block.
+- `recall`: Retrieves by embedding similarity, recency, or both. Deduplicates. Returns `<past_experiences>` block in a `MessageItem` with `role: developer`.
 - `onComplete`: Creates episode summary, embeds it, saves to store.
 
 ### Supporting Types
@@ -193,7 +195,7 @@ function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableT
 
 **Behavior:**
 - `init`: Loads from storage, falls back to disk (crash recovery).
-- `recall`: Renders current state, files modified, recent checkpoints as `<task_state>` block.
+- `recall`: Renders current state, files modified, recent checkpoints as `<task_state>` block in a `MessageItem` with `role: developer`.
 - `store`: Extracts state updates from response. Writes to disk + storage. Optional git commit.
 - `onSpawn`: **Always** provides child state (unlike other layers that may return `null`).
 - `onReturn`: Merges child files/checkpoints/data back into parent.
@@ -223,7 +225,7 @@ Slot `Slot.RAG` (350), scope `'global'`, budget `{ min: 0, max: 6000 }`. Recall-
 function entityMemory(config: { extractorModel?: string }): MemoryLayer<EntityGraphState>
 ```
 
-Slot `Slot.ENTITY` (150), scope `'resource'`. Extracts entities from new events in `store`, renders relevant entities in `recall`.
+Slot `Slot.ENTITY` (150), scope `'resource'`. Extracts entities from new items in `store`, renders relevant entities in `recall`.
 
 ### Shared Swarm Memory
 

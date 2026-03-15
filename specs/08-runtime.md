@@ -1,6 +1,6 @@
 # Runtime Interface
 
-> **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Message), `06-channels` (Channel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
+> **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
 > **Exports:** `Runtime`, `AgentConfig`, `setRuntime()`, `setTraceExporter()`
 
 ---
@@ -17,7 +17,7 @@ interface Runtime {
   // Context management
   createContext(opts?: {
     parent?: Context;
-    messages?: Message[];
+    items?: Item[];
     state?: unknown;
     threadId?: string;
     resourceId?: string;
@@ -26,6 +26,10 @@ interface Runtime {
   // Channel operations (the runtime owns the backing store)
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
+
+  // External channel handles
+  getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
 
   // Memory layer lifecycle (see 11-memory-layer-system for hook semantics)
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
@@ -34,7 +38,7 @@ interface Runtime {
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
 
   // View assembly (the Projector)
-  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Message[]>;
+  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
 
   // Durability (no-ops in InMemoryRuntime)
   checkpoint(ctx: Context): Promise<void>;
@@ -49,7 +53,13 @@ interface Runtime {
 
 interface LayerOutput {
   slot: number;
-  messages: Message[];
+  items: Item[];
+}
+
+interface ChannelHandle<T> {
+  send(value: T): void;
+  readonly closed: boolean;
+  readonly channel: Channel<T>;
 }
 ```
 
@@ -57,9 +67,10 @@ interface LayerOutput {
 
 ## Key Design Points
 
-- **`send`/`recv` on the runtime** means the runtime controls channel storage. `InMemoryRuntime` uses a `Map`. `DurableRuntime` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `runtime.send(ch, v, ctx)`.
-- **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order. `storeLayers` runs `store()` concurrently via `Promise.allSettled`. `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
-- **`assembleView`** is the Projector — it calls `recallLayers`, allocates token budgets, and assembles system prompt + layer outputs + conversation history into the View. This is what `executeLLM` calls internally before sending messages to the model.
+- **`send`/`recv`/`tryRecv` on the runtime** means the runtime controls channel storage. `InMemoryRuntime` uses a `Map`. `DurableRuntime` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `runtime.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `runtime.tryRecv(ch, ctx)`.
+- **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `InMemoryRuntime` uses in-process handles; `DurableRuntime` translates to durable signals (e.g., Temporal signals, Inngest events).
+- **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
+- **`assembleView`** is the Projector — it calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
 - **`checkpoint`/`restore`** enable durable execution. `InMemoryRuntime` implements them as no-ops. `DurableRuntime` serializes state (including memory layer state) to its backing store.
 - **`cancel`** with propagation. The runtime knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
 - **`createSpan`** lets the runtime control the tracing backend.
@@ -73,11 +84,11 @@ interface LayerOutput {
 
 ## Runtime Backends
 
-| Backend              | When to Use                                                     |
-|----------------------|-----------------------------------------------------------------|
-| `InMemoryRuntime`    | Testing, simple scripts, CLI tools                              |
-| `DurableRuntime`     | Production — backed by Temporal, Inngest, or custom event store |
-| `DistributedRuntime` | Multi-node — A2A, worker pools, cloud functions                 |
+| Backend              | When to Use                                                     | Channel Handles |
+|----------------------|-----------------------------------------------------------------|-----------------|
+| `InMemoryRuntime`    | Testing, simple scripts, CLI tools                              | In-process handles |
+| `DurableRuntime`     | Production — backed by Temporal, Inngest, or custom event store | Translates to durable signals |
+| `DistributedRuntime` | Multi-node — A2A, worker pools, cloud functions                 | Translates to network messages |
 
 ```typescript
 import { setRuntime, InMemoryRuntime } from '@orchid/core';

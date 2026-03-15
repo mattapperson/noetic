@@ -16,6 +16,7 @@ type OrchidError =
   | { kind: 'fork_partial';         stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: OrchidError }> }
   | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
   | { kind: 'channel_timeout';      channelName: string; timeout: number }
+  | { kind: 'channel_closed';       channelName: string }
   | { kind: 'cancelled';            reason?: string }
   | { kind: 'budget_exceeded';      field: 'cost' | 'steps' | 'duration'; limit: number; actual: number }
 ```
@@ -52,6 +53,10 @@ The child's work succeeded — don't discard it. Throw `spawn_summary_failed` wi
 ### LLM Parse Error
 
 The LLM returned text that didn't match the Zod schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
+
+### Channel Closed
+
+Thrown when `ChannelHandle.send()` is called after the execution has completed. The execution's external channels are closed when the root execution finishes (success, failure, or cancellation). External callers can check `handle.closed` before sending to avoid this error.
 
 ### Cancellation
 

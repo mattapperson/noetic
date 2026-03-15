@@ -82,26 +82,37 @@ The `executeLLM` function delegates to the OpenRouter SDK's `callModel`, which h
 
 The runtime does NOT implement its own tool call loop — `callModel` owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether `callModel`'s internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
 
-The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
+`callModel` returns a `ModelResult` with `getItemsStream()`. The runtime appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
 
 ```typescript
 const result = await execute(analyze, codeSnippet, ctx);
 // result is { bugs: Bug[], severity: Severity }
 
 // Metadata on ctx.lastStepMeta:
-// { toolCalls: ToolCall[], usage: { inputTokens: number; outputTokens: number }, cost: number }
+// { toolCalls: FunctionCallItem[], usage: { inputTokens, outputTokens, cachedTokens }, cost, responseItems: Item[] }
 ```
 
 ### What the LLM Actually Sees: The View
 
-An `llm` step does NOT simply send the `system` prompt and the raw input. The runtime assembles a **View** — the complete message array sent to the model — via the Memory Layer system (see `11-memory-layer-system`). Before each LLM call, the runtime:
+An `llm` step does NOT simply send the `system` prompt and the raw input. The runtime assembles a **View** — the complete `Item[]` array sent to the model — via the Memory Layer system (see `11-memory-layer-system`). Before each LLM call, the runtime:
 
 1. Runs `recall()` on each memory layer to gather contextual content.
-2. Assembles system prompt + memory layer outputs (ordered by slot) + conversation history into the View.
-3. Sends the View to the model.
+2. Assembles system prompt item (`role: system`) + memory layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
+3. Sends the View to the model. The View is `Item[]` — directly passable to `callModel` as input.
 4. After the response, runs `store()` on each memory layer to persist learnings.
 
-The `system` field on `StepLLMOpts` becomes the agent's base instructions within the View. Memory layers inject additional context around it.
+The `system` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Memory layers inject additional context as `MessageItem` entries with `role: developer`.
+
+### `StepMeta`
+
+```typescript
+interface StepMeta {
+  toolCalls?: FunctionCallItem[];
+  usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  cost?: number;
+  responseItems?: ReadonlyArray<Item>;
+}
+```
 
 ---
 

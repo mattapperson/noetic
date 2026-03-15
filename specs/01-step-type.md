@@ -61,7 +61,7 @@ const result = await execute(analyze, codeSnippet, ctx);
 // result is { bugs: Bug[], severity: Severity } — just O, nothing else.
 
 // Metadata is on the context:
-ctx.lastStepMeta; // { toolCalls: ToolCall[], usage: TokenUsage, cost: number }
+ctx.lastStepMeta; // { toolCalls: FunctionCallItem[], usage: TokenUsage, cost: number, responseItems: Item[] }
 ```
 
 This means `Step<I, O>` is an honest contract: input `I`, output `O`, always. This is analogous to how OpenTelemetry works — spans carry metadata, the function return carries the business value.

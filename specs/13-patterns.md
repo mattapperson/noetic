@@ -1,7 +1,7 @@
 # Pattern Derivations
 
-> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (fork), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `07-context-and-event-log` (Context), `11-memory-layer-system` (memory layer lifecycle)
-> **Exports:** `react()`, `ralphWiggum()`, `taskTree()`, `enforced()`, `recursiveLLM()`, `threadWeave()`, `remote()`, `compilePlan()`, `adaptivePlan()`, `TaskNode`, `PlanNode`, `PlanNodeSchema`, `PlanConstraints`, `WorkerDispatch`
+> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (fork), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-memory-layer-system` (memory layer lifecycle)
+> **Exports:** `react()`, `ralphWiggum()`, `taskTree()`, `enforced()`, `recursiveLLM()`, `threadWeave()`, `remote()`, `compilePlan()`, `adaptivePlan()`, `dualAgent()`, `TaskNode`, `PlanNode`, `PlanNodeSchema`, `PlanConstraints`, `WorkerDispatch`
 
 ---
 
@@ -42,13 +42,13 @@ function react(opts: {
 
 **Primitives used:** `loop` + `step.llm` + `until.noToolCalls` + `until.maxSteps`.
 
-**Event Log strategy:** Accumulate. No spawn boundary — tool call results append to the Event Log. Memory layers `recall()`/`store()` run each iteration.
+**ItemLog strategy:** Accumulate. No spawn boundary — tool call results append to the ItemLog. Memory layers `recall()`/`store()` run each iteration.
 
 ---
 
 ## Ralph Wiggum Loop
 
-Wraps an inner pattern in an outer loop where each iteration gets a fresh Event Log. All state that survives across iterations is managed by memory layers.
+Wraps an inner pattern in an outer loop where each iteration gets a fresh ItemLog. All state that survives across iterations is managed by memory layers.
 
 ```typescript
 function ralphWiggum(opts: {
@@ -248,3 +248,97 @@ function adaptivePlan<O>(opts: {
 ```
 
 Wraps `compilePlan` in a plan → validate → execute → revise loop. Feeds validation errors and partial failure results back to the planner.
+
+---
+
+## Dual-Agent: Conversational + Background Worker
+
+A conversational agent paired with a background worker that processes tasks asynchronously. External channels enable human-in-the-loop messaging into a running execution.
+
+```typescript
+function dualAgent(opts: {
+  conversational: { model: string; system: string; tools: Tool[] };
+  worker: { model: string; system: string; tools: Tool[] };
+  userChannel: ExternalChannel<string>;
+  maxWorkerSteps?: number;
+}): Step<string, string> {
+  // External channel for user messages — writable from HTTP handlers
+  const { userChannel } = opts;
+
+  // Shared working memory for plan coordination
+  const sharedMemory = workingMemory({ scope: 'resource' });
+
+  // Conversational agent: responds to user, updates shared plan
+  const conversationalLoop = loop({
+    id: 'conversational-loop',
+    body: step.run({
+      id: 'handle-user-message',
+      execute: async (_, ctx) => {
+        const message = await ctx.recv(userChannel);
+        // LLM processes the message with access to shared working memory
+        const response = await execute(
+          step.llm({
+            id: 'respond',
+            model: opts.conversational.model,
+            system: opts.conversational.system,
+            tools: opts.conversational.tools,
+          }),
+          message,
+          ctx,
+        );
+        return response;
+      },
+    }),
+    until: until.maxSteps(1000),
+  });
+
+  // Background worker: executes plan, checks for updates via tryRecv
+  const workerLoop = loop({
+    id: 'worker-loop',
+    body: spawn({
+      id: 'worker-iteration',
+      child: react({
+        model: opts.worker.model,
+        system: opts.worker.system,
+        tools: opts.worker.tools,
+        maxSteps: opts.maxWorkerSteps ?? 20,
+      }),
+      contextIn: { strategy: 'fresh' },
+      contextOut: { strategy: 'full' },
+    }),
+    until: any(
+      until.verified(async (output) => {
+        // Worker checks shared working memory for completion
+        return { pass: false };
+      }),
+      until.maxSteps(100),
+    ),
+  });
+
+  // Race: worker completing ends the fork
+  return fork({
+    id: 'dual-agent',
+    mode: 'race',
+    paths: () => [conversationalLoop, workerLoop],
+  });
+}
+```
+
+**Primitives used:** `fork(race)` + `loop` + `spawn(fresh)` + `react` + `channel(external)` + `recv` + `tryRecv`.
+
+**External HTTP handler using `ChannelHandle`:**
+
+```typescript
+// Outside the execution — e.g., in an Express route handler
+const handle = runtime.getChannelHandle(userChannel, executionId);
+
+app.post('/api/message', (req, res) => {
+  if (handle.closed) {
+    return res.status(410).json({ error: 'Execution completed' });
+  }
+  handle.send(req.body.message);  // typed, lifecycle-aware
+  res.json({ ok: true });
+});
+```
+
+**Memory layer interaction:** `workingMemory({ scope: 'resource' })` shared between conversational and worker agents enables plan coordination. The worker uses `tryRecv` to check for plan updates without blocking. External channels survive `contextIn: 'fresh'` boundaries because they're scoped to the root execution.

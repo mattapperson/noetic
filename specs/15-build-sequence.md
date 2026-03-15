@@ -11,7 +11,7 @@ Each stage produces a working system that can be tested. The spec updates after 
 
 **Specs:** `01-step-type`, `02-step-variants` (run + llm mocked)
 
-The discriminated union `Step` type and the `execute` interpreter. Get the core switch working with `run`, `llm` (mocked), and `loop` + `until`. Write **ReAct** against this.
+The discriminated union `Step` type and the `execute` interpreter. Get the core switch working with `run`, `llm` (mocked), and `loop` + `until`. `ItemLog` established here — `callModel` returns items, runtime appends to `ItemLog`. Write **ReAct** against this.
 
 ## Stage 2: Fork
 
@@ -25,11 +25,13 @@ The discriminated union `Step` type and the `execute` interpreter. Get the core 
 
 `spawn` with `fresh` + `full`. Write **Ralph Wiggum**. This forces context isolation and the `prepareNext` feedback loop. State persistence across fresh boundaries is deferred to Stage 7 (memory layers).
 
-## Stage 4: Channels
+## Stage 4: Channels and External Channels
 
 **Specs:** `06-channels`
 
-`channel` with `value` and `queue` modes. Write a two-step pipeline where one step produces and another consumes. This forces the async blocking model.
+`channel` with `value` and `queue` modes. Write a two-step pipeline where one step produces and another consumes. This forces the async blocking model. Implement `tryRecv` for non-blocking reads.
+
+Add external channel declaration (`external: true`), `getChannelHandle`, `ChannelHandle.send`, and `channel_closed` error. Test the dual-agent pattern with external channels: verify that external `handle.send()` delivers to a running execution, that `handle.closed` reflects execution completion, and that `channel_closed` is thrown on post-completion sends.
 
 ## Stage 5: Spawn with Summary/Schema
 
@@ -47,19 +49,19 @@ The discriminated union `Step` type and the `execute` interpreter. Get the core 
 
 **Specs:** `11-memory-layer-system`, `12-builtin-memory-layers` (workingMemory)
 
-Implement the `MemoryLayer` interface, the Projector (View assembly), and the `workingMemory()` built-in. Write a ReAct agent with working memory and verify the recall/store lifecycle runs correctly on each iteration. This forces the budget allocation algorithm and the slot-ordering system.
+Implement the `MemoryLayer` interface, the Projector (View assembly), and the `workingMemory()` built-in. The Projector assembles system prompt item (`role: system`) + layer output items (`role: developer`) + conversation history items into `Item[]`. `recallLayers` returns `Item[]`. `storeLayers` receives `LLMResponse` (with items + usage). Write a ReAct agent with working memory and verify the recall/store lifecycle runs correctly on each iteration. This forces the budget allocation algorithm and the slot-ordering system.
 
 ## Stage 8: Memory Layers Across Spawn Boundaries
 
 **Specs:** `11-memory-layer-system` (onSpawn/onReturn), `12-builtin-memory-layers` (durableTaskState, observationalMemory)
 
-Implement `onSpawn`/`onReturn` hooks. Write Ralph Wiggum with `workingMemory({ scope: 'resource' })` and `durableTaskState()`. Verify that both structured state and task artifacts persist across fresh-context iterations while the Event Log resets. Add `observationalMemory()` and verify that observations compress across iterations.
+Implement `onSpawn`/`onReturn` hooks. Write Ralph Wiggum with `workingMemory({ scope: 'resource' })` and `durableTaskState()`. Verify that both structured state and task artifacts persist across fresh-context iterations while the ItemLog resets. Add `observationalMemory()` and verify that observations compress across iterations.
 
 ## Stage 9: Error Model
 
 **Specs:** `09-error-model`
 
-Deliberately inject failures at every level and verify propagation matches the defined rules. Test `onError` on loops, `fork_partial` recovery, `spawn_summary_failed` fallback. Test memory layer error policies: init failure disables the layer, recall failure skips iteration, store failure is logged but doesn't block.
+Deliberately inject failures at every level and verify propagation matches the defined rules. Test `onError` on loops, `fork_partial` recovery, `spawn_summary_failed` fallback. Test memory layer error policies: init failure disables the layer, recall failure skips iteration, store failure is logged but doesn't block. Test `channel_closed` error on external channel handles.
 
 ## Stage 10: Observability
 

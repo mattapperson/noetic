@@ -22,7 +22,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 
-2. **Execution infrastructure** (`07-context-and-event-log`, `08-runtime`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable runtime backends, error taxonomy, and tracing.
+2. **Execution infrastructure** (`07-context-and-event-log`, `08-runtime`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable runtime backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with `callModel`.
 
 3. **Memory system** (`11-memory-layer-system`, `12-builtin-memory-layers`) — Composable plugins that recall context before LLM calls and persist learnings after them. The View (what the LLM actually sees) is assembled from memory layer outputs + conversation history.
 
@@ -37,14 +37,14 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `03-control-flow` | `branch()`, `fork()` | Routing and parallelism |
 | `04-spawn` | `spawn()` + context strategies | Context boundaries |
 | `05-loop-and-until` | `loop()`, `Until`, `Verdict` | Iteration and termination |
-| `06-channels` | `Channel<T>`, `send`/`recv` | Typed data flow |
-| `07-context-and-event-log` | `Context`, `EventLog` | Execution state |
+| `06-channels` | `Channel<T>`, `send`/`recv`, `tryRecv`, `ExternalChannel`, `ChannelHandle` | Typed data flow |
+| `07-context-and-event-log` | `Context`, `ItemLog`, `Item`, `StepMeta`, `TokenUsage`, `LLMResponse` | Execution state |
 | `08-runtime` | `Runtime` interface | Pluggable engine |
 | `09-error-model` | `OrchidError` | Error taxonomy + propagation |
 | `10-observability` | `Span`, tracing | OpenTelemetry integration |
 | `11-memory-layer-system` | `MemoryLayer`, lifecycle, budget, scope, View assembly | Memory contract |
 | `12-builtin-memory-layers` | 5 built-in factories + custom examples | Reference implementations |
-| `13-patterns` | ReAct, Ralph Wiggum, Task Trees, etc. | Composition proofs |
+| `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
 

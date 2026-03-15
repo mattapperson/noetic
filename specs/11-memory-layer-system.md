@@ -1,13 +1,13 @@
 # Memory Layer System
 
-> **Depends On:** `07-context-and-event-log` (EventLog, Message), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
+> **Depends On:** `07-context-and-event-log` (ItemLog, Item), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
 > **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
 
 ---
 
 ## Overview
 
-A `MemoryLayer` is a plugin that participates in the agent execution lifecycle to recall context before LLM calls and persist information after them. Memory layers are the sole extension point for injecting non-conversation content into the View (the assembled message array sent to the model).
+A `MemoryLayer` is a plugin that participates in the agent execution lifecycle to recall context before LLM calls and persist information after them. Memory layers are the sole extension point for injecting non-conversation content into the View (the assembled item array sent to the model).
 
 Normative language uses **MUST**, **SHOULD**, and **MAY** per RFC 2119.
 
@@ -81,7 +81,7 @@ LOOP ITERATION ─────────────────────�
 │
 ├─ recall()            Sequential, SLOT ORDER (ascending). Ties by array index.
 │
-├─ [VIEW ASSEMBLY]     Projector assembles system prompt + layer outputs + history.
+├─ [VIEW ASSEMBLY]     Projector assembles system prompt item + layer output items + history items.
 │
 ├─ [LLM CALL]
 │
@@ -123,7 +123,7 @@ interface InitResult<TState> {
 }
 
 interface RecallParams<TState> {
-  log: EventLog;
+  log: ItemLog;
   query: string;
   ctx: ExecutionContext;
   state: TState;
@@ -131,14 +131,14 @@ interface RecallParams<TState> {
 }
 
 interface RecallResult<TState = unknown> {
-  messages: Message[];
+  items: Item[];
   tokenCount: number;
   state?: TState;
 }
 
 interface StoreParams<TState> {
-  newEvents: Event[];
-  log: EventLog;
+  newItems: Item[];
+  log: ItemLog;
   response: LLMResponse;
   ctx: ExecutionContext;
   state: TState;
@@ -156,12 +156,12 @@ interface SpawnParams<TState> {
 
 interface SpawnResult<TState> {
   childState: TState | null;
-  messages?: Message[];
+  items?: Item[];
 }
 
 interface ReturnParams<TState> {
   childState: TState;
-  childLog: EventLog;
+  childLog: ItemLog;
   parentState: TState;
   result: unknown;
 }
@@ -171,7 +171,7 @@ interface ReturnResult<TState> {
 }
 
 interface CompleteParams<TState> {
-  log: EventLog;
+  log: ItemLog;
   ctx: ExecutionContext;
   state: TState;
   outcome: ExecutionOutcome;
@@ -331,7 +331,7 @@ interface ExecutionContext {
 }
 ```
 
-Note what is NOT on `ExecutionContext`: no `getLayerState()`, no `storage` (captured in `init`), no `eventLog` mutation, no `setRenderingHint()`.
+Note what is NOT on `ExecutionContext`: no `getLayerState()`, no `storage` (captured in `init`), no `itemLog` mutation, no `setRenderingHint()`.
 
 ---
 
@@ -355,13 +355,14 @@ interface ProjectionPolicy {
 1. Count system prompt tokens
 2. Allocate budgets to layers
 3. Run recall() hooks (sequential, slot order)
-4. Assemble: system prompt + layer outputs (slot order) + conversation history
+4. Assemble: system prompt item (role: system) + layer output items (role: developer) + conversation history items
 5. Conversation history gets remaining budget after layers, with overflow policy applied
+6. Result is Item[] — directly passable to callModel
 ```
 
 ### Conversation History is Not a Memory Layer
 
-The Event Log's rendering is handled by the Projector natively. Memory layers get budgets FROM a pool. Conversation history gets the REMAINDER. This asymmetry is fundamental.
+The ItemLog's rendering is handled by the Projector natively. Memory layers get budgets FROM a pool. Conversation history gets the REMAINDER. This asymmetry is fundamental.
 
 ---
 
