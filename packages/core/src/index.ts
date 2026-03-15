@@ -57,3 +57,5 @@ export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
 export { until } from './until/predicates';
 export type { VerifyFn, ConvergeOpts } from './until/predicates';
 export { any, all } from './until/combinators';
+
+export { react } from './patterns/react';
