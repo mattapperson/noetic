@@ -49,3 +49,7 @@ export { executeLLM } from './interpreter/execute-llm';
 export type { CallModelFn } from './interpreter/execute-llm';
 export { executeTool } from './interpreter/execute-tool';
 export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
+
+export { until } from './until/predicates';
+export type { VerifyFn, ConvergeOpts } from './until/predicates';
+export { any, all } from './until/combinators';
