@@ -37,3 +37,7 @@ export { Slot } from './types/memory';
 export type {
   Runtime, AgentConfig, AgentHooks, RecallLayerOutput
 } from './types/runtime';
+
+export { until } from './until/predicates';
+export type { VerifyFn, ConvergeOpts } from './until/predicates';
+export { any, all } from './until/combinators';
