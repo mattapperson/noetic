@@ -79,6 +79,38 @@ describe('step builders', () => {
     expect(s.tool.name).toBe('calculator');
   });
 
+  it('step.run() throws on empty id', () => {
+    expect(() => step.run({ id: '', execute: async () => {} })).toThrow('non-empty id');
+    expect(() => step.run({ id: '  ', execute: async () => {} })).toThrow('non-empty id');
+  });
+
+  it('step.run() throws on missing execute', () => {
+    expect(() => step.run({ id: 'test', execute: undefined as any })).toThrow('execute function');
+  });
+
+  it('step.llm() throws on empty id', () => {
+    expect(() => step.llm({ id: '', model: 'gpt-4' })).toThrow('non-empty id');
+  });
+
+  it('step.llm() throws on empty model', () => {
+    expect(() => step.llm({ id: 'test', model: '' })).toThrow('non-empty model');
+  });
+
+  it('step.tool() throws on empty id', () => {
+    const myTool = {
+      name: 'calc',
+      description: 'Calc',
+      input: z.object({ x: z.string() }),
+      output: z.object({ r: z.number() }),
+      execute: async () => ({ r: 1 }),
+    };
+    expect(() => step.tool({ id: '', tool: myTool })).toThrow('non-empty id');
+  });
+
+  it('step.tool() throws on missing tool', () => {
+    expect(() => step.tool({ id: 'test', tool: undefined as any })).toThrow('requires a tool');
+  });
+
   it('step.tool() with args', () => {
     const myTool = {
       name: 'calculator',

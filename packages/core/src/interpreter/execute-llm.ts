@@ -1,17 +1,41 @@
 import type { StepLLM } from '../types/step';
 import type { Context } from '../types/context';
-import type { LLMResponse, StepMeta } from '../types/common';
+import type { LLMResponse, StepMeta, Tool, ModelParams } from '../types/common';
 import type { Item, MessageItem, FunctionCallItem } from '../types/items';
 import { OrchidErrorImpl } from '../errors/orchid-error';
-import { ZodError } from 'zod';
+import { isMutableContext, isAssistantMessage, isOutputText } from './typeguards';
+import { ZodError, type ZodType } from 'zod';
 
 export type CallModelFn = (
   model: string,
   items: ReadonlyArray<Item>,
-  tools?: any[],
-  params?: any,
-  output?: any,
+  tools?: Tool[],
+  params?: ModelParams,
+  output?: ZodType,
 ) => Promise<LLMResponse>;
+
+function createUserMessage(text: string): MessageItem {
+  return {
+    id: crypto.randomUUID(),
+    status: 'completed',
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text }],
+  };
+}
+
+function extractAssistantText(items: Item[]): string {
+  const lastTextItem = [...items]
+    .reverse()
+    .find(isAssistantMessage);
+
+  if (!lastTextItem) return '';
+
+  return lastTextItem.content
+    ?.filter(isOutputText)
+    ?.map((c) => c.text)
+    ?.join('') ?? '';
+}
 
 export async function executeLLM<I, O>(
   step: StepLLM<I, O>,
@@ -21,13 +45,7 @@ export async function executeLLM<I, O>(
 ): Promise<O> {
   // Add the input as a user message if it's a non-empty string
   if (typeof input === 'string' && input.length > 0) {
-    ctx.itemLog.append({
-      id: crypto.randomUUID(),
-      status: 'completed',
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'input_text', text: input }],
-    } as MessageItem);
+    ctx.itemLog.append(createUserMessage(input));
   }
 
   // Call the model
@@ -57,37 +75,24 @@ export async function executeLLM<I, O>(
     responseItems: response.items,
   };
 
-  // Set lastStepMeta (cast to mutable since Context interface has readonly)
-  (ctx as any).lastStepMeta = meta;
-
-  // Accumulate token usage
-  (ctx as any).tokens = {
-    input: ctx.tokens.input + response.usage.inputTokens,
-    output: ctx.tokens.output + response.usage.outputTokens,
-    total: ctx.tokens.total + response.usage.inputTokens + response.usage.outputTokens,
-  };
-
-  // Accumulate cost
-  if (response.cost) {
-    (ctx as any).cost = ctx.cost + response.cost;
+  // Update mutable context fields
+  if (isMutableContext(ctx)) {
+    ctx.lastStepMeta = meta;
+    ctx.tokens.input += response.usage.inputTokens;
+    ctx.tokens.output += response.usage.outputTokens;
+    ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
+    if (response.cost) {
+      ctx.cost = ctx.cost + response.cost;
+    }
   }
 
-  // Find the last assistant message to extract text output
-  const lastTextItem = [...response.items]
-    .reverse()
-    .find((i): i is MessageItem => i.type === 'message' && (i as MessageItem).role === 'assistant');
-
-  const lastText = lastTextItem?.content
-    ?.filter((c) => c.type === 'output_text')
-    ?.map((c) => (c as Extract<typeof c, { type: 'output_text' }>).text)
-    ?.join('') ?? '';
+  const lastText = extractAssistantText(response.items);
 
   // If output schema is provided, parse with Zod
   if (step.output) {
     try {
       const parsed = JSON.parse(lastText);
-      const result = step.output.parse(parsed);
-      return result as O;
+      return step.output.parse(parsed);
     } catch (e) {
       if (e instanceof SyntaxError || e instanceof ZodError) {
         throw new OrchidErrorImpl({
@@ -111,6 +116,9 @@ export async function executeLLM<I, O>(
     }
   }
 
-  // Return raw text as output
+  // When no Zod output schema is provided, the LLM step returns raw text.
+  // This is inherent to the Step<I, O> contract — callers without an output schema
+  // receive string. The type system cannot express this without changing the Step contract.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- design limitation
   return lastText as unknown as O;
 }

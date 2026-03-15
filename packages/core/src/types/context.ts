@@ -25,6 +25,8 @@ export interface Context<TState = unknown> {
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
   send<T>(channel: Channel<T>, value: T): void;
   tryRecv<T>(channel: Channel<T>): T | null;
+  readonly aborted: boolean;
+  readonly abortReason?: string;
   checkpoint(): Promise<void>;
   complete<T>(value: T): void;
   abort(reason?: string): void;

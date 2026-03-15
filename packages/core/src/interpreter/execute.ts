@@ -4,6 +4,8 @@ import type { CallModelFn } from './execute-llm';
 import { executeRun } from './execute-run';
 import { executeLLM } from './execute-llm';
 import { executeTool } from './execute-tool';
+import { OrchidErrorImpl } from '../errors/orchid-error';
+import { isMutableContext } from './typeguards';
 
 export async function execute<I, O>(
   step: Step<I, O>,
@@ -12,13 +14,22 @@ export async function execute<I, O>(
   callModel?: CallModelFn,
 ): Promise<O> {
   // Increment step count
-  (ctx as any).stepCount = (ctx.stepCount || 0) + 1;
+  if (isMutableContext(ctx)) {
+    ctx.stepCount = (ctx.stepCount || 0) + 1;
+  }
 
   switch (step.kind) {
     case 'run':
       return executeRun(step, input, ctx);
     case 'llm':
-      if (!callModel) throw new Error('callModel is required for LLM steps');
+      if (!callModel) {
+        throw new OrchidErrorImpl({
+          kind: 'step_failed',
+          stepId: step.id,
+          cause: new Error('callModel is required for LLM steps'),
+          retriesExhausted: false,
+        });
+      }
       return executeLLM(step, input, ctx, callModel);
     case 'tool':
       return executeTool(step, input, ctx);
@@ -35,11 +46,17 @@ export async function execute<I, O>(
       return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel), callModel);
     }
     case 'loop': {
-      // Import executeLoop dynamically to avoid circular dependency
       const { executeLoop } = await import('./execute-loop');
       return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
     }
-    default:
-      throw new Error(`Unknown step kind: ${(step as any).kind}`);
+    default: {
+      const _exhaustive: never = step;
+      throw new OrchidErrorImpl({
+        kind: 'step_failed',
+        stepId: 'unknown',
+        cause: new Error('Unknown step kind'),
+        retriesExhausted: false,
+      });
+    }
   }
 }

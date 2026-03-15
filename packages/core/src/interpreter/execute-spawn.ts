@@ -1,11 +1,24 @@
 import type { StepSpawn } from '../types/step';
 import type { Context } from '../types/context';
 import type { CallModelFn } from './execute-llm';
-import type { MessageItem } from '../types/items';
+import type { Item, MessageItem } from '../types/items';
 import { ContextImpl } from '../runtime/context-impl';
 import { OrchidErrorImpl } from '../errors/orchid-error';
+import { isContextImpl, isAssistantMessage, isOutputText } from './typeguards';
 
-export type ExecuteStepFn = <I, O>(step: any, input: I, ctx: Context) => Promise<O>;
+import type { Step } from '../types/step';
+
+export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
+
+function createUserMessage(text: string): MessageItem {
+  return {
+    id: crypto.randomUUID(),
+    status: 'completed',
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text }],
+  };
+}
 
 export async function executeSpawn<I, O>(
   step: StepSpawn<I, O>,
@@ -15,7 +28,7 @@ export async function executeSpawn<I, O>(
   callModel?: CallModelFn,
 ): Promise<O> {
   // Build child context based on contextIn strategy
-  let childItems: any[] = [];
+  let childItems: Item[] = [];
 
   switch (step.contextIn.strategy) {
     case 'inherit':
@@ -37,8 +50,8 @@ export async function executeSpawn<I, O>(
     parent: ctx,
     items: childItems,
     state: structuredClone(ctx.state),
-    threadId: (ctx as any).threadId,
-    resourceId: (ctx as any).resourceId,
+    threadId: isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID(),
+    resourceId: isContextImpl(ctx) ? ctx.resourceId : undefined,
   });
 
   // Execute the child step
@@ -50,29 +63,27 @@ export async function executeSpawn<I, O>(
       return childOutput;
 
     case 'summary': {
-      if (!callModel) throw new Error('callModel required for summary contextOut');
+      if (!callModel) throw new OrchidErrorImpl({
+        kind: 'step_failed',
+        stepId: step.id,
+        cause: new Error('callModel required for summary contextOut'),
+        retriesExhausted: false,
+      });
       const summaryModel = step.contextOut.model ?? 'gpt-4';
       const summaryPrompt = step.contextOut.prompt ?? 'Summarize the above conversation concisely.';
 
-      // Add a user message asking for summary
-      childCtx.itemLog.append({
-        id: crypto.randomUUID(),
-        status: 'completed',
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: summaryPrompt }],
-      } as MessageItem);
+      childCtx.itemLog.append(createUserMessage(summaryPrompt));
 
       try {
         const response = await callModel(summaryModel, childCtx.itemLog.items);
         const lastMsg = [...response.items]
           .reverse()
-          .find((i: any) => i.type === 'message' && i.role === 'assistant');
-        const text =
-          (lastMsg as any)?.content
-            ?.filter((c: any) => c.type === 'output_text')
-            ?.map((c: any) => c.text)
-            ?.join('') ?? '';
+          .find(isAssistantMessage);
+        const text = lastMsg?.content
+          ?.filter(isOutputText)
+          ?.map((c) => c.text)
+          ?.join('') ?? '';
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- design: summary text returned as O
         return text as unknown as O;
       } catch (e) {
         throw new OrchidErrorImpl({
@@ -87,7 +98,7 @@ export async function executeSpawn<I, O>(
     case 'schema': {
       const parseResult = step.contextOut.schema.safeParse(childOutput);
       if (parseResult.success) {
-        return parseResult.data as O;
+        return parseResult.data;
       }
       throw new OrchidErrorImpl({
         kind: 'llm_parse_error',
@@ -98,7 +109,14 @@ export async function executeSpawn<I, O>(
       });
     }
 
-    default:
-      throw new Error(`Unknown contextOut strategy: ${(step.contextOut as any).strategy}`);
+    default: {
+      const _exhaustive: never = step.contextOut;
+      throw new OrchidErrorImpl({
+        kind: 'step_failed',
+        stepId: step.id,
+        cause: new Error('Unknown contextOut strategy'),
+        retriesExhausted: false,
+      });
+    }
   }
 }

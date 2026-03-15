@@ -1,8 +1,15 @@
 import type { StepLoop, Snapshot, Verdict } from '../types/step';
 import type { Context } from '../types/context';
-import { isOrchidError } from '../errors/orchid-error';
+import { isOrchidError, OrchidErrorImpl } from '../errors/orchid-error';
+import { isMutableContext } from './typeguards';
 
-export type ExecuteStepFn = <I, O>(step: any, input: I, ctx: Context) => Promise<O>;
+import type { Step } from '../types/step';
+
+export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
+
+function hasTextField(value: unknown): value is { text: unknown } {
+  return typeof value === 'object' && value !== null && 'text' in value;
+}
 
 export async function executeLoop<I, O>(
   step: StepLoop<I, O>,
@@ -16,8 +23,21 @@ export async function executeLoop<I, O>(
   const history: unknown[] = [];
   const startTime = Date.now();
   let stepCount = 0;
+  const maxIterations = step.maxIterations ?? 1000;
+  let totalIterations = 0;
 
   while (true) {
+    // Enforce hard iteration ceiling (includes retries)
+    totalIterations++;
+    if (totalIterations > maxIterations) {
+      throw new OrchidErrorImpl({
+        kind: 'step_failed',
+        stepId: step.id,
+        cause: new Error(`Loop exceeded maximum iterations (${maxIterations})`),
+        retriesExhausted: false,
+      });
+    }
+
     // Execute the body step
     let output: O;
     try {
@@ -28,7 +48,7 @@ export async function executeLoop<I, O>(
       if (step.onError && isOrchidError(e)) {
         const action = step.onError(e.orchidError, ctx);
         if (action === 'retry') {
-          continue; // re-run same iteration
+          continue; // re-run same iteration (totalIterations already incremented)
         } else if (action === 'skip') {
           stepCount++;
           // Use last successful output if available
@@ -52,14 +72,14 @@ export async function executeLoop<I, O>(
     // Extract text from output for snapshot
     if (typeof output === 'string') {
       lastText = output;
-    } else if (output && typeof output === 'object' && 'text' in output) {
-      lastText = String((output as Record<string, unknown>).text);
+    } else if (hasTextField(output)) {
+      lastText = String(output.text);
     } else {
       lastText = output === undefined ? '' : JSON.stringify(output);
     }
 
     // Build snapshot
-    const snapshot: Snapshot & { lastStepMeta?: any } = {
+    const snapshot: Snapshot & { lastStepMeta?: unknown } = {
       stepCount,
       tokens: { ...ctx.tokens },
       elapsed: Date.now() - startTime,
@@ -68,7 +88,7 @@ export async function executeLoop<I, O>(
       lastText,
       history: [...history],
       depth: ctx.depth,
-      lastStepMeta: (ctx as any).lastStepMeta,
+      lastStepMeta: isMutableContext(ctx) ? ctx.lastStepMeta : null,
     };
 
     // Evaluate until predicate
@@ -84,13 +104,22 @@ export async function executeLoop<I, O>(
     }
 
     if (verdict.stop) {
-      return lastOutput!;
+      if (lastOutput === undefined) {
+        throw new OrchidErrorImpl({
+          kind: 'step_failed',
+          stepId: step.id,
+          cause: new Error('Loop completed with no successful output'),
+          retriesExhausted: false,
+        });
+      }
+      return lastOutput;
     }
 
     // Prepare input for next iteration
     if (step.prepareNext) {
       currentInput = step.prepareNext(output, verdict, ctx);
     } else {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- design: output reused as input
       currentInput = output as unknown as I;
     }
   }

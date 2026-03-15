@@ -94,6 +94,70 @@ describe('executeRun', () => {
     }
   });
 
+  it('caps exponential backoff delay at maxDelay', async () => {
+    const delays: number[] = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    // Monkey-patch setTimeout to capture delays
+    const patched = (fn: any, delay?: number, ...args: any[]) => {
+      if (delay && delay > 0) delays.push(delay);
+      return originalSetTimeout(fn, 1, ...args); // execute quickly
+    };
+    (globalThis as any).setTimeout = patched;
+
+    let attempts = 0;
+    const s: StepRun<string, string> = {
+      kind: 'run',
+      id: 'cap-test',
+      execute: async () => {
+        attempts++;
+        if (attempts < 5) throw new Error('fail');
+        return 'ok';
+      },
+      retry: { maxAttempts: 5, backoff: 'exponential', initialDelay: 100, maxDelay: 500 },
+    };
+    try {
+      await executeRun(s, 'test', mockCtx);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    // Delays: 100, 200, 400, 500 (capped from 800)
+    for (const d of delays) {
+      expect(d).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it('defaults maxDelay to 30000', async () => {
+    // With exponential backoff, delay = 100 * 2^attempt
+    // For attempt 9: 100 * 512 = 51200, should be capped at 30000
+    const delays: number[] = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const patched = (fn: any, delay?: number, ...args: any[]) => {
+      if (delay && delay > 0) delays.push(delay);
+      return originalSetTimeout(fn, 1, ...args);
+    };
+    (globalThis as any).setTimeout = patched;
+
+    let attempts = 0;
+    const s: StepRun<string, string> = {
+      kind: 'run',
+      id: 'default-cap-test',
+      execute: async () => {
+        attempts++;
+        if (attempts < 11) throw new Error('fail');
+        return 'ok';
+      },
+      retry: { maxAttempts: 11, backoff: 'exponential', initialDelay: 100 },
+    };
+    try {
+      await executeRun(s, 'test', mockCtx);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    for (const d of delays) {
+      expect(d).toBeLessThanOrEqual(30_000);
+    }
+  });
+
   it('retries with linear backoff', async () => {
     let attempts = 0;
     const s: StepRun<string, string> = {

@@ -72,9 +72,9 @@ export { compilePlan, adaptivePlan, PlanNodeSchema } from './patterns/plans';
 export type { PlanNode, PlanConstraints } from './patterns/plans';
 
 export { resolveScopeKey, createScopedStorage } from './memory/scope';
-export { allocateBudgets } from './memory/budget';
-export type { BudgetAllocation } from './memory/budget';
-export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, spawnLayers, returnLayers } from './memory/layer-lifecycle';
+export { allocateBudgets, checkBudget } from './memory/budget';
+export type { BudgetAllocation, BudgetLimits } from './memory/budget';
+export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, spawnLayers, returnLayers, setLayerDiagnostic, cleanupLayerState } from './memory/layer-lifecycle';
 export { assembleView } from './memory/projector';
 export { workingMemory } from './memory/layers/working-memory';
 export type { WorkingMemoryConfig } from './memory/layers/working-memory';

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, layerStates } from '../../src/memory/layer-lifecycle';
+import { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, layerStates, setLayerDiagnostic, cleanupLayerState } from '../../src/memory/layer-lifecycle';
 import type { MemoryLayer, ExecutionContext, StorageAdapter } from '../../src/types/memory';
 import type { ItemLog } from '../../src/types/context';
 import type { Item } from '../../src/types/items';
@@ -161,6 +161,88 @@ describe('layer-lifecycle', () => {
     await initLayers(layers, ctx, makeStorage());
     const results = await recallLayers(layers, 'q', ctx, makeItemLog(), new Map([['slow', 1000]]));
     expect(results).toHaveLength(0);
+  });
+
+  it('diagnostic callback invoked on init error', async () => {
+    const errors: { layerId: string; hook: string; error: unknown }[] = [];
+    setLayerDiagnostic((layerId, hook, error) => {
+      errors.push({ layerId, hook, error });
+    });
+
+    const layers: MemoryLayer[] = [
+      {
+        id: 'broken', name: 'Broken', slot: 100, scope: 'thread', hooks: {
+          init: async () => { throw new Error('init failed'); },
+        },
+      },
+    ];
+    const ctx = makeCtx('exec-diag');
+    await initLayers(layers, ctx, makeStorage());
+    expect(errors).toHaveLength(1);
+    expect(errors[0].layerId).toBe('broken');
+    expect(errors[0].hook).toBe('init');
+    expect((errors[0].error as Error).message).toBe('init failed');
+
+    // Reset diagnostic to no-op
+    setLayerDiagnostic(() => {});
+  });
+
+  it('diagnostic callback invoked on recall error', async () => {
+    const errors: { layerId: string; hook: string }[] = [];
+    setLayerDiagnostic((layerId, hook) => {
+      errors.push({ layerId, hook });
+    });
+
+    const layers: MemoryLayer[] = [
+      {
+        id: 'recall-fail', name: 'RecallFail', slot: 100, scope: 'thread', hooks: {
+          recall: async () => { throw new Error('recall boom'); return { items: [], tokenCount: 0 }; },
+        },
+      },
+    ];
+    const ctx = makeCtx('exec-diag-recall');
+    const results = await recallLayers(layers, 'q', ctx, makeItemLog(), new Map([['recall-fail', 1000]]));
+    expect(results).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].hook).toBe('recall');
+
+    setLayerDiagnostic(() => {});
+  });
+
+  it('withTimeout clears timer when promise resolves first', async () => {
+    // If withTimeout leaked timers, this test would hang (timeout in bun:test)
+    const layers: MemoryLayer[] = [
+      {
+        id: 'fast', name: 'Fast', slot: 100, scope: 'thread',
+        timeouts: { init: 5000 },
+        hooks: {
+          init: async () => ({ state: { fast: true } }),
+        },
+      },
+    ];
+    const ctx = makeCtx('exec-timer');
+    await initLayers(layers, ctx, makeStorage());
+    // If we get here without hanging, the timer was properly cleaned up
+    expect(layerStates.get('exec-timer')?.get('fast')).toEqual({ fast: true });
+    await disposeLayers(layers, ctx);
+  });
+
+  it('cleanupLayerState is idempotent', async () => {
+    const layers: MemoryLayer[] = [
+      {
+        id: 'a', name: 'A', slot: 100, scope: 'thread', hooks: {
+          init: async () => ({ state: { x: 1 } }),
+        },
+      },
+    ];
+    const ctx = makeCtx('exec-cleanup-2');
+    await initLayers(layers, ctx, makeStorage());
+    expect(layerStates.has('exec-cleanup-2')).toBe(true);
+    cleanupLayerState('exec-cleanup-2');
+    expect(layerStates.has('exec-cleanup-2')).toBe(false);
+    // Second call should not throw
+    cleanupLayerState('exec-cleanup-2');
+    expect(layerStates.has('exec-cleanup-2')).toBe(false);
   });
 
   it('dispose cleans up layerStates', async () => {

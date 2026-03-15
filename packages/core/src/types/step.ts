@@ -130,6 +130,7 @@ export interface StepLoop<I, O> {
   id: string;
   body: Step<I, O>;
   until: Until;
+  maxIterations?: number;
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
   onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }

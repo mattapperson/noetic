@@ -7,6 +7,13 @@ import { resolveScopeKey, createScopedStorage } from './scope';
 // State management for active layers
 export const layerStates = new Map<string, Map<string, unknown>>();
 
+// Diagnostic callback for layer errors — default is no-op
+let diagnosticFn: (layerId: string, hook: string, error: unknown) => void = () => {};
+
+export function setLayerDiagnostic(fn: (layerId: string, hook: string, error: unknown) => void): void {
+  diagnosticFn = fn;
+}
+
 function getLayerState<T>(executionId: string, layerId: string): T | undefined {
   return layerStates.get(executionId)?.get(layerId) as T | undefined;
 }
@@ -18,12 +25,17 @@ function setLayerState<T>(executionId: string, layerId: string, state: T): void 
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   if (ms <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms),
-    ),
+    promise.then(v => { clearTimeout(timer); return v; }),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms);
+    }),
   ]);
+}
+
+export function cleanupLayerState(executionId: string): void {
+  layerStates.delete(executionId);
 }
 
 export async function initLayers(
@@ -43,7 +55,8 @@ export async function initLayers(
         timeout,
       );
       setLayerState(ctx.executionId, layer.id, result.state);
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'init', e);
       // Init error -> layer disabled (skip in future hooks)
       // State remains undefined, which signals disabled
     }
@@ -79,7 +92,8 @@ export async function recallLayers(
           setLayerState(ctx.executionId, layer.id, result.state);
         }
       }
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'recall', e);
       // Recall error -> skip layer
     }
   }
@@ -108,7 +122,8 @@ export async function storeLayers(
       if (result?.state !== undefined) {
         setLayerState(ctx.executionId, layer.id, result.state);
       }
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'store', e);
       // Store error -> skip
     }
   });
@@ -128,12 +143,13 @@ export async function disposeLayers(
     try {
       const timeout = layer.timeouts?.dispose ?? 5_000;
       await withTimeout(layer.hooks.dispose({ state }), timeout);
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'dispose', e);
       // Dispose error -> continue
     }
   }
   // Cleanup
-  layerStates.delete(ctx.executionId);
+  cleanupLayerState(ctx.executionId);
 }
 
 export async function spawnLayers(
@@ -158,7 +174,8 @@ export async function spawnLayers(
         setLayerState(childCtx.executionId, layer.id, result.childState);
         results.push({ layerId: layer.id, childState: result.childState, items: result.items ?? [] });
       }
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'onSpawn', e);
       // onSpawn error -> skip layer
     }
   }
@@ -187,7 +204,8 @@ export async function returnLayers(
       if (returnResult?.parentState !== undefined) {
         setLayerState(parentCtx.executionId, layer.id, returnResult.parentState);
       }
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'onReturn', e);
       // onReturn error -> continue
     }
   }
@@ -206,7 +224,8 @@ export async function completeLayers(
     try {
       const timeout = layer.timeouts?.onComplete ?? 30_000;
       await withTimeout(layer.hooks.onComplete({ log, ctx, state, outcome }), timeout);
-    } catch (_e) {
+    } catch (e) {
+      diagnosticFn(layer.id, 'onComplete', e);
       // onComplete error -> continue
     }
   }

@@ -6,6 +6,7 @@ export interface RetryPolicy {
   maxAttempts: number;
   backoff: 'fixed' | 'linear' | 'exponential';
   initialDelay: number;
+  maxDelay?: number;
 }
 
 export interface ModelParams {

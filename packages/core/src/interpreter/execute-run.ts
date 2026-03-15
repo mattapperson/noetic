@@ -31,12 +31,17 @@ export async function executeRun<I, O>(step: StepRun<I, O>, input: I, ctx: Conte
 }
 
 function computeDelay(retry: RetryPolicy, attempt: number): number {
+  let delay: number;
   switch (retry.backoff) {
     case 'fixed':
-      return retry.initialDelay;
+      delay = retry.initialDelay;
+      break;
     case 'linear':
-      return retry.initialDelay * (attempt + 1);
+      delay = retry.initialDelay * (attempt + 1);
+      break;
     case 'exponential':
-      return retry.initialDelay * Math.pow(2, attempt);
+      delay = retry.initialDelay * Math.pow(2, attempt);
+      break;
   }
+  return Math.min(delay, retry.maxDelay ?? 30_000);
 }

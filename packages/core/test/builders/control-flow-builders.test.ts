@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { fork } from '../../src/builders/control-flow-builders';
+import { fork, branch } from '../../src/builders/control-flow-builders';
 import type { Step, SettleResult } from '../../src/types/step';
 
 describe('fork builder', () => {
@@ -59,6 +59,30 @@ describe('fork builder', () => {
     expect(f.concurrency).toBe(2);
   });
 
+  it('throws on empty id', () => {
+    expect(() => fork<string, string>({
+      id: '',
+      mode: 'race',
+      paths: () => [],
+    })).toThrow('non-empty id');
+  });
+
+  it('throws when all mode lacks merge', () => {
+    expect(() => fork<string, string>({
+      id: 'test',
+      mode: 'all',
+      paths: () => [],
+    } as any)).toThrow('merge function');
+  });
+
+  it('throws when settle mode lacks merge', () => {
+    expect(() => fork<string, string>({
+      id: 'test',
+      mode: 'settle',
+      paths: () => [],
+    } as any)).toThrow('merge function');
+  });
+
   it('paths is a function', () => {
     const f = fork<number, number>({
       id: 'fn-test',
@@ -68,5 +92,21 @@ describe('fork builder', () => {
       ],
     });
     expect(f.paths).toBeFunction();
+  });
+});
+
+describe('branch builder', () => {
+  it('throws on empty id', () => {
+    expect(() => branch<string, string>({
+      id: '',
+      route: () => null,
+    })).toThrow('non-empty id');
+  });
+
+  it('throws on missing route', () => {
+    expect(() => branch<string, string>({
+      id: 'test',
+      route: undefined as any,
+    })).toThrow('route function');
   });
 });

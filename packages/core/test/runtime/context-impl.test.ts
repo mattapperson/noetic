@@ -115,6 +115,15 @@ describe('ContextImpl', () => {
     await expect(ctx.checkpoint()).resolves.toBeUndefined();
   });
 
+  test('abort sets aborted flag and stores reason', () => {
+    const ctx = new ContextImpl();
+    expect(ctx.aborted).toBe(false);
+    expect(ctx.abortReason).toBeUndefined();
+    ctx.abort('test reason');
+    expect(ctx.aborted).toBe(true);
+    expect(ctx.abortReason).toBe('test reason');
+  });
+
   test('items can be provided at construction', () => {
     const item = makeTestItem();
     const ctx = new ContextImpl({ items: [item] });

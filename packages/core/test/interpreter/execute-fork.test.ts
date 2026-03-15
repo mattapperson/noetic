@@ -150,6 +150,46 @@ describe('executeFork', () => {
       expect((ctx.state as any).winner).toBe(true);
     });
 
+    it('aborts loser contexts after winner resolves', async () => {
+      const childContexts: ContextImpl[] = [];
+      const step: StepForkRace<string, string> = {
+        kind: 'fork',
+        id: 'abort-test',
+        mode: 'race',
+        paths: () => [
+          { kind: 'run', id: 'fast', execute: async (_: string, ctx: Context) => { childContexts.push(ctx as ContextImpl); return 'winner'; } },
+          { kind: 'run', id: 'slow', execute: async (_: string, ctx: Context) => { childContexts.push(ctx as ContextImpl); await new Promise(r => setTimeout(r, 200)); return 'loser'; } },
+        ],
+      };
+      const ctx = new ContextImpl();
+      const result = await executeFork(step, '', ctx, simpleExecute);
+      expect(result).toBe('winner');
+      // Allow time for abort to propagate
+      await new Promise(r => setTimeout(r, 50));
+      // The losing context should have been aborted
+      const loserCtx = childContexts.find(c => c.aborted);
+      expect(loserCtx).toBeDefined();
+    });
+
+    it('respects concurrency limit in race mode', async () => {
+      let maxConcurrent = 0;
+      let current = 0;
+      const step: StepForkRace<string, string> = {
+        kind: 'fork',
+        id: 'race-conc-test',
+        mode: 'race',
+        paths: () => [
+          { kind: 'run', id: 'a', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'a'; } },
+          { kind: 'run', id: 'b', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'b'; } },
+          { kind: 'run', id: 'c', execute: async () => { current++; maxConcurrent = Math.max(maxConcurrent, current); await new Promise(r => setTimeout(r, 50)); current--; return 'c'; } },
+        ],
+        concurrency: 2,
+      };
+      const ctx = new ContextImpl();
+      await executeFork(step, '', ctx, simpleExecute);
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+    });
+
     it('all fail throws fork_partial', async () => {
       const step: StepForkRace<string, string> = {
         kind: 'fork',

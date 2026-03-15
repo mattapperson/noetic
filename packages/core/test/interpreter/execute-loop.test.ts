@@ -206,6 +206,90 @@ describe('executeLoop', () => {
     expect(capturedSnapshot.depth).toBe(0);
   });
 
+  it('enforces maxIterations ceiling', async () => {
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'ceiling-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => input + 1,
+      },
+      until: () => ({ stop: false }), // never stops
+      maxIterations: 5,
+    };
+
+    const ctx = new ContextImpl();
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('step_failed');
+      expect(oe.cause.message).toContain('maximum iterations');
+    }
+  });
+
+  it('default maxIterations is 1000', async () => {
+    let count = 0;
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'default-ceiling-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => {
+          count++;
+          return input + 1;
+        },
+      },
+      until: () => ({ stop: false }), // never stops
+    };
+
+    const ctx = new ContextImpl();
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      expect(count).toBe(1000);
+    }
+  });
+
+  it('retry counts against maxIterations ceiling', async () => {
+    let attempts = 0;
+    const loopStep: StepLoop<string, string> = {
+      kind: 'loop',
+      id: 'retry-ceiling-loop',
+      body: {
+        kind: 'run',
+        id: 'always-fail',
+        execute: async () => {
+          attempts++;
+          throw new OrchidErrorImpl({
+            kind: 'step_failed',
+            stepId: 'always-fail',
+            cause: new Error('always fails'),
+            retriesExhausted: false,
+          });
+        },
+      },
+      until: until.maxSteps(100),
+      maxIterations: 10,
+      onError: () => 'retry',
+    };
+
+    const ctx = new ContextImpl();
+    try {
+      await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      expect(attempts).toBe(10); // capped by maxIterations
+    }
+  });
+
   it('uses verified predicate with feedback', async () => {
     let iteration = 0;
     const feedbacks: (string | undefined)[] = [];

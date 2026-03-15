@@ -4,6 +4,7 @@ import type { TokenUsage, StepMeta } from '../types/common';
 import type { Span } from '../types/observability';
 import type { Channel } from '../types/channel';
 import type { ChannelStore } from './channel-store';
+import { ItemLogImpl } from './item-log-impl';
 
 class NoopSpan implements Span {
   readonly traceId = crypto.randomUUID();
@@ -14,20 +15,10 @@ class NoopSpan implements Span {
   end(): void {}
 }
 
-class ItemLogImpl implements ItemLog {
-  private _items: Item[] = [];
-  get items(): ReadonlyArray<Item> {
-    return this._items;
-  }
-  append(item: Item): void {
-    this._items.push(item);
-  }
-}
-
 export class ContextImpl implements Context {
   readonly id: string;
   stepCount: number = 0;
-  readonly tokens: TokenUsage = { input: 0, output: 0, total: 0 };
+  tokens: TokenUsage = { input: 0, output: 0, total: 0 };
   cost: number = 0;
   state: unknown;
   readonly parent: Context | null;
@@ -40,6 +31,8 @@ export class ContextImpl implements Context {
 
   private readonly _createdAt: number;
   private readonly channelStore?: ChannelStore;
+  private _aborted = false;
+  private _abortReason?: string;
 
   constructor(opts?: {
     parent?: Context;
@@ -73,6 +66,10 @@ export class ContextImpl implements Context {
     return Date.now() - this._createdAt;
   }
 
+  get aborted(): boolean {
+    return this._aborted;
+  }
+
   recv<T>(ch: Channel<T>, opts?: { timeout?: number }): Promise<T> {
     if (!this.channelStore) {
       return Promise.reject(new Error('No channel store configured'));
@@ -98,5 +95,12 @@ export class ContextImpl implements Context {
 
   complete<T>(_value: T): void {}
 
-  abort(_reason?: string): void {}
+  get abortReason(): string | undefined {
+    return this._abortReason;
+  }
+
+  abort(reason?: string): void {
+    this._aborted = true;
+    this._abortReason = reason;
+  }
 }

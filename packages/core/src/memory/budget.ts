@@ -1,4 +1,6 @@
 import type { MemoryLayer, BudgetConfig } from '../types/memory';
+import type { Context } from '../types/context';
+import { OrchidErrorImpl } from '../errors/orchid-error';
 
 export interface BudgetAllocation {
   layerId: string;
@@ -86,4 +88,37 @@ export function allocateBudgets(
   }
 
   return { allocations, historyBudget: Math.max(0, historyBudget) };
+}
+
+export interface BudgetLimits {
+  maxCost?: number;
+  maxSteps?: number;
+  maxDuration?: number;
+}
+
+export function checkBudget(ctx: Context, limits: BudgetLimits): void {
+  if (limits.maxCost !== undefined && ctx.cost > limits.maxCost) {
+    throw new OrchidErrorImpl({
+      kind: 'budget_exceeded',
+      field: 'cost',
+      limit: limits.maxCost,
+      actual: ctx.cost,
+    });
+  }
+  if (limits.maxSteps !== undefined && ctx.stepCount > limits.maxSteps) {
+    throw new OrchidErrorImpl({
+      kind: 'budget_exceeded',
+      field: 'steps',
+      limit: limits.maxSteps,
+      actual: ctx.stepCount,
+    });
+  }
+  if (limits.maxDuration !== undefined && ctx.elapsed > limits.maxDuration) {
+    throw new OrchidErrorImpl({
+      kind: 'budget_exceeded',
+      field: 'duration',
+      limit: limits.maxDuration,
+      actual: ctx.elapsed,
+    });
+  }
 }

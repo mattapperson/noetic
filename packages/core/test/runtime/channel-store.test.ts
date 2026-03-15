@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, spyOn } from 'bun:test';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { channel } from '../../src/builders/channel-builder';
 import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
@@ -176,6 +176,19 @@ describe('ChannelStore', () => {
       expect(store.tryRecv(ch)).toBe(3);
       expect(store.tryRecv(ch)).toBe(4);
       expect(store.tryRecv(ch)).toBeNull();
+    });
+
+    it('warns on overflow when dropping messages', () => {
+      const warnSpy = spyOn(console, 'warn');
+      const store = new ChannelStore();
+      const ch = channel('overflow-test', { schema: z.number(), mode: 'queue', capacity: 2 });
+      store.send(ch, 1);
+      store.send(ch, 2);
+      store.send(ch, 3); // should trigger warning
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('overflow-test');
+      expect(warnSpy.mock.calls[0][0]).toContain('capacity');
+      warnSpy.mockRestore();
     });
 
     it('drops on full internal channel queue', () => {

@@ -54,6 +54,9 @@ export class ChannelStore {
           state.queue.push(value);
         } else {
           // At capacity
+          console.warn(
+            `[orchid] Channel '${channel.name}': queue at capacity (${state.capacity}), dropping message.`,
+          );
           if ((channel as any).external) {
             state.queue.shift();
             state.queue.push(value);
