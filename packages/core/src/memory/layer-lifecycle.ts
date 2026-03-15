@@ -136,6 +136,63 @@ export async function disposeLayers(
   layerStates.delete(ctx.executionId);
 }
 
+export async function spawnLayers(
+  layers: MemoryLayer[],
+  parentCtx: ExecutionContext,
+  childCtx: ExecutionContext,
+  spawnOpts: { contextIn: string; contextOut: string },
+): Promise<{ layerId: string; childState: unknown; items: Item[] }[]> {
+  // Sequential, array order
+  const results: { layerId: string; childState: unknown; items: Item[] }[] = [];
+  for (const layer of layers) {
+    if (!layer.hooks.onSpawn) continue;
+    const parentState = getLayerState(parentCtx.executionId, layer.id);
+    if (parentState === undefined) continue; // layer not initialized
+    try {
+      const timeout = layer.timeouts?.onSpawn ?? 10_000;
+      const result = await withTimeout(
+        layer.hooks.onSpawn({ parentState, childCtx, spawnOpts }),
+        timeout,
+      );
+      if (result && result.childState !== null) {
+        setLayerState(childCtx.executionId, layer.id, result.childState);
+        results.push({ layerId: layer.id, childState: result.childState, items: result.items ?? [] });
+      }
+    } catch (e) {
+      console.warn(`Memory layer '${layer.id}' onSpawn failed:`, e);
+    }
+  }
+  return results;
+}
+
+export async function returnLayers(
+  layers: MemoryLayer[],
+  parentCtx: ExecutionContext,
+  childCtx: ExecutionContext,
+  childLog: ItemLog,
+  result: unknown,
+): Promise<void> {
+  // Sequential, array order
+  for (const layer of layers) {
+    if (!layer.hooks.onReturn) continue;
+    const childState = getLayerState(childCtx.executionId, layer.id);
+    const parentState = getLayerState(parentCtx.executionId, layer.id);
+    if (childState === undefined || parentState === undefined) continue;
+    try {
+      const timeout = layer.timeouts?.onReturn ?? 10_000;
+      const returnResult = await withTimeout(
+        layer.hooks.onReturn({ childState, childLog, parentState, result }),
+        timeout,
+      );
+      if (returnResult?.parentState !== undefined) {
+        setLayerState(parentCtx.executionId, layer.id, returnResult.parentState);
+      }
+    } catch (e) {
+      console.warn(`Memory layer '${layer.id}' onReturn failed:`, e);
+    }
+  }
+}
+
 export async function completeLayers(
   layers: MemoryLayer[],
   ctx: ExecutionContext,
