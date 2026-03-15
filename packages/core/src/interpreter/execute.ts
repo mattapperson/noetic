@@ -29,9 +29,10 @@ export async function execute<I, O>(
       const { executeFork } = await import('./execute-fork');
       return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
     }
-    case 'spawn':
-      // Will be implemented in Stage 3
-      throw new Error('Spawn not yet implemented');
+    case 'spawn': {
+      const { executeSpawn } = await import('./execute-spawn');
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+    }
     case 'loop': {
       // Import executeLoop dynamically to avoid circular dependency
       const { executeLoop } = await import('./execute-loop');
