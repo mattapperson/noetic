@@ -4,8 +4,14 @@ import type { CallModelFn } from './execute-llm';
 import { executeRun } from './execute-run';
 import { executeLLM } from './execute-llm';
 import { executeTool } from './execute-tool';
+import { executeBranch } from './execute-branch';
+import { executeFork } from './execute-fork';
+import { executeSpawn } from './execute-spawn';
+import { executeLoop } from './execute-loop';
 import { OrchidErrorImpl } from '../errors/orchid-error';
 import { isMutableContext } from './typeguards';
+
+const MAX_DEPTH = 64;
 
 export async function execute<I, O>(
   step: Step<I, O>,
@@ -13,6 +19,24 @@ export async function execute<I, O>(
   ctx: Context,
   callModel?: CallModelFn,
 ): Promise<O> {
+  // Depth guard
+  if (ctx.depth >= MAX_DEPTH) {
+    throw new OrchidErrorImpl({
+      kind: 'budget_exceeded',
+      field: 'depth',
+      limit: MAX_DEPTH,
+      actual: ctx.depth,
+    });
+  }
+
+  // Abort check
+  if (ctx.aborted) {
+    throw new OrchidErrorImpl({
+      kind: 'cancelled',
+      reason: ctx.abortReason ?? 'context aborted',
+    });
+  }
+
   // Increment step count
   if (isMutableContext(ctx)) {
     ctx.stepCount = (ctx.stepCount || 0) + 1;
@@ -33,22 +57,14 @@ export async function execute<I, O>(
       return executeLLM(step, input, ctx, callModel);
     case 'tool':
       return executeTool(step, input, ctx);
-    case 'branch': {
-      const { executeBranch } = await import('./execute-branch');
+    case 'branch':
       return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
-    }
-    case 'fork': {
-      const { executeFork } = await import('./execute-fork');
+    case 'fork':
       return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
-    }
-    case 'spawn': {
-      const { executeSpawn } = await import('./execute-spawn');
+    case 'spawn':
       return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel), callModel);
-    }
-    case 'loop': {
-      const { executeLoop } = await import('./execute-loop');
+    case 'loop':
       return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
-    }
     default: {
       const _exhaustive: never = step;
       throw new OrchidErrorImpl({

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { isOrchidError } from '../../src/errors/orchid-error';
 import type { Step } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
 import { z } from 'zod';
@@ -72,6 +73,47 @@ describe('execute() switch', () => {
     expect(ctx.stepCount).toBe(1);
     await execute(step, 'b', ctx);
     expect(ctx.stepCount).toBe(2);
+  });
+
+  it('throws budget_exceeded when depth exceeds MAX_DEPTH', async () => {
+    // Build a context chain 64 levels deep
+    let ctx: Context = new ContextImpl();
+    for (let i = 0; i < 64; i++) {
+      ctx = new ContextImpl({ parent: ctx });
+    }
+    expect(ctx.depth).toBe(64);
+    const step: Step<string, string> = {
+      kind: 'run',
+      id: 'deep',
+      execute: async (input: string) => input,
+    };
+    try {
+      await execute(step, 'test', ctx);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('budget_exceeded');
+      expect(oe.field).toBe('depth');
+    }
+  });
+
+  it('throws cancelled when context is aborted', async () => {
+    const ctx = new ContextImpl();
+    ctx.abort('test abort');
+    const step: Step<string, string> = {
+      kind: 'run',
+      id: 'test',
+      execute: async (input: string) => input,
+    };
+    try {
+      await execute(step, 'test', ctx);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('cancelled');
+    }
   });
 
   it('branch step routes correctly', async () => {

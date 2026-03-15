@@ -290,6 +290,106 @@ describe('executeLoop', () => {
     }
   });
 
+  it('aborts mid-loop when context is aborted', async () => {
+    let count = 0;
+    const ctx = new ContextImpl();
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'abort-mid-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => {
+          count++;
+          if (count === 2) ctx.abort('stop now');
+          return input + 1;
+        },
+      },
+      until: until.maxSteps(10),
+    };
+
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('cancelled');
+      expect(count).toBe(2);
+    }
+  });
+
+  it('rejects invalid maxIterations (NaN)', async () => {
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'nan-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => input + 1,
+      },
+      until: until.maxSteps(5),
+      maxIterations: NaN,
+    };
+    const ctx = new ContextImpl();
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('step_failed');
+      expect(oe.cause.message).toContain('Invalid maxIterations');
+    }
+  });
+
+  it('rejects invalid maxIterations (0)', async () => {
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'zero-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => input + 1,
+      },
+      until: until.maxSteps(5),
+      maxIterations: 0,
+    };
+    const ctx = new ContextImpl();
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as any).orchidError;
+      expect(oe.kind).toBe('step_failed');
+      expect(oe.cause.message).toContain('Invalid maxIterations');
+    }
+  });
+
+  it('trims history to maxHistorySize', async () => {
+    let capturedHistory: unknown[] = [];
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'history-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => input + 1,
+      },
+      until: (snap) => {
+        capturedHistory = snap.history;
+        return { stop: snap.stepCount >= 10 };
+      },
+      maxHistorySize: 3,
+    };
+    const ctx = new ContextImpl();
+    await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    // History should only contain the last 3 items
+    expect(capturedHistory).toHaveLength(3);
+    expect(capturedHistory).toEqual([8, 9, 10]);
+  });
+
   it('uses verified predicate with feedback', async () => {
     let iteration = 0;
     const feedbacks: (string | undefined)[] = [];

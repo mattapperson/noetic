@@ -5,6 +5,7 @@ import type { Item, MessageItem } from '../types/items';
 import { ContextImpl } from '../runtime/context-impl';
 import { OrchidErrorImpl } from '../errors/orchid-error';
 import { isContextImpl, isAssistantMessage, isOutputText } from './typeguards';
+import { cloneWithGuard } from './clone-guard';
 
 import type { Step } from '../types/step';
 
@@ -49,7 +50,7 @@ export async function executeSpawn<I, O>(
   const childCtx = new ContextImpl({
     parent: ctx,
     items: childItems,
-    state: structuredClone(ctx.state),
+    state: cloneWithGuard(ctx.state, `Spawn '${step.id}'`),
     threadId: isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID(),
     resourceId: isContextImpl(ctx) ? ctx.resourceId : undefined,
   });

@@ -30,13 +30,3 @@ export class InMemoryExporter implements TraceExporter {
     return this.spans.filter(s => s.traceId === traceId);
   }
 }
-
-let globalExporter: TraceExporter = new NoopExporter();
-
-export function setTraceExporter(exporter: TraceExporter): void {
-  globalExporter = exporter;
-}
-
-export function getTraceExporter(): TraceExporter {
-  return globalExporter;
-}

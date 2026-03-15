@@ -110,11 +110,6 @@ describe('ContextImpl', () => {
     expect(ctx.state).toEqual({});
   });
 
-  test('checkpoint is a no-op async', async () => {
-    const ctx = new ContextImpl();
-    await expect(ctx.checkpoint()).resolves.toBeUndefined();
-  });
-
   test('abort sets aborted flag and stores reason', () => {
     const ctx = new ContextImpl();
     expect(ctx.aborted).toBe(false);

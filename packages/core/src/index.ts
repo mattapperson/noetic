@@ -69,12 +69,13 @@ export { react } from './patterns/react';
 export { ralphWiggum } from './patterns/ralph-wiggum';
 
 export { compilePlan, adaptivePlan, PlanNodeSchema } from './patterns/plans';
-export type { PlanNode, PlanConstraints } from './patterns/plans';
+export type { PlanNode, PlanConstraints, ExecuteStepFn as PlanExecuteStepFn } from './patterns/plans';
 
 export { resolveScopeKey, createScopedStorage } from './memory/scope';
 export { allocateBudgets, checkBudget } from './memory/budget';
 export type { BudgetAllocation, BudgetLimits } from './memory/budget';
-export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, spawnLayers, returnLayers, setLayerDiagnostic, cleanupLayerState } from './memory/layer-lifecycle';
+export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, spawnLayers, returnLayers, createLayerStateStore } from './memory/layer-lifecycle';
+export type { LayerStateStore } from './memory/layer-lifecycle';
 export { assembleView } from './memory/projector';
 export { workingMemory } from './memory/layers/working-memory';
 export type { WorkingMemoryConfig } from './memory/layers/working-memory';
@@ -84,5 +85,5 @@ export { observationalMemory } from './memory/layers/observational-memory';
 export type { ObservationalMemoryConfig } from './memory/layers/observational-memory';
 
 export { SpanImpl } from './observability/span-impl';
-export { NoopExporter, InMemoryExporter, setTraceExporter, getTraceExporter } from './observability/trace-exporter';
+export { NoopExporter, InMemoryExporter } from './observability/trace-exporter';
 export { GenAI, ToolAttr } from './observability/genai-attributes';

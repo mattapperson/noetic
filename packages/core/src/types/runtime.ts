@@ -43,7 +43,6 @@ export interface Runtime {
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
   assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
-  checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;
   createSpan(name: string, parent: Span | null): Span;

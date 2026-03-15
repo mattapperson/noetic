@@ -91,10 +91,6 @@ export class ContextImpl implements Context {
     return this.channelStore.tryRecv(ch);
   }
 
-  async checkpoint(): Promise<void> {}
-
-  complete<T>(_value: T): void {}
-
   get abortReason(): string | undefined {
     return this._abortReason;
   }

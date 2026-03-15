@@ -29,77 +29,59 @@ export interface PlanConstraints {
   validate?: (taskId: string, input: unknown, ctx: Context) => Promise<boolean>;
 }
 
+export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
+
 export function compilePlan<O>(
   plan: PlanNode,
   agents: Record<string, (prompt: string) => Step<string, unknown>>,
   constraints?: PlanConstraints,
+  executeStep?: ExecuteStepFn,
 ): Step<string, O> {
-  return compileNode(plan, agents, constraints) as Step<string, O>;
+  return compileNode(plan, agents, constraints, executeStep) as Step<string, O>;
 }
 
 function compileNode(
   node: PlanNode,
   agents: Record<string, (prompt: string) => Step<string, unknown>>,
   constraints?: PlanConstraints,
+  executeStep?: ExecuteStepFn,
 ): Step<string, unknown> {
   const agentFactory = agents[node.assignee];
   if (!agentFactory) {
     throw new Error(`Unknown agent: ${node.assignee}`);
   }
 
-  // Leaf node - just create the step
+  // Leaf node - return the step directly from the factory
   if (!node.children || node.children.length === 0) {
-    return {
-      kind: 'run',
-      id: `plan-${node.id}`,
-      execute: async (input: string, ctx: Context) => {
-        const agentStep = agentFactory(node.description);
-        // Execute through the interpreter by making it a run step that calls execute
-        if (agentStep.kind === 'run') {
-          return (agentStep as any).execute(input, ctx);
-        }
-        throw new Error('Agent must return a run step for compilePlan');
-      },
-    };
+    return agentFactory(node.description);
   }
 
   // Has children - compile them
-  const childSteps = node.children.map(child => compileNode(child, agents, constraints));
+  const childSteps = node.children.map(child => compileNode(child, agents, constraints, executeStep));
 
   if (node.execution === 'parallel') {
-    // Use fork(all)
     return fork<string, unknown>({
       id: `plan-fork-${node.id}`,
       mode: 'all',
       paths: () => childSteps,
-      merge: (results) => results[results.length - 1], // return last result
+      merge: (results) => results[results.length - 1],
     });
   }
 
-  // Sequential - chain steps via a run step
+  // Sequential - chain steps via a run step that uses executeStep
   return {
     kind: 'run',
     id: `plan-seq-${node.id}`,
     execute: async (input: string, ctx: Context) => {
       let currentOutput: unknown = input;
       for (const child of childSteps) {
-        if (child.kind === 'run') {
-          currentOutput = await (child as any).execute(
-            typeof currentOutput === 'string' ? currentOutput : JSON.stringify(currentOutput),
-            ctx,
-          );
-        } else if (child.kind === 'fork') {
-          // Need to execute fork - import and use
-          const { executeFork } = await import('../interpreter/execute-fork');
-          currentOutput = await executeFork(
-            child as any,
-            typeof currentOutput === 'string' ? currentOutput : JSON.stringify(currentOutput),
-            ctx,
-            async (s: any, i: any, c: any) => {
-              if (s.kind === 'run') return s.execute(i, c);
-              throw new Error('Nested non-run steps not supported');
-            },
-          );
+        const childInput = typeof currentOutput === 'string' ? currentOutput : JSON.stringify(currentOutput);
+        if (executeStep) {
+          currentOutput = await executeStep(child, childInput, ctx);
+        } else if (child.kind === 'run') {
+          currentOutput = await child.execute(childInput, ctx);
+        } else {
+          throw new Error(`No executeStep provided and child step kind '${child.kind}' cannot be executed directly`);
         }
       }
       return currentOutput;
@@ -112,6 +94,7 @@ export function adaptivePlan<O>(opts: {
   agents: Record<string, (prompt: string) => Step<string, unknown>>;
   constraints?: PlanConstraints;
   maxRevisions: number;
+  executeStep?: ExecuteStepFn;
 }): Step<string, O> {
   return {
     kind: 'run',
@@ -122,22 +105,30 @@ export function adaptivePlan<O>(opts: {
       for (let revision = 0; revision < opts.maxRevisions; revision++) {
         // Generate plan
         let plan: PlanNode;
-        if (opts.planner.kind === 'run') {
-          plan = await (opts.planner as any).execute(
+        if (opts.executeStep) {
+          plan = await opts.executeStep(
+            opts.planner,
+            lastError ? `${input}\n\nPrevious plan failed: ${lastError.message}` : input,
+            ctx,
+          ) as PlanNode;
+        } else if (opts.planner.kind === 'run') {
+          plan = await opts.planner.execute(
             lastError ? `${input}\n\nPrevious plan failed: ${lastError.message}` : input,
             ctx,
           ) as PlanNode;
         } else {
-          throw new Error('Planner must be a run step');
+          throw new Error('Planner must be a run step when no executeStep provided');
         }
 
         // Compile and execute
         try {
-          const compiled = compilePlan<O>(plan, opts.agents, opts.constraints);
-          if (compiled.kind === 'run') {
-            return await (compiled as any).execute(input, ctx) as O;
+          const compiled = compilePlan<O>(plan, opts.agents, opts.constraints, opts.executeStep);
+          if (opts.executeStep) {
+            return await opts.executeStep(compiled, input, ctx) as O;
+          } else if (compiled.kind === 'run') {
+            return await compiled.execute(input, ctx) as O;
           }
-          throw new Error('Compiled plan must be a run step');
+          throw new Error(`No executeStep provided and compiled plan kind '${compiled.kind}' cannot be executed directly`);
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
           if (revision === opts.maxRevisions - 1) throw lastError;

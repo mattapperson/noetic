@@ -27,7 +27,5 @@ export interface Context<TState = unknown> {
   tryRecv<T>(channel: Channel<T>): T | null;
   readonly aborted: boolean;
   readonly abortReason?: string;
-  checkpoint(): Promise<void>;
-  complete<T>(value: T): void;
   abort(reason?: string): void;
 }

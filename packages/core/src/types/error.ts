@@ -10,4 +10,4 @@ export type OrchidError =
   | { kind: 'channel_timeout'; channelName: string; timeout: number }
   | { kind: 'channel_closed'; channelName: string }
   | { kind: 'cancelled'; reason?: string }
-  | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number };
+  | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration' | 'depth'; limit: number; actual: number };

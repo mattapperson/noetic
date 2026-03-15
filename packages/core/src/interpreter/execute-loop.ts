@@ -24,9 +24,28 @@ export async function executeLoop<I, O>(
   const startTime = Date.now();
   let stepCount = 0;
   const maxIterations = step.maxIterations ?? 1000;
+  const maxHistory = step.maxHistorySize ?? 100;
   let totalIterations = 0;
 
+  // Validate maxIterations
+  if (!Number.isFinite(maxIterations) || maxIterations < 1) {
+    throw new OrchidErrorImpl({
+      kind: 'step_failed',
+      stepId: step.id,
+      cause: new Error(`Invalid maxIterations: ${step.maxIterations}`),
+      retriesExhausted: false,
+    });
+  }
+
   while (true) {
+    // Abort check at top of each iteration
+    if (ctx.aborted) {
+      throw new OrchidErrorImpl({
+        kind: 'cancelled',
+        reason: ctx.abortReason ?? 'context aborted',
+      });
+    }
+
     // Enforce hard iteration ceiling (includes retries)
     totalIterations++;
     if (totalIterations > maxIterations) {
@@ -68,6 +87,11 @@ export async function executeLoop<I, O>(
 
     lastOutput = output;
     history.push(output);
+
+    // Trim history if it exceeds maxHistorySize
+    if (history.length > maxHistory) {
+      history.splice(0, history.length - maxHistory);
+    }
 
     // Extract text from output for snapshot
     if (typeof output === 'string') {

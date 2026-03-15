@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { NoopExporter, InMemoryExporter, setTraceExporter, getTraceExporter } from '../../src/observability/trace-exporter';
+import { NoopExporter, InMemoryExporter } from '../../src/observability/trace-exporter';
 import { SpanImpl } from '../../src/observability/span-impl';
 
 describe('NoopExporter', () => {
@@ -50,15 +50,5 @@ describe('InMemoryExporter', () => {
     expect(exporter.spans).toHaveLength(1);
     exporter.clear();
     expect(exporter.spans).toHaveLength(0);
-  });
-});
-
-describe('setTraceExporter', () => {
-  it('sets global exporter', () => {
-    const exporter = new InMemoryExporter();
-    setTraceExporter(exporter);
-    expect(getTraceExporter()).toBe(exporter);
-    // Reset
-    setTraceExporter(new NoopExporter());
   });
 });

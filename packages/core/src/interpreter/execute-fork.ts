@@ -4,31 +4,11 @@ import type { OrchidError } from '../types/error';
 import { ContextImpl } from '../runtime/context-impl';
 import { OrchidErrorImpl, isOrchidError } from '../errors/orchid-error';
 import { isContextImpl } from './typeguards';
+import { cloneWithGuard } from './clone-guard';
 
 export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
 
-const LARGE_STATE_THRESHOLD = 10 * 1024 * 1024; // 10MB
-
-// Note: Returns 0 for non-JSON-serializable state (Maps, Sets, circular refs).
-// The warning will not fire for those cases, but structuredClone will still handle them.
-function estimateSize(value: unknown): number {
-  try {
-    return JSON.stringify(value)?.length ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
-  // Warn if state is large before cloning
-  const stateSize = estimateSize(ctx.state);
-  if (stateSize > LARGE_STATE_THRESHOLD) {
-    console.warn(
-      `[orchid] Fork '${stepId}': state size (~${Math.round(stateSize / 1024 / 1024)}MB) exceeds 10MB threshold. ` +
-      `Consider reducing state size before forking to avoid performance issues.`,
-    );
-  }
-
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();
   const resourceId = isContextImpl(ctx) ? ctx.resourceId : undefined;
 
@@ -36,7 +16,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
     new ContextImpl({
       parent: ctx,
       items: [...ctx.itemLog.items],
-      state: structuredClone(ctx.state),
+      state: cloneWithGuard(ctx.state, `Fork '${stepId}'`),
       threadId,
       resourceId,
     }),
@@ -187,19 +167,18 @@ async function executeRace<I, O>(
 
       executeStep<I, O>(paths[i], input, childContexts[i])
         .then((result) => {
-          if (!settled) {
-            settled = true;
-            // Winner's state replaces parent's
-            if (isContextImpl(ctx)) {
-              ctx.state = childContexts[i].state;
+          if (settled) return;
+          settled = true;
+          // Winner's state replaces parent's
+          if (isContextImpl(ctx)) {
+            ctx.state = childContexts[i].state;
+          }
+          // Resolve first, then abort losers (non-critical path)
+          resolve(result);
+          for (let j = 0; j < childContexts.length; j++) {
+            if (j !== i) {
+              childContexts[j].abort('race lost');
             }
-            // Abort all other child contexts
-            for (let j = 0; j < childContexts.length; j++) {
-              if (j !== i) {
-                childContexts[j].abort('race lost');
-              }
-            }
-            resolve(result);
           }
         })
         .catch((err: unknown) => {

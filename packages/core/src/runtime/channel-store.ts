@@ -1,6 +1,8 @@
 import type { Channel, ExternalChannel, ChannelHandle } from '../types/channel';
 import { OrchidErrorImpl } from '../errors/orchid-error';
 
+const MAX_TOPIC_TIMEOUT = 300_000; // 5 minutes
+
 interface ChannelState<T> {
   mode: 'value' | 'queue' | 'topic';
   // value mode
@@ -88,20 +90,30 @@ export class ChannelStore {
         }
         return this.waitWithTimeout(state.queueWaiters, channel.name, timeout);
 
-      case 'topic':
+      case 'topic': {
+        // Clamp timeout to prevent indefinite subscriber leaks
+        let effectiveTimeout = timeout;
+        if (effectiveTimeout <= 0) {
+          console.warn(
+            `[orchid] Channel '${channel.name}': topic recv with non-positive timeout, clamping to ${MAX_TOPIC_TIMEOUT}ms`,
+          );
+          effectiveTimeout = MAX_TOPIC_TIMEOUT;
+        }
+
         return new Promise<T>((resolve, reject) => {
-          const timer = timeout > 0 ? setTimeout(() => {
+          const timer = setTimeout(() => {
             state.topicSubscribers.delete(handler);
-            reject(new OrchidErrorImpl({ kind: 'channel_timeout', channelName: channel.name, timeout }));
-          }, timeout) : null;
+            reject(new OrchidErrorImpl({ kind: 'channel_timeout', channelName: channel.name, timeout: effectiveTimeout }));
+          }, effectiveTimeout);
 
           const handler = (value: T) => {
-            if (timer) clearTimeout(timer);
+            clearTimeout(timer);
             state.topicSubscribers.delete(handler);
             resolve(value);
           };
           state.topicSubscribers.add(handler);
         });
+      }
     }
   }
 
@@ -124,11 +136,16 @@ export class ChannelStore {
     timeout: number,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const entry = { resolve, reject };
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const wrappedResolve = (v: T) => {
+        if (timer) clearTimeout(timer);
+        resolve(v);
+      };
+      const entry = { resolve: wrappedResolve, reject };
       waiters.push(entry);
 
       if (timeout > 0) {
-        setTimeout(() => {
+        timer = setTimeout(() => {
           const idx = waiters.indexOf(entry);
           if (idx >= 0) {
             waiters.splice(idx, 1);
