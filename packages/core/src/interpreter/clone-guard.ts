@@ -21,7 +21,7 @@ export function cloneWithGuard<T>(
 
   if (size > warnBytes) {
     console.warn(
-      `[orchid] ${label}: state size (~${Math.round(size / 1024 / 1024)}MB) exceeds ${Math.round(warnBytes / 1024 / 1024)}MB threshold. ` +
+      `[noetic] ${label}: state size (~${Math.round(size / 1024 / 1024)}MB) exceeds ${Math.round(warnBytes / 1024 / 1024)}MB threshold. ` +
         'Consider reducing state size to avoid performance issues.',
     );
   }

@@ -6,7 +6,7 @@ description: The Runtime interface executes steps, manages context, and coordina
 ## Quick Example
 
 ```ts
-import { InMemoryRuntime, step } from '@orchid/core';
+import { InMemoryRuntime, step } from '@noetic/core';
 
 const runtime = new InMemoryRuntime();
 const ctx = runtime.createContext({ state: { count: 0 } });
@@ -19,7 +19,7 @@ const result = await runtime.execute(add, 5, ctx);
 // result === 6
 ```
 
-The Runtime is the execution engine at the heart of Orchid. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `InMemoryRuntime` or implement the `Runtime` interface for durable, distributed, or custom execution environments.
+The Runtime is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `InMemoryRuntime` or implement the `Runtime` interface for durable, distributed, or custom execution environments.
 
 ## Runtime Interface
 
@@ -118,7 +118,7 @@ interface RecallLayerOutput {
 `InMemoryRuntime` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
 
 ```ts
-import { InMemoryRuntime, InMemoryExporter } from '@orchid/core';
+import { InMemoryRuntime, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
 const runtime = new InMemoryRuntime({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
+import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { SettleResult, Step, StepLoop } from '../../src/types/step';
@@ -36,7 +36,7 @@ describe('Error propagation', () => {
           execute: async () => {
             attempts++;
             if (attempts < 3) {
-              throw new OrchidErrorImpl({
+              throw new NoeticErrorImpl({
                 kind: 'step_failed',
                 stepId: 'flaky',
                 cause: new Error('flaky'),
@@ -106,8 +106,8 @@ describe('Error propagation', () => {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('fork_partial');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('fork_partial');
       }
     });
 
@@ -165,8 +165,8 @@ describe('Error propagation', () => {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('fork_partial');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('fork_partial');
       }
     });
   });
@@ -196,8 +196,8 @@ describe('Error propagation', () => {
         await execute(step, '', ctx, mockCallModel);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        const oe = e.orchidError;
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
         assert(oe.kind === 'spawn_summary_failed');
         expect(oe.childOutput).toBe('child-data');
       }

@@ -17,7 +17,7 @@ type Step<I, O> =
   | { kind: 'branch'; id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';   id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
   | { kind: 'spawn';  id: string; child: Step<I, O>; contextIn: ContextInStrategy; contextOut: ContextOutStrategy<O>; timeout?: number }
-  | { kind: 'loop';   id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'loop';   id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
 Each variant is specified in its own feature spec:
@@ -73,4 +73,4 @@ This means `Step<I, O>` is an honest contract: input `I`, output `O`, always. Th
 - `MergeFn`, `SettleResult` are defined in `03-control-flow`
 - `ContextInStrategy`, `ContextOutStrategy` are defined in `04-spawn`
 - `Until`, `Verdict` are defined in `05-loop-and-until`
-- `OrchidError` is defined in `09-error-model`
+- `NoeticError` is defined in `09-error-model`

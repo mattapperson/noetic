@@ -7,7 +7,7 @@ description: Invoke a single tool directly as a typed step.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const calculator = {
   name: 'add',
@@ -41,7 +41,7 @@ The optional `args` field lets you preset some or all of the tool's inputs. At r
 
 ## The Tool Interface
 
-Every tool in Orchid follows the same interface, whether it is passed to `step.llm` or invoked directly via `step.tool`.
+Every tool in Noetic follows the same interface, whether it is passed to `step.llm` or invoked directly via `step.tool`.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ Every tool in Orchid follows the same interface, whether it is passed to `step.l
 ```ts
 import { z } from 'zod';
 
-import type { Tool } from '@orchid/core';
+import type { Tool } from '@noetic/core';
 
 const fetchUrl: Tool<typeof UrlInput, typeof UrlOutput> = {
   name: 'fetch-url',

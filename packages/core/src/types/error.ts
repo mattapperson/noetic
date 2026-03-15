@@ -1,6 +1,6 @@
 import type { ZodError, ZodType } from 'zod';
 
-export type OrchidError =
+export type NoeticError =
   | {
       kind: 'step_failed';
       stepId: string;
@@ -33,7 +33,7 @@ export type OrchidError =
       }>;
       failed: Array<{
         stepId: string;
-        error: OrchidError;
+        error: NoeticError;
       }>;
     }
   | {

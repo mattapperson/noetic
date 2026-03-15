@@ -18,7 +18,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 ## Architecture
 
-`@orchid/core` is structured around three layers:
+`@noetic/core` is structured around three layers:
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 
@@ -40,7 +40,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `06-channels` | `Channel<T>`, `send`/`recv`, `tryRecv`, `ExternalChannel`, `ChannelHandle` | Typed data flow |
 | `07-context-and-event-log` | `Context`, `ItemLog`, `Item`, `StepMeta`, `TokenUsage`, `LLMResponse` | Execution state |
 | `08-runtime` | `Runtime` interface | Pluggable engine |
-| `09-error-model` | `OrchidError` | Error taxonomy + propagation |
+| `09-error-model` | `NoeticError` | Error taxonomy + propagation |
 | `10-observability` | `Span`, tracing | OpenTelemetry integration |
 | `11-memory-layer-system` | `MemoryLayer`, lifecycle, budget, scope, View assembly | Memory contract |
 | `12-builtin-memory-layers` | 5 built-in factories + custom examples | Reference implementations |

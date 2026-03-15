@@ -23,7 +23,7 @@ interface MyLayerState {
 The slot determines where your layer's output appears in the assembled prompt. Lower slots appear first.
 
 ```ts
-import { Slot } from '@orchid/core';
+import { Slot } from '@noetic/core';
 
 // Use a built-in constant...
 const slot = Slot.PROCEDURAL; // 250
@@ -75,7 +75,7 @@ budget: 'auto'
 Implement only the hooks you need. All hooks are optional.
 
 ```ts
-import type { MemoryLayer, MemoryHooks } from '@orchid/core';
+import type { MemoryLayer, MemoryHooks } from '@noetic/core';
 
 function myCustomLayer(): MemoryLayer<MyLayerState> {
   return {
@@ -156,7 +156,7 @@ timeouts: {
 ## Step 7: Register with AgentConfig
 
 ```ts
-import type { AgentConfig } from '@orchid/core';
+import type { AgentConfig } from '@noetic/core';
 
 const agent: AgentConfig = {
   name: 'my-agent',

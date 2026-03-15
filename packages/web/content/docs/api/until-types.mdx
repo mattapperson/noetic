@@ -1,6 +1,6 @@
 ---
 title: Until Types
-description: Type definitions for termination predicates, verdicts, snapshots, and combinators in Orchid.
+description: Type definitions for termination predicates, verdicts, snapshots, and combinators in Noetic.
 ---
 
 ## Until
@@ -182,7 +182,7 @@ function all(...predicates: Until[]): Until
 ## Example: Combining Predicates
 
 ```ts
-import { until, any, all } from '@orchid/core';
+import { until, any, all } from '@noetic/core';
 
 // Stop on any condition
 const stopEarly = any(

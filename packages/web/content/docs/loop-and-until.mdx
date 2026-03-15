@@ -6,7 +6,7 @@ description: Repeat a step until a termination predicate says stop.
 ## Quick Example
 
 ```ts
-import { step, until } from '@orchid/core';
+import { step, until } from '@noetic/core';
 
 const agent = {
   kind: 'loop',
@@ -34,7 +34,7 @@ The loop executes its `body` step repeatedly. After each iteration, a `Snapshot`
 | `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries) |
 | `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | No | -- | Transform output into next iteration's input |
-| `onError` | `(error: OrchidError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body step |
+| `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body step |
 
 ## The Snapshot
 
@@ -64,14 +64,14 @@ The `until` predicate returns a `Verdict` telling the loop what to do.
 
 ## Built-in Predicates
 
-Orchid ships with several ready-made predicates on the `until` object.
+Noetic ships with several ready-made predicates on the `until` object.
 
 ### until.noToolCalls()
 
 Stop when the LLM responds without calling any tools. This is the core of the ReAct pattern.
 
 ```ts
-import { until } from '@orchid/core';
+import { until } from '@noetic/core';
 
 const predicate = until.noToolCalls();
 ```
@@ -152,7 +152,7 @@ Combine multiple predicates with logical operators.
 Stop when **any one** of the predicates says stop. This is a logical OR.
 
 ```ts
-import { any, until } from '@orchid/core';
+import { any, until } from '@noetic/core';
 
 const stopCondition = any(
   until.noToolCalls(),
@@ -166,7 +166,7 @@ const stopCondition = any(
 Stop when **every** predicate says stop. This is a logical AND.
 
 ```ts
-import { all, until } from '@orchid/core';
+import { all, until } from '@noetic/core';
 
 const stopCondition = all(
   until.maxSteps(3),
@@ -181,7 +181,7 @@ const stopCondition = all(
 By default, the body's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
 
 ```ts
-import { until } from '@orchid/core';
+import { until } from '@noetic/core';
 
 const loop = {
   kind: 'loop',
@@ -240,7 +240,7 @@ If `onError` is not provided, errors propagate immediately.
 The built-in `react()` helper is just a loop with `until.noToolCalls()`.
 
 ```ts
-import { react } from '@orchid/core';
+import { react } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -254,7 +254,7 @@ const agent = react({
 This is equivalent to:
 
 ```ts
-import { any, step, until } from '@orchid/core';
+import { any, step, until } from '@noetic/core';
 
 const agent = {
   kind: 'loop',

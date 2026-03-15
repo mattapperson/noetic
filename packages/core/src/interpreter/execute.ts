@@ -1,4 +1,4 @@
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
@@ -22,7 +22,7 @@ export async function execute<I, O>(
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
       cause: new Error(`Maximum spawn depth ${MAX_DEPTH} exceeded (depth: ${ctx.depth})`),
@@ -32,7 +32,7 @@ export async function execute<I, O>(
 
   // Abort check
   if (ctx.aborted) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'cancelled',
       reason: ctx.abortReason ?? 'context aborted',
     });
@@ -48,7 +48,7 @@ export async function execute<I, O>(
       return executeRun(step, input, ctx);
     case 'llm':
       if (!callModel) {
-        throw new OrchidErrorImpl({
+        throw new NoeticErrorImpl({
           kind: 'step_failed',
           stepId: step.id,
           cause: new Error('callModel is required for LLM steps'),
@@ -68,7 +68,7 @@ export async function execute<I, O>(
       return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
     default: {
       const _exhaustive: never = step;
-      throw new OrchidErrorImpl({
+      throw new NoeticErrorImpl({
         kind: 'step_failed',
         stepId: 'unknown',
         cause: new Error('Unknown step kind'),

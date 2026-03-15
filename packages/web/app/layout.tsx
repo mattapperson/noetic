@@ -4,7 +4,7 @@ import { jetbrainsMono } from '@/lib/fonts';
 import './global.css';
 
 export const metadata = {
-  title: 'Orchid — Agent Framework',
+  title: 'Noetic — Agent Framework',
   description: 'Primitives to build agents from scratch. Patterns to start fast.',
 };
 

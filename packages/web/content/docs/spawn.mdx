@@ -6,7 +6,7 @@ description: Run a child step in an isolated context with configurable input and
 ## Quick Example
 
 ```ts
-import { spawn, step } from '@orchid/core';
+import { spawn, step } from '@noetic/core';
 
 const isolated = spawn({
   id: 'sub-agent',
@@ -206,7 +206,7 @@ const spawned = spawn({
 ## Real-World Example: Research Delegation
 
 ```ts
-import { spawn, step, until } from '@orchid/core';
+import { spawn, step, until } from '@noetic/core';
 
 const researchAgent = spawn({
   id: 'delegated-research',

@@ -26,7 +26,7 @@ interface ChannelHandle<T> {
 ## Creating an External Channel
 
 ```ts
-import { channel } from '@orchid/core';
+import { channel } from '@noetic/core';
 import { z } from 'zod';
 
 const taskChannel = channel({
@@ -66,7 +66,7 @@ if (!handle.closed) {
 ### Process A (Orchestrator)
 
 ```ts
-import { channel, step } from '@orchid/core';
+import { channel, step } from '@noetic/core';
 import { z } from 'zod';
 
 const resultChannel = channel({

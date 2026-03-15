@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeRun } from '../../src/interpreter/execute-run';
 import type { Context } from '../../src/types/context';
 import type { StepRun } from '../../src/types/step';
@@ -78,8 +78,8 @@ describe('executeRun', () => {
       await executeRun(s, 'test', mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.stepId).toBe('failing');
       expect(oe.cause.message).toBe('boom');
@@ -141,8 +141,8 @@ describe('executeRun', () => {
       await executeRun(s, 'test', mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.retriesExhausted).toBe(true);
       expect(attempts).toBe(3);
@@ -261,7 +261,7 @@ describe('executeRun', () => {
     }
   });
 
-  it('wraps non-Error throws in OrchidErrorImpl', async () => {
+  it('wraps non-Error throws in NoeticErrorImpl', async () => {
     const s: StepRun<string, string> = {
       kind: 'run',
       id: 'string-throw',
@@ -273,8 +273,8 @@ describe('executeRun', () => {
       await executeRun(s, 'test', mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      expect(e.orchidError.kind).toBe('step_failed');
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('step_failed');
     }
   });
 });

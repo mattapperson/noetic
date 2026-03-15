@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeFork } from '../../src/interpreter/execute-fork';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
@@ -59,8 +59,8 @@ describe('executeFork', () => {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        const oe = e.orchidError;
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
         assert(oe.kind === 'fork_partial');
         expect(oe.succeeded).toHaveLength(1);
         expect(oe.succeeded[0].stepId).toBe('ok');
@@ -437,8 +437,8 @@ describe('executeFork', () => {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        const oe = e.orchidError;
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
         assert(oe.kind === 'fork_partial');
         expect(oe.succeeded).toHaveLength(0);
         expect(oe.failed).toHaveLength(2);
@@ -457,8 +457,8 @@ describe('executeFork', () => {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('fork_partial');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('fork_partial');
       }
     });
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
@@ -124,8 +124,8 @@ describe('execute() switch', () => {
       await execute(step, 'test', ctx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Maximum spawn depth');
     }
@@ -143,8 +143,8 @@ describe('execute() switch', () => {
       await execute(step, 'test', ctx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       expect(oe.kind).toBe('cancelled');
     }
   });

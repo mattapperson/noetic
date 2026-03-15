@@ -1,28 +1,28 @@
 ---
 title: Error Model
-description: Orchid uses structured OrchidError objects with error codes and recovery hints.
+description: Noetic uses structured NoeticError objects with error codes and recovery hints.
 ---
 
 ## Quick Example
 
 ```ts
-import { isOrchidError } from '@orchid/core';
+import { isNoeticError } from '@noetic/core';
 
 try {
   const result = await runtime.execute(myStep, input, ctx);
 } catch (e) {
-  if (isOrchidError(e)) {
-    console.log(e.orchidError.kind); // e.g. 'step_failed'
+  if (isNoeticError(e)) {
+    console.log(e.noeticError.kind); // e.g. 'step_failed'
     console.log(e.message);         // Human-readable description
   }
 }
 ```
 
-Orchid wraps every framework-level failure in a structured `OrchidError` discriminated union. Instead of catching generic exceptions and guessing what went wrong, you can match on the `kind` field and access typed metadata for each error variant.
+Noetic wraps every framework-level failure in a structured `NoeticError` discriminated union. Instead of catching generic exceptions and guessing what went wrong, you can match on the `kind` field and access typed metadata for each error variant.
 
-## OrchidError Type
+## NoeticError Type
 
-`OrchidError` is a discriminated union with a `kind` field. Each variant carries context-specific data:
+`NoeticError` is a discriminated union with a `kind` field. Each variant carries context-specific data:
 
 | `kind` | Key Fields | When it occurs |
 |---|---|---|
@@ -40,12 +40,12 @@ Orchid wraps every framework-level failure in a structured `OrchidError` discrim
 ### Full Type Definition
 
 ```ts
-type OrchidError =
+type NoeticError =
   | { kind: 'step_failed'; stepId: string; cause: Error; retriesExhausted: boolean }
   | { kind: 'llm_refused'; stepId: string; refusal: string }
   | { kind: 'llm_parse_error'; stepId: string; raw: string; schema: ZodType; zodError: ZodError }
   | { kind: 'llm_rate_limit'; stepId: string; retryAfter?: number }
-  | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: OrchidError }> }
+  | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
   | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
   | { kind: 'channel_timeout'; channelName: string; timeout: number }
   | { kind: 'channel_closed'; channelName: string }
@@ -53,14 +53,14 @@ type OrchidError =
   | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number };
 ```
 
-## OrchidErrorImpl Class
+## NoeticErrorImpl Class
 
-`OrchidErrorImpl` extends the standard `Error` class, so it works with `try/catch` and stack traces. The structured error data lives on the `.orchidError` property:
+`NoeticErrorImpl` extends the standard `Error` class, so it works with `try/catch` and stack traces. The structured error data lives on the `.noeticError` property:
 
 ```ts
-class OrchidErrorImpl extends Error {
-  readonly orchidError: OrchidError;
-  constructor(error: OrchidError);
+class NoeticErrorImpl extends Error {
+  readonly noeticError: NoeticError;
+  constructor(error: NoeticError);
 }
 ```
 
@@ -70,24 +70,24 @@ The `message` string is auto-generated from the error kind and its fields. For e
 Step 'fetch-data' failed: Connection refused
 ```
 
-## isOrchidError Type Guard
+## isNoeticError Type Guard
 
-Use `isOrchidError()` to narrow an `unknown` catch value:
+Use `isNoeticError()` to narrow an `unknown` catch value:
 
 ```ts
-import { isOrchidError } from '@orchid/core';
+import { isNoeticError } from '@noetic/core';
 
-function isOrchidError(e: unknown): e is OrchidErrorImpl;
+function isNoeticError(e: unknown): e is NoeticErrorImpl;
 ```
 
-This is an `instanceof` check against `OrchidErrorImpl`.
+This is an `instanceof` check against `NoeticErrorImpl`.
 
 ## Handling Errors in Loops
 
 Loops accept an `onError` callback that receives the structured error and returns a recovery action:
 
 ```ts
-import { step, loop, until } from '@orchid/core';
+import { step, loop, until } from '@noetic/core';
 
 const resilientLoop = loop({
   id: 'retry-loop',
@@ -113,11 +113,11 @@ const resilientLoop = loop({
 
 ## Matching on Error Kind
 
-Because `OrchidError` is a discriminated union, TypeScript narrows the type after checking `kind`:
+Because `NoeticError` is a discriminated union, TypeScript narrows the type after checking `kind`:
 
 ```ts
-if (isOrchidError(e)) {
-  const err = e.orchidError;
+if (isNoeticError(e)) {
+  const err = e.noeticError;
 
   switch (err.kind) {
     case 'llm_parse_error':

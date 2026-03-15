@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
+import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { executeLoop } from '../../src/interpreter/execute-loop';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Snapshot, StepLoop } from '../../src/types/step';
@@ -65,7 +65,7 @@ describe('executeLoop', () => {
         execute: async (_input: string) => {
           attempts++;
           if (attempts <= 2) {
-            throw new OrchidErrorImpl({
+            throw new NoeticErrorImpl({
               kind: 'step_failed',
               stepId: 'flaky',
               cause: new Error('flaky'),
@@ -96,7 +96,7 @@ describe('executeLoop', () => {
         execute: async (input: number) => {
           callCount++;
           if (callCount === 2) {
-            throw new OrchidErrorImpl({
+            throw new NoeticErrorImpl({
               kind: 'step_failed',
               stepId: 'sometimes-fail',
               cause: new Error('oops'),
@@ -124,7 +124,7 @@ describe('executeLoop', () => {
         kind: 'run',
         id: 'fail',
         execute: async () => {
-          throw new OrchidErrorImpl({
+          throw new NoeticErrorImpl({
             kind: 'step_failed',
             stepId: 'fail',
             cause: new Error('boom'),
@@ -141,7 +141,7 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
+      assert(isNoeticError(e));
     }
   });
 
@@ -221,8 +221,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('maximum iterations');
     }
@@ -251,7 +251,7 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
+      assert(isNoeticError(e));
       expect(count).toBe(1_000);
     }
   });
@@ -266,7 +266,7 @@ describe('executeLoop', () => {
         id: 'always-fail',
         execute: async () => {
           attempts++;
-          throw new OrchidErrorImpl({
+          throw new NoeticErrorImpl({
             kind: 'step_failed',
             stepId: 'always-fail',
             cause: new Error('always fails'),
@@ -284,7 +284,7 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
+      assert(isNoeticError(e));
       expect(attempts).toBe(10); // capped by maxIterations
     }
   });
@@ -313,8 +313,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       expect(oe.kind).toBe('cancelled');
       expect(count).toBe(2);
     }
@@ -337,8 +337,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
     }
@@ -361,8 +361,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
     }
@@ -408,7 +408,7 @@ describe('executeLoop', () => {
         execute: async (_input: string) => {
           callCount++;
           if (callCount === 1) {
-            throw new OrchidErrorImpl({
+            throw new NoeticErrorImpl({
               kind: 'step_failed',
               stepId: 'fail-then-ok',
               cause: new Error('first fail'),
@@ -447,8 +447,8 @@ describe('executeLoop', () => {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
     }

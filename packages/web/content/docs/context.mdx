@@ -6,7 +6,7 @@ description: The Context object tracks execution state, metrics, and conversatio
 ## Quick Example
 
 ```ts
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const greet = step.run('greet', async (input: string, ctx) => {
   console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
@@ -25,7 +25,7 @@ const greet = step.run('greet', async (input: string, ctx) => {
 });
 ```
 
-Every step in Orchid receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
+Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
 
 ## Context Interface
 
@@ -80,7 +80,7 @@ Context exposes three methods for communicating over [Channels](/docs/channels):
 | `tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 
 ```ts
-import { channel } from '@orchid/core';
+import { channel } from '@noetic/core';
 import { z } from 'zod';
 
 const approvals = channel('approvals', {

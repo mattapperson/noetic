@@ -1,4 +1,4 @@
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
 import type { Item } from '../types/items';
@@ -58,7 +58,7 @@ export async function executeSpawn<I, O>(
 
     case 'summary': {
       if (!callModel) {
-        throw new OrchidErrorImpl({
+        throw new NoeticErrorImpl({
           kind: 'step_failed',
           stepId: step.id,
           cause: new Error('callModel required for summary contextOut'),
@@ -80,7 +80,7 @@ export async function executeSpawn<I, O>(
         // and callers using summary contextOut expect string output.
         return text as unknown as O;
       } catch (e) {
-        throw new OrchidErrorImpl({
+        throw new NoeticErrorImpl({
           kind: 'spawn_summary_failed',
           stepId: step.id,
           childOutput: childOutput,
@@ -94,7 +94,7 @@ export async function executeSpawn<I, O>(
       if (parseResult.success) {
         return parseResult.data;
       }
-      throw new OrchidErrorImpl({
+      throw new NoeticErrorImpl({
         kind: 'llm_parse_error',
         stepId: step.id,
         raw: JSON.stringify(childOutput),
@@ -105,7 +105,7 @@ export async function executeSpawn<I, O>(
 
     default: {
       const _exhaustive: never = step.contextOut;
-      throw new OrchidErrorImpl({
+      throw new NoeticErrorImpl({
         kind: 'step_failed',
         stepId: step.id,
         cause: new Error('Unknown contextOut strategy'),

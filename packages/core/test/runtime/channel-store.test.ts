@@ -2,7 +2,7 @@ import { describe, expect, it, spyOn } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import { ChannelStore } from '../../src/runtime/channel-store';
 
 describe('ChannelStore', () => {
@@ -185,8 +185,8 @@ describe('ChannelStore', () => {
         await store.recv(ch, 50);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('channel_timeout');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('channel_timeout');
       }
     });
 
@@ -200,8 +200,8 @@ describe('ChannelStore', () => {
         await store.recv(ch, 50);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('channel_timeout');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('channel_timeout');
       }
     });
 
@@ -215,8 +215,8 @@ describe('ChannelStore', () => {
         await store.recv(ch, 50);
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('channel_timeout');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('channel_timeout');
       }
     });
   });
@@ -272,8 +272,8 @@ describe('ChannelStore', () => {
         handle.send('hello');
         expect.unreachable('should have thrown');
       } catch (e) {
-        assert(isOrchidError(e));
-        expect(e.orchidError.kind).toBe('channel_closed');
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('channel_closed');
       }
     });
   });

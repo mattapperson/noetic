@@ -16,11 +16,11 @@ Unlike other memory layers that operate on structured state, Semantic Recall int
 
 ## Building a Semantic Recall Layer
 
-Orchid does not ship a built-in vector store. Instead, you implement the `MemoryHooks` interface with your preferred vector database. Here is the general shape:
+Noetic does not ship a built-in vector store. Instead, you implement the `MemoryHooks` interface with your preferred vector database. Here is the general shape:
 
 ```ts
-import type { MemoryLayer } from '@orchid/core';
-import { Slot } from '@orchid/core';
+import type { MemoryLayer } from '@noetic/core';
+import { Slot } from '@noetic/core';
 
 interface VectorStore {
   upsert(id: string, embedding: number[], text: string, metadata?: Record<string, unknown>): Promise<void>;

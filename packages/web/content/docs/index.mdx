@@ -1,19 +1,19 @@
 ---
 title: Getting Started
-description: Install Orchid and build your first agent in under 5 minutes.
+description: Install Noetic and build your first agent in under 5 minutes.
 ---
 
 ## Installation
 
 ```package-install
-npm i @orchid/core
+npm i @noetic/core
 ```
 
 Or with your preferred package manager:
 
 ```bash
-bun add @orchid/core
-pnpm add @orchid/core
+bun add @noetic/core
+pnpm add @noetic/core
 ```
 
 ## Your First Agent
@@ -22,7 +22,7 @@ Build a ReAct agent in under 10 lines. This agent loops over an LLM step, callin
 
 ```ts
 import { z } from 'zod';
-import { react, step, until } from '@orchid/core';
+import { react, step, until } from '@noetic/core';
 
 const searchTool = {
   name: 'search',
@@ -51,13 +51,13 @@ The `react` pattern composes three primitives under the hood: `step.llm`, `until
 ## What Happens When You Run It
 
 1. The LLM receives the system prompt and user input.
-2. If the model calls a tool, Orchid executes it and feeds the result back.
+2. If the model calls a tool, Noetic executes it and feeds the result back.
 3. The loop repeats until the model responds without tool calls, or the step limit is reached.
 4. The final text output is returned.
 
 ## Next Steps
 
-- [Overview](/docs/overview) -- understand Orchid's philosophy and the 7 primitives.
+- [Overview](/docs/overview) -- understand Noetic's philosophy and the 7 primitives.
 - [Steps](/docs/steps) -- learn about `step.run`, `step.llm`, and `step.tool`.
 - [Control Flow](/docs/control-flow) -- branch and fork for conditional and parallel logic.
 - [Loop & Until](/docs/loop-and-until) -- iteration with termination predicates.

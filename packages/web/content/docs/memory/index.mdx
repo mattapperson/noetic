@@ -1,11 +1,11 @@
 ---
 title: Memory Layer System
-description: How Orchid's memory layers inject long-term and short-term context into every LLM call through a slot-based, scoped architecture.
+description: How Noetic's memory layers inject long-term and short-term context into every LLM call through a slot-based, scoped architecture.
 ---
 
 ## Overview
 
-Orchid's memory system is built around **MemoryLayer** objects. Each layer occupies a numbered slot, declares a scope, and implements lifecycle hooks that run before and after every LLM call. The runtime merges all layer outputs into a single prompt view via `assembleView()`.
+Noetic's memory system is built around **MemoryLayer** objects. Each layer occupies a numbered slot, declares a scope, and implements lifecycle hooks that run before and after every LLM call. The runtime merges all layer outputs into a single prompt view via `assembleView()`.
 
 ## MemoryLayer Interface
 

@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
 import { ZodError } from 'zod';
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { FunctionCallItem, Item } from '../types/items';
@@ -74,7 +74,7 @@ export async function executeLLM<I, O>(
       return step.output.parse(parsed);
     } catch (e) {
       if (e instanceof SyntaxError || e instanceof ZodError) {
-        throw new OrchidErrorImpl({
+        throw new NoeticErrorImpl({
           kind: 'llm_parse_error',
           stepId: step.id,
           raw: lastText,

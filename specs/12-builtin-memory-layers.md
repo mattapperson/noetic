@@ -172,7 +172,7 @@ Persists task-level artifacts (files modified, progress checkpoints, git commits
 
 ```typescript
 interface DurableTaskStateConfig {
-  baseDir?: string;          // default '.orchid/tasks'
+  baseDir?: string;          // default '.noetic/tasks'
   gitCommit?: boolean;       // default false
   schema?: ZodType;
   serializer?: {

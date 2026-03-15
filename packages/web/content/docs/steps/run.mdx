@@ -6,7 +6,7 @@ description: Execute arbitrary async code as a typed step.
 ## Quick Example
 
 ```ts
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const transform = step.run({
   id: 'normalize-input',
@@ -23,7 +23,7 @@ const transform = step.run({
 The `execute` function receives two arguments:
 
 1. **input** -- the typed input from the previous step (or the initial pipeline input).
-2. **ctx** -- the Orchid `Context`, giving access to memory, tokens, abort signals, and more.
+2. **ctx** -- the Noetic `Context`, giving access to memory, tokens, abort signals, and more.
 
 The return value becomes the output of the step, passed to whatever comes next.
 
@@ -49,7 +49,7 @@ The return value becomes the output of the step, passed to whatever comes next.
 ## Retry Example
 
 ```ts
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const fetchData = step.run({
   id: 'fetch-api',
@@ -74,7 +74,7 @@ const fetchData = step.run({
 The `Context` object provides access to runtime state inside your execute function.
 
 ```ts
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const contextAware = step.run({
   id: 'context-example',

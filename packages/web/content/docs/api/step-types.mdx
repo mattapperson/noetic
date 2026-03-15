@@ -1,6 +1,6 @@
 ---
 title: Step Types
-description: Type definitions for all step variants in Orchid's discriminated union.
+description: Type definitions for all step variants in Noetic's discriminated union.
 ---
 
 ## Step Union
@@ -114,7 +114,7 @@ Fork has three mode variants, each a separate interface.
 | `maxIterations` | `number` | no | Safety limit on iterations |
 | `maxHistorySize` | `number` | no | Max history items to retain |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | no | Transform output to next input |
-| `onError` | `(error: OrchidError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
+| `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
 
 ## Supporting Types
 
@@ -125,7 +125,7 @@ Fork has three mode variants, each a separate interface.
 | `stepId` | `string` | Step that produced this result |
 | `status` | `'fulfilled' \| 'rejected'` | Outcome |
 | `value` | `O` | Present if fulfilled |
-| `error` | `OrchidError` | Present if rejected |
+| `error` | `NoeticError` | Present if rejected |
 
 ### ContextInStrategy
 

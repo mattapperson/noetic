@@ -6,7 +6,7 @@ description: Call a language model with tools, structured output, and system pro
 ## Quick Example
 
 ```ts
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const chat = step.llm({
   id: 'chat',
@@ -43,7 +43,7 @@ const chat = step.llm({
 
 ### Tool Interface
 
-Tools passed to `step.llm` follow the standard Orchid `Tool` interface. See [step.tool](/docs/steps/tool) for the full definition.
+Tools passed to `step.llm` follow the standard Noetic `Tool` interface. See [step.tool](/docs/steps/tool) for the full definition.
 
 ## Structured Output
 
@@ -51,7 +51,7 @@ Provide a Zod schema to `output` and the model response will be parsed and valid
 
 ```ts
 import { z } from 'zod';
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const extract = step.llm({
   id: 'extract-entities',
@@ -71,7 +71,7 @@ If the model response does not match the schema, a validation error is thrown.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const searchTool = {
   name: 'search',
@@ -102,7 +102,7 @@ When the model emits a tool call, the runtime executes the tool and feeds the re
 ## Tuning Generation
 
 ```ts
-import { step } from '@orchid/core';
+import { step } from '@noetic/core';
 
 const creative = step.llm({
   id: 'brainstorm',

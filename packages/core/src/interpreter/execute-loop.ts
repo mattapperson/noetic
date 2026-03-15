@@ -1,4 +1,4 @@
-import { isOrchidError, OrchidErrorImpl } from '../errors/orchid-error';
+import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { ExecuteStepFn, Snapshot, StepLoop, Verdict } from '../types/step';
 import { isMutableContext } from './typeguards';
@@ -27,7 +27,7 @@ export async function executeLoop<I, O>(
 
   // Validate maxIterations
   if (!Number.isFinite(maxIterations) || maxIterations < 1) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
       cause: new Error(`Invalid maxIterations: ${step.maxIterations}`),
@@ -38,7 +38,7 @@ export async function executeLoop<I, O>(
   while (true) {
     // Abort check at top of each iteration
     if (ctx.aborted) {
-      throw new OrchidErrorImpl({
+      throw new NoeticErrorImpl({
         kind: 'cancelled',
         reason: ctx.abortReason ?? 'context aborted',
       });
@@ -47,7 +47,7 @@ export async function executeLoop<I, O>(
     // Enforce hard iteration ceiling (includes retries)
     totalIterations++;
     if (totalIterations > maxIterations) {
-      throw new OrchidErrorImpl({
+      throw new NoeticErrorImpl({
         kind: 'step_failed',
         stepId: step.id,
         cause: new Error(`Loop exceeded maximum iterations (${maxIterations})`),
@@ -61,10 +61,10 @@ export async function executeLoop<I, O>(
       output = await executeStep<I, O>(step.body, currentInput, ctx);
       stepCount++;
     } catch (e) {
-      if (!step.onError || !isOrchidError(e)) {
+      if (!step.onError || !isNoeticError(e)) {
         throw e;
       }
-      const action = step.onError(e.orchidError, ctx);
+      const action = step.onError(e.noeticError, ctx);
       if (action === 'retry') {
         continue;
       }
@@ -126,7 +126,7 @@ export async function executeLoop<I, O>(
 
     if (verdict.stop) {
       if (lastOutput === undefined) {
-        throw new OrchidErrorImpl({
+        throw new NoeticErrorImpl({
           kind: 'step_failed',
           stepId: step.id,
           cause: new Error('Loop completed with no successful output'),

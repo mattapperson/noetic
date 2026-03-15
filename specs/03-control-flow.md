@@ -1,6 +1,6 @@
 # Control Flow: `branch` and `fork`
 
-> **Depends On:** `01-step-type` (Step<I,O>), `09-error-model` (OrchidError)
+> **Depends On:** `01-step-type` (Step<I,O>), `09-error-model` (NoeticError)
 > **Exports:** `branch()`, `fork()`, `BranchOpts`, `ForkOpts`, `SettleResult`, `MergeFn`
 
 ---
@@ -66,7 +66,7 @@ interface SettleResult<O> {
   stepId: string;
   status: 'fulfilled' | 'rejected';
   value?: O;
-  error?: OrchidError;
+  error?: NoeticError;
 }
 ```
 

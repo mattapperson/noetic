@@ -32,7 +32,7 @@ export function Nav(): ReactNode {
           letterSpacing: '0.1em',
         }}
       >
-        ORCHID
+        NOETIC
       </Link>
       <div
         style={{

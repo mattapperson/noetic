@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import { allocateBudgets, checkBudget } from '../../src/memory/budget';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { BudgetConfig, MemoryLayer } from '../../src/types/memory';
@@ -168,8 +168,8 @@ describe('checkBudget', () => {
       });
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'budget_exceeded');
       expect(oe.field).toBe('cost');
       expect(oe.limit).toBe(5.0);
@@ -186,8 +186,8 @@ describe('checkBudget', () => {
       });
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'budget_exceeded');
       expect(oe.field).toBe('steps');
     }
@@ -203,8 +203,8 @@ describe('checkBudget', () => {
       }); // 1ms limit, elapsed should be > 1ms
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'budget_exceeded');
       expect(oe.field).toBe('duration');
     }

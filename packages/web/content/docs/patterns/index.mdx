@@ -1,11 +1,11 @@
 ---
 title: Patterns Overview
-description: Pre-built agent patterns composed from Orchid's 7 primitives -- from simple ReAct loops to multi-agent task trees.
+description: Pre-built agent patterns composed from Noetic's 7 primitives -- from simple ReAct loops to multi-agent task trees.
 ---
 
 ## Overview
 
-Patterns are ready-made compositions of Orchid's 7 primitives (`step.run`, `step.llm`, `step.tool`, `branch`, `fork`, `spawn`, `loop`). Each pattern solves a common agent architecture problem without sacrificing the ability to customize.
+Patterns are ready-made compositions of Noetic's 7 primitives (`step.run`, `step.llm`, `step.tool`, `branch`, `fork`, `spawn`, `loop`). Each pattern solves a common agent architecture problem without sacrificing the ability to customize.
 
 Every pattern returns a `Step` (usually a `StepLoop`), which means you can nest patterns inside other patterns, wrap them in additional loops, or use them as children in spawn and fork steps.
 
@@ -27,7 +27,7 @@ Every pattern returns a `Step` (usually a `StepLoop`), which means you can nest 
 Patterns are not special. They return plain `Step` objects:
 
 ```ts
-import { react, ralphWiggum, fork } from '@orchid/core';
+import { react, ralphWiggum, fork } from '@noetic/core';
 
 // Use a pattern as a fork path
 const parallel = fork({

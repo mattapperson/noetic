@@ -10,7 +10,7 @@ Thread Weaving uses `fork({ mode: 'all' })` to run multiple analysis paths in pa
 ## Pattern
 
 ```ts
-import { fork, react } from '@orchid/core';
+import { fork, react } from '@noetic/core';
 
 const weavedAnalysis = fork({
   id: 'thread-weave',
@@ -52,7 +52,7 @@ Thread Weaving typically uses `mode: 'all'`, but other modes are available:
 ## Example: Research with Multiple Sources
 
 ```ts
-import { fork, react } from '@orchid/core';
+import { fork, react } from '@noetic/core';
 
 const multiSourceResearch = fork({
   id: 'multi-source',
@@ -72,7 +72,7 @@ const multiSourceResearch = fork({
 ## Example: Settle Mode for Fault Tolerance
 
 ```ts
-import { fork } from '@orchid/core';
+import { fork } from '@noetic/core';
 
 const resilientFork = fork({
   id: 'resilient-analysis',

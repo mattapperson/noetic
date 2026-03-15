@@ -8,13 +8,13 @@ import { TuiWindow } from '@/components/tui/tui-window';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 
 const INSTALL_COMMANDS = [
-  '$ bun add @orchid/core',
-  '$ npm install @orchid/core',
-  '$ pnpm add @orchid/core',
+  '$ bun add @noetic/core',
+  '$ npm install @noetic/core',
+  '$ pnpm add @noetic/core',
 ] as const;
 
-const HERO_CODE = `import { react } from '@orchid/core';
-import { InMemoryRuntime } from '@orchid/core';
+const HERO_CODE = `import { react } from '@noetic/core';
+import { InMemoryRuntime } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -92,7 +92,7 @@ export function Hero(): ReactNode {
           lineHeight: 1,
         }}
       >
-        ORCHID
+        NOETIC
       </motion.h1>
 
       <motion.p

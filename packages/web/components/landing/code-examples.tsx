@@ -8,7 +8,7 @@ import { TuiWindow } from '@/components/tui/tui-window';
 import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 
 const EXAMPLES = {
-  ReAct: `import { react } from '@orchid/core';
+  ReAct: `import { react } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -19,7 +19,7 @@ const agent = react({
 // Observe → Think → Act loop
 const result = await execute(agent, runtime);`,
 
-  'Ralph Wiggum': `import { ralphWiggum } from '@orchid/core';
+  'Ralph Wiggum': `import { ralphWiggum } from '@noetic/core';
 
 // Naive agent: just fires tools without thinking
 const agent = ralphWiggum({
@@ -30,7 +30,7 @@ const agent = ralphWiggum({
 
 const result = await execute(agent, runtime);`,
 
-  'Task Tree': `import { adaptivePlan, compilePlan } from '@orchid/core';
+  'Task Tree': `import { adaptivePlan, compilePlan } from '@noetic/core';
 
 const plan = compilePlan({
   goal: 'Research and summarize topic',

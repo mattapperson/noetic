@@ -6,7 +6,7 @@ description: Built-in distributed tracing with OpenTelemetry-compatible spans.
 ## Quick Example
 
 ```ts
-import { InMemoryRuntime, InMemoryExporter } from '@orchid/core';
+import { InMemoryRuntime, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
 const runtime = new InMemoryRuntime({ traceExporter: exporter });
@@ -20,7 +20,7 @@ for (const span of exporter.spans) {
 }
 ```
 
-Orchid includes a built-in tracing system modeled on OpenTelemetry conventions. Every step execution, LLM call, and tool invocation creates a span with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
+Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. Every step execution, LLM call, and tool invocation creates a span with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
 
 ## Span Interface
 
@@ -116,7 +116,7 @@ interface TraceExporter {
 Discards all spans. This is the default when no exporter is configured.
 
 ```ts
-import { NoopExporter } from '@orchid/core';
+import { NoopExporter } from '@noetic/core';
 
 const runtime = new InMemoryRuntime({
   traceExporter: new NoopExporter(),
@@ -128,7 +128,7 @@ const runtime = new InMemoryRuntime({
 Collects spans in an array for testing and debugging.
 
 ```ts
-import { InMemoryExporter } from '@orchid/core';
+import { InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
 // ... run agent ...
@@ -155,7 +155,7 @@ exporter.clear();
 Implement `TraceExporter` to send spans to any backend:
 
 ```ts
-import type { TraceExporter, Span } from '@orchid/core';
+import type { TraceExporter, Span } from '@noetic/core';
 
 class OtlpExporter implements TraceExporter {
   async export(spans: Span[]): Promise<void> {
@@ -169,7 +169,7 @@ class OtlpExporter implements TraceExporter {
 
 ## GenAI Semantic Attributes
 
-Orchid defines constants following the OpenTelemetry GenAI semantic conventions. These are automatically set on LLM and tool spans:
+Noetic defines constants following the OpenTelemetry GenAI semantic conventions. These are automatically set on LLM and tool spans:
 
 ### GenAI Constants
 
@@ -189,7 +189,7 @@ Orchid defines constants following the OpenTelemetry GenAI semantic conventions.
 | `ToolAttr.NEEDS_APPROVAL` | `'tool.needs_approval'` | Whether the tool requires human approval. |
 
 ```ts
-import { GenAI, ToolAttr } from '@orchid/core';
+import { GenAI, ToolAttr } from '@noetic/core';
 
 // These are set automatically by the runtime, but you can use them
 // in custom exporters or assertions:

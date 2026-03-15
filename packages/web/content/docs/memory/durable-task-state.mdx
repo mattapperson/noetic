@@ -15,7 +15,7 @@ Durable Task State tracks checkpoints, file artifacts, and arbitrary key-value d
 ## Usage
 
 ```ts
-import { durableTaskState } from '@orchid/core';
+import { durableTaskState } from '@noetic/core';
 
 const layer = durableTaskState({
   baseDir: './task-output',
@@ -107,7 +107,7 @@ You can use the built-in `InMemoryRuntime` for development or implement a persis
 ## Example: Task Recovery
 
 ```ts
-import { durableTaskState } from '@orchid/core';
+import { durableTaskState } from '@noetic/core';
 
 const layer = durableTaskState();
 

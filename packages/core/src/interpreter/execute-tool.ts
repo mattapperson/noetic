@@ -1,4 +1,4 @@
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { StepTool } from '../types/step';
 
@@ -9,7 +9,7 @@ export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Con
   // Validate input against tool's schema
   const parseResult = step.tool.input.safeParse(args);
   if (!parseResult.success) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
       cause: new Error(`Tool input validation failed: ${parseResult.error.message}`),
@@ -22,7 +22,7 @@ export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Con
     const result = await step.tool.execute(parseResult.data, ctx);
     return result;
   } catch (e) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
       cause: e instanceof Error ? e : new Error(String(e)),

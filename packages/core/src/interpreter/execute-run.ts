@@ -1,4 +1,4 @@
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { RetryPolicy } from '../types/common';
 import type { Context } from '../types/context';
 import type { StepRun } from '../types/step';
@@ -22,7 +22,7 @@ export async function executeRun<I, O>(step: StepRun<I, O>, input: I, ctx: Conte
     }
   }
 
-  throw new OrchidErrorImpl({
+  throw new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
     cause: lastError,

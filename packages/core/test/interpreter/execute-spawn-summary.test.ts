@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import type { CallModelParams } from '../../src/interpreter/execute-llm';
 import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { ContextImpl } from '../../src/runtime/context-impl';
@@ -137,8 +137,8 @@ describe('executeSpawn - summary contextOut', () => {
       await executeSpawn(step, '', new ContextImpl(), simpleExecute, mockCallModel);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'spawn_summary_failed');
       expect(oe.childOutput).toBe('child-output-value');
       expect(oe.summaryCause.message).toBe('LLM unavailable');
@@ -206,8 +206,8 @@ describe('executeSpawn - schema contextOut', () => {
       await executeSpawn(step, '', new ContextImpl(), simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      expect(e.orchidError.kind).toBe('llm_parse_error');
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('llm_parse_error');
     }
   });
 });

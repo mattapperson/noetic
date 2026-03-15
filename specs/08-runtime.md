@@ -92,7 +92,7 @@ interface ChannelHandle<T> {
 | `DistributedRuntime` | Multi-node — A2A, worker pools, cloud functions                 | Translates to network messages |
 
 ```typescript
-import { setRuntime, InMemoryRuntime } from '@orchid/core';
+import { setRuntime, InMemoryRuntime } from '@noetic/core';
 
 setRuntime(new InMemoryRuntime());
 ```

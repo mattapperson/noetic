@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
 import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
 import type { Context } from './context';
-import type { OrchidError } from './error';
+import type { NoeticError } from './error';
 import type { Item } from './items';
 
 // Until predicate types
@@ -65,7 +65,7 @@ export interface SettleResult<O> {
   stepId: string;
   status: 'fulfilled' | 'rejected';
   value?: O;
-  error?: OrchidError;
+  error?: NoeticError;
 }
 
 // The main Step discriminated union
@@ -154,7 +154,7 @@ export interface StepLoop<I, O> {
   maxIterations?: number;
   maxHistorySize?: number;
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
-  onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort';
+  onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
 
 export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;

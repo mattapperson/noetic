@@ -1,20 +1,20 @@
-import type { OrchidError } from '../types/error';
+import type { NoeticError } from '../types/error';
 
-export class OrchidErrorImpl extends Error {
-  readonly orchidError: OrchidError;
+export class NoeticErrorImpl extends Error {
+  readonly noeticError: NoeticError;
 
-  constructor(error: OrchidError) {
+  constructor(error: NoeticError) {
     super(formatMessage(error));
-    this.name = 'OrchidError';
-    this.orchidError = error;
+    this.name = 'NoeticError';
+    this.noeticError = error;
   }
 }
 
-export function isOrchidError(e: unknown): e is OrchidErrorImpl {
-  return e instanceof OrchidErrorImpl;
+export function isNoeticError(e: unknown): e is NoeticErrorImpl {
+  return e instanceof NoeticErrorImpl;
 }
 
-function formatMessage(error: OrchidError): string {
+function formatMessage(error: NoeticError): string {
   switch (error.kind) {
     case 'step_failed':
       return `Step '${error.stepId}' failed: ${error.cause.message}`;
@@ -39,7 +39,7 @@ function formatMessage(error: OrchidError): string {
     default: {
       const _exhaustive: never = error;
       void _exhaustive;
-      return `OrchidError: unknown (${
+      return `NoeticError: unknown (${
         (
           error as {
             kind: string;

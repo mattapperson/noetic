@@ -1,4 +1,4 @@
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { BudgetConfig, MemoryLayer } from '../types/memory';
 
@@ -155,7 +155,7 @@ export interface BudgetLimits {
 
 export function checkBudget(ctx: Context, limits: BudgetLimits): void {
   if (limits.maxCost !== undefined && ctx.cost > limits.maxCost) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'budget_exceeded',
       field: 'cost',
       limit: limits.maxCost,
@@ -163,7 +163,7 @@ export function checkBudget(ctx: Context, limits: BudgetLimits): void {
     });
   }
   if (limits.maxSteps !== undefined && ctx.stepCount > limits.maxSteps) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'budget_exceeded',
       field: 'steps',
       limit: limits.maxSteps,
@@ -171,7 +171,7 @@ export function checkBudget(ctx: Context, limits: BudgetLimits): void {
     });
   }
   if (limits.maxDuration !== undefined && ctx.elapsed > limits.maxDuration) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'budget_exceeded',
       field: 'duration',
       limit: limits.maxDuration,

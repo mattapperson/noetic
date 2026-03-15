@@ -1,4 +1,4 @@
-import { OrchidErrorImpl } from '../errors/orchid-error';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 
 function isExternalChannel<T>(ch: Channel<T>): ch is ExternalChannel<T> {
@@ -69,7 +69,7 @@ export class ChannelStore {
         } else {
           // At capacity
           console.warn(
-            `[orchid] Channel '${channel.name}': queue at capacity (${state.capacity}), dropping message.`,
+            `[noetic] Channel '${channel.name}': queue at capacity (${state.capacity}), dropping message.`,
           );
           if (isExternalChannel(channel)) {
             state.queue.shift();
@@ -107,7 +107,7 @@ export class ChannelStore {
         let effectiveTimeout = timeout;
         if (effectiveTimeout <= 0) {
           console.warn(
-            `[orchid] Channel '${channel.name}': topic recv with non-positive timeout, clamping to ${MAX_TOPIC_TIMEOUT}ms`,
+            `[noetic] Channel '${channel.name}': topic recv with non-positive timeout, clamping to ${MAX_TOPIC_TIMEOUT}ms`,
           );
           effectiveTimeout = MAX_TOPIC_TIMEOUT;
         }
@@ -116,7 +116,7 @@ export class ChannelStore {
           const timer = setTimeout(() => {
             state.topicSubscribers.delete(handler);
             reject(
-              new OrchidErrorImpl({
+              new NoeticErrorImpl({
                 kind: 'channel_timeout',
                 channelName: channel.name,
                 timeout: effectiveTimeout,
@@ -176,7 +176,7 @@ export class ChannelStore {
           if (idx >= 0) {
             waiters.splice(idx, 1);
             reject(
-              new OrchidErrorImpl({
+              new NoeticErrorImpl({
                 kind: 'channel_timeout',
                 channelName,
                 timeout,
@@ -197,7 +197,7 @@ export class ChannelStore {
       channel,
       send(value: T) {
         if (store.closedExecutions.has(executionId)) {
-          throw new OrchidErrorImpl({
+          throw new NoeticErrorImpl({
             kind: 'channel_closed',
             channelName: channel.name,
           });

@@ -3,14 +3,14 @@ title: Control Flow
 description: Route between steps with branch and execute steps in parallel with fork.
 ---
 
-Orchid provides two control flow primitives -- `branch` for conditional routing and `fork` for parallel execution.
+Noetic provides two control flow primitives -- `branch` for conditional routing and `fork` for parallel execution.
 
 ## branch -- Conditional Routing
 
 `branch` evaluates a route function at runtime and dispatches to one step, or returns `null` to skip.
 
 ```ts
-import { branch, step } from '@orchid/core';
+import { branch, step } from '@noetic/core';
 
 const router = branch({
   id: 'language-router',
@@ -42,7 +42,7 @@ See [branch deep dive](/docs/control-flow/branch).
 - **settle** -- wait for every step, collect successes and failures, then merge.
 
 ```ts
-import { fork, step } from '@orchid/core';
+import { fork, step } from '@noetic/core';
 
 const parallel = fork({
   id: 'multi-search',

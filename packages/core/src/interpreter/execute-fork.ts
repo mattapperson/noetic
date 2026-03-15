@@ -1,7 +1,7 @@
-import { isOrchidError, OrchidErrorImpl } from '../errors/orchid-error';
+import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
-import type { OrchidError } from '../types/error';
+import type { NoeticError } from '../types/error';
 import type {
   ExecuteStepFn,
   SettleResult,
@@ -50,7 +50,7 @@ export async function executeFork<I, O>(
     if (step.mode === 'settle') {
       return step.merge([], ctx);
     }
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'fork_partial',
       stepId: step.id,
       succeeded: [],
@@ -70,7 +70,7 @@ export async function executeFork<I, O>(
       return executeSettle(step, paths, input, ctx, childContexts, executeStep, concurrency);
     default: {
       const _exhaustive: never = step;
-      throw new OrchidErrorImpl({
+      throw new NoeticErrorImpl({
         kind: 'step_failed',
         stepId: 'unknown',
         cause: new Error('Unknown fork mode'),
@@ -121,12 +121,12 @@ interface StepResult<T> {
 }
 interface StepError {
   stepId: string;
-  error: OrchidError;
+  error: NoeticError;
 }
 
-function toOrchidError(err: unknown, stepId: string): OrchidError {
-  if (isOrchidError(err)) {
-    return err.orchidError;
+function toNoeticError(err: unknown, stepId: string): NoeticError {
+  if (isNoeticError(err)) {
+    return err.noeticError;
   }
   return {
     kind: 'step_failed',
@@ -157,7 +157,7 @@ function classifyResults<T>(
     } else {
       failed.push({
         stepId: paths[i].id,
-        error: toOrchidError(result.reason, paths[i].id),
+        error: toNoeticError(result.reason, paths[i].id),
       });
     }
   });
@@ -182,7 +182,7 @@ async function executeAll<I, O>(
   const { succeeded, failed } = classifyResults(settled, paths);
 
   if (failed.length > 0) {
-    throw new OrchidErrorImpl({
+    throw new NoeticErrorImpl({
       kind: 'fork_partial',
       stepId: step.id,
       succeeded,
@@ -238,7 +238,7 @@ async function executeRace<I, O>(
           failedCount++;
           errors.push({
             stepId: paths[i].id,
-            error: toOrchidError(err, paths[i].id),
+            error: toNoeticError(err, paths[i].id),
           });
 
           // Start next task if available
@@ -249,7 +249,7 @@ async function executeRace<I, O>(
           if (failedCount === totalPaths && !settled) {
             settled = true;
             reject(
-              new OrchidErrorImpl({
+              new NoeticErrorImpl({
                 kind: 'fork_partial',
                 stepId: step.id,
                 succeeded: [],
@@ -291,7 +291,7 @@ async function executeSettle<I, O>(
     return {
       stepId: paths[i].id,
       status: 'rejected' as const,
-      error: toOrchidError(result.reason, paths[i].id),
+      error: toNoeticError(result.reason, paths[i].id),
     };
   });
 

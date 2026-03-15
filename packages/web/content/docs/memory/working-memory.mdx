@@ -14,7 +14,7 @@ Working Memory is the simplest built-in memory layer. It acts as a scratchpad th
 ## Usage
 
 ```ts
-import { workingMemory } from '@orchid/core';
+import { workingMemory } from '@noetic/core';
 
 const layer = workingMemory({
   scope: 'thread',
@@ -85,7 +85,7 @@ When scope is `'resource'`, the parent state is deep-cloned to the child. For `'
 
 ```ts
 import { z } from 'zod';
-import { workingMemory } from '@orchid/core';
+import { workingMemory } from '@noetic/core';
 
 const layer = workingMemory({
   schema: z.object({

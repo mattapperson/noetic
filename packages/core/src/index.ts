@@ -4,7 +4,7 @@ export { channel } from './builders/channel-builder';
 export { branch, fork } from './builders/control-flow-builders';
 export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
-export { isOrchidError, OrchidErrorImpl } from './errors/orchid-error';
+export { isNoeticError, NoeticErrorImpl } from './errors/noetic-error';
 export { execute } from './interpreter/execute';
 export { executeBranch } from './interpreter/execute-branch';
 export { executeFork } from './interpreter/execute-fork';
@@ -60,7 +60,7 @@ export type {
   Tool,
 } from './types/common';
 export type { Context, ItemLog } from './types/context';
-export type { OrchidError } from './types/error';
+export type { NoeticError } from './types/error';
 export type {
   ContentPart,
   ExtensionItem,

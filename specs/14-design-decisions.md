@@ -29,7 +29,7 @@ We chose `contextIn` x `contextOut` as two independent axes (see `04-spawn`). Th
 
 ## Error taxonomy vs. generic `Error` propagation
 
-We chose a discriminated union `OrchidError` (see `09-error-model`) because different errors require different recovery strategies. `llm_parse_error` includes the raw text for re-prompting. `fork_partial` includes both succeeded and failed results. `spawn_summary_failed` preserves the child's output. The tradeoff: callers must pattern-match on error kinds instead of catching generic `Error`, but they get actionable information.
+We chose a discriminated union `NoeticError` (see `09-error-model`) because different errors require different recovery strategies. `llm_parse_error` includes the raw text for re-prompting. `fork_partial` includes both succeeded and failed results. `spawn_summary_failed` preserves the child's output. The tradeoff: callers must pattern-match on error kinds instead of catching generic `Error`, but they get actionable information.
 
 ## Channels as standalone objects vs. state properties
 

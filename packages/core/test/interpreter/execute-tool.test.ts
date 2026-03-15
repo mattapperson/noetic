@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeTool } from '../../src/interpreter/execute-tool';
 import type { StepTool } from '../../src/types/step';
 import { makeMockContext } from '../_helpers';
@@ -86,8 +86,8 @@ describe('executeTool', () => {
       await executeTool(s, badInput, mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      expect(e.orchidError.kind).toBe('step_failed');
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('step_failed');
     }
   });
 
@@ -184,8 +184,8 @@ describe('executeTool', () => {
       await executeTool(s, {}, mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      const oe = e.orchidError;
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toBe('tool broke');
     }

@@ -1,17 +1,17 @@
 ---
 title: Overview
-description: Orchid is a TypeScript agent framework built on seven composable primitives.
+description: Noetic is a TypeScript agent framework built on seven composable primitives.
 ---
 
 ## Philosophy
 
-Most frameworks give you a pre-built agent to tweak. Orchid gives you the primitives to build agents from scratch -- or grab a batteries-included pattern to start fast.
+Most frameworks give you a pre-built agent to tweak. Noetic gives you the primitives to build agents from scratch -- or grab a batteries-included pattern to start fast.
 
 Every agent is a composition of small, typed building blocks. There is no hidden control flow, no magic base class, and no runtime surprises. You describe _what_ your agent does; the interpreter figures out _how_ to run it.
 
 ## The Seven Primitives
 
-Orchid's entire execution model is built from seven primitives. Each one is a `Step` -- a typed, serializable unit of work.
+Noetic's entire execution model is built from seven primitives. Each one is a `Step` -- a typed, serializable unit of work.
 
 | Primitive | Kind | Purpose |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ Orchid's entire execution model is built from seven primitives. Each one is a `S
 Primitives nest freely. A `loop` body can be an `llm` step, a `branch`, or even another `loop`. A `fork` can fan out into spawned sub-agents. The type system keeps inputs and outputs aligned at every boundary.
 
 ```ts
-import { branch, fork, spawn, step, until } from '@orchid/core';
+import { branch, fork, spawn, step, until } from '@noetic/core';
 
 // A branch that picks between two LLM steps
 const router = branch({
@@ -52,7 +52,7 @@ const router = branch({
 
 ### Memory System
 
-Orchid ships with a layered memory system -- working memory, observational memory, and durable task state. Memory layers participate in spawn/return lifecycles and project context into LLM-friendly views.
+Noetic ships with a layered memory system -- working memory, observational memory, and durable task state. Memory layers participate in spawn/return lifecycles and project context into LLM-friendly views.
 
 ### Patterns
 

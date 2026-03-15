@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
-import { isOrchidError } from '../../src/errors/orchid-error';
+import { isNoeticError } from '../../src/errors/noetic-error';
 import type { CallModelParams } from '../../src/interpreter/execute-llm';
 import { executeLLM } from '../../src/interpreter/execute-llm';
 import type { MessageItem } from '../../src/types/items';
@@ -295,8 +295,8 @@ describe('executeLLM', () => {
       await executeLLM(step, 'hi', ctx, callModel);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      expect(e.orchidError.kind).toBe('llm_parse_error');
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('llm_parse_error');
     }
   });
 
@@ -337,8 +337,8 @@ describe('executeLLM', () => {
       await executeLLM(step, 'hi', ctx, callModel);
       expect.unreachable('should have thrown');
     } catch (e) {
-      assert(isOrchidError(e));
-      expect(e.orchidError.kind).toBe('llm_parse_error');
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('llm_parse_error');
     }
   });
 

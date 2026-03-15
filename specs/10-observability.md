@@ -57,8 +57,8 @@ interface TraceExporter {
 Custom exporters plug in:
 
 ```typescript
-import { setTraceExporter } from '@orchid/core';
-import { DatadogExporter } from '@orchid/datadog';
+import { setTraceExporter } from '@noetic/core';
+import { DatadogExporter } from '@noetic/datadog';
 
 setTraceExporter(new DatadogExporter({ apiKey: process.env.DD_API_KEY }));
 ```

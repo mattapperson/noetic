@@ -10,7 +10,7 @@ The Recursive LLM pattern uses `spawn()` with `contextIn: { strategy: 'fresh' }`
 ## Pattern
 
 ```ts
-import { spawn, react } from '@orchid/core';
+import { spawn, react } from '@noetic/core';
 
 const subTaskAgent = react({
   model: 'gpt-4o',
@@ -53,7 +53,7 @@ Control how the child's output returns to the parent:
 ## Example: Divide and Conquer
 
 ```ts
-import { spawn, react, step, fork } from '@orchid/core';
+import { spawn, react, step, fork } from '@noetic/core';
 
 // The main agent decides how to decompose the problem
 const mainAgent = step.run({

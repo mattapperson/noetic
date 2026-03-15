@@ -1,6 +1,6 @@
 # Loop and Until: Iteration and Termination
 
-> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context), `09-error-model` (OrchidError)
+> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context), `09-error-model` (NoeticError)
 > **Exports:** `loop()`, `LoopOpts`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates, `any()`, `all()`, `VerifyFn`, `ConvergeOpts`
 
 ---
@@ -17,7 +17,7 @@ interface LoopOpts<I, O> {
   maxIterations?: number;    // hard safety cap on iterations (default 1000)
   maxHistorySize?: number;   // limits history array size for memory management
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
-  onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort';
+  onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
 ```
 
