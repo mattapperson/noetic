@@ -63,3 +63,4 @@ export type { VerifyFn, ConvergeOpts } from './until/predicates';
 export { any, all } from './until/combinators';
 
 export { react } from './patterns/react';
+export { ralphWiggum } from './patterns/ralph-wiggum';
