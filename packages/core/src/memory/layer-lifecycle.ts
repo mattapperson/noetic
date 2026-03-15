@@ -1,0 +1,156 @@
+import type { MemoryLayer, ExecutionContext, StorageAdapter } from '../types/memory';
+import type { ItemLog } from '../types/context';
+import type { Item } from '../types/items';
+import type { LLMResponse } from '../types/common';
+import { resolveScopeKey, createScopedStorage } from './scope';
+
+// State management for active layers
+export const layerStates = new Map<string, Map<string, unknown>>();
+
+function getLayerState<T>(executionId: string, layerId: string): T | undefined {
+  return layerStates.get(executionId)?.get(layerId) as T | undefined;
+}
+
+function setLayerState<T>(executionId: string, layerId: string, state: T): void {
+  if (!layerStates.has(executionId)) layerStates.set(executionId, new Map());
+  layerStates.get(executionId)!.set(layerId, state);
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  if (ms <= 0) return promise;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+export async function initLayers(
+  layers: MemoryLayer[],
+  ctx: ExecutionContext,
+  storage: StorageAdapter,
+): Promise<void> {
+  // Sequential, array order
+  for (const layer of layers) {
+    if (!layer.hooks.init) continue;
+    const scopeKey = resolveScopeKey(layer.scope, ctx);
+    const scopedStorage = createScopedStorage(storage, layer.id, scopeKey);
+    try {
+      const timeout = layer.timeouts?.init ?? 10_000;
+      const result = await withTimeout(
+        layer.hooks.init({ storage: scopedStorage, scopeKey, ctx }),
+        timeout,
+      );
+      setLayerState(ctx.executionId, layer.id, result.state);
+    } catch (_e) {
+      // Init error -> layer disabled (skip in future hooks)
+      // State remains undefined, which signals disabled
+    }
+  }
+}
+
+export async function recallLayers(
+  layers: MemoryLayer[],
+  query: string,
+  ctx: ExecutionContext,
+  log: ItemLog,
+  budgets: Map<string, number>,
+): Promise<{ layerId: string; items: Item[]; tokenCount: number }[]> {
+  // Sequential, SLOT ORDER (ascending), ties by array index
+  const sorted = [...layers].sort((a, b) => a.slot - b.slot);
+  const results: { layerId: string; items: Item[]; tokenCount: number }[] = [];
+
+  for (const layer of sorted) {
+    if (!layer.hooks.recall) continue;
+    const state = getLayerState(ctx.executionId, layer.id);
+    if (state === undefined && layer.hooks.init) continue; // was disabled
+
+    const budget = budgets.get(layer.id) ?? 0;
+    try {
+      const timeout = layer.timeouts?.recall ?? 5_000;
+      const result = await withTimeout(
+        layer.hooks.recall({ log, query, ctx, state, budget }),
+        timeout,
+      );
+      if (result) {
+        results.push({ layerId: layer.id, items: result.items, tokenCount: result.tokenCount });
+        if (result.state !== undefined) {
+          setLayerState(ctx.executionId, layer.id, result.state);
+        }
+      }
+    } catch (_e) {
+      // Recall error -> skip layer
+    }
+  }
+
+  return results;
+}
+
+export async function storeLayers(
+  layers: MemoryLayer[],
+  response: LLMResponse,
+  ctx: ExecutionContext,
+  log: ItemLog,
+): Promise<void> {
+  // CONCURRENT via Promise.allSettled
+  const promises = layers.map(async (layer) => {
+    if (!layer.hooks.store) return;
+    const state = getLayerState(ctx.executionId, layer.id);
+    if (state === undefined && layer.hooks.init) return;
+
+    try {
+      const timeout = layer.timeouts?.store ?? 30_000;
+      const result = await withTimeout(
+        layer.hooks.store({ newItems: response.items, log, response, ctx, state }),
+        timeout,
+      );
+      if (result?.state !== undefined) {
+        setLayerState(ctx.executionId, layer.id, result.state);
+      }
+    } catch (_e) {
+      // Store error -> skip
+    }
+  });
+
+  await Promise.allSettled(promises);
+}
+
+export async function disposeLayers(
+  layers: MemoryLayer[],
+  ctx: ExecutionContext,
+): Promise<void> {
+  // Sequential, REVERSE array order
+  const reversed = [...layers].reverse();
+  for (const layer of reversed) {
+    if (!layer.hooks.dispose) continue;
+    const state = getLayerState(ctx.executionId, layer.id);
+    try {
+      const timeout = layer.timeouts?.dispose ?? 5_000;
+      await withTimeout(layer.hooks.dispose({ state }), timeout);
+    } catch (_e) {
+      // Dispose error -> continue
+    }
+  }
+  // Cleanup
+  layerStates.delete(ctx.executionId);
+}
+
+export async function completeLayers(
+  layers: MemoryLayer[],
+  ctx: ExecutionContext,
+  log: ItemLog,
+  outcome: 'success' | 'failure' | 'aborted',
+): Promise<void> {
+  // Sequential, array order, always runs
+  for (const layer of layers) {
+    if (!layer.hooks.onComplete) continue;
+    const state = getLayerState(ctx.executionId, layer.id);
+    try {
+      const timeout = layer.timeouts?.onComplete ?? 30_000;
+      await withTimeout(layer.hooks.onComplete({ log, ctx, state, outcome }), timeout);
+    } catch (_e) {
+      // onComplete error -> continue
+    }
+  }
+}

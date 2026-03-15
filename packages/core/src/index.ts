@@ -70,3 +70,11 @@ export { ralphWiggum } from './patterns/ralph-wiggum';
 
 export { compilePlan, adaptivePlan, PlanNodeSchema } from './patterns/plans';
 export type { PlanNode, PlanConstraints } from './patterns/plans';
+
+export { resolveScopeKey, createScopedStorage } from './memory/scope';
+export { allocateBudgets } from './memory/budget';
+export type { BudgetAllocation } from './memory/budget';
+export { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers } from './memory/layer-lifecycle';
+export { assembleView } from './memory/projector';
+export { workingMemory } from './memory/layers/working-memory';
+export type { WorkingMemoryConfig } from './memory/layers/working-memory';
