@@ -25,9 +25,10 @@ export async function execute<I, O>(
     case 'branch':
       // Will be implemented in Stage 6
       throw new Error('Branch not yet implemented');
-    case 'fork':
-      // Will be implemented in Stage 2
-      throw new Error('Fork not yet implemented');
+    case 'fork': {
+      const { executeFork } = await import('./execute-fork');
+      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+    }
     case 'spawn':
       // Will be implemented in Stage 3
       throw new Error('Spawn not yet implemented');
