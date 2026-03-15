@@ -35,6 +35,9 @@ export class ContextImpl implements Context {
 
   private readonly _createdAt: number;
   private readonly channelStore?: ChannelStore;
+  private _checkpointFn?: () => Promise<void>;
+  private _completionValue?: unknown;
+  private _completed = false;
   private _aborted = false;
   private _abortReason?: string;
 
@@ -46,6 +49,7 @@ export class ContextImpl implements Context {
     resourceId?: string;
     span?: Span;
     channelStore?: ChannelStore;
+    checkpointFn?: () => Promise<void>;
   }) {
     this.id = crypto.randomUUID();
     this._createdAt = Date.now();
@@ -56,6 +60,7 @@ export class ContextImpl implements Context {
     this.threadId = opts?.threadId ?? crypto.randomUUID();
     this.resourceId = opts?.resourceId;
     this.channelStore = opts?.channelStore;
+    this._checkpointFn = opts?.checkpointFn;
 
     const log = new ItemLogImpl();
     if (opts?.items) {
@@ -98,6 +103,25 @@ export class ContextImpl implements Context {
       throw new Error('No channel store configured');
     }
     return this.channelStore.tryRecv(ch);
+  }
+
+  async checkpoint(): Promise<void> {
+    if (this._checkpointFn) {
+      await this._checkpointFn();
+    }
+  }
+
+  complete<T>(value: T): void {
+    this._completed = true;
+    this._completionValue = value;
+  }
+
+  get completed(): boolean {
+    return this._completed;
+  }
+
+  get completionValue(): unknown {
+    return this._completionValue;
   }
 
   get abortReason(): string | undefined {

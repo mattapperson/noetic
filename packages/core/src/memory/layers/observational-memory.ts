@@ -7,20 +7,28 @@ import { Slot } from '../../types/memory';
 export interface ObservationalState {
   observations: string[];
   buffer: string[];
+  bufferTokens: number;
   version: number;
 }
+
+const DEFAULT_BUFFER_THRESHOLD_TOKENS = 2_000;
+const DEFAULT_MAX_OBSERVATIONS = 50;
+
+export type ObserverFn = (buffer: string[]) => Promise<string[]>;
 
 export interface ObservationalMemoryConfig {
   bufferThreshold?: number;
   maxObservations?: number;
   scope?: 'thread' | 'resource';
+  observer?: ObserverFn;
 }
 
 export function observationalMemory(
   config?: ObservationalMemoryConfig,
 ): MemoryLayer<ObservationalState> {
-  const maxObs = config?.maxObservations ?? 20;
-  const threshold = config?.bufferThreshold ?? 5;
+  const maxObs = config?.maxObservations ?? DEFAULT_MAX_OBSERVATIONS;
+  const threshold = config?.bufferThreshold ?? DEFAULT_BUFFER_THRESHOLD_TOKENS;
+  const observer = config?.observer;
 
   return {
     id: 'observational-memory',
@@ -41,6 +49,7 @@ export function observationalMemory(
           state: saved ?? {
             observations: [],
             buffer: [],
+            bufferTokens: 0,
             version: 0,
           },
         };
@@ -64,6 +73,7 @@ export function observationalMemory(
         const s: ObservationalState = state ?? {
           observations: [],
           buffer: [],
+          bufferTokens: 0,
           version: 0,
         };
         // Accumulate new items into buffer
@@ -82,17 +92,24 @@ export function observationalMemory(
           ...textItems,
         ];
 
-        // If buffer exceeds threshold, compress into observation
-        if (newBuffer.length >= threshold) {
-          const observation = `Processed ${newBuffer.length} items`;
+        // Token-based threshold: accumulate incrementally
+        const newTokens = textItems.reduce((sum, t) => sum + estimateTokens(t), 0);
+        const totalBufferTokens = s.bufferTokens + newTokens;
+        if (totalBufferTokens >= threshold) {
+          const distilled = observer
+            ? await observer(newBuffer)
+            : [
+                `Processed ${newBuffer.length} items`,
+              ];
           const newObservations = [
             ...s.observations,
-            observation,
+            ...distilled,
           ].slice(-maxObs);
           return {
             state: {
               observations: newObservations,
               buffer: [],
+              bufferTokens: 0,
               version: s.version + 1,
             },
           };
@@ -102,6 +119,7 @@ export function observationalMemory(
           state: {
             ...s,
             buffer: newBuffer,
+            bufferTokens: totalBufferTokens,
           },
         };
       },

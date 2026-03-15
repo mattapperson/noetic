@@ -57,6 +57,17 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
     threadId: 'thread-1',
     resourceId: 'user-1',
     depth: 0,
+    stepNumber: 0,
+    tokenUsage: {
+      input: 0,
+      output: 0,
+    },
+    cost: 0,
+    tokenize: (text: string) => Math.ceil(text.length / 4),
+    trace: {
+      setAttribute() {},
+      addEvent() {},
+    },
     ...overrides,
   };
 }
@@ -160,6 +171,10 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     tryRecv: () => {
       throw new Error('not impl');
     },
+    checkpoint: async () => {},
+    complete: () => {},
+    completed: false,
+    completionValue: undefined,
     aborted: false,
     abort: () => {},
     ...overrides,

@@ -1,15 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { createScopedStorage, resolveScopeKey } from '../../src/memory/scope';
-import type { ExecutionContext } from '../../src/types/memory';
-import { makeStorage } from '../_helpers';
+import { makeCtx, makeStorage } from '../_helpers';
 
 describe('resolveScopeKey', () => {
-  const ctx: ExecutionContext = {
-    executionId: 'exec-1',
-    threadId: 'thread-1',
-    resourceId: 'user-1',
-    depth: 0,
-  };
+  const ctx = makeCtx();
 
   it('thread scope returns threadId', () => {
     expect(resolveScopeKey('thread', ctx)).toBe('thread-1');

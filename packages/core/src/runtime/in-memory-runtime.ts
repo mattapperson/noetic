@@ -1,5 +1,6 @@
 import { execute } from '../interpreter/execute';
 import type { CallModelFn } from '../interpreter/execute-llm';
+import { estimateTokens } from '../interpreter/message-helpers';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
   createLayerStateStore,
@@ -83,11 +84,27 @@ export class InMemoryRuntime implements Runtime {
       threadId: ctx.threadId,
       resourceId: ctx.resourceId,
       depth: ctx.depth,
+      stepNumber: ctx.stepCount,
+      tokenUsage: {
+        input: ctx.tokens.input,
+        output: ctx.tokens.output,
+      },
+      cost: ctx.cost,
+      tokenize: estimateTokens,
+      trace: {
+        setAttribute: (key, value) => ctx.span.setAttribute(key, value),
+        addEvent: (name, attributes) => ctx.span.addEvent(name, attributes),
+      },
     };
   }
 
   async initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {
-    await initLayers(layers, this.toExecCtx(ctx), storage, this.layerStateStore);
+    await initLayers({
+      layers,
+      ctx: this.toExecCtx(ctx),
+      storage,
+      store: this.layerStateStore,
+    });
   }
 
   async recallLayers(
@@ -95,28 +112,42 @@ export class InMemoryRuntime implements Runtime {
     input: string,
     ctx: Context,
   ): Promise<RecallLayerOutput[]> {
-    return recallLayers(
+    return recallLayers({
       layers,
-      input,
-      this.toExecCtx(ctx),
-      ctx.itemLog,
-      new Map(),
-      this.layerStateStore,
-    );
+      query: input,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets: new Map(),
+      store: this.layerStateStore,
+    });
   }
 
   async storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void> {
-    await storeLayers(layers, response, this.toExecCtx(ctx), ctx.itemLog, this.layerStateStore);
+    await storeLayers({
+      layers,
+      response,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      store: this.layerStateStore,
+    });
   }
 
   async disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void> {
-    await disposeLayers(layers, this.toExecCtx(ctx), this.layerStateStore);
+    await disposeLayers({
+      layers,
+      ctx: this.toExecCtx(ctx),
+      store: this.layerStateStore,
+    });
   }
 
   async assembleView(_agent: AgentConfig, _input: string, ctx: Context): Promise<Item[]> {
     return [
       ...ctx.itemLog.items,
     ];
+  }
+
+  async checkpoint(_ctx: Context): Promise<void> {
+    // No-op for in-memory runtime
   }
 
   async restore(_executionId: string): Promise<Context | null> {

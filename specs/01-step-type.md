@@ -17,7 +17,7 @@ type Step<I, O> =
   | { kind: 'branch'; id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';   id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
   | { kind: 'spawn';  id: string; child: Step<I, O>; contextIn: ContextInStrategy; contextOut: ContextOutStrategy<O>; timeout?: number }
-  | { kind: 'loop';   id: string; body: Step<I, O>; until: Until; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'loop';   id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
 Each variant is specified in its own feature spec:

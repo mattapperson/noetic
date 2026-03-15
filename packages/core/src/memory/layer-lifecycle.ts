@@ -1,8 +1,10 @@
 import type { LLMResponse } from '../types/common';
 import type { ItemLog } from '../types/context';
 import type { Item } from '../types/items';
-import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
+import type { ExecutionContext, MemoryLayer, SpawnOptions, StorageAdapter } from '../types/memory';
 import { createScopedStorage, resolveScopeKey } from './scope';
+
+//#region Types
 
 export interface LayerStateStore {
   get<T>(executionId: string, layerId: string): T | undefined;
@@ -11,12 +13,73 @@ export interface LayerStateStore {
   diagnostic: (layerId: string, hook: string, error: unknown) => void;
 }
 
+interface InitLayersParams {
+  layers: MemoryLayer[];
+  ctx: ExecutionContext;
+  storage: StorageAdapter;
+  store: LayerStateStore;
+}
+
+interface RecallLayersParams {
+  layers: MemoryLayer[];
+  query: string;
+  ctx: ExecutionContext;
+  log: ItemLog;
+  budgets: Map<string, number>;
+  store: LayerStateStore;
+}
+
+interface StoreLayersParams {
+  layers: MemoryLayer[];
+  response: LLMResponse;
+  ctx: ExecutionContext;
+  log: ItemLog;
+  store: LayerStateStore;
+}
+
+interface SpawnLayersParams {
+  layers: MemoryLayer[];
+  parentCtx: ExecutionContext;
+  childCtx: ExecutionContext;
+  spawnOpts: SpawnOptions;
+  store: LayerStateStore;
+}
+
+interface ReturnLayersParams {
+  layers: MemoryLayer[];
+  parentCtx: ExecutionContext;
+  childCtx: ExecutionContext;
+  childLog: ItemLog;
+  result: unknown;
+  store: LayerStateStore;
+}
+
+interface CompleteLayersParams {
+  layers: MemoryLayer[];
+  ctx: ExecutionContext;
+  log: ItemLog;
+  outcome: 'success' | 'failure' | 'aborted';
+  store: LayerStateStore;
+}
+
+interface DisposeLayersParams {
+  layers: MemoryLayer[];
+  ctx: ExecutionContext;
+  store: LayerStateStore;
+}
+
+//#endregion
+
+//#region Helper Functions
+
 export function createLayerStateStore(
   diagnostic?: (layerId: string, hook: string, error: unknown) => void,
 ): LayerStateStore {
   const states = new Map<string, Map<string, unknown>>();
   return {
     get<T>(executionId: string, layerId: string): T | undefined {
+      // SAFETY: values are stored via set(key, layerId, state: T); the caller is
+      // responsible for reading back with the same type T they stored.
       return states.get(executionId)?.get(layerId) as T | undefined;
     },
     set<T>(executionId: string, layerId: string, state: T): void {
@@ -45,12 +108,11 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-export async function initLayers(
-  layers: MemoryLayer[],
-  ctx: ExecutionContext,
-  storage: StorageAdapter,
-  store: LayerStateStore,
-): Promise<void> {
+//#endregion
+
+//#region Public API
+
+export async function initLayers({ layers, ctx, storage, store }: InitLayersParams): Promise<void> {
   // Sequential, array order
   for (const layer of layers) {
     if (!layer.hooks.init) {
@@ -75,14 +137,14 @@ export async function initLayers(
   }
 }
 
-export async function recallLayers(
-  layers: MemoryLayer[],
-  query: string,
-  ctx: ExecutionContext,
-  log: ItemLog,
-  budgets: Map<string, number>,
-  store: LayerStateStore,
-): Promise<
+export async function recallLayers({
+  layers,
+  query,
+  ctx,
+  log,
+  budgets,
+  store,
+}: RecallLayersParams): Promise<
   {
     layerId: string;
     items: Item[];
@@ -138,14 +200,19 @@ export async function recallLayers(
   return results;
 }
 
-export async function storeLayers(
-  layers: MemoryLayer[],
-  response: LLMResponse,
-  ctx: ExecutionContext,
-  log: ItemLog,
-  store: LayerStateStore,
-): Promise<void> {
-  // Sequential, matching init/recall pattern
+export async function storeLayers({
+  layers,
+  response,
+  ctx,
+  log,
+  store,
+}: StoreLayersParams): Promise<void> {
+  // Concurrent via Promise.allSettled — each layer gets its own state snapshot
+  const snapshots: {
+    layer: MemoryLayer;
+    state: unknown;
+    storeFn: NonNullable<MemoryLayer['hooks']['store']>;
+  }[] = [];
   for (const layer of layers) {
     if (!layer.hooks.store) {
       continue;
@@ -154,33 +221,38 @@ export async function storeLayers(
     if (state === undefined && layer.hooks.init) {
       continue;
     }
-
-    try {
-      const timeout = layer.timeouts?.store ?? 30_000;
-      const result = await withTimeout(
-        layer.hooks.store({
-          newItems: response.items,
-          log,
-          response,
-          ctx,
-          state,
-        }),
-        timeout,
-      );
-      if (result?.state !== undefined) {
-        store.set(ctx.executionId, layer.id, result.state);
-      }
-    } catch (e) {
-      store.diagnostic(layer.id, 'store', e);
-    }
+    snapshots.push({
+      layer,
+      state,
+      storeFn: layer.hooks.store,
+    });
   }
+
+  await Promise.allSettled(
+    snapshots.map(async ({ layer, state, storeFn }) => {
+      const timeout = layer.timeouts?.store ?? 30_000;
+      try {
+        const result = await withTimeout(
+          storeFn({
+            newItems: response.items,
+            log,
+            response,
+            ctx,
+            state,
+          }),
+          timeout,
+        );
+        if (result?.state !== undefined) {
+          store.set(ctx.executionId, layer.id, result.state);
+        }
+      } catch (e) {
+        store.diagnostic(layer.id, 'store', e);
+      }
+    }),
+  );
 }
 
-export async function disposeLayers(
-  layers: MemoryLayer[],
-  ctx: ExecutionContext,
-  store: LayerStateStore,
-): Promise<void> {
+export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams): Promise<void> {
   // Sequential, REVERSE array order
   const reversed = [
     ...layers,
@@ -205,16 +277,13 @@ export async function disposeLayers(
   store.cleanup(ctx.executionId);
 }
 
-export async function spawnLayers(
-  layers: MemoryLayer[],
-  parentCtx: ExecutionContext,
-  childCtx: ExecutionContext,
-  spawnOpts: {
-    contextIn: string;
-    contextOut: string;
-  },
-  store: LayerStateStore,
-): Promise<
+export async function spawnLayers({
+  layers,
+  parentCtx,
+  childCtx,
+  spawnOpts,
+  store,
+}: SpawnLayersParams): Promise<
   {
     layerId: string;
     childState: unknown;
@@ -259,14 +328,14 @@ export async function spawnLayers(
   return results;
 }
 
-export async function returnLayers(
-  layers: MemoryLayer[],
-  parentCtx: ExecutionContext,
-  childCtx: ExecutionContext,
-  childLog: ItemLog,
-  result: unknown,
-  store: LayerStateStore,
-): Promise<void> {
+export async function returnLayers({
+  layers,
+  parentCtx,
+  childCtx,
+  childLog,
+  result,
+  store,
+}: ReturnLayersParams): Promise<void> {
   for (const layer of layers) {
     if (!layer.hooks.onReturn) {
       continue;
@@ -296,13 +365,13 @@ export async function returnLayers(
   }
 }
 
-export async function completeLayers(
-  layers: MemoryLayer[],
-  ctx: ExecutionContext,
-  log: ItemLog,
-  outcome: 'success' | 'failure' | 'aborted',
-  store: LayerStateStore,
-): Promise<void> {
+export async function completeLayers({
+  layers,
+  ctx,
+  log,
+  outcome,
+  store,
+}: CompleteLayersParams): Promise<void> {
   for (const layer of layers) {
     if (!layer.hooks.onComplete) {
       continue;
@@ -310,7 +379,7 @@ export async function completeLayers(
     const state = store.get(ctx.executionId, layer.id);
     try {
       const timeout = layer.timeouts?.onComplete ?? 30_000;
-      await withTimeout(
+      const result = await withTimeout(
         layer.hooks.onComplete({
           log,
           ctx,
@@ -319,8 +388,13 @@ export async function completeLayers(
         }),
         timeout,
       );
+      if (result && 'state' in result) {
+        store.set(ctx.executionId, layer.id, result.state);
+      }
     } catch (e) {
       store.diagnostic(layer.id, 'onComplete', e);
     }
   }
 }
+
+//#endregion

@@ -14,6 +14,8 @@ interface LoopOpts<I, O> {
   id: string;
   body: Step<I, O>;
   until: Until;
+  maxIterations?: number;    // hard safety cap on iterations (default 1000)
+  maxHistorySize?: number;   // limits history array size for memory management
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
   onError?: (error: OrchidError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
@@ -62,6 +64,7 @@ interface Snapshot {
   lastText: string;       // lastOutput as string
   history: unknown[];     // all outputs from this loop
   depth: number;          // spawn depth
+  lastStepMeta?: StepMeta | null;
 }
 ```
 

@@ -179,4 +179,46 @@ describe('durableTaskState', () => {
       y: 2,
     });
   });
+
+  it('onComplete returns state with outcome and checkpoint', async () => {
+    const layer = durableTaskState();
+    const state: DurableTaskState = {
+      checkpoints: [],
+      files: [],
+      data: {},
+    };
+    const result = await layer.hooks.onComplete!({
+      log: makeItemLog(),
+      ctx: makeCtx(),
+      state,
+      outcome: 'success',
+    });
+    assert(result !== null && result !== undefined && 'state' in result);
+    expect(result.state.data.__outcome).toBe('success');
+    expect(result.state.checkpoints).toHaveLength(1);
+    expect(result.state.checkpoints[0]).toHaveProperty('timestamp');
+  });
+
+  it('onComplete returns state with failure outcome', async () => {
+    const layer = durableTaskState();
+    const state: DurableTaskState = {
+      checkpoints: [
+        {
+          timestamp: 1,
+          depth: 0,
+        },
+      ],
+      files: [],
+      data: {},
+    };
+    const result = await layer.hooks.onComplete!({
+      log: makeItemLog(),
+      ctx: makeCtx(),
+      state,
+      outcome: 'failure',
+    });
+    assert(result !== null && result !== undefined && 'state' in result);
+    expect(result.state.data.__outcome).toBe('failure');
+    expect(result.state.checkpoints).toHaveLength(2);
+  });
 });

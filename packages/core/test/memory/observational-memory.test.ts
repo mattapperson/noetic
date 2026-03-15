@@ -23,6 +23,7 @@ describe('observationalMemory', () => {
     expect(result.state).toEqual({
       observations: [],
       buffer: [],
+      bufferTokens: 0,
       version: 0,
     });
   });
@@ -35,6 +36,7 @@ describe('observationalMemory', () => {
         'User prefers JSON',
       ],
       buffer: [],
+      bufferTokens: 0,
       version: 1,
     };
     const result = await layer.hooks.recall!({
@@ -52,12 +54,14 @@ describe('observationalMemory', () => {
   });
 
   it('store accumulates and compresses at threshold', async () => {
+    // Token-based threshold: "test output" ≈ 3 tokens, so threshold 5 triggers after 2 items
     const layer = observationalMemory({
-      bufferThreshold: 2,
+      bufferThreshold: 5,
     });
     const state: ObservationalState = {
       observations: [],
       buffer: [],
+      bufferTokens: 0,
       version: 0,
     };
     const msg: MessageItem = {
@@ -125,6 +129,7 @@ describe('observationalMemory', () => {
       buffer: [
         'buf1',
       ],
+      bufferTokens: 1,
       version: 1,
     };
     const result = await layer.hooks.onSpawn!({

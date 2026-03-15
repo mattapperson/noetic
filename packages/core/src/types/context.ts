@@ -8,13 +8,13 @@ export interface ItemLog {
   append(item: Item): void;
 }
 
-export interface Context {
+export interface Context<TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
-  state: unknown;
+  state: TState;
   readonly parent: Context | null;
   readonly depth: number;
   readonly span: Span;
@@ -30,6 +30,10 @@ export interface Context {
   ): Promise<T>;
   send<T>(channel: Channel<T>, value: T): void;
   tryRecv<T>(channel: Channel<T>): T | null;
+  checkpoint(): Promise<void>;
+  complete<T>(value: T): void;
+  readonly completed: boolean;
+  readonly completionValue: unknown;
   readonly aborted: boolean;
   readonly abortReason?: string;
   abort(reason?: string): void;

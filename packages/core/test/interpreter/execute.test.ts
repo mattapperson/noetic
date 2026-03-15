@@ -126,8 +126,8 @@ describe('execute() switch', () => {
     } catch (e) {
       assert(isOrchidError(e));
       const oe = e.orchidError;
-      assert(oe.kind === 'budget_exceeded');
-      expect(oe.field).toBe('depth');
+      assert(oe.kind === 'step_failed');
+      expect(oe.cause.message).toContain('Maximum spawn depth');
     }
   });
 

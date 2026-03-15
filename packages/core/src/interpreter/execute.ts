@@ -19,13 +19,14 @@ export async function execute<I, O>(
   ctx: Context,
   callModel?: CallModelFn,
 ): Promise<O> {
-  // Depth guard
+  // Depth guard — classified as step_failed (not budget_exceeded) because depth
+  // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
     throw new OrchidErrorImpl({
-      kind: 'budget_exceeded',
-      field: 'depth',
-      limit: MAX_DEPTH,
-      actual: ctx.depth,
+      kind: 'step_failed',
+      stepId: step.id,
+      cause: new Error(`Maximum spawn depth ${MAX_DEPTH} exceeded (depth: ${ctx.depth})`),
+      retriesExhausted: true,
     });
   }
 

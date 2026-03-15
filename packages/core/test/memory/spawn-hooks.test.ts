@@ -41,17 +41,22 @@ describe('spawnLayers', () => {
       depth: 1,
     });
 
-    await initLayers(layers, parentCtx, makeStorage(), store);
-    const results = await spawnLayers(
+    await initLayers({
+      layers,
+      ctx: parentCtx,
+      storage: makeStorage(),
+      store,
+    });
+    const results = await spawnLayers({
       layers,
       parentCtx,
       childCtx,
-      {
+      spawnOpts: {
         contextIn: 'fresh',
         contextOut: 'full',
       },
       store,
-    );
+    });
 
     expect(results).toHaveLength(1);
     expect((results[0].childState as Record<string, unknown>).spawned).toBe(true);
@@ -95,24 +100,36 @@ describe('returnLayers', () => {
       depth: 1,
     });
 
-    await initLayers(layers, parentCtx, makeStorage(), store);
-    await spawnLayers(
+    await initLayers({
+      layers,
+      ctx: parentCtx,
+      storage: makeStorage(),
+      store,
+    });
+    await spawnLayers({
       layers,
       parentCtx,
       childCtx,
-      {
+      spawnOpts: {
         contextIn: 'fresh',
         contextOut: 'full',
       },
       store,
-    );
+    });
 
     // Simulate child modifying its state
     store.set('child2', 'test', {
       count: 5,
     });
 
-    await returnLayers(layers, parentCtx, childCtx, makeItemLog(), 'done', store);
+    await returnLayers({
+      layers,
+      parentCtx,
+      childCtx,
+      childLog: makeItemLog(),
+      result: 'done',
+      store,
+    });
 
     const parentState = store.get<CountState>('parent2', 'test');
     expect(parentState?.count).toBe(5); // 0 + 5
@@ -142,17 +159,22 @@ describe('returnLayers', () => {
       executionId: 'child3',
       depth: 1,
     });
-    await initLayers(layers, parentCtx, makeStorage(), store);
-    const results = await spawnLayers(
+    await initLayers({
+      layers,
+      ctx: parentCtx,
+      storage: makeStorage(),
+      store,
+    });
+    const results = await spawnLayers({
       layers,
       parentCtx,
       childCtx,
-      {
+      spawnOpts: {
         contextIn: 'fresh',
         contextOut: 'full',
       },
       store,
-    );
+    });
     expect(results).toHaveLength(0);
   });
 
@@ -181,17 +203,22 @@ describe('returnLayers', () => {
       executionId: 'child4',
       depth: 1,
     });
-    await initLayers(layers, parentCtx, makeStorage(), store);
-    const results = await spawnLayers(
+    await initLayers({
+      layers,
+      ctx: parentCtx,
+      storage: makeStorage(),
+      store,
+    });
+    const results = await spawnLayers({
       layers,
       parentCtx,
       childCtx,
-      {
+      spawnOpts: {
         contextIn: 'fresh',
         contextOut: 'full',
       },
       store,
-    );
+    });
     expect(results).toHaveLength(0);
   });
 });

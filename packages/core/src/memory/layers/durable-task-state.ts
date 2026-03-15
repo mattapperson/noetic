@@ -1,3 +1,4 @@
+import type { ZodType } from 'zod';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { MemoryLayer } from '../../types/memory';
 import { Slot } from '../../types/memory';
@@ -11,8 +12,17 @@ export interface DurableTaskState {
   data: Record<string, unknown>;
 }
 
-// Reserved for future configuration options (e.g. custom storage key, schema validation)
-export type DurableTaskStateConfig = Record<string, never>;
+export interface DurableTaskStateSerializer {
+  serialize(state: DurableTaskState): string;
+  deserialize(data: string): DurableTaskState;
+}
+
+export interface DurableTaskStateConfig {
+  baseDir?: string;
+  gitCommit?: boolean;
+  schema?: ZodType;
+  serializer?: DurableTaskStateSerializer;
+}
 
 export function durableTaskState(_config?: DurableTaskStateConfig): MemoryLayer<DurableTaskState> {
   return {
@@ -100,6 +110,28 @@ export function durableTaskState(_config?: DurableTaskStateConfig): MemoryLayer<
               ...parentState.data,
               ...childState.data,
             },
+          },
+        };
+      },
+
+      async onComplete({ state, outcome }) {
+        if (!state) {
+          return;
+        }
+        return {
+          state: {
+            ...state,
+            data: {
+              ...state.data,
+              __outcome: outcome,
+            },
+            checkpoints: [
+              ...state.checkpoints,
+              {
+                timestamp: Date.now(),
+                depth: 0,
+              },
+            ],
           },
         };
       },

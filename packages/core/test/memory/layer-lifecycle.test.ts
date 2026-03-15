@@ -50,7 +50,12 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
     expect(order).toEqual([
       'a',
       'b',
@@ -99,13 +104,18 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
-    await recallLayers(
+    await initLayers({
       layers,
-      'query',
       ctx,
-      makeItemLog(),
-      new Map([
+      storage: makeStorage(),
+      store,
+    });
+    await recallLayers({
+      layers,
+      query: 'query',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map([
         [
           'high',
           1_000,
@@ -116,14 +126,14 @@ describe('layer-lifecycle', () => {
         ],
       ]),
       store,
-    );
+    });
     expect(order).toEqual([
       'low',
       'high',
     ]); // slot order ascending
   });
 
-  it('store sequential', async () => {
+  it('store concurrent', async () => {
     const store = createLayerStateStore();
     const order: string[] = [];
     const layers: MemoryLayer[] = [
@@ -163,7 +173,12 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
     const response: LLMResponse = {
       items: [],
       usage: {
@@ -171,11 +186,17 @@ describe('layer-lifecycle', () => {
         outputTokens: 0,
       },
     };
-    await storeLayers(layers, response, ctx, makeItemLog(), store);
-    expect(order).toEqual([
-      'a',
-      'b',
-    ]); // sequential order
+    await storeLayers({
+      layers,
+      response,
+      ctx,
+      log: makeItemLog(),
+      store,
+    });
+    // Both should have run (order may vary since concurrent)
+    expect(order).toHaveLength(2);
+    expect(order).toContain('a');
+    expect(order).toContain('b');
   });
 
   it('dispose in reverse order', async () => {
@@ -212,8 +233,17 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
-    await disposeLayers(layers, ctx, store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
+    await disposeLayers({
+      layers,
+      ctx,
+      store,
+    });
     expect(order).toEqual([
       'b',
       'a',
@@ -240,8 +270,19 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
-    await completeLayers(layers, ctx, makeItemLog(), 'success', store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
+    await completeLayers({
+      layers,
+      ctx,
+      log: makeItemLog(),
+      outcome: 'success',
+      store,
+    });
     expect(completed).toBe(true);
   });
 
@@ -265,20 +306,25 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
-    const results = await recallLayers(
+    await initLayers({
       layers,
-      'q',
       ctx,
-      makeItemLog(),
-      new Map([
+      storage: makeStorage(),
+      store,
+    });
+    const results = await recallLayers({
+      layers,
+      query: 'q',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map([
         [
           'broken',
           1_000,
         ],
       ]),
       store,
-    );
+    });
     expect(results).toHaveLength(0); // skipped because init failed
   });
 
@@ -308,20 +354,25 @@ describe('layer-lifecycle', () => {
       },
     ];
     const ctx = makeCtx();
-    await initLayers(layers, ctx, makeStorage(), store);
-    const results = await recallLayers(
+    await initLayers({
       layers,
-      'q',
       ctx,
-      makeItemLog(),
-      new Map([
+      storage: makeStorage(),
+      store,
+    });
+    const results = await recallLayers({
+      layers,
+      query: 'q',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map([
         [
           'slow',
           1_000,
         ],
       ]),
       store,
-    );
+    });
     expect(results).toHaveLength(0);
   });
 
@@ -355,7 +406,12 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-diag',
     });
-    await initLayers(layers, ctx, makeStorage(), store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
     expect(errors).toHaveLength(1);
     expect(errors[0].layerId).toBe('broken');
     expect(errors[0].hook).toBe('init');
@@ -390,19 +446,19 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-diag-recall',
     });
-    const results = await recallLayers(
+    const results = await recallLayers({
       layers,
-      'q',
+      query: 'q',
       ctx,
-      makeItemLog(),
-      new Map([
+      log: makeItemLog(),
+      budgets: new Map([
         [
           'recall-fail',
           1_000,
         ],
       ]),
       store,
-    );
+    });
     expect(results).toHaveLength(0);
     expect(errors).toHaveLength(1);
     expect(errors[0].hook).toBe('recall');
@@ -431,7 +487,12 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-timer',
     });
-    await initLayers(layers, ctx, makeStorage(), store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
     // If we get here without hanging, the timer was properly cleaned up
     expect(
       store.get<{
@@ -440,7 +501,11 @@ describe('layer-lifecycle', () => {
     ).toEqual({
       fast: true,
     });
-    await disposeLayers(layers, ctx, store);
+    await disposeLayers({
+      layers,
+      ctx,
+      store,
+    });
   });
 
   it('cleanup is idempotent', async () => {
@@ -463,7 +528,12 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-cleanup-2',
     });
-    await initLayers(layers, ctx, makeStorage(), store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
     expect(
       store.get<{
         x: number;
@@ -498,7 +568,12 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-cleanup',
     });
-    await initLayers(layers, ctx, makeStorage(), store);
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
     expect(
       store.get<{
         x: number;
@@ -506,7 +581,11 @@ describe('layer-lifecycle', () => {
     ).toEqual({
       x: 1,
     });
-    await disposeLayers(layers, ctx, store);
+    await disposeLayers({
+      layers,
+      ctx,
+      store,
+    });
     expect(store.get('exec-cleanup', 'a')).toBeUndefined();
   });
 });

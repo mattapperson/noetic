@@ -41,6 +41,18 @@ export interface ExecutionContext {
   threadId: string;
   resourceId?: string;
   depth: number;
+  stepNumber: number;
+  tokenUsage: {
+    input: number;
+    output: number;
+  };
+  cost: number;
+  model?: string;
+  tokenize(text: string): number;
+  trace: {
+    setAttribute(key: string, value: string | number | boolean): void;
+    addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+  };
 }
 
 // Storage interfaces
@@ -140,7 +152,9 @@ export interface MemoryHooks<TState = unknown> {
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
-  onComplete?: (params: CompleteParams<TState>) => Promise<void>;
+  onComplete?: (params: CompleteParams<TState>) => Promise<void | {
+    state: TState;
+  }>;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
 }
 

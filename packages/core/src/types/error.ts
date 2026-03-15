@@ -57,7 +57,7 @@ export type OrchidError =
     }
   | {
       kind: 'budget_exceeded';
-      field: 'cost' | 'steps' | 'duration' | 'depth';
+      field: 'cost' | 'steps' | 'duration';
       limit: number;
       actual: number;
     };

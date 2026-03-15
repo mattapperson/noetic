@@ -109,8 +109,8 @@ interface ReasoningItem extends ItemBase {
 }
 
 interface ExtensionItem extends ItemBase {
-  readonly type: string;
-  readonly [key: string]: unknown;
+  readonly type: `x-${string}`;
+  readonly data: Record<string, unknown>;
 }
 ```
 
@@ -143,8 +143,9 @@ Framework abstraction over the model result. Contains the response items and tok
 
 ```typescript
 interface LLMResponse {
-  readonly items: ReadonlyArray<Item>;
-  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  items: Item[];
+  usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  cost?: number;
 }
 ```
 

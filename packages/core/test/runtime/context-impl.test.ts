@@ -158,4 +158,30 @@ describe('ContextImpl', () => {
     expect(ctx.itemLog.items).toHaveLength(1);
     expect(ctx.itemLog.items[0]).toBe(item);
   });
+
+  test('checkpoint calls injected checkpointFn', async () => {
+    let called = false;
+    const ctx = new ContextImpl({
+      checkpointFn: async () => {
+        called = true;
+      },
+    });
+    await ctx.checkpoint();
+    expect(called).toBe(true);
+  });
+
+  test('checkpoint is no-op when no checkpointFn provided', async () => {
+    const ctx = new ContextImpl();
+    await ctx.checkpoint();
+    // Should resolve without error
+  });
+
+  test('complete sets completed and completionValue', () => {
+    const ctx = new ContextImpl();
+    expect(ctx.completed).toBe(false);
+    expect(ctx.completionValue).toBeUndefined();
+    ctx.complete('result-42');
+    expect(ctx.completed).toBe(true);
+    expect(ctx.completionValue).toBe('result-42');
+  });
 });

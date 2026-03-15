@@ -33,7 +33,7 @@ interface Runtime {
 
   // Memory layer lifecycle (see 11-memory-layer-system for hook semantics)
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
-  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<LayerOutput[]>;
+  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
 
@@ -51,9 +51,10 @@ interface Runtime {
   createSpan(name: string, parent: Span | null): Span;
 }
 
-interface LayerOutput {
-  slot: number;
+interface RecallLayerOutput {
+  layerId: string;
   items: Item[];
+  tokenCount: number;
 }
 
 interface ChannelHandle<T> {
