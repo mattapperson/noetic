@@ -47,4 +47,5 @@ export { step } from './builders/step-builders';
 export { executeRun } from './interpreter/execute-run';
 export { executeLLM } from './interpreter/execute-llm';
 export type { CallModelFn } from './interpreter/execute-llm';
+export { executeTool } from './interpreter/execute-tool';
 export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
