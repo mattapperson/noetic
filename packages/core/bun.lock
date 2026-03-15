@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "@orchid/core",
+      "dependencies": {
+        "zod": "^3.23.0",
+      },
       "devDependencies": {
         "bun-types": "latest",
       },

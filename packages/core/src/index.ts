@@ -37,3 +37,7 @@ export { Slot } from './types/memory';
 export type {
   Runtime, AgentConfig, AgentHooks, RecallLayerOutput
 } from './types/runtime';
+
+export { executeLLM } from './interpreter/execute-llm';
+export type { CallModelFn } from './interpreter/execute-llm';
+export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
