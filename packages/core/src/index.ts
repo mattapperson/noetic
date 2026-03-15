@@ -45,4 +45,6 @@ export { ContextImpl } from './runtime/context-impl';
 export { step } from './builders/step-builders';
 
 export { executeRun } from './interpreter/execute-run';
+export { executeLLM } from './interpreter/execute-llm';
+export type { CallModelFn } from './interpreter/execute-llm';
 export { OrchidErrorImpl, isOrchidError } from './errors/orchid-error';
