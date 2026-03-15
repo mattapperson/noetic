@@ -58,7 +58,7 @@ describe('Ralph Wiggum pattern', () => {
     expect(llmCallCount).toBe(6);
   });
 
-  it('respects maxIterations', async () => {
+  it('respects maxIterations and always returns pass:false', async () => {
     const tool = { name: 'noop', description: 'No-op', input: z.object({}), output: z.string(), execute: async () => 'ok' };
     const mockCallModel = async (): Promise<LLMResponse> => ({
       items: [{ id: `msg-${Date.now()}`, status: 'completed', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } as MessageItem],
@@ -68,13 +68,34 @@ describe('Ralph Wiggum pattern', () => {
     const runtime = new InMemoryRuntime({ callModel: mockCallModel });
     const ctx = runtime.createContext();
     let verifyCount = 0;
+    const verifyResults: boolean[] = [];
     const rw = ralphWiggum({
       model: 'gpt-4', system: 'Test', tools: [tool],
-      verify: async () => { verifyCount++; return { pass: false, feedback: 'keep trying' }; },
+      verify: async () => { verifyCount++; const result = { pass: false as const, feedback: 'keep trying' }; verifyResults.push(result.pass); return result; },
       maxIterations: 3, innerMaxSteps: 2,
     });
     await runtime.execute(rw, 'go', ctx);
     expect(verifyCount).toBe(3);
+    expect(verifyResults).toEqual([false, false, false]);
+  });
+
+  it('stops early when verify passes', async () => {
+    const tool = { name: 'noop', description: 'No-op', input: z.object({}), output: z.string(), execute: async () => 'ok' };
+    const mockCallModel = async (): Promise<LLMResponse> => ({
+      items: [{ id: `msg-${Date.now()}-${Math.random()}`, status: 'completed', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } as MessageItem],
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+
+    const runtime = new InMemoryRuntime({ callModel: mockCallModel });
+    const ctx = runtime.createContext();
+    let verifyCount = 0;
+    const rw = ralphWiggum({
+      model: 'gpt-4', system: 'Test', tools: [tool],
+      verify: async () => { verifyCount++; return verifyCount >= 2 ? { pass: true } : { pass: false, feedback: 'retry' }; },
+      maxIterations: 5, innerMaxSteps: 2,
+    });
+    await runtime.execute(rw, 'go', ctx);
+    expect(verifyCount).toBe(2);
   });
 
   it('context resets each iteration (fresh spawn)', async () => {

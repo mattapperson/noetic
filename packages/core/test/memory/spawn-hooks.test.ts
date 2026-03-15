@@ -1,16 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { initLayers, spawnLayers, returnLayers, createLayerStateStore } from '../../src/memory/layer-lifecycle';
-import type { MemoryLayer, ExecutionContext, StorageAdapter } from '../../src/types/memory';
-
-function makeStorage(): StorageAdapter {
-  const store = new Map<string, unknown>();
-  return {
-    async get(key) { return store.get(key) as any ?? null; },
-    async set(key, value) { store.set(key, value); },
-    async delete(key) { store.delete(key); },
-    async list(prefix) { return [...store.keys()].filter(k => k.startsWith(prefix)); },
-  };
-}
+import type { MemoryLayer  } from '../../src/types/memory';
+import { makeStorage, makeCtx } from '../_helpers';
 
 describe('spawnLayers', () => {
   it('calls onSpawn and sets child state', async () => {
@@ -21,8 +12,8 @@ describe('spawnLayers', () => {
         onSpawn: async ({ parentState }) => ({ childState: { ...parentState as any, spawned: true }, items: [] }),
       },
     }];
-    const parentCtx: ExecutionContext = { executionId: 'parent', threadId: 't1', depth: 0 };
-    const childCtx: ExecutionContext = { executionId: 'child', threadId: 't1', depth: 1 };
+    const parentCtx = makeCtx({ executionId: 'parent' });
+    const childCtx = makeCtx({ executionId: 'child', depth: 1 });
 
     await initLayers(layers, parentCtx, makeStorage(), store);
     const results = await spawnLayers(layers, parentCtx, childCtx, { contextIn: 'fresh', contextOut: 'full' }, store);
@@ -44,8 +35,8 @@ describe('returnLayers', () => {
         }),
       },
     }];
-    const parentCtx: ExecutionContext = { executionId: 'parent2', threadId: 't1', depth: 0 };
-    const childCtx: ExecutionContext = { executionId: 'child2', threadId: 't1', depth: 1 };
+    const parentCtx = makeCtx({ executionId: 'parent2' });
+    const childCtx = makeCtx({ executionId: 'child2', depth: 1 });
 
     await initLayers(layers, parentCtx, makeStorage(), store);
     await spawnLayers(layers, parentCtx, childCtx, { contextIn: 'fresh', contextOut: 'full' }, store);
@@ -57,5 +48,34 @@ describe('returnLayers', () => {
 
     const parentState = store.get<any>('parent2', 'test');
     expect(parentState.count).toBe(5); // 0 + 5
+  });
+
+  it('missing onSpawn hook returns empty results', async () => {
+    const store = createLayerStateStore();
+    const layers: MemoryLayer[] = [{
+      id: 'no-spawn', name: 'NoSpawn', slot: 100, scope: 'execution', hooks: {
+        init: async () => ({ state: { data: 'parent' } }),
+      },
+    }];
+    const parentCtx = makeCtx({ executionId: 'parent3' });
+    const childCtx = makeCtx({ executionId: 'child3', depth: 1 });
+    await initLayers(layers, parentCtx, makeStorage(), store);
+    const results = await spawnLayers(layers, parentCtx, childCtx, { contextIn: 'fresh', contextOut: 'full' }, store);
+    expect(results).toHaveLength(0);
+  });
+
+  it('onSpawn returning null excludes layer from child', async () => {
+    const store = createLayerStateStore();
+    const layers: MemoryLayer[] = [{
+      id: 'null-spawn', name: 'NullSpawn', slot: 100, scope: 'execution', hooks: {
+        init: async () => ({ state: { data: 'parent' } }),
+        onSpawn: async () => null,
+      },
+    }];
+    const parentCtx = makeCtx({ executionId: 'parent4' });
+    const childCtx = makeCtx({ executionId: 'child4', depth: 1 });
+    await initLayers(layers, parentCtx, makeStorage(), store);
+    const results = await spawnLayers(layers, parentCtx, childCtx, { contextIn: 'fresh', contextOut: 'full' }, store);
+    expect(results).toHaveLength(0);
   });
 });

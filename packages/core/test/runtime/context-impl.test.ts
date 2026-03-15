@@ -39,7 +39,7 @@ describe('ContextImpl', () => {
     expect(child.depth).toBe(1);
   });
 
-  test('token accumulation: modify tokens, verify total updates', () => {
+  test('token fields are mutable', () => {
     const ctx = new ContextImpl();
     ctx.tokens.input = 10;
     ctx.tokens.output = 5;

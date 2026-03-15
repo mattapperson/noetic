@@ -67,7 +67,8 @@ describe('allocateBudgets', () => {
   it('handles auto budget config', () => {
     const layers = [makeLayer('a', 'auto')];
     const { allocations } = allocateBudgets(layers, 10000, 0, 0);
-    expect(allocations[0].allocated).toBeGreaterThan(0);
+    // 60% of 10000 (layerPool ratio) allocated to single auto layer
+    expect(allocations[0].allocated).toBe(6000);
   });
 });
 
@@ -77,7 +78,7 @@ describe('checkBudget', () => {
     (ctx as any).cost = 10.0;
     try {
       checkBudget(ctx, { maxCost: 5.0 });
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;
@@ -95,7 +96,7 @@ describe('checkBudget', () => {
     (ctx as any).stepCount = 100;
     try {
       checkBudget(ctx, { maxSteps: 50 });
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;
@@ -112,7 +113,7 @@ describe('checkBudget', () => {
     await new Promise(r => setTimeout(r, 20));
     try {
       checkBudget(ctx, { maxDuration: 1 }); // 1ms limit, elapsed should be > 1ms
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;

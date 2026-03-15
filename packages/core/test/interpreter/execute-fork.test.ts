@@ -4,11 +4,7 @@ import { ContextImpl } from '../../src/runtime/context-impl';
 import { OrchidErrorImpl, isOrchidError } from '../../src/errors/orchid-error';
 import type { StepForkAll, StepForkRace, StepForkSettle, SettleResult } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
-
-const simpleExecute = async <I, O>(step: any, input: I, ctx: Context): Promise<O> => {
-  if (step.kind === 'run') return step.execute(input, ctx);
-  throw new Error(`Unsupported: ${step.kind}`);
-};
+import { simpleExecute } from '../_helpers';
 
 describe('executeFork', () => {
   describe('all mode', () => {
@@ -42,13 +38,14 @@ describe('executeFork', () => {
       const ctx = new ContextImpl();
       try {
         await executeFork(step, '', ctx, simpleExecute);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         const oe = (e as OrchidErrorImpl).orchidError;
         expect(oe.kind).toBe('fork_partial');
         if (oe.kind === 'fork_partial') {
-          expect(oe.succeeded.length).toBeGreaterThanOrEqual(1);
+          expect(oe.succeeded).toHaveLength(1);
+          expect(oe.succeeded[0].stepId).toBe('ok');
           expect(oe.failed).toHaveLength(1);
         }
       }
@@ -80,7 +77,10 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({ state: { original: true } });
       const result = await executeFork(step, '', ctx, simpleExecute);
       // b should see the original state, not a's mutation
-      expect(result).toContain('original');
+      const bResult = result.split('|')[1];
+      const bState = JSON.parse(bResult);
+      expect(bState.modified).toBeUndefined();
+      expect(bState.original).toBe(true);
       // Parent state should also be unchanged
       expect((ctx.state as any).original).toBe(true);
     });
@@ -261,7 +261,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl();
       try {
         await executeFork(step, '', ctx, simpleExecute);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         const oe = (e as OrchidErrorImpl).orchidError;
@@ -283,7 +283,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl();
       try {
         await executeFork(step, '', ctx, simpleExecute);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         const oe = (e as OrchidErrorImpl).orchidError;
@@ -338,7 +338,7 @@ describe('executeFork', () => {
 
       const rejected = capturedResults.find(r => r.status === 'rejected')!;
       expect(rejected.stepId).toBe('b');
-      expect(rejected.error).toBeDefined();
+      expect(rejected.error!.kind).toBe('step_failed');
     });
 
     it('handles empty paths', async () => {

@@ -1,26 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { ScopedStorage, ExecutionContext } from '../../src/types/memory';
-import type { ItemLog } from '../../src/types/context';
-import type { Item, FunctionCallItem, MessageItem } from '../../src/types/items';
-
-function makeStorage(): ScopedStorage {
-  const store = new Map<string, unknown>();
-  return {
-    async get(key) { return (store.get(key) as any) ?? null; },
-    async set(key, value) { store.set(key, value); },
-    async delete(key) { store.delete(key); },
-    async list(prefix) { return [...store.keys()].filter(k => !prefix || k.startsWith(prefix)); },
-  };
-}
-
-function makeCtx(): ExecutionContext {
-  return { executionId: 'exec-1', threadId: 'thread-1', depth: 0 };
-}
-
-function makeItemLog(items: Item[] = []): ItemLog {
-  return { get items() { return items; }, append(item: Item) { items.push(item); } };
-}
+import { makeScopedStorage as makeStorage, makeCtx, makeItemLog } from '../_helpers';
+import type { FunctionCallItem, MessageItem } from '../../src/types/items';
 
 describe('workingMemory layer', () => {
   it('has correct id and slot', () => {
@@ -88,7 +69,6 @@ describe('workingMemory layer', () => {
       response: { items: [funcCall], usage: { inputTokens: 0, outputTokens: 0 } },
       ctx: makeCtx(), state: { existing: true },
     });
-    expect(result).toBeDefined();
     expect((result as any).state.notes).toBe('updated');
     expect((result as any).state.existing).toBe(true); // shallow merged via spread
   });
@@ -114,7 +94,6 @@ describe('workingMemory layer', () => {
       childCtx: makeCtx(),
       spawnOpts: { contextIn: 'none', contextOut: 'none' },
     });
-    expect(result).not.toBeNull();
     expect(result!.childState).toEqual({ data: 'parent' });
   });
 

@@ -14,7 +14,7 @@ describe('Error propagation', () => {
         until: until.maxSteps(5),
       };
       const ctx = new ContextImpl();
-      await expect(execute(step, 'go', ctx)).rejects.toThrow();
+      await expect(execute(step, 'go', ctx)).rejects.toThrow('body fail');
     });
 
     it('onError retry re-runs', async () => {
@@ -65,7 +65,7 @@ describe('Error propagation', () => {
       const ctx = new ContextImpl();
       try {
         await execute(step, '', ctx);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         expect((e as OrchidErrorImpl).orchidError.kind).toBe('fork_partial');
@@ -97,7 +97,7 @@ describe('Error propagation', () => {
       const ctx = new ContextImpl();
       try {
         await execute(step, '', ctx);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         expect((e as OrchidErrorImpl).orchidError.kind).toBe('fork_partial');
@@ -117,7 +117,7 @@ describe('Error propagation', () => {
       const mockCallModel = async () => { throw new Error('LLM down'); };
       try {
         await execute(step, '', ctx, mockCallModel);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         const oe = (e as OrchidErrorImpl).orchidError;

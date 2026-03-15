@@ -6,11 +6,7 @@ import type { StepSpawn } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
 import type { Item, MessageItem } from '../../src/types/items';
 import { z } from 'zod';
-
-const simpleExecute = async <I, O>(step: any, input: I, ctx: Context): Promise<O> => {
-  if (step.kind === 'run') return step.execute(input, ctx);
-  throw new Error(`Unsupported: ${step.kind}`);
-};
+import { simpleExecute } from '../_helpers';
 
 describe('executeSpawn', () => {
   describe('contextIn: inherit', () => {

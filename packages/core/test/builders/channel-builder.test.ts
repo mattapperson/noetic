@@ -4,18 +4,23 @@ import { z } from 'zod';
 
 describe('channel builder', () => {
   it('creates value channel', () => {
-    const ch = channel('test', { schema: z.string(), mode: 'value' });
+    const schema = z.string();
+    const ch = channel('test', { schema, mode: 'value' });
     expect(ch.name).toBe('test');
     expect(ch.mode).toBe('value');
+    expect(ch.schema).toBe(schema);
   });
 
   it('creates queue channel with capacity', () => {
     const ch = channel('q', { schema: z.number(), mode: 'queue', capacity: 100 });
+    expect(ch.name).toBe('q');
+    expect(ch.mode).toBe('queue');
     expect(ch.capacity).toBe(100);
   });
 
   it('creates topic channel', () => {
     const ch = channel('t', { schema: z.string(), mode: 'topic' });
+    expect(ch.name).toBe('t');
     expect(ch.mode).toBe('topic');
   });
 

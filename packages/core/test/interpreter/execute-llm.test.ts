@@ -1,43 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 import { executeLLM } from '../../src/interpreter/execute-llm';
 import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
-import type { Context, ItemLog } from '../../src/types/context';
-import type { Item, MessageItem } from '../../src/types/items';
+import type { MessageItem } from '../../src/types/items';
 import type { StepLLM } from '../../src/types/step';
 import { z } from 'zod';
-
-// Simple test helpers
-function createItemLog(): ItemLog {
-  const items: Item[] = [];
-  return {
-    get items() { return items as ReadonlyArray<Item>; },
-    append(item: Item) { items.push(item); },
-  };
-}
-
-function createMockCtx(overrides?: Partial<Context>): Context {
-  return {
-    id: 'test-ctx',
-    stepCount: 0,
-    tokens: { input: 0, output: 0, total: 0 },
-    elapsed: 0,
-    cost: 0,
-    state: {},
-    parent: null,
-    depth: 0,
-    span: { traceId: 't', spanId: 's', parentSpanId: null, setAttribute() {}, addEvent() {}, end() {} },
-    threadId: 'thread-1',
-    itemLog: createItemLog(),
-    lastStepMeta: null,
-    recv: async () => { throw new Error('not impl'); },
-    send: () => { throw new Error('not impl'); },
-    tryRecv: () => { throw new Error('not impl'); },
-    checkpoint: async () => {},
-    complete: () => {},
-    abort: () => {},
-    ...overrides,
-  } as Context;
-}
+import { makeMockContext as createMockCtx, makeLLMResponse } from '../_helpers';
 
 describe('executeLLM', () => {
   it('calls callModel and returns text output', async () => {
@@ -193,7 +160,7 @@ describe('executeLLM', () => {
 
     try {
       await executeLLM(step, 'hi', ctx, callModel);
-      expect(true).toBe(false); // should not reach
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       expect((e as OrchidErrorImpl).orchidError.kind).toBe('llm_parse_error');
@@ -218,7 +185,7 @@ describe('executeLLM', () => {
 
     try {
       await executeLLM(step, 'hi', ctx, callModel);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       expect((e as OrchidErrorImpl).orchidError.kind).toBe('llm_parse_error');
@@ -278,6 +245,8 @@ describe('executeLLM', () => {
     expect(capturedArgs.model).toBe('claude-3');
     expect(capturedArgs.params).toEqual({ temperature: 0.5 });
     expect(capturedArgs.output).toBe(schema);
+    expect(capturedArgs.items).toBeDefined();
+    expect(Array.isArray(capturedArgs.items)).toBe(true);
   });
 
   it('stores responseItems in lastStepMeta', async () => {
@@ -313,5 +282,26 @@ describe('executeLLM', () => {
 
     await executeLLM(step, 'hi', ctx, callModel);
     expect(ctx.cost).toBe(0.05);
+  });
+
+  it('does not create user message for non-string input', async () => {
+    const step: StepLLM<{ data: number }, string> = { kind: 'llm', id: 'test', model: 'gpt-4' };
+    const ctx = createMockCtx();
+    const callModel = async () => makeLLMResponse('ok');
+    await executeLLM(step, { data: 42 } as any, ctx, callModel);
+    const userItems = ctx.itemLog.items.filter(i => (i as any).role === 'user');
+    expect(userItems).toHaveLength(0);
+  });
+
+  it('handles empty tools array', async () => {
+    const step: StepLLM<string, string> = { kind: 'llm', id: 'test', model: 'gpt-4', tools: [] };
+    const ctx = createMockCtx();
+    let capturedTools: any;
+    const callModel = async (_m: string, _items: any, tools: any) => {
+      capturedTools = tools;
+      return makeLLMResponse('ok');
+    };
+    await executeLLM(step, 'hi', ctx, callModel);
+    expect(capturedTools).toEqual([]);
   });
 });

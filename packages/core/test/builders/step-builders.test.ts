@@ -3,7 +3,7 @@ import { step } from '../../src/builders/step-builders';
 import { z } from 'zod';
 
 describe('step builders', () => {
-  it('step.run() produces correct shape', () => {
+  it('step.run() produces correct shape', async () => {
     const s = step.run({
       id: 'my-run',
       execute: async (input: string) => input.length,
@@ -12,6 +12,8 @@ describe('step builders', () => {
     expect(s.id).toBe('my-run');
     expect(s.execute).toBeFunction();
     expect(s.retry).toBeUndefined();
+    const result = await s.execute('hello', {} as any);
+    expect(result).toBe(5);
   });
 
   it('step.run() with retry policy', () => {
@@ -59,7 +61,7 @@ describe('step builders', () => {
       tools: [tool],
     });
     expect(s.tools).toHaveLength(1);
-    expect(s.tools![0].name).toBe('search');
+    expect(s.tools![0]).toBe(tool);
   });
 
   it('step.tool() produces correct shape', () => {

@@ -1,21 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { observationalMemory } from '../../src/memory/layers/observational-memory';
-import type { ScopedStorage, ExecutionContext } from '../../src/types/memory';
+import { makeScopedStorage as makeStorage, makeCtx } from '../_helpers';
 import type { MessageItem } from '../../src/types/items';
-
-function makeStorage(): ScopedStorage {
-  const store = new Map<string, unknown>();
-  return {
-    async get(key) { return store.get(key) as any ?? null; },
-    async set(key, value) { store.set(key, value); },
-    async delete(key) { store.delete(key); },
-    async list() { return []; },
-  };
-}
-
-function makeCtx(): ExecutionContext {
-  return { executionId: 'exec-1', threadId: 'thread-1', depth: 0 };
-}
 
 describe('observationalMemory', () => {
   it('has correct id and slot', () => {
@@ -50,6 +36,7 @@ describe('observationalMemory', () => {
     // Second store: threshold reached, compresses
     const r2 = await layer.hooks.store!({ newItems: [msg], log: { items: [], append: () => {} } as any, response: { items: [msg], usage: { inputTokens: 0, outputTokens: 0 } }, ctx: makeCtx(), state: (r1 as any).state });
     expect((r2 as any).state.observations).toHaveLength(1);
+    expect((r2 as any).state.observations[0]).toContain('Processed 2 items');
     expect((r2 as any).state.buffer).toHaveLength(0);
   });
 

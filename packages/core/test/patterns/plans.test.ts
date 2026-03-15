@@ -27,16 +27,17 @@ describe('compilePlan', () => {
         { id: 'step-2', description: 'Step 2', assignee: 'worker', execution: 'sequential' },
       ],
     };
-    const results: string[] = [];
+    const receivedInputs: string[] = [];
     const agents = {
       worker: (prompt: string) => ({
         kind: 'run' as const, id: `w-${prompt}`,
-        execute: async (input: string) => { results.push(prompt); return `${input} -> ${prompt}`; },
+        execute: async (input: string) => { receivedInputs.push(input); return `${input} -> ${prompt}`; },
       }),
     };
     const compiled = compilePlan(plan, agents);
     await (compiled as any).execute('start', new ContextImpl());
-    expect(results).toEqual(['Step 1', 'Step 2']);
+    expect(receivedInputs[0]).toBe('start');
+    expect(receivedInputs[1]).toBe('start -> Step 1');
   });
 
   it('throws on unknown agent', () => {

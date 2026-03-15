@@ -1,20 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { durableTaskState } from '../../src/memory/layers/durable-task-state';
-import type { ScopedStorage, ExecutionContext } from '../../src/types/memory';
-
-function makeStorage(): ScopedStorage {
-  const store = new Map<string, unknown>();
-  return {
-    async get(key) { return store.get(key) as any ?? null; },
-    async set(key, value) { store.set(key, value); },
-    async delete(key) { store.delete(key); },
-    async list(prefix) { return [...store.keys()]; },
-  };
-}
-
-function makeCtx(): ExecutionContext {
-  return { executionId: 'exec-1', threadId: 'thread-1', depth: 0 };
-}
+import { makeScopedStorage as makeStorage, makeCtx } from '../_helpers';
 
 describe('durableTaskState', () => {
   it('has correct id and slot', () => {
@@ -24,7 +10,7 @@ describe('durableTaskState', () => {
     expect(layer.scope).toBe('execution');
   });
 
-  it('init/recall/store lifecycle', async () => {
+  it('init/recall lifecycle', async () => {
     const layer = durableTaskState();
     const result = await layer.hooks.init!({ storage: makeStorage(), scopeKey: 'exec-1', ctx: makeCtx() });
     expect(result.state).toEqual({ checkpoints: [], files: [], data: {} });
@@ -81,7 +67,6 @@ describe('durableTaskState', () => {
     const result = await layer.hooks.onReturn!({
       childState, childLog: { items: [], append: () => {} } as any, parentState, result: 'done',
     });
-    expect(result).toBeDefined();
     expect((result as any).parentState.checkpoints).toHaveLength(2);
     expect((result as any).parentState.files).toContain('a.ts');
     expect((result as any).parentState.files).toContain('b.ts');

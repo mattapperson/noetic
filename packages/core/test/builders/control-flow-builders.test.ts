@@ -29,6 +29,8 @@ describe('fork builder', () => {
     expect(f.kind).toBe('fork');
     expect(f.mode).toBe('all');
     expect(f.merge).toBeFunction();
+    const merged = f.merge(['a', 'b', 'c'], {} as any);
+    expect(merged).toBe('a,b,c');
   });
 
   it('creates settle mode fork with merge', () => {
@@ -92,6 +94,10 @@ describe('fork builder', () => {
       ],
     });
     expect(f.paths).toBeFunction();
+    const paths = f.paths(5, {} as any);
+    expect(paths).toHaveLength(1);
+    expect(paths[0].kind).toBe('run');
+    expect(paths[0].id).toBe('path-5');
   });
 });
 

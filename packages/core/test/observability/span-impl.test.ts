@@ -4,8 +4,10 @@ import { SpanImpl } from '../../src/observability/span-impl';
 describe('SpanImpl', () => {
   it('creates with IDs', () => {
     const span = new SpanImpl('test', null);
-    expect(span.traceId).toBeDefined();
-    expect(span.spanId).toBeDefined();
+    expect(typeof span.traceId).toBe('string');
+    expect(span.traceId.length).toBeGreaterThan(0);
+    expect(typeof span.spanId).toBe('string');
+    expect(span.spanId.length).toBeGreaterThan(0);
     expect(span.parentSpanId).toBeNull();
     expect(span.name).toBe('test');
   });
@@ -41,13 +43,20 @@ describe('SpanImpl', () => {
     expect(span.endTime).toBeUndefined();
     span.end();
     expect(span.endTime).toBeDefined();
+    expect(span.endTime).toBeGreaterThanOrEqual(span.startTime);
   });
 
   it('duration computed correctly', () => {
     const span = new SpanImpl('test', null);
-    // Immediate end
     span.end();
     expect(span.duration).toBeGreaterThanOrEqual(0);
     expect(span.duration).toBeLessThan(100);
+    expect(span.duration).toBe(span.endTime! - span.startTime);
+  });
+
+  it('un-ended span returns live elapsed time', () => {
+    const span = new SpanImpl('test', null);
+    expect(span.duration).toBeGreaterThanOrEqual(0);
+    expect(span.endTime).toBeUndefined();
   });
 });

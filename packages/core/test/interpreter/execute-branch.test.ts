@@ -3,11 +3,7 @@ import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { StepBranch, Step } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
-
-const simpleExecute = async <I, O>(step: any, input: I, ctx: Context): Promise<O> => {
-  if (step.kind === 'run') return step.execute(input, ctx);
-  throw new Error(`Unsupported: ${step.kind}`);
-};
+import { simpleExecute } from '../_helpers';
 
 describe('executeBranch', () => {
   it('route selects a step and executes it', async () => {

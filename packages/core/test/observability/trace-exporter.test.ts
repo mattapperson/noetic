@@ -9,9 +9,12 @@ describe('NoopExporter', () => {
     expect(result).toBeUndefined();
   });
 
-  it('has no spans property', () => {
+  it('export can be called multiple times without side effects', async () => {
     const exporter = new NoopExporter();
-    expect((exporter as any).spans).toBeUndefined();
+    const result1 = await exporter.export([new SpanImpl('test1', null)]);
+    const result2 = await exporter.export([new SpanImpl('test2', null)]);
+    expect(result1).toBeUndefined();
+    expect(result2).toBeUndefined();
   });
 });
 

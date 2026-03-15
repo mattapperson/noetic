@@ -35,7 +35,7 @@ describe('executeTool', () => {
 
     try {
       await executeTool(s, { name: 123 }, mockCtx); // wrong type
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       expect((e as OrchidErrorImpl).orchidError.kind).toBe('step_failed');
@@ -86,7 +86,7 @@ describe('executeTool', () => {
 
     try {
       await executeTool(s, {}, mockCtx);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;

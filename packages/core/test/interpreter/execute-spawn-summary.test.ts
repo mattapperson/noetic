@@ -7,18 +7,16 @@ import type { Context } from '../../src/types/context';
 import type { MessageItem } from '../../src/types/items';
 import type { LLMResponse } from '../../src/types/common';
 import { z } from 'zod';
-
-const simpleExecute = async <I, O>(step: any, input: I, ctx: Context): Promise<O> => {
-  if (step.kind === 'run') return step.execute(input, ctx);
-  throw new Error(`Unsupported: ${step.kind}`);
-};
+import { simpleExecute } from '../_helpers';
 
 describe('executeSpawn - summary contextOut', () => {
   it('makes summary LLM call after child execution', async () => {
     const parentCtx = new ContextImpl();
     let summaryCallMade = false;
 
-    const mockCallModel = async (): Promise<LLMResponse> => {
+    let capturedArgs: any;
+    const mockCallModel = async (model: string, items: any, ...rest: any[]): Promise<LLMResponse> => {
+      capturedArgs = { model, items };
       summaryCallMade = true;
       return {
         items: [{
@@ -39,6 +37,8 @@ describe('executeSpawn - summary contextOut', () => {
     const result = await executeSpawn(step, 'input', parentCtx, simpleExecute, mockCallModel);
     expect(summaryCallMade).toBe(true);
     expect(result).toBe('Child did X and Y');
+    expect(capturedArgs).toBeDefined();
+    expect(capturedArgs.items).toBeDefined();
   });
 
   it('uses custom model for summary', async () => {
@@ -76,7 +76,7 @@ describe('executeSpawn - summary contextOut', () => {
 
     try {
       await executeSpawn(step, '', new ContextImpl(), simpleExecute, mockCallModel);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;
@@ -114,7 +114,7 @@ describe('executeSpawn - schema contextOut', () => {
 
     try {
       await executeSpawn(step, '', new ContextImpl(), simpleExecute);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       expect((e as OrchidErrorImpl).orchidError.kind).toBe('llm_parse_error');

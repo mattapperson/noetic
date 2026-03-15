@@ -89,7 +89,7 @@ describe('execute() switch', () => {
     };
     try {
       await execute(step, 'test', ctx);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as any).orchidError;
@@ -108,7 +108,7 @@ describe('execute() switch', () => {
     };
     try {
       await execute(step, 'test', ctx);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as any).orchidError;

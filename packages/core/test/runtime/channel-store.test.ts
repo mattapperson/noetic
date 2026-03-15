@@ -140,7 +140,7 @@ describe('ChannelStore', () => {
       const ch = channel('t', { schema: z.string(), mode: 'queue' });
       try {
         await store.recv(ch, 50);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         expect((e as OrchidErrorImpl).orchidError.kind).toBe('channel_timeout');
@@ -152,7 +152,7 @@ describe('ChannelStore', () => {
       const ch = channel('v', { schema: z.string(), mode: 'value' });
       try {
         await store.recv(ch, 50);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         expect((e as OrchidErrorImpl).orchidError.kind).toBe('channel_timeout');
@@ -164,7 +164,7 @@ describe('ChannelStore', () => {
       const ch = channel('tp', { schema: z.string(), mode: 'topic' });
       try {
         await store.recv(ch, 50);
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         expect((e as OrchidErrorImpl).orchidError.kind).toBe('channel_timeout');
@@ -205,7 +205,7 @@ describe('ChannelStore', () => {
       store.closeExecution('exec-1');
       try {
         handle.send('hello');
-        expect(true).toBe(false);
+        expect.unreachable('should have thrown');
       } catch (e) {
         expect(isOrchidError(e)).toBe(true);
         expect((e as OrchidErrorImpl).orchidError.kind).toBe('channel_closed');
@@ -213,6 +213,9 @@ describe('ChannelStore', () => {
     });
   });
 
+  // Back-pressure policy:
+  // - External channels: drop oldest (to keep receiving new data from outside)
+  // - Internal channels: drop newest (to preserve data already in the queue)
   describe('back-pressure', () => {
     it('drops oldest on full external channel queue', () => {
       const store = new ChannelStore();

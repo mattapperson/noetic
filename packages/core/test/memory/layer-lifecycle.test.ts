@@ -1,30 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 import { initLayers, recallLayers, storeLayers, disposeLayers, completeLayers, createLayerStateStore } from '../../src/memory/layer-lifecycle';
 import type { LayerStateStore } from '../../src/memory/layer-lifecycle';
-import type { MemoryLayer, ExecutionContext, StorageAdapter } from '../../src/types/memory';
-import type { ItemLog } from '../../src/types/context';
-import type { Item } from '../../src/types/items';
+import type { MemoryLayer } from '../../src/types/memory';
 import type { LLMResponse } from '../../src/types/common';
 import { Slot } from '../../src/types/memory';
-
-function makeStorage(): StorageAdapter {
-  const store = new Map<string, unknown>();
-  return {
-    async get(key) { return (store.get(key) as any) ?? null; },
-    async set(key, value) { store.set(key, value); },
-    async delete(key) { store.delete(key); },
-    async list(prefix) { return [...store.keys()].filter(k => k.startsWith(prefix)); },
-  };
-}
-
-function makeCtx(executionId = 'exec-1'): ExecutionContext {
-  return { executionId, threadId: 'thread-1', resourceId: 'user-1', depth: 0 };
-}
-
-function makeItemLog(): ItemLog {
-  const items: Item[] = [];
-  return { get items() { return items; }, append(item: Item) { items.push(item); } };
-}
+import { makeStorage, makeCtx, makeItemLog } from '../_helpers';
 
 describe('layer-lifecycle', () => {
   it('init sequential, sets state', async () => {
@@ -184,7 +164,7 @@ describe('layer-lifecycle', () => {
         },
       },
     ];
-    const ctx = makeCtx('exec-diag');
+    const ctx = makeCtx({ executionId: 'exec-diag' });
     await initLayers(layers, ctx, makeStorage(), store);
     expect(errors).toHaveLength(1);
     expect(errors[0].layerId).toBe('broken');
@@ -205,7 +185,7 @@ describe('layer-lifecycle', () => {
         },
       },
     ];
-    const ctx = makeCtx('exec-diag-recall');
+    const ctx = makeCtx({ executionId: 'exec-diag-recall' });
     const results = await recallLayers(layers, 'q', ctx, makeItemLog(), new Map([['recall-fail', 1000]]), store);
     expect(results).toHaveLength(0);
     expect(errors).toHaveLength(1);
@@ -223,7 +203,7 @@ describe('layer-lifecycle', () => {
         },
       },
     ];
-    const ctx = makeCtx('exec-timer');
+    const ctx = makeCtx({ executionId: 'exec-timer' });
     await initLayers(layers, ctx, makeStorage(), store);
     // If we get here without hanging, the timer was properly cleaned up
     expect(store.get<{ fast: boolean }>('exec-timer', 'fast')).toEqual({ fast: true });
@@ -239,7 +219,7 @@ describe('layer-lifecycle', () => {
         },
       },
     ];
-    const ctx = makeCtx('exec-cleanup-2');
+    const ctx = makeCtx({ executionId: 'exec-cleanup-2' });
     await initLayers(layers, ctx, makeStorage(), store);
     expect(store.get<{ x: number }>('exec-cleanup-2', 'a')).toEqual({ x: 1 });
     store.cleanup('exec-cleanup-2');
@@ -258,7 +238,7 @@ describe('layer-lifecycle', () => {
         },
       },
     ];
-    const ctx = makeCtx('exec-cleanup');
+    const ctx = makeCtx({ executionId: 'exec-cleanup' });
     await initLayers(layers, ctx, makeStorage(), store);
     expect(store.get<{ x: number }>('exec-cleanup', 'a')).toEqual({ x: 1 });
     await disposeLayers(layers, ctx, store);

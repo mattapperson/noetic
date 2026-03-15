@@ -5,14 +5,7 @@ import { isOrchidError, OrchidErrorImpl } from '../../src/errors/orchid-error';
 import type { StepLoop } from '../../src/types/step';
 import type { Context } from '../../src/types/context';
 import { ContextImpl } from '../../src/runtime/context-impl';
-
-// Simple executeStep that handles 'run' kind
-const simpleExecuteStep = async <I, O>(step: any, input: I, ctx: Context): Promise<O> => {
-  if (step.kind === 'run') {
-    return await step.execute(input, ctx);
-  }
-  throw new Error(`Unsupported step kind: ${step.kind}`);
-};
+import { simpleExecute as simpleExecuteStep } from '../_helpers';
 
 describe('executeLoop', () => {
   it('repeats body until predicate fires', async () => {
@@ -51,17 +44,14 @@ describe('executeLoop', () => {
         },
       },
       until: until.maxSteps(3),
-      prepareNext: (output, verdict) => {
-        if (verdict.feedback) return verdict.feedback;
-        return 'next';
-      },
+      prepareNext: (output) => output.toUpperCase(),
     };
 
     const ctx = new ContextImpl();
     await executeLoop(loopStep, 'first', ctx, simpleExecuteStep);
     expect(inputs[0]).toBe('first');
-    expect(inputs[1]).toBe('next');
-    expect(inputs[2]).toBe('next');
+    expect(inputs[1]).toBe('RESULT-FIRST');
+    expect(inputs[2]).toBe('RESULT-RESULT-FIRST');
   });
 
   it('onError retry re-runs same iteration', async () => {
@@ -149,7 +139,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
     }
@@ -222,7 +212,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as any).orchidError;
@@ -250,7 +240,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       expect(count).toBe(1000);
@@ -283,7 +273,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       expect(attempts).toBe(10); // capped by maxIterations
@@ -310,7 +300,7 @@ describe('executeLoop', () => {
 
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as any).orchidError;
@@ -334,7 +324,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as any).orchidError;
@@ -358,7 +348,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as any).orchidError;

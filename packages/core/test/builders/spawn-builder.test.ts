@@ -25,4 +25,31 @@ describe('spawn builder', () => {
     });
     expect(s.timeout).toBe(5000);
   });
+
+  it('throws on empty id', () => {
+    expect(() => spawn({
+      id: '',
+      child: { kind: 'run', id: 'child', execute: async (i: string) => i },
+      contextIn: { strategy: 'fresh' },
+      contextOut: { strategy: 'full' },
+    })).toThrow('non-empty id');
+  });
+
+  it('throws on whitespace-only id', () => {
+    expect(() => spawn({
+      id: '  ',
+      child: { kind: 'run', id: 'child', execute: async (i: string) => i },
+      contextIn: { strategy: 'fresh' },
+      contextOut: { strategy: 'full' },
+    })).toThrow('non-empty id');
+  });
+
+  it('throws on missing child', () => {
+    expect(() => spawn({
+      id: 'test',
+      child: undefined as any,
+      contextIn: { strategy: 'fresh' },
+      contextOut: { strategy: 'full' },
+    })).toThrow('child step');
+  });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
 import { executeRun } from '../../src/interpreter/execute-run';
 import { OrchidErrorImpl, isOrchidError } from '../../src/errors/orchid-error';
 import type { StepRun } from '../../src/types/step';
@@ -6,6 +6,20 @@ import type { Context } from '../../src/types/context';
 
 // Minimal mock context
 const mockCtx = {} as Context;
+
+// Safety net: ensure setTimeout is always restored
+const _originalSetTimeout = globalThis.setTimeout;
+afterEach(() => { globalThis.setTimeout = _originalSetTimeout; });
+
+/** Patch setTimeout to capture delay values and execute callbacks instantly. */
+function interceptDelays(): { delays: number[]; restore: () => void } {
+  const delays: number[] = [];
+  (globalThis as any).setTimeout = (fn: any, delay?: number, ...args: any[]) => {
+    if (delay && delay > 0) delays.push(delay);
+    return _originalSetTimeout(fn, 1, ...args);
+  };
+  return { delays, restore: () => { globalThis.setTimeout = _originalSetTimeout; } };
+}
 
 describe('executeRun', () => {
   it('calls execute function and returns output', async () => {
@@ -40,7 +54,7 @@ describe('executeRun', () => {
     };
     try {
       await executeRun(s, 'test', mockCtx);
-      expect(true).toBe(false); // should not reach
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;
@@ -54,6 +68,8 @@ describe('executeRun', () => {
   });
 
   it('retries with fixed backoff', async () => {
+    const { delays, restore } = interceptDelays();
+
     let attempts = 0;
     const s: StepRun<string, string> = {
       kind: 'run',
@@ -65,12 +81,19 @@ describe('executeRun', () => {
       },
       retry: { maxAttempts: 3, backoff: 'fixed', initialDelay: 10 },
     };
-    const result = await executeRun(s, 'test', mockCtx);
-    expect(result).toBe('success');
-    expect(attempts).toBe(3);
+    try {
+      const result = await executeRun(s, 'test', mockCtx);
+      expect(result).toBe('success');
+      expect(attempts).toBe(3);
+      // Fixed backoff: all delays should be 10
+      expect(delays).toEqual([10, 10]);
+    } finally {
+      restore();
+    }
   });
 
   it('retries with exponential backoff and exhausts', async () => {
+    const { delays, restore } = interceptDelays();
     let attempts = 0;
     const s: StepRun<string, string> = {
       kind: 'run',
@@ -83,26 +106,23 @@ describe('executeRun', () => {
     };
     try {
       await executeRun(s, 'test', mockCtx);
-      expect(true).toBe(false);
+      expect.unreachable('should have thrown');
     } catch (e) {
       expect(isOrchidError(e)).toBe(true);
       const oe = (e as OrchidErrorImpl).orchidError;
+      expect(oe.kind).toBe('step_failed');
       if (oe.kind === 'step_failed') {
         expect(oe.retriesExhausted).toBe(true);
       }
       expect(attempts).toBe(3);
+      expect(delays).toEqual([10, 20]);
+    } finally {
+      restore();
     }
   });
 
   it('caps exponential backoff delay at maxDelay', async () => {
-    const delays: number[] = [];
-    const originalSetTimeout = globalThis.setTimeout;
-    // Monkey-patch setTimeout to capture delays
-    const patched = (fn: any, delay?: number, ...args: any[]) => {
-      if (delay && delay > 0) delays.push(delay);
-      return originalSetTimeout(fn, 1, ...args); // execute quickly
-    };
-    (globalThis as any).setTimeout = patched;
+    const { delays, restore } = interceptDelays();
 
     let attempts = 0;
     const s: StepRun<string, string> = {
@@ -118,24 +138,20 @@ describe('executeRun', () => {
     try {
       await executeRun(s, 'test', mockCtx);
     } finally {
-      globalThis.setTimeout = originalSetTimeout;
+      restore();
     }
     // Delays: 100, 200, 400, 500 (capped from 800)
     for (const d of delays) {
       expect(d).toBeLessThanOrEqual(500);
     }
+    expect(delays.length).toBeGreaterThan(0);
+    expect(delays).toEqual([100, 200, 400, 500]);
   });
 
   it('defaults maxDelay to 30000', async () => {
     // With exponential backoff, delay = 100 * 2^attempt
     // For attempt 9: 100 * 512 = 51200, should be capped at 30000
-    const delays: number[] = [];
-    const originalSetTimeout = globalThis.setTimeout;
-    const patched = (fn: any, delay?: number, ...args: any[]) => {
-      if (delay && delay > 0) delays.push(delay);
-      return originalSetTimeout(fn, 1, ...args);
-    };
-    (globalThis as any).setTimeout = patched;
+    const { delays, restore } = interceptDelays();
 
     let attempts = 0;
     const s: StepRun<string, string> = {
@@ -151,27 +167,52 @@ describe('executeRun', () => {
     try {
       await executeRun(s, 'test', mockCtx);
     } finally {
-      globalThis.setTimeout = originalSetTimeout;
+      restore();
     }
     for (const d of delays) {
       expect(d).toBeLessThanOrEqual(30_000);
     }
+    expect(delays.length).toBeGreaterThan(0);
   });
 
   it('retries with linear backoff', async () => {
+    const { delays, restore } = interceptDelays();
+
     let attempts = 0;
     const s: StepRun<string, string> = {
       kind: 'run',
       id: 'linear-test',
       execute: async () => {
         attempts++;
-        if (attempts < 2) throw new Error('not yet');
+        if (attempts < 3) throw new Error('not yet');
         return 'ok';
       },
       retry: { maxAttempts: 3, backoff: 'linear', initialDelay: 10 },
     };
-    const result = await executeRun(s, 'test', mockCtx);
-    expect(result).toBe('ok');
-    expect(attempts).toBe(2);
+    try {
+      const result = await executeRun(s, 'test', mockCtx);
+      expect(result).toBe('ok');
+      expect(attempts).toBe(3);
+      // Linear backoff: delay = initialDelay * attempt
+      expect(delays).toEqual([10, 20]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('wraps non-Error throws in OrchidErrorImpl', async () => {
+    const s: StepRun<string, string> = {
+      kind: 'run',
+      id: 'string-throw',
+      execute: async () => { throw 'string error'; },
+    };
+    try {
+      await executeRun(s, 'test', mockCtx);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      expect(isOrchidError(e)).toBe(true);
+      const oe = (e as OrchidErrorImpl).orchidError;
+      expect(oe.kind).toBe('step_failed');
+    }
   });
 });
