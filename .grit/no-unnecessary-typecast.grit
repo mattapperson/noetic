@@ -1,0 +1,23 @@
+// Disallow unnecessary type casting with `as`
+// Use proper typing, Zod schemas, or auto-generated types instead
+//
+// BAD:
+//   const data = response as MyType;
+//   const value = input as unknown as TargetType;
+//
+// GOOD:
+//   const data = mySchema.parse(response);
+//   const data = response as const;
+//   const data = response satisfies MyType;
+
+engine biome(2.0)
+language js(typescript)
+
+or {
+  // Explicitly allow const assertions (short-circuits before diagnostic)
+  `$expr as const`,
+  // Flag all other `as` type assertions
+  `$expr as $type` as $match where {
+    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, auto-generated types, or 'satisfies' instead.", severity="warn")
+  }
+}

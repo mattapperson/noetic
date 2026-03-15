@@ -1,8 +1,8 @@
+import type { Channel } from '../types/channel';
+import type { StepMeta, TokenUsage } from '../types/common';
 import type { Context, ItemLog } from '../types/context';
 import type { Item } from '../types/items';
-import type { TokenUsage, StepMeta } from '../types/common';
 import type { Span } from '../types/observability';
-import type { Channel } from '../types/channel';
 import type { ChannelStore } from './channel-store';
 import { ItemLogImpl } from './item-log-impl';
 
@@ -17,9 +17,13 @@ class NoopSpan implements Span {
 
 export class ContextImpl implements Context {
   readonly id: string;
-  stepCount: number = 0;
-  tokens: TokenUsage = { input: 0, output: 0, total: 0 };
-  cost: number = 0;
+  stepCount = 0;
+  tokens: TokenUsage = {
+    input: 0,
+    output: 0,
+    total: 0,
+  };
+  cost = 0;
   state: unknown;
   readonly parent: Context | null;
   readonly depth: number;
@@ -70,7 +74,12 @@ export class ContextImpl implements Context {
     return this._aborted;
   }
 
-  recv<T>(ch: Channel<T>, opts?: { timeout?: number }): Promise<T> {
+  recv<T>(
+    ch: Channel<T>,
+    opts?: {
+      timeout?: number;
+    },
+  ): Promise<T> {
     if (!this.channelStore) {
       return Promise.reject(new Error('No channel store configured'));
     }

@@ -1,0 +1,19 @@
+// Prefer ESM URL-based path resolution over CJS-style __dirname/__filename patterns
+// Using `new URL('..', import.meta.url)` is the proper ESM primitive for path resolution.
+//
+// Example transformation:
+// Before (CJS-style):
+//   const __dirname = dirname(fileURLToPath(import.meta.url));
+//   const SERVICE_ROOT = join(__dirname, '..');
+//
+// After (ESM-native):
+//   const SERVICE_ROOT_URL = new URL('..', import.meta.url);
+//   const SERVICE_ROOT = fileURLToPath(SERVICE_ROOT_URL);
+
+engine biome(2.0)
+language js(typescript)
+
+// Match fileURLToPath(import.meta.url) - the core CJS-style pattern
+`fileURLToPath(import.meta.url)` as $match where {
+  register_diagnostic(span=$match, message="Prefer ESM URL-based path resolution. Use `new URL('..', import.meta.url)` to construct paths, then `fileURLToPath()` only when a string path is needed.", severity="warn")
+}
