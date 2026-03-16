@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod';
+import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
@@ -121,6 +122,8 @@ export interface StepLoop<I, O> {
   until: Until;
   maxIterations?: number;
   maxHistorySize?: number;
+  inbox?: Channel<string>;
+  parkTimeout?: number;
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
   onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }

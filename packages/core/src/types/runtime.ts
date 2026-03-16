@@ -2,6 +2,7 @@ import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, Tool } from './common';
 import type { Context } from './context';
+import type { DetachedHandle } from './detached';
 import type { Item } from './items';
 import type { MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span } from './observability';
@@ -27,6 +28,7 @@ export interface AgentConfig {
 
 export interface Runtime {
   execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;
     items?: Item[];

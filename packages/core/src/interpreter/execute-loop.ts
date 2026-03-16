@@ -1,13 +1,57 @@
 import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { ExecuteStepFn, Snapshot, StepLoop, Verdict } from '../types/step';
+import { createMessage } from './message-helpers';
 import { isMutableContext } from './typeguards';
+
+//#region Types
+
+type InboxFields = Pick<StepLoop<unknown, unknown>, 'inbox' | 'parkTimeout'>;
+
+//#endregion
+
+//#region Helper Functions
 
 function hasTextField(value: unknown): value is {
   text: unknown;
 } {
   return typeof value === 'object' && value !== null && 'text' in value;
 }
+
+async function recvInboxWithTimeout(ctx: Context, step: InboxFields): Promise<string | null> {
+  if (!step.inbox) {
+    return null;
+  }
+  if ((step.parkTimeout ?? 0) <= 0) {
+    return ctx.tryRecv(step.inbox);
+  }
+  try {
+    return await ctx.recv(step.inbox, {
+      timeout: step.parkTimeout,
+    });
+  } catch {
+    // Expected: channel_timeout error when parkTimeout expires with no message.
+    return null;
+  }
+}
+
+function prepareNextInput<I, O>(
+  step: StepLoop<I, O>,
+  lastOutput: O,
+  verdict: Verdict,
+  ctx: Context,
+): I {
+  if (step.prepareNext) {
+    return step.prepareNext(lastOutput, verdict, ctx);
+  }
+  // SAFETY: requires I === O when prepareNext is omitted — the loop feeds output
+  // back as input. Callers must ensure I and O are compatible types.
+  return lastOutput as unknown as I;
+}
+
+//#endregion
+
+//#region Public API
 
 export async function executeLoop<I, O>(
   step: StepLoop<I, O>,
@@ -21,7 +65,7 @@ export async function executeLoop<I, O>(
   const history: unknown[] = [];
   const startTime = Date.now();
   let stepCount = 0;
-  const maxIterations = step.maxIterations ?? 1_000;
+  const maxIterations = step.maxIterations ?? 1e3;
   const maxHistory = step.maxHistorySize ?? 100;
   let totalIterations = 0;
 
@@ -133,16 +177,24 @@ export async function executeLoop<I, O>(
           retriesExhausted: false,
         });
       }
+
+      // Check inbox before truly stopping
+      if (step.inbox) {
+        const inboxMessage = await recvInboxWithTimeout(ctx, step);
+        if (inboxMessage !== null) {
+          ctx.itemLog.append(createMessage(inboxMessage, 'developer'));
+          // Continue the loop — don't stop
+          currentInput = prepareNextInput(step, lastOutput, verdict, ctx);
+          continue;
+        }
+      }
+
       return lastOutput;
     }
 
     // Prepare input for next iteration
-    if (step.prepareNext) {
-      currentInput = step.prepareNext(output, verdict, ctx);
-    } else {
-      // SAFETY: requires I === O when prepareNext is omitted — the loop feeds output
-      // back as input. Callers must ensure I and O are compatible types.
-      currentInput = output as unknown as I;
-    }
+    currentInput = prepareNextInput(step, output, verdict, ctx);
   }
 }
+
+//#endregion

@@ -147,6 +147,48 @@ const verified = (fn: VerifyFn): Until => async (snap) => {
 
 ---
 
+## Inbox Channel
+
+A loop can optionally define an **inbox channel** that lets external messages prevent the loop from stopping. This enables async sub-agent patterns where the loop parks, waiting for background work to complete.
+
+```typescript
+interface LoopOpts<I, O> {
+  // ... existing fields
+  inbox?: Channel<string>;   // messages injected as developer items
+  parkTimeout?: number;       // ms to wait on inbox before truly stopping (default: 0 = tryRecv only)
+}
+```
+
+### Behavior
+
+When the `until` predicate returns `{ stop: true }` and `inbox` is defined:
+
+1. If `parkTimeout > 0`: the loop calls `ctx.recv(inbox, { timeout: parkTimeout })` — blocking until a message arrives or the timeout expires.
+2. If `parkTimeout` is `0` or omitted: the loop calls `ctx.tryRecv(inbox)` — non-blocking check.
+3. If a message is received: it is appended to the context's `ItemLog` as a `developer` message, and the loop **continues** (does not stop).
+4. If no message (tryRecv returns null, or recv times out): the loop proceeds with normal stop behavior.
+
+This means the loop only truly stops when both the `until` predicate says stop AND the inbox is empty (or timed out).
+
+### Use Case: Async Sub-Agent Results
+
+```typescript
+const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
+
+const agentLoop = {
+  kind: 'loop',
+  id: 'async-agent',
+  body: step.llm({ id: 'agent-llm', model: 'gpt-4o', tools: [launchTool] }),
+  until: until.noToolCalls(),
+  inbox,
+  parkTimeout: 3e4,  // wait up to 30s for sub-agent results
+};
+```
+
+When a sub-agent completes, its result is sent to the inbox channel. The loop wakes, injects the result as a developer message, and the LLM can incorporate it in its next response.
+
+---
+
 ## Error Behavior
 
 - **`until` predicate throws:** Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A broken predicate should not cause infinite iteration.

@@ -112,6 +112,8 @@ Fork has three mode variants, each a separate interface.
 | `until` | `Until` | yes | Termination predicate |
 | `maxIterations` | `number` | no | Safety limit on iterations |
 | `maxHistorySize` | `number` | no | Max history items to retain |
+| `inbox` | `Channel<string>` | no | Channel for external messages that prevent loop from stopping |
+| `parkTimeout` | `number` | no | Milliseconds to wait on inbox before stopping (0 = non-blocking) |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | no | Transform output to next input |
 | `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
 

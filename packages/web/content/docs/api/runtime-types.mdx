@@ -10,6 +10,7 @@ The core execution engine interface.
 ```ts
 interface Runtime {
   execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
@@ -32,6 +33,7 @@ interface Runtime {
 | Method | Description |
 |---|---|
 | `execute(step, input, ctx)` | Execute a step with the given input and context |
+| `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
 | `createContext(opts?)` | Create a new execution context |
 | `send(channel, value, ctx)` | Send a value to a channel |
 | `recv(channel, ctx, opts?)` | Receive from a channel (blocking) |
@@ -92,6 +94,45 @@ interface AgentHooks {
 |---|---|---|
 | `beforeStep` | `(step, ctx)` | Called before each step executes |
 | `afterStep` | `(step, result, ctx)` | Called after each step completes |
+
+## DetachedHandle
+
+A handle returned by `runtime.detachedSpawn()` to track a concurrently running child step.
+
+```ts
+interface DetachedHandle<O> {
+  readonly id: string;
+  readonly status: DetachedStatus;
+  readonly result: O | undefined;
+  readonly error: string | undefined;
+  await(timeout?: number): Promise<O>;
+}
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique handle identifier (child context ID) |
+| `status` | `DetachedStatus` | Current execution status |
+| `result` | `O \| undefined` | Child output (set when completed) |
+| `error` | `string \| undefined` | Error message (set when failed) |
+| `await(timeout?)` | `Promise<O>` | Wait for completion, optionally with timeout in ms |
+
+## DetachedStatus
+
+```ts
+const DetachedStatus = {
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+} as const;
+type DetachedStatus = (typeof DetachedStatus)[keyof typeof DetachedStatus];
+```
+
+| Value | Description |
+|---|---|
+| `'running'` | Child step is still executing |
+| `'completed'` | Child step finished successfully |
+| `'failed'` | Child step threw an error |
 
 ## RecallLayerOutput
 

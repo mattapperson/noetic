@@ -216,6 +216,45 @@ const loop = {
 } as const;
 ```
 
+## Inbox Channel
+
+A loop can define an optional **inbox channel** that prevents the loop from stopping when external messages are waiting. This enables async sub-agent patterns where the loop parks and waits for background work to complete.
+
+| Property | Type | Default | Description |
+| --- | --- | --- | --- |
+| `inbox` | `Channel<string>` | -- | Channel for external messages |
+| `parkTimeout` | `number` | `0` | Milliseconds to wait on inbox before stopping (0 = non-blocking check) |
+
+When `until` returns `{ stop: true }` and `inbox` is set:
+
+1. The loop checks the inbox for messages
+2. If a message is found, it's injected as a `developer` message in the context and the loop **continues**
+3. If no message is found (or timeout expires), the loop truly stops
+
+```ts
+import { channel } from '@noetic/core';
+import { z } from 'zod';
+
+const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
+
+const agent = {
+  kind: 'loop',
+  id: 'async-agent',
+  body: step.llm({
+    id: 'agent-llm',
+    model: 'gpt-4o',
+    tools: [launchTool, checkTool],
+  }),
+  until: until.noToolCalls(),
+  inbox,
+  parkTimeout: 3e4, // wait up to 30s for sub-agent results
+};
+```
+
+When a background sub-agent completes, its result is sent to the inbox channel. The loop wakes, the LLM sees the result as a developer message, and can incorporate it in its next response.
+
+See [Detached Spawn](/docs/spawn#detached-spawn) for the full async delegation pattern.
+
 ## Error Handling
 
 The `onError` callback lets you decide what happens when the body step throws.

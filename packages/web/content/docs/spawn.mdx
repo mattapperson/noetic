@@ -148,6 +148,131 @@ const researchAgent = spawn({
 });
 ```
 
+## Detached Spawn
+
+For background sub-agents that run concurrently, use `runtime.detachedSpawn()`. The parent continues immediately and receives a `DetachedHandle` to track the child.
+
+```ts
+import type { DetachedHandle } from '@noetic/core';
+
+const handle = runtime.detachedSpawn(subAgentStep, input, ctx);
+// handle.status === 'running' — parent continues immediately
+
+// Poll status
+if (handle.status === 'completed') {
+  console.log(handle.result);
+}
+
+// Or await the result
+const result = await handle.await();         // blocks until done
+const result = await handle.await(5_000);    // throws on timeout
+```
+
+### DetachedHandle API
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `id` | `string` | Unique handle identifier (child context ID) |
+| `status` | `'running' \| 'completed' \| 'failed'` | Current execution status |
+| `result` | `O \| undefined` | Child output (set when completed) |
+| `error` | `string \| undefined` | Error message (set when failed) |
+| `await(timeout?)` | `Promise<O>` | Wait for completion, optionally with timeout |
+
+### Async Sub-Agent Pattern
+
+Combine detached spawn with the [loop inbox channel](/docs/loop-and-until#inbox-channel) for a full async delegation workflow:
+
+```ts
+import { channel } from '@noetic/core';
+import { z } from 'zod';
+
+const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
+
+// In a tool's execute function:
+const handle = runtime.detachedSpawn(subAgentStep, task, ctx);
+handle.await().then((result) => {
+  runtime.send(inbox, `[Sub-agent done] ${result}`, ctx);
+});
+
+// The parent loop uses the inbox to wake when results arrive:
+const agentLoop = {
+  kind: 'loop',
+  id: 'async-agent',
+  body: llmStep,
+  until: until.noToolCalls(),
+  inbox,
+  parkTimeout: 3e4,
+};
+```
+
+## Dynamic Delegation via Tool Calling
+
+Give the LLM both a sync and async delegation tool. The LLM decides at runtime which to use based on the task — blocking when it needs the result immediately, or launching in the background when it can continue working.
+
+```ts
+import { channel, react, spawn, step, until } from '@noetic/core';
+import { z } from 'zod';
+
+const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
+
+// Tool 1: Sync — blocks until sub-agent finishes, returns result directly
+const delegateTool = {
+  name: 'delegate',
+  description: 'Run a sub-agent and wait for its result. Use when you need the answer now.',
+  input: z.object({ task: z.string() }),
+  output: z.string(),
+  execute: async (args: { task: string }) => {
+    const child = step.llm({ id: 'sync-sub', model: 'gpt-4o', system: 'Answer concisely.' });
+    const ctx = runtime.createContext();
+    return runtime.execute(spawn({ id: 'sync-spawn', child }), args.task, ctx);
+  },
+};
+
+// Tool 2: Async — launches sub-agent in background, notifies via inbox when done
+const launchTool = {
+  name: 'launch_agent',
+  description: 'Launch a sub-agent in the background. Use when you can continue other work.',
+  input: z.object({ task: z.string() }),
+  output: z.object({ agentId: z.string() }),
+  execute: async (args: { task: string }) => {
+    const child = step.llm<string, string>({
+      id: 'async-sub', model: 'gpt-4o', system: 'Answer concisely.',
+    });
+    const ctx = runtime.createContext();
+    const handle = runtime.detachedSpawn(child, args.task, ctx);
+    // Notify the parent loop when the sub-agent finishes
+    handle.await().then(
+      (result) => runtime.send(inbox, `[Agent ${handle.id} done] ${result}`, ctx),
+      (err) => runtime.send(inbox, `[Agent ${handle.id} failed] ${err}`, ctx),
+    );
+    return { agentId: handle.id };
+  },
+};
+
+// The agent loop: LLM chooses which tool to call based on the situation
+const agent = {
+  kind: 'loop',
+  id: 'smart-delegator',
+  body: step.llm({
+    id: 'orchestrator',
+    model: 'gpt-4o',
+    system: `You are an orchestrator. You have two delegation tools:
+- delegate: blocks and returns the result. Use for tasks you need answered before continuing.
+- launch_agent: runs in background. Use when you can keep working while it runs.`,
+    tools: [delegateTool, launchTool],
+  }),
+  until: until.noToolCalls(),
+  inbox,           // wakes the loop when background agents finish
+  parkTimeout: 3e4,
+};
+```
+
+The LLM sees both tools and their descriptions, then decides per-task:
+- **"I need this answer to continue"** → calls `delegate` (sync, blocks)
+- **"Research this while I handle other things"** → calls `launch_agent` (async, continues)
+
+When a background agent finishes, its result arrives via the inbox channel as a developer message. The loop wakes, the LLM sees the result, and incorporates it.
+
 ## Related
 
 - [fork](/docs/control-flow/fork) -- parallel execution without context isolation.

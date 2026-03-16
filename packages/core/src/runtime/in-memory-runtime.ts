@@ -14,6 +14,7 @@ import { NoopExporter } from '../observability/trace-exporter';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
+import type { DetachedHandle } from '../types/detached';
 import type { Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
@@ -21,6 +22,7 @@ import type { AgentConfig, RecallLayerOutput, Runtime } from '../types/runtime';
 import type { Step } from '../types/step';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
+import { DetachedHandleImpl } from './detached-handle';
 
 export class InMemoryRuntime implements Runtime {
   private callModel?: CallModelFn;
@@ -41,6 +43,14 @@ export class InMemoryRuntime implements Runtime {
 
   async execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
     return execute(step, input, ctx, this.callModel);
+  }
+
+  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
+    const childCtx = this.createContext({
+      parent: parentCtx,
+    });
+    const promise = this.execute(step, input, childCtx);
+    return new DetachedHandleImpl<O>(childCtx.id, promise);
   }
 
   createContext(opts?: {

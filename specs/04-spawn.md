@@ -72,3 +72,60 @@ Memory layers are the single system for all context flow across spawn boundaries
 - **Isolation via spawn-local layers**: Setting `memory` on the spawn step replaces all parent layers with the specified set, giving complete control over what crosses the boundary in both directions.
 
 This unified approach means there is one system to learn, one set of hooks to implement, and full composability between layers.
+
+---
+
+## Detached Spawn
+
+In addition to synchronous spawning, the runtime supports **detached spawns** — background sub-agents that run concurrently while the parent continues working.
+
+```typescript
+interface DetachedHandle<O> {
+  readonly id: string;
+  readonly status: DetachedStatus;    // 'running' | 'completed' | 'failed'
+  readonly result: O | undefined;
+  readonly error: string | undefined;
+  await(timeout?: number): Promise<O>;
+}
+```
+
+### Usage
+
+```typescript
+const handle = runtime.detachedSpawn(subAgentStep, input, ctx);
+// Parent continues immediately — handle.status === 'running'
+
+// Later, check status or await result:
+const result = await handle.await();        // blocks until done
+const result = await handle.await(5_000);   // throws on timeout
+```
+
+### Lifecycle
+
+```
+Parent calls runtime.detachedSpawn(step, input, ctx)
+│
+├─ Creates child Context with parent: ctx
+├─ Starts execute(step, input, childCtx) without awaiting
+├─ Wraps promise in DetachedHandle
+├─ Returns handle immediately
+│
+├─ Child runs concurrently
+│   ├─ On success: handle.status → 'completed', handle.result → output
+│   └─ On failure: handle.status → 'failed', handle.error → message
+│
+└─ Parent can:
+    ├─ Poll handle.status
+    ├─ Await handle.await() or handle.await(timeout)
+    └─ Use channels to receive notifications on completion
+```
+
+### Integration with Loop Inbox
+
+Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-until`). A common pattern:
+
+1. LLM agent calls a `launch_agent` tool that creates a detached spawn
+2. The tool registers a `.then()` callback that sends the result to the loop's inbox channel
+3. The loop parks on the inbox after `until` says stop
+4. When the sub-agent completes, the inbox message wakes the loop
+5. The LLM sees the result as a developer message and incorporates it

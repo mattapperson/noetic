@@ -14,6 +14,9 @@ interface Runtime {
   // Core execution
   execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
 
+  // Detached (concurrent) execution
+  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
+
   // Context management
   createContext(opts?: {
     parent?: Context;
@@ -62,6 +65,21 @@ interface ChannelHandle<T> {
   readonly closed: boolean;
   readonly channel: Channel<T>;
 }
+
+const DetachedStatus = {
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+} as const;
+type DetachedStatus = (typeof DetachedStatus)[keyof typeof DetachedStatus];
+
+interface DetachedHandle<O> {
+  readonly id: string;
+  readonly status: DetachedStatus;
+  readonly result: O | undefined;
+  readonly error: string | undefined;
+  await(timeout?: number): Promise<O>;
+}
 ```
 
 ---
@@ -72,6 +90,7 @@ interface ChannelHandle<T> {
 - **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `InMemoryRuntime` uses in-process handles; `DurableRuntime` translates to durable signals (e.g., Temporal signals, Inngest events).
 - **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
 - **`assembleView`** is the Projector — it calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
+- **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns.
 - **`checkpoint`/`restore`** enable durable execution. `InMemoryRuntime` implements them as no-ops. `DurableRuntime` serializes state (including memory layer state) to its backing store.
 - **`cancel`** with propagation. The runtime knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
 - **`createSpan`** lets the runtime control the tracing backend.

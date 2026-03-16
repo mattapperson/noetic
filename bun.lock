@@ -12,6 +12,7 @@
       "name": "@noetic/core",
       "version": "0.1.0",
       "dependencies": {
+        "@openrouter/sdk": "0.9.11",
         "zod": "^3.23.0",
       },
       "devDependencies": {
@@ -19,7 +20,7 @@
         "bun-types": "latest",
       },
       "peerDependencies": {
-        "@openrouter/sdk": ">=0.9.0",
+        "@openrouter/sdk": "^0.9.11",
         "zod": "^3.23.0",
       },
       "optionalPeers": [

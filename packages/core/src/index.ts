@@ -73,6 +73,8 @@ export type {
   Tool,
 } from './types/common';
 export type { Context, ItemLog } from './types/context';
+export type { DetachedHandle } from './types/detached';
+export { DetachedStatus } from './types/detached';
 export type { EmbedFn } from './types/embed';
 export type { NoeticError } from './types/error';
 export type {

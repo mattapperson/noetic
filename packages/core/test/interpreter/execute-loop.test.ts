@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { z } from 'zod';
+import { channel } from '../../src/builders/channel-builder';
 import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { executeLoop } from '../../src/interpreter/execute-loop';
+import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Snapshot, StepLoop } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
@@ -252,7 +255,7 @@ describe('executeLoop', () => {
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
-      expect(count).toBe(1_000);
+      expect(count).toBe(1e3);
     }
   });
 
@@ -491,5 +494,166 @@ describe('executeLoop', () => {
     expect(result).toBe('correct');
     expect(iteration).toBe(3);
     expect(feedbacks[0]).toBe('Not correct yet');
+  });
+});
+
+describe('executeLoop inbox channel', () => {
+  const inbox = channel('inbox', {
+    schema: z.string(),
+    mode: 'queue',
+  });
+
+  function makeInboxCtx(): {
+    ctx: ContextImpl;
+    channelStore: ChannelStore;
+  } {
+    const channelStore = new ChannelStore();
+    const ctx = new ContextImpl({
+      channelStore,
+    });
+    return {
+      ctx,
+      channelStore,
+    };
+  }
+
+  it('continues when inbox has a message after until says stop', async () => {
+    const { ctx, channelStore } = makeInboxCtx();
+
+    let callCount = 0;
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'inbox-continue-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => {
+          callCount++;
+          return input + 1;
+        },
+      },
+      until: until.maxSteps(1),
+      inbox,
+    };
+
+    // Pre-load one message so the loop continues after first stop
+    channelStore.send(inbox, 'wake up');
+
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    // First iteration: 0+1=1 (stop, but inbox has message → continue)
+    // Second iteration: 1+1=2 (stop, inbox empty → truly stop)
+    expect(callCount).toBe(2);
+    expect(result).toBe(2);
+  });
+
+  it('stops when inbox is empty and until says stop', async () => {
+    const { ctx } = makeInboxCtx();
+
+    let callCount = 0;
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'inbox-empty-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => {
+          callCount++;
+          return input + 1;
+        },
+      },
+      until: until.maxSteps(1),
+      inbox,
+    };
+
+    // No messages in inbox
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    expect(callCount).toBe(1);
+    expect(result).toBe(1);
+  });
+
+  it('parks with parkTimeout and wakes on message', async () => {
+    const { ctx, channelStore } = makeInboxCtx();
+
+    let callCount = 0;
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'inbox-park-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => {
+          callCount++;
+          return input + 1;
+        },
+      },
+      until: until.maxSteps(1),
+      inbox,
+      parkTimeout: 2e3,
+    };
+
+    // Send a message after a short delay so the park recv picks it up
+    setTimeout(() => {
+      channelStore.send(inbox, 'delayed wake');
+    }, 20);
+
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    expect(callCount).toBe(2);
+    expect(result).toBe(2);
+  });
+
+  it('stops after parkTimeout expires with no message', async () => {
+    const { ctx } = makeInboxCtx();
+
+    let callCount = 0;
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'inbox-timeout-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => {
+          callCount++;
+          return input + 1;
+        },
+      },
+      until: until.maxSteps(1),
+      inbox,
+      parkTimeout: 50,
+    };
+
+    // No messages — should timeout and stop
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    expect(callCount).toBe(1);
+    expect(result).toBe(1);
+  });
+
+  it('developer message appears in ctx.itemLog when inbox delivers', async () => {
+    const { ctx, channelStore } = makeInboxCtx();
+
+    const loopStep: StepLoop<number, number> = {
+      kind: 'loop',
+      id: 'inbox-log-loop',
+      body: {
+        kind: 'run',
+        id: 'inc',
+        execute: async (input: number) => input + 1,
+      },
+      until: until.maxSteps(1),
+      inbox,
+    };
+
+    channelStore.send(inbox, 'hello from sub-agent');
+
+    await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+
+    const devMessages = ctx.itemLog.items.filter(
+      (item) => item.type === 'message' && item.role === 'developer',
+    );
+    expect(devMessages).toHaveLength(1);
+    assert(devMessages[0].type === 'message');
+    expect(devMessages[0].content[0]).toEqual({
+      type: 'input_text',
+      text: 'hello from sub-agent',
+    });
   });
 });
