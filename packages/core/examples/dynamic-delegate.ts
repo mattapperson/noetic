@@ -15,6 +15,7 @@ import type { DetachedHandle } from '../src/types/detached';
 import type { StepLoop } from '../src/types/step';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
+import { createExampleRuntime } from './create-example-runtime';
 import { createAsyncLaunchTool, createSyncDelegateTool } from './delegate-tools';
 
 //#region Inbox Channel
@@ -32,6 +33,7 @@ export const delegateInbox = channel('delegate-inbox', {
 export function buildDynamicDelegateAgent(opts: {
   runtime: InMemoryRuntime;
   inbox: Channel<string>;
+  parkTimeout?: number;
 }): StepLoop<string, string> {
   const handles = new Map<string, DetachedHandle<string>>();
 
@@ -59,8 +61,32 @@ Choose the right strategy based on each task.`,
     }),
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
-    parkTimeout: 5e3,
+    parkTimeout: opts.parkTimeout ?? 5e3,
   };
+}
+
+//#endregion
+
+//#region Main
+
+async function main(): Promise<void> {
+  const runtime = createExampleRuntime();
+
+  const agent = buildDynamicDelegateAgent({
+    runtime,
+    inbox: delegateInbox,
+  });
+  const ctx = runtime.createContext();
+  const result = await runtime.execute(agent, 'Research AI safety and answer: what is 2+2?', ctx);
+
+  console.log(result);
+}
+
+if (import.meta.main) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
 
 //#endregion

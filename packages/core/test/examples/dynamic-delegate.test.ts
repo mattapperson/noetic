@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { buildDynamicDelegateAgent, delegateInbox } from '../../examples/dynamic-delegate';
-import {
-  createScriptedCallModel,
-  textOnlyResponse,
-  toolCallResponse,
-} from '../../examples/helpers';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('dynamic delegate demo', () => {
   it('builds agent with both sync and async tools', () => {
@@ -42,8 +38,8 @@ describe('dynamic delegate demo', () => {
     const agent = buildDynamicDelegateAgent({
       runtime,
       inbox: delegateInbox,
+      parkTimeout: 50,
     });
-    agent.parkTimeout = 50;
 
     const ctx = runtime.createContext();
     const result = await runtime.execute(agent, 'What is 2+2?', ctx);
@@ -76,8 +72,8 @@ describe('dynamic delegate demo', () => {
     const agent = buildDynamicDelegateAgent({
       runtime,
       inbox: delegateInbox,
+      parkTimeout: 50,
     });
-    agent.parkTimeout = 50;
 
     const result = await runtime.execute(agent, 'Research a topic for me', ctx);
     expect(result).toBe('Got the results from the background agent.');
@@ -116,8 +112,8 @@ describe('dynamic delegate demo', () => {
     const agent = buildDynamicDelegateAgent({
       runtime,
       inbox: delegateInbox,
+      parkTimeout: 50,
     });
-    agent.parkTimeout = 50;
 
     const result = await runtime.execute(agent, 'Do both sync and async work', ctx);
     expect(result).toBe('All done with both sync and async results.');

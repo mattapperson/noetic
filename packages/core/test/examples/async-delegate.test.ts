@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { agentInbox, buildAsyncDelegateAgent } from '../../examples/async-delegate';
-import {
-  createScriptedCallModel,
-  textOnlyResponse,
-  toolCallResponse,
-} from '../../examples/helpers';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('async delegate demo', () => {
   it('buildAsyncDelegateAgent creates loop with inbox and parkTimeout', () => {
@@ -53,8 +49,8 @@ describe('async delegate demo', () => {
     const agent = buildAsyncDelegateAgent({
       runtime,
       inbox: agentInbox,
+      parkTimeout: 50,
     });
-    agent.parkTimeout = 50;
 
     const result = await runtime.execute(agent, 'Tell me about quantum computing', ctx);
 

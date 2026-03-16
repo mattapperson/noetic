@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  createScriptedCallModel,
-  textOnlyResponse,
-  toolCallResponse,
-} from '../../examples/helpers';
 import { buildSyncDelegateAgent } from '../../examples/sync-delegate';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('sync delegate demo', () => {
   it('agent delegates to sub-agent and returns combined result', async () => {
