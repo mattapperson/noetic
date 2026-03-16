@@ -71,6 +71,43 @@ const analyze = step.llm({
 });
 ```
 
+### The `CallModelFn` Contract
+
+The runtime delegates LLM calls through a `CallModelFn` — a function provided at construction time. This is the adapter seam: any LLM provider can be wired in by implementing this contract.
+
+```typescript
+interface CallModelParams {
+  model: string;
+  items: ReadonlyArray<Item>;
+  tools?: Tool[];
+  params?: ModelParams;
+  output?: ZodType;
+  ctx: Context;                 // execution context — tools need this for side effects
+}
+
+type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
+```
+
+The `ctx` field is required so that tool `execute` functions (which accept `(args, ctx)`) can receive the current execution context when the adapter delegates tool execution to the provider SDK.
+
+### OpenRouter Adapter
+
+The `createOpenRouterCallModel(client)` factory returns a `CallModelFn` backed by the `@openrouter/sdk`. It:
+
+1. Extracts system messages from `items` and passes them as `instructions`.
+2. Converts Noetic `Item[]` to OpenResponses input format.
+3. Wraps Noetic `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
+4. Calls `client.callModel()` — the SDK handles the tool call loop internally.
+5. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
+
+```typescript
+import OpenRouter from '@openrouter/sdk';
+import { createOpenRouterCallModel, InMemoryRuntime } from '@noetic/core';
+
+const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
+const runtime = new InMemoryRuntime({ callModel: createOpenRouterCallModel(client) });
+```
+
 ### Tool Call Execution
 
 The `executeLLM` function delegates to the OpenRouter SDK's `callModel`, which handles the tool call loop internally. When the model response contains tool calls:

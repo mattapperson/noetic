@@ -14,6 +14,7 @@ export interface CallModelParams {
   tools?: Tool[];
   params?: ModelParams;
   output?: ZodType;
+  ctx: Context;
 }
 
 export type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
@@ -36,15 +37,17 @@ export async function executeLLM<I, O>(
     tools: step.tools,
     params: step.params,
     output: step.output,
+    ctx,
   });
 
-  // Append response items to ItemLog
+  // Append response items to ItemLog and extract tool calls in a single pass
+  const toolCalls: FunctionCallItem[] = [];
   for (const item of response.items) {
     ctx.itemLog.append(item);
+    if (item.type === 'function_call') {
+      toolCalls.push(item);
+    }
   }
-
-  // Extract tool calls from response
-  const toolCalls = response.items.filter((i): i is FunctionCallItem => i.type === 'function_call');
 
   // Build step metadata
   const meta: StepMeta = {

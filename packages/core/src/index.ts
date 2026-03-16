@@ -1,3 +1,6 @@
+// Adapters
+export { createOpenRouterCallModel } from './adapters/openrouter';
+
 // Types
 
 export { channel } from './builders/channel-builder';

@@ -11,8 +11,12 @@
         "bun-types": "latest",
       },
       "peerDependencies": {
+        "@openrouter/sdk": "",
         "zod": "^3.23.0",
       },
+      "optionalPeers": [
+        "@openrouter/sdk",
+      ],
     },
   },
   "packages": {
