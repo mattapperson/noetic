@@ -154,12 +154,16 @@ type VerifyFn = (output: unknown) => Promise<{
 ```ts
 interface ConvergeOpts {
   threshold?: number;
+  embed?: EmbedFn;
+  cache?: StorageAdapter;
 }
 ```
 
-| Field | Type | Description |
-|---|---|---|
-| `threshold` | `number` | Reserved for future similarity-based convergence. Currently uses exact string equality. |
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `threshold` | `number` | `1` | Similarity threshold. At `1` (default), uses exact string equality. When `embed` is provided and `threshold < 1`, uses cosine similarity. |
+| `embed` | `EmbedFn` | — | Embedding function. When provided with `threshold < 1`, enables semantic convergence detection. |
+| `cache` | `StorageAdapter` | — | Persist the previous output vector across ephemeral invocations (e.g., Cloudflare Workers). |
 
 ## Combinators
 

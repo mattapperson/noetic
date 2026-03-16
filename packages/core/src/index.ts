@@ -1,12 +1,22 @@
-// Adapters
-export { createOpenRouterCallModel } from './adapters/openrouter';
-
 // Types
 
+export { createOpenRouterCallModel, createOpenRouterEmbed } from './adapters/openrouter';
 export { channel } from './builders/channel-builder';
 export { branch, fork } from './builders/control-flow-builders';
 export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
+export type { Condition, OtherwiseClause, WhenClause } from './conditions';
+export {
+  aiCondition,
+  allCondition,
+  anyCondition,
+  cosineSimilarity,
+  embeddingMatch,
+  otherwise,
+  semanticRoute,
+  semanticSwitch,
+  when,
+} from './conditions';
 export { isNoeticError, NoeticErrorImpl } from './errors/noetic-error';
 export { execute } from './interpreter/execute';
 export { executeBranch } from './interpreter/execute-branch';
@@ -48,7 +58,6 @@ export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 export { adaptivePlan, compilePlan, PlanNodeSchema } from './patterns/plans';
 export { ralphWiggum } from './patterns/ralph-wiggum';
-
 export { react } from './patterns/react';
 export { ChannelStore } from './runtime/channel-store';
 export { ContextImpl } from './runtime/context-impl';
@@ -64,6 +73,7 @@ export type {
   Tool,
 } from './types/common';
 export type { Context, ItemLog } from './types/context';
+export type { EmbedFn } from './types/embed';
 export type { NoeticError } from './types/error';
 export type {
   ContentPart,

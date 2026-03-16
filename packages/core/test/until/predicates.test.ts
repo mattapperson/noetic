@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type { FunctionCallItem } from '../../src/types/items';
 import type { Snapshot } from '../../src/types/step';
 import { all, any } from '../../src/until/combinators';
 import { until } from '../../src/until/predicates';
+import { makeStorage, mockEmbed } from '../_helpers';
 
 function makeSnap(overrides?: Partial<Snapshot>): Snapshot {
   return {
@@ -144,7 +144,7 @@ describe('until predicates', () => {
           stepCount: 2,
         }),
         lastStepMeta: {
-          toolCalls: [] as FunctionCallItem[],
+          toolCalls: [],
         },
       };
       const verdict = await pred(snap);
@@ -332,6 +332,173 @@ describe('until predicates', () => {
           )
         ).stop,
       ).toBe(true);
+    });
+  });
+
+  describe('converged with embedding', () => {
+    it('uses cosine similarity when embed is provided and threshold < 1', async () => {
+      const embed = mockEmbed({
+        hello: [
+          1,
+          0,
+          0,
+        ],
+        'hello!': [
+          0.98,
+          0.02,
+          0,
+        ],
+        goodbye: [
+          0,
+          1,
+          0,
+        ],
+      });
+
+      const pred = until.converged({
+        threshold: 0.95,
+        embed,
+      });
+
+      // First call — never stops
+      const v1 = await pred(
+        makeSnap({
+          lastText: 'hello',
+        }),
+      );
+      expect(v1.stop).toBe(false);
+
+      // Similar text — cosine similarity ~0.9998 > 0.95 → converged
+      const v2 = await pred(
+        makeSnap({
+          lastText: 'hello!',
+        }),
+      );
+      expect(v2.stop).toBe(true);
+    });
+
+    it('does not converge when similarity is below threshold', async () => {
+      const embed = mockEmbed({
+        hello: [
+          1,
+          0,
+          0,
+        ],
+        goodbye: [
+          0,
+          1,
+          0,
+        ],
+      });
+
+      const pred = until.converged({
+        threshold: 0.9,
+        embed,
+      });
+      await pred(
+        makeSnap({
+          lastText: 'hello',
+        }),
+      );
+      const v2 = await pred(
+        makeSnap({
+          lastText: 'goodbye',
+        }),
+      );
+      expect(v2.stop).toBe(false);
+    });
+
+    it('restores previousVector from cache on first in-process call', async () => {
+      const embed = mockEmbed({
+        hello: [
+          1,
+          0,
+          0,
+        ],
+        'hello!': [
+          0.98,
+          0.02,
+          0,
+        ],
+      });
+
+      const cache = makeStorage();
+
+      // First instance writes to cache
+      const pred1 = until.converged({
+        threshold: 0.95,
+        embed,
+        cache,
+      });
+      await pred1(
+        makeSnap({
+          lastText: 'hello',
+        }),
+      );
+
+      // Second instance (simulating new process) should restore from cache
+      const pred2 = until.converged({
+        threshold: 0.95,
+        embed,
+        cache,
+      });
+      // 'hello!' is similar to cached 'hello' vector → should converge
+      const v = await pred2(
+        makeSnap({
+          lastText: 'hello!',
+        }),
+      );
+      expect(v.stop).toBe(true);
+    });
+
+    it('persists vector to cache after each call', async () => {
+      const embed = mockEmbed({
+        hello: [
+          1,
+          0,
+          0,
+        ],
+        goodbye: [
+          0,
+          1,
+          0,
+        ],
+      });
+
+      const cache = makeStorage();
+      const pred = until.converged({
+        threshold: 0.9,
+        embed,
+        cache,
+      });
+
+      await pred(
+        makeSnap({
+          lastText: 'hello',
+        }),
+      );
+
+      // Verify cache was written
+      const keys = await cache.list('converge:');
+      expect(keys.length).toBe(1);
+    });
+
+    it('falls back to exact equality without embed', async () => {
+      const pred = until.converged({
+        threshold: 0.5,
+      });
+      await pred(
+        makeSnap({
+          lastText: 'hello',
+        }),
+      );
+      // Different text → not converged even with low threshold (no embed = exact match)
+      const v = await pred(
+        makeSnap({
+          lastText: 'hello!',
+        }),
+      );
+      expect(v.stop).toBe(false);
     });
   });
 

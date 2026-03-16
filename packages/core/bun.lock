@@ -5,6 +5,7 @@
     "": {
       "name": "@orchid/core",
       "dependencies": {
+        "@openrouter/sdk": "0.9.11",
         "zod": "^3.23.0",
       },
       "devDependencies": {
@@ -20,6 +21,8 @@
     },
   },
   "packages": {
+    "@openrouter/sdk": ["@openrouter/sdk@0.9.11", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-BgFu6NcIJO4a9aVjr04y3kZ8pyM71j15I+bzfVAGEvxnj+KQNIkBYQGgwrG3D+aT1QpDKLki8btcQmpaxUas6A=="],
+
     "@types/node": ["@types/node@25.5.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw=="],
 
     "bun-types": ["bun-types@1.3.10", "", { "dependencies": { "@types/node": "*" } }, "sha512-tcpfCCl6XWo6nCVnpcVrxQ+9AYN1iqMIzgrSKYMB/fjLtV2eyAVEg7AxQJuCq/26R6HpKWykQXuSOq/21RYcbg=="],

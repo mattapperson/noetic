@@ -118,10 +118,18 @@ When `pass` is `false`, the `feedback` string is available on the `Verdict` for 
 
 ### until.converged(opts)
 
-Stop when the output stabilizes (consecutive outputs are identical).
+Stop when the output stabilizes. By default, uses exact string equality. When an `embed` function is provided and `threshold < 1`, uses cosine similarity between consecutive output embeddings.
 
 ```ts
-const predicate = until.converged({});
+// Exact match (default)
+const exact = until.converged({});
+
+// Semantic similarity with embeddings
+const semantic = until.converged({
+  threshold: 0.95,
+  embed: myEmbedFn,
+  cache: myStorageAdapter, // optional: persist across ephemeral invocations
+});
 ```
 
 ### until.outputContains(marker)

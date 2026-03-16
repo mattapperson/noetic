@@ -10,11 +10,13 @@ import type {
   ResponsesOutputItemFunctionCall,
   ResponsesOutputMessage,
 } from '@openrouter/sdk/models';
+import { z } from 'zod';
 
 import type { CallModelFn, CallModelParams } from '../interpreter/execute-llm';
 import { isAssistantMessage, isOutputText } from '../interpreter/typeguards';
 import type { LLMResponse, Tool } from '../types/common';
 import type { Context } from '../types/context';
+import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
 
 //#region Types
@@ -23,6 +25,15 @@ type OpenRouterInputItem =
   | OpenResponsesEasyInputMessage
   | OpenResponsesFunctionToolCall
   | OpenResponsesFunctionCallOutput;
+
+const EmbeddingsResponseSchema = z.object({
+  data: z.array(
+    z.object({
+      embedding: z.array(z.number()),
+      index: z.number(),
+    }),
+  ),
+});
 
 //#endregion
 
@@ -281,6 +292,36 @@ export function createOpenRouterCallModel(client: OpenRouter): CallModelFn {
       usage: extractUsage(response.usage),
       cost: response.usage?.cost ?? undefined,
     };
+  };
+}
+
+export function createOpenRouterEmbed(apiKey: string, embeddingModel?: string): EmbedFn {
+  const model = embeddingModel ?? 'openai/text-embedding-3-small';
+
+  return async (texts: readonly string[]): Promise<readonly number[][]> => {
+    const response = await fetch('https://openrouter.ai/api/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        input: texts,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `OpenRouter embeddings request failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const json = EmbeddingsResponseSchema.parse(await response.json());
+
+    // Sort by index to preserve input order
+    const sorted = json.data.sort((a, b) => a.index - b.index);
+    return sorted.map((d) => d.embedding);
   };
 }
 

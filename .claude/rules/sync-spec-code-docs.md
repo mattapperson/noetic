@@ -24,5 +24,6 @@ They are mandatory, not optional.
 | `10-observability.md` | `observability/` | `observability.mdx` |
 | `11-memory-layer-system.md`, `12-builtin-memory-layers.md` | `memory/` | `memory/`, `api/memory-types.mdx` |
 | `13-patterns.md` | `patterns/` | `patterns/` |
+| `16-semantic-conditions.md` | `conditions/`, `adapters/` | `control-flow/branch.mdx`, `api/adapter-types.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/`, Docs → `packages/web/content/docs/`

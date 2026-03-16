@@ -1,3 +1,6 @@
+import { cosineSimilarity } from '../conditions/cosine-similarity';
+import type { EmbedFn } from '../types/embed';
+import type { StorageAdapter } from '../types/memory';
 import type { Snapshot, Until, Verdict } from '../types/step';
 
 export type VerifyFn = (output: unknown) => Promise<{
@@ -5,9 +8,15 @@ export type VerifyFn = (output: unknown) => Promise<{
   feedback?: string;
 }>;
 export interface ConvergeOpts {
-  /** No-op — reserved for future similarity-based convergence. Currently uses exact string equality regardless of value. */
+  /** Similarity threshold. Default 1 (exact match). When embed is provided and threshold < 1, uses cosine similarity. */
   threshold?: number;
+  /** When provided with threshold < 1, enables embedding-based similarity comparison. */
+  embed?: EmbedFn;
+  /** Persist previous output vector across ephemeral invocations. */
+  cache?: StorageAdapter;
 }
+
+const CONVERGE_CACHE_KEY = 'converge:previousVector';
 
 export const until = {
   maxSteps(n: number): Until {
@@ -58,21 +67,65 @@ export const until = {
     };
   },
 
-  converged(_opts: ConvergeOpts): Until {
-    let previousOutput: string | null = null;
-    return (snap: Snapshot): Verdict => {
-      const currentText = snap.lastText;
-      if (previousOutput === null) {
+  converged(opts: ConvergeOpts): Until {
+    const threshold = opts.threshold ?? 1;
+    const { embed } = opts;
+
+    if (!embed || threshold >= 1) {
+      // Exact string equality (original behavior)
+      let previousOutput: string | null = null;
+      return (snap: Snapshot): Verdict => {
+        const currentText = snap.lastText;
+        if (previousOutput === null) {
+          previousOutput = currentText;
+          return {
+            stop: false,
+          };
+        }
+        const similar = currentText === previousOutput;
         previousOutput = currentText;
+        return {
+          stop: similar,
+          reason: similar ? 'Output converged' : undefined,
+        };
+      };
+    }
+
+    // Embedding-based similarity — embed is narrowed to EmbedFn here
+    let previousVector: readonly number[] | null = null;
+
+    const persistVector = async (vector: readonly number[]): Promise<void> => {
+      if (opts.cache) {
+        await opts.cache.set(CONVERGE_CACHE_KEY, vector);
+      }
+      previousVector = vector;
+    };
+
+    return async (snap: Snapshot): Promise<Verdict> => {
+      const currentText = snap.lastText;
+      const [currentVector] = await embed([
+        currentText,
+      ]);
+
+      // Try to load previous vector from cache if we don't have one in closure
+      if (!previousVector && opts.cache) {
+        previousVector = await opts.cache.get<number[]>(CONVERGE_CACHE_KEY);
+      }
+
+      if (!previousVector) {
+        await persistVector(currentVector);
         return {
           stop: false,
         };
       }
-      const similar = currentText === previousOutput;
-      previousOutput = currentText;
+
+      const similarity = cosineSimilarity(currentVector, previousVector);
+      await persistVector(currentVector);
+
+      const converged = similarity >= threshold;
       return {
-        stop: similar,
-        reason: similar ? 'Output converged' : undefined,
+        stop: converged,
+        reason: converged ? `Output converged (similarity: ${similarity.toFixed(3)})` : undefined,
       };
     };
   },

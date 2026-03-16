@@ -1,0 +1,70 @@
+---
+title: Adapter Types
+description: OpenRouter adapter and EmbedFn type for semantic routing and convergence.
+---
+
+## EmbedFn
+
+Batch embedding function that maps N texts to N vectors. Used by `semanticSwitch`, `embeddingMatch`, and `until.converged`.
+
+```ts
+type EmbedFn = (texts: readonly string[]) => Promise<readonly number[][]>;
+```
+
+## OpenRouter Adapter
+
+Factory functions that create `CallModelFn` and `EmbedFn` implementations backed by the `@openrouter/sdk`.
+
+### createOpenRouterCallModel(client)
+
+Creates a `CallModelFn` from an existing `OpenRouter` client instance.
+
+```ts
+import { OpenRouter } from '@openrouter/sdk';
+import { createOpenRouterCallModel } from '@noetic/core';
+
+const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
+const callModel = createOpenRouterCallModel(client);
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `client` | `OpenRouter` | Yes | An initialized `@openrouter/sdk` client |
+
+### createOpenRouterEmbed(apiKey, embeddingModel?)
+
+Creates an `EmbedFn` that calls the OpenRouter embeddings endpoint.
+
+```ts
+import { createOpenRouterEmbed } from '@noetic/core';
+
+const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `apiKey` | `string` | Yes | OpenRouter API key |
+| `embeddingModel` | `string` | No | Embedding model ID. Defaults to `openai/text-embedding-3-small`. |
+
+### Usage with Semantic Routing
+
+```ts
+import { OpenRouter } from '@openrouter/sdk';
+import { branch, createOpenRouterCallModel, createOpenRouterEmbed, semanticSwitch, step } from '@noetic/core';
+
+const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
+const callModel = createOpenRouterCallModel(client);
+const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
+
+const router = branch({
+  id: 'semantic-router',
+  route: semanticSwitch({
+    embed,
+    cases: {
+      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+    },
+    threshold: 0.7,
+  }),
+});
+```

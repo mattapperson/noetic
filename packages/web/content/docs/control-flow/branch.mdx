@@ -44,7 +44,7 @@ This is the idiomatic way to add conditional logic to an Noetic pipeline. Instea
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `route` | `(input: I, ctx: Context) => Step<I, O> \| null` | Yes | Function that picks the step to run |
+| `route` | `(input: I, ctx: Context) => Step<I, O> \| null \| Promise<Step<I, O> \| null>` | Yes | Function that picks the step to run (sync or async) |
 
 ## How Null Routes Work
 
@@ -120,6 +120,76 @@ const nested = branch({
       model: 'gpt-4o',
     });
   },
+});
+```
+
+## Semantic Routing
+
+The `route` function can be async, enabling AI-powered and embedding-based routing. Noetic provides condition helpers that return async route functions:
+
+### `semanticSwitch` -- Embedding-Based Routing
+
+Routes input to the most semantically similar case using embeddings:
+
+```ts
+import { branch, semanticSwitch, step } from '@noetic/core';
+import type { EmbedFn } from '@noetic/core';
+
+const embed: EmbedFn = /* your embedding function */;
+
+const router = branch({
+  id: 'semantic-router',
+  route: semanticSwitch({
+    embed,
+    cases: {
+      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+      'complaint or feedback': step.llm({ id: 'feedback', model: 'gpt-4o' }),
+    },
+    threshold: 0.7, // minimum cosine similarity
+  }),
+});
+```
+
+### `semanticRoute` -- Condition-Based Routing
+
+Evaluates conditions in order and returns the first match:
+
+```ts
+import { branch, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic/core';
+
+const router = branch({
+  id: 'smart-router',
+  route: semanticRoute(
+    when(embeddingMatch(embed, 'greeting', 0.8), greetingStep),
+    when(aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
+    otherwise(defaultStep),
+  ),
+});
+```
+
+### Condition Combinators
+
+Combine conditions with `anyCondition` (OR) and `allCondition` (AND):
+
+```ts
+import { anyCondition, allCondition, embeddingMatch, aiCondition } from '@noetic/core';
+
+const isUrgentGreeting = allCondition(
+  embeddingMatch(embed, 'greeting', 0.8),
+  aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+);
+```
+
+### Caching
+
+All embedding conditions accept an optional `cache: StorageAdapter` to persist label embeddings across ephemeral invocations (e.g., Cloudflare Workers):
+
+```ts
+const route = semanticSwitch({
+  embed,
+  cases: { /* ... */ },
+  cache: myStorageAdapter, // persists label vectors
 });
 ```
 

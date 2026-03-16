@@ -54,7 +54,7 @@ export function fork<I, O>(opts: {
 
 export function branch<I, O>(opts: {
   id: string;
-  route: (input: I, ctx: Context) => Step<I, O> | null;
+  route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
 }): StepBranch<I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new Error('branch requires a non-empty id');

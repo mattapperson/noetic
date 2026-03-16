@@ -70,6 +70,26 @@ describe('executeBranch', () => {
     expect(capturedCtx).toBe(ctx);
   });
 
+  it('async route function is awaited correctly', async () => {
+    const step: StepBranch<string, string> = {
+      kind: 'branch',
+      id: 'async-test',
+      route: async (input) => {
+        await Promise.resolve();
+        return input === 'async'
+          ? {
+              kind: 'run',
+              id: 'async-path',
+              execute: async () => 'async result',
+            }
+          : null;
+      },
+    };
+    const ctx = new ContextImpl();
+    expect(await executeBranch(step, 'async', ctx, simpleExecute)).toBe('async result');
+    expect(await executeBranch(step, 'other', ctx, simpleExecute)).toBe('other');
+  });
+
   it('selected step is executed with correct input', async () => {
     let receivedInput = '';
     const step: StepBranch<string, string> = {

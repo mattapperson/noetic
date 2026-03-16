@@ -12,9 +12,11 @@ Inspects a value and selects which step to execute next. Returns the actual `Ste
 ```typescript
 interface BranchOpts<I, O> {
   id: string;
-  route: (input: I, ctx: Context) => Step<I, O> | null;
+  route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
 }
 ```
+
+The `route` function may be sync or async. Async routes enable embedding-based semantic routing and AI-driven conditions without blocking the type system.
 
 ```typescript
 const routeByLanguage = branch<CodeFile, AnalysisResult>({
@@ -33,6 +35,21 @@ const routeByLanguage = branch<CodeFile, AnalysisResult>({
 LangGraph's conditional edges return string node names (`return "node_a"`), which TypeScript can't verify. Here, the router returns actual `Step` objects — TypeScript enforces that all branches return compatible output types.
 
 Returning `null` is a no-op (skip this branch). This is useful in loops where some iterations don't need a particular branch.
+
+### Semantic Condition Helpers
+
+The `conditions` module provides helpers for building async route functions:
+
+- **`when(condition, step)`** — pairs an async condition with a step
+- **`otherwise(step)`** — fallback marker for use with `semanticRoute`
+- **`semanticRoute(...clauses)`** — evaluates when-clauses in order, returns first match or otherwise
+- **`semanticSwitch({ embed, cases, ... })`** — embedding-based routing: embeds the input and all case labels, picks the best cosine-similarity match above a threshold
+- **`embeddingMatch(embed, label, threshold)`** — condition that checks if input is semantically similar to a label via embeddings
+- **`aiCondition({ callModel, model, prompt })`** — condition that asks an LLM a yes/no question
+- **`anyCondition(...conditions)`** — true if any sub-condition is true (short-circuits)
+- **`allCondition(...conditions)`** — true if all sub-conditions are true (short-circuits)
+
+All embedding conditions accept an optional `cache: StorageAdapter` for persistent label embedding caching across ephemeral invocations.
 
 ---
 

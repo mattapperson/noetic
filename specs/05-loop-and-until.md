@@ -121,7 +121,9 @@ const until = {
 type VerifyFn = (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
 
 interface ConvergeOpts {
-  threshold: number;  // 0-1, similarity between consecutive outputs
+  threshold?: number;        // default 1 (exact match). When embed is provided and threshold < 1, uses cosine similarity
+  embed?: EmbedFn;           // when provided + threshold < 1, embed both outputs and compare via cosine similarity
+  cache?: StorageAdapter;    // persist previous output vector across ephemeral invocations
 }
 ```
 

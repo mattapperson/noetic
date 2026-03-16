@@ -7,7 +7,7 @@ export async function executeBranch<I, O>(
   ctx: Context,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
-  const selected = step.route(input, ctx);
+  const selected = await step.route(input, ctx);
   if (selected === null) {
     // SAFETY: requires I assignable to O for null route — when no branch is selected,
     // the input passes through. Callers must ensure I is compatible with O.

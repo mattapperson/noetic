@@ -74,7 +74,7 @@ export interface StepTool<I, O> {
 export interface StepBranch<I, O> {
   kind: 'branch';
   id: string;
-  route: (input: I, ctx: Context) => Step<I, O> | null;
+  route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
 }
 
 // Fork with type-safe mode variants

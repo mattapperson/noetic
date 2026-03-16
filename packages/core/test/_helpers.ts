@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { LLMResponse, Tool } from '../src/types/common';
 import type { Context, ItemLog } from '../src/types/context';
+import type { EmbedFn } from '../src/types/embed';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -248,6 +249,21 @@ export function makeTestTool(
       result: `executed: ${args.query}`,
     }),
     ...overrides,
+  };
+}
+
+// ── Mock EmbedFn ─────────────────────────────────────────────────────
+
+export function mockEmbed(vectors: Record<string, number[]>): EmbedFn {
+  return async (texts: readonly string[]): Promise<readonly number[][]> => {
+    return texts.map(
+      (t) =>
+        vectors[t] ?? [
+          0,
+          0,
+          0,
+        ],
+    );
   };
 }
 
