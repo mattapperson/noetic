@@ -23,8 +23,8 @@ describe('sync delegate demo', () => {
       textOnlyResponse('Based on my research, the capital of France is Paris.'),
     ]);
 
-    // The delegate tool creates its own runtime context internally,
-    // so we test the main agent's behavior with a mocked callModel
+    // The delegate tool receives the parent context via execute(args, ctx)
+    // and forwards it to runtime.execute, which creates a child context internally
     const runtime = new InMemoryRuntime({
       callModel: mainCallModel,
     });

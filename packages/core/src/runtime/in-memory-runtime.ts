@@ -48,6 +48,8 @@ export class InMemoryRuntime implements Runtime {
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
     const childCtx = this.createContext({
       parent: parentCtx,
+      threadId: parentCtx.threadId,
+      resourceId: parentCtx.resourceId,
     });
     const promise = this.execute(step, input, childCtx);
     return new DetachedHandleImpl<O>(childCtx.id, promise);

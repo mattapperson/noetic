@@ -120,6 +120,10 @@ Parent calls runtime.detachedSpawn(step, input, ctx)
     └─ Use channels to receive notifications on completion
 ```
 
+### Context in Tools
+
+Tools that spawn sub-agents **must use the parent context** passed to `execute(args, ctx)` rather than creating a new root context via `runtime.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, memory layer propagation, and observability tracing. Both `runtime.execute()` and `runtime.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives.
+
 ### Integration with Loop Inbox
 
 Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-until`). A common pattern:

@@ -6,12 +6,12 @@
 import { z } from 'zod';
 import { spawn } from '../src/builders/spawn-builder';
 import { step } from '../src/builders/step-builders';
+import { tool } from '../src/builders/tool-builder';
 import type { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
 import type { Channel } from '../src/types/channel';
 import type { Tool } from '../src/types/common';
 import type { Context } from '../src/types/context';
-import type { DetachedHandle } from '../src/types/detached';
-import { DetachedStatus } from '../src/types/detached';
+import type { DetachedHandle, DetachedStatus } from '../src/types/detached';
 
 //#region Types
 
@@ -63,23 +63,22 @@ function notifyInboxOnSettlement(opts: {
 
 /** Sync tool: blocks until sub-agent completes, returns result as tool output. */
 export function createSyncDelegateTool(runtime: InMemoryRuntime): Tool {
-  return {
+  return tool({
     name: 'delegate',
     description: 'Run a sub-agent and wait for its result. Use when you need the answer now.',
     input: z.object({
       task: z.string().describe('The task to delegate'),
     }),
     output: z.string(),
-    execute: async (args: { task: string }): Promise<string> => {
+    execute: async (args, ctx) => {
       const child = buildSubAgentStep('sync-sub-agent');
       const spawnStep = spawn({
         id: 'sync-delegate-spawn',
         child,
       });
-      const ctx = runtime.createContext();
       return runtime.execute(spawnStep, args.task, ctx);
     },
-  };
+  });
 }
 
 /** Async tool: launches sub-agent in background, notifies via inbox on completion. */
@@ -88,7 +87,7 @@ export function createAsyncLaunchTool(opts: {
   inbox: Channel<string>;
   handles: Map<string, DetachedHandle<string>>;
 }): Tool {
-  return {
+  return tool({
     name: 'launch_agent',
     description:
       'Launch a sub-agent in the background. Use when you can continue other work while it runs.',
@@ -98,13 +97,8 @@ export function createAsyncLaunchTool(opts: {
     output: z.object({
       agentId: z.string(),
     }),
-    execute: async (args: {
-      task: string;
-    }): Promise<{
-      agentId: string;
-    }> => {
+    execute: async (args, ctx) => {
       const child = buildSubAgentStep('async-sub-agent');
-      const ctx = opts.runtime.createContext();
       const handle = opts.runtime.detachedSpawn(child, args.task, ctx);
       opts.handles.set(handle.id, handle);
 
@@ -120,12 +114,12 @@ export function createAsyncLaunchTool(opts: {
         agentId: handle.id,
       };
     },
-  };
+  });
 }
 
 /** Check tool: reports the status of a previously launched sub-agent. */
 export function createCheckTool(handles: Map<string, DetachedHandle<string>>): Tool {
-  return {
+  return tool({
     name: 'check_agent',
     description: 'Check the status of a launched sub-agent.',
     input: z.object({
@@ -135,7 +129,7 @@ export function createCheckTool(handles: Map<string, DetachedHandle<string>>): T
       status: z.string(),
       result: z.string().optional(),
     }),
-    execute: async (args: { agentId: string }): Promise<CheckToolResult> => {
+    execute: async (args, _ctx): Promise<CheckToolResult> => {
       const handle = handles.get(args.agentId);
       if (!handle) {
         return {
@@ -148,7 +142,7 @@ export function createCheckTool(handles: Map<string, DetachedHandle<string>>): T
         result: handle.result,
       };
     },
-  };
+  });
 }
 
 //#endregion

@@ -188,10 +188,10 @@ import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
-// In a tool's execute function:
-const handle = runtime.detachedSpawn(subAgentStep, task, ctx);
+// In a tool's execute function — use the parent ctx passed to execute(args, ctx):
+const handle = runtime.detachedSpawn(subAgentStep, task, parentCtx);
 handle.await().then((result) => {
-  runtime.send(inbox, `[Sub-agent done] ${result}`, ctx);
+  runtime.send(inbox, `[Sub-agent done] ${result}`, parentCtx);
 });
 
 // The parent loop uses the inbox to wake when results arrive:
@@ -210,44 +210,44 @@ const agentLoop = {
 Give the LLM both a sync and async delegation tool. The LLM decides at runtime which to use based on the task — blocking when it needs the result immediately, or launching in the background when it can continue working.
 
 ```ts
-import { channel, react, spawn, step, until } from '@noetic/core';
+import { channel, spawn, step, tool, until } from '@noetic/core';
+import type { Context } from '@noetic/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
 // Tool 1: Sync — blocks until sub-agent finishes, returns result directly
-const delegateTool = {
+// The execute function receives the parent context as its second argument.
+const delegateTool = tool({
   name: 'delegate',
   description: 'Run a sub-agent and wait for its result. Use when you need the answer now.',
   input: z.object({ task: z.string() }),
   output: z.string(),
-  execute: async (args: { task: string }) => {
+  execute: async (args: { task: string }, parentCtx: Context) => {
     const child = step.llm({ id: 'sync-sub', model: 'gpt-4o', system: 'Answer concisely.' });
-    const ctx = runtime.createContext();
-    return runtime.execute(spawn({ id: 'sync-spawn', child }), args.task, ctx);
+    return runtime.execute(spawn({ id: 'sync-spawn', child }), args.task, parentCtx);
   },
-};
+});
 
 // Tool 2: Async — launches sub-agent in background, notifies via inbox when done
-const launchTool = {
+const launchTool = tool({
   name: 'launch_agent',
   description: 'Launch a sub-agent in the background. Use when you can continue other work.',
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
-  execute: async (args: { task: string }) => {
+  execute: async (args: { task: string }, parentCtx: Context) => {
     const child = step.llm<string, string>({
       id: 'async-sub', model: 'gpt-4o', system: 'Answer concisely.',
     });
-    const ctx = runtime.createContext();
-    const handle = runtime.detachedSpawn(child, args.task, ctx);
+    const handle = runtime.detachedSpawn(child, args.task, parentCtx);
     // Notify the parent loop when the sub-agent finishes
     handle.await().then(
-      (result) => runtime.send(inbox, `[Agent ${handle.id} done] ${result}`, ctx),
-      (err) => runtime.send(inbox, `[Agent ${handle.id} failed] ${err}`, ctx),
+      (result) => runtime.send(inbox, `[Agent ${handle.id} done] ${result}`, parentCtx),
+      (err) => runtime.send(inbox, `[Agent ${handle.id} failed] ${err}`, parentCtx),
     );
     return { agentId: handle.id };
   },
-};
+});
 
 // The agent loop: LLM chooses which tool to call based on the situation
 const agent = {

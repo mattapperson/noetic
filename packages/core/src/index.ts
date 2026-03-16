@@ -5,6 +5,7 @@ export { channel } from './builders/channel-builder';
 export { branch, fork } from './builders/control-flow-builders';
 export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
+export { tool } from './builders/tool-builder';
 export type { Condition, OtherwiseClause, WhenClause } from './conditions';
 export {
   aiCondition,
