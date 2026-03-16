@@ -1,6 +1,6 @@
 import type { ZodTypeAny, z } from 'zod';
-import type { Context } from './context';
 import type { FunctionCallItem, Item } from './items';
+import type { ToolExecutionContext } from './tool-context';
 
 export interface RetryPolicy {
   maxAttempts: number;
@@ -21,7 +21,7 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   description: string;
   input: I;
   output: O;
-  execute: (args: z.infer<I>, ctx: Context) => Promise<z.infer<O>>;
+  execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
 }
 

@@ -1,8 +1,15 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { Context } from '../types/context';
+import type { Runtime } from '../types/runtime';
 import type { StepTool } from '../types/step';
 
-export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Context): Promise<O> {
+export async function executeTool<I, O>(
+  step: StepTool<I, O>,
+  input: I,
+  ctx: Context,
+  runtime?: Runtime,
+): Promise<O> {
   // Merge step.args with input (step.args takes precedence as overrides, input as base)
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
@@ -19,7 +26,8 @@ export async function executeTool<I, O>(step: StepTool<I, O>, input: I, ctx: Con
 
   // Execute the tool
   try {
-    const result = await step.tool.execute(parseResult.data, ctx);
+    const toolCtx = buildToolExecutionContext(ctx, runtime);
+    const result = await step.tool.execute(parseResult.data, toolCtx);
     return result;
   } catch (e) {
     throw new NoeticErrorImpl({

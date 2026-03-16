@@ -1,5 +1,6 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
+import type { Runtime } from '../types/runtime';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
@@ -18,6 +19,7 @@ export async function execute<I, O>(
   input: I,
   ctx: Context,
   callModel?: CallModelFn,
+  runtime?: Runtime,
 ): Promise<O> {
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
@@ -55,17 +57,17 @@ export async function execute<I, O>(
           retriesExhausted: false,
         });
       }
-      return executeLLM(step, input, ctx, callModel);
+      return executeLLM(step, input, ctx, callModel, runtime);
     case 'tool':
-      return executeTool(step, input, ctx);
+      return executeTool(step, input, ctx, runtime);
     case 'branch':
-      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
     case 'fork':
-      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
     case 'loop':
-      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel));
+      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
     default: {
       const _exhaustive: never = step;
       throw new NoeticErrorImpl({

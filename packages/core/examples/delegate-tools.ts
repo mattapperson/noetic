@@ -10,8 +10,8 @@ import { tool } from '../src/builders/tool-builder';
 import type { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
 import type { Channel } from '../src/types/channel';
 import type { Tool } from '../src/types/common';
-import type { Context } from '../src/types/context';
 import type { DetachedHandle, DetachedStatus } from '../src/types/detached';
+import type { ToolExecutionContext } from '../src/types/tool-context';
 
 //#region Types
 
@@ -41,18 +41,26 @@ function notifyInboxOnSettlement(opts: {
   handle: DetachedHandle<string>;
   runtime: InMemoryRuntime;
   inbox: Channel<string>;
-  ctx: Context;
+  ctx: ToolExecutionContext;
   handles: Map<string, DetachedHandle<string>>;
 }): void {
   void opts.handle.await().then(
     (result) => {
       opts.handles.delete(opts.handle.id);
-      opts.runtime.send(opts.inbox, `[Sub-agent ${opts.handle.id} completed] ${result}`, opts.ctx);
+      opts.runtime.send(
+        opts.inbox,
+        `[Sub-agent ${opts.handle.id} completed] ${result}`,
+        opts.ctx.ctx,
+      );
     },
     (err: unknown) => {
       opts.handles.delete(opts.handle.id);
       const message = err instanceof Error ? err.message : String(err);
-      opts.runtime.send(opts.inbox, `[Sub-agent ${opts.handle.id} failed] ${message}`, opts.ctx);
+      opts.runtime.send(
+        opts.inbox,
+        `[Sub-agent ${opts.handle.id} failed] ${message}`,
+        opts.ctx.ctx,
+      );
     },
   );
 }
@@ -70,13 +78,13 @@ export function createSyncDelegateTool(runtime: InMemoryRuntime): Tool {
       task: z.string().describe('The task to delegate'),
     }),
     output: z.string(),
-    execute: async (args, ctx) => {
+    execute: async (args, toolCtx) => {
       const child = buildSubAgentStep('sync-sub-agent');
       const spawnStep = spawn({
         id: 'sync-delegate-spawn',
         child,
       });
-      return runtime.execute(spawnStep, args.task, ctx);
+      return runtime.execute(spawnStep, args.task, toolCtx.ctx);
     },
   });
 }
@@ -97,16 +105,16 @@ export function createAsyncLaunchTool(opts: {
     output: z.object({
       agentId: z.string(),
     }),
-    execute: async (args, ctx) => {
+    execute: async (args, toolCtx) => {
       const child = buildSubAgentStep('async-sub-agent');
-      const handle = opts.runtime.detachedSpawn(child, args.task, ctx);
+      const handle = opts.runtime.detachedSpawn(child, args.task, toolCtx.ctx);
       opts.handles.set(handle.id, handle);
 
       notifyInboxOnSettlement({
         handle,
         runtime: opts.runtime,
         inbox: opts.inbox,
-        ctx,
+        ctx: toolCtx,
         handles: opts.handles,
       });
 
@@ -129,7 +137,7 @@ export function createCheckTool(handles: Map<string, DetachedHandle<string>>): T
       status: z.string(),
       result: z.string().optional(),
     }),
-    execute: async (args, _ctx): Promise<CheckToolResult> => {
+    execute: async (args, _toolCtx): Promise<CheckToolResult> => {
       const handle = handles.get(args.agentId);
       if (!handle) {
         return {

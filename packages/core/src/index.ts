@@ -133,6 +133,7 @@ export type {
   Until,
   Verdict,
 } from './types/step';
+export type { ToolExecutionContext, ToolMemory } from './types/tool-context';
 export { all, any } from './until/combinators';
 export type { ConvergeOpts, VerifyFn } from './until/predicates';
 export { until } from './until/predicates';

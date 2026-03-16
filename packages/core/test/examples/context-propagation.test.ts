@@ -4,6 +4,7 @@ import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/de
 import { channel } from '../../src/builders/channel-builder';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
 import type { DetachedHandle } from '../../src/types/detached';
+import { makeMockToolContext } from '../_helpers';
 
 describe('context propagation in delegate tools', () => {
   it('sync delegate tool uses parent context, not a new root context', async () => {
@@ -14,6 +15,7 @@ describe('context propagation in delegate tools', () => {
     });
 
     const delegateTool = createSyncDelegateTool(runtime);
+    const toolCtx = makeMockToolContext(parentCtx);
 
     // Calling execute with the parent context should not throw
     // and the tool should forward ctx to runtime.execute
@@ -23,7 +25,7 @@ describe('context propagation in delegate tools', () => {
         {
           task: 'test',
         },
-        parentCtx,
+        toolCtx,
       );
     } catch (err) {
       // Expected: no callModel configured — rethrow anything unexpected
@@ -55,6 +57,7 @@ describe('context propagation in delegate tools', () => {
       inbox,
       handles,
     });
+    const toolCtx = makeMockToolContext(parentCtx);
 
     // This will create a detached spawn using the parent context
     try {
@@ -62,7 +65,7 @@ describe('context propagation in delegate tools', () => {
         {
           task: 'background work',
         },
-        parentCtx,
+        toolCtx,
       );
     } catch (err) {
       // Expected: no callModel configured — rethrow anything unexpected

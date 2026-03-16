@@ -4,6 +4,7 @@ import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { FunctionCallItem, Item } from '../types/items';
+import type { Runtime } from '../types/runtime';
 import type { StepLLM } from '../types/step';
 import { createMessage, extractAssistantText } from './message-helpers';
 import { isMutableContext } from './typeguards';
@@ -15,6 +16,7 @@ export interface CallModelParams {
   params?: ModelParams;
   output?: ZodType;
   ctx: Context;
+  runtime?: Runtime;
 }
 
 export type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
@@ -24,6 +26,7 @@ export async function executeLLM<I, O>(
   input: I,
   ctx: Context,
   callModel: CallModelFn,
+  runtime?: Runtime,
 ): Promise<O> {
   // Add the input as a user message if it's a non-empty string
   if (typeof input === 'string' && input.length > 0) {
@@ -38,6 +41,7 @@ export async function executeLLM<I, O>(
     params: step.params,
     output: step.output,
     ctx,
+    runtime,
   });
 
   // Append response items to ItemLog and extract tool calls in a single pass

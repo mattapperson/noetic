@@ -1,6 +1,6 @@
 import type { ZodTypeAny, z } from 'zod';
 import type { Tool } from '../types/common';
-import type { Context } from '../types/context';
+import type { ToolExecutionContext } from '../types/tool-context';
 
 /**
  * Creates a typed Tool with Zod schema inference for input and output.
@@ -16,7 +16,7 @@ import type { Context } from '../types/context';
  *   description: 'Greet a user by name',
  *   input: z.object({ name: z.string() }),
  *   output: z.string(),
- *   execute: async (args, ctx) => `Hello, ${args.name}!`,
+ *   execute: async (args) => `Hello, ${args.name}!`,
  * });
  * ```
  */
@@ -25,7 +25,7 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(config: {
   description: string;
   input: I;
   output: O;
-  execute: (args: z.infer<I>, ctx: Context) => Promise<z.infer<O>>;
+  execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
 }): Tool {
   if (!config.name || config.name.trim() === '') {

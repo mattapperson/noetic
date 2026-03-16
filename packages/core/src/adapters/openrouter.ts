@@ -1,4 +1,4 @@
-import type { OpenRouter, Tool as SdkTool } from '@openrouter/sdk';
+import type { OpenRouter, Tool as SdkTool, TurnContext } from '@openrouter/sdk';
 import type {
   OpenResponsesEasyInputMessage,
   OpenResponsesFunctionCallOutput,
@@ -14,10 +14,12 @@ import { z } from 'zod';
 
 import type { CallModelFn, CallModelParams } from '../interpreter/execute-llm';
 import { isAssistantMessage, isOutputText } from '../interpreter/typeguards';
+import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { LLMResponse, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
+import type { Runtime } from '../types/runtime';
 
 //#region Types
 
@@ -247,7 +249,7 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 // We construct the SDK tool shape manually and cast through unknown to bridge the
 // Zod version gap. This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation, which works identically across Zod 3 and 4.
-function convertTools(tools: ReadonlyArray<Tool>, ctx: Context): SdkTool[] {
+function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime?: Runtime): SdkTool[] {
   return tools.map(
     (t) =>
       ({
@@ -256,7 +258,10 @@ function convertTools(tools: ReadonlyArray<Tool>, ctx: Context): SdkTool[] {
           name: t.name,
           description: t.description,
           inputSchema: t.input,
-          execute: async (args: unknown) => t.execute(args, ctx),
+          execute: async (args: unknown, turnContext?: TurnContext) => {
+            const toolCtx = buildToolExecutionContext(ctx, runtime, turnContext);
+            return t.execute(args, toolCtx);
+          },
         },
       }) as unknown as SdkTool,
   );
@@ -272,7 +277,9 @@ export function createOpenRouterCallModel(client: OpenRouter): CallModelFn {
     const input = itemsToInput(remaining);
 
     const tools =
-      params.tools && params.tools.length > 0 ? convertTools(params.tools, params.ctx) : undefined;
+      params.tools && params.tools.length > 0
+        ? convertTools(params.tools, params.ctx, params.runtime)
+        : undefined;
 
     const result = client.callModel({
       model: params.model,

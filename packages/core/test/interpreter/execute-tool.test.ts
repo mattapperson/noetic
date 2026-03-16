@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeTool } from '../../src/interpreter/execute-tool';
 import type { StepTool } from '../../src/types/step';
+import type { ToolExecutionContext } from '../../src/types/tool-context';
 import { makeMockContext } from '../_helpers';
 
 const mockCtx = makeMockContext();
@@ -143,15 +144,15 @@ describe('executeTool', () => {
     expect(receivedArgs?.limit).toBe(5); // step.args overrides
   });
 
-  it('passes context to tool.execute', async () => {
-    let receivedCtx: ReturnType<typeof makeMockContext> | undefined;
+  it('passes ToolExecutionContext to tool.execute', async () => {
+    let receivedToolCtx: ToolExecutionContext | undefined;
     const tool = {
       name: 'ctx-test',
       description: 'Test',
       input: z.object({}),
       output: z.string(),
-      execute: async (_args: Record<string, never>, ctx: ReturnType<typeof makeMockContext>) => {
-        receivedCtx = ctx;
+      execute: async (_args: Record<string, never>, toolCtx: ToolExecutionContext) => {
+        receivedToolCtx = toolCtx;
         return 'ok';
       },
     };
@@ -161,7 +162,10 @@ describe('executeTool', () => {
       tool,
     };
     await executeTool(s, {}, mockCtx);
-    expect(receivedCtx).toBe(mockCtx);
+    assert(receivedToolCtx !== undefined);
+    expect(receivedToolCtx.ctx).toBe(mockCtx);
+    expect(receivedToolCtx.memory).toBeDefined();
+    expect(receivedToolCtx.assembledView).toBeDefined();
   });
 
   it('wraps tool execution errors in step_failed', async () => {

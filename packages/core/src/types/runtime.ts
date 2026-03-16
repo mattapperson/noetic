@@ -55,6 +55,8 @@ export interface Runtime {
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;
   createSpan(name: string, parent: Span | null): Span;
+  getLayerState<T>(executionId: string, layerId: string): T | undefined;
+  setLayerState<T>(executionId: string, layerId: string, state: T): void;
 }
 
 export interface RecallLayerOutput {

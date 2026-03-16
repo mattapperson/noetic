@@ -13,7 +13,9 @@ import type {
   MessageItem,
 } from '../src/types/items';
 import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
+import type { Runtime } from '../src/types/runtime';
 import type { ExecuteStepFn, Step } from '../src/types/step';
+import type { ToolExecutionContext } from '../src/types/tool-context';
 
 // ── Storage ──────────────────────────────────────────────────────────
 
@@ -264,6 +266,62 @@ export function mockEmbed(vectors: Record<string, number[]>): EmbedFn {
           0,
         ],
     );
+  };
+}
+
+// ── Mock ToolExecutionContext ─────────────────────────────────────────
+
+export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
+  const resolvedCtx = ctx ?? makeMockContext();
+  return {
+    ctx: resolvedCtx,
+    runtime: makeMockRuntime(),
+    memory: {
+      get: () => undefined,
+      set: () => {},
+    },
+    assembledView: resolvedCtx.itemLog.items,
+    lastStepMeta: null,
+  };
+}
+
+function makeMockRuntime(): Runtime {
+  return {
+    execute: async () => {
+      throw new Error('not impl');
+    },
+    detachedSpawn: () => {
+      throw new Error('not impl');
+    },
+    createContext: () => makeMockContext(),
+    send: () => {},
+    recv: async () => {
+      throw new Error('not impl');
+    },
+    tryRecv: () => null,
+    getChannelHandle: () => {
+      throw new Error('not impl');
+    },
+    initLayers: async () => {},
+    recallLayers: async () => [],
+    storeLayers: async () => {},
+    disposeLayers: async () => {},
+    assembleView: async (_agent, _input, ctx) => [
+      ...ctx.itemLog.items,
+    ],
+    checkpoint: async () => {},
+    restore: async () => null,
+    cancel: async () => {},
+    createSpan: (name) => ({
+      traceId: 't',
+      spanId: name,
+      parentSpanId: null,
+      setAttribute() {},
+      addEvent() {},
+      end() {},
+    }),
+    getLayerState: () => undefined,
+    setLayerState: () => {},
   };
 }
 

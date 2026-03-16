@@ -52,6 +52,10 @@ interface Runtime {
 
   // Observability (see 10-observability)
   createSpan(name: string, parent: Span | null): Span;
+
+  // Layer state access (used by ToolExecutionContext.memory)
+  getLayerState<T>(executionId: string, layerId: string): T | undefined;
+  setLayerState<T>(executionId: string, layerId: string, state: T): void;
 }
 
 interface RecallLayerOutput {

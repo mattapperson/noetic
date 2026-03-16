@@ -42,7 +42,7 @@ export class InMemoryRuntime implements Runtime {
   }
 
   async execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
-    return execute(step, input, ctx, this.callModel);
+    return execute(step, input, ctx, this.callModel, this);
   }
 
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
@@ -169,5 +169,13 @@ export class InMemoryRuntime implements Runtime {
 
   createSpan(name: string, parent: Span | null): Span {
     return new SpanImpl(name, parent);
+  }
+
+  getLayerState<T>(executionId: string, layerId: string): T | undefined {
+    return this.layerStateStore.get(executionId, layerId);
+  }
+
+  setLayerState<T>(executionId: string, layerId: string, state: T): void {
+    this.layerStateStore.set(executionId, layerId, state);
   }
 }
