@@ -1,0 +1,251 @@
+---
+title: Semantic Conditions
+description: AI-powered routing with embeddings, LLM classifiers, and condition combinators.
+---
+
+Noetic provides a set of condition helpers that let you route pipeline inputs using embeddings, LLM classifiers, and boolean combinators. These helpers produce async route functions compatible with [`branch`](/docs/control-flow/branch).
+
+## Condition Type
+
+Every condition is an async boolean predicate:
+
+```ts
+type Condition<I> = (input: I, ctx: Context) => Promise<boolean>;
+```
+
+Conditions are the building blocks for [`semanticRoute`](#semanticroute), [`anyCondition`](#anycondition), and [`allCondition`](#allcondition).
+
+## Route Builders
+
+### `semanticSwitch`
+
+Routes input to the most semantically similar case using cosine similarity on embeddings.
+
+**Simple form** -- string keys map directly to steps:
+
+```ts
+import { branch, semanticSwitch, step } from '@noetic/core';
+import type { EmbedFn } from '@noetic/core';
+
+const embed: EmbedFn = /* your embedding function */;
+
+const router = branch({
+  id: 'semantic-router',
+  route: semanticSwitch({
+    embed,
+    cases: {
+      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+      'complaint or feedback': step.llm({ id: 'feedback', model: 'gpt-4o' }),
+    },
+    threshold: 0.7,
+  }),
+});
+```
+
+**Advanced form** -- multiple labels per case:
+
+```ts
+const router = branch({
+  id: 'semantic-router',
+  route: semanticSwitch({
+    embed,
+    cases: [
+      {
+        labels: ['greeting', 'hello', 'hi there'],
+        step: step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+      },
+      {
+        labels: 'technical question',
+        step: step.llm({ id: 'tech', model: 'gpt-4o' }),
+      },
+    ],
+    default: step.llm({ id: 'fallback', model: 'gpt-4o-mini' }),
+    threshold: 0.7,
+  }),
+});
+```
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `embed` | `EmbedFn` | Yes | Batch embedding function |
+| `cases` | `Record<string, Step>` or `{ labels: string \| string[]; step: Step }[]` | Yes | Label-to-step mapping |
+| `default` | `Step` | No | Fallback step when no case exceeds the threshold |
+| `threshold` | `number` | No | Minimum cosine similarity (default `0.7`) |
+| `cache` | `StorageAdapter` | No | Persists label embeddings across invocations |
+
+When no case exceeds the threshold and no `default` is provided, the route returns `null` (branch skips).
+
+### `semanticRoute`
+
+Evaluates condition clauses in order and returns the first match. Built from [`when`](#when) and [`otherwise`](#otherwise) clauses.
+
+```ts
+import { branch, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic/core';
+
+const router = branch({
+  id: 'smart-router',
+  route: semanticRoute(
+    when(embeddingMatch(embed, 'greeting', 0.8), greetingStep),
+    when(aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
+    otherwise(defaultStep),
+  ),
+});
+```
+
+Returns `null` if no `when` matches and no `otherwise` is present.
+
+## Clause Builders
+
+### `when`
+
+Creates a conditional clause. The condition is evaluated; if `true`, the associated step is selected.
+
+```ts
+import { when } from '@noetic/core';
+
+when(condition, step);
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `condition` | `Condition<I>` | Async predicate |
+| `step` | `Step<I, O>` | Step to execute when condition is true |
+
+### `otherwise`
+
+Creates a fallback clause. Used as the last argument to `semanticRoute`.
+
+```ts
+import { otherwise } from '@noetic/core';
+
+otherwise(fallbackStep);
+```
+
+## Condition Helpers
+
+### `embeddingMatch`
+
+Returns `true` when the input is semantically similar to a label (or set of labels) above a threshold.
+
+**Simple form:**
+
+```ts
+import { embeddingMatch } from '@noetic/core';
+
+const isGreeting = embeddingMatch(embed, 'greeting or salutation', 0.8);
+```
+
+**Advanced form** -- multiple labels with match mode:
+
+```ts
+const isTechSupport = embeddingMatch({
+  embed,
+  labels: ['technical question', 'bug report', 'how do I'],
+  threshold: 0.75,
+  match: 'any', // 'any' (default) or 'all'
+  cache: myStorageAdapter,
+});
+```
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `embed` | `EmbedFn` | Yes | Batch embedding function |
+| `labels` | `string[]` | Yes | Labels to compare against |
+| `threshold` | `number` | Yes | Minimum cosine similarity |
+| `match` | `'any' \| 'all'` | No | Match mode (default `'any'`) |
+| `cache` | `StorageAdapter` | No | Persists label embeddings |
+
+### `aiCondition`
+
+Uses an LLM as a boolean classifier. The model receives the input and answers a yes/no question with structured JSON output.
+
+```ts
+import { aiCondition } from '@noetic/core';
+
+const isUrgent = aiCondition({
+  callModel,
+  model: 'gpt-4o-mini',
+  prompt: 'Is this message urgent and requiring immediate attention?',
+});
+```
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `callModel` | `CallModelFn` | Yes | Model invocation function |
+| `model` | `string` | Yes | Model identifier |
+| `prompt` | `string` | Yes | Yes/no question to classify against |
+
+The model is called with `temperature: 0` and a JSON response schema (`{ answer: boolean }`).
+
+## Combinators
+
+### `anyCondition`
+
+Logical OR -- returns `true` if **any** condition is true. Short-circuits on the first `true`.
+
+```ts
+import { anyCondition, embeddingMatch, aiCondition } from '@noetic/core';
+
+const isGreetingOrUrgent = anyCondition(
+  embeddingMatch(embed, 'greeting', 0.8),
+  aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+);
+```
+
+### `allCondition`
+
+Logical AND -- returns `true` if **all** conditions are true. Short-circuits on the first `false`.
+
+```ts
+import { allCondition, embeddingMatch, aiCondition } from '@noetic/core';
+
+const isUrgentGreeting = allCondition(
+  embeddingMatch(embed, 'greeting', 0.8),
+  aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+);
+```
+
+## Custom Conditions
+
+Any function matching `Condition<I>` works with `when`, `anyCondition`, and `allCondition`:
+
+```ts
+import type { Condition } from '@noetic/core';
+
+const containsKeyword: Condition<string> = async (input) => {
+  return input.toLowerCase().includes('help');
+};
+
+const router = branch({
+  id: 'custom-router',
+  route: semanticRoute(
+    when(containsKeyword, helpStep),
+    otherwise(defaultStep),
+  ),
+});
+```
+
+## Input Serialization
+
+When a condition receives non-string input, it is serialized to JSON before embedding or classification. String inputs are passed as-is. This means your embeddings and LLM classifiers see a consistent text representation regardless of the input type.
+
+## Caching
+
+Embedding-based conditions (`semanticSwitch`, `embeddingMatch`) accept an optional `cache: StorageAdapter` to persist label embeddings. This is useful in ephemeral environments like Cloudflare Workers where label vectors would otherwise be recomputed on every invocation.
+
+```ts
+const route = semanticSwitch({
+  embed,
+  cases: { /* ... */ },
+  cache: myStorageAdapter,
+});
+```
+
+Label vectors are cached under deterministic keys (`embed:<encoded-label>`). In-memory caching is always active -- the `StorageAdapter` adds persistence across process restarts.
+
+## Related
+
+- [branch](/docs/control-flow/branch) -- the control flow primitive that uses route functions.
+- [fork](/docs/control-flow/fork) -- parallel execution.
+- [Adapters](/docs/api/adapter-types) -- `EmbedFn` and `CallModelFn` types.

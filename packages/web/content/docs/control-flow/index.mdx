@@ -63,6 +63,28 @@ const parallel = fork({
 
 See [fork deep dive](/docs/control-flow/fork).
 
+## Semantic Conditions
+
+Noetic includes condition helpers for AI-powered routing -- use embeddings, LLM classifiers, and boolean combinators to build intelligent route functions for `branch`.
+
+```ts
+import { branch, semanticSwitch, step } from '@noetic/core';
+
+const router = branch({
+  id: 'semantic-router',
+  route: semanticSwitch({
+    embed,
+    cases: {
+      'greeting': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+    },
+    threshold: 0.7,
+  }),
+});
+```
+
+See [Semantic Conditions](/docs/control-flow/conditions) for the full API: `semanticSwitch`, `semanticRoute`, `embeddingMatch`, `aiCondition`, combinators, and caching.
+
 ## Comparison
 
 | | `branch` | `fork` |
@@ -75,6 +97,7 @@ See [fork deep dive](/docs/control-flow/fork).
 ## Next Steps
 
 - [branch](/docs/control-flow/branch) -- full API and examples.
+- [Semantic Conditions](/docs/control-flow/conditions) -- AI-powered routing with embeddings and LLM classifiers.
 - [fork](/docs/control-flow/fork) -- full API, modes, and merge functions.
 - [Spawn](/docs/spawn) -- isolated child execution.
 - [Loop & Until](/docs/loop-and-until) -- repeat steps with termination conditions.
