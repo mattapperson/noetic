@@ -3,6 +3,8 @@
 export { createOpenRouterCallModel, createOpenRouterEmbed } from './adapters/openrouter';
 export { channel } from './builders/channel-builder';
 export { branch, fork } from './builders/control-flow-builders';
+export type { LoopOpts } from './builders/loop-builder';
+export { loop } from './builders/loop-builder';
 export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
 export { tool } from './builders/tool-builder';

@@ -1,3 +1,4 @@
+import { loop } from '../builders/loop-builder';
 import { spawn } from '../builders/spawn-builder';
 import type { Tool } from '../types/common';
 import type { StepLoop } from '../types/step';
@@ -21,8 +22,7 @@ export function ralphWiggum(opts: {
     maxSteps: opts.innerMaxSteps ?? 20,
   });
 
-  return {
-    kind: 'loop',
+  return loop({
     id: 'ralph-wiggum-loop',
     body: spawn<string, string>({
       id: 'ralph-iteration',
@@ -35,5 +35,5 @@ export function ralphWiggum(opts: {
       }
       return 'Continue working on the task.';
     },
-  };
+  });
 }

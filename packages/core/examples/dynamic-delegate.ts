@@ -8,6 +8,7 @@
  */
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
+import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
 import type { Channel } from '../src/types/channel';
@@ -44,8 +45,7 @@ export function buildDynamicDelegateAgent(opts: {
     handles,
   });
 
-  return {
-    kind: 'loop',
+  return loop({
     id: 'dynamic-delegate-loop',
     body: step.llm({
       id: 'dynamic-delegate-llm',
@@ -62,7 +62,7 @@ Choose the right strategy based on each task.`,
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
     parkTimeout: opts.parkTimeout ?? 5e3,
-  };
+  });
 }
 
 //#endregion

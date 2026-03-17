@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
+import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
 import type { Channel } from '../src/types/channel';
@@ -42,8 +43,7 @@ export function buildAsyncDelegateAgent(opts: {
   });
   const checkTool = createCheckTool(handles);
 
-  return {
-    kind: 'loop',
+  return loop({
     id: 'async-delegate-loop',
     body: step.llm({
       id: 'async-delegate-llm',
@@ -57,7 +57,7 @@ export function buildAsyncDelegateAgent(opts: {
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
     parkTimeout: opts.parkTimeout ?? 5e3,
-  };
+  });
 }
 
 //#endregion

@@ -116,7 +116,7 @@ export async function executeLoop<I, O>(
       if (action !== 'skip') {
         throw e;
       }
-      stepCount++;
+      // Skip does not increment stepCount — it is not a successful execution.
       if (lastOutput === undefined) {
         continue;
       }

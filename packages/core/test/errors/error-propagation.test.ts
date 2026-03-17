@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { loop } from '../../src/builders/loop-builder';
 import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { SettleResult, Step, StepLoop } from '../../src/types/step';
+import type { SettleResult, Step } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
 
 describe('Error propagation', () => {
   describe('loop error handling', () => {
     it('default propagates error', async () => {
-      const step: StepLoop<string, string> = {
-        kind: 'loop',
+      const loopStep = loop<string, string>({
         id: 'test-loop',
         body: {
           kind: 'run',
@@ -20,15 +20,14 @@ describe('Error propagation', () => {
           },
         },
         until: until.maxSteps(5),
-      };
+      });
       const ctx = new ContextImpl();
-      await expect(execute(step, 'go', ctx)).rejects.toThrow('body fail');
+      await expect(execute(loopStep, 'go', ctx)).rejects.toThrow('body fail');
     });
 
     it('onError retry re-runs', async () => {
       let attempts = 0;
-      const step: StepLoop<string, string> = {
-        kind: 'loop',
+      const loopStep = loop<string, string>({
         id: 'retry-loop',
         body: {
           kind: 'run',
@@ -48,17 +47,16 @@ describe('Error propagation', () => {
         },
         until: until.maxSteps(1),
         onError: () => 'retry',
-      };
+      });
       const ctx = new ContextImpl();
-      const result = await execute(step, '', ctx);
+      const result = await execute(loopStep, '', ctx);
       expect(result).toBe('ok');
       expect(attempts).toBe(3);
     });
 
     it('until predicate throw treated as stop', async () => {
       let bodyCount = 0;
-      const step: StepLoop<string, string> = {
-        kind: 'loop',
+      const loopStep = loop<string, string>({
         id: 'pred-throw',
         body: {
           kind: 'run',
@@ -71,9 +69,9 @@ describe('Error propagation', () => {
         until: () => {
           throw new Error('predicate boom');
         },
-      };
+      });
       const ctx = new ContextImpl();
-      const result = await execute(step, '', ctx);
+      const result = await execute(loopStep, '', ctx);
       expect(bodyCount).toBe(1);
       expect(result).toBe('ok');
     });

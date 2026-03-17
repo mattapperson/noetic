@@ -1,3 +1,4 @@
+import { loop } from '../builders/loop-builder';
 import { step } from '../builders/step-builders';
 import type { Tool } from '../types/common';
 import type { StepLoop } from '../types/step';
@@ -18,8 +19,7 @@ export function react(opts: {
     tools: opts.tools,
   });
 
-  return {
-    kind: 'loop',
+  return loop({
     id: 'react-loop',
     body: llmStep,
     until: any(
@@ -31,5 +31,5 @@ export function react(opts: {
           ]
         : []),
     ),
-  };
+  });
 }
