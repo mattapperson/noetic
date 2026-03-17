@@ -422,7 +422,7 @@ function discoverFieldsFromSource(evalFilePath: string): OptimizableField[];
 The static analysis module:
 1. Takes an eval file path
 2. Follows imports to find agent/step definition source files using TypeScript module resolution
-3. Parses those files into TypeScript ASTs
+3. Parses those imported source files into TypeScript ASTs (the eval file itself is excluded — only imported source modules are analyzed for builder calls)
 4. Walks the AST to find builder calls (`step.llm()`, `tool()`, `react()`, `ralphWiggum()`, `branch()`, `fork()`, `spawn()`, `loop()`)
 5. Extracts string literal values of optimizable fields (`system`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
 6. Returns `OptimizableField[]` with populated `sourceLocation`

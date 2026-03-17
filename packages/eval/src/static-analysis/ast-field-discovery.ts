@@ -256,9 +256,7 @@ export function discoverFieldsFromSource(evalFilePath: string): OptimizableField
   const absoluteEvalPath = path.resolve(evalFilePath);
   const allFields: OptimizableField[] = [];
 
-  const filesToAnalyze = new Set<string>([
-    absoluteEvalPath,
-  ]);
+  const filesToAnalyze = new Set<string>();
 
   const imports = resolveImports(absoluteEvalPath);
   for (const imp of imports) {

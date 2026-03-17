@@ -175,7 +175,7 @@ noetic test --check                # Fail if scores regress
 ### How It Works
 
 1. **Field Discovery** -- walks the step tree to find optimizable text (system prompts, tool descriptions/names)
-2. **AST Source Discovery** -- parses TypeScript source files to find exact source locations of optimizable fields
+2. **AST Source Discovery** -- parses imported source files (not the eval file itself) to find exact source locations of optimizable fields
 3. **GEPA Bridge** -- maps fields to AxGEPA candidates, runs eval as the metric function
 4. **Source Writer** -- writes optimized values back to source files at tracked locations
 
