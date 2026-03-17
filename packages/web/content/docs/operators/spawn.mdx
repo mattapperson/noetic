@@ -180,7 +180,7 @@ const result = await handle.await(5_000);    // throws on timeout
 
 ### Async Sub-Agent Pattern
 
-Combine detached spawn with the [loop inbox channel](/docs/loop-and-until#inbox-channel) for a full async delegation workflow:
+Combine detached spawn with the [loop inbox channel](/docs/operators/loop-and-until#inbox-channel) for a full async delegation workflow:
 
 ```ts
 import { channel } from '@noetic/core';
@@ -275,6 +275,6 @@ When a background agent finishes, its result arrives via the inbox channel as a 
 
 ## Related
 
-- [fork](/docs/control-flow/fork) -- parallel execution without context isolation.
-- [Loop & Until](/docs/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
+- [fork](/docs/operators/fork) -- parallel execution without context isolation.
+- [Loop & Until](/docs/operators/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
 - [Overview](/docs/overview) -- how spawn fits into the seven primitives.

@@ -75,7 +75,7 @@ interface Runtime {
 | `send(channel, value, ctx)` | Push a value into a channel. |
 | `recv(channel, ctx, opts?)` | Wait for a value from a channel. Supports `timeout`. |
 | `tryRecv(channel, ctx)` | Non-blocking read. Returns `null` if nothing is available. |
-| `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
+| `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
 
 ### Memory Methods
 
@@ -206,6 +206,6 @@ const config: AgentConfig = {
 ## Related Pages
 
 - [Context & Event Log](/docs/context) -- the context object the runtime creates.
-- [Channels](/docs/channels) -- channel send/recv methods on the runtime.
+- [Channels](/docs/operators/channels) -- channel send/recv methods on the runtime.
 - [Memory](/docs/memory) -- memory layers managed by the runtime.
 - [Observability](/docs/observability) -- tracing spans created by `createSpan`.

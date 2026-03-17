@@ -97,7 +97,7 @@ const researcher = step.llm({
 });
 ```
 
-When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/loop-and-until) with `until.noToolCalls()`.
+When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/operators/loop-and-until) with `until.noToolCalls()`.
 
 ## Tuning Generation
 
@@ -119,4 +119,4 @@ const creative = step.llm({
 
 - [step.run](/docs/steps/run) -- custom async logic.
 - [step.tool](/docs/steps/tool) -- invoke a tool directly without an LLM.
-- [Loop & Until](/docs/loop-and-until) -- wrap an LLM step in a ReAct-style loop.
+- [Loop & Until](/docs/operators/loop-and-until) -- wrap an LLM step in a ReAct-style loop.

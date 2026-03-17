@@ -3,7 +3,7 @@ title: Semantic Conditions
 description: AI-powered routing with embeddings, LLM classifiers, and condition combinators.
 ---
 
-Noetic provides a set of condition helpers that let you route pipeline inputs using embeddings, LLM classifiers, and boolean combinators. These helpers produce async route functions compatible with [`branch`](/docs/control-flow/branch).
+Noetic provides a set of condition helpers that let you route pipeline inputs using embeddings, LLM classifiers, and boolean combinators. These helpers produce async route functions compatible with [`branch`](/docs/operators/branch).
 
 ## Condition Type
 
@@ -246,6 +246,6 @@ Label vectors are cached under deterministic keys (`embed:<encoded-label>`). In-
 
 ## Related
 
-- [branch](/docs/control-flow/branch) -- the control flow primitive that uses route functions.
-- [fork](/docs/control-flow/fork) -- parallel execution.
+- [branch](/docs/operators/branch) -- the control flow primitive that uses route functions.
+- [fork](/docs/operators/fork) -- parallel execution.
 - [Adapters](/docs/api/adapter-types) -- `EmbedFn` and `CallModelFn` types.

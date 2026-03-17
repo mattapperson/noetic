@@ -18,10 +18,10 @@ Noetic's entire execution model is built from seven primitives. Each one is a `S
 | [`step.run`](/docs/steps/run) | `run` | Execute arbitrary async code |
 | [`step.llm`](/docs/steps/llm) | `llm` | Call a language model |
 | [`step.tool`](/docs/steps/tool) | `tool` | Invoke a single tool directly |
-| [`branch`](/docs/control-flow/branch) | `branch` | Conditional routing -- pick one step or skip |
-| [`fork`](/docs/control-flow/fork) | `fork` | Parallel execution -- race, all, or settle |
-| [`spawn`](/docs/spawn) | `spawn` | Isolated child execution with context strategies |
-| [`loop`](/docs/loop-and-until) | `loop` | Repeat a step until a predicate says stop |
+| [`branch`](/docs/operators/branch) | `branch` | Conditional routing -- pick one step or skip |
+| [`fork`](/docs/operators/fork) | `fork` | Parallel execution -- race, all, or settle |
+| [`spawn`](/docs/operators/spawn) | `spawn` | Isolated child execution with context strategies |
+| [`loop`](/docs/operators/loop-and-until) | `loop` | Repeat a step until a predicate says stop |
 
 ## How They Compose
 
@@ -66,6 +66,6 @@ The `InMemoryRuntime` orchestrates execution, manages context, and wires up obse
 
 - [Getting Started](/docs) -- install and run your first agent.
 - [Steps](/docs/steps) -- deep dive into `run`, `llm`, and `tool`.
-- [Control Flow](/docs/control-flow) -- branching and forking.
-- [Spawn](/docs/spawn) -- isolated child agents.
-- [Loop & Until](/docs/loop-and-until) -- iteration and termination.
+- [Control Flow](/docs/operators) -- branching and forking.
+- [Spawn](/docs/operators/spawn) -- isolated child agents.
+- [Loop & Until](/docs/operators/loop-and-until) -- iteration and termination.
