@@ -1,4 +1,5 @@
 import { frameworkCast } from '../interpreter/framework-cast';
+import { createMessage, estimateTokens } from '../interpreter/message-helpers';
 import type { LLMResponse } from '../types/common';
 import type { ItemLog } from '../types/context';
 import type { Item } from '../types/items';
@@ -182,15 +183,26 @@ export async function recallLayers({
         }),
         timeout,
       );
-      if (result) {
+      if (!result) {
+        continue;
+      }
+      if (typeof result === 'string') {
         results.push({
           layerId: layer.id,
-          items: result.items,
-          tokenCount: result.tokenCount,
+          items: [
+            createMessage(result, 'developer'),
+          ],
+          tokenCount: estimateTokens(result),
         });
-        if (result.state !== undefined) {
-          store.set(ctx.executionId, layer.id, result.state);
-        }
+        continue;
+      }
+      results.push({
+        layerId: layer.id,
+        items: result.items,
+        tokenCount: result.tokenCount,
+      });
+      if (result.state !== undefined) {
+        store.set(ctx.executionId, layer.id, result.state);
       }
     } catch (e) {
       store.diagnostic(layer.id, 'recall', e);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { buildSyncDelegateAgent } from '../../examples/sync-delegate';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
@@ -25,9 +26,9 @@ describe('sync delegate demo', () => {
       callModel: mainCallModel,
     });
 
-    const agentStep = buildSyncDelegateAgent(runtime);
+    const agentStep = buildSyncDelegateAgent();
 
-    expect(agentStep.kind).toBe('loop');
+    assert(agentStep.kind === 'loop');
     expect(agentStep.id).toBe('react-loop');
     expect(agentStep.body.kind).toBe('llm');
 
@@ -38,10 +39,9 @@ describe('sync delegate demo', () => {
   });
 
   it('buildSyncDelegateAgent creates correct structure', () => {
-    const runtime = new InMemoryRuntime();
-    const agent = buildSyncDelegateAgent(runtime);
+    const agent = buildSyncDelegateAgent();
 
-    expect(agent.kind).toBe('loop');
+    assert(agent.kind === 'loop');
     expect(agent.body.kind).toBe('llm');
   });
 });

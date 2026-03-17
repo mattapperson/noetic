@@ -5,9 +5,7 @@ import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../
 
 describe('dynamic delegate demo', () => {
   it('builds agent with both sync and async tools', () => {
-    const runtime = new InMemoryRuntime();
     const agent = buildDynamicDelegateAgent({
-      runtime,
       inbox: delegateInbox,
     });
 
@@ -36,7 +34,6 @@ describe('dynamic delegate demo', () => {
     });
 
     const agent = buildDynamicDelegateAgent({
-      runtime,
       inbox: delegateInbox,
       parkTimeout: 50,
     });
@@ -70,7 +67,6 @@ describe('dynamic delegate demo', () => {
     runtime.send(delegateInbox, '[Sub-agent bg-1 completed] Topic is interesting.', ctx);
 
     const agent = buildDynamicDelegateAgent({
-      runtime,
       inbox: delegateInbox,
       parkTimeout: 50,
     });
@@ -110,7 +106,6 @@ describe('dynamic delegate demo', () => {
     runtime.send(delegateInbox, '[Sub-agent bg-2 completed] Background findings.', ctx);
 
     const agent = buildDynamicDelegateAgent({
-      runtime,
       inbox: delegateInbox,
       parkTimeout: 50,
     });

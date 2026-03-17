@@ -3,6 +3,7 @@
  */
 
 import { z } from 'zod';
+import { frameworkCast } from '../src/interpreter/framework-cast';
 import type { LLMResponse, Tool } from '../src/types/common';
 import type { Context, ItemLog } from '../src/types/context';
 import type { EmbedFn } from '../src/types/embed';
@@ -26,7 +27,7 @@ function makeMapStorage() {
       const val = store.get(key);
       // SAFETY: values are stored via set(key, value: unknown); the caller is
       // responsible for reading back with the same type T they stored.
-      return val === undefined ? null : (val as T);
+      return val === undefined ? null : frameworkCast<T>(val);
     },
     async set(key: string, value: unknown): Promise<void> {
       store.set(key, value);
@@ -285,7 +286,7 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   };
 }
 
-function makeMockRuntime(): Runtime {
+export function makeMockRuntime(): Runtime {
   return {
     execute: async () => {
       throw new Error('not impl');

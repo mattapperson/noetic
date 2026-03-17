@@ -40,13 +40,16 @@ describe('execute() switch', () => {
       id: 'echo-tool',
       tool,
     };
-    const ctx = new ContextImpl();
+    const runtime = new InMemoryRuntime();
+    const ctx = runtime.createContext();
     const result = await execute(
       step,
       {
         msg: 'hi',
       },
       ctx,
+      undefined,
+      runtime,
     );
     expect(result).toBe('hi');
   });

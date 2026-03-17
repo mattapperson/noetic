@@ -1,7 +1,9 @@
 import { loop } from '../builders/loop-builder';
+import { spawn } from '../builders/spawn-builder';
 import { step } from '../builders/step-builders';
 import type { Tool } from '../types/common';
-import type { StepLoop } from '../types/step';
+import type { MemoryLayer } from '../types/memory';
+import type { StepLoop, StepSpawn } from '../types/step';
 import { any } from '../until/combinators';
 import { until } from '../until/predicates';
 
@@ -11,7 +13,8 @@ export function react(opts: {
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-}): StepLoop<string, string> {
+  memory?: MemoryLayer[];
+}): StepLoop<string, string> | StepSpawn<string, string> {
   const llmStep = step.llm<string, string>({
     id: 'react-step',
     model: opts.model,
@@ -19,7 +22,7 @@ export function react(opts: {
     tools: opts.tools,
   });
 
-  return loop({
+  const loopStep = loop({
     id: 'react-loop',
     body: llmStep,
     until: any(
@@ -31,5 +34,15 @@ export function react(opts: {
           ]
         : []),
     ),
+  });
+
+  if (!opts.memory) {
+    return loopStep;
+  }
+
+  return spawn({
+    id: 'react-agent',
+    child: loopStep,
+    memory: opts.memory,
   });
 }

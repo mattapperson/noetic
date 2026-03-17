@@ -18,7 +18,7 @@ Normative language uses **MUST**, **SHOULD**, and **MAY** per RFC 2119.
 ```typescript
 interface MemoryLayer<TState = unknown> {
   id: string;
-  name: string;
+  name?: string;
   slot: number;
   scope: MemoryScope;
   budget?: BudgetConfig;
@@ -57,7 +57,7 @@ The runtime sorts layers by slot ascending. Ties broken by array index (stable s
 ```typescript
 interface MemoryHooks<TState = unknown> {
   init?:       (params: InitParams)                => Promise<InitResult<TState>>;
-  recall?:     (params: RecallParams<TState>)      => Promise<RecallResult<TState> | null>;
+  recall?:     (params: RecallParams<TState>)      => Promise<RecallResult<TState> | string | null>;
   store?:      (params: StoreParams<TState>)       => Promise<StoreResult<TState> | void>;
   onSpawn?:    (params: SpawnParams<TState>)       => Promise<SpawnResult<TState> | null>;
   onReturn?:   (params: ReturnParams<TState>)      => Promise<ReturnResult<TState> | void>;
@@ -135,7 +135,11 @@ interface RecallResult<TState = unknown> {
   tokenCount: number;
   state?: TState;
 }
+```
 
+**String shorthand:** `recall` MAY return a plain `string` instead of a `RecallResult`. The runtime wraps it in a `developer` message item and estimates the token count automatically. This avoids boilerplate for layers that only inject text.
+
+```typescript
 interface StoreParams<TState> {
   newItems: Item[];
   log: ItemLog;

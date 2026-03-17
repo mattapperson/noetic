@@ -26,6 +26,16 @@ export interface ModelParams {
   stopSequences?: string[];
 }
 
+/** Declares tool-owned memory that the runtime materializes into a MemoryLayer. */
+export interface ToolMemoryDeclaration<TState = unknown> {
+  /** Shared id — tools with the same id share state. Defaults to `tool.name`. */
+  id?: string;
+  /** Factory for the initial state. */
+  init: () => TState;
+  /** Project state into the LLM context. Return null to omit. */
+  recall: (state: TState) => string | null;
+}
+
 /** A tool definition that an LLM can invoke during execution. */
 export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
   /** Unique tool name used by the LLM for selection. */
@@ -40,6 +50,8 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
+  /** Optional memory declaration — the runtime generates a MemoryLayer from this. */
+  memory?: ToolMemoryDeclaration;
 }
 
 export interface TokenUsage {

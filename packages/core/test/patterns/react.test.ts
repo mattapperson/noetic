@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { z } from 'zod';
 import { react } from '../../src/patterns/react';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
 import type { LLMResponse } from '../../src/types/common';
-import type { FunctionCallItem, FunctionCallOutputItem, MessageItem } from '../../src/types/items';
 
 describe('ReAct pattern', () => {
   it('creates a loop step with correct structure', () => {
@@ -32,7 +32,7 @@ describe('ReAct pattern', () => {
       maxSteps: 5,
     });
 
-    expect(reactStep.kind).toBe('loop');
+    assert(reactStep.kind === 'loop');
     expect(reactStep.id).toBe('react-loop');
     expect(reactStep.body.kind).toBe('llm');
   });
@@ -69,14 +69,14 @@ describe('ReAct pattern', () => {
               call_id: `call_${callCount}`,
               name: 'search',
               arguments: '{"query":"test query"}',
-            } as FunctionCallItem,
+            } satisfies LLMResponse['items'][number],
             {
               id: `fco-${callCount}`,
               status: 'completed',
               type: 'function_call_output',
               call_id: `call_${callCount}`,
               output: '{"results":["found: test query"]}',
-            } as FunctionCallOutputItem,
+            } satisfies LLMResponse['items'][number],
             {
               id: `msg-${callCount}`,
               status: 'completed',
@@ -88,7 +88,7 @@ describe('ReAct pattern', () => {
                   text: 'I searched and found results.',
                 },
               ],
-            } as MessageItem,
+            } satisfies LLMResponse['items'][number],
           ],
           usage: {
             inputTokens: 50,
@@ -112,7 +112,7 @@ describe('ReAct pattern', () => {
                 text: 'Based on my search, here is the answer.',
               },
             ],
-          } as MessageItem,
+          } satisfies LLMResponse['items'][number],
         ],
         usage: {
           inputTokens: 80,
@@ -163,14 +163,14 @@ describe('ReAct pattern', () => {
             call_id: `call_${callCount}`,
             name: 'always',
             arguments: '{}',
-          } as FunctionCallItem,
+          } satisfies LLMResponse['items'][number],
           {
             id: `fco-${callCount}`,
             status: 'completed',
             type: 'function_call_output',
             call_id: `call_${callCount}`,
             output: '"ok"',
-          } as FunctionCallOutputItem,
+          } satisfies LLMResponse['items'][number],
           {
             id: `msg-${callCount}`,
             status: 'completed',
@@ -182,7 +182,7 @@ describe('ReAct pattern', () => {
                 text: `Step ${callCount}`,
               },
             ],
-          } as MessageItem,
+          } satisfies LLMResponse['items'][number],
         ],
         usage: {
           inputTokens: 10,
@@ -234,7 +234,7 @@ describe('ReAct pattern', () => {
                 text: 'No tools needed',
               },
             ],
-          } as MessageItem,
+          } satisfies LLMResponse['items'][number],
         ],
         usage: {
           inputTokens: 10,
@@ -286,14 +286,14 @@ describe('ReAct pattern', () => {
               call_id: 'c1',
               name: 'search',
               arguments: '{"q":"x"}',
-            } as FunctionCallItem,
+            } satisfies LLMResponse['items'][number],
             {
               id: 'fco1',
               status: 'completed',
               type: 'function_call_output',
               call_id: 'c1',
               output: '"found"',
-            } as FunctionCallOutputItem,
+            } satisfies LLMResponse['items'][number],
             {
               id: 'm1',
               status: 'completed',
@@ -305,7 +305,7 @@ describe('ReAct pattern', () => {
                   text: 'searching',
                 },
               ],
-            } as MessageItem,
+            } satisfies LLMResponse['items'][number],
           ],
           usage: {
             inputTokens: 100,
@@ -327,7 +327,7 @@ describe('ReAct pattern', () => {
                 text: 'done',
               },
             ],
-          } as MessageItem,
+          } satisfies LLMResponse['items'][number],
         ],
         usage: {
           inputTokens: 200,

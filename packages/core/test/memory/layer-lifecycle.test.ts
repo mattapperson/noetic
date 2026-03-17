@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import {
   completeLayers,
   createLayerStateStore,
@@ -416,7 +417,8 @@ describe('layer-lifecycle', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].layerId).toBe('broken');
     expect(errors[0].hook).toBe('init');
-    expect((errors[0].error as Error).message).toBe('init failed');
+    assert(errors[0].error instanceof Error);
+    expect(errors[0].error.message).toBe('init failed');
   });
 
   it('diagnostic callback invoked on recall error', async () => {
@@ -588,5 +590,91 @@ describe('layer-lifecycle', () => {
       store,
     });
     expect(store.get('exec-cleanup', 'a')).toBeUndefined();
+  });
+
+  it('recall string shorthand wraps in developer message', async () => {
+    const store = createLayerStateStore();
+    const layers: MemoryLayer[] = [
+      {
+        id: 'string-layer',
+        name: 'String Layer',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          recall: async () => '<instructions>Hello</instructions>',
+        },
+      },
+    ];
+    const ctx = makeCtx({
+      executionId: 'exec-string-recall',
+    });
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
+    const results = await recallLayers({
+      layers,
+      query: 'q',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map([
+        [
+          'string-layer',
+          1e3,
+        ],
+      ]),
+      store,
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].layerId).toBe('string-layer');
+    expect(results[0].items).toHaveLength(1);
+    expect(results[0].items[0].type).toBe('message');
+    expect(results[0].tokenCount).toBeGreaterThan(0);
+  });
+
+  it('recall null string shorthand is skipped', async () => {
+    const store = createLayerStateStore();
+    const layers: MemoryLayer[] = [
+      {
+        id: 'null-layer',
+        name: 'Null Layer',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          init: async () => ({
+            state: {},
+          }),
+          recall: async () => null,
+        },
+      },
+    ];
+    const ctx = makeCtx({
+      executionId: 'exec-null-recall',
+    });
+    await initLayers({
+      layers,
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
+    const results = await recallLayers({
+      layers,
+      query: 'q',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map([
+        [
+          'null-layer',
+          1e3,
+        ],
+      ]),
+      store,
+    });
+    expect(results).toHaveLength(0);
   });
 });

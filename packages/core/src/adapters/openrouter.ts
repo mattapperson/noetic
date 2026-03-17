@@ -258,7 +258,7 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 // We construct the SDK tool shape manually and use frameworkCast to bridge the
 // Zod version gap. This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation, which works identically across Zod 3 and 4.
-function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime?: Runtime): SdkTool[] {
+function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime: Runtime): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
@@ -284,10 +284,13 @@ export function createOpenRouterCallModel(client: OpenRouter): CallModelFn {
     const { instructions, remaining } = extractSystemInstruction(params.items);
     const input = itemsToInput(remaining);
 
-    const tools =
-      params.tools && params.tools.length > 0
-        ? convertTools(params.tools, params.ctx, params.runtime)
-        : undefined;
+    let tools: SdkTool[] | undefined;
+    if (params.tools && params.tools.length > 0) {
+      if (!params.runtime) {
+        throw new Error('runtime is required when tools are provided');
+      }
+      tools = convertTools(params.tools, params.ctx, params.runtime);
+    }
 
     const result = client.callModel({
       model: params.model,

@@ -2,6 +2,7 @@ import type { ZodType } from 'zod';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
+import { findFunctionCall } from '../function-call-utils';
 
 export type WorkingMemoryState = string | Record<string, unknown>;
 
@@ -34,11 +35,7 @@ export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<Working
       },
 
       async recall({ state }) {
-        if (
-          !state ||
-          (typeof state === 'string' && !state) ||
-          (typeof state === 'object' && Object.keys(state).length === 0)
-        ) {
+        if (!state || (typeof state === 'object' && Object.keys(state).length === 0)) {
           return null;
         }
         const text = typeof state === 'string' ? state : JSON.stringify(state, null, 2);
@@ -55,37 +52,22 @@ export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<Working
         if (config?.readOnly) {
           return;
         }
-        // Watch for updateWorkingMemory function calls
-        for (const item of newItems) {
-          if (item.type !== 'function_call') {
-            continue;
-          }
-          if (item.name === 'updateWorkingMemory') {
-            try {
-              const raw = JSON.parse(item.arguments);
-              if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-                continue;
-              }
-              const { __proto__: _p, constructor: _c, ...safeArgs } = raw;
-              if (typeof state === 'object' && state !== null) {
-                // Shallow merge: top-level keys from safeArgs overwrite state keys
-                const newState = {
-                  ...state,
-                  ...safeArgs,
-                };
-                return {
-                  state: newState,
-                };
-              }
-              return {
-                state: safeArgs,
-              };
-            } catch {
-              // Invalid JSON, skip
-            }
-          }
+        const args = findFunctionCall(newItems, 'updateWorkingMemory');
+        if (!args) {
+          return;
         }
-        // No updateWorkingMemory call found — return undefined to skip unnecessary store.set
+        const { __proto__: _p, constructor: _c, ...safeArgs } = args;
+        if (typeof state === 'object' && state !== null) {
+          return {
+            state: {
+              ...state,
+              ...safeArgs,
+            },
+          };
+        }
+        return {
+          state: safeArgs,
+        };
       },
 
       async onSpawn({ parentState }) {

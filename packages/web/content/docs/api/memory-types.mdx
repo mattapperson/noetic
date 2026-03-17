@@ -10,7 +10,7 @@ The core memory layer interface.
 ```ts
 interface MemoryLayer<TState = unknown> {
   id: string;
-  name: string;
+  name?: string;
   slot: number;
   scope: MemoryScope;
   budget?: BudgetConfig;
@@ -22,7 +22,7 @@ interface MemoryLayer<TState = unknown> {
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `id` | `string` | yes | Unique layer identifier |
-| `name` | `string` | yes | Human-readable name |
+| `name` | `string` | no | Human-readable name for debugging |
 | `slot` | `number` | yes | Ordering priority (lower = earlier in prompt) |
 | `scope` | `MemoryScope` | yes | Persistence boundary |
 | `budget` | `BudgetConfig` | no | Token budget allocation |
@@ -63,7 +63,7 @@ const Slot = {
 ```ts
 interface MemoryHooks<TState = unknown> {
   init?: (params: InitParams) => Promise<InitResult<TState>>;
-  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | null>;
+  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | string | null>;
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;

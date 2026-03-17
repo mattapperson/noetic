@@ -3,7 +3,6 @@ import assert from 'node:assert';
 import type { ObservationalState } from '../../src/memory/layers/observational-memory';
 import { observationalMemory } from '../../src/memory/layers/observational-memory';
 import type { MessageItem } from '../../src/types/items';
-import type { StoreResult } from '../../src/types/memory';
 import { makeCtx, makeItemLog, makeScopedStorage as makeStorage } from '../_helpers';
 
 describe('observationalMemory', () => {
@@ -47,7 +46,9 @@ describe('observationalMemory', () => {
       budget: 1_000,
     });
     expect(result).not.toBeNull();
-    const msg = result!.items[0] as MessageItem;
+    assert(typeof result !== 'string');
+    const msg = result!.items[0];
+    assert(msg.type === 'message');
     const part = msg.content[0];
     assert(part.type === 'input_text');
     expect(part.text).toContain('Tool X returns errors');
@@ -78,7 +79,7 @@ describe('observationalMemory', () => {
     };
 
     // First store: buffer grows
-    const r1 = (await layer.hooks.store!({
+    const r1 = await layer.hooks.store!({
       newItems: [
         msg,
       ],
@@ -94,11 +95,12 @@ describe('observationalMemory', () => {
       },
       ctx: makeCtx(),
       state,
-    })) as StoreResult<ObservationalState>;
+    });
+    assert(r1 !== undefined);
     expect(r1.state.buffer).toHaveLength(1);
 
     // Second store: threshold reached, compresses
-    const r2 = (await layer.hooks.store!({
+    const r2 = await layer.hooks.store!({
       newItems: [
         msg,
       ],
@@ -114,7 +116,8 @@ describe('observationalMemory', () => {
       },
       ctx: makeCtx(),
       state: r1.state,
-    })) as StoreResult<ObservationalState>;
+    });
+    assert(r2 !== undefined);
     expect(r2.state.observations).toHaveLength(1);
     expect(r2.state.observations[0]).toContain('Processed 2 items');
     expect(r2.state.buffer).toHaveLength(0);

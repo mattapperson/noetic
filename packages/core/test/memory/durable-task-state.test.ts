@@ -2,8 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
 import { durableTaskState } from '../../src/memory/layers/durable-task-state';
-import type { MessageItem } from '../../src/types/items';
-import type { ReturnResult, StoreResult } from '../../src/types/memory';
 import { makeCtx, makeItemLog, makeScopedStorage as makeStorage } from '../_helpers';
 
 describe('durableTaskState', () => {
@@ -35,7 +33,9 @@ describe('durableTaskState', () => {
       budget: 500,
     });
     expect(recalled).not.toBeNull();
-    const msg = recalled!.items[0] as MessageItem;
+    assert(typeof recalled !== 'string');
+    const msg = recalled!.items[0];
+    assert(msg.type === 'message');
     const part = msg.content[0];
     assert(part.type === 'input_text');
     expect(part.text).toContain('<task_state>');
@@ -74,7 +74,7 @@ describe('durableTaskState', () => {
       files: [],
       data: {},
     };
-    const result1 = (await layer.hooks.store!({
+    const result1 = await layer.hooks.store!({
       newItems: [],
       log: makeItemLog(),
       response: {
@@ -86,8 +86,9 @@ describe('durableTaskState', () => {
       },
       ctx: makeCtx(),
       state,
-    })) as StoreResult<DurableTaskState>;
-    const result2 = (await layer.hooks.store!({
+    });
+    assert(result1 !== undefined);
+    const result2 = await layer.hooks.store!({
       newItems: [],
       log: makeItemLog(),
       response: {
@@ -99,7 +100,8 @@ describe('durableTaskState', () => {
       },
       ctx: makeCtx(),
       state: result1.state,
-    })) as StoreResult<DurableTaskState>;
+    });
+    assert(result2 !== undefined);
     expect(result2.state.checkpoints).toHaveLength(2);
     expect(result2.state.checkpoints[0]).toHaveProperty('timestamp');
     expect(result2.state.checkpoints[0]).toHaveProperty('depth');
@@ -121,12 +123,13 @@ describe('durableTaskState', () => {
         key: 'child-value',
       },
     };
-    const result = (await layer.hooks.onReturn!({
+    const result = await layer.hooks.onReturn!({
       childState,
       childLog: makeItemLog(),
       parentState,
       result: 'done',
-    })) as ReturnResult<DurableTaskState>;
+    });
+    assert(result !== undefined);
     // { ...parent.data, ...child.data } → child overwrites
     expect(result.parentState.data.key).toBe('child-value');
   });
@@ -161,12 +164,13 @@ describe('durableTaskState', () => {
         y: 2,
       },
     };
-    const result = (await layer.hooks.onReturn!({
+    const result = await layer.hooks.onReturn!({
       childState,
       childLog: makeItemLog(),
       parentState,
       result: 'done',
-    })) as ReturnResult<DurableTaskState>;
+    });
+    assert(result !== undefined);
     expect(result.parentState.checkpoints).toHaveLength(2);
     expect(result.parentState.files).toContain('a.ts');
     expect(result.parentState.files).toContain('b.ts');
@@ -189,7 +193,7 @@ describe('durableTaskState', () => {
       state,
       outcome: 'success',
     });
-    assert(result !== null && result !== undefined && 'state' in result);
+    assert(result !== undefined);
     expect(result.state.data.__outcome).toBe('success');
     expect(result.state.checkpoints).toHaveLength(1);
     expect(result.state.checkpoints[0]).toHaveProperty('timestamp');
@@ -213,7 +217,7 @@ describe('durableTaskState', () => {
       state,
       outcome: 'failure',
     });
-    assert(result !== null && result !== undefined && 'state' in result);
+    assert(result !== undefined);
     expect(result.state.data.__outcome).toBe('failure');
     expect(result.state.checkpoints).toHaveLength(2);
   });

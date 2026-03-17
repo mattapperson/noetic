@@ -13,8 +13,8 @@ export interface ToolMemory {
 export interface ToolExecutionContext {
   /** The current step execution context (access to item log, parent id, etc.). */
   readonly ctx: Context;
-  /** The runtime instance, if available (undefined during unit tests). */
-  readonly runtime: Runtime | undefined;
+  /** The runtime instance executing this tool. */
+  readonly runtime: Runtime;
   /** Per-layer memory accessor for reading/writing tool-specific state. */
   readonly memory: ToolMemory;
   /** The fully assembled conversation view at the point of tool invocation. */

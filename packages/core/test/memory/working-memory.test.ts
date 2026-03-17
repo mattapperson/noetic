@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { FunctionCallItem, MessageItem } from '../../src/types/items';
-import type { StoreResult } from '../../src/types/memory';
+import type { FunctionCallItem } from '../../src/types/items';
 import { makeCtx, makeItemLog, makeScopedStorage as makeStorage } from '../_helpers';
 
 describe('workingMemory layer', () => {
@@ -51,8 +50,10 @@ describe('workingMemory layer', () => {
       budget: 1_000,
     });
     expect(result).not.toBeNull();
+    assert(typeof result !== 'string');
     expect(result!.items).toHaveLength(1);
-    const msg = result!.items[0] as MessageItem;
+    const msg = result!.items[0];
+    assert(msg.type === 'message');
     expect(msg.role).toBe('developer');
     const part = msg.content[0];
     assert(part.type === 'input_text');
@@ -94,7 +95,7 @@ describe('workingMemory layer', () => {
       name: 'updateWorkingMemory',
       arguments: '{"notes":"updated"}',
     };
-    const result = (await layer.hooks.store!({
+    const result = await layer.hooks.store!({
       newItems: [
         funcCall,
       ],
@@ -112,7 +113,9 @@ describe('workingMemory layer', () => {
       state: {
         existing: true,
       },
-    })) as StoreResult<Record<string, unknown>>;
+    });
+    assert(result !== undefined);
+    assert(typeof result.state !== 'string');
     expect(result.state.notes).toBe('updated');
     expect(result.state.existing).toBe(true); // shallow merged via spread
   });
@@ -189,7 +192,7 @@ describe('workingMemory layer', () => {
       name: 'updateWorkingMemory',
       arguments: '{"nested":{"a":99}}',
     };
-    const result = (await layer.hooks.store!({
+    const result = await layer.hooks.store!({
       newItems: [
         funcCall,
       ],
@@ -210,7 +213,9 @@ describe('workingMemory layer', () => {
           b: 2,
         },
       },
-    })) as StoreResult<Record<string, unknown>>;
+    });
+    assert(result !== undefined);
+    assert(typeof result.state !== 'string');
     // Shallow merge: nested object is replaced entirely, b is lost
     expect(result.state.nested).toEqual({
       a: 99,

@@ -59,6 +59,14 @@ export async function execute<I, O>(
       }
       return executeLLM(step, input, ctx, callModel, runtime);
     case 'tool':
+      if (!runtime) {
+        throw new NoeticErrorImpl({
+          kind: 'step_failed',
+          stepId: step.id,
+          cause: new Error('runtime is required for tool steps'),
+          retriesExhausted: false,
+        });
+      }
       return executeTool(step, input, ctx, runtime);
     case 'branch':
       return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));

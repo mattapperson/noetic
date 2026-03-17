@@ -170,6 +170,12 @@ interface StepToolOpts<I, O> {
 ## The `Tool` Type
 
 ```typescript
+interface ToolMemoryDeclaration<TState = unknown> {
+  id?: string;            // shared id = shared state; defaults to tool.name
+  init: () => TState;
+  recall: (state: TState) => string | null;
+}
+
 interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
   name: string;
   description: string;
@@ -177,8 +183,11 @@ interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodType
   output: O;
   execute: (args: z.infer<I>, ctx: Context) => Promise<z.infer<O>>;
   needsApproval?: boolean;  // preventive gating, not reactive throwing
+  memory?: ToolMemoryDeclaration;
 }
 ```
+
+`toolMemoryLayer(tools)` generates one `MemoryLayer` per unique `memory.id` among the tools. Tools sharing the same id share state.
 
 ---
 

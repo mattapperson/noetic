@@ -20,6 +20,7 @@ function react(opts: {
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
+  memory?: MemoryLayer[];
 }) {
   const llmStep = step.llm({
     id: 'react-step',
@@ -28,7 +29,7 @@ function react(opts: {
     tools: opts.tools,
   });
 
-  return loop({
+  const loopStep = loop({
     id: 'react-loop',
     body: llmStep,
     until: any(
@@ -37,6 +38,9 @@ function react(opts: {
       ...(opts.maxCost ? [until.maxCost(opts.maxCost)] : []),
     ),
   });
+
+  if (!opts.memory) return loopStep;
+  return spawn({ id: 'react-agent', child: loopStep, memory: opts.memory });
 }
 ```
 

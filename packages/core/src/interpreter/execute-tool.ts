@@ -8,7 +8,7 @@ export async function executeTool<I, O>(
   step: StepTool<I, O>,
   input: I,
   ctx: Context,
-  runtime?: Runtime,
+  runtime: Runtime,
 ): Promise<O> {
   // Merge step.args with input (step.args takes precedence as overrides, input as base)
   const args = step.args ? Object.assign({}, input, step.args) : input;
@@ -30,6 +30,9 @@ export async function executeTool<I, O>(
     const result = await step.tool.execute(parseResult.data, toolCtx);
     return result;
   } catch (e) {
+    if (e instanceof NoeticErrorImpl) {
+      throw e;
+    }
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,

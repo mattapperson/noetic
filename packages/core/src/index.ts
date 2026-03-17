@@ -33,6 +33,7 @@ export { executeSpawn } from './interpreter/execute-spawn';
 export { executeTool } from './interpreter/execute-tool';
 export type { BudgetAllocation, BudgetLimits } from './memory/budget';
 export { allocateBudgets, checkBudget } from './memory/budget';
+export { findFunctionCall } from './memory/function-call-utils';
 export type { LayerStateStore } from './memory/layer-lifecycle';
 export {
   completeLayers,
@@ -51,6 +52,8 @@ export type {
   ObservationalState,
 } from './memory/layers/observational-memory';
 export { observationalMemory } from './memory/layers/observational-memory';
+export { staticContent } from './memory/layers/static-content';
+export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 export { workingMemory } from './memory/layers/working-memory';
 export { assembleView } from './memory/projector';
@@ -74,6 +77,7 @@ export type {
   StepMeta,
   TokenUsage,
   Tool,
+  ToolMemoryDeclaration,
 } from './types/common';
 export type { Context, ItemLog } from './types/context';
 export type { DetachedHandle } from './types/detached';

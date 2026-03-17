@@ -3,11 +3,13 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeTool } from '../../src/interpreter/execute-tool';
+import { frameworkCast } from '../../src/interpreter/framework-cast';
 import type { StepTool } from '../../src/types/step';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
-import { makeMockContext } from '../_helpers';
+import { makeMockContext, makeMockRuntime } from '../_helpers';
 
 const mockCtx = makeMockContext();
+const mockRuntime = makeMockRuntime();
 
 describe('executeTool', () => {
   it('calls tool.execute() and returns typed output', async () => {
@@ -45,6 +47,7 @@ describe('executeTool', () => {
         b: 4,
       },
       mockCtx,
+      mockRuntime,
     );
     expect(result).toEqual({
       sum: 7,
@@ -79,12 +82,12 @@ describe('executeTool', () => {
       id: 'greet-test',
       tool,
     };
-    const badInput = {
+    const badInput = frameworkCast<GreetInput>({
       name: 123,
-    } as unknown as GreetInput;
+    });
 
     try {
-      await executeTool(s, badInput, mockCtx);
+      await executeTool(s, badInput, mockCtx, mockRuntime);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -139,6 +142,7 @@ describe('executeTool', () => {
         limit: 10,
       },
       mockCtx,
+      mockRuntime,
     );
     expect(receivedArgs?.query).toBe('test');
     expect(receivedArgs?.limit).toBe(5); // step.args overrides
@@ -161,7 +165,7 @@ describe('executeTool', () => {
       id: 'ctx-test',
       tool,
     };
-    await executeTool(s, {}, mockCtx);
+    await executeTool(s, {}, mockCtx, mockRuntime);
     assert(receivedToolCtx !== undefined);
     expect(receivedToolCtx.ctx).toBe(mockCtx);
     expect(receivedToolCtx.memory).toBeDefined();
@@ -185,7 +189,7 @@ describe('executeTool', () => {
     };
 
     try {
-      await executeTool(s, {}, mockCtx);
+      await executeTool(s, {}, mockCtx, mockRuntime);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));

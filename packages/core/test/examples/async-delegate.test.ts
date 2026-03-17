@@ -5,10 +5,7 @@ import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../
 
 describe('async delegate demo', () => {
   it('buildAsyncDelegateAgent creates loop with inbox and parkTimeout', () => {
-    const runtime = new InMemoryRuntime();
-
     const agent = buildAsyncDelegateAgent({
-      runtime,
       inbox: agentInbox,
     });
 
@@ -47,7 +44,6 @@ describe('async delegate demo', () => {
     );
 
     const agent = buildAsyncDelegateAgent({
-      runtime,
       inbox: agentInbox,
       parkTimeout: 50,
     });

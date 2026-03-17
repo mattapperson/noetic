@@ -143,7 +143,7 @@ export interface DisposeParams<TState> {
 // Memory hooks interface
 export interface MemoryHooks<TState = unknown> {
   init?: (params: InitParams) => Promise<InitResult<TState>>;
-  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | null>;
+  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | string | null>;
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
@@ -161,7 +161,7 @@ export interface MemoryLayer<TState = unknown> {
   /** Unique identifier for this layer instance. */
   id: string;
   /** Human-readable name for debugging and trace output. */
-  name: string;
+  name?: string;
   /** Ordering slot (lower = recalled first). Use `Slot` constants for well-known positions. */
   slot: number;
   /** Scope controlling state isolation: `'thread'`, `'resource'`, `'global'`, or `'execution'`. */

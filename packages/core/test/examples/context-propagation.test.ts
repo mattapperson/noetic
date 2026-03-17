@@ -4,22 +4,32 @@ import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/de
 import { channel } from '../../src/builders/channel-builder';
 import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
 import type { DetachedHandle } from '../../src/types/detached';
-import { makeMockToolContext } from '../_helpers';
+import type { ToolExecutionContext } from '../../src/types/tool-context';
+
+function makeToolCtxWithRuntime(runtime: InMemoryRuntime): ToolExecutionContext {
+  const ctx = runtime.createContext({
+    threadId: 'thread-abc',
+    resourceId: 'resource-xyz',
+  });
+  return {
+    ctx,
+    runtime,
+    memory: {
+      get: () => undefined,
+      set: () => {},
+    },
+    assembledView: ctx.itemLog.items,
+    lastStepMeta: null,
+  };
+}
 
 describe('context propagation in delegate tools', () => {
   it('sync delegate tool uses parent context, not a new root context', async () => {
     const runtime = new InMemoryRuntime();
-    const parentCtx = runtime.createContext({
-      threadId: 'thread-abc',
-      resourceId: 'resource-xyz',
-    });
+    const toolCtx = makeToolCtxWithRuntime(runtime);
 
-    const delegateTool = createSyncDelegateTool(runtime);
-    const toolCtx = makeMockToolContext(parentCtx);
+    const delegateTool = createSyncDelegateTool();
 
-    // Calling execute with the parent context should not throw
-    // and the tool should forward ctx to runtime.execute
-    // (which will fail because no callModel is set, but that's expected)
     try {
       await delegateTool.execute(
         {
@@ -28,16 +38,14 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured — rethrow anything unexpected
+      // Expected: no callModel configured
       if (!(err instanceof Error && err.message.includes('callModel'))) {
         throw err;
       }
     }
 
-    // The key assertion: parentCtx should have been used (not a new root)
-    // We verify by checking the parent context's threadId is preserved
-    expect(parentCtx.threadId).toBe('thread-abc');
-    expect(parentCtx.resourceId).toBe('resource-xyz');
+    expect(toolCtx.ctx.threadId).toBe('thread-abc');
+    expect(toolCtx.ctx.resourceId).toBe('resource-xyz');
   });
 
   it('async launch tool uses parent context, not a new root context', async () => {
@@ -47,19 +55,13 @@ describe('context propagation in delegate tools', () => {
       mode: 'queue',
     });
     const handles = new Map<string, DetachedHandle<string>>();
-    const parentCtx = runtime.createContext({
-      threadId: 'thread-async',
-      resourceId: 'resource-async',
-    });
+    const toolCtx = makeToolCtxWithRuntime(runtime);
 
     const launchTool = createAsyncLaunchTool({
-      runtime,
       inbox,
       handles,
     });
-    const toolCtx = makeMockToolContext(parentCtx);
 
-    // This will create a detached spawn using the parent context
     try {
       await launchTool.execute(
         {
@@ -68,14 +70,14 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured — rethrow anything unexpected
+      // Expected: no callModel configured
       if (!(err instanceof Error && err.message.includes('callModel'))) {
         throw err;
       }
     }
 
-    expect(parentCtx.threadId).toBe('thread-async');
-    expect(parentCtx.resourceId).toBe('resource-async');
+    expect(toolCtx.ctx.threadId).toBe('thread-abc');
+    expect(toolCtx.ctx.resourceId).toBe('resource-xyz');
   });
 
   it('detachedSpawn forwards threadId and resourceId to child context', () => {
@@ -85,7 +87,6 @@ describe('context propagation in delegate tools', () => {
       resourceId: 'parent-resource',
     });
 
-    // Create a child context the same way detachedSpawn does internally
     const childCtx = runtime.createContext({
       parent: parentCtx,
       threadId: parentCtx.threadId,

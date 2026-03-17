@@ -13,7 +13,6 @@ import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
 import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
-import type { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
 import type { Channel } from '../src/types/channel';
 import type { DetachedHandle } from '../src/types/detached';
 import type { StepLoop } from '../src/types/step';
@@ -34,15 +33,13 @@ export const delegateInbox = channel('delegate-inbox', {
 
 /** Builds an agent loop where the LLM can choose sync or async delegation. */
 export function buildDynamicDelegateAgent(opts: {
-  runtime: InMemoryRuntime;
   inbox: Channel<string>;
   parkTimeout?: number;
 }): StepLoop<string, string> {
   const handles = new Map<string, DetachedHandle<string>>();
 
-  const syncTool = createSyncDelegateTool(opts.runtime);
+  const syncTool = createSyncDelegateTool();
   const asyncTool = createAsyncLaunchTool({
-    runtime: opts.runtime,
     inbox: opts.inbox,
     handles,
   });
