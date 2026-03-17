@@ -9,6 +9,14 @@ import type { ToolExecutionContext } from '../types/tool-context';
  * full type safety on `execute` args and return value, while returning
  * the wide `Tool` type so the result is directly usable in `tools[]` arrays.
  *
+ * @param config.name - Unique tool name used by the LLM for selection.
+ * @param config.description - Human-readable description shown to the LLM.
+ * @param config.input - Zod schema validating tool input arguments.
+ * @param config.output - Zod schema validating tool return value.
+ * @param config.execute - Async function `(args, toolCtx) => result` that performs the tool's work.
+ * @param config.needsApproval - When true, execution pauses for human approval before running.
+ * @returns A `Tool` instance usable in `step.llm` tool arrays.
+ *
  * @example
  * ```ts
  * const myTool = tool({

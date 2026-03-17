@@ -5,36 +5,53 @@ import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { MemoryLayer } from './memory';
 
-// Until predicate types
+/** Cumulative execution snapshot passed to loop `until` predicates. */
 export interface Snapshot {
+  /** Number of loop iterations completed so far. */
   stepCount: number;
+  /** Aggregate token usage across all iterations. */
   tokens: {
     input: number;
     output: number;
     total: number;
   };
+  /** Wall-clock time in ms since the loop started. */
   elapsed: number;
+  /** Cumulative cost across all iterations. */
   cost: number;
+  /** Raw output of the most recent iteration. */
   lastOutput: unknown;
+  /** Stringified text of the most recent iteration output. */
   lastText: string;
+  /** Array of all prior iteration outputs (bounded by `maxHistorySize`). */
   history: unknown[];
+  /** Nesting depth of the current execution context. */
   depth: number;
+  /** Metadata from the most recent step execution (token usage, tool calls, etc.). */
   lastStepMeta?: StepMeta | null;
 }
 
+/** Decision returned by a loop `until` predicate. */
 export interface Verdict {
+  /** When true, the loop terminates after this iteration. */
   stop: boolean;
+  /** Human-readable explanation of why the loop stopped (logged in traces). */
   reason?: string;
+  /** Feedback string injected into the next iteration's context (ignored when `stop` is true). */
   feedback?: string;
 }
 
 export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
-// Settle result for fork
+/** Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`). */
 export interface SettleResult<O> {
+  /** Id of the step that produced this result. */
   stepId: string;
+  /** Whether the path completed successfully or threw. */
   status: 'fulfilled' | 'rejected';
+  /** The path's return value (present when `status` is `'fulfilled'`). */
   value?: O;
+  /** The error that caused rejection (present when `status` is `'rejected'`). */
   error?: NoeticError;
 }
 
@@ -115,16 +132,26 @@ export interface StepSpawn<I, O> {
   timeout?: number;
 }
 
+/** A loop step that iterates a body step until a termination predicate is satisfied. */
 export interface StepLoop<I, O> {
   kind: 'loop';
+  /** Unique step identifier used in traces and error messages. */
   id: string;
+  /** Step to execute on each iteration. */
   body: Step<I, O>;
+  /** Termination predicate evaluated after each iteration with a cumulative snapshot. */
   until: Until;
+  /** Hard safety cap on iterations (default: 1000). */
   maxIterations?: number;
+  /** Maximum number of entries kept in the snapshot history array. */
   maxHistorySize?: number;
+  /** Optional channel for injecting messages into the loop mid-execution. */
   inbox?: Channel<string>;
+  /** Ms to wait on inbox before the loop parks itself (default: 0 = no parking). */
   parkTimeout?: number;
+  /** Transforms the previous iteration's output into the next iteration's input. */
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
+  /** Per-iteration error handler: retry the iteration, skip it, or abort the loop. */
   onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
 

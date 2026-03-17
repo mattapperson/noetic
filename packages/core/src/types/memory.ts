@@ -156,14 +156,21 @@ export interface MemoryHooks<TState = unknown> {
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
 }
 
-// The main MemoryLayer interface
+/** A composable memory layer that participates in the recall/store lifecycle. */
 export interface MemoryLayer<TState = unknown> {
+  /** Unique identifier for this layer instance. */
   id: string;
+  /** Human-readable name for debugging and trace output. */
   name: string;
+  /** Ordering slot (lower = recalled first). Use `Slot` constants for well-known positions. */
   slot: number;
+  /** Scope controlling state isolation: `'thread'`, `'resource'`, `'global'`, or `'execution'`. */
   scope: MemoryScope;
+  /** Token budget: a fixed number, a `{ min, max }` range, or `'auto'` for dynamic allocation. */
   budget?: BudgetConfig;
+  /** Lifecycle hooks invoked by the runtime at each phase (init, recall, store, etc.). */
   hooks: MemoryHooks<TState>;
+  /** Per-hook timeout overrides in ms. */
   timeouts?: Partial<LayerTimeouts>;
 }
 

@@ -9,11 +9,18 @@ export interface ToolMemory {
   set<T>(layerId: string, state: T): void;
 }
 
+/** Context provided to a tool's `execute` function at invocation time. */
 export interface ToolExecutionContext {
+  /** The current step execution context (access to item log, parent id, etc.). */
   readonly ctx: Context;
+  /** The runtime instance, if available (undefined during unit tests). */
   readonly runtime: Runtime | undefined;
+  /** Per-layer memory accessor for reading/writing tool-specific state. */
   readonly memory: ToolMemory;
+  /** The fully assembled conversation view at the point of tool invocation. */
   readonly assembledView: ReadonlyArray<Item>;
+  /** Metadata from the most recent step execution (token usage, tool calls, etc.). */
   readonly lastStepMeta: StepMeta | null;
+  /** OpenRouter turn context, when using the OpenRouter SDK adapter. */
   readonly turnContext?: TurnContext;
 }

@@ -2,26 +2,43 @@ import type { ZodTypeAny, z } from 'zod';
 import type { FunctionCallItem, Item } from './items';
 import type { ToolExecutionContext } from './tool-context';
 
+/** Policy controlling automatic retry behavior on step failure. */
 export interface RetryPolicy {
+  /** Maximum number of execution attempts (including the initial try). */
   maxAttempts: number;
+  /** Backoff strategy between retries. */
   backoff: 'fixed' | 'linear' | 'exponential';
+  /** Delay in ms before the first retry. */
   initialDelay: number;
+  /** Upper bound in ms for the computed delay (caps exponential/linear growth). */
   maxDelay?: number;
 }
 
+/** Optional parameters forwarded to the model provider during an LLM step. */
 export interface ModelParams {
+  /** Sampling temperature (0 = deterministic, higher = more creative). */
   temperature?: number;
+  /** Nucleus sampling threshold (alternative to temperature). */
   topP?: number;
+  /** Maximum number of tokens the model may generate. */
   maxTokens?: number;
+  /** Sequences that cause the model to stop generating. */
   stopSequences?: string[];
 }
 
+/** A tool definition that an LLM can invoke during execution. */
 export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
+  /** Unique tool name used by the LLM for selection. */
   name: string;
+  /** Human-readable description shown to the LLM. */
   description: string;
+  /** Zod schema validating tool input arguments. */
   input: I;
+  /** Zod schema validating tool return value. */
   output: O;
+  /** Async function that performs the tool's work. */
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
+  /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
 }
 

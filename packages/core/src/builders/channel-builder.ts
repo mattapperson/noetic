@@ -1,6 +1,16 @@
 import type { ZodType } from 'zod';
 import type { Channel, ExternalChannel } from '../types/channel';
 
+/**
+ * Creates a typed communication channel writable from outside the execution tree.
+ *
+ * @param name - Channel name for identification and debugging.
+ * @param opts.schema - Zod schema used to validate every message sent through the channel.
+ * @param opts.mode - Delivery semantics: `'value'` (last-write-wins), `'queue'` (FIFO), `'topic'` (pub/sub).
+ * @param opts.capacity - Buffer size for queue mode (default: 1000). Ignored for value/topic modes.
+ * @param opts.external - Must be `true` to create an externally writable channel.
+ * @returns An `ExternalChannel`.
+ */
 export function channel<T>(
   name: string,
   opts: {
@@ -11,6 +21,16 @@ export function channel<T>(
   },
 ): ExternalChannel<T>;
 
+/**
+ * Creates a typed communication channel for inter-step messaging within an execution tree.
+ *
+ * @param name - Channel name for identification and debugging.
+ * @param opts.schema - Zod schema used to validate every message sent through the channel.
+ * @param opts.mode - Delivery semantics: `'value'` (last-write-wins), `'queue'` (FIFO), `'topic'` (pub/sub).
+ * @param opts.capacity - Buffer size for queue mode (default: 1000). Ignored for value/topic modes.
+ * @param opts.external - Omit or set to `false` for internal-only channels.
+ * @returns A `Channel`.
+ */
 export function channel<T>(
   name: string,
   opts: {
