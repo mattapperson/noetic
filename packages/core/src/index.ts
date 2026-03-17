@@ -31,6 +31,7 @@ export { executeRun } from './interpreter/execute-run';
 export type { ExecuteSpawnOpts } from './interpreter/execute-spawn';
 export { executeSpawn } from './interpreter/execute-spawn';
 export { executeTool } from './interpreter/execute-tool';
+export { frameworkCast } from './interpreter/framework-cast';
 export type { BudgetAllocation, BudgetLimits } from './memory/budget';
 export { allocateBudgets, checkBudget } from './memory/budget';
 export { findFunctionCall } from './memory/function-call-utils';

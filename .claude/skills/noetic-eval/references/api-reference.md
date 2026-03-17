@@ -8,10 +8,15 @@ Registers an eval suite.
 
 ```typescript
 function describe(
-  config: EvalSuiteConfig,
+  config: DescribeConfig,
   objective: EvalObjective,
   fn: () => void,
 ): void;
+
+// Accepts any Step<I, O> — no type widening needed by callers
+type DescribeConfig = Omit<EvalSuiteConfig, 'step'> & {
+  step: { kind: Step['kind']; id: string };
+};
 
 interface EvalSuiteConfig {
   step: Step;
@@ -232,5 +237,51 @@ interface AdapterConfig {
   wrap: Record<string, (...args: unknown[]) => unknown>;
   fields?: Record<string, FieldMapping>;
   skill?: string;
+}
+```
+
+## Test Helpers
+
+### Scripted Call Model
+
+From `@noetic/core/test/_helpers` — deterministic LLM responses for eval testing without real API calls:
+
+```typescript
+import {
+  createScriptedCallModel,
+  textOnlyResponse,
+  toolCallResponse,
+} from '@noetic/core/test/_helpers';
+
+// Returns responses in order; throws if exhausted
+createScriptedCallModel(script: LLMResponse[]): () => Promise<LLMResponse>
+
+// Text-only response (no tool calls — triggers until.noToolCalls())
+textOnlyResponse(text: string): LLMResponse
+
+// Tool call + output + final text in one response
+toolCallResponse({
+  toolName: string;
+  args: string;        // JSON.stringify'd tool arguments
+  output: string;      // Tool execution result
+  finalText: string;   // Assistant text after tool call
+}): LLMResponse
+```
+
+### Running Evals in bun test
+
+```typescript
+import { clearSuites, getSuites, runAllSuites } from '@noetic/eval';
+
+// Each test should clearSuites() first (global registry is shared)
+clearSuites();
+await import('./my-agent.eval');
+const results = await runAllSuites(getSuites());
+
+// Check all cases passed
+for (const suite of results) {
+  for (const c of suite.cases) {
+    if (!c.passed) throw new Error(`"${c.name}" failed: ${c.error}`);
+  }
 }
 ```

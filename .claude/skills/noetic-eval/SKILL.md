@@ -231,6 +231,39 @@ const adapted = createAdapter({
 });
 ```
 
+## Deterministic Testing with Scripted callModel
+
+To test agent patterns without making real LLM calls, use the scripted call model helpers from `@noetic/core/test/_helpers`:
+
+```typescript
+import {
+  createScriptedCallModel,
+  textOnlyResponse,
+  toolCallResponse,
+} from '@noetic/core/test/_helpers';
+
+const callModel = createScriptedCallModel([
+  // First call: LLM calls a tool
+  toolCallResponse({
+    toolName: 'search',
+    args: JSON.stringify({ query: 'test' }),
+    output: 'search results',
+    finalText: 'Found results.',
+  }),
+  // Second call: LLM responds with text only (no tool calls → loop terminates)
+  textOnlyResponse('Here is my final answer.'),
+]);
+
+describe({ step: myReactAgent, callModel }, { objective: '...' }, () => {
+  it('uses search tool', async (ctx) => {
+    const exec = await ctx.execute('Find something');
+    await exec.score([scorer.latency({ target: 100, maxAcceptable: 5e3 })]);
+  });
+});
+```
+
+**Script sizing:** The scripted model must contain enough responses for the full execution. For a ReAct agent with `maxSteps: 5`, ensure the script includes a `textOnlyResponse` (no tool calls) before index 5 to trigger `until.noToolCalls()` termination.
+
 ## How to Write an Eval
 
 ### Step 1: Create the File
@@ -240,6 +273,8 @@ Create `<name>.eval.ts` anywhere in your project. Import your agent step and `@n
 ### Step 2: Define the Suite
 
 Use `describe()` with your step config and objective. Include `callModel` if your step needs LLM access.
+
+`describe()` accepts steps with any `I`/`O` type parameters — no need to widen types or cast. Steps of type `Step<string, string>`, `Step<unknown, unknown>`, etc. all work directly.
 
 ### Step 3: Write Test Cases
 
@@ -255,6 +290,24 @@ Each `it()` block calls `ctx.execute(input)` and scores the result. Choose score
 ```bash
 noetic test
 ```
+
+### Running Evals as Tests
+
+To run eval suites as part of `bun test`, import the `.eval.ts` file in a test and use `runAllSuites`:
+
+```typescript
+import { clearSuites, getSuites, runAllSuites } from '@noetic/eval';
+
+clearSuites();
+await import('./my-agent.eval');
+const results = await runAllSuites(getSuites());
+```
+
+### Common Pitfalls
+
+- **Scripted callModel exhaustion**: Ensure the scripted call model has enough responses for the full execution (including loop iterations and tool call rounds)
+- **`compilePlan` with mixed execution**: Nested plans mixing sequential and parallel require `executeStep` — pure eval context cannot execute `fork` steps inside sequential chains without it
+- **Verify return type**: The `ralphWiggum` verify function must return `{ pass: boolean; feedback?: string }` (note: `pass`, not `passed`)
 
 ## Source Locations
 

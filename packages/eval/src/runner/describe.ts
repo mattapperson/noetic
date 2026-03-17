@@ -1,3 +1,6 @@
+import type { Step } from '@noetic/core';
+import { frameworkCast } from '@noetic/core';
+
 import type { EvalObjective, EvalSuiteConfig } from '../types/eval';
 import type { EvalContext } from './eval-context';
 import { registerSuite } from './registry';
@@ -15,6 +18,14 @@ export interface CaseDefinition {
   fn: (ctx: EvalContext) => Promise<void>;
 }
 
+/** Widened config type for describe() — accepts Step with any I/O types. */
+export type DescribeConfig = Omit<EvalSuiteConfig, 'step'> & {
+  step: {
+    kind: Step['kind'];
+    id: string;
+  };
+};
+
 //#endregion
 
 //#region Active Cases State
@@ -29,7 +40,7 @@ export function getActiveCases(): CaseDefinition[] | null {
 
 //#region Public API
 
-export function describe(config: EvalSuiteConfig, objective: EvalObjective, fn: () => void): void {
+export function describe(config: DescribeConfig, objective: EvalObjective, fn: () => void): void {
   const cases: CaseDefinition[] = [];
   const previous = activeCases;
   activeCases = cases;
@@ -39,7 +50,7 @@ export function describe(config: EvalSuiteConfig, objective: EvalObjective, fn: 
     activeCases = previous;
   }
   registerSuite({
-    config,
+    config: frameworkCast<EvalSuiteConfig>(config),
     objective,
     cases,
   });

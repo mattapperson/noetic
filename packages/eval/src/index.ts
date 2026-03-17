@@ -14,7 +14,7 @@ export { optimize } from './optimization/optimizer';
 // Regression
 export { loadBaseline, saveBaseline } from './regression/baseline';
 export { checkRegression } from './regression/comparator';
-export type { CaseDefinition, SuiteDefinition } from './runner/describe';
+export type { CaseDefinition, DescribeConfig, SuiteDefinition } from './runner/describe';
 // Runner
 export { describe } from './runner/describe';
 export type { EvalContext } from './runner/eval-context';
