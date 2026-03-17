@@ -4,7 +4,7 @@ import type { SourceLocation } from '../types/source-location';
 
 //#region Types
 
-interface WriteBackEntry {
+export interface WriteBackEntry {
   sourceLocation: SourceLocation;
   newValue: string;
 }

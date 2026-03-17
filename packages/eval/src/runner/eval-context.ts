@@ -1,7 +1,7 @@
 import type { Step } from '@noetic/core';
-import { InMemoryExporter, InMemoryRuntime, spawn } from '@noetic/core';
+import { InMemoryExporter, InMemoryRuntime } from '@noetic/core';
 
-import type { EvalSuiteConfig } from '../types/eval';
+import type { EvalSuiteOptions } from '../types/eval';
 import type { EvalExecution, ScoreResult, ScorerFn } from './eval-execution';
 
 //#region Types
@@ -33,31 +33,21 @@ async function runScorers(opts: RunScorersOpts): Promise<ScoreResult[]> {
 
 //#region Public API
 
-export function createEvalContext(
-  config: EvalSuiteConfig,
-  objective: string,
-  background: string,
-): EvalContext {
+export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalContext {
+  const objective = options.objective;
+  const background = options.background ?? '';
+
   return {
     objective,
     background,
     async execute(input: unknown): Promise<EvalExecution> {
       const exporter = new InMemoryExporter();
       const runtime = new InMemoryRuntime({
-        callModel: config.callModel,
         traceExporter: exporter,
       });
 
-      const targetStep: Step = config.memory?.length
-        ? spawn({
-            id: 'eval-memory-wrapper',
-            child: config.step,
-            memory: config.memory,
-          })
-        : config.step;
-
       const ctx = runtime.createContext();
-      const output = await runtime.execute(targetStep, input, ctx);
+      const output = await runtime.execute(step, input, ctx);
       const traces = [
         ...exporter.spans,
       ];

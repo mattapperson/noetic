@@ -25,9 +25,7 @@ bunDescribe('it.each()', () => {
       },
     ];
 
-    describe({
-      step: testStep,
-    }, {
+    describe(testStep, {
       objective: 'dataset test',
     }, () => {
       it.each(dataset, async (ctx) => {
@@ -53,9 +51,7 @@ bunDescribe('it.each()', () => {
 
     const captured: string[] = [];
 
-    describe({
-      step: testStep,
-    }, {
+    describe(testStep, {
       objective: 'capture test',
     }, () => {
       it.each(

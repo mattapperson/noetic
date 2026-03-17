@@ -9,11 +9,7 @@ async function runCase(
   suite: SuiteDefinition,
 ): Promise<CaseResult> {
   const caseStart = performance.now();
-  const ctx = createEvalContext(
-    suite.config,
-    suite.objective.objective,
-    suite.objective.background ?? '',
-  );
+  const ctx = createEvalContext(suite.step, suite.options);
 
   try {
     await caseDef.fn(ctx);
@@ -55,8 +51,8 @@ export async function runSuite(suite: SuiteDefinition): Promise<SuiteResult> {
   }
 
   return {
-    suiteName: suite.objective.objective,
-    objective: suite.objective.objective,
+    suiteName: suite.options.objective,
+    objective: suite.options.objective,
     cases,
     aggregateScore: computeAggregateScore(cases),
     duration: performance.now() - suiteStart,

@@ -173,22 +173,29 @@ async function handleRegressionCheck(results: SuiteResult[]): Promise<boolean> {
 async function handleOptimization(
   suites: ReadonlyArray<SuiteDefinition>,
   args: CliArgs,
+  evalFiles: string[],
 ): Promise<void> {
   console.log('Starting optimization...');
   const { optimize } = await import('../optimization/optimizer');
   const { runAllSuites } = await import('../runner/suite-runner');
+  const { discoverFieldsFromSource } = await import('../static-analysis/ast-field-discovery');
+  const { discoverFields, enrichWithSourceLocations } = await import(
+    '../optimization/field-discovery'
+  );
+
+  const astFields = evalFiles.flatMap((f) => discoverFieldsFromSource(f));
 
   for (const suite of suites) {
+    const runtimeFields = discoverFields(suite.step);
     await optimize({
-      step: suite.config.step,
+      step: suite.step,
+      preEnrichedFields:
+        astFields.length > 0 ? enrichWithSourceLocations(runtimeFields, astFields) : runtimeFields,
       scope: args.scope,
       runEval: async (modifiedStep: Step) => {
         const modifiedSuite: SuiteDefinition = {
           ...suite,
-          config: {
-            ...suite.config,
-            step: modifiedStep,
-          },
+          step: modifiedStep,
         };
         const [result] = await runAllSuites([
           modifiedSuite,
@@ -250,7 +257,7 @@ async function runEvals(args: CliArgs): Promise<void> {
   }
 
   if (args.optimize) {
-    await handleOptimization(suites, args);
+    await handleOptimization(suites, args, files);
   }
 }
 

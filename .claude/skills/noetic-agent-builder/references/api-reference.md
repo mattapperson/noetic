@@ -198,7 +198,8 @@ adaptivePlan<O>({
 **Important:** When plans mix sequential and parallel execution (e.g., a fork inside a sequential chain), `executeStep` must be provided. Without it, only `run`-kind children can be executed in sequential nodes. When using the eval framework, the runtime's `execute` method serves as `executeStep`:
 
 ```typescript
-const runtime = new InMemoryRuntime({ callModel });
+// callModel auto-detected from OPENROUTER_API_KEY when omitted
+const runtime = new InMemoryRuntime();
 const compiled = compilePlan(plan, agents, undefined, runtime.execute.bind(runtime));
 ```
 

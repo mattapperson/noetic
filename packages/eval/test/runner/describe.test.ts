@@ -13,15 +13,13 @@ bunDescribe('describe()', () => {
       execute: async (input: unknown) => input,
     });
 
-    describe({
-      step: testStep,
-    }, {
+    describe(testStep, {
       objective: 'test objective',
     }, () => {});
 
     const suites = getSuites();
     expect(suites).toHaveLength(1);
-    expect(suites[0].objective.objective).toBe('test objective');
+    expect(suites[0].options.objective).toBe('test objective');
     expect(suites[0].cases).toHaveLength(0);
   });
 
@@ -33,9 +31,7 @@ bunDescribe('describe()', () => {
       execute: async (input: unknown) => input,
     });
 
-    describe({
-      step: testStep,
-    }, {
+    describe(testStep, {
       objective: 'captures cases',
     }, () => {
       it('case one', async () => {});
@@ -63,9 +59,7 @@ bunDescribe('describe()', () => {
       execute: async (input: unknown) => input,
     });
 
-    describe({
-      step: testStep,
-    }, {
+    describe(testStep, {
       objective: 'will be cleared',
     }, () => {});
 

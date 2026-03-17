@@ -1,3 +1,4 @@
+import { getDefaultCallModel } from '../adapters/default-call-model';
 import { execute } from '../interpreter/execute';
 import type { CallModelFn } from '../interpreter/execute-llm';
 import { estimateTokens } from '../interpreter/message-helpers';
@@ -35,7 +36,7 @@ export class InMemoryRuntime implements Runtime {
     traceExporter?: TraceExporter;
     layerStateStore?: LayerStateStore;
   }) {
-    this.callModel = opts?.callModel;
+    this.callModel = opts?.callModel ?? getDefaultCallModel();
     this.channelStore = new ChannelStore();
     this.traceExporter = opts?.traceExporter ?? new NoopExporter();
     this.layerStateStore = opts?.layerStateStore ?? createLayerStateStore();

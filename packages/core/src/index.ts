@@ -1,5 +1,6 @@
 // Types
 
+export { getDefaultCallModel } from './adapters/default-call-model';
 export { createOpenRouterCallModel, createOpenRouterEmbed } from './adapters/openrouter';
 export { channel } from './builders/channel-builder';
 export { branch, fork } from './builders/control-flow-builders';

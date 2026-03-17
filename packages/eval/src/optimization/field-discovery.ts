@@ -110,4 +110,27 @@ export function discoverFields(step: Step, prefix?: string): OptimizableField[] 
   return fields;
 }
 
+export function enrichWithSourceLocations(
+  runtimeFields: OptimizableField[],
+  astFields: OptimizableField[],
+): OptimizableField[] {
+  const astIndex = new Map<string, OptimizableField>();
+  for (const af of astFields) {
+    if (af.sourceLocation) {
+      astIndex.set(`${af.stepId}:${af.fieldKind}:${af.value}`, af);
+    }
+  }
+
+  return runtimeFields.map((rf) => {
+    const match = astIndex.get(`${rf.stepId}:${rf.fieldKind}:${rf.value}`);
+    if (!match?.sourceLocation) {
+      return rf;
+    }
+    return {
+      ...rf,
+      sourceLocation: match.sourceLocation,
+    };
+  });
+}
+
 //#endregion

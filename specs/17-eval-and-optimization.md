@@ -1,7 +1,7 @@
 # Eval and Optimization
 
 > **Depends On:** `01-step-type` (Step), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-runtime` (Runtime, execute), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
-> **Exports:** `describe()`, `it()`, `EvalSuiteConfig`, `EvalObjective`, `ScorerFn`, `createScorer()`, `createAdapter()`, `Baseline`, `OptimizationLevel`
+> **Exports:** `describe()`, `it()`, `EvalSuiteOptions`, `DescribeStep`, `ScorerFn`, `createScorer()`, `createAdapter()`, `Baseline`, `OptimizationLevel`, `discoverFieldsFromSource()`
 
 ---
 
@@ -23,58 +23,40 @@ The package is separate from `@noetic/core` because evaluation is a development-
 Evaluation suites use a `describe()`/`it()` API modeled after test runners. `describe()` groups related evaluations. `it()` defines a single evaluation case. This is intentional — evals are tests with scores instead of pass/fail.
 
 ```typescript
-function describe(name: string, config: EvalSuiteConfig, fn: () => void): void;
+function describe(step: DescribeStep, options: EvalSuiteOptions, fn: () => void): void;
 
-function it(name: string, objective: EvalObjective): void;
+function it(name: string, fn: (ctx: EvalContext) => Promise<void>): void;
 ```
 
-### `EvalSuiteConfig`
+### `DescribeStep`
 
 ```typescript
-interface EvalSuiteConfig {
-  /** The step composition under evaluation. */
-  step: Step<unknown, unknown>;
+/** Widened step type — accepts Step with any I/O types. */
+type DescribeStep = {
+  kind: Step['kind'];
+  id: string;
+};
+```
 
-  /** Scorers applied to every `it()` case in this suite. */
-  scorers: ScorerFn[];
+### `EvalSuiteOptions`
 
-  /** Optional runtime override. Defaults to InMemoryRuntime. */
-  runtime?: Runtime;
+```typescript
+interface EvalSuiteOptions {
+  /** The objective being evaluated. */
+  objective: string;
 
-  /** Concurrency limit for parallel case execution. */
-  concurrency?: number;
+  /** Optional background context for scorers. */
+  background?: string;
 
-  /** Global timeout per case in milliseconds. */
-  timeout?: number;
+  /** Optimization configuration. */
+  optimize?: OptimizeConfig;
 
-  /** Memory layers to attach to the execution context. */
-  memory?: MemoryLayer[];
-
-  /** Adapter for third-party SDK integration. */
-  adapter?: EvalAdapter;
+  /** Regression testing configuration. */
+  regression?: RegressionConfig;
 }
 ```
 
-### `EvalObjective`
-
-```typescript
-interface EvalObjective {
-  /** The input provided to the step. */
-  input: unknown;
-
-  /** Expected output for reference-based scorers. Optional — some scorers are reference-free. */
-  expected?: unknown;
-
-  /** Additional context available to scorers (e.g., source documents for faithfulness). */
-  context?: Record<string, unknown>;
-
-  /** Per-case scorer overrides. Merged with suite-level scorers. */
-  scorers?: ScorerFn[];
-
-  /** Per-case timeout override. */
-  timeout?: number;
-}
-```
+The eval context has **zero knowledge of `callModel`** — the `InMemoryRuntime` auto-detects from `OPENROUTER_API_KEY`. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
 
 ### Execution Model
 
@@ -428,6 +410,33 @@ The source writer:
 **Invariant:** `planWriteback` is pure — it computes changes without applying them. `executeWriteback` applies the changes. This two-phase design supports `--dry-run`.
 
 **Invariant:** The source writer only modifies string literals, number literals, and array literals. It does not rewrite function bodies or control flow. L3 topology changes that require structural code modification are delegated to the pluggable coding agent.
+
+### AST-Based Source Location Discovery
+
+The optimizer needs to know WHERE in user source files each optimizable field lives so it can write changes back. Source locations are inferred automatically via TypeScript AST analysis — users never define them manually.
+
+```typescript
+function discoverFieldsFromSource(evalFilePath: string): OptimizableField[];
+```
+
+The static analysis module:
+1. Takes an eval file path
+2. Follows imports to find agent/step definition source files using TypeScript module resolution
+3. Parses those files into TypeScript ASTs
+4. Walks the AST to find builder calls (`step.llm()`, `tool()`, `react()`, `ralphWiggum()`, `branch()`, `fork()`, `spawn()`, `loop()`)
+5. Extracts string literal values of optimizable fields (`system`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
+6. Returns `OptimizableField[]` with populated `sourceLocation`
+
+The CLI optimizer calls `discoverFieldsFromSource()` for each loaded eval file, then enriches runtime-discovered fields with AST-discovered source locations via `enrichWithSourceLocations()`.
+
+```typescript
+function enrichWithSourceLocations(
+  runtimeFields: OptimizableField[],
+  astFields: OptimizableField[],
+): OptimizableField[];
+```
+
+Matching is by `stepId` + `fieldKind` + `value`. This two-phase approach (runtime discovery for values, AST discovery for locations) means the optimizer works correctly even when step trees are dynamically constructed.
 
 ---
 

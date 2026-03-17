@@ -2,8 +2,26 @@ import { describe, expect, test } from 'bun:test';
 import type { Step, Tool } from '@noetic/core';
 import { branch, spawn, step } from '@noetic/core';
 import { z } from 'zod';
-import { discoverFields } from '../../src/optimization/field-discovery';
+import { discoverFields, enrichWithSourceLocations } from '../../src/optimization/field-discovery';
+import type { OptimizableField } from '../../src/types/optimizer';
 import { FieldKind } from '../../src/types/optimizer';
+
+interface MockFieldOpts {
+  stepId: string;
+  fieldKind: OptimizableField['fieldKind'];
+  value: string;
+  sourceLocation?: OptimizableField['sourceLocation'];
+}
+
+function makeMockField(opts: MockFieldOpts): OptimizableField {
+  return {
+    path: `${opts.stepId}.${opts.fieldKind}`,
+    value: opts.value,
+    stepId: opts.stepId,
+    fieldKind: opts.fieldKind,
+    sourceLocation: opts.sourceLocation,
+  };
+}
 
 function makeMockTool(name: string, description: string): Tool {
   return {
@@ -132,5 +150,100 @@ describe('discoverFields', () => {
     const fields = discoverFields(llmStep);
 
     expect(fields).toHaveLength(0);
+  });
+});
+
+describe('enrichWithSourceLocations', () => {
+  test('copies sourceLocation from AST fields to matching runtime fields', () => {
+    const location = {
+      filePath: 'agent.ts',
+      line: 10,
+      column: 5,
+    };
+    const runtimeFields = [
+      makeMockField({
+        stepId: 'llm-1',
+        fieldKind: FieldKind.System,
+        value: 'Be helpful',
+      }),
+    ];
+    const astFields = [
+      makeMockField({
+        stepId: 'llm-1',
+        fieldKind: FieldKind.System,
+        value: 'Be helpful',
+        sourceLocation: location,
+      }),
+    ];
+
+    const enriched = enrichWithSourceLocations(runtimeFields, astFields);
+
+    expect(enriched).toHaveLength(1);
+    expect(enriched[0].sourceLocation).toEqual(location);
+  });
+
+  test('leaves runtime fields unchanged when no AST match exists', () => {
+    const runtimeFields = [
+      makeMockField({
+        stepId: 'llm-1',
+        fieldKind: FieldKind.System,
+        value: 'Be helpful',
+      }),
+    ];
+    const astFields = [
+      makeMockField({
+        stepId: 'llm-2',
+        fieldKind: FieldKind.System,
+        value: 'Different',
+        sourceLocation: {
+          filePath: 'other.ts',
+          line: 1,
+          column: 1,
+        },
+      }),
+    ];
+
+    const enriched = enrichWithSourceLocations(runtimeFields, astFields);
+
+    expect(enriched).toHaveLength(1);
+    expect(enriched[0].sourceLocation).toBeUndefined();
+  });
+
+  test('matches by stepId + fieldKind + value composite key', () => {
+    const location = {
+      filePath: 'tools.ts',
+      line: 5,
+      column: 3,
+    };
+    const runtimeFields = [
+      makeMockField({
+        stepId: 'tool-a',
+        fieldKind: FieldKind.ToolDescription,
+        value: 'Search',
+      }),
+      makeMockField({
+        stepId: 'tool-a',
+        fieldKind: FieldKind.ToolName,
+        value: 'search',
+      }),
+    ];
+    const astFields = [
+      makeMockField({
+        stepId: 'tool-a',
+        fieldKind: FieldKind.ToolName,
+        value: 'search',
+        sourceLocation: location,
+      }),
+    ];
+
+    const enriched = enrichWithSourceLocations(runtimeFields, astFields);
+
+    expect(enriched[0].sourceLocation).toBeUndefined();
+    expect(enriched[1].sourceLocation).toEqual(location);
+  });
+
+  test('returns empty array when both inputs are empty', () => {
+    const enriched = enrichWithSourceLocations([], []);
+    expect(enriched).toHaveLength(0);
   });
 });

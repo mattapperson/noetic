@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@noetic/core": "workspace:*",
+    "typescript": "5.9.3",
     "zod": "^4.0.0"
   },
   "peerDependencies": {

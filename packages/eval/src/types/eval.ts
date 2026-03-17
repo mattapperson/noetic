@@ -1,6 +1,3 @@
-import type { CallModelFn, MemoryLayer, Step, TraceExporter } from '@noetic/core';
-
-import type { CodingAgent } from './optimizer';
 import type { RegressionConfig } from './regression';
 
 //#region ESM Literal Enums
@@ -17,14 +14,7 @@ type OptimizeScope = (typeof OptimizeScope)[keyof typeof OptimizeScope];
 
 //#region Types
 
-export interface EvalSuiteConfig {
-  step: Step;
-  callModel?: CallModelFn;
-  memory?: MemoryLayer[];
-  traceExporter?: TraceExporter;
-}
-
-export interface EvalObjective {
+export interface EvalSuiteOptions {
   objective: string;
   background?: string;
   optimize?: OptimizeConfig;
@@ -35,7 +25,7 @@ export interface OptimizeConfig {
   scope: OptimizeScope;
   maxMetricCalls?: number;
   budget?: number;
-  codingAgent?: CodingAgent;
+  codingAgent?: import('./optimizer').CodingAgent;
   dryRun?: boolean;
 }
 

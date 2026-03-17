@@ -5,6 +5,7 @@ import type { Candidate, CodingAgent, OptimizableField } from '../types/optimize
 import type { SourceLocation } from '../types/source-location';
 import { discoverFields } from './field-discovery';
 import { optimizeWithGepa } from './gepa-bridge';
+import type { WriteBackEntry } from './source-writer';
 import { writeOptimizedValues } from './source-writer';
 
 //#region Types
@@ -17,6 +18,7 @@ export interface OptimizeOptions {
   budget?: number;
   dryRun?: boolean;
   codingAgent?: CodingAgent;
+  preEnrichedFields?: OptimizableField[];
 }
 
 export interface OptimizeResult {
@@ -25,11 +27,6 @@ export interface OptimizeResult {
   score: number;
   iterations: number;
   writtenBack: boolean;
-}
-
-interface WriteBackEntry {
-  sourceLocation: SourceLocation;
-  newValue: string;
 }
 
 //#endregion
@@ -68,7 +65,7 @@ function buildWriteBackEntries(
 //#region Public API
 
 export async function optimize(options: OptimizeOptions): Promise<OptimizeResult> {
-  const fields = discoverFields(options.step);
+  const fields = options.preEnrichedFields ?? discoverFields(options.step);
 
   if (fields.length === 0) {
     return {

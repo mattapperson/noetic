@@ -10,13 +10,10 @@ describe('createEvalContext()', () => {
       execute: async (input: unknown) => input,
     });
 
-    const ctx = createEvalContext(
-      {
-        step: testStep,
-      },
-      'test objective',
-      'test background',
-    );
+    const ctx = createEvalContext(testStep, {
+      objective: 'test objective',
+      background: 'test background',
+    });
 
     expect(ctx.objective).toBe('test objective');
     expect(ctx.background).toBe('test background');
@@ -29,13 +26,9 @@ describe('createEvalContext()', () => {
       execute: async (input: unknown) => Number(input) * 2,
     });
 
-    const ctx = createEvalContext(
-      {
-        step: testStep,
-      },
-      'doubling objective',
-      '',
-    );
+    const ctx = createEvalContext(testStep, {
+      objective: 'doubling objective',
+    });
 
     const result = await ctx.execute(5);
 
@@ -52,13 +45,10 @@ describe('createEvalContext()', () => {
       execute: async (input: unknown) => `hello ${input}`,
     });
 
-    const ctx = createEvalContext(
-      {
-        step: testStep,
-      },
-      'greeting objective',
-      'greeting background',
-    );
+    const ctx = createEvalContext(testStep, {
+      objective: 'greeting objective',
+      background: 'greeting background',
+    });
 
     const result = await ctx.execute('world');
     expect(result.output).toBe('hello world');
@@ -70,13 +60,10 @@ describe('createEvalContext()', () => {
       execute: async (input: unknown) => input,
     });
 
-    const ctx = createEvalContext(
-      {
-        step: testStep,
-      },
-      'score test',
-      'background',
-    );
+    const ctx = createEvalContext(testStep, {
+      objective: 'score test',
+      background: 'background',
+    });
 
     const result = await ctx.execute('test');
 

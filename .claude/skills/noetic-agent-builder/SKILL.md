@@ -29,7 +29,7 @@ const ctx = runtime.createContext();
 const result = await runtime.execute(step, input, ctx);
 ```
 
-The runtime manages execution, context creation, channels, memory lifecycle, and detached spawns.
+The runtime manages execution, context creation, channels, memory lifecycle, and detached spawns. When no `callModel` is provided, `InMemoryRuntime` auto-detects from the `OPENROUTER_API_KEY` environment variable.
 
 ### Tools
 

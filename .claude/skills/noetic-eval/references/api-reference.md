@@ -2,30 +2,24 @@
 
 ## Runner API
 
-### `describe(config, objective, fn)`
+### `describe(step, options, fn)`
 
-Registers an eval suite.
+Registers an eval suite. The step is the first positional argument.
 
 ```typescript
 function describe(
-  config: DescribeConfig,
-  objective: EvalObjective,
+  step: DescribeStep,
+  options: EvalSuiteOptions,
   fn: () => void,
 ): void;
 
 // Accepts any Step<I, O> — no type widening needed by callers
-type DescribeConfig = Omit<EvalSuiteConfig, 'step'> & {
-  step: { kind: Step['kind']; id: string };
+type DescribeStep = {
+  kind: Step['kind'];
+  id: string;
 };
 
-interface EvalSuiteConfig {
-  step: Step;
-  callModel?: CallModelFn;
-  memory?: MemoryLayer[];
-  traceExporter?: TraceExporter;
-}
-
-interface EvalObjective {
+interface EvalSuiteOptions {
   objective: string;
   background?: string;
   optimize?: OptimizeConfig;
@@ -157,6 +151,7 @@ interface OptimizeOptions {
   budget?: number;
   dryRun?: boolean;
   codingAgent?: CodingAgent;
+  preEnrichedFields?: OptimizableField[];  // AST-enriched fields with source locations
 }
 
 interface OptimizeResult {
@@ -183,6 +178,29 @@ interface OptimizableField {
   sourceLocation?: SourceLocation;
 }
 ```
+
+### `discoverFieldsFromSource(evalFilePath)`
+
+AST-based static analysis that parses TypeScript source files to discover optimizable fields with exact source locations.
+
+```typescript
+function discoverFieldsFromSource(evalFilePath: string): OptimizableField[];
+```
+
+Follows imports from the eval file, parses builder calls (`step.llm`, `tool`, `react`, `ralphWiggum`, etc.), and extracts `system`, `description`, `name` field values with their `SourceLocation`.
+
+### `enrichWithSourceLocations(runtimeFields, astFields)`
+
+Merges runtime-discovered fields with AST-discovered source locations.
+
+```typescript
+function enrichWithSourceLocations(
+  runtimeFields: OptimizableField[],
+  astFields: OptimizableField[],
+): OptimizableField[];
+```
+
+Matches by `stepId` + `fieldKind` + `value` and copies `sourceLocation` from AST fields to runtime fields.
 
 ### `applyCandidate(step, candidate)`
 
@@ -240,35 +258,7 @@ interface AdapterConfig {
 }
 ```
 
-## Test Helpers
-
-### Scripted Call Model
-
-From `@noetic/core/test/_helpers` — deterministic LLM responses for eval testing without real API calls:
-
-```typescript
-import {
-  createScriptedCallModel,
-  textOnlyResponse,
-  toolCallResponse,
-} from '@noetic/core/test/_helpers';
-
-// Returns responses in order; throws if exhausted
-createScriptedCallModel(script: LLMResponse[]): () => Promise<LLMResponse>
-
-// Text-only response (no tool calls — triggers until.noToolCalls())
-textOnlyResponse(text: string): LLMResponse
-
-// Tool call + output + final text in one response
-toolCallResponse({
-  toolName: string;
-  args: string;        // JSON.stringify'd tool arguments
-  output: string;      // Tool execution result
-  finalText: string;   // Assistant text after tool call
-}): LLMResponse
-```
-
-### Running Evals in bun test
+## Running Evals in bun test
 
 ```typescript
 import { clearSuites, getSuites, runAllSuites } from '@noetic/eval';

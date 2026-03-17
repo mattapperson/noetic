@@ -1,5 +1,3 @@
-// Types — adapter
-
 // Adapters
 export {
   clearRegisteredFields,
@@ -7,14 +5,14 @@ export {
   getRegisteredFields,
 } from './adapters/adapter-factory';
 // Optimization
-export { discoverFields } from './optimization/field-discovery';
+export { discoverFields, enrichWithSourceLocations } from './optimization/field-discovery';
 export { applyCandidate } from './optimization/mutator';
 export type { OptimizeOptions, OptimizeResult } from './optimization/optimizer';
 export { optimize } from './optimization/optimizer';
 // Regression
 export { loadBaseline, saveBaseline } from './regression/baseline';
 export { checkRegression } from './regression/comparator';
-export type { CaseDefinition, DescribeConfig, SuiteDefinition } from './runner/describe';
+export type { CaseDefinition, DescribeStep, SuiteDefinition } from './runner/describe';
 // Runner
 export { describe } from './runner/describe';
 export type { EvalContext } from './runner/eval-context';
@@ -26,12 +24,13 @@ export { runAllSuites, runSuite } from './runner/suite-runner';
 export { scorer } from './scorers/index';
 export { createScorer } from './scorers/scorer-pipeline';
 export type { EvalExecution, ScorerFn } from './scorers/types';
+// Static analysis
+export { discoverFieldsFromSource } from './static-analysis/ast-field-discovery';
 export type { AdapterConfig, FieldMapping } from './types/adapter';
 // Types — eval
 export type {
   CaseResult,
-  EvalObjective,
-  EvalSuiteConfig,
+  EvalSuiteOptions,
   OptimizeConfig,
   ScoreResult,
   SuiteResult,

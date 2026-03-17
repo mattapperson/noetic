@@ -2,6 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import { clearSuites, getSuites, runAllSuites } from '../../src';
 
+//#region Constants
+
+const HAS_API_KEY = Boolean(process.env.OPENROUTER_API_KEY);
+const ONLINE_TIMEOUT = 12e4; // 2 minutes per eval
+
+//#endregion
+
 //#region Helper Functions
 
 async function runEvalFile(path: string): Promise<void> {
@@ -21,32 +28,32 @@ async function runEvalFile(path: string): Promise<void> {
 
 //#endregion
 
-//#region Eval Suite Tests
+//#region Online Eval Suite Tests
 
-describe('eval suites', () => {
-  test('branching eval', async () => {
-    await runEvalFile('../../evals/branching.eval');
-  });
+describe('online eval suites', () => {
+  test.skipIf(!HAS_API_KEY)(
+    'support-agent eval',
+    async () => {
+      await runEvalFile('../../evals/support-agent.eval');
+    },
+    ONLINE_TIMEOUT,
+  );
 
-  test('plans eval', async () => {
-    await runEvalFile('../../evals/plans.eval');
-  });
+  test.skipIf(!HAS_API_KEY)(
+    'routing-agent eval',
+    async () => {
+      await runEvalFile('../../evals/routing-agent.eval');
+    },
+    ONLINE_TIMEOUT,
+  );
 
-  test('parallel eval', async () => {
-    await runEvalFile('../../evals/parallel.eval');
-  });
-
-  test('eval-framework eval', async () => {
-    await runEvalFile('../../evals/eval-framework.eval');
-  });
-
-  test('react-agent eval', async () => {
-    await runEvalFile('../../evals/react-agent.eval');
-  });
-
-  test('ralph-wiggum eval', async () => {
-    await runEvalFile('../../evals/ralph-wiggum.eval');
-  });
+  test.skipIf(!HAS_API_KEY)(
+    'code-writer eval',
+    async () => {
+      await runEvalFile('../../evals/code-writer.eval');
+    },
+    ONLINE_TIMEOUT,
+  );
 });
 
 //#endregion

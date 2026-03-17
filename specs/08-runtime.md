@@ -110,7 +110,7 @@ interface DetachedHandle<O> {
 
 | Backend              | When to Use                                                     | Channel Handles |
 |----------------------|-----------------------------------------------------------------|-----------------|
-| `InMemoryRuntime`    | Testing, simple scripts, CLI tools                              | In-process handles |
+| `InMemoryRuntime`    | Testing, simple scripts, CLI tools. Auto-detects `callModel` from `OPENROUTER_API_KEY` when none is provided. | In-process handles |
 | `DurableRuntime`     | Production — backed by Temporal, Inngest, or custom event store | Translates to durable signals |
 | `DistributedRuntime` | Multi-node — A2A, worker pools, cloud functions                 | Translates to network messages |
 
