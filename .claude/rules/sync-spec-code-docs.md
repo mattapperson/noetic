@@ -1,4 +1,4 @@
-# Spec ↔ Code ↔ Docs Sync
+# Spec ↔ Code ↔ Docs ↔ Skill Sync
 
 **CRITICAL:** These rules MUST be followed for ALL code changes.
 They are mandatory, not optional.
@@ -8,6 +8,7 @@ They are mandatory, not optional.
 1. **Code ↔ Spec**: When changing runtime code, update the corresponding spec if behavior diverges. When a spec changes, update the implementation to match.
 2. **Code → Docs**: When code changes alter public API surface, behavior, or configuration, update the corresponding doc pages.
 3. **Spec → Docs**: When a spec is added or revised, ensure the docs reflect the new specification.
+4. **Code → Skill**: When public API surface changes (new builders, patterns, memory layers, tool APIs, or runtime methods), update the `noetic-agent-builder` skill at `.claude/skills/noetic-agent-builder/`. Update `references/api-reference.md` for API changes and `references/composition-patterns.md` for new patterns or usage examples.
 
 ## Reference Mapping
 
@@ -27,3 +28,11 @@ They are mandatory, not optional.
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/`, Docs → `packages/web/content/docs/`
+
+## Skill Mapping
+
+| Source Area | Skill File |
+|-------------|------------|
+| `builders/`, `types/`, `patterns/`, `memory/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
+| `patterns/`, `examples/` | `.claude/skills/noetic-agent-builder/references/composition-patterns.md` |
+| Any public API change | `.claude/skills/noetic-agent-builder/SKILL.md` (if core concepts change) |
