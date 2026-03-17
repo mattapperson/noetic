@@ -145,11 +145,6 @@ export async function executeSpawn<I, O>(
       return childOutput;
     }
 
-    // SAFETY: returnLayers pipelines `result` through each layer's onReturn hook.
-    // The initial value is childOutput (typed O from executeStep). Layers may transform
-    // the value but are responsible for maintaining the O contract. TypeScript cannot
-    // express "unknown that was originally O and was only transformed by O-preserving hooks"
-    // without dependent types, so we cast at the framework boundary.
     const pipelinedResult = await returnLayers({
       layers,
       parentCtx: parentExecutionCtx,
@@ -158,8 +153,7 @@ export async function executeSpawn<I, O>(
       result: childOutput,
       store: layerStore,
     });
-
-    return pipelinedResult as O;
+    return pipelinedResult;
   } finally {
     // Clean up child execution state to prevent memory leaks — runs on success and error
     if (hasLayers) {

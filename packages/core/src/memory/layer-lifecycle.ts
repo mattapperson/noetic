@@ -1,3 +1,4 @@
+import { frameworkCast } from '../interpreter/framework-cast';
 import type { LLMResponse } from '../types/common';
 import type { ItemLog } from '../types/context';
 import type { Item } from '../types/items';
@@ -44,12 +45,12 @@ interface SpawnLayersParams {
   store: LayerStateStore;
 }
 
-interface ReturnLayersParams {
+interface ReturnLayersParams<T = unknown> {
   layers: MemoryLayer[];
   parentCtx: ExecutionContext;
   childCtx: ExecutionContext;
   childLog: ItemLog;
-  result: unknown;
+  result: T;
   store: LayerStateStore;
 }
 
@@ -77,9 +78,7 @@ export function createLayerStateStore(
   const states = new Map<string, Map<string, unknown>>();
   return {
     get<T>(executionId: string, layerId: string): T | undefined {
-      // SAFETY: values are stored via set(key, layerId, state: T); the caller is
-      // responsible for reading back with the same type T they stored.
-      return states.get(executionId)?.get(layerId) as T | undefined;
+      return frameworkCast<T | undefined>(states.get(executionId)?.get(layerId));
     },
     set<T>(executionId: string, layerId: string, state: T): void {
       let execMap = states.get(executionId);
@@ -330,14 +329,14 @@ export async function spawnLayers({
   return results;
 }
 
-export async function returnLayers({
+export async function returnLayers<T>({
   layers,
   parentCtx,
   childCtx,
   childLog,
   result,
   store,
-}: ReturnLayersParams): Promise<unknown> {
+}: ReturnLayersParams<T>): Promise<T> {
   const sorted = [
     ...layers,
   ].sort((a, b) => a.slot - b.slot);
@@ -374,7 +373,7 @@ export async function returnLayers({
     }
   }
 
-  return currentResult;
+  return frameworkCast<T>(currentResult);
 }
 
 export async function completeLayers({

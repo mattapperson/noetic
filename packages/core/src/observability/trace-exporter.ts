@@ -1,5 +1,5 @@
 import type { Span, TraceExporter } from '../types/observability';
-import type { SpanImpl } from './span-impl';
+import { SpanImpl } from './span-impl';
 
 export class NoopExporter implements TraceExporter {
   async export(_spans: Span[]): Promise<void> {
@@ -7,13 +7,12 @@ export class NoopExporter implements TraceExporter {
   }
 }
 
+/** Collects SpanImpl instances for test assertions and diagnostics. Non-SpanImpl spans are filtered out. */
 export class InMemoryExporter implements TraceExporter {
   readonly spans: SpanImpl[] = [];
 
   async export(spans: Span[]): Promise<void> {
-    // SAFETY: InMemoryExporter is only used with SpanImpl instances from the runtime.
-    // The Span interface is the public contract; SpanImpl adds internal fields needed for export.
-    this.spans.push(...(spans as SpanImpl[]));
+    this.spans.push(...spans.filter((s): s is SpanImpl => s instanceof SpanImpl));
   }
 
   clear(): void {

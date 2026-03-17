@@ -1,3 +1,4 @@
+import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
 import type {
   SettleResult,
@@ -46,10 +47,10 @@ export function fork<I, O>(opts: {
   if ((opts.mode === 'all' || opts.mode === 'settle') && !opts.merge) {
     throw new Error(`fork mode '${opts.mode}' requires a merge function`);
   }
-  return {
+  return frameworkCast<StepFork<I, O>>({
     kind: 'fork',
     ...opts,
-  } as StepFork<I, O>;
+  });
 }
 
 export function branch<I, O>(opts: {

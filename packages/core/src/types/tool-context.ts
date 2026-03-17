@@ -11,7 +11,7 @@ export interface ToolMemory {
 
 export interface ToolExecutionContext {
   readonly ctx: Context;
-  readonly runtime: Runtime;
+  readonly runtime: Runtime | undefined;
   readonly memory: ToolMemory;
   readonly assembledView: ReadonlyArray<Item>;
   readonly lastStepMeta: StepMeta | null;

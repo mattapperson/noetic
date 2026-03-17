@@ -34,11 +34,12 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(config: {
   if (!config.execute) {
     throw new Error('tool() requires an execute function');
   }
-  // SAFETY: Tool<I,O> is structurally compatible with Tool<ZodTypeAny,ZodTypeAny>.
-  // The cast is required because ZodTypeAny is invariant in the generic position;
-  // TypeScript cannot automatically widen Tool<ZodObject<...>,ZodString> to
-  // Tool<ZodTypeAny,ZodTypeAny> even though it is safe at runtime.
-  // Using `satisfies` is not applicable here — this is a widening cast, not a
-  // narrowing one, and `satisfies` does not change the inferred return type.
-  return config as Tool;
+  return {
+    name: config.name,
+    description: config.description,
+    input: config.input,
+    output: config.output,
+    execute: config.execute,
+    needsApproval: config.needsApproval,
+  } satisfies Tool;
 }

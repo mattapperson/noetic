@@ -1,10 +1,9 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import { frameworkCast } from '../interpreter/framework-cast';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 
 function isExternalChannel<T>(ch: Channel<T>): ch is ExternalChannel<T> {
-  // SAFETY: Channel<T> does not declare `external`. The `in` check confirms it
-  // exists at runtime before we access it, narrowing to ExternalChannel<T>.
-  return 'external' in ch && (ch as ExternalChannel<T>).external === true;
+  return 'external' in ch && ch.external === true;
 }
 
 const MAX_TOPIC_TIMEOUT = 300_000; // 5 minutes
@@ -34,7 +33,7 @@ export class ChannelStore {
   private closedExecutions = new Set<string>();
 
   private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
-    let state = this.channels.get(channel.name) as ChannelState<T> | undefined;
+    let state = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
     if (!state) {
       state = {
         mode: channel.mode,
@@ -45,7 +44,7 @@ export class ChannelStore {
         queueWaiters: [],
         topicSubscribers: new Set(),
       };
-      this.channels.set(channel.name, state as ChannelState<unknown>);
+      this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
     }
     return state;
   }
@@ -92,7 +91,7 @@ export class ChannelStore {
     switch (state.mode) {
       case 'value':
         if (state.hasValue) {
-          return state.currentValue as T;
+          return state.currentValue!;
         }
         return this.waitWithTimeout(state.valueWaiters, channel.name, timeout);
 
@@ -140,7 +139,7 @@ export class ChannelStore {
 
     switch (state.mode) {
       case 'value':
-        return state.hasValue ? (state.currentValue as T) : null;
+        return state.hasValue ? state.currentValue! : null;
       case 'queue':
         return state.queue.length > 0 ? state.queue.shift()! : null;
       case 'topic':

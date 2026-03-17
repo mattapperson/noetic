@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fork } from '../builders/control-flow-builders';
+import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
 import type { ExecuteStepFn, Step } from '../types/step';
 
@@ -11,7 +12,8 @@ export interface PlanNode {
   children?: PlanNode[];
 }
 
-// PlanNode schema
+// PlanNode schema — the variable annotation provides the recursive type;
+// z.lazy() returns a compatible type that TypeScript checks against it.
 export const PlanNodeSchema: z.ZodType<PlanNode> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -23,7 +25,7 @@ export const PlanNodeSchema: z.ZodType<PlanNode> = z.lazy(() =>
     ]),
     children: z.array(PlanNodeSchema).optional(),
   }),
-) as z.ZodType<PlanNode>;
+);
 
 export interface PlanConstraints {
   toolAllowlist?: Record<string, string[]>;
@@ -44,11 +46,13 @@ export function compilePlan<O>(
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
 ): Step<string, O> {
-  return compileNode(plan, {
-    agents,
-    constraints,
-    executeStep,
-  }) as Step<string, O>;
+  return frameworkCast<Step<string, O>>(
+    compileNode(plan, {
+      agents,
+      constraints,
+      executeStep,
+    }),
+  );
 }
 
 function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
@@ -113,18 +117,14 @@ export function adaptivePlan<O>(opts: {
 
       for (let revision = 0; revision < opts.maxRevisions; revision++) {
         // Generate plan
+        const planInput = lastError
+          ? `${input}\n\nPrevious plan failed: ${lastError.message}`
+          : input;
         let plan: PlanNode;
         if (opts.executeStep) {
-          plan = (await opts.executeStep(
-            opts.planner,
-            lastError ? `${input}\n\nPrevious plan failed: ${lastError.message}` : input,
-            ctx,
-          )) as PlanNode;
+          plan = PlanNodeSchema.parse(await opts.executeStep(opts.planner, planInput, ctx));
         } else if (opts.planner.kind === 'run') {
-          plan = (await opts.planner.execute(
-            lastError ? `${input}\n\nPrevious plan failed: ${lastError.message}` : input,
-            ctx,
-          )) as PlanNode;
+          plan = PlanNodeSchema.parse(await opts.planner.execute(planInput, ctx));
         } else {
           throw new Error('Planner must be a run step when no executeStep provided');
         }
@@ -133,10 +133,10 @@ export function adaptivePlan<O>(opts: {
         try {
           const compiled = compilePlan<O>(plan, opts.agents, opts.constraints, opts.executeStep);
           if (opts.executeStep) {
-            return (await opts.executeStep(compiled, input, ctx)) as O;
+            return frameworkCast<O>(await opts.executeStep(compiled, input, ctx));
           }
           if (compiled.kind === 'run') {
-            return (await compiled.execute(input, ctx)) as O;
+            return frameworkCast<O>(await compiled.execute(input, ctx));
           }
           throw new Error(
             `No executeStep provided and compiled plan kind '${compiled.kind}' cannot be executed directly`,

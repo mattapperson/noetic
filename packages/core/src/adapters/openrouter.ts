@@ -13,6 +13,7 @@ import type {
 import { z } from 'zod';
 
 import type { CallModelFn, CallModelParams } from '../interpreter/execute-llm';
+import { frameworkCast } from '../interpreter/framework-cast';
 import { isAssistantMessage, isOutputText } from '../interpreter/typeguards';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { LLMResponse, Tool } from '../types/common';
@@ -20,6 +21,24 @@ import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
 import type { Runtime } from '../types/runtime';
+
+//#region Type Guards
+
+function isOutputMessage(entry: ResponsesOutputItem): entry is ResponsesOutputMessage & {
+  type: 'message';
+} {
+  return entry.type === 'message';
+}
+
+function isOutputFunctionCall(
+  entry: ResponsesOutputItem,
+): entry is ResponsesOutputItemFunctionCall & {
+  type: 'function_call';
+} {
+  return entry.type === 'function_call';
+}
+
+//#endregion
 
 //#region Types
 
@@ -146,21 +165,15 @@ function itemsToInput(items: ReadonlyArray<Item>): OpenResponsesInput {
 //#region OpenRouter Response → Noetic Item Conversion
 
 function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
-  if (entry.type === 'message') {
-    // SAFETY: TypeScript narrows entry.type to 'message' but the SDK union type
-    // does not automatically narrow the full intersection. The cast is safe after
-    // the discriminant check above.
-    const msg = entry as ResponsesOutputMessage & {
-      type: 'message';
-    };
-    const text = contentPartToText(msg.content);
+  if (isOutputMessage(entry)) {
+    const text = contentPartToText(entry.content);
 
     if (!text) {
       return null;
     }
 
     return {
-      id: msg.id,
+      id: entry.id,
       status: 'completed',
       type: 'message',
       role: 'assistant',
@@ -173,18 +186,14 @@ function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
     } satisfies MessageItem;
   }
 
-  if (entry.type === 'function_call') {
-    // SAFETY: Same discriminant narrowing as above for the function_call variant.
-    const fc = entry as ResponsesOutputItemFunctionCall & {
-      type: 'function_call';
-    };
+  if (isOutputFunctionCall(entry)) {
     return {
-      id: fc.id ?? crypto.randomUUID(),
+      id: entry.id ?? crypto.randomUUID(),
       status: 'completed',
       type: 'function_call',
-      call_id: fc.callId,
-      name: fc.name,
-      arguments: fc.arguments,
+      call_id: entry.callId,
+      name: entry.name,
+      arguments: entry.arguments,
     } satisfies FunctionCallItem;
   }
 
@@ -244,26 +253,25 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 
 //#region Tool Conversion
 
-// SAFETY: Noetic uses Zod v3 while the OpenRouter SDK expects Zod v4 ($ZodObject).
+// Noetic uses Zod v3 while the OpenRouter SDK expects Zod v4 ($ZodObject).
 // The runtime shapes are compatible — both produce JSON Schema from .describe()/.shape.
-// We construct the SDK tool shape manually and cast through unknown to bridge the
+// We construct the SDK tool shape manually and use frameworkCast to bridge the
 // Zod version gap. This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation, which works identically across Zod 3 and 4.
 function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime?: Runtime): SdkTool[] {
-  return tools.map(
-    (t) =>
-      ({
-        type: 'function',
-        function: {
-          name: t.name,
-          description: t.description,
-          inputSchema: t.input,
-          execute: async (args: unknown, turnContext?: TurnContext) => {
-            const toolCtx = buildToolExecutionContext(ctx, runtime, turnContext);
-            return t.execute(args, toolCtx);
-          },
+  return tools.map((t) =>
+    frameworkCast<SdkTool>({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        inputSchema: t.input,
+        execute: async (args: unknown, turnContext?: TurnContext) => {
+          const toolCtx = buildToolExecutionContext(ctx, runtime, turnContext);
+          return t.execute(args, toolCtx);
         },
-      }) as unknown as SdkTool,
+      },
+    }),
   );
 }
 

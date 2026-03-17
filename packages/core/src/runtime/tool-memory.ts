@@ -26,10 +26,7 @@ export function buildToolExecutionContext(
 ): ToolExecutionContext {
   return {
     ctx,
-    // SAFETY: runtime is undefined only in bare `execute()` calls without a Runtime wrapper.
-    // Tools that access runtime in that path will get undefined, which is safe — runtime-dependent
-    // operations (spawn, channels) will throw at the call site with a clear error.
-    runtime: runtime as Runtime,
+    runtime,
     memory: runtime ? buildToolMemory(runtime, ctx) : NO_OP_TOOL_MEMORY,
     assembledView: ctx.itemLog.items,
     lastStepMeta: ctx.lastStepMeta,

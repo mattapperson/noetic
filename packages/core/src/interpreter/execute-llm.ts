@@ -6,6 +6,7 @@ import type { Context } from '../types/context';
 import type { FunctionCallItem, Item } from '../types/items';
 import type { Runtime } from '../types/runtime';
 import type { StepLLM } from '../types/step';
+import { frameworkCast } from './framework-cast';
 import { createMessage, extractAssistantText } from './message-helpers';
 import { isMutableContext } from './typeguards';
 
@@ -102,8 +103,8 @@ export async function executeLLM<I, O>(
     }
   }
 
-  // SAFETY: O is string when step.output is undefined — callers without an output schema
+  // O is string when step.output is undefined — callers without an output schema
   // receive raw text. The type system cannot express "O = string when output is omitted"
   // without conditional types that would complicate the entire Step contract.
-  return lastText as unknown as O;
+  return frameworkCast<O>(lastText);
 }

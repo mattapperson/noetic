@@ -1,6 +1,7 @@
 import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { ExecuteStepFn, Snapshot, StepLoop, Verdict } from '../types/step';
+import { frameworkCast } from './framework-cast';
 import { createMessage } from './message-helpers';
 import { isMutableContext } from './typeguards';
 
@@ -44,9 +45,9 @@ function prepareNextInput<I, O>(
   if (step.prepareNext) {
     return step.prepareNext(lastOutput, verdict, ctx);
   }
-  // SAFETY: requires I === O when prepareNext is omitted — the loop feeds output
+  // Requires I === O when prepareNext is omitted — the loop feeds output
   // back as input. Callers must ensure I and O are compatible types.
-  return lastOutput as unknown as I;
+  return frameworkCast<I>(lastOutput);
 }
 
 //#endregion
