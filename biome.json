@@ -11,7 +11,8 @@
     ".grit/use-named-arguments.grit",
     ".grit/prefer-nullish-over-optional-nullable.grit",
     ".grit/no-unnecessary-typecast.grit",
-    ".grit/prefer-esm-url-over-dirname.grit"
+    ".grit/prefer-esm-url-over-dirname.grit",
+    ".grit/no-explicit-unknown.grit"
   ],
   "files": {
     "ignoreUnknown": false,

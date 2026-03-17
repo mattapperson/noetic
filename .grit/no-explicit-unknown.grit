@@ -1,0 +1,48 @@
+// Disallow explicit `unknown` type annotations in declarations and parameters.
+// Generic defaults like `<T = unknown>` are allowed.
+// Note: `any` is already caught by biome's built-in `noExplicitAny` rule.
+//
+// BAD:
+//   const data: unknown = fetchData();
+//   let result: unknown;
+//   function process(input: unknown): void { }
+//   const fn = (x: unknown) => x;
+//
+// GOOD:
+//   function process<T = unknown>(input: T): void { }
+//   type Result<T = unknown> = { data: T };
+
+engine biome(2.0)
+language js(typescript)
+
+or {
+  // Variable declarations: const/let/var $name: unknown
+  `const $name: unknown = $val` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` type annotation. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+  `let $name: unknown = $val` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` type annotation. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+  `let $name: unknown` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` type annotation. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+  `var $name: unknown = $val` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` type annotation. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+  `var $name: unknown` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` type annotation. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+
+  // Function return types
+  `function $name($...params): unknown { $body }` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` return type. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+  `async function $name($...params): unknown { $body }` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` return type. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  },
+
+  // Arrow functions with unknown return type
+  `($...params): unknown => $body` as $match where {
+    register_diagnostic(span=$match, message="Avoid explicit `unknown` return type. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
+  }
+}

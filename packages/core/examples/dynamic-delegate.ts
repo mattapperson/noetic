@@ -5,19 +5,22 @@
  * The LLM dynamically chooses which to use via tool calling:
  * - `delegate`: blocks until sub-agent finishes (sync)
  * - `launch_agent`: runs sub-agent in background (async)
+ *
+ * Flow: User input → LLM loop → LLM picks sync or async tool → sub-agent(s) run
+ *       → results collected → LLM synthesizes final answer
  */
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
 import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
-import type { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
+import { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
 import type { Channel } from '../src/types/channel';
 import type { DetachedHandle } from '../src/types/detached';
 import type { StepLoop } from '../src/types/step';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
-import { createExampleRuntime } from './create-example-runtime';
 import { createAsyncLaunchTool, createSyncDelegateTool } from './delegate-tools';
+import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from './helpers';
 
 //#region Inbox Channel
 
@@ -28,7 +31,7 @@ export const delegateInbox = channel('delegate-inbox', {
 
 //#endregion
 
-//#region Demo Step Builder
+//#region Agent Builder
 
 /** Builds an agent loop where the LLM can choose sync or async delegation. */
 export function buildDynamicDelegateAgent(opts: {
@@ -67,19 +70,57 @@ Choose the right strategy based on each task.`,
 
 //#endregion
 
-//#region Main
+//#region End-to-End Execution
 
 async function main(): Promise<void> {
-  const runtime = createExampleRuntime();
+  // 1. Create a mock LLM that scripts a conversation where the orchestrator
+  //    uses sync delegation for an urgent question, then async for a background task:
+  //    Turn 1: LLM calls `delegate` (sync) for a blocking question
+  //    Turn 2 (sync sub-agent): answers the question
+  //    Turn 3: LLM launches async agent for background research
+  //    Turn 4 (async sub-agent): completes and notifies inbox
+  //    Turn 5: LLM synthesizes final answer from both results
+  const callModel = createScriptedCallModel([
+    // Parent turn 1: sync delegate for immediate answer
+    toolCallResponse({
+      toolName: 'delegate',
+      args: '{"task":"What year was the Eiffel Tower built?"}',
+      output: 'The Eiffel Tower was completed in 1889.',
+      finalText: 'Got the answer via sync delegation.',
+    }),
+    // Sync sub-agent LLM call
+    textOnlyResponse('The Eiffel Tower was completed in 1889.'),
+    // Parent turn 2: launch async agent for background research
+    toolCallResponse({
+      toolName: 'launch_agent',
+      args: '{"task":"Find the current height of the Eiffel Tower"}',
+      output: '{"agentId":"sub-height"}',
+      finalText: 'Launched a background agent for additional research.',
+    }),
+    // Async sub-agent LLM call
+    textOnlyResponse('The Eiffel Tower is 330 meters tall including antennas.'),
+    // Parent turn 3: final synthesis (no tool calls → loop exits)
+    textOnlyResponse(
+      'The Eiffel Tower was completed in 1889 and stands 330 meters tall including antennas.',
+    ),
+  ]);
 
+  // 2. Create runtime and context
+  const runtime = new InMemoryRuntime({
+    callModel,
+  });
+  const ctx = runtime.createContext();
+
+  // 3. Build the agent and execute with user input
   const agent = buildDynamicDelegateAgent({
     runtime,
     inbox: delegateInbox,
   });
-  const ctx = runtime.createContext();
-  const result = await runtime.execute(agent, 'Research AI safety and answer: what is 2+2?', ctx);
+  const userInput = 'Tell me about the Eiffel Tower — when was it built and how tall is it?';
 
-  console.log(result);
+  console.log(`User: ${userInput}`);
+  const result = await runtime.execute(agent, userInput, ctx);
+  console.log(`Agent: ${result}`);
 }
 
 if (import.meta.main) {

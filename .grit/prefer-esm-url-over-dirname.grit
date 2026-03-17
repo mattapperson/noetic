@@ -15,5 +15,5 @@ language js(typescript)
 
 // Match fileURLToPath(import.meta.url) - the core CJS-style pattern
 `fileURLToPath(import.meta.url)` as $match where {
-  register_diagnostic(span=$match, message="Prefer ESM URL-based path resolution. Use `new URL('..', import.meta.url)` to construct paths, then `fileURLToPath()` only when a string path is needed.", severity="warn")
+  register_diagnostic(span=$match, message="Prefer ESM URL-based path resolution. Use `new URL('..', import.meta.url)` to construct paths, then `fileURLToPath()` only when a string path is needed.", severity="error")
 }

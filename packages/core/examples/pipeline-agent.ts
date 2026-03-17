@@ -1,0 +1,115 @@
+/**
+ * Pipeline Agent
+ *
+ * Demonstrates: branch (as sequencer) + step.run + step.llm + loop + prepareNext
+ *
+ * A 3-stage text processing pipeline:
+ * 1. step.run — normalize and clean raw text
+ * 2. step.llm — analyze for sentiment and themes
+ * 3. step.run — format into structured report
+ *
+ * Uses loop({ until: until.maxSteps(3) }) with branch routing by phase,
+ * and prepareNext feeding each stage's output as the next stage's input.
+ */
+import { branch } from '../src/builders/control-flow-builders';
+import { loop } from '../src/builders/loop-builder';
+import { step } from '../src/builders/step-builders';
+import type { StepLoop } from '../src/types/step';
+import { until } from '../src/until/predicates';
+import { createExampleRuntime } from './create-example-runtime';
+
+//#region Stage Handlers
+
+const normalizeStage = step.run<string, string>({
+  id: 'normalize-text',
+  execute: async (input) => {
+    return input
+      .replace(/\s+/g, ' ')
+      .replace(/[^\w\s.,!?;:'"()-]/g, '')
+      .trim();
+  },
+});
+
+const analyzeStage = step.llm<string, string>({
+  id: 'analyze-text',
+  model: 'gpt-4o',
+  system: [
+    'You are a text analyst.',
+    'Analyze the given text for sentiment (positive/negative/neutral),',
+    'key themes, and notable patterns.',
+    'Return your analysis as structured text with labeled sections:',
+    'SENTIMENT, THEMES, PATTERNS.',
+  ].join(' '),
+});
+
+const formatStage = step.run<string, string>({
+  id: 'format-report',
+  execute: async (input) => {
+    return [
+      '=== Text Analysis Report ===',
+      '',
+      input,
+      '',
+      '=== End Report ===',
+    ].join('\n');
+  },
+});
+
+//#endregion
+
+//#region Agent Builder
+
+/** Builds a 3-stage text processing pipeline using branch + loop + prepareNext. */
+export function buildPipelineAgent(): StepLoop<string, string> {
+  const stages = [
+    normalizeStage,
+    analyzeStage,
+    formatStage,
+  ] as const;
+  let phase = 0;
+
+  const router = branch<string, string>({
+    id: 'phase-router',
+    route: () => stages[phase] ?? null,
+  });
+
+  return loop({
+    id: 'pipeline-loop',
+    body: router,
+    until: until.maxSteps(3),
+    prepareNext: (output: string): string => {
+      phase++;
+      return output;
+    },
+  });
+}
+
+//#endregion
+
+//#region Main
+
+async function main(): Promise<void> {
+  const runtime = createExampleRuntime();
+
+  const agent = buildPipelineAgent();
+  const ctx = runtime.createContext();
+
+  const input = [
+    'The   new AI system has been AMAZING!!!',
+    'Users love it... but some are worried about    privacy.',
+    'Overall the feedback has been   overwhelmingly positive,',
+    'though a few edge cases need  attention.',
+  ].join(' ');
+
+  const result = await runtime.execute(agent, input, ctx);
+  console.log(result);
+}
+
+if (import.meta.main) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+//#endregion

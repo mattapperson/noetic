@@ -92,25 +92,10 @@
   grid-template-columns: repeat(3, 1fr);
 }
 
-@media (max-width: 639px) {
-  .primitives-grid,
-  .patterns-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .tui-bento > [data-col-span] {
-    grid-column: span 1;
-  }
-}
-
-@media (min-width: 640px) and (max-width: 767px) {
+@media (max-width: 767px) {
   .primitives-grid,
   .patterns-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .tui-bento > [data-col-span] {
-    grid-column: span 1;
   }
 }
 

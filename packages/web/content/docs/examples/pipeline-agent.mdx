@@ -1,0 +1,84 @@
+---
+title: Pipeline Agent
+description: A 3-stage text processing pipeline using branch, step.run, step.llm, loop, and prepareNext to chain sequential stages.
+---
+
+## Overview
+
+A text processing pipeline that normalizes input, analyzes it with an LLM, and formats the result into a structured report. Demonstrates how `branch` + `loop` + `prepareNext` create sequential multi-stage pipelines.
+
+**Primitives used**: `branch` + `step.run` + `step.llm` + `loop` + `prepareNext`
+
+## How It Works
+
+1. **Stage 1** (`step.run`): Normalize whitespace and strip special characters
+2. **Stage 2** (`step.llm`): Analyze for sentiment, themes, and patterns
+3. **Stage 3** (`step.run`): Format into a structured report
+
+The `loop` runs 3 iterations. A `branch` routes to the correct stage based on a phase counter. `prepareNext` feeds each stage's output as the next stage's input and advances the phase.
+
+## Code
+
+```ts
+import { branch } from '@noetic/core';
+import { loop } from '@noetic/core';
+import { step } from '@noetic/core';
+import { until } from '@noetic/core';
+
+const normalizeStage = step.run<string, string>({
+  id: 'normalize-text',
+  execute: async (input) => {
+    return input
+      .replace(/\s+/g, ' ')
+      .replace(/[^\w\s.,!?;:'"()-]/g, '')
+      .trim();
+  },
+});
+
+const analyzeStage = step.llm<string, string>({
+  id: 'analyze-text',
+  model: 'gpt-4o',
+  system: 'Analyze the text for sentiment, key themes, and patterns. Return labeled sections.',
+});
+
+const formatStage = step.run<string, string>({
+  id: 'format-report',
+  execute: async (input) => {
+    return ['=== Text Analysis Report ===', '', input, '', '=== End Report ==='].join('\n');
+  },
+});
+
+export function buildPipelineAgent() {
+  const stages = [normalizeStage, analyzeStage, formatStage] as const;
+  let phase = 0;
+
+  const router = branch<string, string>({
+    id: 'phase-router',
+    route: () => stages[phase] ?? null,
+  });
+
+  return loop({
+    id: 'pipeline-loop',
+    body: router,
+    until: until.maxSteps(3),
+    prepareNext: (output: string) => {
+      phase++;
+      return output;
+    },
+  });
+}
+```
+
+## Key Concepts
+
+### Branch as Sequencer
+
+While `branch` is typically used for conditional routing, here it acts as a sequencer -- the phase counter determines which stage runs next. This turns a loop into a pipeline where each iteration runs a different step.
+
+### prepareNext for Stage Chaining
+
+The `prepareNext` callback runs after each iteration. It receives the current output and returns the input for the next iteration. This is how the normalized text flows into the analyzer, and the analysis flows into the formatter.
+
+### Mixing Run and LLM Steps
+
+Stages 1 and 3 are pure `step.run` (deterministic, no API call), while stage 2 is `step.llm`. This keeps costs down -- only the analysis step that genuinely needs reasoning uses the model.

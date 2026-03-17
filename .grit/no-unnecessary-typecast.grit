@@ -18,6 +18,6 @@ or {
   `$expr as const`,
   // Flag all other `as` type assertions
   `$expr as $type` as $match where {
-    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, auto-generated types, or 'satisfies' instead.", severity="warn")
+    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, or 'satisfies' instead.", severity="error")
   }
 }

@@ -1,0 +1,81 @@
+---
+title: Parallel Research
+description: A research agent using fork (all mode) with spawn-wrapped LLM calls to investigate a topic from multiple perspectives in parallel.
+---
+
+## Overview
+
+A research agent that investigates a topic from three perspectives simultaneously -- historical, technical, and societal. Demonstrates how `fork` fans out into parallel `spawn`-wrapped LLM calls and merges the results.
+
+**Primitives used**: `fork` (all mode) + `spawn` + `step.llm`
+
+## How It Works
+
+1. Input arrives as a research topic string
+2. `fork` (mode: `'all'`) creates three parallel paths
+3. Each path is a `spawn`-wrapped `step.llm` with a perspective-specific system prompt
+4. All three complete, then `merge` combines results into a multi-section summary
+
+## Code
+
+```ts
+import { fork } from '@noetic/core';
+import { spawn } from '@noetic/core';
+import { step } from '@noetic/core';
+
+const PERSPECTIVES = [
+  {
+    id: 'historical',
+    label: 'Historical Context',
+    system: 'You are a historian. Analyze the topic from a historical perspective.',
+  },
+  {
+    id: 'technical',
+    label: 'Technical Analysis',
+    system: 'You are a technical expert. Analyze the topic from a technical perspective.',
+  },
+  {
+    id: 'societal',
+    label: 'Societal Impact',
+    system: 'You are a social scientist. Analyze the topic from a societal perspective.',
+  },
+] as const;
+
+export function buildParallelResearchAgent() {
+  return fork<string, string>({
+    id: 'parallel-research',
+    mode: 'all',
+    paths: () =>
+      PERSPECTIVES.map((perspective) =>
+        spawn<string, string>({
+          id: `research-${perspective.id}`,
+          child: step.llm<string, string>({
+            id: `llm-${perspective.id}`,
+            model: 'gpt-4o',
+            system: perspective.system,
+          }),
+        }),
+      ),
+    merge: (results) => {
+      const sections = PERSPECTIVES.map(
+        (perspective, i) => `## ${perspective.label}\n\n${results[i]}`,
+      );
+      return `# Research Summary\n\n${sections.join('\n\n')}`;
+    },
+  });
+}
+```
+
+## Key Concepts
+
+### Fork All Mode
+
+`fork` with `mode: 'all'` runs every path to completion and collects all results. The `merge` function then combines them. This is the right choice when you need every perspective -- unlike `'race'` (first wins) or `'settle'` (tolerates failures).
+
+### Spawn for Isolation
+
+Each LLM call is wrapped in `spawn`, giving it its own context boundary. This means each perspective agent has independent token tracking, memory, and item logs. If one perspective fails, it doesn't corrupt the others.
+
+### Data-Driven Paths
+
+The `paths` function generates steps from the `PERSPECTIVES` array. Adding a fourth perspective (e.g., economic) requires only adding an entry to the array -- no structural changes to the agent.
