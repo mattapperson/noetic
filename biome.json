@@ -22,7 +22,8 @@
       "!.grit/tests",
       "!packages/web/.source",
       "!packages/web/.next",
-      "!packages/web/next-env.d.ts"
+      "!packages/web/next-env.d.ts",
+      "!.worktrees"
     ]
   },
   "formatter": {
