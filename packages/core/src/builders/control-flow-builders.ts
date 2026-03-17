@@ -24,6 +24,7 @@ export function fork<I, O>(opts: {
   mode: 'race';
   paths: (input: I, ctx: Context) => Step<I, O>[];
   concurrency?: number;
+  _optimizable?: Step[];
 }): StepForkRace<I, O>;
 
 /**
@@ -42,6 +43,7 @@ export function fork<I, O>(opts: {
   paths: (input: I, ctx: Context) => Step<I, O>[];
   merge: (results: O[], ctx: Context) => O;
   concurrency?: number;
+  _optimizable?: Step[];
 }): StepForkAll<I, O>;
 
 /**
@@ -60,6 +62,7 @@ export function fork<I, O>(opts: {
   paths: (input: I, ctx: Context) => Step<I, O>[];
   merge: (results: SettleResult<O>[], ctx: Context) => O;
   concurrency?: number;
+  _optimizable?: Step[];
 }): StepForkSettle<I, O>;
 
 export function fork<I, O>(opts: {
@@ -68,6 +71,7 @@ export function fork<I, O>(opts: {
   paths: (input: I, ctx: Context) => Step<I, O>[];
   merge?: ((results: O[], ctx: Context) => O) | ((results: SettleResult<O>[], ctx: Context) => O);
   concurrency?: number;
+  _optimizable?: Step[];
 }): StepFork<I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new Error('fork requires a non-empty id');
@@ -92,6 +96,7 @@ export function fork<I, O>(opts: {
 export function branch<I, O>(opts: {
   id: string;
   route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
+  _optimizable?: Step[];
 }): StepBranch<I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new Error('branch requires a non-empty id');

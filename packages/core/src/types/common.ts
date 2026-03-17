@@ -47,7 +47,7 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   /** Zod schema validating tool return value. */
   output: O;
   /** Async function that performs the tool's work. */
-  execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
+  execute(args: z.infer<I>, toolCtx: ToolExecutionContext): Promise<z.infer<O>>;
   /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
   /** Optional memory declaration — the runtime generates a MemoryLayer from this. */

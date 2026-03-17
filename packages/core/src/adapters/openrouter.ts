@@ -253,11 +253,10 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 
 //#region Tool Conversion
 
-// Noetic uses Zod v3 while the OpenRouter SDK expects Zod v4 ($ZodObject).
-// The runtime shapes are compatible — both produce JSON Schema from .describe()/.shape.
-// We construct the SDK tool shape manually and use frameworkCast to bridge the
-// Zod version gap. This is safe because callModel only uses inputSchema for JSON Schema
-// generation and validation, which works identically across Zod 3 and 4.
+// We construct the SDK tool shape manually and use frameworkCast to bridge
+// the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
+// This is safe because callModel only uses inputSchema for JSON Schema
+// generation and validation.
 function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime: Runtime): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({

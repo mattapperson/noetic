@@ -93,6 +93,7 @@ export interface StepBranch<I, O> {
   kind: 'branch';
   id: string;
   route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
+  _optimizable?: Step[];
 }
 
 // Fork with type-safe mode variants
@@ -104,6 +105,7 @@ export interface StepForkRace<I, O> {
   mode: 'race';
   paths: (input: I, ctx: Context) => Step<I, O>[];
   concurrency?: number;
+  _optimizable?: Step[];
 }
 
 export interface StepForkAll<I, O> {
@@ -113,6 +115,7 @@ export interface StepForkAll<I, O> {
   paths: (input: I, ctx: Context) => Step<I, O>[];
   merge: (results: O[], ctx: Context) => O;
   concurrency?: number;
+  _optimizable?: Step[];
 }
 
 export interface StepForkSettle<I, O> {
@@ -122,6 +125,7 @@ export interface StepForkSettle<I, O> {
   paths: (input: I, ctx: Context) => Step<I, O>[];
   merge: (results: SettleResult<O>[], ctx: Context) => O;
   concurrency?: number;
+  _optimizable?: Step[];
 }
 
 export interface StepSpawn<I, O> {

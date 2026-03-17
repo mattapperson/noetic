@@ -35,7 +35,7 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(config: {
   output: O;
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
-}): Tool {
+}): Tool<I, O> {
   if (!config.name || config.name.trim() === '') {
     throw new Error('tool() requires a non-empty name');
   }
@@ -49,5 +49,5 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(config: {
     output: config.output,
     execute: config.execute,
     needsApproval: config.needsApproval,
-  } satisfies Tool;
+  } satisfies Tool<I, O>;
 }
