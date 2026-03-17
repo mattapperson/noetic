@@ -16,7 +16,6 @@ import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { StepLoop } from '../src/types/step';
 import { until } from '../src/until/predicates';
-import { createExampleRuntime } from './create-example-runtime';
 
 //#region Stage Handlers
 
@@ -81,34 +80,6 @@ export function buildPipelineAgent(): StepLoop<string, string> {
       phase++;
       return output;
     },
-  });
-}
-
-//#endregion
-
-//#region Main
-
-async function main(): Promise<void> {
-  const runtime = createExampleRuntime();
-
-  const agent = buildPipelineAgent();
-  const ctx = runtime.createContext();
-
-  const input = [
-    'The   new AI system has been AMAZING!!!',
-    'Users love it... but some are worried about    privacy.',
-    'Overall the feedback has been   overwhelmingly positive,',
-    'though a few edge cases need  attention.',
-  ].join(' ');
-
-  const result = await runtime.execute(agent, input, ctx);
-  console.log(result);
-}
-
-if (import.meta.main) {
-  main().catch((err: unknown) => {
-    console.error(err);
-    process.exit(1);
   });
 }
 

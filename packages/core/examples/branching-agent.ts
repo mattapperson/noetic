@@ -15,7 +15,6 @@ import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { StepLoop } from '../src/types/step';
 import { until } from '../src/until/predicates';
-import { createExampleRuntime } from './create-example-runtime';
 
 //#region Keyword Sets
 
@@ -106,27 +105,6 @@ export function buildBranchingAgent(): StepLoop<string, string> {
     id: 'ticket-processing-loop',
     body: router,
     until: until.maxSteps(1),
-  });
-}
-
-//#endregion
-
-//#region Main
-
-async function main(): Promise<void> {
-  const runtime = createExampleRuntime();
-
-  const agent = buildBranchingAgent();
-  const ctx = runtime.createContext();
-  const result = await runtime.execute(agent, 'I was charged twice on my invoice', ctx);
-
-  console.log(result);
-}
-
-if (import.meta.main) {
-  main().catch((err: unknown) => {
-    console.error(err);
-    process.exit(1);
   });
 }
 

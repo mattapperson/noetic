@@ -11,7 +11,6 @@ import { fork } from '../src/builders/control-flow-builders';
 import { spawn } from '../src/builders/spawn-builder';
 import { step } from '../src/builders/step-builders';
 import type { StepForkAll } from '../src/types/step';
-import { createExampleRuntime } from './create-example-runtime';
 
 //#region Perspective Definitions
 
@@ -74,31 +73,6 @@ export function buildParallelResearchAgent(): StepForkAll<string, string> {
       );
       return `# Research Summary\n\n${sections.join('\n\n')}`;
     },
-  });
-}
-
-//#endregion
-
-//#region Main
-
-async function main(): Promise<void> {
-  const runtime = createExampleRuntime();
-
-  const agent = buildParallelResearchAgent();
-  const ctx = runtime.createContext();
-  const result = await runtime.execute(
-    agent,
-    'The impact of artificial intelligence on healthcare',
-    ctx,
-  );
-
-  console.log(result);
-}
-
-if (import.meta.main) {
-  main().catch((err: unknown) => {
-    console.error(err);
-    process.exit(1);
   });
 }
 

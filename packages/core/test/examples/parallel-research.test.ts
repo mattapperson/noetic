@@ -13,8 +13,12 @@ describe('parallel research agent', () => {
   });
 
   it('forks into three spawn paths', () => {
+    const callModel = createScriptedCallModel([]);
+    const runtime = new InMemoryRuntime({
+      callModel,
+    });
     const agent = buildParallelResearchAgent();
-    const paths = agent.paths('any-input');
+    const paths = agent.paths('any-input', runtime.createContext());
 
     expect(paths).toHaveLength(3);
     for (const path of paths) {
