@@ -140,6 +140,8 @@ noetic test --optimize  # Run GEPA optimization
 
 Detailed specifications live in [`specs/`](specs/), covering every primitive, the memory system, error model, observability, and patterns.
 
+The specs are consumed by [SpecBuilt](https://github.com/mattapperson/spec-built) to automatically implement new features.
+
 ## License
 
 MIT
