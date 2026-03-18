@@ -76,7 +76,7 @@ describe('ItemLogImpl', () => {
     // The returned array should be frozen or otherwise prevent mutation
     const items = log.items;
     expect(() => {
-      (items as unknown[]).push(makeMessage('m2'));
+      Array.prototype.push.call(items, makeMessage('m2'));
     }).toThrow();
   });
 

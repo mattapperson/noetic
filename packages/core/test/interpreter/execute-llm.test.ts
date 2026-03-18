@@ -72,7 +72,7 @@ describe('executeLLM', () => {
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
-    const userItems = ctx.itemLog.items.filter((i) => (i as MessageItem).role === 'user');
+    const userItems = ctx.itemLog.items.filter((i) => i.type === 'message' && i.role === 'user');
     expect(userItems).toHaveLength(1);
   });
 
@@ -108,7 +108,9 @@ describe('executeLLM', () => {
     });
 
     await executeLLM(step, 'hi', ctx, callModel);
-    const assistantItems = ctx.itemLog.items.filter((i) => (i as MessageItem).role === 'assistant');
+    const assistantItems = ctx.itemLog.items.filter(
+      (i) => i.type === 'message' && i.role === 'assistant',
+    );
     expect(assistantItems).toHaveLength(1);
   });
 
@@ -142,7 +144,7 @@ describe('executeLLM', () => {
     });
 
     await executeLLM(step, '', ctx, callModel);
-    const userItems = ctx.itemLog.items.filter((i) => (i as MessageItem).role === 'user');
+    const userItems = ctx.itemLog.items.filter((i) => i.type === 'message' && i.role === 'user');
     expect(userItems).toHaveLength(0);
   });
 

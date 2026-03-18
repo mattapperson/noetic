@@ -96,23 +96,25 @@ describe('fork builder', () => {
   });
 
   it('throws when all mode lacks merge', () => {
-    // Cast via unknown to intentionally bypass type safety and test runtime validation
-    const badOpts = {
-      id: 'test',
-      mode: 'all',
-      paths: () => [],
-    } as unknown as Parameters<typeof fork<string, string>>[0];
-    expect(() => fork<string, string>(badOpts)).toThrow('merge function');
+    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
+    expect(() =>
+      fork<string, string>({
+        id: 'test',
+        mode: 'all',
+        paths: () => [],
+      }),
+    ).toThrow('merge function');
   });
 
   it('throws when settle mode lacks merge', () => {
-    // Cast via unknown to intentionally bypass type safety and test runtime validation
-    const badOpts = {
-      id: 'test',
-      mode: 'settle',
-      paths: () => [],
-    } as unknown as Parameters<typeof fork<string, string>>[0];
-    expect(() => fork<string, string>(badOpts)).toThrow('merge function');
+    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
+    expect(() =>
+      fork<string, string>({
+        id: 'test',
+        mode: 'settle',
+        paths: () => [],
+      }),
+    ).toThrow('merge function');
   });
 
   it('paths is a function', () => {
@@ -146,12 +148,12 @@ describe('branch builder', () => {
   });
 
   it('throws on missing route', () => {
-    // Cast via unknown to intentionally bypass type safety and test runtime validation
-    type RouteOpts = Parameters<typeof branch<string, string>>[0];
-    const badOpts = {
-      id: 'test',
-      route: undefined,
-    } as unknown as RouteOpts;
-    expect(() => branch<string, string>(badOpts)).toThrow('route function');
+    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
+    expect(() =>
+      branch<string, string>({
+        id: 'test',
+        route: undefined,
+      }),
+    ).toThrow('route function');
   });
 });

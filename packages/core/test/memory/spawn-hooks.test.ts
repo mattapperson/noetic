@@ -12,7 +12,11 @@ import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 describe('spawnLayers', () => {
   it('calls onSpawn and sets child state', async () => {
     const store = createLayerStateStore();
-    const layers: MemoryLayer[] = [
+    type DataState = {
+      data: string;
+      spawned?: boolean;
+    };
+    const layers: MemoryLayer<DataState>[] = [
       {
         id: 'test',
         name: 'Test',
@@ -24,16 +28,13 @@ describe('spawnLayers', () => {
               data: 'parent',
             },
           }),
-          onSpawn: async ({ parentState }) => {
-            const state = parentState as Record<string, unknown>;
-            return {
-              childState: {
-                ...state,
-                spawned: true,
-              },
-              items: [],
-            };
-          },
+          onSpawn: async ({ parentState }) => ({
+            childState: {
+              ...parentState,
+              spawned: true,
+            },
+            items: [],
+          }),
         },
       },
     ];
@@ -59,8 +60,8 @@ describe('spawnLayers', () => {
     });
 
     expect(results).toHaveLength(1);
-    const childState = results[0].childState as Record<string, unknown>;
-    expect(childState.spawned).toBe(true);
+    assert(results[0].childState !== null);
+    expect(results[0].childState.spawned).toBe(true);
   });
 });
 
@@ -70,7 +71,7 @@ describe('returnLayers', () => {
       count: number;
     };
     const store = createLayerStateStore();
-    const layers: MemoryLayer[] = [
+    const layers: MemoryLayer<CountState>[] = [
       {
         id: 'test',
         name: 'Test',
@@ -85,15 +86,11 @@ describe('returnLayers', () => {
           onSpawn: async ({ parentState }) => ({
             childState: structuredClone(parentState),
           }),
-          onReturn: async ({ childState, parentState }) => {
-            const parent = parentState as CountState;
-            const child = childState as CountState;
-            return {
-              parentState: {
-                count: parent.count + child.count,
-              } satisfies CountState,
-            };
-          },
+          onReturn: async ({ childState, parentState }) => ({
+            parentState: {
+              count: parentState.count + childState.count,
+            } satisfies CountState,
+          }),
         },
       },
     ];

@@ -65,21 +65,23 @@ describe('loop builder', () => {
 
   it('throws on missing body', () => {
     expect(() =>
+      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
       loop({
         id: 'test',
         body: undefined,
         until: until.maxSteps(1),
-      } as never),
+      }),
     ).toThrow('body step');
   });
 
   it('throws on missing until', () => {
     expect(() =>
+      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
       loop({
         id: 'test',
         body,
         until: undefined,
-      } as never),
+      }),
     ).toThrow('until predicate');
   });
 });

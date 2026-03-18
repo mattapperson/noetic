@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type {
+  OpenResponsesNonStreamingResponse,
+  ResponsesOutputItem,
+} from '@openrouter/sdk/models';
+import { z } from 'zod';
+import type { OpenRouterClientLike } from '../../src/adapters/openrouter';
 import { createOpenRouterCallModel } from '../../src/adapters/openrouter';
 import {
   makeFunctionCall,
@@ -8,61 +14,69 @@ import {
   makeMockContext,
 } from '../_helpers';
 
+//#region Schemas
+
+const CallParamsSchema = z.record(z.string(), z.unknown());
+const InputArraySchema = z.array(z.record(z.string(), z.unknown()));
+
+//#endregion
+
+//#region Mock Factory
+
+// Base response shape shared by all mock responses
+const BASE_RESPONSE = {
+  id: 'resp-1',
+  object: 'response',
+  createdAt: 0,
+  model: 'test-model',
+  status: 'completed',
+  completedAt: 0,
+  error: null,
+  incompleteDetails: null,
+  metadata: null,
+  tools: [],
+  toolChoice: 'auto',
+  parallelToolCalls: false,
+  temperature: null,
+  topP: null,
+  presencePenalty: null,
+  frequencyPenalty: null,
+} satisfies Omit<OpenResponsesNonStreamingResponse, 'output' | 'outputText' | 'usage'>;
+
 // Minimal mock of OpenRouter client
 function makeMockClient(response: {
-  output: unknown[];
+  output: ResponsesOutputItem[];
   outputText?: string;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    inputTokensDetails?: {
-      cachedTokens: number;
-    };
-    totalTokens: number;
-    cost?: number;
-  };
+  usage?: OpenResponsesNonStreamingResponse['usage'];
 }): {
-  client: {
-    callModel: (params: unknown) => {
-      getResponse: () => Promise<unknown>;
-    };
-  };
+  client: OpenRouterClientLike;
   calls: unknown[];
 } {
   const calls: unknown[] = [];
 
-  return {
-    client: {
-      callModel(params: unknown) {
-        calls.push(params);
-        return {
-          async getResponse() {
-            return {
-              id: 'resp-1',
-              object: 'response',
-              createdAt: Date.now(),
-              model: 'test-model',
-              status: 'completed',
-              completedAt: Date.now(),
-              error: null,
-              incompleteDetails: null,
-              metadata: null,
-              tools: [],
-              toolChoice: 'auto',
-              parallelToolCalls: false,
-              temperature: null,
-              topP: null,
-              presencePenalty: null,
-              frequencyPenalty: null,
-              ...response,
-            };
-          },
-        };
-      },
+  const client: OpenRouterClientLike = {
+    callModel(params) {
+      calls.push(params);
+      return {
+        async getResponse(): Promise<OpenResponsesNonStreamingResponse> {
+          return {
+            ...BASE_RESPONSE,
+            createdAt: Date.now(),
+            completedAt: Date.now(),
+            ...response,
+          };
+        },
+      };
     },
+  };
+
+  return {
+    client,
     calls,
   };
 }
+
+//#endregion
 
 describe('createOpenRouterCallModel', () => {
   it('converts a simple text response to Noetic items', async () => {
@@ -76,6 +90,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'Hello world',
+              annotations: [],
             },
           ],
         },
@@ -86,11 +101,14 @@ describe('createOpenRouterCallModel', () => {
         inputTokensDetails: {
           cachedTokens: 2,
         },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 15,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     const result = await callModel({
@@ -119,6 +137,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'response',
+              annotations: [],
             },
           ],
         },
@@ -126,11 +145,17 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 0,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     await callModel({
@@ -142,10 +167,10 @@ describe('createOpenRouterCallModel', () => {
       ctx,
     });
 
-    const callParams = calls[0] as Record<string, unknown>;
+    const callParams = CallParamsSchema.parse(calls[0]);
     expect(callParams.instructions).toBe('You are helpful');
 
-    const input = callParams.input as Array<Record<string, unknown>>;
+    const input = InputArraySchema.parse(callParams.input);
     // System message should be extracted, only user message remains
     expect(input).toHaveLength(1);
     expect(input[0].role).toBe('user');
@@ -162,6 +187,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'done',
+              annotations: [],
             },
           ],
         },
@@ -169,11 +195,17 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 0,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     const fc = makeFunctionCall('search', '{"q":"test"}');
@@ -189,8 +221,8 @@ describe('createOpenRouterCallModel', () => {
       ctx,
     });
 
-    const callParams = calls[0] as Record<string, unknown>;
-    const input = callParams.input as Array<Record<string, unknown>>;
+    const callParams = CallParamsSchema.parse(calls[0]);
+    const input = InputArraySchema.parse(callParams.input);
 
     // User message + function_call + function_call_output
     expect(input).toHaveLength(3);
@@ -224,6 +256,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'Found results',
+              annotations: [],
             },
           ],
         },
@@ -231,11 +264,17 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 0,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     const result = await callModel({
@@ -265,11 +304,17 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 0,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     const result = await callModel({
@@ -295,6 +340,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'ok',
+              annotations: [],
             },
           ],
         },
@@ -302,11 +348,17 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 0,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     await callModel({
@@ -322,7 +374,7 @@ describe('createOpenRouterCallModel', () => {
       ctx,
     });
 
-    const callParams = calls[0] as Record<string, unknown>;
+    const callParams = CallParamsSchema.parse(calls[0]);
     expect(callParams.temperature).toBe(0.7);
     expect(callParams.maxOutputTokens).toBe(1e3);
     expect(callParams.topP).toBe(0.9);
@@ -339,6 +391,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'ok',
+              annotations: [],
             },
           ],
         },
@@ -346,12 +399,18 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 100,
         outputTokens: 50,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 150,
         cost: 0.003,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     const result = await callModel({
@@ -376,13 +435,14 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'ok',
+              annotations: [],
             },
           ],
         },
       ],
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     const result = await callModel({
@@ -408,6 +468,7 @@ describe('createOpenRouterCallModel', () => {
             {
               type: 'output_text',
               text: 'ok',
+              annotations: [],
             },
           ],
         },
@@ -415,11 +476,17 @@ describe('createOpenRouterCallModel', () => {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
         totalTokens: 0,
       },
     });
 
-    const callModel = createOpenRouterCallModel(client as never);
+    const callModel = createOpenRouterCallModel(client);
     const ctx = makeMockContext();
 
     await callModel({
@@ -441,8 +508,8 @@ describe('createOpenRouterCallModel', () => {
       ctx,
     });
 
-    const callParams = calls[0] as Record<string, unknown>;
-    const input = callParams.input as Array<Record<string, unknown>>;
+    const callParams = CallParamsSchema.parse(calls[0]);
+    const input = InputArraySchema.parse(callParams.input);
     // Reasoning item should be skipped
     expect(input).toHaveLength(1);
     expect(input[0].role).toBe('user');

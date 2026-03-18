@@ -57,13 +57,13 @@ describe('spawn builder', () => {
   });
 
   it('throws on missing child', () => {
-    type SpawnOpts = Parameters<typeof spawn>[0];
-    // Cast via unknown to test runtime validation
-    const badOpts = {
-      id: 'test',
-      child: undefined,
-    } as unknown as SpawnOpts;
-    expect(() => spawn(badOpts)).toThrow('child step');
+    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
+    expect(() =>
+      spawn({
+        id: 'test',
+        child: undefined,
+      }),
+    ).toThrow('child step');
   });
 
   it('supports optional memory field', () => {

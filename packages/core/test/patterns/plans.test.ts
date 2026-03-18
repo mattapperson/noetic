@@ -288,7 +288,13 @@ describe('adaptivePlan', () => {
       body: {
         kind: 'run' as const,
         id: 'b',
-        execute: async () => ({}) as unknown as PlanNode,
+        execute: async () =>
+          ({
+            id: 'stub',
+            description: 'stub',
+            assignee: 'none',
+            execution: 'sequential' as const,
+          }) satisfies PlanNode,
       },
       until: () => ({
         stop: true,

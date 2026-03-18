@@ -14,25 +14,22 @@ afterEach(() => {
   globalThis.setTimeout = _originalSetTimeout;
 });
 
-type SetTimeoutFn = (
-  fn: (...args: unknown[]) => void,
-  delay?: number,
-  ...args: unknown[]
-) => ReturnType<typeof setTimeout>;
-
 /** Patch setTimeout to capture delay values and execute callbacks instantly. */
 function interceptDelays(): {
   delays: number[];
   restore: () => void;
 } {
   const delays: number[] = [];
-  const patched: SetTimeoutFn = (fn, delay, ...args) => {
+  globalThis.setTimeout = (
+    fn: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
     if (delay && delay > 0) {
       delays.push(delay);
     }
     return _originalSetTimeout(fn, 1, ...args);
   };
-  globalThis.setTimeout = patched as typeof globalThis.setTimeout;
   return {
     delays,
     restore: () => {

@@ -122,13 +122,13 @@ describe('step builders', () => {
   });
 
   it('step.run() throws on missing execute', () => {
-    // Cast via unknown to test runtime validation without bypassing with any
-    type RunOpts = Parameters<typeof step.run<string, number>>[0];
-    const badOpts = {
-      id: 'test',
-      execute: undefined,
-    } as unknown as RunOpts;
-    expect(() => step.run(badOpts)).toThrow('execute function');
+    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
+    expect(() =>
+      step.run({
+        id: 'test',
+        execute: undefined,
+      }),
+    ).toThrow('execute function');
   });
 
   it('step.llm() throws on empty id', () => {
@@ -172,13 +172,13 @@ describe('step builders', () => {
   });
 
   it('step.tool() throws on missing tool', () => {
-    // Cast via unknown to test runtime validation without bypassing with any
-    type ToolOpts = Parameters<typeof step.tool<string, number>>[0];
-    const badOpts = {
-      id: 'test',
-      tool: undefined,
-    } as unknown as ToolOpts;
-    expect(() => step.tool(badOpts)).toThrow('requires a tool');
+    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
+    expect(() =>
+      step.tool({
+        id: 'test',
+        tool: undefined,
+      }),
+    ).toThrow('requires a tool');
   });
 
   it('step.tool() with args', () => {

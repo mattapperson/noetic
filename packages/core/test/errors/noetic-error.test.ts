@@ -75,7 +75,7 @@ describe('NoeticError', () => {
             stepId: 'b',
             error: {
               kind: 'cancelled',
-            } as NoeticError,
+            } satisfies NoeticError,
           },
         ],
       });
@@ -133,9 +133,10 @@ describe('NoeticError', () => {
 
   describe('formatMessage default branch', () => {
     it('unknown kind produces fallback message', () => {
+      // @ts-expect-error — intentionally passing invalid kind to test runtime fallback branch
       const e = new NoeticErrorImpl({
         kind: 'totally_unknown',
-      } as unknown as ConstructorParameters<typeof NoeticErrorImpl>[0]);
+      });
       expect(e.message).toContain('NoeticError');
       expect(e.message).toContain('unknown kind');
     });

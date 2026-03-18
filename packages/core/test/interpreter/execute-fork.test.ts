@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeFork } from '../../src/interpreter/execute-fork';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { SettleResult, StepForkAll, StepForkRace, StepForkSettle } from '../../src/types/step';
 import { simpleExecute } from '../_helpers';
+
+const _StateSchema = z.record(z.string(), z.unknown());
 
 describe('executeFork', () => {
   describe('all mode', () => {
@@ -104,11 +107,11 @@ describe('executeFork', () => {
       const result = await executeFork(step, '', ctx, simpleExecute);
       // b should see the original state, not a's mutation
       const bResult = result.split('|')[1];
-      const bState = JSON.parse(bResult) as Record<string, unknown>;
+      const bState = StateSchema.parse(JSON.parse(bResult));
       expect(bState.modified).toBeUndefined();
       expect(bState.original).toBe(true);
       // Parent state should also be unchanged
-      const parentState = ctx.state as Record<string, unknown>;
+      const parentState = StateSchema.parse(ctx.state);
       expect(parentState.original).toBe(true);
     });
 
@@ -320,7 +323,7 @@ describe('executeFork', () => {
         },
       });
       await executeFork(step, '', ctx, simpleExecute);
-      const finalState = ctx.state as Record<string, unknown>;
+      const finalState = StateSchema.parse(ctx.state);
       expect(finalState.winner).toBe(true);
     });
 
