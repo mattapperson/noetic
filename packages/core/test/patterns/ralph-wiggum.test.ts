@@ -56,14 +56,14 @@ describe('Ralph Wiggum pattern', () => {
               call_id: `call_${llmCallCount}`,
               name: 'write',
               arguments: `{"code":"attempt ${Math.ceil(llmCallCount / 2)}"}`,
-            } as FunctionCallItem,
+            } satisfies FunctionCallItem,
             {
               id: `fco-${llmCallCount}`,
               status: 'completed',
               type: 'function_call_output',
               call_id: `call_${llmCallCount}`,
               output: '"ok"',
-            } as FunctionCallOutputItem,
+            } satisfies FunctionCallOutputItem,
             {
               id: `msg-${llmCallCount}`,
               status: 'completed',
@@ -75,7 +75,7 @@ describe('Ralph Wiggum pattern', () => {
                   text: 'Writing...',
                 },
               ],
-            } as MessageItem,
+            } satisfies MessageItem,
           ],
           usage: {
             inputTokens: 10,
@@ -96,7 +96,7 @@ describe('Ralph Wiggum pattern', () => {
                 text: `Done attempt ${llmCallCount / 2}`,
               },
             ],
-          } as MessageItem,
+          } satisfies MessageItem,
         ],
         usage: {
           inputTokens: 10,
@@ -158,7 +158,7 @@ describe('Ralph Wiggum pattern', () => {
               text: 'done',
             },
           ],
-        } as MessageItem,
+        } satisfies MessageItem,
       ],
       usage: {
         inputTokens: 5,
@@ -220,7 +220,7 @@ describe('Ralph Wiggum pattern', () => {
               text: 'done',
             },
           ],
-        } as MessageItem,
+        } satisfies MessageItem,
       ],
       usage: {
         inputTokens: 5,
@@ -281,7 +281,7 @@ describe('Ralph Wiggum pattern', () => {
                 text: 'resp',
               },
             ],
-          } as MessageItem,
+          } satisfies MessageItem,
         ],
         usage: {
           inputTokens: 5,

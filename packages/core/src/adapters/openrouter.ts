@@ -1,4 +1,4 @@
-import type { OpenRouter, Tool as SdkTool, TurnContext } from '@openrouter/sdk';
+import type { CallModelInput, Tool as SdkTool, TurnContext } from '@openrouter/sdk';
 import type {
   OpenResponsesEasyInputMessage,
   OpenResponsesFunctionCallOutput,
@@ -48,6 +48,16 @@ type OpenRouterInputItem =
   | OpenResponsesEasyInputMessage
   | OpenResponsesFunctionToolCall
   | OpenResponsesFunctionCallOutput;
+
+/**
+ * Minimal interface covering only the methods used by createOpenRouterCallModel.
+ * Allows passing a mock or a real OpenRouter client interchangeably.
+ */
+export interface OpenRouterClientLike {
+  callModel(request: CallModelInput<SdkTool[]>): {
+    getResponse(): Promise<OpenResponsesNonStreamingResponse>;
+  };
+}
 
 const EmbeddingsResponseSchema = z.object({
   data: z.array(
@@ -297,7 +307,7 @@ function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkT
 
 //#region Public API
 
-export function createOpenRouterCallModel(client: OpenRouter): CallModelFn {
+export function createOpenRouterCallModel(client: OpenRouterClientLike): CallModelFn {
   return async (params: CallModelParams): Promise<LLMResponse> => {
     const { instructions, remaining } = extractSystemInstruction(params.items);
     const input = itemsToInput(remaining);

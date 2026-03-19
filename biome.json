@@ -93,6 +93,21 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": [
+        "**/*.test.ts",
+        "**/test/**"
+      ],
+      "plugins": [
+        ".grit/no-iife.grit",
+        ".grit/use-named-arguments.grit",
+        ".grit/prefer-nullish-over-optional-nullable.grit",
+        ".grit/prefer-esm-url-over-dirname.grit",
+        ".grit/no-explicit-unknown.grit"
+      ]
+    }
+  ],
   "css": {
     "parser": {
       "cssModules": true,

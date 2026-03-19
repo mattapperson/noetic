@@ -69,6 +69,17 @@ describe('executeSpawn', () => {
         };
       };
 
+      const TestStateSchema = z.object({
+        count: z.number(),
+        nested: z.object({
+          val: z.string(),
+        }),
+      });
+
+      function assertsIsTestState(value: unknown): asserts value is TestState {
+        TestStateSchema.parse(value);
+      }
+
       const initialState = {
         count: 0,
         nested: {
@@ -81,17 +92,17 @@ describe('executeSpawn', () => {
       });
 
       const step = makeSpawnStep<string, string>('state-test', async (_input, ctx) => {
-        const childState = ctx.state as TestState;
-        childState.count = 99;
-        childState.nested.val = 'modified';
+        assertsIsTestState(ctx.state);
+        ctx.state.count = 99;
+        ctx.state.nested.val = 'modified';
         return 'done';
       });
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
 
-      const parentState = parentCtx.state as TestState;
-      expect(parentState.count).toBe(0);
-      expect(parentState.nested.val).toBe('original');
+      assertsIsTestState(parentCtx.state);
+      expect(parentCtx.state.count).toBe(0);
+      expect(parentCtx.state.nested.val).toBe('original');
     });
   });
 

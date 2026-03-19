@@ -32,7 +32,6 @@ or {
   `var $name: unknown` as $match where {
     register_diagnostic(span=$match, message="Avoid explicit `unknown` type annotation. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
   },
-
   // Function return types
   `function $name($...params): unknown { $body }` as $match where {
     register_diagnostic(span=$match, message="Avoid explicit `unknown` return type. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
@@ -40,7 +39,6 @@ or {
   `async function $name($...params): unknown { $body }` as $match where {
     register_diagnostic(span=$match, message="Avoid explicit `unknown` return type. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")
   },
-
   // Arrow functions with unknown return type
   `($...params): unknown => $body` as $match where {
     register_diagnostic(span=$match, message="Avoid explicit `unknown` return type. Use a generic type parameter with `= unknown` default, or a more specific type.", severity="error")

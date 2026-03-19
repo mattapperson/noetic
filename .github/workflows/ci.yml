@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check .
+
+      - name: Typecheck core
+        run: bun --cwd packages/core run typecheck
+
+      - name: Typecheck eval
+        run: bun --cwd packages/eval run typecheck
+
+      - name: Test core
+        run: bun --cwd packages/core run test:ci
+
+      - name: Test eval
+        run: bun --cwd packages/eval run test:ci
+
+      - name: Build web
+        run: bun --cwd packages/web run test:build
+
+      - name: Link check
+        run: bun --cwd packages/web run test:links
+
+      - name: Eval regression (if baselines exist)
+        if: hashFiles('.noetic/baselines/**') != ''
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            bun --cwd packages/eval run noetic test --regression --fail-on-regression
+          else
+            bun --cwd packages/eval run noetic test --regression || echo "::warning::Eval regression detected — scores degraded on this PR"
+          fi

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { assembleView } from '../../src/memory/projector';
-import type { MessageItem } from '../../src/types/items';
 import { makeMessage } from '../_helpers';
 
 describe('assembleView', () => {
@@ -21,9 +20,12 @@ describe('assembleView', () => {
       historyItems: history,
     });
     expect(view).toHaveLength(4);
-    expect((view[0] as MessageItem).role).toBe('system');
-    expect((view[1] as MessageItem).role).toBe('developer');
-    expect((view[2] as MessageItem).role).toBe('user');
+    assert(view[0].type === 'message');
+    expect(view[0].role).toBe('system');
+    assert(view[1].type === 'message');
+    expect(view[1].role).toBe('developer');
+    assert(view[2].type === 'message');
+    expect(view[2].role).toBe('user');
   });
 
   it('applies sliding_window policy', () => {
@@ -46,7 +48,8 @@ describe('assembleView', () => {
     });
     // system(0) + layers(0) + window(3)
     expect(view).toHaveLength(3);
-    expect((view[0] as MessageItem).content[0]).toEqual({
+    assert(view[0].type === 'message');
+    expect(view[0].content[0]).toEqual({
       type: 'input_text',
       text: 'msg-7',
     });

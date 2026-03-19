@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:build": "bun run build",
+    "test:links": "bunx lychee --offline 'content/**/*.mdx'"
   },
   "dependencies": {
     "fumadocs-core": "16.6.17",

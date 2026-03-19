@@ -81,7 +81,11 @@ describe('ContextImpl', () => {
 
   test('channel methods throw when no channel store configured', () => {
     const ctx = new ContextImpl();
-    const fakeChannel = {} as Channel<unknown>;
+    const fakeChannel = {
+      name: 'test',
+      schema: z.unknown(),
+      mode: 'value' as const,
+    } satisfies Channel<unknown>;
     expect(() => ctx.send(fakeChannel, 'val')).toThrow('No channel store configured');
     expect(() => ctx.tryRecv(fakeChannel)).toThrow('No channel store configured');
     expect(ctx.recv(fakeChannel)).rejects.toThrow('No channel store configured');
