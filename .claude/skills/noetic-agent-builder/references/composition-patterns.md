@@ -39,6 +39,48 @@ const agent = react({
 
 When `memory` is provided, `react()` auto-wraps the loop in a `spawn` boundary.
 
+## Pattern: Agent with Steering
+
+Use the steering layer to enforce policies on tool usage and model output.
+
+```typescript
+import { react, steering, SteeringAction } from '@noetic/core';
+
+const agent = react({
+  model: 'anthropic/claude-sonnet-4-20250514',
+  system: 'You are a helpful assistant.',
+  tools: [searchTool, deleteTool, writeTool],
+  memory: [
+    steering({
+      rules: [
+        {
+          id: 'deny-delete',
+          appliesTo: ['beforeToolCall'],
+          predicate: (params) => {
+            if ('toolName' in params && params.toolName === 'delete') {
+              return { action: SteeringAction.Deny, guidance: 'Deletion is not allowed' };
+            }
+            return { action: SteeringAction.Allow };
+          },
+        },
+        {
+          id: 'guide-search',
+          appliesTo: ['beforeToolCall'],
+          predicate: (params) => {
+            if ('toolName' in params && params.toolName === 'search') {
+              return { action: SteeringAction.Guide, guidance: 'Prefer specific queries' };
+            }
+            return { action: SteeringAction.Allow };
+          },
+        },
+      ],
+    }),
+  ],
+});
+```
+
+The steering layer runs at slot 90 (before all other memory layers). `Deny` blocks execution, `Guide` injects feedback for retries, `Allow` proceeds normally.
+
 ## Pattern: Sub-Agent Delegation via Tools
 
 Tools access `toolCtx.runtime` to spawn sub-agents:

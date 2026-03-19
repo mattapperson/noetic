@@ -54,4 +54,8 @@ export type NoeticError =
       field: 'cost' | 'steps' | 'duration';
       limit: number;
       actual: number;
+    }
+  | {
+      kind: 'steering_denied';
+      guidance?: string;
     };

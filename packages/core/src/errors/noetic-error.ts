@@ -34,6 +34,8 @@ function formatMessage(error: NoeticError): string {
       return `Cancelled${error.reason ? `: ${error.reason}` : ''}`;
     case 'budget_exceeded':
       return `Budget exceeded: ${error.field} limit ${error.limit}, actual ${error.actual}`;
+    case 'steering_denied':
+      return `Steering denied${error.guidance ? `: ${error.guidance}` : ''}`;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

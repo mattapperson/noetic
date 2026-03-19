@@ -245,6 +245,35 @@ Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
 
+### steering
+
+Intercepts tool calls and model responses via programmatic or LLM-evaluated rules. Maintains an activity ledger. Slot 90 (runs before all other layers).
+
+```typescript
+steering({
+  rules: SteeringRule[];
+  maxLedgerEntries?: number;  // default 100
+  maxRetries?: number;        // default 3
+  scope?: MemoryScope;        // default 'execution'
+  callModel?: CallModelFn;    // required if any rule uses llmEval
+}): MemoryLayer<SteeringState>
+```
+
+**SteeringRule:**
+```typescript
+interface SteeringRule {
+  id: string;
+  name?: string;
+  appliesTo: ('beforeToolCall' | 'afterModelCall')[];
+  predicate?: (params: BeforeToolCallParams | AfterModelCallParams) => SteeringDecision;
+  llmEval?: { mode: 'sync' | 'async'; prompt: string; model?: string };
+}
+```
+
+**SteeringAction:** `Allow`, `Deny`, `Guide` — `Deny` short-circuits, `Guide` injects feedback.
+
+**Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
+
 ## Runtime
 
 ```typescript

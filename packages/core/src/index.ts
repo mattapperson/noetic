@@ -38,6 +38,8 @@ export { allocateBudgets, checkBudget } from './memory/budget';
 export { findFunctionCall } from './memory/function-call-utils';
 export type { LayerStateStore } from './memory/layer-lifecycle';
 export {
+  afterModelCallLayers,
+  beforeToolCallLayers,
   completeLayers,
   createLayerStateStore,
   disposeLayers,
@@ -55,6 +57,7 @@ export type {
 } from './memory/layers/observational-memory';
 export { observationalMemory } from './memory/layers/observational-memory';
 export { staticContent } from './memory/layers/static-content';
+export { steering } from './memory/layers/steering';
 export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 export { workingMemory } from './memory/layers/working-memory';
@@ -123,6 +126,18 @@ export type {
 export { Slot } from './types/memory';
 export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability';
 export type { AgentConfig, AgentHooks, RecallLayerOutput, Runtime } from './types/runtime';
+export type {
+  AfterModelCallParams,
+  AfterModelCallResult,
+  BeforeToolCallParams,
+  BeforeToolCallResult,
+  LedgerEntry,
+  SteeringConfig,
+  SteeringDecision,
+  SteeringRule,
+  SteeringState,
+} from './types/steering';
+export { LedgerEntryKind, SteeringAction } from './types/steering';
 export type {
   ExecuteStepFn,
   SettleResult,

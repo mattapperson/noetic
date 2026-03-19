@@ -1,7 +1,7 @@
 # Built-In Memory Layers
 
 > **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
 
 ---
 
@@ -202,6 +202,84 @@ function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableT
 - `onComplete`: Final checkpoint with outcome label. Git commit if enabled.
 
 **Key design:** Always crosses spawn boundaries. Dual persistence (disk + storage). Git integration is optional. Recalls into the View so the LLM can see progress.
+
+---
+
+## `steering()`
+
+Enforces behavioral rules at execution time — before tool calls and after model responses. Rules can be declared programmatically (static string checks) or evaluated by a secondary LLM call.
+
+```typescript
+interface SteeringRule {
+  id: string;
+  description: string;
+  /**
+   * Programmatic check. Return a violation message string to block, or null/undefined to pass.
+   * When omitted, the rule is evaluated by the configured `callModel`.
+   */
+  check?: (toolName: string, toolArgs: unknown) => string | null | undefined;
+  /** Which hook to apply this rule in. Default: 'beforeToolCall'. */
+  hook?: 'beforeToolCall' | 'afterModelCall';
+}
+
+interface SteeringConfig {
+  rules: SteeringRule[];
+  /** LLM used to evaluate rules that have no `check` function. Required if any rule is LLM-evaluated. */
+  callModel?: CallModel;
+  /** Max entries retained in the per-execution violation ledger. Default: 100. */
+  maxLedgerEntries?: number;
+  /** Max retries for LLM-evaluated rule calls before treating as pass. Default: 2. */
+  maxRetries?: number;
+}
+
+function steering(config: SteeringConfig): MemoryLayer<SteeringState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'steering'` |
+| **slot** | `Slot.STEERING` (90) |
+| **scope** | `'execution'` |
+| **budget** | none (this layer does not participate in `recall`) |
+| **hooks** | `beforeToolCall`, `afterModelCall` |
+
+**Behavior:**
+
+- `beforeToolCall`: Runs each rule whose `hook` is `'beforeToolCall'` (the default). Programmatic rules call `check(toolName, toolArgs)`. LLM-evaluated rules send a prompt to `callModel` with the rule description and the pending call; a violation response blocks the tool. If any rule returns a violation, tool execution is blocked and the violation message is surfaced as a tool error. The violation is recorded in the in-memory ledger.
+- `afterModelCall`: Runs each rule whose `hook` is `'afterModelCall'`. LLM-evaluated rules receive the full model response text. A violation aborts the current turn with the violation message.
+- **Ledger**: Each execution maintains a bounded log of `{ ruleId, hook, toolName?, violation, timestamp }` entries. Capped at `maxLedgerEntries`. Accessible via `getLayerState(executionId, 'steering')`.
+- **LLM evaluation**: When a rule has no `check` function, the layer sends a structured prompt: the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`). The model responds with `{ violation: true | false, reason?: string }`. Retried up to `maxRetries` on parse failure; treated as pass on exhaustion.
+- **Slot 90**: Runs before all other layers (slot 100+) in `beforeToolCall` and `afterModelCall` to ensure policy enforcement precedes any side effects.
+
+```typescript
+// Programmatic rule example
+steering({
+  rules: [
+    {
+      id: 'no-delete',
+      description: 'Prevent deletion of files outside the workspace.',
+      check: (toolName, toolArgs) => {
+        if (toolName !== 'deleteFile') return null;
+        const args = toolArgs as { path: string };
+        if (!args.path.startsWith('/workspace/')) return 'Deletion outside /workspace/ is not allowed.';
+        return null;
+      },
+    },
+  ],
+});
+
+// LLM-evaluated rule example
+steering({
+  callModel,
+  rules: [
+    {
+      id: 'no-pii',
+      description: 'Model output must not contain personally identifiable information.',
+      hook: 'afterModelCall',
+    },
+  ],
+});
+```
 
 ---
 

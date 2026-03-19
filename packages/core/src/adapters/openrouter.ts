@@ -20,7 +20,9 @@ import type { LLMResponse, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
+import type { MemoryLayer } from '../types/memory';
 import type { Runtime } from '../types/runtime';
+import { SteeringAction } from '../types/steering';
 
 //#region Type Guards
 
@@ -55,6 +57,13 @@ const EmbeddingsResponseSchema = z.object({
     }),
   ),
 });
+
+interface ConvertToolsParams {
+  tools: ReadonlyArray<Tool>;
+  ctx: Context;
+  runtime: Runtime;
+  layers?: MemoryLayer[];
+}
 
 //#endregion
 
@@ -257,7 +266,7 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 // the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
 // This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation.
-function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime: Runtime): SdkTool[] {
+function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
@@ -266,6 +275,16 @@ function convertTools(tools: ReadonlyArray<Tool>, ctx: Context, runtime: Runtime
         description: t.description,
         inputSchema: t.input,
         execute: async (args: unknown, turnContext?: TurnContext) => {
+          // Run beforeToolCall steering check if layers are present
+          if (layers && layers.length > 0) {
+            const decision = await runtime.beforeToolCall(layers, t.name, args, ctx);
+            if (decision.action === SteeringAction.Deny) {
+              return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
+            }
+            if (decision.action === SteeringAction.Guide) {
+              return `Tool call redirected: ${decision.guidance}`;
+            }
+          }
           const toolCtx = buildToolExecutionContext(ctx, runtime, turnContext);
           return t.execute(args, toolCtx);
         },
@@ -288,7 +307,12 @@ export function createOpenRouterCallModel(client: OpenRouter): CallModelFn {
       if (!params.runtime) {
         throw new Error('runtime is required when tools are provided');
       }
-      tools = convertTools(params.tools, params.ctx, params.runtime);
+      tools = convertTools({
+        tools: params.tools,
+        ctx: params.ctx,
+        runtime: params.runtime,
+        layers: params.layers,
+      });
     }
 
     const result = client.callModel({

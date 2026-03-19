@@ -6,6 +6,7 @@ import type { DetachedHandle } from './detached';
 import type { Item } from './items';
 import type { MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span } from './observability';
+import type { SteeringDecision } from './steering';
 import type { Step } from './step';
 
 export interface AgentHooks {
@@ -57,6 +58,17 @@ export interface Runtime {
   createSpan(name: string, parent: Span | null): Span;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
+  beforeToolCall(
+    layers: MemoryLayer[],
+    toolName: string,
+    toolArgs: unknown,
+    ctx: Context,
+  ): Promise<SteeringDecision>;
+  afterModelCall(
+    layers: MemoryLayer[],
+    response: LLMResponse,
+    ctx: Context,
+  ): Promise<SteeringDecision>;
 }
 
 export interface RecallLayerOutput {

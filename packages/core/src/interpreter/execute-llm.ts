@@ -4,7 +4,9 @@ import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { FunctionCallItem, Item } from '../types/items';
+import type { MemoryLayer } from '../types/memory';
 import type { Runtime } from '../types/runtime';
+import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
 import { createMessage, extractAssistantText } from './message-helpers';
@@ -18,9 +20,12 @@ export interface CallModelParams {
   output?: ZodType;
   ctx: Context;
   runtime?: Runtime;
+  layers?: MemoryLayer[];
 }
 
 export type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
+
+const MAX_STEERING_RETRIES = 3;
 
 export async function executeLLM<I, O>(
   step: StepLLM<I, O>,
@@ -28,83 +33,110 @@ export async function executeLLM<I, O>(
   ctx: Context,
   callModel: CallModelFn,
   runtime?: Runtime,
+  layers?: MemoryLayer[],
 ): Promise<O> {
   // Add the input as a user message if it's a non-empty string
   if (typeof input === 'string' && input.length > 0) {
     ctx.itemLog.append(createMessage(input, 'user'));
   }
 
-  // Call the model
-  const response = await callModel({
-    model: step.model,
-    items: ctx.itemLog.items,
-    tools: step.tools,
-    params: step.params,
-    output: step.output,
-    ctx,
-    runtime,
-  });
+  let retries = 0;
 
-  // Append response items to ItemLog and extract tool calls in a single pass
-  const toolCalls: FunctionCallItem[] = [];
-  for (const item of response.items) {
-    ctx.itemLog.append(item);
-    if (item.type === 'function_call') {
-      toolCalls.push(item);
-    }
-  }
+  while (true) {
+    // Call the model
+    const response = await callModel({
+      model: step.model,
+      items: ctx.itemLog.items,
+      tools: step.tools,
+      params: step.params,
+      output: step.output,
+      ctx,
+      runtime,
+      layers,
+    });
 
-  // Build step metadata
-  const meta: StepMeta = {
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-    usage: response.usage,
-    cost: response.cost,
-    responseItems: response.items,
-  };
+    // Check afterModelCall steering layers
+    if (layers && layers.length > 0 && runtime) {
+      const decision = await runtime.afterModelCall(layers, response, ctx);
 
-  // Update mutable context fields
-  if (isMutableContext(ctx)) {
-    ctx.lastStepMeta = meta;
-    ctx.tokens.input += response.usage.inputTokens;
-    ctx.tokens.output += response.usage.outputTokens;
-    ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
-    if (response.cost) {
-      ctx.cost = ctx.cost + response.cost;
-    }
-  }
-
-  const lastText = extractAssistantText(response.items);
-
-  // If output schema is provided, parse with Zod
-  if (step.output) {
-    try {
-      const parsed = JSON.parse(lastText);
-      return step.output.parse(parsed);
-    } catch (e) {
-      if (e instanceof SyntaxError || e instanceof ZodError) {
+      if (decision.action === SteeringAction.Deny) {
         throw new NoeticErrorImpl({
-          kind: 'llm_parse_error',
-          stepId: step.id,
-          raw: lastText,
-          schema: step.output,
-          zodError:
-            e instanceof ZodError
-              ? e
-              : new ZodError([
-                  {
-                    code: 'custom',
-                    message: `Invalid JSON: ${e.message}`,
-                    path: [],
-                  },
-                ]),
+          kind: 'steering_denied',
+          guidance: decision.guidance,
         });
       }
-      throw e;
-    }
-  }
 
-  // O is string when step.output is undefined — callers without an output schema
-  // receive raw text. The type system cannot express "O = string when output is omitted"
-  // without conditional types that would complicate the entire Step contract.
-  return frameworkCast<O>(lastText);
+      if (decision.action === SteeringAction.Guide && retries < MAX_STEERING_RETRIES) {
+        ctx.itemLog.append(
+          createMessage(decision.guidance ?? 'Please adjust your response.', 'developer'),
+        );
+        retries++;
+        continue;
+      }
+      // Guide with retries exhausted — proceed with last response rather than failing
+    }
+
+    // Append response items to ItemLog and extract tool calls in a single pass
+    const toolCalls: FunctionCallItem[] = [];
+    for (const item of response.items) {
+      ctx.itemLog.append(item);
+      if (item.type === 'function_call') {
+        toolCalls.push(item);
+      }
+    }
+
+    // Build step metadata
+    const meta: StepMeta = {
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage: response.usage,
+      cost: response.cost,
+      responseItems: response.items,
+    };
+
+    // Update mutable context fields
+    if (isMutableContext(ctx)) {
+      ctx.lastStepMeta = meta;
+      ctx.tokens.input += response.usage.inputTokens;
+      ctx.tokens.output += response.usage.outputTokens;
+      ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
+      if (response.cost) {
+        ctx.cost = ctx.cost + response.cost;
+      }
+    }
+
+    const lastText = extractAssistantText(response.items);
+
+    // If output schema is provided, parse with Zod
+    if (step.output) {
+      try {
+        const parsed = JSON.parse(lastText);
+        return step.output.parse(parsed);
+      } catch (e) {
+        if (e instanceof SyntaxError || e instanceof ZodError) {
+          throw new NoeticErrorImpl({
+            kind: 'llm_parse_error',
+            stepId: step.id,
+            raw: lastText,
+            schema: step.output,
+            zodError:
+              e instanceof ZodError
+                ? e
+                : new ZodError([
+                    {
+                      code: 'custom',
+                      message: `Invalid JSON: ${e.message}`,
+                      path: [],
+                    },
+                  ]),
+          });
+        }
+        throw e;
+      }
+    }
+
+    // O is string when step.output is undefined — callers without an output schema
+    // receive raw text. The type system cannot express "O = string when output is omitted"
+    // without conditional types that would complicate the entire Step contract.
+    return frameworkCast<O>(lastText);
+  }
 }

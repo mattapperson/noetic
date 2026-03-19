@@ -4,6 +4,8 @@ import type { LLMResponse } from '../types/common';
 import type { ItemLog } from '../types/context';
 import type { Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
+import type { SteeringDecision } from '../types/steering';
+import { SteeringAction } from '../types/steering';
 import { createScopedStorage, resolveScopeKey } from './scope';
 
 //#region Types
@@ -69,6 +71,21 @@ interface DisposeLayersParams {
   store: LayerStateStore;
 }
 
+interface BeforeToolCallLayersParams {
+  layers: MemoryLayer[];
+  toolName: string;
+  toolArgs: unknown;
+  ctx: ExecutionContext;
+  store: LayerStateStore;
+}
+
+interface AfterModelCallLayersParams {
+  layers: MemoryLayer[];
+  response: LLMResponse;
+  ctx: ExecutionContext;
+  store: LayerStateStore;
+}
+
 //#endregion
 
 //#region Helper Functions
@@ -107,6 +124,34 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms);
     }),
   ]);
+}
+
+export function mostRestrictive(decisions: SteeringDecision[]): SteeringDecision {
+  let result: SteeringDecision = {
+    action: SteeringAction.Allow,
+  };
+  const guidances: string[] = [];
+
+  for (const d of decisions) {
+    if (d.action === SteeringAction.Deny) {
+      return d;
+    }
+    if (d.action === SteeringAction.Guide) {
+      result = d;
+      if (d.guidance) {
+        guidances.push(d.guidance);
+      }
+    }
+  }
+
+  if (result.action === SteeringAction.Guide && guidances.length > 1) {
+    return {
+      action: SteeringAction.Guide,
+      guidance: guidances.join('\n'),
+    };
+  }
+
+  return result;
 }
 
 //#endregion
@@ -418,6 +463,96 @@ export async function completeLayers({
       store.diagnostic(layer.id, 'onComplete', e);
     }
   }
+}
+
+export async function beforeToolCallLayers({
+  layers,
+  toolName,
+  toolArgs,
+  ctx,
+  store,
+}: BeforeToolCallLayersParams): Promise<SteeringDecision> {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  const decisions: SteeringDecision[] = [];
+
+  for (const layer of sorted) {
+    if (!layer.hooks.beforeToolCall) {
+      continue;
+    }
+    const state = store.get(ctx.executionId, layer.id);
+    if (state === undefined && layer.hooks.init) {
+      continue;
+    }
+    try {
+      const timeout = layer.timeouts?.beforeToolCall ?? 5e3;
+      const result = await withTimeout(
+        layer.hooks.beforeToolCall({
+          toolName,
+          toolArgs,
+          ctx,
+          state,
+        }),
+        timeout,
+      );
+      if (result.state !== undefined) {
+        store.set(ctx.executionId, layer.id, result.state);
+      }
+      if (result.decision.action === SteeringAction.Deny) {
+        return result.decision;
+      }
+      decisions.push(result.decision);
+    } catch (e) {
+      store.diagnostic(layer.id, 'beforeToolCall', e);
+    }
+  }
+
+  return mostRestrictive(decisions);
+}
+
+export async function afterModelCallLayers({
+  layers,
+  response,
+  ctx,
+  store,
+}: AfterModelCallLayersParams): Promise<SteeringDecision> {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  const decisions: SteeringDecision[] = [];
+
+  for (const layer of sorted) {
+    if (!layer.hooks.afterModelCall) {
+      continue;
+    }
+    const state = store.get(ctx.executionId, layer.id);
+    if (state === undefined && layer.hooks.init) {
+      continue;
+    }
+    try {
+      const timeout = layer.timeouts?.afterModelCall ?? 1e4;
+      const result = await withTimeout(
+        layer.hooks.afterModelCall({
+          response,
+          ctx,
+          state,
+        }),
+        timeout,
+      );
+      if (result.state !== undefined) {
+        store.set(ctx.executionId, layer.id, result.state);
+      }
+      if (result.decision.action === SteeringAction.Deny) {
+        return result.decision;
+      }
+      decisions.push(result.decision);
+    } catch (e) {
+      store.diagnostic(layer.id, 'afterModelCall', e);
+    }
+  }
+
+  return mostRestrictive(decisions);
 }
 
 //#endregion

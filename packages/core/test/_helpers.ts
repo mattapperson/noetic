@@ -15,6 +15,7 @@ import type {
 } from '../src/types/items';
 import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
 import type { Runtime } from '../src/types/runtime';
+import { SteeringAction } from '../src/types/steering';
 import type { ExecuteStepFn, Step } from '../src/types/step';
 import type { ToolExecutionContext } from '../src/types/tool-context';
 
@@ -323,6 +324,12 @@ export function makeMockRuntime(): Runtime {
     }),
     getLayerState: () => undefined,
     setLayerState: () => {},
+    beforeToolCall: async () => ({
+      action: SteeringAction.Allow,
+    }),
+    afterModelCall: async () => ({
+      action: SteeringAction.Allow,
+    }),
   };
 }
 

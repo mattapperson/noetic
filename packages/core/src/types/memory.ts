@@ -1,9 +1,16 @@
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
 import type { Item } from './items';
+import type {
+  AfterModelCallParams,
+  AfterModelCallResult,
+  BeforeToolCallParams,
+  BeforeToolCallResult,
+} from './steering';
 
 // Slot constants
 export const Slot = {
+  STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
@@ -31,6 +38,8 @@ export interface LayerTimeouts {
   onReturn?: number;
   onComplete?: number;
   dispose?: number;
+  beforeToolCall?: number;
+  afterModelCall?: number;
 }
 
 export type ExecutionOutcome = 'success' | 'failure' | 'aborted';
@@ -154,6 +163,8 @@ export interface MemoryHooks<TState = unknown> {
       }
   >;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
+  beforeToolCall?: (params: BeforeToolCallParams<TState>) => Promise<BeforeToolCallResult<TState>>;
+  afterModelCall?: (params: AfterModelCallParams<TState>) => Promise<AfterModelCallResult<TState>>;
 }
 
 /** A composable memory layer that participates in the recall/store lifecycle. */

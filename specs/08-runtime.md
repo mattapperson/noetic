@@ -38,6 +38,8 @@ interface Runtime {
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  beforeToolCall(layers: MemoryLayer[], toolName: string, toolArgs: unknown, ctx: Context): Promise<SteeringDecision>;
+  afterModelCall(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<SteeringDecision>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
 
   // View assembly (the Projector)
@@ -93,6 +95,8 @@ interface DetachedHandle<O> {
 - **`send`/`recv`/`tryRecv` on the runtime** means the runtime controls channel storage. `InMemoryRuntime` uses a `Map`. `DurableRuntime` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `runtime.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `runtime.tryRecv(ch, ctx)`.
 - **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `InMemoryRuntime` uses in-process handles; `DurableRuntime` translates to durable signals (e.g., Temporal signals, Inngest events).
 - **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
+- **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
+- **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
 - **`assembleView`** is the Projector — it calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns.
 - **`checkpoint`/`restore`** enable durable execution. `InMemoryRuntime` implements them as no-ops. `DurableRuntime` serializes state (including memory layer state) to its backing store.

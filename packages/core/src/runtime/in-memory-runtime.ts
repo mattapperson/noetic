@@ -4,6 +4,8 @@ import type { CallModelFn } from '../interpreter/execute-llm';
 import { estimateTokens } from '../interpreter/message-helpers';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
+  afterModelCallLayers,
+  beforeToolCallLayers,
   createLayerStateStore,
   disposeLayers,
   initLayers,
@@ -20,6 +22,8 @@ import type { Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
 import type { AgentConfig, RecallLayerOutput, Runtime } from '../types/runtime';
+import type { SteeringDecision } from '../types/steering';
+import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
@@ -178,5 +182,45 @@ export class InMemoryRuntime implements Runtime {
 
   setLayerState<T>(executionId: string, layerId: string, state: T): void {
     this.layerStateStore.set(executionId, layerId, state);
+  }
+
+  async beforeToolCall(
+    layers: MemoryLayer[],
+    toolName: string,
+    toolArgs: unknown,
+    ctx: Context,
+  ): Promise<SteeringDecision> {
+    const hasHook = layers.some((l) => l.hooks.beforeToolCall);
+    if (!hasHook) {
+      return {
+        action: SteeringAction.Allow,
+      };
+    }
+    return beforeToolCallLayers({
+      layers,
+      toolName,
+      toolArgs,
+      ctx: this.toExecCtx(ctx),
+      store: this.layerStateStore,
+    });
+  }
+
+  async afterModelCall(
+    layers: MemoryLayer[],
+    response: LLMResponse,
+    ctx: Context,
+  ): Promise<SteeringDecision> {
+    const hasHook = layers.some((l) => l.hooks.afterModelCall);
+    if (!hasHook) {
+      return {
+        action: SteeringAction.Allow,
+      };
+    }
+    return afterModelCallLayers({
+      layers,
+      response,
+      ctx: this.toExecCtx(ctx),
+      store: this.layerStateStore,
+    });
   }
 }
