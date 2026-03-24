@@ -126,9 +126,11 @@ Tools receive a `ToolExecutionContext` as their second argument, which provides 
 
 ---
 
-## Parent Context Updates to Forked Children
+## Parent Context Updates to Spawned Children
 
-A forked child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
+`spawn` creates a child context — not `fork`. `fork` branches share the parent context entirely and do not trigger `onParentUpdate`. This section applies only to `spawn` boundaries.
+
+A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
 
 This is opt-in per memory layer via the `onParentUpdate` hook (see `11-memory-layer-system`). The runtime fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
 

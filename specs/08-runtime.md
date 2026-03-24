@@ -126,6 +126,66 @@ setRuntime(new InMemoryRuntime());
 
 ---
 
+## Runtime Registration
+
+`setRuntime()` registers the global singleton runtime for the current process. There is exactly one active runtime per process at any time.
+
+```typescript
+function setRuntime(runtime: Runtime): void;
+function getRuntime(): Runtime; // throws NoeticConfigError if none set
+```
+
+### Singleton Semantics
+
+1. Calling `setRuntime()` after `execute()` has already been called is a `NoeticConfigError` with `code: RUNTIME_ALREADY_IN_USE`. Set the runtime before any execution begins.
+2. Calling `setRuntime()` a second time replaces the previous runtime. This is intentional for test isolation (see below) — it is not an error.
+3. Calling `execute()` without a prior `setRuntime()` throws `NoeticConfigError` with `code: NO_RUNTIME_SET` and a hint pointing to the setup docs.
+
+### Module Load Order
+
+`setRuntime()` MUST be called at the top of the application entry point, before any module that calls `execute()` is imported or evaluated. In ESM environments, dynamic imports may evaluate lazily — do not rely on import order to ensure the runtime is set before execution begins.
+
+Recommended pattern:
+
+```ts
+// entry.ts — first file evaluated
+import { setRuntime, InMemoryRuntime } from '@noetic/core';
+setRuntime(new InMemoryRuntime());
+
+// All other imports come after
+import { runAgent } from './agent';
+await runAgent();
+```
+
+### Test Isolation
+
+Each test file MUST call `setRuntime()` in a `beforeEach` block. Without this, runtime state leaks between tests and between test files when they share the same process.
+
+```ts
+import { setRuntime, InMemoryRuntime } from '@noetic/core';
+
+beforeEach(() => {
+  setRuntime(new InMemoryRuntime());
+});
+```
+
+### Serverless / Stateless Environments
+
+In serverless functions (AWS Lambda, Cloudflare Workers, etc.), the runtime is re-instantiated per cold start. Call `setRuntime()` at module scope so it runs once per instance, not once per invocation:
+
+```ts
+// Runs once per cold start
+setRuntime(new InMemoryRuntime({ callModel: createOpenRouterCallModel() }));
+
+export const handler = async (event) => {
+  return execute(agentStep, event, runtime.createContext());
+};
+```
+
+In-memory channel storage and non-durable runtimes do not persist across invocations. Use `DurableRuntime` if cross-invocation state is required.
+
+---
+
 ## `AgentConfig`
 
 The top-level configuration for an agent, integrating steps, tools, memory layers, and projection policy.

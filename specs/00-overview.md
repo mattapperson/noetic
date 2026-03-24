@@ -18,17 +18,26 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 ## Packages
 
-The framework is split across three published packages with a strict dependency direction:
+### Current State
+
+The framework currently ships two packages:
+
+- **`@noetic/core`** — Everything: step primitives, execution infrastructure, memory layer contract, built-in layer implementations, error taxonomy, observability, and runtime. This is the package users install today.
+- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
+
+### Target Architecture
+
+The target package structure separates the memory contract into its own package. This split is not yet implemented — it is the goal. See Gap Audit in `19-dx`.
 
 ```
 @noetic/memory  ←  @noetic/core  ←  @noetic/eval
 ```
 
-- **`@noetic/memory`** — The memory API contract and built-in implementations. Contains: the `MemoryLayer` interface, all hook param/result types, `MemoryScope` (including narrowed scope), `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories (`workingMemory`, `semanticRecall`, `observationalMemory`, `episodicMemory`, `durableTaskState`, `steering`). Custom layer authors depend only on this package — they do not need `@noetic/core`.
+- **`@noetic/memory`** *(planned)* — The memory API contract and built-in implementations. Will contain: the `MemoryLayer` interface, all hook param/result types, `MemoryScope` (including narrowed scope), `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors will depend only on this package — not `@noetic/core`.
 
-- **`@noetic/core`** — Step primitives and execution infrastructure. Depends on `@noetic/memory` for the layer contract. Contains: `Step<I,O>` and all variants, the `execute()` interpreter, `Runtime`, `Context`, `ItemLog`, error taxonomy, observability, the Projector (View assembly), and layer lifecycle orchestration. Does not contain layer implementations.
+- **`@noetic/core`** *(target state)* — Step primitives and execution infrastructure only. Will depend on `@noetic/memory` for the layer contract. Will not contain layer implementations.
 
-- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
+- **`@noetic/eval`** — Unchanged.
 
 ## Architecture
 

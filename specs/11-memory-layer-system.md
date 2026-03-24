@@ -6,7 +6,9 @@
 
 ## Package Boundary
 
-This spec is owned by `@noetic/memory`. The split is:
+**Current state:** Everything in this spec currently lives in `@noetic/core`. The `@noetic/memory` package does not yet exist.
+
+**Target state:** This spec is owned by `@noetic/memory`. The planned split is:
 
 | Lives in `@noetic/memory` | Lives in `@noetic/core` |
 |---|---|
@@ -16,9 +18,9 @@ This spec is owned by `@noetic/memory`. The split is:
 | `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) |
 | `ProjectionPolicy` | Projector implementation |
 
-**Dependency direction:** `@noetic/memory` has no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types from `@noetic/core` as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
+**Dependency direction:** `@noetic/memory` will have no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` will depend on `@noetic/memory` for the layer contract.
 
-**Custom layer authors** import only from `@noetic/memory`. They never need `@noetic/core` to implement a layer.
+**Custom layer authors** will import only from `@noetic/memory`. They will not need `@noetic/core` to implement a layer.
 
 ---
 
@@ -406,6 +408,20 @@ A layer may declare a **narrowed scope** — interest in a specific subset of a 
 **Why narrowed scope exists.** A step may be a specialist — it cares about one domain (e.g., user preferences, active task list) and should not receive or process the full weight of parent context changes. Narrowing the scope limits unnecessary recomputation and enforces separation of concern between layers.
 
 **Narrowed scope does not grant broader access.** A `narrowed` layer cannot read keys outside its `select` patterns, even if they exist in the `from` scope. Attempts to access unselected keys return `null` from `ScopedStorage`.
+
+### Narrowed Scope Contract
+
+**Glob syntax:** `select` patterns use [minimatch](https://github.com/isaacs/minimatch) syntax. Only two wildcards are supported: `*` (matches one path segment, e.g. `tasks/*` matches `tasks/abc` but not `tasks/abc/def`) and `**` (matches any number of segments, e.g. `tasks/**` matches `tasks/abc/def`). Exact key matches are also valid. No other glob syntax is supported.
+
+**`resolveScopeKey` for narrowed scope:** A `narrowed` scope resolves to the same key as its `from` scope. The `select` patterns restrict access within that scope — they do not change the key used to namespace storage.
+
+```typescript
+case 'narrowed': return resolveScopeKey(scope.from, ctx); // delegates to the base scope
+```
+
+**`onParentUpdate` is independent of narrowed scope.** Declaring narrowed scope without implementing `onParentUpdate` is valid and produces no warnings. The narrowed scope only restricts `ScopedStorage` access; `onParentUpdate` notification is a separate opt-in. A layer may use narrowed scope without `onParentUpdate`, or `onParentUpdate` without narrowed scope.
+
+**Runtime cost:** The runtime evaluates `select` patterns against changed storage keys after each parent `store()`. Layers with narrowed scope and large `select` arrays impose a per-store pattern-matching cost proportional to `|select| × |changed keys|`. Prefer exact key matches over broad `**` globs in performance-sensitive layers.
 
 ---
 

@@ -1,7 +1,7 @@
 # Error Model
 
 > **Depends On:** `01-step-type` (stepId concept)
-> **Exports:** `NoeticError`
+> **Exports:** `NoeticError`, `NoeticConfigError`, `isNoeticError`, `isNoeticConfigError`
 
 ---
 
@@ -76,6 +76,43 @@ Cancellation walks the execution tree depth-first from the cancelled context:
 #### Cancellation is Idempotent
 
 Calling `runtime.cancel()` on an already-cancelled context is a no-op.
+
+---
+
+## `NoeticConfigError`
+
+`NoeticConfigError` is a separate class from `NoeticError`. The two are never interchangeable:
+
+- **`NoeticError`** — thrown during execution (LLM failures, fork failures, spawn errors, budget exceeded, cancellation). Always has a `kind` discriminant. Caught by callers of `execute()`.
+- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid memory layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Caught before execution begins.
+
+```typescript
+class NoeticConfigError extends Error {
+  readonly code: string;       // SCREAMING_SNAKE_CASE, e.g. 'MISSING_API_KEY'
+  readonly hint: string;       // complete sentence: what the user should do next
+  readonly docsUrl?: string;   // link to the relevant docs page
+}
+
+function isNoeticConfigError(e: unknown): e is NoeticConfigError;
+```
+
+### Rules
+
+1. `code` MUST be `SCREAMING_SNAKE_CASE` and uniquely identify the error condition across the entire framework.
+2. `hint` MUST be a complete sentence. It MUST NOT say "an error occurred" or restate the message.
+3. `docsUrl` SHOULD be provided for any error a new user is likely to hit during setup.
+4. Error messages MUST NOT expose internal stack details, file paths, or implementation class names.
+5. Every `code` value MUST appear in `docs/errors.mdx` with an explanation and resolution steps.
+6. Construction-time functions (builders, factories, memory layer factories) that can throw `NoeticConfigError` MUST document the applicable `code` values in a `@throws` TSDoc tag.
+
+### Example
+
+```
+NoeticConfigError: Missing required environment variable.
+  code: MISSING_API_KEY
+  hint: Set OPENROUTER_API_KEY in your environment or pass a callModel adapter explicitly.
+  docsUrl: https://noetic.dev/docs/errors#MISSING_API_KEY
+```
 
 ### Budget Exceeded
 
