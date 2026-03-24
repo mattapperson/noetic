@@ -1,7 +1,24 @@
 # Memory Layer System
 
-> **Depends On:** `07-context-and-event-log` (ItemLog, Item), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
+> **Package:** `@noetic/memory`
+> **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
+> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
+
+## Package Boundary
+
+This spec is owned by `@noetic/memory`. The split is:
+
+| Lives in `@noetic/memory` | Lives in `@noetic/core` |
+|---|---|
+| `MemoryLayer` interface and all hook types | Layer lifecycle orchestration (`initLayers`, `recallLayers`, etc.) |
+| `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) |
+| `BudgetConfig`, `Slot`, budget algorithm | `allocateBudgets` call site |
+| `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) |
+| `ProjectionPolicy` | Projector implementation |
+
+**Dependency direction:** `@noetic/memory` has no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types from `@noetic/core` as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
+
+**Custom layer authors** import only from `@noetic/memory`. They never need `@noetic/core` to implement a layer.
 
 ---
 
