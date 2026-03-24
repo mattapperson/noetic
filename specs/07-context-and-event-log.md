@@ -157,6 +157,7 @@ interface LLMResponse {
 - **`span`** means every step is automatically traced without user instrumentation (see `10-observability`).
 - **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).
 - **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus memory layer outputs.
+- **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all memory layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-memory-layer-system`.
 
 ## Circular Reference with Channels
 

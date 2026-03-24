@@ -13,6 +13,30 @@ Normative language uses **MUST**, **SHOULD**, and **MAY** per RFC 2119.
 
 ---
 
+## Mental Model: Reactive-Inspired Context Assembly
+
+The layer system is loosely inspired by reactive programming — not in the formal RxJS/MobX sense, but in spirit: the View (what the LLM sees) is always re-assembled from current layer state before each request, producing a fresh, consistent snapshot.
+
+**Context is the result of all layers converging — it is not itself a layer.** You define layers; the runtime converges them. Their convergence is the context. Context is never exposed as an input, never passed into a layer hook, and never something you construct directly. It is the output.
+
+**Memory is a type of layer, not a separate system.** "Memory" (facts recalled from storage) and "context injection" (information injected for this turn) are both expressed as layers with the same hook interface. The mechanism is identical; the purpose differs. The `slot` number determines where in the converged result each layer's contribution appears.
+
+**Each layer is one of two things** (or both):
+- A **window section** — a portion of the context budget reserved for specific content (skills, reminders, entity facts)
+- A **map/reduce** over prior information — transforming raw history or storage into a condensed, relevant form (summarization layers, RAG layers, episodic memory)
+
+**Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated. A step can also declare a **narrowed scope**, subscribing only to the parts of the parent context it cares about rather than the whole thing.
+
+**Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the runtime handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
+
+**Loose pattern, not strict formalism.** The reactive inspiration is a mental model, not a contract. Formal reactive concepts (observables, subscriptions, schedulers) do not appear in this API. The goal is the insight — always-fresh context from converging layers — without the boilerplate or jargon.
+
+### Stale Context (Non-Default)
+
+Context can be explicitly marked stale, causing the next request to block until all layers finish revalidating. This is opt-in for layers that need guaranteed consistency before the LLM call proceeds. The default `recall()` model is sufficient for most layers.
+
+---
+
 ## The `MemoryLayer` Interface
 
 ```typescript
@@ -26,7 +50,12 @@ interface MemoryLayer<TState = unknown> {
   timeouts?: Partial<LayerTimeouts>;
 }
 
-type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
+type MemoryScope =
+  | 'thread'
+  | 'resource'
+  | 'global'
+  | 'execution'
+  | { type: 'narrowed'; from: 'thread' | 'resource' | 'global' | 'execution'; select: string[] };
 
 type BudgetConfig =
   | number
@@ -64,6 +93,7 @@ interface MemoryHooks<TState = unknown> {
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
   onReturn?:        (params: ReturnParams<TState>)               => Promise<ReturnResult<TState> | void>;
+  onParentUpdate?:  (params: ParentUpdateParams<TState>)         => Promise<ParentUpdateResult<TState> | void>;
   onComplete?:      (params: CompleteParams<TState>)             => Promise<void>;
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
 }
@@ -221,6 +251,17 @@ interface DisposeParams<TState> {
   state: TState;
 }
 
+interface ParentUpdateParams<TState> {
+  parentState: TState;        // the parent layer's current state after its latest store()
+  childState: TState;         // the child layer's current state
+  childCtx: ExecutionContext;
+}
+
+interface ParentUpdateResult<TState> {
+  childState?: TState;        // updated child state, if the child wants to act on the update
+  items?: Item[];             // optional items to inject into the child's ItemLog
+}
+
 type ExecutionOutcome = 'success' | 'failure' | 'aborted';
 ```
 
@@ -324,6 +365,30 @@ A layer declaring `scope: 'thread'` CANNOT accidentally read another thread's da
 ### Cross-Scope Access
 
 To read a different scope, declare the broader scope. No escape hatches.
+
+---
+
+## Narrowed Scope
+
+A layer may declare a **narrowed scope** — interest in a specific subset of a parent scope, rather than the whole thing. This is distinct from the four base scopes: it is a selector applied on top of one of them.
+
+```typescript
+// Example: only interested in 'user.preferences' and anything under 'tasks/'
+{
+  type: 'narrowed',
+  from: 'thread',
+  select: ['user.preferences', 'tasks/*']
+}
+```
+
+`select` is an array of storage key patterns (exact keys or prefix globs). A layer with narrowed scope:
+
+1. Only has `ScopedStorage` access to keys matching its `select` patterns within the `from` scope
+2. Only receives `onParentUpdate` notifications when a matched key changes — changes to other parts of the parent scope are not delivered
+
+**Why narrowed scope exists.** A step may be a specialist — it cares about one domain (e.g., user preferences, active task list) and should not receive or process the full weight of parent context changes. Narrowing the scope limits unnecessary recomputation and enforces separation of concern between layers.
+
+**Narrowed scope does not grant broader access.** A `narrowed` layer cannot read keys outside its `select` patterns, even if they exist in the `from` scope. Attempts to access unselected keys return `null` from `ScopedStorage`.
 
 ---
 
