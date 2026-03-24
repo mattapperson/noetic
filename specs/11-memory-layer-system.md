@@ -44,7 +44,7 @@ The layer system is loosely inspired by reactive programming — not in the form
 - A **window section** — a portion of the context budget reserved for specific content (skills, reminders, entity facts)
 - A **map/reduce** over prior information — transforming raw history or storage into a condensed, relevant form (summarization layers, RAG layers, episodic memory)
 
-**Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated. A step can also declare a **narrowed scope**, subscribing only to the parts of the parent context it cares about rather than the whole thing.
+**Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated.
 
 **Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the runtime handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
 
@@ -73,8 +73,7 @@ type MemoryScope =
   | 'thread'
   | 'resource'
   | 'global'
-  | 'execution'
-  | { type: 'narrowed'; from: 'thread' | 'resource' | 'global' | 'execution'; select: string[] };
+  | 'execution';
 
 type BudgetConfig =
   | number
@@ -387,41 +386,13 @@ To read a different scope, declare the broader scope. No escape hatches.
 
 ---
 
-## Narrowed Scope
+## Future Considerations
 
-A layer may declare a **narrowed scope** — interest in a specific subset of a parent scope, rather than the whole thing. This is distinct from the four base scopes: it is a selector applied on top of one of them.
+### Narrowed Scope (Not Yet Designed)
 
-```typescript
-// Example: only interested in 'user.preferences' and anything under 'tasks/'
-{
-  type: 'narrowed',
-  from: 'thread',
-  select: ['user.preferences', 'tasks/*']
-}
-```
+A potential optimization: allow a layer to declare interest in a specific subset of a parent scope rather than the whole thing. A specialist layer — one that cares only about user preferences or an active task list — could subscribe only to those keys and avoid receiving or processing unrelated parent context changes.
 
-`select` is an array of storage key patterns (exact keys or prefix globs). A layer with narrowed scope:
-
-1. Only has `ScopedStorage` access to keys matching its `select` patterns within the `from` scope
-2. Only receives `onParentUpdate` notifications when a matched key changes — changes to other parts of the parent scope are not delivered
-
-**Why narrowed scope exists.** A step may be a specialist — it cares about one domain (e.g., user preferences, active task list) and should not receive or process the full weight of parent context changes. Narrowing the scope limits unnecessary recomputation and enforces separation of concern between layers.
-
-**Narrowed scope does not grant broader access.** A `narrowed` layer cannot read keys outside its `select` patterns, even if they exist in the `from` scope. Attempts to access unselected keys return `null` from `ScopedStorage`.
-
-### Narrowed Scope Contract
-
-**Glob syntax:** `select` patterns use [minimatch](https://github.com/isaacs/minimatch) syntax. Only two wildcards are supported: `*` (matches one path segment, e.g. `tasks/*` matches `tasks/abc` but not `tasks/abc/def`) and `**` (matches any number of segments, e.g. `tasks/**` matches `tasks/abc/def`). Exact key matches are also valid. No other glob syntax is supported.
-
-**`resolveScopeKey` for narrowed scope:** A `narrowed` scope resolves to the same key as its `from` scope. The `select` patterns restrict access within that scope — they do not change the key used to namespace storage.
-
-```typescript
-case 'narrowed': return resolveScopeKey(scope.from, ctx); // delegates to the base scope
-```
-
-**`onParentUpdate` is independent of narrowed scope.** Declaring narrowed scope without implementing `onParentUpdate` is valid and produces no warnings. The narrowed scope only restricts `ScopedStorage` access; `onParentUpdate` notification is a separate opt-in. A layer may use narrowed scope without `onParentUpdate`, or `onParentUpdate` without narrowed scope.
-
-**Runtime cost:** The runtime evaluates `select` patterns against changed storage keys after each parent `store()`. Layers with narrowed scope and large `select` arrays impose a per-store pattern-matching cost proportional to `|select| × |changed keys|`. Prefer exact key matches over broad `**` globs in performance-sensitive layers.
+This would require extending `MemoryScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to `onParentUpdate` dispatch, and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
 
 ---
 

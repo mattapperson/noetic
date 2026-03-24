@@ -33,7 +33,7 @@ The target package structure separates the memory contract into its own package.
 @noetic/memory  ←  @noetic/core  ←  @noetic/eval
 ```
 
-- **`@noetic/memory`** *(planned)* — The memory API contract and built-in implementations. Will contain: the `MemoryLayer` interface, all hook param/result types, `MemoryScope` (including narrowed scope), `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors will depend only on this package — not `@noetic/core`.
+- **`@noetic/memory`** *(planned)* — The memory API contract and built-in implementations. Will contain: the `MemoryLayer` interface, all hook param/result types, `MemoryScope`, `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors will depend only on this package — not `@noetic/core`.
 
 - **`@noetic/core`** *(target state)* — Step primitives and execution infrastructure only. Will depend on `@noetic/memory` for the layer contract. Will not contain layer implementations.
 
