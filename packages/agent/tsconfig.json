@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "types": ["bun-types"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"]
+}
