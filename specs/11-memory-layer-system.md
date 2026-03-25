@@ -6,9 +6,7 @@
 
 ## Package Boundary
 
-**Current state:** Everything in this spec currently lives in `@noetic/core`. The `@noetic/memory` package does not yet exist.
-
-**Target state:** This spec is owned by `@noetic/memory`. The planned split is:
+This spec is owned by `@noetic/memory`. The split between packages is:
 
 | Lives in `@noetic/memory` | Lives in `@noetic/core` |
 |---|---|
@@ -18,9 +16,9 @@
 | `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) |
 | `ProjectionPolicy` | Projector implementation |
 
-**Dependency direction:** `@noetic/memory` will have no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` will depend on `@noetic/memory` for the layer contract.
+**Dependency direction:** `@noetic/memory` has no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
 
-**Custom layer authors** will import only from `@noetic/memory`. They will not need `@noetic/core` to implement a layer.
+**Custom layer authors** import only from `@noetic/memory`. They do not need `@noetic/core` to implement a layer.
 
 ---
 
