@@ -1,7 +1,24 @@
 # Memory Layer System
 
-> **Depends On:** `07-context-and-event-log` (ItemLog, Item), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
+> **Package:** `@noetic/memory`
+> **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
+> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
+
+## Package Boundary
+
+This spec is owned by `@noetic/memory`. The split between packages is:
+
+| Lives in `@noetic/memory` | Lives in `@noetic/core` |
+|---|---|
+| `MemoryLayer` interface and all hook types | Layer lifecycle orchestration (`initLayers`, `recallLayers`, etc.) |
+| `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) |
+| `BudgetConfig`, `Slot`, budget algorithm | `allocateBudgets` call site |
+| `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) |
+| `ProjectionPolicy` | Projector implementation |
+
+**Dependency direction:** `@noetic/memory` has no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
+
+**Custom layer authors** import only from `@noetic/memory`. They do not need `@noetic/core` to implement a layer.
 
 ---
 
@@ -10,6 +27,30 @@
 A `MemoryLayer` is a plugin that participates in the agent execution lifecycle to recall context before LLM calls and persist information after them. Memory layers are the sole extension point for injecting non-conversation content into the View (the assembled item array sent to the model).
 
 Normative language uses **MUST**, **SHOULD**, and **MAY** per RFC 2119.
+
+---
+
+## Mental Model: Reactive-Inspired Context Assembly
+
+The layer system is loosely inspired by reactive programming — not in the formal RxJS/MobX sense, but in spirit: the View (what the LLM sees) is always re-assembled from current layer state before each request, producing a fresh, consistent snapshot.
+
+**Context is the result of all layers converging — it is not itself a layer.** You define layers; the runtime converges them. Their convergence is the context. Context is never exposed as an input, never passed into a layer hook, and never something you construct directly. It is the output.
+
+**Memory is a type of layer, not a separate system.** "Memory" (facts recalled from storage) and "context injection" (information injected for this turn) are both expressed as layers with the same hook interface. The mechanism is identical; the purpose differs. The `slot` number determines where in the converged result each layer's contribution appears.
+
+**Each layer is one of two things** (or both):
+- A **window section** — a portion of the context budget reserved for specific content (skills, reminders, entity facts)
+- A **map/reduce** over prior information — transforming raw history or storage into a condensed, relevant form (summarization layers, RAG layers, episodic memory)
+
+**Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated.
+
+**Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the runtime handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
+
+**Loose pattern, not strict formalism.** The reactive inspiration is a mental model, not a contract. Formal reactive concepts (observables, subscriptions, schedulers) do not appear in this API. The goal is the insight — always-fresh context from converging layers — without the boilerplate or jargon.
+
+### Stale Context (Non-Default)
+
+Context can be explicitly marked stale, causing the next request to block until all layers finish revalidating. This is opt-in for layers that need guaranteed consistency before the LLM call proceeds. The default `recall()` model is sufficient for most layers.
 
 ---
 
@@ -26,7 +67,11 @@ interface MemoryLayer<TState = unknown> {
   timeouts?: Partial<LayerTimeouts>;
 }
 
-type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
+type MemoryScope =
+  | 'thread'
+  | 'resource'
+  | 'global'
+  | 'execution';
 
 type BudgetConfig =
   | number
@@ -64,6 +109,7 @@ interface MemoryHooks<TState = unknown> {
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
   onReturn?:        (params: ReturnParams<TState>)               => Promise<ReturnResult<TState> | void>;
+  onParentUpdate?:  (params: ParentUpdateParams<TState>)         => Promise<ParentUpdateResult<TState> | void>;
   onComplete?:      (params: CompleteParams<TState>)             => Promise<void>;
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
 }
@@ -221,6 +267,17 @@ interface DisposeParams<TState> {
   state: TState;
 }
 
+interface ParentUpdateParams<TState> {
+  parentState: TState;        // the parent layer's current state after its latest store()
+  childState: TState;         // the child layer's current state
+  childCtx: ExecutionContext;
+}
+
+interface ParentUpdateResult<TState> {
+  childState?: TState;        // updated child state, if the child wants to act on the update
+  items?: Item[];             // optional items to inject into the child's ItemLog
+}
+
 type ExecutionOutcome = 'success' | 'failure' | 'aborted';
 ```
 
@@ -324,6 +381,16 @@ A layer declaring `scope: 'thread'` CANNOT accidentally read another thread's da
 ### Cross-Scope Access
 
 To read a different scope, declare the broader scope. No escape hatches.
+
+---
+
+## Future Considerations
+
+### Narrowed Scope (Not Yet Designed)
+
+A potential optimization: allow a layer to declare interest in a specific subset of a parent scope rather than the whole thing. A specialist layer — one that cares only about user preferences or an active task list — could subscribe only to those keys and avoid receiving or processing unrelated parent context changes.
+
+This would require extending `MemoryScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to `onParentUpdate` dispatch, and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
 
 ---
 

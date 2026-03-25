@@ -124,6 +124,20 @@ Parent calls runtime.detachedSpawn(step, input, ctx)
 
 Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, runtime?, memory, assembledView, lastStepMeta, turnContext? }`. Note: `runtime` is `undefined` when the step is executed via bare `execute()` without a Runtime wrapper; tools that need runtime (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `runtime.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, memory layer propagation, and observability tracing. Both `runtime.execute()` and `runtime.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
 
+---
+
+## Parent Context Updates to Spawned Children
+
+`spawn` creates a child context — not `fork`. `fork` branches share the parent context entirely and do not trigger `onParentUpdate`. This section applies only to `spawn` boundaries.
+
+A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
+
+This is opt-in per memory layer via the `onParentUpdate` hook (see `11-memory-layer-system`). The runtime fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
+
+**The child is never forced to accept parent updates.** Returning `void` means the child ignores the update entirely. This preserves the child's autonomy while enabling reactive parent-child relationships where needed.
+
+---
+
 ### Integration with Loop Inbox
 
 Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-until`). A common pattern:

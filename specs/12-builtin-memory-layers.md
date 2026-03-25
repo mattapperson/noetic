@@ -1,5 +1,6 @@
 # Built-In Memory Layers
 
+> **Package:** `@noetic/memory`
 > **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
 > **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
 
