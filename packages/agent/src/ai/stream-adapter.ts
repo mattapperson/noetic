@@ -20,16 +20,16 @@ interface ItemState {
 
 //#region Item ID Extraction
 
-function createIdGenerator(): (item: StreamableOutputItem) => string {
+export function createIdGenerator(): (item: StreamableOutputItem) => string {
   let counter = 0;
   return (item: StreamableOutputItem): string => {
-    if ('id' in item && typeof item.id === 'string') {
-      return item.id;
-    }
-    if ('callId' in item && typeof item.callId === 'string') {
+    if (item.type === 'function_call') {
       return `call-${item.callId}`;
     }
-    return `anon-${++counter}`;
+    if (item.type === 'function_call_output') {
+      return item.id ?? `call-output-${item.callId}`;
+    }
+    return item.id ?? `anon-${++counter}`;
   };
 }
 

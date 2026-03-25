@@ -6,7 +6,11 @@ import type { Interface } from 'node:readline';
 import { createInterface } from 'node:readline';
 import type { OpenRouter, StreamableOutputItem } from '@openrouter/sdk';
 import { stepCountIs } from '@openrouter/sdk';
-import { createStreamAdapter, extractTextContent } from '../ai/stream-adapter.js';
+import {
+  createIdGenerator,
+  createStreamAdapter,
+  extractTextContent,
+} from '../ai/stream-adapter.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { createCodingTools } from '../tools/index.js';
 import type { AgentConfig } from '../types/config.js';
@@ -27,6 +31,8 @@ export async function runAgent(client: OpenRouter, config: AgentConfig): Promise
   const systemPrompt = config.systemPrompt ?? buildSystemPrompt(config.cwd);
   const adapter = createStreamAdapter();
   const conversationHistory: Array<ConversationTurn | StreamableOutputItem> = [];
+  const itemIndex = new Map<string, number>();
+  const getItemId = createIdGenerator();
 
   const rl = createInterface({
     input: process.stdin,
@@ -67,7 +73,14 @@ export async function runAgent(client: OpenRouter, config: AgentConfig): Promise
 
     for await (const item of result.getItemsStream()) {
       adapter.processItem(item);
-      conversationHistory.push(item);
+      const itemId = getItemId(item);
+      const existing = itemIndex.get(itemId);
+      if (existing !== undefined) {
+        conversationHistory[existing] = item;
+      } else {
+        itemIndex.set(itemId, conversationHistory.length);
+        conversationHistory.push(item);
+      }
       renderItem(item);
     }
 
