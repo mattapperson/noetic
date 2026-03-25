@@ -16,7 +16,7 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from '
 
 //#region Constants
 
-const DEFAULT_BASH_TIMEOUT = 120;
+const DEFAULT_BASH_TIMEOUT = 12e1;
 
 //#endregion
 
@@ -268,7 +268,7 @@ export function createBashTool(cwd: string, options?: BashToolOptions): BashTool
     eventSchema: BashEventSchema,
     async *execute(params) {
       const { command, timeout: userTimeout } = params;
-      const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 600);
+      const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 6e2);
 
       const validation = validateCommand(command);
       if (!validation.valid) {

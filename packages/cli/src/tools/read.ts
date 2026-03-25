@@ -102,7 +102,7 @@ When NOT to use:
 function buildImageResult(path: string, buffer: Buffer, mimeType: ImageMimeType): ReadOutput {
   const base64 = buffer.toString('base64');
   return {
-    content: `Read image file [${mimeType}]\nBase64 data: ${base64.slice(0, 100)}...`,
+    content: `Read image file [${mimeType}]\nBase64 data: ${base64.slice(0, 1e2)}...`,
     path,
     isImage: true,
     truncated: false,

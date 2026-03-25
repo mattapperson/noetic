@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { ToolWithExecute } from '@openrouter/sdk';
 import { tool } from '@openrouter/sdk';
 import { z } from 'zod';
+import { normalizeToLf } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';
 import {
   DEFAULT_MAX_BYTES,
@@ -20,7 +21,7 @@ import {
 
 //#region Constants
 
-const DEFAULT_LIMIT = 100;
+const DEFAULT_LIMIT = 1e2;
 
 //#endregion
 
@@ -138,7 +139,7 @@ function parseRgOutput(
   for (const line of stdoutLines) {
     if (matches.length >= effectiveLimit) {
       matchLimitReached = true;
-      continue;
+      break;
     }
     if (!line.trim()) {
       continue;
@@ -189,21 +190,21 @@ async function formatMatches(params: FormatMatchesParams): Promise<{
   const outputLines: string[] = [];
   let linesTruncated = false;
 
-  const getFileLines = async (filePath: string): Promise<string[]> => {
+  async function getFileLines(filePath: string): Promise<string[]> {
     let lines = fileCache.get(filePath);
     if (!lines) {
       try {
         const content = await ops.readFile(filePath);
-        lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+        lines = normalizeToLf(content).split('\n');
       } catch {
         lines = [];
       }
       fileCache.set(filePath, lines);
     }
     return lines;
-  };
+  }
 
-  const formatFilePath = (filePath: string): string => {
+  function formatFilePath(filePath: string): string {
     if (!isDirectory) {
       return path.basename(filePath);
     }
@@ -212,7 +213,7 @@ async function formatMatches(params: FormatMatchesParams): Promise<{
       return relative.replace(/\\/g, '/');
     }
     return path.basename(filePath);
-  };
+  }
 
   for (const match of matches) {
     const absFilePath = path.isAbsolute(match.filePath)
@@ -233,8 +234,7 @@ async function formatMatches(params: FormatMatchesParams): Promise<{
 
     for (let current = start; current <= end; current++) {
       const lineText = lines[current - 1] ?? '';
-      const sanitized = lineText.replace(/\r/g, '');
-      const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
+      const { text: truncatedText, wasTruncated } = truncateLine(lineText);
       if (wasTruncated) {
         linesTruncated = true;
       }
@@ -379,14 +379,10 @@ export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool
           output += `\n\n[${notices.join('. ')}]`;
         }
 
-        const matchCount = matchLimitReached
-          ? effectiveLimit
-          : outputLines.filter((l) => l.includes(':')).length;
-
         return {
           matches: output,
           pattern,
-          matchCount,
+          matchCount: matches.length,
           truncated: truncation.truncated,
           limitReached: matchLimitReached,
         };

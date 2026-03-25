@@ -14,7 +14,7 @@ import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from './truncate.js';
 
 //#region Constants
 
-const DEFAULT_LIMIT = 500;
+const DEFAULT_LIMIT = 5e2;
 
 //#endregion
 

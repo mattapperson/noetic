@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * @noetic/agent CLI entry point.
+ * @noetic/cli entry point.
  */
 
 import { createClient } from '../ai/client.js';

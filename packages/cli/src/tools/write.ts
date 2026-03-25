@@ -101,11 +101,12 @@ export function createWriteTool(cwd: string, options?: WriteToolOptions): WriteT
         await ops.mkdir(dir);
         await ops.writeFile(absolutePath, content);
 
+        const bytes = Buffer.byteLength(content, 'utf-8');
         return {
           path,
-          bytesWritten: content.length,
+          bytesWritten: bytes,
           success: true,
-          message: `Successfully wrote ${content.length} bytes to ${path}`,
+          message: `Successfully wrote ${bytes} bytes to ${path}`,
         };
       } catch (e) {
         return {

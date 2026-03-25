@@ -1,27 +1,31 @@
 {
-  "name": "@noetic/agent",
+  "name": "@noetic/cli",
   "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "bin": {
-    "noetic-agent": "src/cli/cli.ts"
+    "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
-    "@gridland/web": "^0.2.53",
-    "@noetic/core": "workspace:*",
+    "@gridland/bun": "0.2.53",
+    "@gridland/web": "0.2.53",
     "@openrouter/sdk": "0.9.11",
     "diff": "7.0.0",
     "glob": "11.0.3",
+    "react": "19.1.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/diff": "^8.0.0",
+    "@types/react": "^19.2.14",
     "bun-types": "latest"
   },
   "scripts": {
     "dev": "bun run src/cli/cli.ts",
     "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --coverage --coverage-reporter=json",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",

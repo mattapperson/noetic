@@ -6,7 +6,7 @@ import type { AgentConfig } from '../types/config.js';
 import { AgentConfigSchema } from '../types/config.js';
 
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4';
-const DEFAULT_MAX_TURNS = 50;
+const DEFAULT_MAX_TURNS = 5e1;
 
 export function parseArgs(argv: string[]): AgentConfig {
   const args = argv.slice(2);
@@ -59,7 +59,7 @@ export function parseArgs(argv: string[]): AgentConfig {
 
 function printHelp(): void {
   process.stdout.write(`
-Usage: noetic-agent [options]
+Usage: noetic [options]
 
 Options:
   --model <model>      Model to use (default: ${DEFAULT_MODEL})

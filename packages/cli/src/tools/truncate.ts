@@ -12,7 +12,7 @@
 
 export const DEFAULT_MAX_LINES = 2e3;
 export const DEFAULT_MAX_BYTES = 50 * 1024;
-export const GREP_MAX_LINE_LENGTH = 500;
+export const GREP_MAX_LINE_LENGTH = 5e2;
 
 //#region Types
 
