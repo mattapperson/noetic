@@ -18,30 +18,19 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 ## Packages
 
-### Current State
-
-The framework currently ships two packages:
-
-- **`@noetic/core`** — Everything: step primitives, execution infrastructure, memory layer contract, built-in layer implementations, error taxonomy, observability, and runtime. This is the package users install today.
-- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
-
-### Target Architecture
-
-The target package structure separates the memory contract into its own package. This split is not yet implemented — it is the goal. See Gap Audit in `19-dx`.
-
 ```
 @noetic/memory  ←  @noetic/core  ←  @noetic/eval
 ```
 
-- **`@noetic/memory`** *(planned)* — The memory API contract and built-in implementations. Will contain: the `MemoryLayer` interface, all hook param/result types, `MemoryScope`, `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors will depend only on this package — not `@noetic/core`.
+- **`@noetic/memory`** — The memory API contract and built-in implementations. Contains: the `MemoryLayer` interface, all hook param/result types, `MemoryScope`, `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors depend only on this package — not `@noetic/core`.
 
-- **`@noetic/core`** *(target state)* — Step primitives and execution infrastructure only. Will depend on `@noetic/memory` for the layer contract. Will not contain layer implementations.
+- **`@noetic/core`** — Step primitives and execution infrastructure only. Depends on `@noetic/memory` for the layer contract. Does not contain layer implementations.
 
-- **`@noetic/eval`** — Unchanged.
+- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
 
 ## Architecture
 
-`@noetic/core` is structured around two layers (memory contract lives in `@noetic/memory`):
+`@noetic/core` is structured around two layers (the memory contract lives in `@noetic/memory`):
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 

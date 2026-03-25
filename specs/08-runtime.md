@@ -137,9 +137,8 @@ function getRuntime(): Runtime; // throws NoeticConfigError if none set
 
 ### Singleton Semantics
 
-1. Calling `setRuntime()` after `execute()` has already been called is a `NoeticConfigError` with `code: RUNTIME_ALREADY_IN_USE`. Set the runtime before any execution begins.
-2. Calling `setRuntime()` a second time replaces the previous runtime. This is intentional for test isolation (see below) — it is not an error.
-3. Calling `execute()` without a prior `setRuntime()` throws `NoeticConfigError` with `code: NO_RUNTIME_SET` and a hint pointing to the setup docs.
+1. Calling `setRuntime()` when a runtime is already registered is a `NoeticConfigError` with `code: RUNTIME_ALREADY_REGISTERED`. The runtime cannot be replaced or reconfigured after it is set.
+2. Calling `execute()` without a prior `setRuntime()` throws `NoeticConfigError` with `code: NO_RUNTIME_SET` and a hint pointing to the setup docs.
 
 ### Module Load Order
 
@@ -159,15 +158,17 @@ await runAgent();
 
 ### Test Isolation
 
-Each test file MUST call `setRuntime()` in a `beforeEach` block. Without this, runtime state leaks between tests and between test files when they share the same process.
+Bun runs each test file in a fresh module environment. Call `setRuntime()` at module scope (top of the test file) — it will execute once per file and will not conflict across files.
 
 ```ts
 import { setRuntime, InMemoryRuntime } from '@noetic/core';
 
-beforeEach(() => {
-  setRuntime(new InMemoryRuntime());
-});
+setRuntime(new InMemoryRuntime());
+
+// tests follow...
 ```
+
+Do not call `setRuntime()` inside `beforeEach` — the runtime is immutable once registered, and calling it a second time within the same module is an error.
 
 ### Serverless / Stateless Environments
 
