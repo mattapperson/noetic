@@ -16,15 +16,29 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 - **LangGraph's Pregel engine** — supersteps, channels, message passing
 - **Slate's architecture** — episodic memory, orchestrator/worker separation, thread-as-actor model
 
+## Packages
+
+```
+@noetic/memory  ←  @noetic/core  ←  @noetic/eval
+```
+
+- **`@noetic/memory`** — The memory API contract and built-in implementations. Contains: the `MemoryLayer` interface, all hook param/result types, `MemoryScope`, `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors depend only on this package — not `@noetic/core`.
+
+- **`@noetic/core`** — Step primitives and execution infrastructure only. Depends on `@noetic/memory` for the layer contract. Does not contain layer implementations.
+
+- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
+
 ## Architecture
 
-`@noetic/core` is structured around three layers:
+`@noetic/core` is structured around two layers (the memory contract lives in `@noetic/memory`):
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 
 2. **Execution infrastructure** (`07-context-and-event-log`, `08-runtime`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable runtime backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with `callModel`.
 
-3. **Memory system** (`11-memory-layer-system`, `12-builtin-memory-layers`) — Composable plugins that recall context before LLM calls and persist learnings after them. The View (what the LLM actually sees) is assembled from memory layer outputs + conversation history.
+`@noetic/memory` provides:
+
+3. **Memory contract and implementations** (`11-memory-layer-system`, `12-builtin-memory-layers`) — The `MemoryLayer` interface, lifecycle hook types, scope system, storage adapter contract, and built-in layer factories. The View (what the LLM actually sees) is assembled by the Projector in `@noetic/core` from the layer outputs + conversation history, but the layer contract itself is owned by `@noetic/memory`.
 
 **Patterns** (`13-patterns`) are 15-30 line compositions of primitives. They prove the primitives are sufficient; they are not framework magic.
 
@@ -51,6 +65,12 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Dependency Graph
 
 ```
+── @noetic/memory ──────────────────────────────────────────────
+                11-memory-system
+                       |
+                12-builtin-layers
+
+── @noetic/core ────────────────────────────────────────────────
                     01-step-type
                    /    |    \
           02-variants 03-flow  05-loop
@@ -61,9 +81,10 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
                     \      /                 |
                    08-runtime                |
                        |                     |
-                11-memory-system ────────────+
-                       |
-                12-builtin-layers
+                  [memory contract] ─────────+   (imported from @noetic/memory)
                        |
                   13-patterns (uses all primitives)
+
+── @noetic/eval ────────────────────────────────────────────────
+                17-eval-and-optimization
 ```
