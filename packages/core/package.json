@@ -5,11 +5,11 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "devDependencies": {
-    "@openrouter/sdk": "0.9.11",
+    "@openrouter/sdk": "0.10.2",
     "bun-types": "latest"
   },
   "peerDependencies": {
-    "@openrouter/sdk": "^0.9.11",
+    "@openrouter/sdk": "^0.10.2",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
@@ -18,7 +18,7 @@
     }
   },
   "dependencies": {
-    "@openrouter/sdk": "0.9.11",
+    "@openrouter/sdk": "0.10.2",
     "zod": "^4.0.0"
   },
   "scripts": {

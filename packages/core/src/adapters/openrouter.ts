@@ -3,7 +3,6 @@ import type {
   OpenResponsesEasyInputMessage,
   OpenResponsesFunctionCallOutput,
   OpenResponsesFunctionToolCall,
-  OpenResponsesInput,
   OpenResponsesNonStreamingResponse,
   OpenResponsesUsage,
   ResponsesOutputItem,
@@ -167,7 +166,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   return null;
 }
 
-function itemsToInput(items: ReadonlyArray<Item>): OpenResponsesInput {
+function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
   const result: OpenRouterInputItem[] = [];
   for (const item of items) {
     const inputItem = itemToInputItem(item);

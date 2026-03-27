@@ -65,9 +65,9 @@ describe('loop builder', () => {
 
   it('throws on missing body', () => {
     expect(() =>
-      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
       loop({
         id: 'test',
+        // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         body: undefined,
         until: until.maxSteps(1),
       }),
@@ -76,10 +76,10 @@ describe('loop builder', () => {
 
   it('throws on missing until', () => {
     expect(() =>
-      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
       loop({
         id: 'test',
         body,
+        // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         until: undefined,
       }),
     ).toThrow('until predicate');

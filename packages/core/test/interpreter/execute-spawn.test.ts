@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { z } from 'zod';
 import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { createLayerStateStore } from '../../src/memory/layer-lifecycle';
 import { ContextImpl } from '../../src/runtime/context-impl';

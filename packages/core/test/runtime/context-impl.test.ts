@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Channel } from '../../src/types/channel';
 import type { MessageItem } from '../../src/types/items';

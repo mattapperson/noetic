@@ -133,8 +133,8 @@ describe('NoeticError', () => {
 
   describe('formatMessage default branch', () => {
     it('unknown kind produces fallback message', () => {
-      // @ts-expect-error — intentionally passing invalid kind to test runtime fallback branch
       const e = new NoeticErrorImpl({
+        // @ts-expect-error — intentionally passing invalid kind to test runtime fallback branch
         kind: 'totally_unknown',
       });
       expect(e.message).toContain('NoeticError');

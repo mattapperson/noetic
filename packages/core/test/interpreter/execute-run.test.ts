@@ -20,16 +20,18 @@ function interceptDelays(): {
   restore: () => void;
 } {
   const delays: number[] = [];
-  globalThis.setTimeout = (
-    fn: (...args: unknown[]) => void,
-    delay?: number,
-    ...args: unknown[]
-  ) => {
-    if (delay && delay > 0) {
-      delays.push(delay);
-    }
-    return _originalSetTimeout(fn, 1, ...args);
+  // Wrap the original to intercept delay values while preserving the full overloaded signature
+  const handler: ProxyHandler<typeof setTimeout> = {
+    apply(_target, thisArg, argsList: unknown[]) {
+      const delay = argsList[1];
+      if (typeof delay === 'number' && delay > 0) {
+        delays.push(delay);
+      }
+      argsList[1] = 1;
+      return Reflect.apply(_originalSetTimeout, thisArg, argsList);
+    },
   };
+  globalThis.setTimeout = new Proxy(_originalSetTimeout, handler);
   return {
     delays,
     restore: () => {

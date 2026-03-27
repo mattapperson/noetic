@@ -57,10 +57,10 @@ describe('spawn builder', () => {
   });
 
   it('throws on missing child', () => {
-    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
     expect(() =>
       spawn({
         id: 'test',
+        // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         child: undefined,
       }),
     ).toThrow('child step');

@@ -96,8 +96,8 @@ describe('fork builder', () => {
   });
 
   it('throws when all mode lacks merge', () => {
-    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
     expect(() =>
+      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
       fork<string, string>({
         id: 'test',
         mode: 'all',
@@ -107,8 +107,8 @@ describe('fork builder', () => {
   });
 
   it('throws when settle mode lacks merge', () => {
-    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
     expect(() =>
+      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
       fork<string, string>({
         id: 'test',
         mode: 'settle',
@@ -148,10 +148,10 @@ describe('branch builder', () => {
   });
 
   it('throws on missing route', () => {
-    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
     expect(() =>
       branch<string, string>({
         id: 'test',
+        // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         route: undefined,
       }),
     ).toThrow('route function');

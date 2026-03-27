@@ -107,11 +107,11 @@ describe('executeFork', () => {
       const result = await executeFork(step, '', ctx, simpleExecute);
       // b should see the original state, not a's mutation
       const bResult = result.split('|')[1];
-      const bState = StateSchema.parse(JSON.parse(bResult));
+      const bState = _StateSchema.parse(JSON.parse(bResult));
       expect(bState.modified).toBeUndefined();
       expect(bState.original).toBe(true);
       // Parent state should also be unchanged
-      const parentState = StateSchema.parse(ctx.state);
+      const parentState = _StateSchema.parse(ctx.state);
       expect(parentState.original).toBe(true);
     });
 
@@ -323,7 +323,7 @@ describe('executeFork', () => {
         },
       });
       await executeFork(step, '', ctx, simpleExecute);
-      const finalState = StateSchema.parse(ctx.state);
+      const finalState = _StateSchema.parse(ctx.state);
       expect(finalState.winner).toBe(true);
     });
 

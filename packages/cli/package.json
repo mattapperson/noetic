@@ -10,7 +10,7 @@
   "dependencies": {
     "@gridland/bun": "0.2.53",
     "@gridland/web": "0.2.53",
-    "@openrouter/sdk": "0.9.11",
+    "@openrouter/sdk": "0.10.2",
     "diff": "7.0.0",
     "glob": "11.0.3",
     "react": "19.1.0",

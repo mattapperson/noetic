@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { assembleView } from '../../src/memory/projector';
 import { makeMessage } from '../_helpers';
 

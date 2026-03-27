@@ -122,10 +122,10 @@ describe('step builders', () => {
   });
 
   it('step.run() throws on missing execute', () => {
-    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
     expect(() =>
       step.run({
         id: 'test',
+        // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         execute: undefined,
       }),
     ).toThrow('execute function');
@@ -172,10 +172,10 @@ describe('step builders', () => {
   });
 
   it('step.tool() throws on missing tool', () => {
-    // @ts-expect-error — intentionally passing invalid opts to test runtime validation
     expect(() =>
       step.tool({
         id: 'test',
+        // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         tool: undefined,
       }),
     ).toThrow('requires a tool');

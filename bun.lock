@@ -17,7 +17,7 @@
       "dependencies": {
         "@gridland/bun": "0.2.53",
         "@gridland/web": "0.2.53",
-        "@openrouter/sdk": "0.9.11",
+        "@openrouter/sdk": "0.10.2",
         "diff": "7.0.0",
         "glob": "11.0.3",
         "react": "19.1.0",
@@ -33,15 +33,15 @@
       "name": "@noetic/core",
       "version": "0.1.0",
       "dependencies": {
-        "@openrouter/sdk": "0.9.11",
+        "@openrouter/sdk": "0.10.2",
         "zod": "^4.0.0",
       },
       "devDependencies": {
-        "@openrouter/sdk": "0.9.11",
+        "@openrouter/sdk": "0.10.2",
         "bun-types": "latest",
       },
       "peerDependencies": {
-        "@openrouter/sdk": "^0.9.11",
+        "@openrouter/sdk": "^0.10.2",
         "zod": "^4.0.0",
       },
       "optionalPeers": [
@@ -95,15 +95,12 @@
       },
     },
   },
-  "patchedDependencies": {
-    "@openrouter/sdk@0.9.11": "patches/@openrouter%2Fsdk@0.9.11.patch",
-  },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
 
     "@ampproject/remapping": ["@ampproject/remapping@2.3.0", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.5", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw=="],
 
-    "@ax-llm/ax": ["@ax-llm/ax@19.0.33", "", { "dependencies": { "@opentelemetry/api": "^1.9.0", "dayjs": "^1.11.13" }, "bin": { "ax": "cli/index.mjs" } }, "sha512-i4dcpofoZIzV3maQOVd/+taMaSHXOkKyVHkzHzwjN0rKohMqewL9s9wBM6Qs2De8mflWn21jVc2HOQlbByTEVw=="],
+    "@ax-llm/ax": ["@ax-llm/ax@19.0.36", "", { "dependencies": { "@opentelemetry/api": "^1.9.0", "dayjs": "^1.11.13" }, "bin": { "ax": "cli/index.mjs" } }, "sha512-KIOAB4EgynsXiCMOXtBlzL2vLDQjoNdFR181p5MBpHfpflQkxkBWmMtGXxXgaUsVaUghGYBTR/r8owMO1nguog=="],
 
     "@biomejs/biome": ["@biomejs/biome@2.4.7", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.7", "@biomejs/cli-darwin-x64": "2.4.7", "@biomejs/cli-linux-arm64": "2.4.7", "@biomejs/cli-linux-arm64-musl": "2.4.7", "@biomejs/cli-linux-x64": "2.4.7", "@biomejs/cli-linux-x64-musl": "2.4.7", "@biomejs/cli-win32-arm64": "2.4.7", "@biomejs/cli-win32-x64": "2.4.7" }, "bin": { "biome": "bin/biome" } }, "sha512-vXrgcmNGZ4lpdwZSpMf1hWw1aWS6B+SyeSYKTLrNsiUsAdSRN0J4d/7mF3ogJFbIwFFSOL3wT92Zzxia/d5/ng=="],
 
@@ -287,7 +284,7 @@
 
     "@noetic/web": ["@noetic/web@workspace:packages/web"],
 
-    "@openrouter/sdk": ["@openrouter/sdk@0.9.11", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-BgFu6NcIJO4a9aVjr04y3kZ8pyM71j15I+bzfVAGEvxnj+KQNIkBYQGgwrG3D+aT1QpDKLki8btcQmpaxUas6A=="],
+    "@openrouter/sdk": ["@openrouter/sdk@0.10.2", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-od0aWkk+vhndEI78YyPvPgMxv2+32KO4MRrk8lFxro/YABKAHkozXugc+x3YeNf/d9KQaBO6M4Rut1uf+yeD2g=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
 

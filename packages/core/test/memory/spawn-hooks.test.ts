@@ -9,14 +9,19 @@ import {
 import type { MemoryLayer } from '../../src/types/memory';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
+type DataState = {
+  data: string;
+  spawned?: boolean;
+};
+
+function isDataState(value: unknown): value is DataState {
+  return typeof value === 'object' && value !== null && 'data' in value;
+}
+
 describe('spawnLayers', () => {
   it('calls onSpawn and sets child state', async () => {
     const store = createLayerStateStore();
-    type DataState = {
-      data: string;
-      spawned?: boolean;
-    };
-    const layers: MemoryLayer<DataState>[] = [
+    const layers: MemoryLayer[] = [
       {
         id: 'test',
         name: 'Test',
@@ -28,13 +33,16 @@ describe('spawnLayers', () => {
               data: 'parent',
             },
           }),
-          onSpawn: async ({ parentState }) => ({
-            childState: {
-              ...parentState,
-              spawned: true,
-            },
-            items: [],
-          }),
+          onSpawn: async ({ parentState }) => {
+            assert(isDataState(parentState));
+            return {
+              childState: {
+                ...parentState,
+                spawned: true,
+              },
+              items: [],
+            };
+          },
         },
       },
     ];
@@ -60,18 +68,25 @@ describe('spawnLayers', () => {
     });
 
     expect(results).toHaveLength(1);
-    assert(results[0].childState !== null);
-    expect(results[0].childState.spawned).toBe(true);
+    const firstResult = results[0];
+    assert(firstResult !== undefined);
+    assert(isDataState(firstResult.childState));
+    expect(firstResult.childState.spawned).toBe(true);
   });
 });
 
+type CountState = {
+  count: number;
+};
+
+function isCountState(value: unknown): value is CountState {
+  return typeof value === 'object' && value !== null && 'count' in value;
+}
+
 describe('returnLayers', () => {
   it('merges child state back to parent', async () => {
-    type CountState = {
-      count: number;
-    };
     const store = createLayerStateStore();
-    const layers: MemoryLayer<CountState>[] = [
+    const layers: MemoryLayer[] = [
       {
         id: 'test',
         name: 'Test',
@@ -86,11 +101,15 @@ describe('returnLayers', () => {
           onSpawn: async ({ parentState }) => ({
             childState: structuredClone(parentState),
           }),
-          onReturn: async ({ childState, parentState }) => ({
-            parentState: {
-              count: parentState.count + childState.count,
-            } satisfies CountState,
-          }),
+          onReturn: async ({ childState, parentState }) => {
+            assert(isCountState(parentState));
+            assert(isCountState(childState));
+            return {
+              parentState: {
+                count: parentState.count + childState.count,
+              } satisfies CountState,
+            };
+          },
         },
       },
     ];
