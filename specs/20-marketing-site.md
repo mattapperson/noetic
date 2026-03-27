@@ -1,23 +1,17 @@
-# Noetic Marketing Page Redesign
-
-**Date:** 2026-03-27
-**Status:** Approved
-**Scope:** Update `packages/web/` landing page — copy, section structure, and animated isometric SVG graphics per section. TUI aesthetic preserved throughout.
-
----
+# Marketing Site
 
 ## Goals
 
-- Replace jargon-heavy copy with language accessible to developers new to AI agents, without condescending to experienced engineers
-- Make Noetic's three differentiators unmistakably clear: composable primitives, pre-built patterns, reactive memory
-- Add animated isometric SVG graphics to each value-prop section (45° tube-map style, glowing sphere data flow)
-- Replace the existing `CodeExamples` section with a differentiation block and a "Code Peek" tabbed section
+- Copy is accessible to developers new to AI agents without condescending to experienced engineers
+- Noetic's three differentiators are unmistakably clear: composable primitives, pre-built patterns, reactive memory
+- Each value-prop section includes an animated isometric SVG graphic (45° tube-map style, glowing sphere data flow)
+- A "Code Peek" tabbed section lets developers see the primitives in action
 
 ---
 
 ## Visual Language
 
-All new SVG graphics follow the style established during design review:
+All SVG graphics follow this style:
 
 - **Projection:** 45° isometric (tube-map style — all line segments at 0°, 45°, or 90° only)
 - **Nodes:** 3-face isometric panels — top face, front face, right face; colored border per node type
@@ -30,16 +24,16 @@ All new SVG graphics follow the style established during design review:
 
 ## Page Structure
 
-| # | Section | Status | Change |
-|---|---------|--------|--------|
-| 1 | Nav | unchanged | — |
-| 2 | Hero | updated | new copy |
-| 3 | Differentiation block | new | `CodeExamples` component removed; this replaces it |
-| 4 | Primitives | updated | new copy + SVG; stacked layout (heading → SVG → grid) |
-| 5 | Patterns | updated | new copy + SVG; stacked layout (heading → SVG → cards) |
-| 6 | Memory | updated | new copy + SVG, split layout (copy left / SVG right) |
-| 7 | Code Peek | new | added after Memory |
-| 8 | Coming Soon + Footer | unchanged | — |
+| # | Section |
+|---|---------|
+| 1 | Nav |
+| 2 | Hero |
+| 3 | Differentiation block |
+| 4 | Primitives |
+| 5 | Patterns |
+| 6 | Memory |
+| 7 | Code Peek |
+| 8 | Coming Soon + Footer |
 
 Sections 4 (Primitives) and 5 (Patterns) render **side-by-side** on desktop.
 
@@ -60,15 +54,13 @@ Sections 4 (Primitives) and 5 (Patterns) render **side-by-side** on desktop.
 | Install | `$ bun add @noetic/core` (cycling, prominent near CTAs) |
 | CTA primary | "Start building (5 min quickstart)" → `/docs` |
 | CTA secondary | "View on GitHub ★" → GitHub URL |
-| Code block | Keep existing TUI window with `react-agent.ts` snippet |
-
-No new SVG in the hero — the TUI code block already provides visual weight.
+| Code block | TUI window with `react-agent.ts` snippet |
 
 ---
 
 ### 3. Differentiation Block
 
-**Component:** new `packages/web/components/landing/differentiation.tsx`
+**Component:** `packages/web/components/landing/differentiation.tsx`
 
 **Section tag:** `// why noetic`
 **H2:** "Built differently than the frameworks you've tried"
@@ -93,7 +85,7 @@ The Noetic row is visually highlighted (green border/accent).
 
 **Component:** `packages/web/components/landing/primitives-viz.tsx`
 
-**Layout:** stacked — heading + copy at top, SVG below, bento grid at bottom. When side-by-side with Patterns, each section occupies one column; no inner left/right split.
+**Layout:** stacked — heading + copy at top, SVG below, bento grid at bottom. When side-by-side with Patterns, each section occupies one column.
 
 | Element | Content |
 |---------|---------|
@@ -101,9 +93,9 @@ The Noetic row is visually highlighted (green border/accent).
 | H2 | `` llm · tool · run · branch · fork · spawn · loop `` (monospace, displayed as code) |
 | Subhead | "The smallest units of agent behavior. Each does one thing. Compose them to build any workflow." |
 | Body | "Noetic gives you seven composable steps — the foundation of every agent pattern. Combine them into reasoning loops, parallel branches, tool calls, sub-agents. No generated code, no hidden orchestration." |
-| Below | Existing bento grid (unchanged) |
+| Below | Bento grid of primitive cards |
 
-**SVG (right column):** `PrimitivesIsometricSvg`
+**SVG:** `PrimitivesIsometricSvg`
 Three nodes (`llm` green, `tool` cyan, `loop` amber) connected by 45° wires with open arrows. The `loop` node has a dashed amber feedback wire returning to `llm`, forming a visible cycle. Glowing spheres travel all wire paths.
 
 ---
@@ -120,9 +112,9 @@ Three nodes (`llm` green, `tool` cyan, `loop` amber) connected by 45° wires wit
 | H2 | "ReAct. Task trees. Dual-agent loops. Adaptive plans." |
 | Subhead | "Production patterns, built from primitives you already understand." |
 | Body | "The workflows that actually work in production — each one a composition of Noetic primitives. No generated abstractions, no locked-in behavior. Read the source, fork it, make it yours." |
-| Below | Existing pattern cards (unchanged) |
+| Below | Pattern cards |
 
-**SVG (right column):** `PatternsIsometricSvg`
+**SVG:** `PatternsIsometricSvg`
 Multiple small primitive nodes (mini-cubes) with wires converging into a larger "pattern" node, then flowing out as a result. Represents the composition story visually.
 
 ---
@@ -139,16 +131,16 @@ Multiple small primitive nodes (mini-cubes) with wires converging into a larger 
 | H2 | "Five memory layers. One reactive context window." |
 | Subhead | "Working memory, semantic recall, episodic state, and more — each optimized for a different kind of information." |
 | Body | "Noetic decides what to keep in context, what to compress, and what to retrieve from long-term storage. When one layer updates, dependent layers react automatically. Your agents stay coherent across long conversations. Your token bill doesn't blow up." |
-| Below | Existing layer list (unchanged) |
+| Below | Memory layer list |
 
-**SVG (right column):** `MemoryIsometricSvg`
+**SVG:** `MemoryIsometricSvg`
 Five stacked isometric layer panels. Left wire: green sphere propagates **down** (writes & propagates). Right wire: cyan sphere travels **up** (assembleView() reads). Connector lines link each layer to both wires. LLM box at top-right receives assembled context. Callout: "raw history ≈ 6,000 tok → assembled context ≈ 680 tok".
 
 ---
 
 ### 7. Code Peek
 
-**Component:** new `packages/web/components/landing/code-peek.tsx`
+**Component:** `packages/web/components/landing/code-peek.tsx`
 
 | Element | Content |
 |---------|---------|
@@ -168,42 +160,41 @@ Each tab renders a `<TuiWindow>` with the code snippet.
 
 ---
 
-## New Components Required
+## Components
 
 | Component | File | Description |
 |-----------|------|-------------|
 | `Differentiation` | `components/landing/differentiation.tsx` | Competitor comparison strip + model-agnostic callout |
-| `CodePeek` | `components/landing/code-peek.tsx` | Tabbed code examples (replaces `CodeExamples`) |
+| `CodePeek` | `components/landing/code-peek.tsx` | Tabbed code examples |
 | `PrimitivesIsometricSvg` | `components/landing/svgs/primitives-isometric.tsx` | Animated SVG for Primitives section |
 | `PatternsIsometricSvg` | `components/landing/svgs/patterns-isometric.tsx` | Animated SVG for Patterns section |
 | `MemoryIsometricSvg` | `components/landing/svgs/memory-isometric.tsx` | Animated SVG for Memory section |
 
 ---
 
-## Layout Changes
+## Layout
 
 ### `page.tsx`
 ```tsx
-// New import order:
 <Nav />
 <main>
   <Hero />
-  <Differentiation />        // new (replaces CodeExamples)
+  <Differentiation />
   <div className="side-by-side-sections">
-    <PrimitivesViz />        // updated
-    <PatternsGrid />         // updated
+    <PrimitivesViz />
+    <PatternsGrid />
   </div>
-  <MemorySystem />           // updated
-  <CodePeek />               // new (replaces CodeExamples)
+  <MemorySystem />
+  <CodePeek />
   <ComingSoon />
 </main>
 <Footer />
 ```
 
-### CSS additions (`global.css`)
+### CSS (`global.css`)
 - `.side-by-side-sections` — flexbox row on desktop, column on mobile, equal widths, shared gap
-- `.section-split` — two-column layout within each updated section (copy left, SVG right)
-- SVG animation keyframes if needed (most animations use SVG SMIL `animateMotion`)
+- `.section-split` — two-column layout within Memory section (copy left, SVG right)
+- SVG animation keyframes where needed (most animations use SVG SMIL `animateMotion`)
 
 ---
 
@@ -224,26 +215,3 @@ Each tab renders a `<TuiWindow>` with the code snippet.
 ### Accessibility
 - All SVGs include `role="img"` and `aria-label` describing what they show
 - Animations respect `prefers-reduced-motion` via CSS: `@media (prefers-reduced-motion: reduce) { svg * { animation-play-state: paused; } }`
-
----
-
-## Copy Changes Summary
-
-| Section | Old headline | New headline |
-|---------|-------------|-------------|
-| Hero tag | `// agent framework` | `// not another graph-based framework` |
-| Hero subhead | "Primitives to build agents from scratch. Patterns to start fast." | "Build complex AI agents without the framework tax." |
-| Primitives | "Seven Primitives. Any Pattern." | `` llm · tool · run · branch · fork · spawn · loop `` |
-| Patterns | "Built-in Patterns" | "ReAct. Task trees. Dual-agent loops. Adaptive plans." |
-| Memory | "Layered Memory System" | "Five memory layers. One reactive context window." |
-
----
-
-## Out of Scope
-
-- Nav changes
-- Coming Soon section
-- Footer
-- Docs content
-- Mobile-specific design (mobile inherits from responsive flex layout)
-- Adding actual social proof / GitHub star count (requires external data fetching — post-launch addition)
