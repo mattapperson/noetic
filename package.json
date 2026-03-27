@@ -16,5 +16,8 @@
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format ."
+  },
+  "patchedDependencies": {
+    "@openrouter/sdk@0.10.2": "patches/@openrouter%2Fsdk@0.10.2.patch"
   }
 }

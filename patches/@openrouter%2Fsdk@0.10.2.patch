@@ -1,0 +1,198 @@
+diff --git a/esm/index.d.ts b/esm/index.d.ts
+index 5e2893278e673881316fb4732899e24d98821e41..a473e81d96591ace8f5b55709027267b0bc2bce4 100644
+--- a/esm/index.d.ts
++++ b/esm/index.d.ts
+@@ -11,6 +11,7 @@ export type { Fetcher, HTTPClientOptions } from "./lib/http.js";
+ export { applyNextTurnParamsToRequest, buildNextTurnParamsContext, executeNextTurnParamsFunctions } from "./lib/next-turn-params.js";
+ export { finishReasonIs, hasToolCall, isStopConditionMet, maxCost, maxTokensUsed, stepCountIs } from "./lib/stop-conditions.js";
+ export { extractUnsupportedContent, getUnsupportedContentSummary, hasUnsupportedContent } from "./lib/stream-transformers.js";
++export type { StreamableOutputItem } from "./lib/stream-transformers.js";
+ export { tool } from "./lib/tool.js";
+ export { hasApprovalRequiredTools, hasExecuteFunction, isGeneratorTool, isRegularExecuteTool, isToolPreliminaryResultEvent, isToolResultEvent, isTurnEndEvent, isTurnStartEvent, toolHasApprovalConfigured, ToolType, } from "./lib/tool-types.js";
+ export type { ChatStreamEvent, ConversationState, ConversationStatus, ResponseStreamEvent, ResponseStreamEvent as EnhancedResponseStreamEvent, HasApprovalTools, InferToolEvent, InferToolEventsUnion, InferToolInput, InferToolOutput, InferToolOutputsUnion, ManualTool, NextTurnParamsContext, NextTurnParamsFunctions, ParsedToolCall, PartialResponse, StateAccessor, StepResult, StopCondition, StopWhen, Tool, ToolApprovalCheck, ToolExecutionResult, ToolExecutionResultUnion, ToolHasApproval, ToolPreliminaryResultEvent, ToolResultEvent, ToolStreamEvent, ToolWithExecute, ToolWithGenerator, TurnContext, TurnEndEvent, TurnStartEvent, TypedToolCall, TypedToolCallUnion, UnsentToolResult, Warning, } from "./lib/tool-types.js";
+diff --git a/esm/lib/model-result.js b/esm/lib/model-result.js
+index fa4eb7ed770ff8c339a4c4970709a488183fb74b..61bb75b9cb049d0bda6e1da4f288f0037352ee78 100644
+--- a/esm/lib/model-result.js
++++ b/esm/lib/model-result.js
+@@ -623,6 +623,50 @@ export class ModelResult {
+             throw new Error('Unexpected response type from API');
+         }
+     }
++    /**
++     * Make a streaming follow-up API request that returns a ReusableReadableStream
++     * instead of consuming to completion. Used by getItemsStream for real-time streaming.
++     */
++    async makeFollowupRequestStreaming(currentResponse, toolResults, turnNumber) {
++        const originalInput = this.resolvedRequest?.input;
++        const normalizedOriginalInput = Array.isArray(originalInput)
++            ? originalInput
++            : originalInput
++                ? [{ role: 'user', content: originalInput }]
++                : [];
++        const newInput = [
++            ...normalizedOriginalInput,
++            ...(Array.isArray(currentResponse.output)
++                ? currentResponse.output
++                : [currentResponse.output]),
++            ...toolResults,
++        ];
++        if (!this.resolvedRequest) {
++            throw new Error('Request not initialized');
++        }
++        this.resolvedRequest = {
++            ...this.resolvedRequest,
++            input: newInput,
++        };
++        const newRequest = {
++            ...this.resolvedRequest,
++            stream: true,
++        };
++        const newResult = await betaResponsesSend(this.options.client, { openResponsesRequest: newRequest }, this.options.options);
++        if (!newResult.ok) {
++            throw newResult.error;
++        }
++        const value = newResult.value;
++        if (isEventStream(value)) {
++            return new ReusableReadableStream(value);
++        }
++        else if (this.isNonStreamingResponse(value)) {
++            return value;
++        }
++        else {
++            throw new Error('Unexpected response type from API');
++        }
++    }
+     /**
+      * Validate the final response has required fields.
+      *
+@@ -1103,39 +1147,106 @@ export class ModelResult {
+             if (!this.reusableStream && !this.finalResponse) {
+                 throw new Error('Stream not initialized');
+             }
+-            // Stream all items from the API response cumulatively
++            // Turn 1: stream items from the initial API response in real-time
+             if (this.reusableStream) {
+                 yield* buildItemsStream(this.reusableStream);
+             }
+-            // Execute tools if needed
+-            await this.executeToolsIfNeeded();
+-            // Yield function calls and outputs for each tool round
+-            for (const round of this.allToolExecutionRounds) {
+-                // Round 0's function_calls already yielded via buildItemsStream
+-                if (round.round > 0) {
+-                    for (const item of round.response.output) {
+-                        if (isFunctionCallItem(item)) {
+-                            yield item;
+-                        }
+-                    }
++            // Get the completed initial response to check for tool calls
++            let currentResponse = await this.getInitialResponse();
++            await this.saveResponseToState(currentResponse);
++            // Check if tools should be executed
++            const hasToolCallItems = currentResponse.output.some(
++                (item) => hasTypeProperty(item) && item.type === 'function_call'
++            );
++            if (!this.options.tools?.length || !hasToolCallItems) {
++                this.finalResponse = currentResponse;
++                await this.markStateComplete();
++                return;
++            }
++            // Check for approval requirements on initial tool calls
++            const initialToolCalls = extractToolCallsFromResponse(currentResponse);
++            if (await this.handleApprovalCheck(initialToolCalls, 0, currentResponse)) {
++                return;
++            }
++            if (!this.hasExecutableToolCalls(initialToolCalls)) {
++                this.finalResponse = currentResponse;
++                await this.markStateComplete();
++                return;
++            }
++            // Inline tool execution loop — yields items in real-time at every stage
++            let currentRound = 0;
++            while (true) {
++                if (await this.checkForInterruption(currentResponse)) {
++                    return;
+                 }
+-                for (const toolResult of round.toolResults) {
++                if (await this.shouldStopExecution()) {
++                    break;
++                }
++                const currentToolCalls = extractToolCallsFromResponse(currentResponse);
++                if (currentToolCalls.length === 0) {
++                    break;
++                }
++                if (await this.handleApprovalCheck(currentToolCalls, currentRound + 1, currentResponse)) {
++                    return;
++                }
++                if (!this.hasExecutableToolCalls(currentToolCalls)) {
++                    break;
++                }
++                const turnNumber = currentRound + 1;
++                const turnContext = { numberOfTurns: turnNumber };
++                await this.options.onTurnStart?.(turnContext);
++                await this.resolveAsyncFunctionsForTurn(turnContext);
++                // Execute tools for this round
++                const toolResults = await this.executeToolRound(currentToolCalls, turnContext);
++                // Track execution round
++                this.allToolExecutionRounds.push({
++                    round: currentRound,
++                    toolCalls: currentToolCalls,
++                    response: currentResponse,
++                    toolResults,
++                });
++                // Yield tool results in real-time as they complete
++                for (const toolResult of toolResults) {
+                     yield toolResult;
+                 }
+-            }
+-            // If tools were executed, yield all items from the final response
+-            if (this.finalResponse && this.allToolExecutionRounds.length > 0) {
+-                for (const item of this.finalResponse.output) {
+-                    if (isOutputMessage(item) ||
+-                        isFunctionCallItem(item) ||
+-                        isReasoningOutputItem(item) ||
+-                        isWebSearchCallOutputItem(item) ||
+-                        isFileSearchCallOutputItem(item) ||
+-                        isImageGenerationCallOutputItem(item)) {
+-                        yield item;
++                await this.saveToolResultsToState(toolResults);
++                await this.applyNextTurnParams(currentToolCalls);
++                // Make streaming follow-up request and yield items in real-time
++                const followupResult = await this.makeFollowupRequestStreaming(
++                    currentResponse, toolResults, turnNumber
++                );
++                if (followupResult && typeof followupResult === 'object' && 'createConsumer' in followupResult) {
++                    // It's a ReusableReadableStream — yield items in real-time
++                    yield* buildItemsStream(followupResult);
++                    currentResponse = await consumeStreamForCompletion(followupResult);
++                }
++                else {
++                    // Non-streaming response — yield items directly
++                    const nonStreamResponse = followupResult;
++                    for (const item of nonStreamResponse.output) {
++                        if (isOutputMessage(item) ||
++                            isFunctionCallItem(item) ||
++                            isReasoningOutputItem(item) ||
++                            isWebSearchCallOutputItem(item) ||
++                            isFileSearchCallOutputItem(item) ||
++                            isImageGenerationCallOutputItem(item)) {
++                            yield item;
++                        }
+                     }
++                    currentResponse = nonStreamResponse;
+                 }
++                await this.options.onTurnEnd?.(turnContext, currentResponse);
++                await this.saveResponseToState(currentResponse);
++                currentRound++;
++            }
++            // Finalize
++            this.validateFinalResponse(currentResponse);
++            this.finalResponse = currentResponse;
++            // Set toolExecutionPromise so other methods (getText, getResponse) work
++            if (!this.toolExecutionPromise) {
++                this.toolExecutionPromise = Promise.resolve();
+             }
++            await this.markStateComplete();
+         }.call(this);
+     }
+     /**

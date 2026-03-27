@@ -95,6 +95,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@openrouter/sdk@0.10.2": "patches/@openrouter%2Fsdk@0.10.2.patch",
+  },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
 
