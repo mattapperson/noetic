@@ -13,7 +13,7 @@ describe('dynamic delegate demo', () => {
     expect(agent.id).toBe('dynamic-delegate-loop');
     expect(agent.inbox).toBe(delegateInbox);
     expect(agent.parkTimeout).toBe(5e3);
-    expect(agent.body.kind).toBe('llm');
+    expect(agent.steps[0].kind).toBe('llm');
   });
 
   it('LLM uses sync delegate tool and gets result immediately', async () => {

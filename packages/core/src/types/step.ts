@@ -141,8 +141,8 @@ export interface StepLoop<I, O> {
   kind: 'loop';
   /** Unique step identifier used in traces and error messages. */
   id: string;
-  /** Step to execute on each iteration. */
-  body: Step<I, O>;
+  /** Steps to execute sequentially on each iteration. */
+  steps: ReadonlyArray<Step<I, O>>;
   /** Termination predicate evaluated after each iteration with a cumulative snapshot. */
   until: Until;
   /** Hard safety cap on iterations (default: 1000). */

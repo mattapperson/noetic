@@ -7,12 +7,12 @@
 
 ## `loop()` — Repeating Execution
 
-Combines a body step + termination predicate + optional input preparation into repeating execution.
+Combines an array of body steps + termination predicate + optional input preparation into repeating execution. Each iteration executes the steps sequentially, piping the output of one into the input of the next.
 
 ```typescript
 interface LoopOpts<I, O> {
   id: string;
-  body: Step<I, O>;
+  steps: ReadonlyArray<Step<I, O>>;
   until: Until;
   maxIterations?: number;    // hard safety cap on iterations (default 1000)
   maxHistorySize?: number;   // limits history array size for memory management
@@ -32,7 +32,7 @@ prepareNext: (output, verdict, ctx) => {
 },
 ```
 
-`onError` controls behavior when the loop body fails:
+`onError` controls behavior when the loop steps fails:
 
 - `'retry'` — re-run the same iteration
 - `'skip'` — move to the next iteration using the last successful output
@@ -178,7 +178,7 @@ const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 const agentLoop = {
   kind: 'loop',
   id: 'async-agent',
-  body: step.llm({ id: 'agent-llm', model: 'gpt-4o', tools: [launchTool] }),
+  steps: [step.llm({ id: 'agent-llm', model: 'gpt-4o', tools: [launchTool] })],
   until: until.noToolCalls(),
   inbox,
   parkTimeout: 3e4,  // wait up to 30s for sub-agent results

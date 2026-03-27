@@ -91,7 +91,7 @@ Iteration with termination predicates.
 ```typescript
 loop<I, O>({
   id: string;
-  body: Step<I, O>;
+  steps: ReadonlyArray<Step<I, O>>;
   until: Until;
   maxIterations?: number;
   inbox?: Channel<string>;

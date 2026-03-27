@@ -10,8 +10,8 @@ describe('pipeline agent', () => {
 
     expect(agent.kind).toBe('loop');
     expect(agent.id).toBe('pipeline-loop');
-    expect(agent.body.kind).toBe('branch');
-    expect(agent.body.id).toBe('phase-router');
+    expect(agent.steps[0].kind).toBe('branch');
+    expect(agent.steps[0].id).toBe('phase-router');
   });
 
   it('runs all three stages and returns the formatted report', async () => {

@@ -44,15 +44,17 @@ export function buildAsyncDelegateAgent(opts: {
 
   return loop({
     id: 'async-delegate-loop',
-    body: step.llm({
-      id: 'async-delegate-llm',
-      model: 'gpt-4o',
-      system: 'You are an assistant that can launch background sub-agents.',
-      tools: [
-        launchTool,
-        checkTool,
-      ],
-    }),
+    steps: [
+      step.llm({
+        id: 'async-delegate-llm',
+        model: 'gpt-4o',
+        system: 'You are an assistant that can launch background sub-agents.',
+        tools: [
+          launchTool,
+          checkTool,
+        ],
+      }),
+    ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
     parkTimeout: opts.parkTimeout ?? 5e3,

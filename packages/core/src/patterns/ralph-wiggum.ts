@@ -24,10 +24,12 @@ export function ralphWiggum(opts: {
 
   return loop({
     id: 'ralph-wiggum-loop',
-    body: spawn<string, string>({
-      id: 'ralph-iteration',
-      child: inner,
-    }),
+    steps: [
+      spawn<string, string>({
+        id: 'ralph-iteration',
+        child: inner,
+      }),
+    ],
     until: any(until.verified(opts.verify), until.maxSteps(opts.maxIterations ?? 50)),
     prepareNext: (_output, verdict) => {
       if (verdict.feedback) {

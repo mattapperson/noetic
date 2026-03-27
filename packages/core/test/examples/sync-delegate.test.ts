@@ -30,7 +30,7 @@ describe('sync delegate demo', () => {
 
     assert(agentStep.kind === 'loop');
     expect(agentStep.id).toBe('react-loop');
-    expect(agentStep.body.kind).toBe('llm');
+    expect(agentStep.steps[0].kind).toBe('llm');
 
     const ctx = runtime.createContext();
     const result = await runtime.execute(agentStep, 'What is the capital of France?', ctx);
@@ -42,6 +42,6 @@ describe('sync delegate demo', () => {
     const agent = buildSyncDelegateAgent();
 
     assert(agent.kind === 'loop');
-    expect(agent.body.kind).toBe('llm');
+    expect(agent.steps[0].kind).toBe('llm');
   });
 });

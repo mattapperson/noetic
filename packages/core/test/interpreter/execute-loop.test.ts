@@ -9,26 +9,28 @@ import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Snapshot } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
-import { simpleExecute as simpleExecuteStep } from '../_helpers';
+import { simpleExecute } from '../_helpers';
 
 describe('executeLoop', () => {
   it('repeats body until predicate fires', async () => {
     let count = 0;
     const loopStep = loop<number, number>({
       id: 'test-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          count++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            count++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(3),
     });
 
     const ctx = new ContextImpl();
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(count).toBe(3);
     expect(result).toBe(3); // 0+1=1, 1+1=2, 2+1=3
   });
@@ -37,20 +39,22 @@ describe('executeLoop', () => {
     const inputs: string[] = [];
     const loopStep = loop<string, string>({
       id: 'prep-loop',
-      body: {
-        kind: 'run',
-        id: 'echo',
-        execute: async (input: string) => {
-          inputs.push(input);
-          return `result-${input}`;
+      steps: [
+        {
+          kind: 'run',
+          id: 'echo',
+          execute: async (input: string) => {
+            inputs.push(input);
+            return `result-${input}`;
+          },
         },
-      },
+      ],
       until: until.maxSteps(3),
       prepareNext: (output) => output.toUpperCase(),
     });
 
     const ctx = new ContextImpl();
-    await executeLoop(loopStep, 'first', ctx, simpleExecuteStep);
+    await executeLoop(loopStep, 'first', ctx, simpleExecute);
     expect(inputs[0]).toBe('first');
     expect(inputs[1]).toBe('RESULT-FIRST');
     expect(inputs[2]).toBe('RESULT-RESULT-FIRST');
@@ -60,28 +64,30 @@ describe('executeLoop', () => {
     let attempts = 0;
     const loopStep = loop<string, string>({
       id: 'retry-loop',
-      body: {
-        kind: 'run',
-        id: 'flaky',
-        execute: async (_input: string) => {
-          attempts++;
-          if (attempts <= 2) {
-            throw new NoeticErrorImpl({
-              kind: 'step_failed',
-              stepId: 'flaky',
-              cause: new Error('flaky'),
-              retriesExhausted: false,
-            });
-          }
-          return 'success';
+      steps: [
+        {
+          kind: 'run',
+          id: 'flaky',
+          execute: async (_input: string) => {
+            attempts++;
+            if (attempts <= 2) {
+              throw new NoeticErrorImpl({
+                kind: 'step_failed',
+                stepId: 'flaky',
+                cause: new Error('flaky'),
+                retriesExhausted: false,
+              });
+            }
+            return 'success';
+          },
         },
-      },
+      ],
       until: until.maxSteps(1),
       onError: () => 'retry',
     });
 
     const ctx = new ContextImpl();
-    const result = await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 'go', ctx, simpleExecute);
     expect(result).toBe('success');
     expect(attempts).toBe(3); // 2 failures + 1 success
   });
@@ -90,28 +96,30 @@ describe('executeLoop', () => {
     let callCount = 0;
     const loopStep = loop<number, number>({
       id: 'skip-loop',
-      body: {
-        kind: 'run',
-        id: 'sometimes-fail',
-        execute: async (input: number) => {
-          callCount++;
-          if (callCount === 2) {
-            throw new NoeticErrorImpl({
-              kind: 'step_failed',
-              stepId: 'sometimes-fail',
-              cause: new Error('oops'),
-              retriesExhausted: false,
-            });
-          }
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'sometimes-fail',
+          execute: async (input: number) => {
+            callCount++;
+            if (callCount === 2) {
+              throw new NoeticErrorImpl({
+                kind: 'step_failed',
+                stepId: 'sometimes-fail',
+                cause: new Error('oops'),
+                retriesExhausted: false,
+              });
+            }
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(3),
       onError: () => 'skip',
     });
 
     const ctx = new ContextImpl();
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     // call 1: 0→1 (stepCount=1), call 2: error (skip, stepCount stays 1, output=1),
     // call 3: 1→2 (stepCount=2), call 4: 2→3 (stepCount=3, maxSteps fires)
     expect(result).toBe(3);
@@ -120,25 +128,27 @@ describe('executeLoop', () => {
   it('onError abort propagates error', async () => {
     const loopStep = loop<string, string>({
       id: 'abort-loop',
-      body: {
-        kind: 'run',
-        id: 'fail',
-        execute: async () => {
-          throw new NoeticErrorImpl({
-            kind: 'step_failed',
-            stepId: 'fail',
-            cause: new Error('boom'),
-            retriesExhausted: false,
-          });
+      steps: [
+        {
+          kind: 'run',
+          id: 'fail',
+          execute: async () => {
+            throw new NoeticErrorImpl({
+              kind: 'step_failed',
+              stepId: 'fail',
+              cause: new Error('boom'),
+              retriesExhausted: false,
+            });
+          },
         },
-      },
+      ],
       until: until.maxSteps(5),
       onError: () => 'abort',
     });
 
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 'go', ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -149,21 +159,23 @@ describe('executeLoop', () => {
     let count = 0;
     const loopStep = loop<number, number>({
       id: 'pred-throw-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          count++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            count++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: () => {
         throw new Error('predicate boom');
       },
     });
 
     const ctx = new ContextImpl();
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(count).toBe(1); // runs once, predicate throws, stops
     expect(result).toBe(1);
   });
@@ -172,11 +184,13 @@ describe('executeLoop', () => {
     let capturedSnapshot: Snapshot | null = null;
     const loopStep = loop<string, string>({
       id: 'snap-loop',
-      body: {
-        kind: 'run',
-        id: 'echo',
-        execute: async (input: string) => `output-${input}`,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'echo',
+          execute: async (input: string) => `output-${input}`,
+        },
+      ],
       until: (snap) => {
         capturedSnapshot = snap;
         return {
@@ -186,7 +200,7 @@ describe('executeLoop', () => {
     });
 
     const ctx = new ContextImpl();
-    await executeLoop(loopStep, 'test', ctx, simpleExecuteStep);
+    await executeLoop(loopStep, 'test', ctx, simpleExecute);
 
     // capturedSnapshot is assigned inside the `until` callback, so TS cannot narrow
     // the outer `let` binding. We assert non-null then access via a typed local.
@@ -202,11 +216,13 @@ describe('executeLoop', () => {
   it('enforces maxIterations ceiling', async () => {
     const loopStep = loop<number, number>({
       id: 'ceiling-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => input + 1,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
       until: () => ({
         stop: false,
       }), // never stops
@@ -215,7 +231,7 @@ describe('executeLoop', () => {
 
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -229,14 +245,16 @@ describe('executeLoop', () => {
     let count = 0;
     const loopStep = loop<number, number>({
       id: 'default-ceiling-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          count++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            count++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: () => ({
         stop: false,
       }), // never stops
@@ -244,7 +262,7 @@ describe('executeLoop', () => {
 
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -256,19 +274,21 @@ describe('executeLoop', () => {
     let attempts = 0;
     const loopStep = loop<string, string>({
       id: 'retry-ceiling-loop',
-      body: {
-        kind: 'run',
-        id: 'always-fail',
-        execute: async () => {
-          attempts++;
-          throw new NoeticErrorImpl({
-            kind: 'step_failed',
-            stepId: 'always-fail',
-            cause: new Error('always fails'),
-            retriesExhausted: false,
-          });
+      steps: [
+        {
+          kind: 'run',
+          id: 'always-fail',
+          execute: async () => {
+            attempts++;
+            throw new NoeticErrorImpl({
+              kind: 'step_failed',
+              stepId: 'always-fail',
+              cause: new Error('always fails'),
+              retriesExhausted: false,
+            });
+          },
         },
-      },
+      ],
       until: until.maxSteps(100),
       maxIterations: 10,
       onError: () => 'retry',
@@ -276,7 +296,7 @@ describe('executeLoop', () => {
 
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 'go', ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -289,22 +309,24 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl();
     const loopStep = loop<number, number>({
       id: 'abort-mid-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          count++;
-          if (count === 2) {
-            ctx.abort('stop now');
-          }
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            count++;
+            if (count === 2) {
+              ctx.abort('stop now');
+            }
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(10),
     });
 
     try {
-      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -317,17 +339,19 @@ describe('executeLoop', () => {
   it('rejects invalid maxIterations (NaN)', async () => {
     const loopStep = loop<number, number>({
       id: 'nan-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => input + 1,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
       until: until.maxSteps(5),
       maxIterations: Number.NaN,
     });
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -340,17 +364,19 @@ describe('executeLoop', () => {
   it('rejects invalid maxIterations (0)', async () => {
     const loopStep = loop<number, number>({
       id: 'zero-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => input + 1,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
       until: until.maxSteps(5),
       maxIterations: 0,
     });
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -364,11 +390,13 @@ describe('executeLoop', () => {
     let capturedHistory: unknown[] = [];
     const loopStep = loop<number, number>({
       id: 'history-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => input + 1,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
       until: (snap) => {
         capturedHistory = snap.history;
         return {
@@ -378,7 +406,7 @@ describe('executeLoop', () => {
       maxHistorySize: 3,
     });
     const ctx = new ContextImpl();
-    await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    await executeLoop(loopStep, 0, ctx, simpleExecute);
     // History should only contain the last 3 items
     expect(capturedHistory).toHaveLength(3);
     expect(capturedHistory).toEqual([
@@ -392,22 +420,24 @@ describe('executeLoop', () => {
     let callCount = 0;
     const loopStep = loop<string, string>({
       id: 'skip-first-loop',
-      body: {
-        kind: 'run',
-        id: 'fail-then-ok',
-        execute: async (_input: string) => {
-          callCount++;
-          if (callCount === 1) {
-            throw new NoeticErrorImpl({
-              kind: 'step_failed',
-              stepId: 'fail-then-ok',
-              cause: new Error('first fail'),
-              retriesExhausted: false,
-            });
-          }
-          return 'success';
+      steps: [
+        {
+          kind: 'run',
+          id: 'fail-then-ok',
+          execute: async (_input: string) => {
+            callCount++;
+            if (callCount === 1) {
+              throw new NoeticErrorImpl({
+                kind: 'step_failed',
+                stepId: 'fail-then-ok',
+                cause: new Error('first fail'),
+                retriesExhausted: false,
+              });
+            }
+            return 'success';
+          },
         },
-      },
+      ],
       // On first error with no previous output: skip → continue (stepCount stays 0).
       // Second call succeeds: stepCount increments to 1, satisfying maxSteps(1).
       until: until.maxSteps(1),
@@ -415,7 +445,7 @@ describe('executeLoop', () => {
     });
 
     const ctx = new ContextImpl();
-    const result = await executeLoop(loopStep, 'go', ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 'go', ctx, simpleExecute);
     expect(result).toBe('success');
     expect(callCount).toBe(2);
   });
@@ -423,17 +453,19 @@ describe('executeLoop', () => {
   it('negative maxIterations throws validation error', async () => {
     const loopStep = loop<number, number>({
       id: 'neg-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => input + 1,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
       until: until.maxSteps(5),
       maxIterations: -1,
     });
     const ctx = new ContextImpl();
     try {
-      await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -449,14 +481,16 @@ describe('executeLoop', () => {
 
     const loopStep = loop<string, string>({
       id: 'verify-loop',
-      body: {
-        kind: 'run',
-        id: 'attempt',
-        execute: async (_input: string) => {
-          iteration++;
-          return iteration >= 3 ? 'correct' : 'wrong';
+      steps: [
+        {
+          kind: 'run',
+          id: 'attempt',
+          execute: async (_input: string) => {
+            iteration++;
+            return iteration >= 3 ? 'correct' : 'wrong';
+          },
         },
-      },
+      ],
       until: until.verified(async (output) => {
         if (output === 'correct') {
           return {
@@ -475,10 +509,48 @@ describe('executeLoop', () => {
     });
 
     const ctx = new ContextImpl();
-    const result = await executeLoop(loopStep, 'start', ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 'start', ctx, simpleExecute);
     expect(result).toBe('correct');
     expect(iteration).toBe(3);
     expect(feedbacks[0]).toBe('Not correct yet');
+  });
+
+  it('executes multiple body steps sequentially', async () => {
+    const order: string[] = [];
+    const loopStep = loop<number, number>({
+      id: 'multi-step-loop',
+      steps: [
+        {
+          kind: 'run',
+          id: 'double',
+          execute: async (input: number) => {
+            order.push('double');
+            return input * 2;
+          },
+        },
+        {
+          kind: 'run',
+          id: 'add-one',
+          execute: async (input: number) => {
+            order.push('add-one');
+            return input + 1;
+          },
+        },
+      ],
+      until: until.maxSteps(2),
+    });
+
+    const ctx = new ContextImpl();
+    // Iteration 1: 1 → double → 2 → add-one → 3
+    // Iteration 2: 3 → double → 6 → add-one → 7
+    const result = await executeLoop(loopStep, 1, ctx, simpleExecute);
+    expect(result).toBe(7);
+    expect(order).toEqual([
+      'double',
+      'add-one',
+      'double',
+      'add-one',
+    ]);
   });
 });
 
@@ -508,14 +580,16 @@ describe('executeLoop inbox channel', () => {
     let callCount = 0;
     const loopStep = loop<number, number>({
       id: 'inbox-continue-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          callCount++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            callCount++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(1),
       inbox,
     });
@@ -523,7 +597,7 @@ describe('executeLoop inbox channel', () => {
     // Pre-load one message so the loop continues after first stop
     channelStore.send(inbox, 'wake up');
 
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     // First iteration: 0+1=1 (stop, but inbox has message → continue)
     // Second iteration: 1+1=2 (stop, inbox empty → truly stop)
     expect(callCount).toBe(2);
@@ -536,20 +610,22 @@ describe('executeLoop inbox channel', () => {
     let callCount = 0;
     const loopStep = loop<number, number>({
       id: 'inbox-empty-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          callCount++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            callCount++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(1),
       inbox,
     });
 
     // No messages in inbox
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(callCount).toBe(1);
     expect(result).toBe(1);
   });
@@ -560,14 +636,16 @@ describe('executeLoop inbox channel', () => {
     let callCount = 0;
     const loopStep = loop<number, number>({
       id: 'inbox-park-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          callCount++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            callCount++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(1),
       inbox,
       parkTimeout: 2e3,
@@ -578,7 +656,7 @@ describe('executeLoop inbox channel', () => {
       channelStore.send(inbox, 'delayed wake');
     }, 20);
 
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(callCount).toBe(2);
     expect(result).toBe(2);
   });
@@ -589,21 +667,23 @@ describe('executeLoop inbox channel', () => {
     let callCount = 0;
     const loopStep = loop<number, number>({
       id: 'inbox-timeout-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => {
-          callCount++;
-          return input + 1;
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => {
+            callCount++;
+            return input + 1;
+          },
         },
-      },
+      ],
       until: until.maxSteps(1),
       inbox,
       parkTimeout: 50,
     });
 
     // No messages — should timeout and stop
-    const result = await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(callCount).toBe(1);
     expect(result).toBe(1);
   });
@@ -613,18 +693,20 @@ describe('executeLoop inbox channel', () => {
 
     const loopStep = loop<number, number>({
       id: 'inbox-log-loop',
-      body: {
-        kind: 'run',
-        id: 'inc',
-        execute: async (input: number) => input + 1,
-      },
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
       until: until.maxSteps(1),
       inbox,
     });
 
     channelStore.send(inbox, 'hello from sub-agent');
 
-    await executeLoop(loopStep, 0, ctx, simpleExecuteStep);
+    await executeLoop(loopStep, 0, ctx, simpleExecute);
 
     const devMessages = ctx.itemLog.items.filter(
       (item) => item.type === 'message' && item.role === 'developer',

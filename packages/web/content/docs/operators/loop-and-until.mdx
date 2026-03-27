@@ -10,30 +10,30 @@ import { loop, step, until } from '@noetic/core';
 
 const agent = loop({
   id: 'chat-loop',
-  body: step.llm({
+  steps: [step.llm({
     id: 'chat',
     model: 'gpt-4o',
     system: 'You are a helpful assistant.',
     tools: [searchTool],
-  }),
+  })],
   until: until.noToolCalls(),
   maxIterations: 10,
 });
 ```
 
-The loop executes its `body` step repeatedly. After each iteration, a `Snapshot` of the current state is passed to the `until` predicate. When the predicate returns `{ stop: true }`, the loop exits and returns the last output.
+The loop executes its `steps` array sequentially on each iteration, piping the output of one step into the next. After each iteration, a `Snapshot` of the current state is passed to the `until` predicate. When the predicate returns `{ stop: true }`, the loop exits and returns the last output.
 
 ## Loop API Reference
 
 | Property | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | -- | Unique step identifier |
-| `body` | `Step<I, O>` | Yes | -- | The step to repeat |
+| `steps` | `ReadonlyArray<Step<I, O>>` | Yes | -- | Steps to execute sequentially on each iteration |
 | `until` | `Until` | Yes | -- | Predicate that decides when to stop |
 | `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries) |
 | `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | No | -- | Transform output into next iteration's input |
-| `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body step |
+| `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body steps |
 
 ## The Snapshot
 
@@ -41,13 +41,13 @@ Every time the `until` predicate is called, it receives a `Snapshot` of the loop
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `stepCount` | `number` | Number of successful body executions |
+| `stepCount` | `number` | Number of successful step executions |
 | `tokens` | `{ input: number; output: number; total: number }` | Cumulative token usage |
 | `elapsed` | `number` | Milliseconds since the loop started |
 | `cost` | `number` | Cumulative cost in USD |
-| `lastOutput` | `unknown` | The most recent body output |
+| `lastOutput` | `unknown` | The most recent step output |
 | `lastText` | `string` | Text representation of the last output |
-| `history` | `unknown[]` | Array of all body outputs (bounded by `maxHistorySize`) |
+| `history` | `unknown[]` | Array of all step outputs (bounded by `maxHistorySize`) |
 | `depth` | `number` | Current nesting depth |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last step (tool calls, usage, etc.) |
 
@@ -77,7 +77,7 @@ const predicate = until.noToolCalls();
 
 ### until.maxSteps(n)
 
-Stop after `n` successful body executions.
+Stop after `n` successful step executions.
 
 ```ts
 const predicate = until.maxSteps(5);
@@ -185,18 +185,18 @@ const stopCondition = all(
 
 ## Preparing the Next Iteration
 
-By default, the body's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
+By default, the last step's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
 
 ```ts
 import { loop, step, until } from '@noetic/core';
 
 const refiner = loop({
   id: 'refine-loop',
-  body: step.llm({
+  steps: [step.llm({
     id: 'refiner',
     model: 'gpt-4o',
     system: 'Improve the draft based on feedback.',
-  }),
+  })],
   until: until.verified(async (output) => {
     const score = await evaluate(output);
     return {
@@ -237,11 +237,11 @@ const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
 const agent = loop({
   id: 'async-agent',
-  body: step.llm({
+  steps: [step.llm({
     id: 'agent-llm',
     model: 'gpt-4o',
     tools: [launchTool, checkTool],
-  }),
+  })],
   until: until.noToolCalls(),
   inbox,
   parkTimeout: 3e4, // wait up to 30s for sub-agent results
@@ -254,11 +254,11 @@ See [Detached Spawn](/docs/operators/spawn#detached-spawn) for the full async de
 
 ## Error Handling
 
-The `onError` callback lets you decide what happens when the body step throws.
+The `onError` callback lets you decide what happens when the body steps throws.
 
 | Return Value | Behavior |
 | --- | --- |
-| `'retry'` | Re-execute the body step immediately (counts toward `maxIterations`) |
+| `'retry'` | Re-execute the body steps immediately (counts toward `maxIterations`) |
 | `'skip'` | Skip this iteration, use the previous output, and continue |
 | `'abort'` | Re-throw the error, terminating the loop |
 
@@ -267,7 +267,7 @@ import { loop, until } from '@noetic/core';
 
 const resilientLoop = loop({
   id: 'resilient-loop',
-  body: myStep,
+  steps: [myStep],
   until: until.maxSteps(5),
   onError: (error, ctx) => {
     if (error.kind === 'step_failed') {
@@ -303,12 +303,12 @@ import { any, loop, step, until } from '@noetic/core';
 
 const agent = loop({
   id: 'react-loop',
-  body: step.llm({
+  steps: [step.llm({
     id: 'react-step',
     model: 'gpt-4o',
     system: 'You are a helpful assistant.',
     tools: [searchTool, calculatorTool],
-  }),
+  })],
   until: any(
     until.noToolCalls(),
     until.maxSteps(10),
@@ -319,6 +319,6 @@ const agent = loop({
 
 ## Related
 
-- [Steps](/docs/steps) -- the step types you can use as a loop body.
+- [Steps](/docs/steps) -- the step types you can use in a loop.
 - [Spawn](/docs/operators/spawn) -- run a loop in an isolated child context.
 - [Control Flow](/docs/operators) -- branch and fork for non-iterative operations.

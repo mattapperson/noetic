@@ -24,7 +24,9 @@ export function react(opts: {
 
   const loopStep = loop({
     id: 'react-loop',
-    body: llmStep,
+    steps: [
+      llmStep,
+    ],
     until: any(
       until.noToolCalls(),
       until.maxSteps(opts.maxSteps ?? 10),

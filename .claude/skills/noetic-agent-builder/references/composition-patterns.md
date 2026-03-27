@@ -132,7 +132,7 @@ const launchTool = tool({
 
 const agent = loop({
   id: 'orchestrator',
-  body: step.llm({ id: 'llm', model: '...', tools: [launchTool] }),
+  steps: [step.llm({ id: 'llm', model: '...', tools: [launchTool] })],
   until: any(until.noToolCalls(), until.maxSteps(10)),
   inbox,
   parkTimeout: 5e3,
@@ -182,7 +182,7 @@ Sequential processing stages using branch + loop:
 let phase = 0;
 const pipeline = loop({
   id: 'pipeline',
-  body: branch({
+  steps: [branch({
     id: 'router',
     route: () => {
       if (phase === 0) return normalizeStep;
@@ -190,7 +190,7 @@ const pipeline = loop({
       if (phase === 2) return formatStep;
       return null;
     },
-  }),
+  })],
   until: until.maxSteps(3),
   prepareNext: (output) => { phase++; return output; },
 });

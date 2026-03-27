@@ -12,13 +12,15 @@ describe('Error propagation', () => {
     it('default propagates error', async () => {
       const loopStep = loop<string, string>({
         id: 'test-loop',
-        body: {
-          kind: 'run',
-          id: 'fail',
-          execute: async () => {
-            throw new Error('body fail');
+        steps: [
+          {
+            kind: 'run',
+            id: 'fail',
+            execute: async () => {
+              throw new Error('body fail');
+            },
           },
-        },
+        ],
         until: until.maxSteps(5),
       });
       const ctx = new ContextImpl();
@@ -29,22 +31,24 @@ describe('Error propagation', () => {
       let attempts = 0;
       const loopStep = loop<string, string>({
         id: 'retry-loop',
-        body: {
-          kind: 'run',
-          id: 'flaky',
-          execute: async () => {
-            attempts++;
-            if (attempts < 3) {
-              throw new NoeticErrorImpl({
-                kind: 'step_failed',
-                stepId: 'flaky',
-                cause: new Error('flaky'),
-                retriesExhausted: false,
-              });
-            }
-            return 'ok';
+        steps: [
+          {
+            kind: 'run',
+            id: 'flaky',
+            execute: async () => {
+              attempts++;
+              if (attempts < 3) {
+                throw new NoeticErrorImpl({
+                  kind: 'step_failed',
+                  stepId: 'flaky',
+                  cause: new Error('flaky'),
+                  retriesExhausted: false,
+                });
+              }
+              return 'ok';
+            },
           },
-        },
+        ],
         until: until.maxSteps(1),
         onError: () => 'retry',
       });
@@ -58,14 +62,16 @@ describe('Error propagation', () => {
       let bodyCount = 0;
       const loopStep = loop<string, string>({
         id: 'pred-throw',
-        body: {
-          kind: 'run',
-          id: 'inc',
-          execute: async () => {
-            bodyCount++;
-            return 'ok';
+        steps: [
+          {
+            kind: 'run',
+            id: 'inc',
+            execute: async () => {
+              bodyCount++;
+              return 'ok';
+            },
           },
-        },
+        ],
         until: () => {
           throw new Error('predicate boom');
         },

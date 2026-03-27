@@ -46,18 +46,20 @@ export function buildDynamicDelegateAgent(opts: {
 
   return loop({
     id: 'dynamic-delegate-loop',
-    body: step.llm({
-      id: 'dynamic-delegate-llm',
-      model: 'gpt-4o',
-      system: `You are an orchestrator with two delegation strategies:
+    steps: [
+      step.llm({
+        id: 'dynamic-delegate-llm',
+        model: 'gpt-4o',
+        system: `You are an orchestrator with two delegation strategies:
 - delegate: blocks and returns the result. Use for tasks you need answered before continuing.
 - launch_agent: runs in background. Use when you can keep working while it runs.
 Choose the right strategy based on each task.`,
-      tools: [
-        syncTool,
-        asyncTool,
-      ],
-    }),
+        tools: [
+          syncTool,
+          asyncTool,
+        ],
+      }),
+    ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
     parkTimeout: opts.parkTimeout ?? 5e3,

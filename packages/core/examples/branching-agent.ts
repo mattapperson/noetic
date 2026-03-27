@@ -103,7 +103,9 @@ export function buildBranchingAgent(): StepLoop<string, string> {
 
   return loop({
     id: 'ticket-processing-loop',
-    body: router,
+    steps: [
+      router,
+    ],
     until: until.maxSteps(1),
   });
 }

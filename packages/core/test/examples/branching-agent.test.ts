@@ -9,8 +9,8 @@ describe('branching agent', () => {
 
     expect(agent.kind).toBe('loop');
     expect(agent.id).toBe('ticket-processing-loop');
-    expect(agent.body.kind).toBe('branch');
-    expect(agent.body.id).toBe('ticket-router');
+    expect(agent.steps[0].kind).toBe('branch');
+    expect(agent.steps[0].id).toBe('ticket-router');
   });
 
   it('routes billing keywords to deterministic handler', async () => {

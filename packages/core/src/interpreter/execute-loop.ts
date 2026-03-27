@@ -100,10 +100,14 @@ export async function executeLoop<I, O>(
       });
     }
 
-    // Execute the body step
+    // Execute body steps sequentially
     let output: O;
     try {
-      output = await executeStep<I, O>(step.body, currentInput, ctx);
+      let stepOutput: unknown = currentInput;
+      for (const bodyStep of step.steps) {
+        stepOutput = await executeStep(bodyStep, frameworkCast(stepOutput), ctx);
+      }
+      output = frameworkCast<O>(stepOutput);
       stepCount++;
     } catch (e) {
       if (!step.onError || !isNoeticError(e)) {

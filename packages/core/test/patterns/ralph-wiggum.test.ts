@@ -29,7 +29,7 @@ describe('Ralph Wiggum pattern', () => {
     });
     expect(rw.kind).toBe('loop');
     expect(rw.id).toBe('ralph-wiggum-loop');
-    expect(rw.body.kind).toBe('spawn');
+    expect(rw.steps[0].kind).toBe('spawn');
   });
 
   it('outer loop + fresh spawn + inner ReAct with verify + feedback', async () => {

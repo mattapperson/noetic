@@ -285,17 +285,19 @@ describe('adaptivePlan', () => {
     const planner: Step<string, PlanNode> = {
       kind: 'loop' as const,
       id: 'planner',
-      body: {
-        kind: 'run' as const,
-        id: 'b',
-        execute: async () =>
-          ({
-            id: 'stub',
-            description: 'stub',
-            assignee: 'none',
-            execution: 'sequential' as const,
-          }) satisfies PlanNode,
-      },
+      steps: [
+        {
+          kind: 'run' as const,
+          id: 'b',
+          execute: async () =>
+            ({
+              id: 'stub',
+              description: 'stub',
+              assignee: 'none',
+              execution: 'sequential' as const,
+            }) satisfies PlanNode,
+        },
+      ],
       until: () => ({
         stop: true,
       }),

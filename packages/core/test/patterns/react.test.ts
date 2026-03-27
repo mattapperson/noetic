@@ -34,7 +34,7 @@ describe('ReAct pattern', () => {
 
     assert(reactStep.kind === 'loop');
     expect(reactStep.id).toBe('react-loop');
-    expect(reactStep.body.kind).toBe('llm');
+    expect(reactStep.steps[0].kind).toBe('llm');
   });
 
   it('runs end-to-end with mocked LLM: tool calls then stops', async () => {
