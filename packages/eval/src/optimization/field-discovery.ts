@@ -86,7 +86,9 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
       walkStep(step.child, `${path}.`, fields);
       return;
     case 'loop':
-      walkStep(step.body, `${path}.`, fields);
+      for (const s of step.steps) {
+        walkStep(s, `${path}.`, fields);
+      }
       return;
     case 'branch':
       walkOptimizableChildren(step._optimizable, path, fields);

@@ -1,13 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 
+import { InMemoryAgentHarness } from '@noetic/core';
 import { ContextImpl, SpanImpl } from '@noetic/core/internal/test';
 import { createScorer } from '../../src/scorers/scorer-pipeline';
 import type { EvalExecution, ScoreResult, ScorerFn } from '../../src/scorers/types';
 
 //#region Helper Functions
 
+const testHarness = new InMemoryAgentHarness({
+  name: 'test',
+  params: {},
+});
+
 function createMockExecution(output: unknown): EvalExecution {
-  const ctx = new ContextImpl();
+  const ctx = new ContextImpl({
+    harness: testHarness,
+  });
   ctx.cost = 0.01;
   ctx.tokens = {
     input: 50,

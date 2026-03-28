@@ -33,6 +33,8 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   });
 
   const harness = new InMemoryAgentHarness({
+    name: 'llm-judge',
+    params: {},
     callModel: config.judge?.callModel,
   });
   const ctx = harness.createContext();

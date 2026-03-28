@@ -72,6 +72,8 @@ function buildAnalyzeScorerFn<T, R>(
     });
 
     const harness = new InMemoryAgentHarness({
+      name: 'scorer-analyze',
+      params: {},
       callModel: judge?.callModel,
     });
     const ctx = harness.createContext();
@@ -135,6 +137,8 @@ function makePipelineStep4(
           });
 
           const harness = new InMemoryAgentHarness({
+            name: 'scorer-reason',
+            params: {},
             callModel: judge.callModel,
           });
           const ctx = harness.createContext();

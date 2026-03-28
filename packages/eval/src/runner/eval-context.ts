@@ -43,6 +43,8 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
     async execute(input: unknown): Promise<EvalExecution> {
       const exporter = new InMemoryExporter();
       const harness = new InMemoryAgentHarness({
+        name: 'eval',
+        params: {},
         traceExporter: exporter,
       });
 
