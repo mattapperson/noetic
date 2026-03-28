@@ -172,7 +172,7 @@ const agent = react({
 Configure persistence via `AgentConfig.storage` on the harness:
 
 ```ts
-const harness = new InMemoryAgentHarness({
+const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
   storage: myStorageAdapter,

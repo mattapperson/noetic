@@ -18,7 +18,7 @@ Four tiers with explicit scope constraints:
 | Tier | Scope | Allowed imports | Packages |
 |------|-------|-----------------|----------|
 | Unit | Single module | Mocks from `_helpers.ts`, no I/O | core, eval |
-| Integration | Multiple modules wired | Real `InMemoryAgentHarness`, no network | core, eval |
+| Integration | Multiple modules wired | Real `AgentHarness`, no network | core, eval |
 | Functional | Full public API in-process | No network; scripted model via `createScriptedCallModel` | core, eval |
 | E2E | Running application | HTTP/build only | web |
 
@@ -30,7 +30,7 @@ Four tiers with explicit scope constraints:
 The functional tier has two distinct sub-concerns that must both be present:
 
 - **Composition tests** — assert that builder outputs produce the expected step tree structure (e.g., `react()` creates a loop step with tool-call branches). Cheaper, catches builder bugs without running the interpreter.
-- **Execution tests** — run the full tree through `InMemoryAgentHarness` with a scripted model.
+- **Execution tests** — run the full tree through `AgentHarness` with a scripted model.
 
 AI-generated tests tend to produce only execution tests. Both are required.
 
@@ -41,7 +41,7 @@ assert.equal(step.kind, 'loop');
 assert.equal(step.body.kind, 'llm');
 
 // Execution test example
-const harness = new InMemoryAgentHarness();
+const harness = new AgentHarness();
 const ctx = await harness.run(step, input);
 assert.equal(ctx.output, expectedOutput);
 ```

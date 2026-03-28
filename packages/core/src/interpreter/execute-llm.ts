@@ -5,7 +5,7 @@ import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { FunctionCallItem, Item } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
-import type { AgentHarness } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
@@ -19,7 +19,7 @@ export interface CallModelParams {
   params?: ModelParams;
   output?: ZodType;
   ctx: Context;
-  harness?: AgentHarness;
+  harness?: AgentHarnessContract;
   layers?: MemoryLayer[];
 }
 
@@ -32,7 +32,7 @@ export async function executeLLM<I, O>(
   input: I,
   ctx: Context,
   callModel: CallModelFn,
-  harness?: AgentHarness,
+  harness?: AgentHarnessContract,
   layers?: MemoryLayer[],
 ): Promise<O> {
   // Add the input as a user message if it's a non-empty string

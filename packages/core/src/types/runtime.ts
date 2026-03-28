@@ -29,8 +29,10 @@ export interface ExecuteOptions {
   state?: unknown;
 }
 
-/** @public Core runtime interface for executing steps, managing channels, and coordinating memory layers. */
-export interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
+/** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, memory layers, and context. Implemented by `AgentHarness`. */
+export interface AgentHarnessContract<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+> {
   readonly config: AgentConfig<TParams>;
   execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
@@ -74,9 +76,6 @@ export interface AgentHarness<TParams extends Record<string, unknown> = Record<s
     ctx: Context,
   ): Promise<SteeringDecision>;
 }
-
-/** @deprecated Use AgentHarness instead. */
-export type Runtime = AgentHarness;
 
 /** @public Output from a single memory layer's recall phase, including items and token budget used. */
 export interface RecallLayerOutput {

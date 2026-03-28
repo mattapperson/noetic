@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { buildPipelineAgent } from '../../examples/pipeline-agent';
 import type { CallModelParams } from '../../src/interpreter/execute-llm';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('pipeline agent', () => {
@@ -18,7 +18,7 @@ describe('pipeline agent', () => {
     const callModel = createScriptedCallModel([
       textOnlyResponse('SENTIMENT: positive\nTHEMES: AI\nPATTERNS: growth'),
     ]);
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,
@@ -48,7 +48,7 @@ describe('pipeline agent', () => {
       }
       return Promise.resolve(textOnlyResponse('SENTIMENT: neutral\nTHEMES: test\nPATTERNS: none'));
     };
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,

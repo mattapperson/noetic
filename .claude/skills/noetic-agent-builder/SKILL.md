@@ -24,12 +24,12 @@ All agent patterns compose through a single `Step<I, O>` type. Steps are pure da
 ### The AgentHarness
 
 ```typescript
-const harness = new InMemoryAgentHarness({ name: 'agent', params: {} });
+const harness = new AgentHarness({ name: 'agent', params: {} });
 const ctx = harness.createContext();
 const result = await harness.run(step, input, ctx);
 ```
 
-The agent harness manages execution, context creation, channels, memory lifecycle, and detached spawns. When no `callModel` is provided, `InMemoryAgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
+The agent harness manages execution, context creation, channels, memory lifecycle, and detached spawns. When no `callModel` is provided, `AgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
 
 ### Tools
 
@@ -114,7 +114,7 @@ const agent = react({
   memory: layers,  // auto-wraps in spawn when provided
 });
 
-const harness = new InMemoryAgentHarness({ name: 'agent', params: {} });
+const harness = new AgentHarness({ name: 'agent', params: {} });
 const ctx = harness.createContext();
 const result = await harness.run(agent, userInput, ctx);
 ```
@@ -144,7 +144,7 @@ For complete builder signatures, memory layer APIs, agent harness methods, and s
 | Memory types | `packages/core/src/types/memory.ts` |
 | Patterns | `packages/core/src/patterns/` |
 | Memory layers | `packages/core/src/memory/layers/` |
-| AgentHarness | `packages/core/src/runtime/in-memory-agent-harness.ts` |
+| AgentHarness | `packages/core/src/runtime/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
 | Specs | `specs/` (numbered 00-16) |
 | Examples | `packages/core/examples/` |

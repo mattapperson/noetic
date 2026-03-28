@@ -1,5 +1,5 @@
 import type { CallModelFn } from '@noetic/core';
-import { InMemoryAgentHarness, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
 import type { EvalExecution, ScoreResult, ScorerFn } from './types';
@@ -71,7 +71,7 @@ function buildAnalyzeScorerFn<T, R>(
       system: prompt,
     });
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'scorer-analyze',
       params: {},
       callModel: judge?.callModel,
@@ -136,7 +136,7 @@ function makePipelineStep4(
             system: reasonConfig.createPrompt(result.score),
           });
 
-          const harness = new InMemoryAgentHarness({
+          const harness = new AgentHarness({
             name: 'scorer-reason',
             params: {},
             callModel: judge.callModel,

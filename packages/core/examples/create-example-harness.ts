@@ -1,14 +1,14 @@
 /**
  * Shared harness factory for runnable examples.
  *
- * Creates an InMemoryAgentHarness wired to a real OpenRouter client,
+ * Creates an AgentHarness wired to a real OpenRouter client,
  * reading the API key from the OPENROUTER_API_KEY environment variable.
  */
 import { OpenRouter } from '@openrouter/sdk';
 import { createOpenRouterCallModel } from '../src/adapters/openrouter';
-import { InMemoryAgentHarness } from '../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../src/runtime/agent-harness';
 
-export function createExampleHarness(): InMemoryAgentHarness {
+export function createExampleHarness(): AgentHarness {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY environment variable is required');
@@ -17,7 +17,7 @@ export function createExampleHarness(): InMemoryAgentHarness {
     apiKey,
   });
   const callModel = createOpenRouterCallModel(client);
-  return new InMemoryAgentHarness({
+  return new AgentHarness({
     name: 'test',
     params: {},
     callModel,

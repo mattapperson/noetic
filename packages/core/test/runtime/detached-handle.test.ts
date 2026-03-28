@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { DetachedStatus } from '../../src/types/detached';
 import type { Step } from '../../src/types/step';
 
@@ -59,9 +59,9 @@ describe('DetachedHandleImpl', () => {
   });
 });
 
-describe('InMemoryAgentHarness.detachedSpawn', () => {
+describe('AgentHarness.detachedSpawn', () => {
   it('multiple detached spawns run concurrently', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -94,7 +94,7 @@ describe('InMemoryAgentHarness.detachedSpawn', () => {
   });
 
   it('creates child context with parent relationship', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });

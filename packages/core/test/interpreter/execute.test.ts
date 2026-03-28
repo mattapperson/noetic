@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { Context } from '../../src/types/context';
 import type { Step } from '../../src/types/step';
 import { makeMockHarness } from '../_helpers';
@@ -43,7 +43,7 @@ describe('execute() switch', () => {
       id: 'echo-tool',
       tool,
     };
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -183,9 +183,9 @@ describe('execute() switch', () => {
   });
 });
 
-describe('InMemoryAgentHarness', () => {
+describe('AgentHarness', () => {
   it('creates context', () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -195,7 +195,7 @@ describe('InMemoryAgentHarness', () => {
   });
 
   it('creates context with options', () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -214,7 +214,7 @@ describe('InMemoryAgentHarness', () => {
   });
 
   it('executes steps via harness', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -249,7 +249,7 @@ describe('InMemoryAgentHarness', () => {
         outputTokens: 3,
       },
     });
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -265,7 +265,7 @@ describe('InMemoryAgentHarness', () => {
   });
 
   it('createSpan returns a valid span', () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });

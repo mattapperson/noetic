@@ -112,7 +112,7 @@ export { react } from './patterns/react';
 //#region Runtime
 
 /** @public */
-export { InMemoryAgentHarness, InMemoryRuntime } from './runtime/in-memory-agent-harness';
+export { AgentHarness } from './runtime/agent-harness';
 
 //#endregion
 
@@ -229,11 +229,10 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 /** @public */
 export type {
   AgentConfig,
-  AgentHarness,
+  AgentHarnessContract,
   AgentHooks,
   ExecuteOptions,
   RecallLayerOutput,
-  Runtime,
 } from './types/runtime';
 
 //#endregion

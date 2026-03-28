@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildBranchingAgent } from '../../examples/branching-agent';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('branching agent', () => {
@@ -14,7 +14,7 @@ describe('branching agent', () => {
   });
 
   it('routes billing keywords to deterministic handler', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -31,7 +31,7 @@ describe('branching agent', () => {
     const callModel = createScriptedCallModel([
       textOnlyResponse('Try clearing your cache and restarting.'),
     ]);
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,
@@ -45,7 +45,7 @@ describe('branching agent', () => {
   });
 
   it('routes unrecognized input to fallback handler', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });

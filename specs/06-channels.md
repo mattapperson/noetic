@@ -169,7 +169,7 @@ This design prevents external callers (e.g., HTTP handlers) from blocking on a f
 
 ### Thread Safety
 
-Node.js is single-threaded, so `InMemoryAgentHarness` handles are inherently thread-safe. `DurableAgentHarness` translates `handle.send()` to durable signals (e.g., Temporal signals, Inngest events).
+Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe. `DurableAgentHarness` translates `handle.send()` to durable signals (e.g., Temporal signals, Inngest events).
 
 ---
 

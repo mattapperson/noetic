@@ -1,5 +1,5 @@
 import type { CallModelFn } from '@noetic/core';
-import { InMemoryAgentHarness, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
 //#region Types
@@ -32,7 +32,7 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
     system: `${config.system}\n\nRespond ONLY with valid JSON matching the required schema.`,
   });
 
-  const harness = new InMemoryAgentHarness({
+  const harness = new AgentHarness({
     name: 'llm-judge',
     params: {},
     callModel: config.judge?.callModel,

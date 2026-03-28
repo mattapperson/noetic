@@ -102,7 +102,7 @@ const maybe = ctx.tryRecv(approvals); // null if empty
 await ctx.checkpoint();
 ```
 
-Persists the current execution state so it can be restored later. In the `InMemoryAgentHarness` this is a no-op; durable agent harnesses use it for crash recovery.
+Persists the current execution state so it can be restored later. In the `AgentHarness` this is a no-op; durable agent harnesses use it for crash recovery.
 
 ### Complete
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { react } from '../../src/patterns/react';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { LLMResponse } from '../../src/types/common';
 
 describe('ReAct pattern', () => {
@@ -122,7 +122,7 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -193,7 +193,7 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -247,7 +247,7 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -343,7 +343,7 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,

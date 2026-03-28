@@ -20,7 +20,7 @@ import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
-import type { AgentHarness } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 
 //#region SDK Tool Type
@@ -84,7 +84,7 @@ const EmbeddingsResponseSchema = z.object({
 interface ConvertToolsParams {
   tools: ReadonlyArray<Tool>;
   ctx: Context;
-  harness: AgentHarness;
+  harness: AgentHarnessContract;
   layers?: MemoryLayer[];
 }
 
@@ -325,7 +325,7 @@ function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkT
  *
  * @public
  * @param client - An OpenRouter client (or compatible mock) implementing `callModel`.
- * @returns A `CallModelFn` suitable for use with `InMemoryAgentHarness`.
+ * @returns A `CallModelFn` suitable for use with `AgentHarness`.
  */
 export function createOpenRouterCallModel(client: OpenRouterClientLike): CallModelFn {
   return async (params: CallModelParams): Promise<LLMResponse> => {

@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { InMemoryAgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic/core';
 import { ContextImpl, SpanImpl } from '@noetic/core/internal/test';
 import { latency } from '../../../src/scorers/builtin/latency';
 import type { EvalExecution, ScoreResult, ScorerFn } from '../../../src/scorers/types';
 
 //#region Helper Functions
 
-const testHarness = new InMemoryAgentHarness({
+const testHarness = new AgentHarness({
   name: 'test',
   params: {},
 });

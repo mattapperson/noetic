@@ -199,7 +199,7 @@ adaptivePlan<O>({
 
 ```typescript
 // callModel auto-detected from OPENROUTER_API_KEY when omitted
-const harness = new InMemoryAgentHarness({ name: 'planner', params: {} });
+const harness = new AgentHarness({ name: 'planner', params: {} });
 const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness));
 ```
 
@@ -280,7 +280,7 @@ interface SteeringRule {
 
 ```typescript
 // High-level API: pass agent step to constructor, execute with simple inputs
-const harness = new InMemoryAgentHarness({
+const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },

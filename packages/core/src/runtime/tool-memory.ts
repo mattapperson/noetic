@@ -1,9 +1,9 @@
 import type { TurnContext } from '@openrouter/sdk';
 import type { Context } from '../types/context';
-import type { AgentHarness } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import type { ToolExecutionContext, ToolMemory } from '../types/tool-context';
 
-export function buildToolMemory(harness: AgentHarness, ctx: Context): ToolMemory {
+export function buildToolMemory(harness: AgentHarnessContract, ctx: Context): ToolMemory {
   return {
     get<T>(layerId: string): T | undefined {
       return harness.getLayerState(ctx.id, layerId);
@@ -16,7 +16,7 @@ export function buildToolMemory(harness: AgentHarness, ctx: Context): ToolMemory
 
 export function buildToolExecutionContext(
   ctx: Context,
-  harness: AgentHarness,
+  harness: AgentHarnessContract,
   turnContext?: TurnContext,
 ): ToolExecutionContext {
   return {

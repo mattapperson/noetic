@@ -1,6 +1,6 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
-import type { AgentHarness } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
@@ -32,7 +32,7 @@ export async function execute<I, O>(
   input: I,
   ctx: Context,
   callModel?: CallModelFn,
-  harness?: AgentHarness,
+  harness?: AgentHarnessContract,
 ): Promise<O> {
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.

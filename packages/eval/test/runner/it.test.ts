@@ -1,5 +1,5 @@
 import { describe as bunDescribe, expect, test } from 'bun:test';
-import { InMemoryAgentHarness, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 import { describe } from '../../src/runner/describe';
 import type { EvalContext } from '../../src/runner/eval-context';
 import { it } from '../../src/runner/it';
@@ -73,7 +73,7 @@ bunDescribe('it.each()', () => {
     const suite = suites[0];
 
     // Execute each case fn with a mock EvalContext
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });

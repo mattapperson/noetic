@@ -77,7 +77,7 @@ bun run build
 
 ```typescript
 import { step, loop, until } from '@noetic/core';
-import { InMemoryAgentHarness } from '@noetic/core/runtime';
+import { AgentHarness } from '@noetic/core/runtime';
 
 // A ReAct agent is just a loop of LLM calls
 const agent = loop(
@@ -89,7 +89,7 @@ const agent = loop(
   until.noToolCalls(),
 );
 
-const harness = new InMemoryAgentHarness();
+const harness = new AgentHarness();
 const result = await harness.run(agent, { query: 'What is 12! ?' });
 ```
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { agentInbox, buildAsyncDelegateAgent } from '../../examples/async-delegate';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('async delegate demo', () => {
@@ -31,7 +31,7 @@ describe('async delegate demo', () => {
       textOnlyResponse('Based on the sub-agent results, quantum computing uses qubits.'),
     ]);
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildDynamicDelegateAgent, delegateInbox } from '../../examples/dynamic-delegate';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('dynamic delegate demo', () => {
@@ -29,7 +29,7 @@ describe('dynamic delegate demo', () => {
       textOnlyResponse('The answer is 4.'),
     ]);
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,
@@ -60,7 +60,7 @@ describe('dynamic delegate demo', () => {
       textOnlyResponse('Got the results from the background agent.'),
     ]);
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,
@@ -101,7 +101,7 @@ describe('dynamic delegate demo', () => {
       textOnlyResponse('All done with both sync and async results.'),
     ]);
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,

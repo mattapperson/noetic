@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import type { CallModelParams } from '../../src/interpreter/execute-llm';
 import { ralphWiggum } from '../../src/patterns/ralph-wiggum';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { LLMResponse } from '../../src/types/common';
 import type { FunctionCallItem, FunctionCallOutputItem, MessageItem } from '../../src/types/items';
 
@@ -105,7 +105,7 @@ describe('Ralph Wiggum pattern', () => {
       };
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -168,7 +168,7 @@ describe('Ralph Wiggum pattern', () => {
       },
     });
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -232,7 +232,7 @@ describe('Ralph Wiggum pattern', () => {
       },
     });
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,
@@ -295,7 +295,7 @@ describe('Ralph Wiggum pattern', () => {
         },
       };
     };
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mockCallModel,

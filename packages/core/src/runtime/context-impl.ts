@@ -3,7 +3,7 @@ import type { StepMeta, TokenUsage } from '../types/common';
 import type { Context, ItemLog } from '../types/context';
 import type { Item } from '../types/items';
 import type { Span } from '../types/observability';
-import type { AgentHarness } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import type { ChannelStore } from './channel-store';
 import { ItemLogImpl } from './item-log-impl';
 
@@ -33,7 +33,7 @@ export class ContextImpl implements Context {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   lastStepMeta: StepMeta | null = null;
-  readonly harness: AgentHarness;
+  readonly harness: AgentHarnessContract;
 
   private readonly _createdAt: number;
   private readonly channelStore?: ChannelStore;
@@ -44,7 +44,7 @@ export class ContextImpl implements Context {
   private _abortReason?: string;
 
   constructor(opts: {
-    harness: AgentHarness;
+    harness: AgentHarnessContract;
     parent?: Context;
     items?: Item[];
     state?: unknown;

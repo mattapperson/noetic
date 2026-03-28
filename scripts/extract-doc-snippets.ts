@@ -36,8 +36,8 @@ import type {
 import {
   adaptivePlan, aiCondition, all, any, branch, channel,
   compilePlan, cosineSimilarity, durableTaskState,
-  embeddingMatch, execute, fork, InMemoryAgentHarness,
-  InMemoryRuntime, isNoeticConfigError, isNoeticError, loop,
+  embeddingMatch, execute, fork, AgentHarness,
+  isNoeticConfigError, isNoeticError, loop,
   NoeticConfigError, NoeticErrorImpl, observationalMemory,
   otherwise, PlanNodeSchema, ralphWiggum, react,
   semanticRoute, semanticSwitch, Slot, spawn,

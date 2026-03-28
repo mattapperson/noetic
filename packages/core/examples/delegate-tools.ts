@@ -12,7 +12,7 @@ import type { Channel } from '../src/types/channel';
 import type { Tool } from '../src/types/common';
 import type { DetachedHandle, DetachedStatus } from '../src/types/detached';
 import type { MemoryLayer } from '../src/types/memory';
-import type { AgentHarness } from '../src/types/runtime';
+import type { AgentHarnessContract } from '../src/types/runtime';
 import type { ToolExecutionContext } from '../src/types/tool-context';
 
 //#region Types
@@ -77,7 +77,7 @@ function buildConfiguredSubAgentStep(
 /** Notifies the inbox channel when a detached handle settles. Intentionally fire-and-forget. */
 function notifyInboxOnSettlement(opts: {
   handle: DetachedHandle<string>;
-  harness: AgentHarness;
+  harness: AgentHarnessContract;
   inbox: Channel<string>;
   ctx: ToolExecutionContext;
   handles: Map<string, DetachedHandle<string>>;

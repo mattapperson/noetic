@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildParallelResearchAgent } from '../../examples/parallel-research';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('parallel research agent', () => {
@@ -14,7 +14,7 @@ describe('parallel research agent', () => {
 
   it('forks into three spawn paths', () => {
     const callModel = createScriptedCallModel([]);
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,
@@ -34,7 +34,7 @@ describe('parallel research agent', () => {
       textOnlyResponse('Technical perspective on the topic.'),
       textOnlyResponse('Societal perspective on the topic.'),
     ]);
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel,

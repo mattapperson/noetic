@@ -2,7 +2,7 @@ import type { Channel } from './channel';
 import type { StepMeta, TokenUsage } from './common';
 import type { Item } from './items';
 import type { Span } from './observability';
-import type { AgentHarness } from './runtime';
+import type { AgentHarnessContract } from './runtime';
 
 /** @public Append-only log of conversation items accumulated during execution. */
 export interface ItemLog {
@@ -25,7 +25,7 @@ export interface Context<TState = unknown> {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
-  readonly harness: AgentHarness;
+  readonly harness: AgentHarnessContract;
   recv<T>(
     channel: Channel<T>,
     opts?: {

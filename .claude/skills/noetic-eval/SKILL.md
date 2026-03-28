@@ -53,7 +53,7 @@ describe(
 When `ctx.execute(input)` is called inside an `it()` block:
 
 1. Creates a fresh `InMemoryExporter` for trace capture
-2. Creates `InMemoryAgentHarness({ traceExporter })` — the agent harness auto-detects `callModel` from `OPENROUTER_API_KEY`
+2. Creates `AgentHarness({ traceExporter })` — the agent harness auto-detects `callModel` from `OPENROUTER_API_KEY`
 3. Creates context and calls `harness.run(step, input, ctx)`
 4. Returns `EvalExecution` with output, context metrics, and traces
 

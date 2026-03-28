@@ -2,7 +2,7 @@ import type { CallModelFn } from '../../interpreter/execute-llm';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
-import type { AgentHarness } from '../../types/runtime';
+import type { AgentHarnessContract } from '../../types/runtime';
 import type {
   AfterModelCallParams,
   BeforeToolCallParams,
@@ -15,7 +15,7 @@ import type {
 import { LedgerEntryKind, SteeringAction } from '../../types/steering';
 import { mostRestrictive } from '../layer-lifecycle';
 
-const STUB_HARNESS: AgentHarness = {
+const STUB_HARNESS: AgentHarnessContract = {
   config: {
     name: 'steering-eval',
     params: {},

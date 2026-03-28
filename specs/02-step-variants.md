@@ -102,10 +102,10 @@ The `createOpenRouterCallModel(client)` factory returns a `CallModelFn` backed b
 
 ```typescript
 import OpenRouter from '@openrouter/sdk';
-import { createOpenRouterCallModel, InMemoryAgentHarness } from '@noetic/core';
+import { createOpenRouterCallModel, AgentHarness } from '@noetic/core';
 
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-const harness = new InMemoryAgentHarness({ callModel: createOpenRouterCallModel(client) });
+const harness = new AgentHarness({ callModel: createOpenRouterCallModel(client) });
 ```
 
 ### Tool Call Execution

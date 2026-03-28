@@ -2,7 +2,7 @@ import { NoeticErrorImpl } from '../errors/noetic-error';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { Context } from '../types/context';
 import type { MemoryLayer } from '../types/memory';
-import type { AgentHarness } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 import type { StepTool } from '../types/step';
 
@@ -10,7 +10,7 @@ export async function executeTool<I, O>(
   step: StepTool<I, O>,
   input: I,
   ctx: Context,
-  harness: AgentHarness,
+  harness: AgentHarnessContract,
   layers?: MemoryLayer[],
 ): Promise<O> {
   // Merge step.args with input (step.args takes precedence as overrides, input as base)

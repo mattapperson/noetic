@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { buildSyncDelegateAgent } from '../../examples/sync-delegate';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('sync delegate demo', () => {
@@ -22,7 +22,7 @@ describe('sync delegate demo', () => {
 
     // The delegate tool receives the parent context via execute(args, ctx)
     // and forwards it to harness.run, which creates a child context internally
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
       callModel: mainCallModel,

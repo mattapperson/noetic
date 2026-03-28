@@ -1,5 +1,5 @@
 import type { Step } from '@noetic/core';
-import { InMemoryAgentHarness, InMemoryExporter } from '@noetic/core';
+import { AgentHarness, InMemoryExporter } from '@noetic/core';
 
 import type { EvalSuiteOptions } from '../types/eval';
 import type { EvalExecution, ScoreResult, ScorerFn } from './eval-execution';
@@ -42,7 +42,7 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
     background,
     async execute(input: unknown): Promise<EvalExecution> {
       const exporter = new InMemoryExporter();
-      const harness = new InMemoryAgentHarness({
+      const harness = new AgentHarness({
         name: 'eval',
         params: {},
         traceExporter: exporter,

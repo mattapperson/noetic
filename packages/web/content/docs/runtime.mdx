@@ -6,9 +6,9 @@ description: The AgentHarness interface runs steps, manages context, and coordin
 ## Quick Example
 
 ```ts
-import { InMemoryAgentHarness, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 
-const harness = new InMemoryAgentHarness({ name: 'example', params: {} });
+const harness = new AgentHarness({ name: 'example', params: {} });
 const ctx = harness.createContext({ state: { count: 0 } });
 
 const add = step.run('add', async (n: number, ctx) => {
@@ -19,7 +19,7 @@ const result = await harness.run(add, 5, ctx);
 // result === 6
 ```
 
-The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `InMemoryAgentHarness` or implement the `AgentHarness` interface for durable, distributed, or custom execution environments.
+The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `AgentHarness` or implement the `AgentHarness` interface for durable, distributed, or custom execution environments.
 
 ## AgentHarness Interface
 
@@ -113,15 +113,15 @@ interface RecallLayerOutput {
 |---|---|
 | `createSpan(name, parent)` | Create a new [tracing span](/docs/observability). Links to a parent span when provided. |
 
-## InMemoryAgentHarness
+## AgentHarness
 
-`InMemoryAgentHarness` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
+`AgentHarness` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
 
 ```ts
-import { InMemoryAgentHarness, InMemoryExporter } from '@noetic/core';
+import { AgentHarness, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
-const harness = new InMemoryAgentHarness({
+const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
   traceExporter: exporter,
@@ -141,7 +141,7 @@ const harness = new InMemoryAgentHarness({
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
 
-Key behaviors of `InMemoryAgentHarness`:
+Key behaviors of `AgentHarness`:
 
 - **`checkpoint`** is a no-op (no persistence).
 - **`restore`** always returns `null`.

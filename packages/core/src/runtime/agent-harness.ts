@@ -25,7 +25,7 @@ import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/mem
 import type { Span, TraceExporter } from '../types/observability';
 import type {
   AgentConfig,
-  AgentHarness,
+  AgentHarnessContract,
   AgentHooks,
   ExecuteOptions,
   RecallLayerOutput,
@@ -39,9 +39,7 @@ import { DetachedHandleImpl } from './detached-handle';
 
 //#region Types
 
-interface InMemoryAgentHarnessOpts<
-  TParams extends Record<string, unknown> = Record<string, unknown>,
-> {
+interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   initialStep?: Step<string, string>;
   storage?: StorageAdapter;
@@ -55,16 +53,16 @@ interface InMemoryAgentHarnessOpts<
 
 //#endregion
 
-//#region InMemoryAgentHarness
+//#region AgentHarness
 
 /**
- * In-memory implementation of `AgentHarness` for testing and simple deployments.
+ * Default agent harness for executing agent steps with built-in channel, memory, and trace support.
  * Provides channel store, memory layer lifecycle, and trace export with no external dependencies.
  *
  * @public
  */
-export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>>
-  implements AgentHarness<TParams>
+export class AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>>
+  implements AgentHarnessContract<TParams>
 {
   readonly config: AgentConfig<TParams>;
   private readonly initialStep?: Step<string, string>;
@@ -73,7 +71,7 @@ export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Reco
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
 
-  constructor(opts: InMemoryAgentHarnessOpts<TParams>) {
+  constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
 
     this.config = {
@@ -291,6 +289,3 @@ export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Reco
 }
 
 //#endregion
-
-/** @deprecated Use InMemoryAgentHarness instead. */
-export const InMemoryRuntime = InMemoryAgentHarness;

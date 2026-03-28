@@ -6,10 +6,10 @@ description: Built-in distributed tracing with OpenTelemetry-compatible spans.
 ## Quick Example
 
 ```ts
-import { InMemoryAgentHarness, InMemoryExporter } from '@noetic/core';
+import { AgentHarness, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
-const harness = new InMemoryAgentHarness({ traceExporter: exporter });
+const harness = new AgentHarness({ traceExporter: exporter });
 
 const ctx = harness.createContext();
 await harness.run(myStep, input, ctx);
@@ -62,7 +62,7 @@ const myStep = step.run('annotated', async (input: string, ctx) => {
 
 ## SpanImpl
 
-`SpanImpl` is the concrete implementation used by `InMemoryAgentHarness`. It adds fields useful for export and inspection:
+`SpanImpl` is the concrete implementation used by `AgentHarness`. It adds fields useful for export and inspection:
 
 | Property | Type | Description |
 |---|---|---|
@@ -118,7 +118,7 @@ Discards all spans. This is the default when no exporter is configured.
 ```ts
 import { NoopExporter } from '@noetic/core';
 
-const harness = new InMemoryAgentHarness({
+const harness = new AgentHarness({
   traceExporter: new NoopExporter(),
 });
 ```

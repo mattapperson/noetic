@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
 import type { CallModelFn } from '../../src/interpreter/execute-llm';
-import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { Step } from '../../src/types/step';
 import { makeMessage, textOnlyResponse } from '../_helpers';
 
@@ -29,9 +29,9 @@ const echoStep: Step<string, string> = {
   tools: [],
 };
 
-describe('InMemoryAgentHarness.execute()', () => {
+describe('AgentHarness.execute()', () => {
   it('accepts a string input and returns the agent output', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       initialStep: echoStep,
       params: {},
@@ -45,7 +45,7 @@ describe('InMemoryAgentHarness.execute()', () => {
   it('accepts a single Item input', async () => {
     const item = makeMessage('user', 'from item', 'msg-1');
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       initialStep: echoStep,
       params: {},
@@ -62,7 +62,7 @@ describe('InMemoryAgentHarness.execute()', () => {
       makeMessage('user', 'second', 'msg-2'),
     ];
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       initialStep: echoStep,
       params: {},
@@ -80,7 +80,7 @@ describe('InMemoryAgentHarness.execute()', () => {
       return textOnlyResponse('ok');
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       initialStep: echoStep,
       params: {},
@@ -96,7 +96,7 @@ describe('InMemoryAgentHarness.execute()', () => {
   });
 
   it('throws NoeticConfigError when no step is configured', async () => {
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
@@ -117,7 +117,7 @@ describe('InMemoryAgentHarness.execute()', () => {
       return textOnlyResponse('ok');
     };
 
-    const harness = new InMemoryAgentHarness({
+    const harness = new AgentHarness({
       name: 'test',
       initialStep: echoStep,
       params: {},

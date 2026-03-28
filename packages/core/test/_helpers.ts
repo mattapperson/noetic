@@ -14,7 +14,7 @@ import type {
   MessageItem,
 } from '../src/types/items';
 import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
-import type { AgentHarness } from '../src/types/runtime';
+import type { AgentHarnessContract } from '../src/types/runtime';
 import { SteeringAction } from '../src/types/steering';
 import type { ExecuteStepFn, Step } from '../src/types/step';
 import type { ToolExecutionContext } from '../src/types/tool-context';
@@ -142,8 +142,8 @@ export function makeFunctionCallOutput(
 
 // ── Mock Context (full Context interface) ────────────────────────────
 
-let _sharedMockHarness: AgentHarness | undefined;
-function getSharedMockHarness(): AgentHarness {
+let _sharedMockHarness: AgentHarnessContract | undefined;
+function getSharedMockHarness(): AgentHarnessContract {
   if (!_sharedMockHarness) {
     _sharedMockHarness = makeMockHarness();
   }
@@ -297,8 +297,8 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   };
 }
 
-export function makeMockHarness(): AgentHarness {
-  const harness: AgentHarness = {
+export function makeMockHarness(): AgentHarnessContract {
+  const harness: AgentHarnessContract = {
     config: {
       name: 'test-harness',
       params: {},
@@ -352,7 +352,6 @@ export function makeMockHarness(): AgentHarness {
 }
 
 /** @deprecated Use makeMockHarness instead. */
-export const makeMockRuntime = makeMockHarness;
 
 // ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
 
