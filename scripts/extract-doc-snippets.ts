@@ -20,13 +20,13 @@ const PREAMBLE = `// Auto-generated — do not edit. Run scripts/extract-doc-sni
 // @ts-nocheck is NOT used — we want real type errors.
 
 import type {
-  AgentConfig, AgentHarness, AgentHooks,
+  AgentConfig, AgentHarnessContract, AgentHooks,
   BudgetConfig, CallModelFn, Channel, Condition,
   Context, ConvergeConfig, DetachedHandle,
   EmbedFn, ExecutionContext, Item, ItemLog,
   LLMResponse, LoopConfig, MemoryHooks, MemoryLayer, MemoryScope,
   ModelParams, NoeticError, PlanConstraints, PlanNode,
-  ProjectionPolicy, RecallLayerOutput, Runtime,
+  ProjectionPolicy, RecallLayerOutput,
   ScopedStorage, SettleResult, Snapshot, Span,
   Step, StepLLM, StepLoop, StepRun,
   StorageAdapter, SteeringConfig, SteeringRule,

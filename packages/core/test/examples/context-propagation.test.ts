@@ -4,9 +4,10 @@ import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/de
 import { channel } from '../../src/builders/channel-builder';
 import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { DetachedHandle } from '../../src/types/detached';
+import type { AgentHarnessContract } from '../../src/types/runtime';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
 
-function makeToolCtxWithHarness(harness: AgentHarness): ToolExecutionContext {
+function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionContext {
   const ctx = harness.createContext({
     threadId: 'thread-abc',
     resourceId: 'resource-xyz',
