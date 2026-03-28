@@ -9,7 +9,7 @@ description: Noetic uses structured NoeticError objects with error codes and rec
 import { isNoeticError } from '@noetic/core';
 
 try {
-  const result = await harness.run(myStep, input, ctx);
+  const result = await harness.execute('Do something');
 } catch (e) {
   if (isNoeticError(e)) {
     console.log(e.noeticError.kind); // e.g. 'step_failed'

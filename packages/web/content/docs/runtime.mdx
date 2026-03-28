@@ -1,65 +1,96 @@
 ---
 title: AgentHarness
-description: The AgentHarness interface runs steps, manages context, and coordinates memory and channels.
+description: The AgentHarness executes agent steps, manages context, and coordinates memory and channels.
 ---
 
 ## Quick Example
 
 ```ts
-import { AgentHarness, step } from '@noetic/core';
+import { react, AgentHarness } from '@noetic/core';
 
-const harness = new AgentHarness({ name: 'example', params: {} });
-const ctx = harness.createContext({ state: { count: 0 } });
-
-const add = step.run('add', async (n: number, ctx) => {
-  return n + 1;
+const agent = react({
+  model: 'gpt-4o',
+  tools: [searchTool, calcTool],
+  maxSteps: 10,
 });
 
-const result = await harness.run(add, 5, ctx);
-// result === 6
+const harness = new AgentHarness({
+  name: 'researcher',
+  initialStep: agent,
+  params: {},
+});
+
+const result = await harness.execute('Find recent AI news');
 ```
 
-The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `AgentHarness` or implement the `AgentHarness` interface for durable, distributed, or custom execution environments.
+The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure.
 
-## AgentHarness Interface
+## Constructor Options
 
 ```ts
-interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
-  readonly config: AgentConfig<TParams>;
-  run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
-  createContext(opts?: CreateContextOpts): Context;
+import { AgentHarness } from '@noetic/core';
 
-  // Channels
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
-  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
-  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
-  getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
-
-  // Memory
-  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
-  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
-  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
-  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
-
-  // Durability
-  checkpoint(ctx: Context): Promise<void>;
-  restore(executionId: string): Promise<Context | null>;
-  cancel(ctx: Context, reason?: string): Promise<void>;
-
-  // Tracing
-  createSpan(name: string, parent: Span | null): Span;
-}
+const harness = new AgentHarness({
+  name: 'my-agent',
+  initialStep: myStep,
+  params: { model: 'gpt-4o' },
+});
 ```
 
-### Core Methods
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `name` | `string` | required | Agent name (populates `config.name`). |
+| `initialStep` | `Step<string, string>` | `undefined` | The agent step to execute when calling `execute()`. |
+| `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
+| `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
+| `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
+| `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
+| `callModel` | `CallModelFn` | `undefined` | Custom function that calls the LLM. Required for `step.llm` execution. |
+| `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
+| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
 
-| Method | Description |
-|---|---|
-| `config` | The `AgentConfig<TParams>` the harness was constructed with. Access params via `harness.config.params`. |
-| `run(step, input, ctx)` | Run a single step with the given input and context. Returns the step output. |
-| `createContext(opts?)` | Create a new execution context. Options let you set parent, initial items, state, threadId, and resourceId. |
+## execute()
 
-### createContext Options
+The primary way to run an agent. Accepts a string, a single `Item`, or an array of `Item[]`.
+
+```ts
+// String input — creates a user message automatically
+const result = await harness.execute('What is 2+2?');
+
+// With options
+const result = await harness.execute('Hello', {
+  threadId: 'thread-1',
+  resourceId: 'user-1',
+});
+
+// Item input — pre-populates the context item log
+const result = await harness.execute(messageItem);
+const result = await harness.execute([item1, item2]);
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `input` | `string \| Item \| Item[]` | The input to the agent. |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, and `state`. |
+
+Throws `NoeticConfigError` with code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
+
+## run()
+
+Low-level step execution. Use this when you need full control over context creation and step dispatch.
+
+```ts
+const ctx = harness.createContext({ state: { count: 0 } });
+const result = await harness.run(myStep, input, ctx);
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `step` | `Step<I, O>` | The step to execute. |
+| `input` | `I` | Input value for the step. |
+| `ctx` | `Context` | Execution context. |
+
+## createContext Options
 
 | Option | Type | Description |
 |---|---|---|
@@ -69,7 +100,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `threadId` | `string` | Conversation thread identifier. |
 | `resourceId` | `string` | Optional resource/tenant identifier. |
 
-### Channel Methods
+## Channel Methods
 
 | Method | Description |
 |---|---|
@@ -78,7 +109,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `tryRecv(channel, ctx)` | Non-blocking read. Returns `null` if nothing is available. |
 | `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
 
-### Memory Methods
+## Memory Methods
 
 The agent harness coordinates [memory layer](/docs/memory) lifecycle hooks:
 
@@ -99,52 +130,19 @@ interface RecallLayerOutput {
 }
 ```
 
-### Durability Methods
+## Durability Methods
 
 | Method | Description |
 |---|---|
-| `checkpoint(ctx)` | Persist execution state for crash recovery. |
-| `restore(executionId)` | Restore a previously checkpointed context. Returns `null` if not found. |
+| `checkpoint(ctx)` | Persist execution state for crash recovery. No-op by default (in-memory). |
+| `restore(executionId)` | Restore a previously checkpointed context. Returns `null` by default. |
 | `cancel(ctx, reason?)` | Cancel a running execution. |
 
-### Tracing
+## Tracing
 
 | Method | Description |
 |---|---|
 | `createSpan(name, parent)` | Create a new [tracing span](/docs/observability). Links to a parent span when provided. |
-
-## AgentHarness
-
-`AgentHarness` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
-
-```ts
-import { AgentHarness, InMemoryExporter } from '@noetic/core';
-
-const exporter = new InMemoryExporter();
-const harness = new AgentHarness({
-  name: 'my-agent',
-  params: {},
-  traceExporter: exporter,
-});
-```
-
-### Constructor Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `name` | `string` | required | Agent name (populates `config.name`). |
-| `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
-| `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
-| `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
-| `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
-| `callModel` | `CallModelFn` | `undefined` | Custom function that calls the LLM. Required for `step.llm` execution. |
-| `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
-| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
-
-Key behaviors of `AgentHarness`:
-
-- **`checkpoint`** is a no-op (no persistence).
-- **`restore`** always returns `null`.
 
 ## AgentConfig
 
@@ -181,8 +179,9 @@ interface AgentHooks {
 | `afterStep` | After each step completes. | Metrics collection, state updates, audit logging. |
 
 ```ts
-const config: AgentConfig = {
+const harness = new AgentHarness({
   name: 'researcher',
+  initialStep: agent,
   params: { model: 'gpt-4o' },
   hooks: {
     async beforeStep(step, ctx) {
@@ -192,7 +191,7 @@ const config: AgentConfig = {
       console.log(`Step ${step.id} used ${ctx.tokens.total} tokens`);
     },
   },
-};
+});
 ```
 
 ## Related Pages

@@ -9,10 +9,14 @@ description: Built-in distributed tracing with OpenTelemetry-compatible spans.
 import { AgentHarness, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
-const harness = new AgentHarness({ traceExporter: exporter });
+const harness = new AgentHarness({
+  name: 'traced-agent',
+  initialStep: myStep,
+  params: {},
+  traceExporter: exporter,
+});
 
-const ctx = harness.createContext();
-await harness.run(myStep, input, ctx);
+await harness.execute('Hello');
 
 // Inspect collected spans
 for (const span of exporter.spans) {

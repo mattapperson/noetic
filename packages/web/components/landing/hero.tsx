@@ -13,17 +13,20 @@ const INSTALL_COMMANDS = [
   '$ pnpm add @noetic/core',
 ] as const;
 
-const HERO_CODE = `import { react } from '@noetic/core';
-import { InMemoryRuntime } from '@noetic/core';
+const HERO_CODE = `import { react, AgentHarness } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
   tools: [searchTool, calcTool],
-  until: until.tokenBudget(4000),
+  maxSteps: 10,
 });
 
-const runtime = new InMemoryRuntime();
-const result = await execute(agent, runtime);`;
+const harness = new AgentHarness({
+  name: 'researcher',
+  initialStep: agent,
+  params: {},
+});
+const result = await harness.execute('Find recent AI news');`;
 
 const CYCLE_INTERVAL = 3e3;
 

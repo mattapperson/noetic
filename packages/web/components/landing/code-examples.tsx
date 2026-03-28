@@ -8,27 +8,35 @@ import { TuiWindow } from '@/components/tui/tui-window';
 import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 
 const EXAMPLES = {
-  ReAct: `import { react } from '@noetic/core';
+  ReAct: `import { react, AgentHarness } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
   tools: [searchTool, calculatorTool],
-  until: until.tokenBudget(4000),
+  maxSteps: 10,
 });
 
-// Observe → Think → Act loop
-const result = await execute(agent, runtime);`,
+const harness = new AgentHarness({
+  name: 'react-agent',
+  initialStep: agent,
+  params: {},
+});
+const result = await harness.execute('What is 2+2?');`,
 
-  'Ralph Wiggum': `import { ralphWiggum } from '@noetic/core';
+  'Ralph Wiggum': `import { ralphWiggum, AgentHarness } from '@noetic/core';
 
-// Naive agent: just fires tools without thinking
 const agent = ralphWiggum({
   model: 'gpt-4o-mini',
   tools: [fetchTool],
   maxIterations: 5,
 });
 
-const result = await execute(agent, runtime);`,
+const harness = new AgentHarness({
+  name: 'ralph',
+  initialStep: agent,
+  params: {},
+});
+const result = await harness.execute('Fetch the latest data');`,
 
   'Task Tree': `import { adaptivePlan, compilePlan } from '@noetic/core';
 
