@@ -23,6 +23,8 @@ describe('sync delegate demo', () => {
     // The delegate tool receives the parent context via execute(args, ctx)
     // and forwards it to harness.run, which creates a child context internally
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mainCallModel,
     });
 

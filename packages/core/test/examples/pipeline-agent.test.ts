@@ -19,6 +19,8 @@ describe('pipeline agent', () => {
       textOnlyResponse('SENTIMENT: positive\nTHEMES: AI\nPATTERNS: growth'),
     ]);
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();
@@ -47,6 +49,8 @@ describe('pipeline agent', () => {
       return Promise.resolve(textOnlyResponse('SENTIMENT: neutral\nTHEMES: test\nPATTERNS: none'));
     };
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();

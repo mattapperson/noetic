@@ -141,10 +141,12 @@ interface MemoryHooks<TState = unknown> {
 
 ## assembleView()
 
-The `assembleView()` function merges all layer `recall` outputs into a single list of `Item` objects, ordered by slot number. This list is prepended to the conversation history before the LLM call.
+The standalone `assembleView()` function (from `memory/projector.ts`) merges all layer `recall` outputs into a single list of `Item` objects, ordered by slot number. This list is prepended to the conversation history before the LLM call.
 
 ```ts
-const items = await runtime.assembleView(agentConfig, userInput, ctx);
+import { assembleView } from '@noetic/core';
+
+const items = await assembleView(layers, userInput, ctx);
 // items contains memory items from all layers, sorted by slot
 ```
 

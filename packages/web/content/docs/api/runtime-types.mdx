@@ -8,7 +8,8 @@ description: Type definitions for the AgentHarness interface, AgentConfig, and r
 The core execution engine interface.
 
 ```ts
-interface AgentHarness {
+interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  readonly config: AgentConfig<TParams>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts): Context;
@@ -20,7 +21,6 @@ interface AgentHarness {
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
-  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;
@@ -32,6 +32,7 @@ interface AgentHarness {
 
 | Method | Description |
 |---|---|
+| `config` | The `AgentConfig<TParams>` the harness was constructed with |
 | `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
 | `createContext(opts?)` | Create a new execution context |
@@ -43,7 +44,6 @@ interface AgentHarness {
 | `recallLayers(layers, input, ctx)` | Run recall on all layers |
 | `storeLayers(layers, response, ctx)` | Run store on all layers |
 | `disposeLayers(layers, ctx)` | Dispose all layers |
-| `assembleView(agent, input, ctx)` | Merge all layer outputs into prompt items |
 | `checkpoint(ctx)` | Persist current execution state |
 | `restore(executionId)` | Restore a previously checkpointed context |
 | `cancel(ctx, reason?)` | Cancel an execution |
@@ -51,35 +51,23 @@ interface AgentHarness {
 
 ## AgentConfig
 
-Declarative configuration for an agent.
+Declarative configuration for an agent harness. Generic over `TParams`, an arbitrary key-value record accessible via `ctx.harness.config.params`.
 
 ```ts
-interface AgentConfig {
+interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  description: string;
-  model: string;
-  instructions: string | (() => string | Promise<string>);
-  tools?: Tool[];
-  outputSchema?: ZodType;
-  memory?: MemoryLayer[];
   storage?: StorageAdapter;
-  projection?: ProjectionPolicy;
   hooks?: AgentHooks;
+  params: TParams;
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | yes | Agent name |
-| `description` | `string` | yes | Agent description |
-| `model` | `string` | yes | Default model identifier |
-| `instructions` | `string \| (() => string \| Promise<string>)` | yes | System instructions (static or dynamic) |
-| `tools` | `Tool[]` | no | Available tools |
-| `outputSchema` | `ZodType` | no | Structured output schema |
-| `memory` | `MemoryLayer[]` | no | Memory layers to attach |
 | `storage` | `StorageAdapter` | no | Storage backend for memory persistence |
-| `projection` | `ProjectionPolicy` | no | Token budget and overflow policy |
 | `hooks` | `AgentHooks` | no | Before/after step hooks |
+| `params` | `TParams` | yes | Arbitrary key-value parameters for steps and tools |
 
 ## AgentHooks
 

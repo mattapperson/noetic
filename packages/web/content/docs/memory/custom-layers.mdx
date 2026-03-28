@@ -153,28 +153,30 @@ timeouts: {
 }
 ```
 
-## Step 7: Register with AgentConfig
+## Step 7: Register with the Agent
+
+Pass custom layers to a `react` pattern (or `spawn`'s `memory` option):
 
 ```ts
-import type { AgentConfig } from '@noetic/core';
-
-const agent: AgentConfig = {
-  name: 'my-agent',
-  description: 'An agent with custom memory',
+const agent = react({
   model: 'gpt-4o',
-  instructions: 'You are a helpful assistant.',
+  system: 'You are a helpful assistant.',
   memory: [
     workingMemory(),
     myCustomLayer(),
     observationalMemory(),
   ],
+});
+```
+
+Configure persistence via `AgentConfig.storage` on the harness:
+
+```ts
+const harness = new InMemoryAgentHarness({
+  name: 'my-agent',
+  params: {},
   storage: myStorageAdapter,
-  projection: {
-    tokenBudget: 8000,
-    responseReserve: 4000,
-    overflow: 'truncate',
-  },
-};
+});
 ```
 
 Layers are ordered by slot number regardless of array order. The runtime calls each layer's hooks in slot order.

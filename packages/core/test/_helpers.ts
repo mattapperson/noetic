@@ -142,7 +142,16 @@ export function makeFunctionCallOutput(
 
 // ── Mock Context (full Context interface) ────────────────────────────
 
+let _sharedMockHarness: AgentHarness | undefined;
+function getSharedMockHarness(): AgentHarness {
+  if (!_sharedMockHarness) {
+    _sharedMockHarness = makeMockHarness();
+  }
+  return _sharedMockHarness;
+}
+
 export function makeMockContext(overrides?: Partial<Context>): Context {
+  const harness = overrides?.harness ?? getSharedMockHarness();
   return {
     id: 'test-ctx',
     stepCount: 0,
@@ -167,6 +176,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     threadId: 'thread-1',
     itemLog: makeItemLog(),
     lastStepMeta: null,
+    harness,
     recv: async () => {
       throw new Error('not impl');
     },
@@ -288,14 +298,21 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
 }
 
 export function makeMockHarness(): AgentHarness {
-  return {
+  const harness: AgentHarness = {
+    config: {
+      name: 'test-harness',
+      params: {},
+    },
     run: async () => {
       throw new Error('not impl');
     },
     detachedSpawn: () => {
       throw new Error('not impl');
     },
-    createContext: () => makeMockContext(),
+    createContext: () =>
+      makeMockContext({
+        harness,
+      }),
     send: () => {},
     recv: async () => {
       throw new Error('not impl');
@@ -308,9 +325,6 @@ export function makeMockHarness(): AgentHarness {
     recallLayers: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},
-    assembleView: async (_agent, _input, ctx) => [
-      ...ctx.itemLog.items,
-    ],
     checkpoint: async () => {},
     restore: async () => null,
     cancel: async () => {},
@@ -331,6 +345,7 @@ export function makeMockHarness(): AgentHarness {
       action: SteeringAction.Allow,
     }),
   };
+  return harness;
 }
 
 /** @deprecated Use makeMockHarness instead. */

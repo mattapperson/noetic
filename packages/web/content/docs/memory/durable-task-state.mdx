@@ -91,7 +91,7 @@ Records the execution outcome (`'success'`, `'failure'`, or `'aborted'`) in `dat
 
 ## StorageAdapter
 
-Durable Task State relies on the `StorageAdapter` provided in your `AgentConfig`. The adapter must implement:
+Durable Task State relies on the `StorageAdapter` provided in your `AgentConfig` (via `storage` on the harness constructor). The adapter must implement:
 
 ```ts
 interface StorageAdapter {

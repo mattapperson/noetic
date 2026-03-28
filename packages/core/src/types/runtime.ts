@@ -1,10 +1,9 @@
-import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
-import type { LLMResponse, Tool } from './common';
+import type { LLMResponse } from './common';
 import type { Context } from './context';
 import type { DetachedHandle } from './detached';
 import type { Item } from './items';
-import type { MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
+import type { MemoryLayer, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
@@ -14,20 +13,15 @@ export interface AgentHooks {
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
 }
 
-export interface AgentConfig {
+export interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  description: string;
-  model: string;
-  instructions: string | (() => string | Promise<string>);
-  tools?: Tool[];
-  outputSchema?: ZodType;
-  memory?: MemoryLayer[];
   storage?: StorageAdapter;
-  projection?: ProjectionPolicy;
   hooks?: AgentHooks;
+  params: TParams;
 }
 
-export interface AgentHarness {
+export interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  readonly config: AgentConfig<TParams>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: {
@@ -51,7 +45,6 @@ export interface AgentHarness {
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
-  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;

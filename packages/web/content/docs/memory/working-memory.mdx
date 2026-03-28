@@ -22,17 +22,14 @@ const layer = workingMemory({
 });
 ```
 
-Register the layer in your agent config:
+Register the layer with a `react` pattern (or `spawn`'s `memory` option):
 
 ```ts
-const agent: AgentConfig = {
-  name: 'assistant',
-  description: 'A helpful assistant',
+const agent = react({
   model: 'gpt-4o',
-  instructions: 'You are a helpful assistant.',
+  system: 'You are a helpful assistant.',
   memory: [layer],
-  storage: myStorageAdapter,
-};
+});
 ```
 
 ## Configuration

@@ -15,6 +15,8 @@ describe('parallel research agent', () => {
   it('forks into three spawn paths', () => {
     const callModel = createScriptedCallModel([]);
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const agent = buildParallelResearchAgent();
@@ -33,6 +35,8 @@ describe('parallel research agent', () => {
       textOnlyResponse('Societal perspective on the topic.'),
     ]);
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();

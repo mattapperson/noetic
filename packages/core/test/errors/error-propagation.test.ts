@@ -6,6 +6,7 @@ import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { SettleResult, Step } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
+import { makeMockHarness } from '../_helpers';
 
 describe('Error propagation', () => {
   describe('loop error handling', () => {
@@ -23,7 +24,9 @@ describe('Error propagation', () => {
         ],
         until: until.maxSteps(5),
       });
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await expect(execute(loopStep, 'go', ctx)).rejects.toThrow('body fail');
     });
 
@@ -52,7 +55,9 @@ describe('Error propagation', () => {
         until: until.maxSteps(1),
         onError: () => 'retry',
       });
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await execute(loopStep, '', ctx);
       expect(result).toBe('ok');
       expect(attempts).toBe(3);
@@ -76,7 +81,9 @@ describe('Error propagation', () => {
           throw new Error('predicate boom');
         },
       });
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await execute(loopStep, '', ctx);
       expect(bodyCount).toBe(1);
       expect(result).toBe('ok');
@@ -105,7 +112,9 @@ describe('Error propagation', () => {
         ],
         merge: (r) => r.join(','),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');
@@ -137,7 +146,9 @@ describe('Error propagation', () => {
         merge: (results: SettleResult<string>[]) =>
           `${results.filter((r) => r.status === 'fulfilled').length} ok`,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await execute(step, '', ctx);
       expect(result).toBe('1 ok');
     });
@@ -164,7 +175,9 @@ describe('Error propagation', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');

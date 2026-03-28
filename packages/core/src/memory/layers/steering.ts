@@ -2,6 +2,7 @@ import type { CallModelFn } from '../../interpreter/execute-llm';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
+import type { AgentHarness } from '../../types/runtime';
 import type {
   AfterModelCallParams,
   BeforeToolCallParams,
@@ -13,6 +14,51 @@ import type {
 } from '../../types/steering';
 import { LedgerEntryKind, SteeringAction } from '../../types/steering';
 import { mostRestrictive } from '../layer-lifecycle';
+
+const STUB_HARNESS: AgentHarness = {
+  config: {
+    name: 'steering-eval',
+    params: {},
+  },
+  run: () => {
+    throw new Error('not available');
+  },
+  detachedSpawn: () => {
+    throw new Error('not available');
+  },
+  createContext: () => {
+    throw new Error('not available');
+  },
+  send: () => {},
+  recv: () => Promise.reject(new Error('not available')),
+  tryRecv: () => null,
+  getChannelHandle: () => {
+    throw new Error('not available');
+  },
+  initLayers: async () => {},
+  recallLayers: async () => [],
+  storeLayers: async () => {},
+  disposeLayers: async () => {},
+  checkpoint: async () => {},
+  restore: async () => null,
+  cancel: async () => {},
+  createSpan: (name) => ({
+    traceId: 't',
+    spanId: name,
+    parentSpanId: null,
+    setAttribute() {},
+    addEvent() {},
+    end() {},
+  }),
+  getLayerState: () => undefined,
+  setLayerState: () => {},
+  beforeToolCall: async () => ({
+    action: SteeringAction.Allow,
+  }),
+  afterModelCall: async () => ({
+    action: SteeringAction.Allow,
+  }),
+};
 
 //#region Constants
 
@@ -93,6 +139,7 @@ async function evaluateLlmRuleSync(
         append() {},
       },
       lastStepMeta: null,
+      harness: STUB_HARNESS,
       recv: async () => {
         throw new Error('not available in steering eval');
       },

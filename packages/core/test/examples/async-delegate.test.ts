@@ -32,6 +32,8 @@ describe('async delegate demo', () => {
     ]);
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();

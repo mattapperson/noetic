@@ -106,6 +106,8 @@ describe('Ralph Wiggum pattern', () => {
     };
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -167,6 +169,8 @@ describe('Ralph Wiggum pattern', () => {
     });
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -229,6 +233,8 @@ describe('Ralph Wiggum pattern', () => {
     });
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -290,6 +296,8 @@ describe('Ralph Wiggum pattern', () => {
       };
     };
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();

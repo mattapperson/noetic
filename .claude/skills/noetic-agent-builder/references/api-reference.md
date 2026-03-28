@@ -199,7 +199,7 @@ adaptivePlan<O>({
 
 ```typescript
 // callModel auto-detected from OPENROUTER_API_KEY when omitted
-const harness = new InMemoryAgentHarness();
+const harness = new InMemoryAgentHarness({ name: 'planner', params: {} });
 const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness));
 ```
 
@@ -276,10 +276,18 @@ interface SteeringRule {
 
 ## AgentHarness
 
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
+
 ```typescript
-const harness = new InMemoryAgentHarness();
+const harness = new InMemoryAgentHarness({
+  name: 'my-agent',
+  params: { model: 'anthropic/claude-sonnet-4-20250514' },
+});
 const ctx = harness.createContext({ threadId?, resourceId? });
 const result = await harness.run(step, input, ctx);
+
+// Access config params from context
+// ctx.harness.config.params.model
 
 // Background execution
 const handle = harness.detachedSpawn(step, input, ctx);
@@ -311,10 +319,12 @@ Available inside tool `execute` functions:
 
 ```typescript
 interface ToolExecutionContext {
-  ctx: Context;                 // Step execution context
+  ctx: Context;                 // Step execution context (ctx.harness also available)
   harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
   memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
   assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
+// Access harness params: toolCtx.harness.config.params
+// Or via context: toolCtx.ctx.harness.config.params
 ```

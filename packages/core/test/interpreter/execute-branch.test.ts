@@ -3,7 +3,7 @@ import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { StepBranch } from '../../src/types/step';
-import { simpleExecute } from '../_helpers';
+import { makeMockHarness, simpleExecute } from '../_helpers';
 
 describe('executeBranch', () => {
   it('route selects a step and executes it', async () => {
@@ -23,7 +23,9 @@ describe('executeBranch', () => {
               execute: async () => 'chose B',
             },
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(await executeBranch(step, 'a', ctx, simpleExecute)).toBe('chose A');
     expect(await executeBranch(step, 'b', ctx, simpleExecute)).toBe('chose B');
   });
@@ -34,7 +36,14 @@ describe('executeBranch', () => {
       id: 'noop',
       route: () => null,
     };
-    const result = await executeBranch(step, 'passthrough', new ContextImpl(), simpleExecute);
+    const result = await executeBranch(
+      step,
+      'passthrough',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+      simpleExecute,
+    );
     expect(result).toBe('passthrough');
   });
 
@@ -46,9 +55,16 @@ describe('executeBranch', () => {
         throw new Error('route exploded');
       },
     };
-    await expect(executeBranch(step, 'input', new ContextImpl(), simpleExecute)).rejects.toThrow(
-      'route exploded',
-    );
+    await expect(
+      executeBranch(
+        step,
+        'input',
+        new ContextImpl({
+          harness: makeMockHarness(),
+        }),
+        simpleExecute,
+      ),
+    ).rejects.toThrow('route exploded');
   });
 
   it('route receives context as second arg', async () => {
@@ -65,7 +81,9 @@ describe('executeBranch', () => {
         };
       },
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     await executeBranch(step, 'test', ctx, simpleExecute);
     expect(capturedCtx).toBe(ctx);
   });
@@ -85,7 +103,9 @@ describe('executeBranch', () => {
           : null;
       },
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(await executeBranch(step, 'async', ctx, simpleExecute)).toBe('async result');
     expect(await executeBranch(step, 'other', ctx, simpleExecute)).toBe('other');
   });
@@ -104,7 +124,14 @@ describe('executeBranch', () => {
         },
       }),
     };
-    await executeBranch(step, 'my-input', new ContextImpl(), simpleExecute);
+    await executeBranch(
+      step,
+      'my-input',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+      simpleExecute,
+    );
     expect(receivedInput).toBe('my-input');
   });
 });

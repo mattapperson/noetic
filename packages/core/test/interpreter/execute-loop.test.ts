@@ -9,7 +9,7 @@ import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Snapshot } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
-import { simpleExecute } from '../_helpers';
+import { makeMockHarness, simpleExecute } from '../_helpers';
 
 describe('executeLoop', () => {
   it('repeats body until predicate fires', async () => {
@@ -29,7 +29,9 @@ describe('executeLoop', () => {
       until: until.maxSteps(3),
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(count).toBe(3);
     expect(result).toBe(3); // 0+1=1, 1+1=2, 2+1=3
@@ -53,7 +55,9 @@ describe('executeLoop', () => {
       prepareNext: (output) => output.toUpperCase(),
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     await executeLoop(loopStep, 'first', ctx, simpleExecute);
     expect(inputs[0]).toBe('first');
     expect(inputs[1]).toBe('RESULT-FIRST');
@@ -86,7 +90,9 @@ describe('executeLoop', () => {
       onError: () => 'retry',
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeLoop(loopStep, 'go', ctx, simpleExecute);
     expect(result).toBe('success');
     expect(attempts).toBe(3); // 2 failures + 1 success
@@ -118,7 +124,9 @@ describe('executeLoop', () => {
       onError: () => 'skip',
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     // call 1: 0→1 (stepCount=1), call 2: error (skip, stepCount stays 1, output=1),
     // call 3: 1→2 (stepCount=2), call 4: 2→3 (stepCount=3, maxSteps fires)
@@ -146,7 +154,9 @@ describe('executeLoop', () => {
       onError: () => 'abort',
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 'go', ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -174,7 +184,9 @@ describe('executeLoop', () => {
       },
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(count).toBe(1); // runs once, predicate throws, stops
     expect(result).toBe(1);
@@ -199,7 +211,9 @@ describe('executeLoop', () => {
       },
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     await executeLoop(loopStep, 'test', ctx, simpleExecute);
 
     // capturedSnapshot is assigned inside the `until` callback, so TS cannot narrow
@@ -229,7 +243,9 @@ describe('executeLoop', () => {
       maxIterations: 5,
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -260,7 +276,9 @@ describe('executeLoop', () => {
       }), // never stops
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -294,7 +312,9 @@ describe('executeLoop', () => {
       onError: () => 'retry',
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 'go', ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -306,7 +326,9 @@ describe('executeLoop', () => {
 
   it('aborts mid-loop when context is aborted', async () => {
     let count = 0;
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const loopStep = loop<number, number>({
       id: 'abort-mid-loop',
       steps: [
@@ -349,7 +371,9 @@ describe('executeLoop', () => {
       until: until.maxSteps(5),
       maxIterations: Number.NaN,
     });
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -374,7 +398,9 @@ describe('executeLoop', () => {
       until: until.maxSteps(5),
       maxIterations: 0,
     });
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -405,7 +431,9 @@ describe('executeLoop', () => {
       },
       maxHistorySize: 3,
     });
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     await executeLoop(loopStep, 0, ctx, simpleExecute);
     // History should only contain the last 3 items
     expect(capturedHistory).toHaveLength(3);
@@ -444,7 +472,9 @@ describe('executeLoop', () => {
       onError: () => 'skip',
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeLoop(loopStep, 'go', ctx, simpleExecute);
     expect(result).toBe('success');
     expect(callCount).toBe(2);
@@ -463,7 +493,9 @@ describe('executeLoop', () => {
       until: until.maxSteps(5),
       maxIterations: -1,
     });
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     try {
       await executeLoop(loopStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown');
@@ -508,7 +540,9 @@ describe('executeLoop', () => {
       },
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeLoop(loopStep, 'start', ctx, simpleExecute);
     expect(result).toBe('correct');
     expect(iteration).toBe(3);
@@ -540,7 +574,9 @@ describe('executeLoop', () => {
       until: until.maxSteps(2),
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     // Iteration 1: 1 → double → 2 → add-one → 3
     // Iteration 2: 3 → double → 6 → add-one → 7
     const result = await executeLoop(loopStep, 1, ctx, simpleExecute);
@@ -566,6 +602,7 @@ describe('executeLoop inbox channel', () => {
   } {
     const channelStore = new ChannelStore();
     const ctx = new ContextImpl({
+      harness: makeMockHarness(),
       channelStore,
     });
     return {

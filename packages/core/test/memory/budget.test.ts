@@ -5,6 +5,7 @@ import { allocateBudgets, checkBudget } from '../../src/memory/budget';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { BudgetConfig, MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
+import { makeMockHarness } from '../_helpers';
 
 function makeLayer(id: string, budget: BudgetConfig): MemoryLayer {
   return {
@@ -160,7 +161,9 @@ describe('allocateBudgets', () => {
 
 describe('checkBudget', () => {
   it('throws budget_exceeded for cost', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     ctx.cost = 10.0;
     try {
       checkBudget(ctx, {
@@ -178,7 +181,9 @@ describe('checkBudget', () => {
   });
 
   it('throws budget_exceeded for steps', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     ctx.stepCount = 100;
     try {
       checkBudget(ctx, {
@@ -194,7 +199,9 @@ describe('checkBudget', () => {
   });
 
   it('throws budget_exceeded for duration', async () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     // Wait a bit so elapsed > 0
     await new Promise((r) => setTimeout(r, 20));
     try {
@@ -211,7 +218,9 @@ describe('checkBudget', () => {
   });
 
   it('does not throw when within budget', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(() =>
       checkBudget(ctx, {
         maxCost: 100,
@@ -222,7 +231,9 @@ describe('checkBudget', () => {
   });
 
   it('checks only specified limits', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     ctx.cost = 999;
     // Only checking steps, not cost
     expect(() =>

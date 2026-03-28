@@ -61,7 +61,10 @@ describe('DetachedHandleImpl', () => {
 
 describe('InMemoryAgentHarness.detachedSpawn', () => {
   it('multiple detached spawns run concurrently', async () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
 
     const step: Step<number, number> = {
@@ -91,7 +94,10 @@ describe('InMemoryAgentHarness.detachedSpawn', () => {
   });
 
   it('creates child context with parent relationship', async () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
 
     const step: Step<string, string> = {

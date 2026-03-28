@@ -129,6 +129,7 @@ export async function executeSpawn<I, O>(
 
   // Create child context — empty by default, layers provide items via onSpawn
   const childCtx = new ContextImpl({
+    harness: ctx.harness,
     parent: ctx,
     items: childItems,
     state: cloneWithGuard(ctx.state, `Spawn '${step.id}'`),

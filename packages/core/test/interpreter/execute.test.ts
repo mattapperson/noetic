@@ -7,6 +7,7 @@ import { ContextImpl } from '../../src/runtime/context-impl';
 import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import type { Context } from '../../src/types/context';
 import type { Step } from '../../src/types/step';
+import { makeMockHarness } from '../_helpers';
 
 describe('execute() switch', () => {
   it('dispatches run step', async () => {
@@ -15,7 +16,9 @@ describe('execute() switch', () => {
       id: 'test',
       execute: async (input: string) => input.length,
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await execute(step, 'hello', ctx);
     expect(result).toBe(5);
   });
@@ -40,7 +43,10 @@ describe('execute() switch', () => {
       id: 'echo-tool',
       tool,
     };
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
     const result = await execute(
       step,
@@ -60,7 +66,9 @@ describe('execute() switch', () => {
       id: 'llm-test',
       model: 'test-model',
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const mockCallModel = async () => ({
       items: [
         {
@@ -91,7 +99,9 @@ describe('execute() switch', () => {
       id: 'test',
       model: 'x',
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(execute(step, 'hi', ctx)).rejects.toThrow('callModel is required');
   });
 
@@ -101,7 +111,9 @@ describe('execute() switch', () => {
       id: 'test',
       execute: async (input: string) => input,
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.stepCount).toBe(0);
     await execute(step, 'a', ctx);
     expect(ctx.stepCount).toBe(1);
@@ -111,9 +123,12 @@ describe('execute() switch', () => {
 
   it('throws budget_exceeded when depth exceeds MAX_DEPTH', async () => {
     // Build a context chain 64 levels deep
-    let ctx: Context = new ContextImpl();
+    let ctx: Context = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     for (let i = 0; i < 64; i++) {
       ctx = new ContextImpl({
+        harness: makeMockHarness(),
         parent: ctx,
       });
     }
@@ -135,7 +150,9 @@ describe('execute() switch', () => {
   });
 
   it('throws cancelled when context is aborted', async () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     ctx.abort('test abort');
     const step: Step<string, string> = {
       kind: 'run',
@@ -153,7 +170,9 @@ describe('execute() switch', () => {
   });
 
   it('branch step routes correctly', async () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const branchStep: Step<string, string> = {
       kind: 'branch',
       id: 'b',
@@ -166,14 +185,20 @@ describe('execute() switch', () => {
 
 describe('InMemoryAgentHarness', () => {
   it('creates context', () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
     expect(ctx.id).toBeDefined();
     expect(ctx.stepCount).toBe(0);
   });
 
   it('creates context with options', () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext({
       state: {
         count: 0,
@@ -189,7 +214,10 @@ describe('InMemoryAgentHarness', () => {
   });
 
   it('executes steps via harness', async () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
     const step: Step<string, number> = {
       kind: 'run',
@@ -222,6 +250,8 @@ describe('InMemoryAgentHarness', () => {
       },
     });
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -235,7 +265,10 @@ describe('InMemoryAgentHarness', () => {
   });
 
   it('createSpan returns a valid span', () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const span = harness.createSpan('test', null);
     expect(span.traceId).toBeDefined();
     expect(span.spanId).toBeDefined();

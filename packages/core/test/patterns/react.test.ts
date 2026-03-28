@@ -123,6 +123,8 @@ describe('ReAct pattern', () => {
     };
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -192,6 +194,8 @@ describe('ReAct pattern', () => {
     };
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -244,6 +248,8 @@ describe('ReAct pattern', () => {
     };
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();
@@ -338,6 +344,8 @@ describe('ReAct pattern', () => {
     };
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel: mockCallModel,
     });
     const ctx = harness.createContext();

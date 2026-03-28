@@ -20,6 +20,7 @@ interface Context<TState = unknown> {
   readonly span: Span;
   readonly threadId: string;
   readonly resourceId?: string;
+  readonly harness: AgentHarness;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
@@ -48,6 +49,7 @@ interface Context<TState = unknown> {
 | `span` | `Span` | Observability span |
 | `threadId` | `string` | Thread identifier for memory scoping |
 | `resourceId` | `string` | Resource identifier for memory scoping (optional) |
+| `harness` | `AgentHarness` | Reference to the owning agent harness. Access params via `ctx.harness.config.params`. |
 | `itemLog` | `ItemLog` | Conversation history |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last executed step |
 | `completed` | `boolean` | Whether `complete()` has been called |

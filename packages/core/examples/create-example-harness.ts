@@ -18,6 +18,8 @@ export function createExampleHarness(): InMemoryAgentHarness {
   });
   const callModel = createOpenRouterCallModel(client);
   return new InMemoryAgentHarness({
+    name: 'test',
+    params: {},
     callModel,
   });
 }

@@ -3,7 +3,7 @@ import { branch } from '../../src/builders/control-flow-builders';
 import { otherwise, semanticRoute, when } from '../../src/conditions';
 import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { mockEmbed, simpleExecute } from '../_helpers';
+import { makeMockHarness, mockEmbed, simpleExecute } from '../_helpers';
 
 describe('semantic branch integration', () => {
   it('branch() with semanticRoute routes through executeBranch', async () => {
@@ -52,7 +52,9 @@ describe('semantic branch integration', () => {
       ),
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await executeBranch(step, 'hello there', ctx, simpleExecute);
     expect(result).toBe('handled greeting');
   });
@@ -74,7 +76,9 @@ describe('semantic branch integration', () => {
       },
     });
 
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const matched = await executeBranch(step, 'match', ctx, simpleExecute);
     expect(matched).toBe('matched!');
 

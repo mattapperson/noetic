@@ -6,7 +6,7 @@ import { executeFork } from '../../src/interpreter/execute-fork';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { SettleResult, StepForkAll, StepForkRace, StepForkSettle } from '../../src/types/step';
-import { simpleExecute } from '../_helpers';
+import { makeMockHarness, simpleExecute } from '../_helpers';
 
 const _StateSchema = z.record(z.string(), z.unknown());
 
@@ -31,7 +31,9 @@ describe('executeFork', () => {
         ],
         merge: (results) => results.reduce((a, b) => a + b, 0),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, 5, ctx, simpleExecute);
       expect(result).toBe(25); // 10 + 15
     });
@@ -57,7 +59,9 @@ describe('executeFork', () => {
         ],
         merge: (results) => results.join(','),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
@@ -100,6 +104,7 @@ describe('executeFork', () => {
         merge: (results) => results.join('|'),
       };
       const ctx = new ContextImpl({
+        harness: makeMockHarness(),
         state: {
           original: true,
         },
@@ -160,7 +165,9 @@ describe('executeFork', () => {
         merge: (r) => r.join(','),
         concurrency: 2,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
@@ -191,7 +198,9 @@ describe('executeFork', () => {
         merge: (r) => r.join(','),
         concurrency: 1,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBe(1);
       expect(result).toBe('a,b,c');
@@ -217,7 +226,9 @@ describe('executeFork', () => {
         },
         merge: (r) => r.join(','),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, 'test-input', ctx, simpleExecute);
       expect(capturedInput).toBe('test-input');
       expect(capturedCtx).toBe(ctx);
@@ -241,7 +252,9 @@ describe('executeFork', () => {
           return results.join(',');
         },
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
       expect(capturedCtx).toBe(ctx);
     });
@@ -254,7 +267,9 @@ describe('executeFork', () => {
         paths: () => [],
         merge: (results) => `got ${results.length}`,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
     });
@@ -285,7 +300,9 @@ describe('executeFork', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('fast');
     });
@@ -318,6 +335,7 @@ describe('executeFork', () => {
         ],
       };
       const ctx = new ContextImpl({
+        harness: makeMockHarness(),
         state: {
           original: true,
         },
@@ -354,7 +372,9 @@ describe('executeFork', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('winner');
       // Allow time for abort to propagate
@@ -408,7 +428,9 @@ describe('executeFork', () => {
         ],
         concurrency: 2,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
@@ -435,7 +457,9 @@ describe('executeFork', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
@@ -455,7 +479,9 @@ describe('executeFork', () => {
         mode: 'race',
         paths: () => [],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
@@ -492,7 +518,9 @@ describe('executeFork', () => {
           return `${fulfilled.length} ok, ${rejected.length} failed`;
         },
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('1 ok, 1 failed');
     });
@@ -522,7 +550,9 @@ describe('executeFork', () => {
           return 'done';
         },
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
 
       expect(capturedResults).toHaveLength(2);
@@ -543,7 +573,9 @@ describe('executeFork', () => {
         paths: () => [],
         merge: (results: SettleResult<string>[]) => `got ${results.length}`,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
     });

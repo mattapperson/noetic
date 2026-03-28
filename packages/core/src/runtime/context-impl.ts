@@ -3,6 +3,7 @@ import type { StepMeta, TokenUsage } from '../types/common';
 import type { Context, ItemLog } from '../types/context';
 import type { Item } from '../types/items';
 import type { Span } from '../types/observability';
+import type { AgentHarness } from '../types/runtime';
 import type { ChannelStore } from './channel-store';
 import { ItemLogImpl } from './item-log-impl';
 
@@ -32,6 +33,7 @@ export class ContextImpl implements Context {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   lastStepMeta: StepMeta | null = null;
+  readonly harness: AgentHarness;
 
   private readonly _createdAt: number;
   private readonly channelStore?: ChannelStore;
@@ -41,7 +43,8 @@ export class ContextImpl implements Context {
   private _aborted = false;
   private _abortReason?: string;
 
-  constructor(opts?: {
+  constructor(opts: {
+    harness: AgentHarness;
     parent?: Context;
     items?: Item[];
     state?: unknown;
@@ -53,17 +56,18 @@ export class ContextImpl implements Context {
   }) {
     this.id = crypto.randomUUID();
     this._createdAt = Date.now();
-    this.state = opts?.state ?? {};
-    this.parent = opts?.parent ?? null;
+    this.harness = opts.harness;
+    this.state = opts.state ?? {};
+    this.parent = opts.parent ?? null;
     this.depth = this.parent ? this.parent.depth + 1 : 0;
-    this.span = opts?.span ?? new NoopSpan();
-    this.threadId = opts?.threadId ?? crypto.randomUUID();
-    this.resourceId = opts?.resourceId;
-    this.channelStore = opts?.channelStore;
-    this._checkpointFn = opts?.checkpointFn;
+    this.span = opts.span ?? new NoopSpan();
+    this.threadId = opts.threadId ?? crypto.randomUUID();
+    this.resourceId = opts.resourceId;
+    this.channelStore = opts.channelStore;
+    this._checkpointFn = opts.checkpointFn;
 
     const log = new ItemLogImpl();
-    if (opts?.items) {
+    if (opts.items) {
       for (const item of opts.items) {
         log.append(item);
       }

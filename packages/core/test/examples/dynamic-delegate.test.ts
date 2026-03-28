@@ -30,6 +30,8 @@ describe('dynamic delegate demo', () => {
     ]);
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
 
@@ -59,6 +61,8 @@ describe('dynamic delegate demo', () => {
     ]);
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();
@@ -98,6 +102,8 @@ describe('dynamic delegate demo', () => {
     ]);
 
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();

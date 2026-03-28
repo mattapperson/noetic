@@ -1,6 +1,6 @@
 # Context and Item Log
 
-> **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `10-observability` (Span)
+> **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
 > **Exports:** `Context`, `ItemLog`, `Item`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `ExtensionItem`, `ContentPart`, `StepMeta`, `TokenUsage`, `LLMResponse`
 
 ---
@@ -20,6 +20,7 @@ interface Context<TState = unknown> {
   readonly parent: Context | null;  // null at root
   readonly depth: number;        // spawn depth (root = 0)
   readonly span: Span;           // OpenTelemetry trace span (see 10-observability)
+  readonly harness: AgentHarness;   // reference to the owning agent harness (see 08-runtime)
 
   // Identifiers for memory layer scope resolution (see 11-memory-layer-system)
   readonly threadId: string;     // stable across calls in the same conversation
@@ -153,6 +154,7 @@ interface LLMResponse {
 
 ## Key Relationships
 
+- **`harness`** gives every step direct access to the `AgentHarness` that owns this context. Steps and tools read harness params via `ctx.harness.config.params` and can call harness methods (e.g., `ctx.harness.run(...)` for sub-agent delegation).
 - **`parent`** enables spawn-tree traversal. The `depth` field enables recursive patterns with depth limits.
 - **`span`** means every step is automatically traced without user instrumentation (see `10-observability`).
 - **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).

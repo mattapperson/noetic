@@ -14,7 +14,10 @@ describe('branching agent', () => {
   });
 
   it('routes billing keywords to deterministic handler', async () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
     const agent = buildBranchingAgent();
 
@@ -29,6 +32,8 @@ describe('branching agent', () => {
       textOnlyResponse('Try clearing your cache and restarting.'),
     ]);
     const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
       callModel,
     });
     const ctx = harness.createContext();
@@ -40,7 +45,10 @@ describe('branching agent', () => {
   });
 
   it('routes unrecognized input to fallback handler', async () => {
-    const harness = new InMemoryAgentHarness();
+    const harness = new InMemoryAgentHarness({
+      name: 'test',
+      params: {},
+    });
     const ctx = harness.createContext();
     const agent = buildBranchingAgent();
 

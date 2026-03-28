@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Channel } from '../../src/types/channel';
 import type { MessageItem } from '../../src/types/items';
+import { makeMockHarness } from '../_helpers';
 
 function makeTestItem(): MessageItem {
   return {
@@ -21,7 +22,9 @@ function makeTestItem(): MessageItem {
 
 describe('ContextImpl', () => {
   test('default creation: id exists, stepCount=0, tokens all 0, cost=0, parent null, depth 0', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.id).toBeTruthy();
     expect(typeof ctx.id).toBe('string');
     expect(ctx.stepCount).toBe(0);
@@ -37,6 +40,7 @@ describe('ContextImpl', () => {
 
   test('mutable state: can set and read back state', () => {
     const ctx = new ContextImpl({
+      harness: makeMockHarness(),
       state: {
         count: 1,
       },
@@ -53,8 +57,11 @@ describe('ContextImpl', () => {
   });
 
   test('parent/depth tracking: child has depth=1', () => {
-    const parent = new ContextImpl();
+    const parent = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const child = new ContextImpl({
+      harness: makeMockHarness(),
       parent,
     });
     expect(child.parent).toBe(parent);
@@ -62,7 +69,9 @@ describe('ContextImpl', () => {
   });
 
   test('token fields are mutable', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     ctx.tokens.input = 10;
     ctx.tokens.output = 5;
     ctx.tokens.total = 15;
@@ -72,7 +81,9 @@ describe('ContextImpl', () => {
   });
 
   test('itemLog exists and can append items', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.itemLog.items).toEqual([]);
     const item = makeTestItem();
     ctx.itemLog.append(item);
@@ -81,7 +92,9 @@ describe('ContextImpl', () => {
   });
 
   test('channel methods throw when no channel store configured', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const fakeChannel = {
       name: 'test',
       schema: z.unknown(),
@@ -93,7 +106,9 @@ describe('ContextImpl', () => {
   });
 
   test('lastStepMeta starts null, can be set', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.lastStepMeta).toBeNull();
     ctx.lastStepMeta = {
       cost: 0.01,
@@ -104,28 +119,36 @@ describe('ContextImpl', () => {
   });
 
   test('threadId is generated if not provided, or uses provided value', () => {
-    const ctx1 = new ContextImpl();
+    const ctx1 = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx1.threadId).toBeTruthy();
     expect(typeof ctx1.threadId).toBe('string');
 
     const ctx2 = new ContextImpl({
+      harness: makeMockHarness(),
       threadId: 'my-thread',
     });
     expect(ctx2.threadId).toBe('my-thread');
   });
 
   test('resourceId is undefined if not provided, or uses provided value', () => {
-    const ctx1 = new ContextImpl();
+    const ctx1 = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx1.resourceId).toBeUndefined();
 
     const ctx2 = new ContextImpl({
+      harness: makeMockHarness(),
       resourceId: 'res-123',
     });
     expect(ctx2.resourceId).toBe('res-123');
   });
 
   test('elapsed increases over time', async () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const t1 = ctx.elapsed;
     await new Promise((r) => setTimeout(r, 10));
     const t2 = ctx.elapsed;
@@ -133,19 +156,25 @@ describe('ContextImpl', () => {
   });
 
   test('span has traceId and spanId', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.span.traceId).toBeTruthy();
     expect(ctx.span.spanId).toBeTruthy();
     expect(ctx.span.parentSpanId).toBeNull();
   });
 
   test('default state is empty object', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.state).toEqual({});
   });
 
   test('abort sets aborted flag and stores reason', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.aborted).toBe(false);
     expect(ctx.abortReason).toBeUndefined();
     ctx.abort('test reason');
@@ -156,6 +185,7 @@ describe('ContextImpl', () => {
   test('items can be provided at construction', () => {
     const item = makeTestItem();
     const ctx = new ContextImpl({
+      harness: makeMockHarness(),
       items: [
         item,
       ],
@@ -167,6 +197,7 @@ describe('ContextImpl', () => {
   test('checkpoint calls injected checkpointFn', async () => {
     let called = false;
     const ctx = new ContextImpl({
+      harness: makeMockHarness(),
       checkpointFn: async () => {
         called = true;
       },
@@ -176,13 +207,17 @@ describe('ContextImpl', () => {
   });
 
   test('checkpoint is no-op when no checkpointFn provided', async () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     await ctx.checkpoint();
     // Should resolve without error
   });
 
   test('complete sets completed and completionValue', () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.completed).toBe(false);
     expect(ctx.completionValue).toBeUndefined();
     ctx.complete('result-42');

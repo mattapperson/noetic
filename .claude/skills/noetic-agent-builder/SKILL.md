@@ -24,7 +24,7 @@ All agent patterns compose through a single `Step<I, O>` type. Steps are pure da
 ### The AgentHarness
 
 ```typescript
-const harness = new InMemoryAgentHarness();
+const harness = new InMemoryAgentHarness({ name: 'agent', params: {} });
 const ctx = harness.createContext();
 const result = await harness.run(step, input, ctx);
 ```
@@ -114,7 +114,7 @@ const agent = react({
   memory: layers,  // auto-wraps in spawn when provided
 });
 
-const harness = new InMemoryAgentHarness();
+const harness = new InMemoryAgentHarness({ name: 'agent', params: {} });
 const ctx = harness.createContext();
 const result = await harness.run(agent, userInput, ctx);
 ```

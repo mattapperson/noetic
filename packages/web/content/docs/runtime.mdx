@@ -8,7 +8,7 @@ description: The AgentHarness interface runs steps, manages context, and coordin
 ```ts
 import { InMemoryAgentHarness, step } from '@noetic/core';
 
-const harness = new InMemoryAgentHarness();
+const harness = new InMemoryAgentHarness({ name: 'example', params: {} });
 const ctx = harness.createContext({ state: { count: 0 } });
 
 const add = step.run('add', async (n: number, ctx) => {
@@ -24,7 +24,8 @@ The AgentHarness is the execution engine at the heart of Noetic. It creates cont
 ## AgentHarness Interface
 
 ```ts
-interface AgentHarness {
+interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  readonly config: AgentConfig<TParams>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   createContext(opts?: CreateContextOpts): Context;
 
@@ -39,7 +40,6 @@ interface AgentHarness {
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
-  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
 
   // Durability
   checkpoint(ctx: Context): Promise<void>;
@@ -55,6 +55,7 @@ interface AgentHarness {
 
 | Method | Description |
 |---|---|
+| `config` | The `AgentConfig<TParams>` the harness was constructed with. Access params via `harness.config.params`. |
 | `run(step, input, ctx)` | Run a single step with the given input and context. Returns the step output. |
 | `createContext(opts?)` | Create a new execution context. Options let you set parent, initial items, state, threadId, and resourceId. |
 
@@ -87,7 +88,6 @@ The agent harness coordinates [memory layer](/docs/memory) lifecycle hooks:
 | `recallLayers` | Query layers for relevant items given an input string. Returns `RecallLayerOutput[]`. |
 | `storeLayers` | Write new items from an LLM response into layers. |
 | `disposeLayers` | Clean up layers at the end of a run. |
-| `assembleView` | Combine item log and recalled memory into the final item list sent to the model. |
 
 ### RecallLayerOutput
 
@@ -122,6 +122,8 @@ import { InMemoryAgentHarness, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
 const harness = new InMemoryAgentHarness({
+  name: 'my-agent',
+  params: {},
   traceExporter: exporter,
 });
 ```
@@ -130,6 +132,11 @@ const harness = new InMemoryAgentHarness({
 
 | Option | Type | Default | Description |
 |---|---|---|---|
+| `name` | `string` | required | Agent name (populates `config.name`). |
+| `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
+| `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
+| `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
+| `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
 | `callModel` | `CallModelFn` | `undefined` | Custom function that calls the LLM. Required for `step.llm` execution. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
@@ -138,39 +145,26 @@ Key behaviors of `InMemoryAgentHarness`:
 
 - **`checkpoint`** is a no-op (no persistence).
 - **`restore`** always returns `null`.
-- **`assembleView`** returns a copy of the current item log.
 
 ## AgentConfig
 
-`AgentConfig` defines the full configuration for an agent. Patterns like `react` build one internally, but you can construct it directly for full control.
+`AgentConfig` defines the configuration for an agent harness. It is generic over `TParams`, an arbitrary key-value record that steps and tools access via `ctx.harness.config.params`.
 
 ```ts
-interface AgentConfig {
+interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  description: string;
-  model: string;
-  instructions: string | (() => string | Promise<string>);
-  tools?: Tool[];
-  outputSchema?: ZodType;
-  memory?: MemoryLayer[];
   storage?: StorageAdapter;
-  projection?: ProjectionPolicy;
   hooks?: AgentHooks;
+  params: TParams;
 }
 ```
 
 | Field | Description |
 |---|---|
 | `name` | Human-readable agent name. |
-| `description` | What the agent does (used in spawn summaries). |
-| `model` | LLM model identifier (e.g., `'gpt-4o'`). |
-| `instructions` | System prompt. Can be a string or an async function for dynamic prompts. |
-| `tools` | Array of tools the agent can call. |
-| `outputSchema` | Zod schema for structured output validation. |
-| `memory` | Memory layers to attach to this agent. |
 | `storage` | Storage adapter for memory persistence. |
-| `projection` | Policy controlling how memory is projected into the context window. |
 | `hooks` | Lifecycle hooks (see below). |
+| `params` | Arbitrary key-value parameters accessible via `ctx.harness.config.params`. |
 
 ## AgentHooks
 
@@ -189,9 +183,7 @@ interface AgentHooks {
 ```ts
 const config: AgentConfig = {
   name: 'researcher',
-  description: 'Searches the web and summarizes findings.',
-  model: 'gpt-4o',
-  instructions: 'You are a research assistant.',
+  params: { model: 'gpt-4o' },
   hooks: {
     async beforeStep(step, ctx) {
       console.log(`Starting step ${step.id} (depth ${ctx.depth})`);

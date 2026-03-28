@@ -2,6 +2,7 @@ import type { Channel } from './channel';
 import type { StepMeta, TokenUsage } from './common';
 import type { Item } from './items';
 import type { Span } from './observability';
+import type { AgentHarness } from './runtime';
 
 export interface ItemLog {
   readonly items: ReadonlyArray<Item>;
@@ -22,6 +23,7 @@ export interface Context<TState = unknown> {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
+  readonly harness: AgentHarness;
   recv<T>(
     channel: Channel<T>,
     opts?: {

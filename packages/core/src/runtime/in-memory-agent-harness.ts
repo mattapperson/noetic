@@ -1,3 +1,4 @@
+import type { ZodType } from 'zod';
 import { getDefaultCallModel } from '../adapters/default-call-model';
 import { execute } from '../interpreter/execute';
 import type { CallModelFn } from '../interpreter/execute-llm';
@@ -21,7 +22,7 @@ import type { DetachedHandle } from '../types/detached';
 import type { Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
-import type { AgentConfig, AgentHarness, RecallLayerOutput } from '../types/runtime';
+import type { AgentConfig, AgentHarness, AgentHooks, RecallLayerOutput } from '../types/runtime';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
@@ -29,21 +30,47 @@ import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { DetachedHandleImpl } from './detached-handle';
 
-export class InMemoryAgentHarness implements AgentHarness {
+//#region Types
+
+interface InMemoryAgentHarnessOpts<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+> {
+  name: string;
+  storage?: StorageAdapter;
+  hooks?: AgentHooks;
+  params: TParams;
+  paramsSchema?: ZodType<TParams>;
+  callModel?: CallModelFn;
+  traceExporter?: TraceExporter;
+  layerStateStore?: LayerStateStore;
+}
+
+//#endregion
+
+//#region InMemoryAgentHarness
+
+export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>>
+  implements AgentHarness<TParams>
+{
+  readonly config: AgentConfig<TParams>;
   private callModel?: CallModelFn;
   private readonly channelStore: ChannelStore;
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
 
-  constructor(opts?: {
-    callModel?: CallModelFn;
-    traceExporter?: TraceExporter;
-    layerStateStore?: LayerStateStore;
-  }) {
-    this.callModel = opts?.callModel ?? getDefaultCallModel();
+  constructor(opts: InMemoryAgentHarnessOpts<TParams>) {
+    const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
+
+    this.config = {
+      name: opts.name,
+      storage: opts.storage,
+      hooks: opts.hooks,
+      params: validatedParams,
+    };
+    this.callModel = opts.callModel ?? getDefaultCallModel();
     this.channelStore = new ChannelStore();
-    this.traceExporter = opts?.traceExporter ?? new NoopExporter();
-    this.layerStateStore = opts?.layerStateStore ?? createLayerStateStore();
+    this.traceExporter = opts.traceExporter ?? new NoopExporter();
+    this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
   }
 
   async run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
@@ -69,6 +96,7 @@ export class InMemoryAgentHarness implements AgentHarness {
   }): Context {
     return new ContextImpl({
       ...opts,
+      harness: this,
       channelStore: this.channelStore,
     });
   }
@@ -157,12 +185,6 @@ export class InMemoryAgentHarness implements AgentHarness {
     });
   }
 
-  async assembleView(_agent: AgentConfig, _input: string, ctx: Context): Promise<Item[]> {
-    return [
-      ...ctx.itemLog.items,
-    ];
-  }
-
   async checkpoint(_ctx: Context): Promise<void> {
     // No-op for in-memory harness
   }
@@ -224,6 +246,8 @@ export class InMemoryAgentHarness implements AgentHarness {
     });
   }
 }
+
+//#endregion
 
 /** @deprecated Use InMemoryAgentHarness instead. */
 export const InMemoryRuntime = InMemoryAgentHarness;

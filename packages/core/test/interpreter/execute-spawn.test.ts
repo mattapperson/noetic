@@ -9,7 +9,7 @@ import type { Item } from '../../src/types/items';
 import type { MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
 import type { StepSpawn } from '../../src/types/step';
-import { makeMessage, simpleExecute } from '../_helpers';
+import { makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
@@ -47,7 +47,9 @@ function makeLayer(id: string, slot: number, hooks: MemoryLayer['hooks']): Memor
 describe('executeSpawn', () => {
   describe('default spawn (no memory)', () => {
     it('starts child with empty ItemLog', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       parentCtx.itemLog.append(makeMessage('user', 'hello', 'p1'));
 
       let childItemCount = -1;
@@ -89,6 +91,7 @@ describe('executeSpawn', () => {
       } satisfies TestState;
 
       const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
         state: initialState,
       });
 
@@ -109,7 +112,9 @@ describe('executeSpawn', () => {
 
   describe('depth', () => {
     it('child depth increments', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       let childDepth = -1;
 
       const step = makeSpawnStep<string, string>('depth-test', async (_input, ctx) => {
@@ -125,7 +130,9 @@ describe('executeSpawn', () => {
 
   describe('child step error', () => {
     it('propagates from executeSpawn', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const step = makeSpawnStep<string, string>('error-test', async () => {
         throw new Error('child boom');
       });
@@ -136,7 +143,9 @@ describe('executeSpawn', () => {
 
   describe('memory layers with onSpawn', () => {
     it('provides items to child via onSpawn hook', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const layerStore = createLayerStateStore();
       const parentExecId = parentCtx.id;
 
@@ -185,7 +194,9 @@ describe('executeSpawn', () => {
 
   describe('result pipeline through onReturn layers', () => {
     it('transforms result via onReturn hook', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const layerStore = createLayerStateStore();
       const parentExecId = parentCtx.id;
 
@@ -222,7 +233,9 @@ describe('executeSpawn', () => {
 
   describe('spawn-local memory replaces parent layers', () => {
     it('uses step.memory instead of parentLayers', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const layerStore = createLayerStateStore();
       const parentExecId = parentCtx.id;
 
@@ -283,7 +296,9 @@ describe('executeSpawn', () => {
 
   describe('slot-ordered item merging from multiple layers', () => {
     it('merges items sorted by slot number', async () => {
-      const parentCtx = new ContextImpl();
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const layerStore = createLayerStateStore();
       const parentExecId = parentCtx.id;
 

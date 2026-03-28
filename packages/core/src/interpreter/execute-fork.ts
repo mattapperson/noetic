@@ -24,6 +24,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
     },
     () =>
       new ContextImpl({
+        harness: ctx.harness,
         parent: ctx,
         items: [
           ...ctx.itemLog.items,
