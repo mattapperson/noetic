@@ -150,12 +150,12 @@ const researchAgent = spawn({
 
 ## Detached Spawn
 
-For background sub-agents that run concurrently, use `runtime.detachedSpawn()`. The parent continues immediately and receives a `DetachedHandle` to track the child.
+For background sub-agents that run concurrently, use `harness.detachedSpawn()`. The parent continues immediately and receives a `DetachedHandle` to track the child.
 
 ```ts
 import type { DetachedHandle } from '@noetic/core';
 
-const handle = runtime.detachedSpawn(subAgentStep, input, ctx);
+const handle = harness.detachedSpawn(subAgentStep, input, ctx);
 // handle.status === 'running' — parent continues immediately
 
 // Poll status
@@ -189,9 +189,9 @@ import { z } from 'zod';
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
 // In a tool's execute function — use the parent ctx passed to execute(args, ctx):
-const handle = runtime.detachedSpawn(subAgentStep, task, parentCtx);
+const handle = harness.detachedSpawn(subAgentStep, task, parentCtx);
 handle.await().then((result) => {
-  runtime.send(inbox, `[Sub-agent done] ${result}`, parentCtx);
+  harness.send(inbox, `[Sub-agent done] ${result}`, parentCtx);
 });
 
 // The parent loop uses the inbox to wake when results arrive:
@@ -225,7 +225,7 @@ const delegateTool = tool({
   output: z.string(),
   execute: async (args: { task: string }, parentCtx: Context) => {
     const child = step.llm({ id: 'sync-sub', model: 'gpt-4o', system: 'Answer concisely.' });
-    return runtime.execute(spawn({ id: 'sync-spawn', child }), args.task, parentCtx);
+    return harness.run(spawn({ id: 'sync-spawn', child }), args.task, parentCtx);
   },
 });
 
@@ -239,11 +239,11 @@ const launchTool = tool({
     const child = step.llm<string, string>({
       id: 'async-sub', model: 'gpt-4o', system: 'Answer concisely.',
     });
-    const handle = runtime.detachedSpawn(child, args.task, parentCtx);
+    const handle = harness.detachedSpawn(child, args.task, parentCtx);
     // Notify the parent loop when the sub-agent finishes
     handle.await().then(
-      (result) => runtime.send(inbox, `[Agent ${handle.id} done] ${result}`, parentCtx),
-      (err) => runtime.send(inbox, `[Agent ${handle.id} failed] ${err}`, parentCtx),
+      (result) => harness.send(inbox, `[Agent ${handle.id} done] ${result}`, parentCtx),
+      (err) => harness.send(inbox, `[Agent ${handle.id} failed] ${err}`, parentCtx),
     );
     return { agentId: handle.id };
   },

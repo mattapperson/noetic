@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import { DetachedStatus } from '../../src/types/detached';
 import type { Step } from '../../src/types/step';
 
@@ -59,10 +59,10 @@ describe('DetachedHandleImpl', () => {
   });
 });
 
-describe('InMemoryRuntime.detachedSpawn', () => {
+describe('InMemoryAgentHarness.detachedSpawn', () => {
   it('multiple detached spawns run concurrently', async () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+    const harness = new InMemoryAgentHarness();
+    const ctx = harness.createContext();
 
     const step: Step<number, number> = {
       kind: 'run',
@@ -73,8 +73,8 @@ describe('InMemoryRuntime.detachedSpawn', () => {
       },
     };
 
-    const handle1 = runtime.detachedSpawn(step, 5, ctx);
-    const handle2 = runtime.detachedSpawn(step, 10, ctx);
+    const handle1 = harness.detachedSpawn(step, 5, ctx);
+    const handle2 = harness.detachedSpawn(step, 10, ctx);
 
     expect(handle1.status).toBe(DetachedStatus.Running);
     expect(handle2.status).toBe(DetachedStatus.Running);
@@ -91,8 +91,8 @@ describe('InMemoryRuntime.detachedSpawn', () => {
   });
 
   it('creates child context with parent relationship', async () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+    const harness = new InMemoryAgentHarness();
+    const ctx = harness.createContext();
 
     const step: Step<string, string> = {
       kind: 'run',
@@ -100,7 +100,7 @@ describe('InMemoryRuntime.detachedSpawn', () => {
       execute: async (input: string) => input,
     };
 
-    const handle = runtime.detachedSpawn(step, 'hello', ctx);
+    const handle = harness.detachedSpawn(step, 'hello', ctx);
     const result = await handle.await();
     expect(result).toBe('hello');
     expect(handle.status).toBe(DetachedStatus.Completed);

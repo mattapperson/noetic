@@ -11,7 +11,7 @@ description: This skill provides guidance for writing evaluations, scored tests,
 
 ### Everything is a Suite
 
-Evals are organized into suites via `describe()`. Each suite wraps a `Runtime.execute` call (step + runtime config) and evaluates it against an objective:
+Evals are organized into suites via `describe()`. Each suite wraps an `AgentHarness.run` call (step + harness config) and evaluates it against an objective:
 
 ```typescript
 import { describe, it, scorer } from '@noetic/eval';
@@ -53,8 +53,8 @@ describe(
 When `ctx.execute(input)` is called inside an `it()` block:
 
 1. Creates a fresh `InMemoryExporter` for trace capture
-2. Creates `InMemoryRuntime({ traceExporter })` — the runtime auto-detects `callModel` from `OPENROUTER_API_KEY`
-3. Creates context and calls `runtime.execute(step, input, ctx)`
+2. Creates `InMemoryAgentHarness({ traceExporter })` — the agent harness auto-detects `callModel` from `OPENROUTER_API_KEY`
+3. Creates context and calls `harness.run(step, input, ctx)`
 4. Returns `EvalExecution` with output, context metrics, and traces
 
 ### The EvalExecution Object

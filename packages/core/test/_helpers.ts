@@ -14,7 +14,7 @@ import type {
   MessageItem,
 } from '../src/types/items';
 import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
-import type { Runtime } from '../src/types/runtime';
+import type { AgentHarness } from '../src/types/runtime';
 import { SteeringAction } from '../src/types/steering';
 import type { ExecuteStepFn, Step } from '../src/types/step';
 import type { ToolExecutionContext } from '../src/types/tool-context';
@@ -277,7 +277,7 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   const resolvedCtx = ctx ?? makeMockContext();
   return {
     ctx: resolvedCtx,
-    runtime: makeMockRuntime(),
+    harness: makeMockHarness(),
     memory: {
       get: () => undefined,
       set: () => {},
@@ -287,9 +287,9 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   };
 }
 
-export function makeMockRuntime(): Runtime {
+export function makeMockHarness(): AgentHarness {
   return {
-    execute: async () => {
+    run: async () => {
       throw new Error('not impl');
     },
     detachedSpawn: () => {
@@ -332,6 +332,9 @@ export function makeMockRuntime(): Runtime {
     }),
   };
 }
+
+/** @deprecated Use makeMockHarness instead. */
+export const makeMockRuntime = makeMockHarness;
 
 // ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
 

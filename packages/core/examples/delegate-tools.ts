@@ -12,7 +12,7 @@ import type { Channel } from '../src/types/channel';
 import type { Tool } from '../src/types/common';
 import type { DetachedHandle, DetachedStatus } from '../src/types/detached';
 import type { MemoryLayer } from '../src/types/memory';
-import type { Runtime } from '../src/types/runtime';
+import type { AgentHarness } from '../src/types/runtime';
 import type { ToolExecutionContext } from '../src/types/tool-context';
 
 //#region Types
@@ -77,7 +77,7 @@ function buildConfiguredSubAgentStep(
 /** Notifies the inbox channel when a detached handle settles. Intentionally fire-and-forget. */
 function notifyInboxOnSettlement(opts: {
   handle: DetachedHandle<string>;
-  runtime: Runtime;
+  harness: AgentHarness;
   inbox: Channel<string>;
   ctx: ToolExecutionContext;
   handles: Map<string, DetachedHandle<string>>;
@@ -85,7 +85,7 @@ function notifyInboxOnSettlement(opts: {
   void opts.handle.await().then(
     (result) => {
       opts.handles.delete(opts.handle.id);
-      opts.runtime.send(
+      opts.harness.send(
         opts.inbox,
         `[Sub-agent ${opts.handle.id} completed] ${result}`,
         opts.ctx.ctx,
@@ -94,7 +94,7 @@ function notifyInboxOnSettlement(opts: {
     (err: unknown) => {
       opts.handles.delete(opts.handle.id);
       const message = err instanceof Error ? err.message : String(err);
-      opts.runtime.send(
+      opts.harness.send(
         opts.inbox,
         `[Sub-agent ${opts.handle.id} failed] ${message}`,
         opts.ctx.ctx,
@@ -122,7 +122,7 @@ export function createSyncDelegateTool(): Tool {
         id: 'sync-delegate-spawn',
         child,
       });
-      return toolCtx.runtime.execute(spawnStep, args.task, toolCtx.ctx);
+      return toolCtx.harness.run(spawnStep, args.task, toolCtx.ctx);
     },
   });
 }
@@ -144,12 +144,12 @@ export function createAsyncLaunchTool(opts: {
     }),
     execute: async (args, toolCtx) => {
       const child = buildSubAgentStep('async-sub-agent');
-      const handle = toolCtx.runtime.detachedSpawn(child, args.task, toolCtx.ctx);
+      const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
       opts.handles.set(handle.id, handle);
 
       notifyInboxOnSettlement({
         handle,
-        runtime: toolCtx.runtime,
+        harness: toolCtx.harness,
         inbox: opts.inbox,
         ctx: toolCtx,
         handles: opts.handles,
@@ -174,7 +174,7 @@ export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool
     execute: async (args, toolCtx) => {
       const config = resolver(args.task);
       const spawnStep = buildConfiguredSubAgentStep(config);
-      return toolCtx.runtime.execute(spawnStep, args.task, toolCtx.ctx);
+      return toolCtx.harness.run(spawnStep, args.task, toolCtx.ctx);
     },
   });
 }
@@ -198,12 +198,12 @@ export function createConfigurableAsyncLaunchTool(opts: {
     execute: async (args, toolCtx) => {
       const config = opts.resolver(args.task);
       const spawnStep = buildConfiguredSubAgentStep(config);
-      const handle = toolCtx.runtime.detachedSpawn(spawnStep, args.task, toolCtx.ctx);
+      const handle = toolCtx.harness.detachedSpawn(spawnStep, args.task, toolCtx.ctx);
       opts.handles.set(handle.id, handle);
 
       notifyInboxOnSettlement({
         handle,
-        runtime: toolCtx.runtime,
+        harness: toolCtx.harness,
         inbox: opts.inbox,
         ctx: toolCtx,
         handles: opts.handles,

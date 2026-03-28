@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { buildSyncDelegateAgent } from '../../examples/sync-delegate';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('sync delegate demo', () => {
@@ -21,8 +21,8 @@ describe('sync delegate demo', () => {
     ]);
 
     // The delegate tool receives the parent context via execute(args, ctx)
-    // and forwards it to runtime.execute, which creates a child context internally
-    const runtime = new InMemoryRuntime({
+    // and forwards it to harness.run, which creates a child context internally
+    const harness = new InMemoryAgentHarness({
       callModel: mainCallModel,
     });
 
@@ -32,8 +32,8 @@ describe('sync delegate demo', () => {
     expect(agentStep.id).toBe('react-loop');
     expect(agentStep.steps[0].kind).toBe('llm');
 
-    const ctx = runtime.createContext();
-    const result = await runtime.execute(agentStep, 'What is the capital of France?', ctx);
+    const ctx = harness.createContext();
+    const result = await harness.run(agentStep, 'What is the capital of France?', ctx);
 
     expect(result).toBe('Based on my research, the capital of France is Paris.');
   });

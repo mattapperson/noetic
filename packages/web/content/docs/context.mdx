@@ -102,7 +102,7 @@ const maybe = ctx.tryRecv(approvals); // null if empty
 await ctx.checkpoint();
 ```
 
-Persists the current execution state so it can be restored later. In the `InMemoryRuntime` this is a no-op; durable runtimes use it for crash recovery.
+Persists the current execution state so it can be restored later. In the `InMemoryAgentHarness` this is a no-op; durable agent harnesses use it for crash recovery.
 
 ### Complete
 
@@ -208,7 +208,7 @@ Content arrays use these discriminated variants:
 
 ## Related Pages
 
-- [Runtime](/docs/runtime) -- creates and manages contexts.
+- [AgentHarness](/docs/runtime) -- creates and manages contexts.
 - [Channels](/docs/operators/channels) -- typed messaging between steps.
 - [Observability](/docs/observability) -- the `span` property and tracing.
 - [Error Model](/docs/errors) -- errors thrown when abort or timeout occurs.

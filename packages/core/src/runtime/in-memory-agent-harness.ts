@@ -21,7 +21,7 @@ import type { DetachedHandle } from '../types/detached';
 import type { Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
-import type { AgentConfig, RecallLayerOutput, Runtime } from '../types/runtime';
+import type { AgentConfig, AgentHarness, RecallLayerOutput } from '../types/runtime';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
@@ -29,7 +29,7 @@ import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { DetachedHandleImpl } from './detached-handle';
 
-export class InMemoryRuntime implements Runtime {
+export class InMemoryAgentHarness implements AgentHarness {
   private callModel?: CallModelFn;
   private readonly channelStore: ChannelStore;
   readonly layerStateStore: LayerStateStore;
@@ -46,7 +46,7 @@ export class InMemoryRuntime implements Runtime {
     this.layerStateStore = opts?.layerStateStore ?? createLayerStateStore();
   }
 
-  async execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
+  async run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
     return execute(step, input, ctx, this.callModel, this);
   }
 
@@ -56,7 +56,7 @@ export class InMemoryRuntime implements Runtime {
       threadId: parentCtx.threadId,
       resourceId: parentCtx.resourceId,
     });
-    const promise = this.execute(step, input, childCtx);
+    const promise = this.run(step, input, childCtx);
     return new DetachedHandleImpl<O>(childCtx.id, promise);
   }
 
@@ -164,7 +164,7 @@ export class InMemoryRuntime implements Runtime {
   }
 
   async checkpoint(_ctx: Context): Promise<void> {
-    // No-op for in-memory runtime
+    // No-op for in-memory harness
   }
 
   async restore(_executionId: string): Promise<Context | null> {
@@ -224,3 +224,6 @@ export class InMemoryRuntime implements Runtime {
     });
   }
 }
+
+/** @deprecated Use InMemoryAgentHarness instead. */
+export const InMemoryRuntime = InMemoryAgentHarness;

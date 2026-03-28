@@ -1,4 +1,4 @@
-import type { CallModelInput, Tool as SdkTool, TurnContext } from '@openrouter/sdk';
+import type { CallModelInput, TurnContext } from '@openrouter/sdk';
 import type {
   OpenResponsesEasyInputMessage,
   OpenResponsesFunctionCallOutput,
@@ -20,8 +20,22 @@ import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
-import type { Runtime } from '../types/runtime';
+import type { AgentHarness } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
+
+//#region SDK Tool Type
+
+// Re-export the SDK Tool type under a distinct name to avoid collision with
+// Noetic's Tool type. Import aliases (`as`) are banned by our biome config,
+// so we use a type extracted from CallModelInput's generic parameter instead.
+type SdkToolArray = CallModelInput extends {
+  tools?: infer T;
+}
+  ? NonNullable<T>
+  : never;
+type SdkTool = SdkToolArray[number];
+
+//#endregion
 
 //#region Type Guards
 
@@ -70,7 +84,7 @@ const EmbeddingsResponseSchema = z.object({
 interface ConvertToolsParams {
   tools: ReadonlyArray<Tool>;
   ctx: Context;
-  runtime: Runtime;
+  harness: AgentHarness;
   layers?: MemoryLayer[];
 }
 
@@ -275,7 +289,7 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 // the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
 // This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation.
-function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkTool[] {
+function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
@@ -286,7 +300,7 @@ function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkT
         execute: async (args: unknown, turnContext?: TurnContext) => {
           // Run beforeToolCall steering check if layers are present
           if (layers && layers.length > 0) {
-            const decision = await runtime.beforeToolCall(layers, t.name, args, ctx);
+            const decision = await harness.beforeToolCall(layers, t.name, args, ctx);
             if (decision.action === SteeringAction.Deny) {
               return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
             }
@@ -294,7 +308,7 @@ function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkT
               return `Tool call redirected: ${decision.guidance}`;
             }
           }
-          const toolCtx = buildToolExecutionContext(ctx, runtime, turnContext);
+          const toolCtx = buildToolExecutionContext(ctx, harness, turnContext);
           return t.execute(args, toolCtx);
         },
       },
@@ -313,13 +327,13 @@ export function createOpenRouterCallModel(client: OpenRouterClientLike): CallMod
 
     let tools: SdkTool[] | undefined;
     if (params.tools && params.tools.length > 0) {
-      if (!params.runtime) {
-        throw new Error('runtime is required when tools are provided');
+      if (!params.harness) {
+        throw new Error('harness is required when tools are provided');
       }
       tools = convertTools({
         tools: params.tools,
         ctx: params.ctx,
-        runtime: params.runtime,
+        harness: params.harness,
         layers: params.layers,
       });
     }

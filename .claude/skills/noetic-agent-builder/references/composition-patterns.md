@@ -14,9 +14,9 @@ const agent = react({
   maxSteps: 10,
 });
 
-const runtime = new InMemoryRuntime();
-const ctx = runtime.createContext();
-const result = await runtime.execute(agent, 'What is 2+2?', ctx);
+const harness = new InMemoryAgentHarness();
+const ctx = harness.createContext();
+const result = await harness.run(agent, 'What is 2+2?', ctx);
 ```
 
 ## Pattern: Agent with Memory
@@ -83,7 +83,7 @@ The steering layer runs at slot 90 (before all other memory layers). `Deny` bloc
 
 ## Pattern: Sub-Agent Delegation via Tools
 
-Tools access `toolCtx.runtime` to spawn sub-agents:
+Tools access `toolCtx.harness` to spawn sub-agents:
 
 ```typescript
 const delegateTool = tool({
@@ -98,7 +98,7 @@ const delegateTool = tool({
       tools: [searchTool],
     });
     const spawnStep = spawn({ id: 'sub-agent', child: subAgent });
-    return toolCtx.runtime.execute(spawnStep, args.task, toolCtx.ctx);
+    return toolCtx.harness.run(spawnStep, args.task, toolCtx.ctx);
   },
 });
 ```
@@ -118,12 +118,12 @@ const launchTool = tool({
   output: z.object({ agentId: z.string() }),
   execute: async (args, toolCtx) => {
     const subAgent = step.llm({ id: 'bg-agent', model: '...', system: '...' });
-    const handle = toolCtx.runtime.detachedSpawn(subAgent, args.task, toolCtx.ctx);
+    const handle = toolCtx.harness.detachedSpawn(subAgent, args.task, toolCtx.ctx);
     handles.set(handle.id, handle);
 
     // Notify inbox when done
     void handle.await().then((result) => {
-      toolCtx.runtime.send(inbox, `[Done] ${result}`, toolCtx.ctx);
+      toolCtx.harness.send(inbox, `[Done] ${result}`, toolCtx.ctx);
     });
 
     return { agentId: handle.id };
@@ -198,7 +198,7 @@ const pipeline = loop({
 
 ## Pattern: Tool-Owned Memory
 
-Tools declare their own memory via `ToolMemoryDeclaration`. The runtime materializes layers automatically:
+Tools declare their own memory via `ToolMemoryDeclaration`. The agent harness materializes layers automatically:
 
 ```typescript
 const todoMemory: ToolMemoryDeclaration<TodoState> = {

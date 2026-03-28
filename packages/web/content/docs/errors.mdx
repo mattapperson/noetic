@@ -9,7 +9,7 @@ description: Noetic uses structured NoeticError objects with error codes and rec
 import { isNoeticError } from '@noetic/core';
 
 try {
-  const result = await runtime.execute(myStep, input, ctx);
+  const result = await harness.run(myStep, input, ctx);
 } catch (e) {
   if (isNoeticError(e)) {
     console.log(e.noeticError.kind); // e.g. 'step_failed'
@@ -34,7 +34,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `spawn_summary_failed` | `stepId`, `childOutput`, `summaryCause: Error` | A spawn's summary step failed after the child completed. |
 | `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call exceeded its timeout. |
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
-| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `runtime.cancel()`. |
+| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()`. |
 | `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
 
 ### Full Type Definition
@@ -143,4 +143,4 @@ if (isNoeticError(e)) {
 - [Context & Event Log](/docs/context) -- `ctx.abort()` produces a `cancelled` error.
 - [Channels](/docs/operators/channels) -- `channel_timeout` and `channel_closed` errors.
 - [Loop & Until](/docs/operators/loop-and-until) -- the `onError` recovery callback.
-- [Runtime](/docs/runtime) -- `runtime.cancel()` triggers cancellation errors.
+- [AgentHarness](/docs/runtime) -- `harness.cancel()` triggers cancellation errors.

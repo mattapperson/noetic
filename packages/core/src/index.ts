@@ -72,7 +72,7 @@ export { ralphWiggum } from './patterns/ralph-wiggum';
 export { react } from './patterns/react';
 export { ChannelStore } from './runtime/channel-store';
 export { ContextImpl } from './runtime/context-impl';
-export { InMemoryRuntime } from './runtime/in-memory-runtime';
+export { InMemoryAgentHarness, InMemoryRuntime } from './runtime/in-memory-agent-harness';
 export { ItemLogImpl } from './runtime/item-log-impl';
 export type { Channel, ChannelHandle, ExternalChannel } from './types/channel';
 export type {
@@ -125,7 +125,13 @@ export type {
 } from './types/memory';
 export { Slot } from './types/memory';
 export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability';
-export type { AgentConfig, AgentHooks, RecallLayerOutput, Runtime } from './types/runtime';
+export type {
+  AgentConfig,
+  AgentHarness,
+  AgentHooks,
+  RecallLayerOutput,
+  Runtime,
+} from './types/runtime';
 export type {
   AfterModelCallParams,
   AfterModelCallResult,

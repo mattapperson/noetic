@@ -2,7 +2,7 @@ import type { TurnContext } from '@openrouter/sdk';
 import type { StepMeta } from './common';
 import type { Context } from './context';
 import type { Item } from './items';
-import type { Runtime } from './runtime';
+import type { AgentHarness } from './runtime';
 
 export interface ToolMemory {
   get<T>(layerId: string): T | undefined;
@@ -13,8 +13,8 @@ export interface ToolMemory {
 export interface ToolExecutionContext {
   /** The current step execution context (access to item log, parent id, etc.). */
   readonly ctx: Context;
-  /** The runtime instance executing this tool. */
-  readonly runtime: Runtime;
+  /** The harness instance executing this tool. */
+  readonly harness: AgentHarness;
   /** Per-layer memory accessor for reading/writing tool-specific state. */
   readonly memory: ToolMemory;
   /** The fully assembled conversation view at the point of tool invocation. */

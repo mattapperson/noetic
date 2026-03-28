@@ -1,31 +1,31 @@
 ---
-title: Runtime
-description: The Runtime interface executes steps, manages context, and coordinates memory and channels.
+title: AgentHarness
+description: The AgentHarness interface runs steps, manages context, and coordinates memory and channels.
 ---
 
 ## Quick Example
 
 ```ts
-import { InMemoryRuntime, step } from '@noetic/core';
+import { InMemoryAgentHarness, step } from '@noetic/core';
 
-const runtime = new InMemoryRuntime();
-const ctx = runtime.createContext({ state: { count: 0 } });
+const harness = new InMemoryAgentHarness();
+const ctx = harness.createContext({ state: { count: 0 } });
 
 const add = step.run('add', async (n: number, ctx) => {
   return n + 1;
 });
 
-const result = await runtime.execute(add, 5, ctx);
+const result = await harness.run(add, 5, ctx);
 // result === 6
 ```
 
-The Runtime is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `InMemoryRuntime` or implement the `Runtime` interface for durable, distributed, or custom execution environments.
+The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure. You can use the built-in `InMemoryAgentHarness` or implement the `AgentHarness` interface for durable, distributed, or custom execution environments.
 
-## Runtime Interface
+## AgentHarness Interface
 
 ```ts
-interface Runtime {
-  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+interface AgentHarness {
+  run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   createContext(opts?: CreateContextOpts): Context;
 
   // Channels
@@ -55,7 +55,7 @@ interface Runtime {
 
 | Method | Description |
 |---|---|
-| `execute(step, input, ctx)` | Run a single step with the given input and context. Returns the step output. |
+| `run(step, input, ctx)` | Run a single step with the given input and context. Returns the step output. |
 | `createContext(opts?)` | Create a new execution context. Options let you set parent, initial items, state, threadId, and resourceId. |
 
 ### createContext Options
@@ -79,7 +79,7 @@ interface Runtime {
 
 ### Memory Methods
 
-The runtime coordinates [memory layer](/docs/memory) lifecycle hooks:
+The agent harness coordinates [memory layer](/docs/memory) lifecycle hooks:
 
 | Method | Description |
 |---|---|
@@ -113,15 +113,15 @@ interface RecallLayerOutput {
 |---|---|
 | `createSpan(name, parent)` | Create a new [tracing span](/docs/observability). Links to a parent span when provided. |
 
-## InMemoryRuntime
+## InMemoryAgentHarness
 
-`InMemoryRuntime` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
+`InMemoryAgentHarness` is the built-in implementation. It keeps all state in memory -- no persistence, no external dependencies.
 
 ```ts
-import { InMemoryRuntime, InMemoryExporter } from '@noetic/core';
+import { InMemoryAgentHarness, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
-const runtime = new InMemoryRuntime({
+const harness = new InMemoryAgentHarness({
   traceExporter: exporter,
 });
 ```
@@ -134,7 +134,7 @@ const runtime = new InMemoryRuntime({
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
 
-Key behaviors of `InMemoryRuntime`:
+Key behaviors of `InMemoryAgentHarness`:
 
 - **`checkpoint`** is a no-op (no persistence).
 - **`restore`** always returns `null`.
@@ -205,7 +205,7 @@ const config: AgentConfig = {
 
 ## Related Pages
 
-- [Context & Event Log](/docs/context) -- the context object the runtime creates.
-- [Channels](/docs/operators/channels) -- channel send/recv methods on the runtime.
-- [Memory](/docs/memory) -- memory layers managed by the runtime.
+- [Context & Event Log](/docs/context) -- the context object the agent harness creates.
+- [Channels](/docs/operators/channels) -- channel send/recv methods on the agent harness.
+- [Memory](/docs/memory) -- memory layers managed by the agent harness.
 - [Observability](/docs/observability) -- tracing spans created by `createSpan`.

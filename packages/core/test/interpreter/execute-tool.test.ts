@@ -6,10 +6,10 @@ import { executeTool } from '../../src/interpreter/execute-tool';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
 import type { StepTool } from '../../src/types/step';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
-import { makeMockContext, makeMockRuntime } from '../_helpers';
+import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx = makeMockContext();
-const mockRuntime = makeMockRuntime();
+const mockHarness = makeMockHarness();
 
 describe('executeTool', () => {
   it('calls tool.execute() and returns typed output', async () => {
@@ -47,7 +47,7 @@ describe('executeTool', () => {
         b: 4,
       },
       mockCtx,
-      mockRuntime,
+      mockHarness,
     );
     expect(result).toEqual({
       sum: 7,
@@ -87,7 +87,7 @@ describe('executeTool', () => {
     });
 
     try {
-      await executeTool(s, badInput, mockCtx, mockRuntime);
+      await executeTool(s, badInput, mockCtx, mockHarness);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -142,7 +142,7 @@ describe('executeTool', () => {
         limit: 10,
       },
       mockCtx,
-      mockRuntime,
+      mockHarness,
     );
     expect(receivedArgs?.query).toBe('test');
     expect(receivedArgs?.limit).toBe(5); // step.args overrides
@@ -165,7 +165,7 @@ describe('executeTool', () => {
       id: 'ctx-test',
       tool,
     };
-    await executeTool(s, {}, mockCtx, mockRuntime);
+    await executeTool(s, {}, mockCtx, mockHarness);
     assert(receivedToolCtx !== undefined);
     expect(receivedToolCtx.ctx).toBe(mockCtx);
     expect(receivedToolCtx.memory).toBeDefined();
@@ -189,7 +189,7 @@ describe('executeTool', () => {
     };
 
     try {
-      await executeTool(s, {}, mockCtx, mockRuntime);
+      await executeTool(s, {}, mockCtx, mockHarness);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));

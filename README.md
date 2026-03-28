@@ -13,7 +13,7 @@ A TypeScript agent framework that decomposes AI agent patterns into seven compos
 
 | Package | Description |
 |---------|-------------|
-| [`@noetic/core`](packages/core) | Core framework — step primitives, runtime, memory layers, patterns |
+| [`@noetic/core`](packages/core) | Core framework — step primitives, agent harness, memory layers, patterns |
 | [`@noetic/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
 | [`@noetic/web`](packages/web) | Documentation site (Next.js + Fumadocs) |
 
@@ -77,7 +77,7 @@ bun run build
 
 ```typescript
 import { step, loop, until } from '@noetic/core';
-import { InMemoryRuntime } from '@noetic/core/runtime';
+import { InMemoryAgentHarness } from '@noetic/core/runtime';
 
 // A ReAct agent is just a loop of LLM calls
 const agent = loop(
@@ -89,8 +89,8 @@ const agent = loop(
   until.noToolCalls(),
 );
 
-const runtime = new InMemoryRuntime();
-const result = await runtime.execute(agent, { query: 'What is 12! ?' });
+const harness = new InMemoryAgentHarness();
+const result = await harness.run(agent, { query: 'What is 12! ?' });
 ```
 
 ## Memory Layers

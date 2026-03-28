@@ -16,7 +16,7 @@ The key insight: **middleware = tools + memory layers**. Every piece of DeepAgen
 | `createDeepAgent()` | `react()` with `memory` param (wraps in `spawn` automatically) |
 | todoListMiddleware | `tool()` definitions with `ToolMemoryDeclaration` + `toolMemoryLayer()` |
 | filesystemMiddleware | `tool()` definitions using Node.js `fs` |
-| subAgentMiddleware | `createConfigurableDelegateTool()` using `toolCtx.runtime` |
+| subAgentMiddleware | `createConfigurableDelegateTool()` using `toolCtx.harness` |
 | summarizationMiddleware | `observationalMemory()` with custom observer |
 | skillsMiddleware | Custom `MemoryLayer` with progressive disclosure |
 | memoryMiddleware | `staticContent()` built-in layer |
@@ -65,7 +65,7 @@ All tools validate paths against `rootDir` using `resolve()` + `startsWith()` to
 
 ## Sub-Agent Delegation
 
-The `createConfigurableDelegateTool` uses `toolCtx.runtime` to execute sub-agents — no need to pass the runtime at construction time:
+The `createConfigurableDelegateTool` uses `toolCtx.harness` to run sub-agents — no need to pass the agent harness at construction time:
 
 ```ts
 export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool {
@@ -74,7 +74,7 @@ export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool
     execute: async (args, toolCtx) => {
       const config = resolver(args.task);
       const spawnStep = buildConfiguredSubAgentStep(config);
-      return toolCtx.runtime.execute(spawnStep, args.task, toolCtx.ctx);
+      return toolCtx.harness.run(spawnStep, args.task, toolCtx.ctx);
     },
   });
 }

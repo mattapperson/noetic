@@ -5,7 +5,7 @@ import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { FunctionCallItem, Item } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
-import type { Runtime } from '../types/runtime';
+import type { AgentHarness } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
@@ -19,7 +19,7 @@ export interface CallModelParams {
   params?: ModelParams;
   output?: ZodType;
   ctx: Context;
-  runtime?: Runtime;
+  harness?: AgentHarness;
   layers?: MemoryLayer[];
 }
 
@@ -32,7 +32,7 @@ export async function executeLLM<I, O>(
   input: I,
   ctx: Context,
   callModel: CallModelFn,
-  runtime?: Runtime,
+  harness?: AgentHarness,
   layers?: MemoryLayer[],
 ): Promise<O> {
   // Add the input as a user message if it's a non-empty string
@@ -51,13 +51,13 @@ export async function executeLLM<I, O>(
       params: step.params,
       output: step.output,
       ctx,
-      runtime,
+      harness,
       layers,
     });
 
     // Check afterModelCall steering layers
-    if (layers && layers.length > 0 && runtime) {
-      const decision = await runtime.afterModelCall(layers, response, ctx);
+    if (layers && layers.length > 0 && harness) {
+      const decision = await harness.afterModelCall(layers, response, ctx);
 
       if (decision.action === SteeringAction.Deny) {
         throw new NoeticErrorImpl({

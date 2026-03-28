@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import type { CallModelParams } from '../../src/interpreter/execute-llm';
 import { ralphWiggum } from '../../src/patterns/ralph-wiggum';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import type { LLMResponse } from '../../src/types/common';
 import type { FunctionCallItem, FunctionCallOutputItem, MessageItem } from '../../src/types/items';
 
@@ -105,10 +105,10 @@ describe('Ralph Wiggum pattern', () => {
       };
     };
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     let verifyCount = 0;
     const rw = ralphWiggum({
@@ -132,7 +132,7 @@ describe('Ralph Wiggum pattern', () => {
       innerMaxSteps: 5,
     });
 
-    await runtime.execute(rw, 'Write a function', ctx);
+    await harness.run(rw, 'Write a function', ctx);
     expect(verifyCount).toBe(3);
     expect(llmCallCount).toBe(6);
   });
@@ -166,10 +166,10 @@ describe('Ralph Wiggum pattern', () => {
       },
     });
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     let verifyCount = 0;
     const verifyResults: boolean[] = [];
     const rw = ralphWiggum({
@@ -190,7 +190,7 @@ describe('Ralph Wiggum pattern', () => {
       maxIterations: 3,
       innerMaxSteps: 2,
     });
-    await runtime.execute(rw, 'go', ctx);
+    await harness.run(rw, 'go', ctx);
     expect(verifyCount).toBe(3);
     expect(verifyResults).toEqual([
       false,
@@ -228,10 +228,10 @@ describe('Ralph Wiggum pattern', () => {
       },
     });
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     let verifyCount = 0;
     const rw = ralphWiggum({
       model: 'gpt-4',
@@ -253,7 +253,7 @@ describe('Ralph Wiggum pattern', () => {
       maxIterations: 5,
       innerMaxSteps: 2,
     });
-    await runtime.execute(rw, 'go', ctx);
+    await harness.run(rw, 'go', ctx);
     expect(verifyCount).toBe(2);
   });
 
@@ -289,10 +289,10 @@ describe('Ralph Wiggum pattern', () => {
         },
       };
     };
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     let iter = 0;
     const rw = ralphWiggum({
       model: 'gpt-4',
@@ -310,7 +310,7 @@ describe('Ralph Wiggum pattern', () => {
       maxIterations: 5,
       innerMaxSteps: 2,
     });
-    await runtime.execute(rw, 'start', ctx);
+    await harness.run(rw, 'start', ctx);
     for (const count of itemCounts) {
       expect(count).toBeLessThanOrEqual(3);
     }

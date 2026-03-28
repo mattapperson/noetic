@@ -27,8 +27,8 @@ export interface AgentConfig {
   hooks?: AgentHooks;
 }
 
-export interface Runtime {
-  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+export interface AgentHarness {
+  run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;
@@ -70,6 +70,9 @@ export interface Runtime {
     ctx: Context,
   ): Promise<SteeringDecision>;
 }
+
+/** @deprecated Use AgentHarness instead. */
+export type Runtime = AgentHarness;
 
 export interface RecallLayerOutput {
   layerId: string;

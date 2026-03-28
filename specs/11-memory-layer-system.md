@@ -16,7 +16,7 @@ This spec is owned by `@noetic/memory`. The split between packages is:
 | `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) |
 | `ProjectionPolicy` | Projector implementation |
 
-**Dependency direction:** `@noetic/memory` has no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
+**Dependency direction:** `@noetic/memory` has no run-time dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
 
 **Custom layer authors** import only from `@noetic/memory`. They do not need `@noetic/core` to implement a layer.
 
@@ -34,7 +34,7 @@ Normative language uses **MUST**, **SHOULD**, and **MAY** per RFC 2119.
 
 The layer system is loosely inspired by reactive programming — not in the formal RxJS/MobX sense, but in spirit: the View (what the LLM sees) is always re-assembled from current layer state before each request, producing a fresh, consistent snapshot.
 
-**Context is the result of all layers converging — it is not itself a layer.** You define layers; the runtime converges them. Their convergence is the context. Context is never exposed as an input, never passed into a layer hook, and never something you construct directly. It is the output.
+**Context is the result of all layers converging — it is not itself a layer.** You define layers; the agent harness converges them. Their convergence is the context. Context is never exposed as an input, never passed into a layer hook, and never something you construct directly. It is the output.
 
 **Memory is a type of layer, not a separate system.** "Memory" (facts recalled from storage) and "context injection" (information injected for this turn) are both expressed as layers with the same hook interface. The mechanism is identical; the purpose differs. The `slot` number determines where in the converged result each layer's contribution appears.
 
@@ -44,7 +44,7 @@ The layer system is loosely inspired by reactive programming — not in the form
 
 **Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated.
 
-**Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the runtime handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
+**Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the agent harness handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
 
 **Loose pattern, not strict formalism.** The reactive inspiration is a mental model, not a contract. Formal reactive concepts (observables, subscriptions, schedulers) do not appear in this API. The goal is the insight — always-fresh context from converging layers — without the boilerplate or jargon.
 
@@ -94,7 +94,7 @@ export const Slot = {
 } as const;
 ```
 
-The runtime sorts layers by slot ascending. Ties broken by array index (stable sort). Custom layers SHOULD use multiples of 10 within these ranges. The runtime does NOT enforce slot uniqueness.
+The agent harness sorts layers by slot ascending. Ties broken by array index (stable sort). Custom layers SHOULD use multiples of 10 within these ranges. The agent harness does NOT enforce slot uniqueness.
 
 ---
 
@@ -117,7 +117,7 @@ interface MemoryHooks<TState = unknown> {
 
 ### Lifecycle Sequence
 
-The runtime MUST execute hooks in this order:
+The agent harness MUST execute hooks in this order:
 
 ```
 EXECUTION START
@@ -193,7 +193,7 @@ interface RecallResult<TState = unknown> {
 }
 ```
 
-**String shorthand:** `recall` MAY return a plain `string` instead of a `RecallResult`. The runtime wraps it in a `developer` message item and estimates the token count automatically. This avoids boilerplate for layers that only inject text.
+**String shorthand:** `recall` MAY return a plain `string` instead of a `RecallResult`. The agent harness wraps it in a `developer` message item and estimates the token count automatically. This avoids boilerplate for layers that only inject text.
 
 ```typescript
 interface StoreParams<TState> {
@@ -344,7 +344,7 @@ When `recall()` returns `tokenCount` less than allocated, the difference goes to
 
 ### Budget Verification
 
-Runtime independently counts tokens. If layer-reported count diverges by >10%, runtime count is authoritative and a warning is emitted.
+The agent harness independently counts tokens. If layer-reported count diverges by >10%, the agent harness count is authoritative and a warning is emitted.
 
 ---
 
@@ -396,7 +396,7 @@ This would require extending `MemoryScope` with a selector variant (e.g. key pat
 
 ## `StorageAdapter`
 
-The raw storage backend. The runtime wraps it in `ScopedStorage`.
+The raw storage backend. The agent harness wraps it in `ScopedStorage`.
 
 ```typescript
 interface StorageAdapter {

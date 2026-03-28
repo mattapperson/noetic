@@ -1,14 +1,14 @@
 /**
- * Shared runtime factory for runnable examples.
+ * Shared harness factory for runnable examples.
  *
- * Creates an InMemoryRuntime wired to a real OpenRouter client,
+ * Creates an InMemoryAgentHarness wired to a real OpenRouter client,
  * reading the API key from the OPENROUTER_API_KEY environment variable.
  */
 import { OpenRouter } from '@openrouter/sdk';
 import { createOpenRouterCallModel } from '../src/adapters/openrouter';
-import { InMemoryRuntime } from '../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../src/runtime/in-memory-agent-harness';
 
-export function createExampleRuntime(): InMemoryRuntime {
+export function createExampleHarness(): InMemoryAgentHarness {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY environment variable is required');
@@ -17,7 +17,7 @@ export function createExampleRuntime(): InMemoryRuntime {
     apiKey,
   });
   const callModel = createOpenRouterCallModel(client);
-  return new InMemoryRuntime({
+  return new InMemoryAgentHarness({
     callModel,
   });
 }

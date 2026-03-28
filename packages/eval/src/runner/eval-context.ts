@@ -1,5 +1,5 @@
 import type { Step } from '@noetic/core';
-import { InMemoryExporter, InMemoryRuntime } from '@noetic/core';
+import { InMemoryAgentHarness, InMemoryExporter } from '@noetic/core';
 
 import type { EvalSuiteOptions } from '../types/eval';
 import type { EvalExecution, ScoreResult, ScorerFn } from './eval-execution';
@@ -42,12 +42,12 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
     background,
     async execute(input: unknown): Promise<EvalExecution> {
       const exporter = new InMemoryExporter();
-      const runtime = new InMemoryRuntime({
+      const harness = new InMemoryAgentHarness({
         traceExporter: exporter,
       });
 
-      const ctx = runtime.createContext();
-      const output = await runtime.execute(step, input, ctx);
+      const ctx = harness.createContext();
+      const output = await harness.run(step, input, ctx);
       const traces = [
         ...exporter.spans,
       ];

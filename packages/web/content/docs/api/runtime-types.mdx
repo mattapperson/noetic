@@ -1,15 +1,15 @@
 ---
-title: Runtime Types
-description: Type definitions for the Runtime interface, AgentConfig, and related runtime types in Noetic.
+title: AgentHarness Types
+description: Type definitions for the AgentHarness interface, AgentConfig, and related types in Noetic.
 ---
 
-## Runtime
+## AgentHarness
 
 The core execution engine interface.
 
 ```ts
-interface Runtime {
-  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
+interface AgentHarness {
+  run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
@@ -28,11 +28,11 @@ interface Runtime {
 }
 ```
 
-### Runtime Methods
+### AgentHarness Methods
 
 | Method | Description |
 |---|---|
-| `execute(step, input, ctx)` | Execute a step with the given input and context |
+| `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
 | `createContext(opts?)` | Create a new execution context |
 | `send(channel, value, ctx)` | Send a value to a channel |
@@ -97,7 +97,7 @@ interface AgentHooks {
 
 ## DetachedHandle
 
-A handle returned by `runtime.detachedSpawn()` to track a concurrently running child step.
+A handle returned by `harness.detachedSpawn()` to track a concurrently running child step.
 
 ```ts
 interface DetachedHandle<O> {

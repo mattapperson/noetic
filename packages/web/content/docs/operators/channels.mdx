@@ -129,7 +129,7 @@ interface Channel<T> {
 
 ## Sending and Receiving
 
-Channels are accessed through the [Context](/docs/context) or [Runtime](/docs/runtime):
+Channels are accessed through the [Context](/docs/context) or [AgentHarness](/docs/runtime):
 
 ### From a Step (via Context)
 
@@ -139,14 +139,14 @@ Channels are accessed through the [Context](/docs/context) or [Runtime](/docs/ru
 | `ctx.recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for a value. Throws `channel_timeout` on expiry (default 30s). |
 | `ctx.tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 
-### From the Runtime
+### From the AgentHarness
 
-The runtime provides the same three methods, taking an additional `ctx` parameter:
+The agent harness provides the same three methods, taking an additional `ctx` parameter:
 
 ```ts
-runtime.send(channel, value, ctx);
-const val = await runtime.recv(channel, ctx, { timeout: 5_000 });
-const maybe = runtime.tryRecv(channel, ctx);
+harness.send(channel, value, ctx);
+const val = await harness.recv(channel, ctx, { timeout: 5_000 });
+const maybe = harness.tryRecv(channel, ctx);
 ```
 
 ## External Channels
@@ -173,10 +173,10 @@ interface ChannelHandle<T> {
 }
 ```
 
-Get a handle from the runtime using the execution ID:
+Get a handle from the agent harness using the execution ID:
 
 ```ts
-const handle = runtime.getChannelHandle(userInput, ctx.id);
+const handle = harness.getChannelHandle(userInput, ctx.id);
 
 // From your API handler, UI callback, etc:
 handle.send('What is the weather in Tokyo?');
@@ -214,7 +214,7 @@ const askForApproval = step.run('ask-approval', async (plan: string, ctx) => {
 });
 
 // Meanwhile, from your server:
-const handle = runtime.getChannelHandle(approval, ctx.id);
+const handle = harness.getChannelHandle(approval, ctx.id);
 handle.send('approve'); // Unblocks the step
 ```
 
@@ -245,5 +245,5 @@ ctx.send(scores, 'high'); // Throws ZodError: Expected number, received string
 ## Related Pages
 
 - [Context & Event Log](/docs/context) -- `recv`, `send`, and `tryRecv` on the context.
-- [Runtime](/docs/runtime) -- `getChannelHandle` for external channels.
+- [AgentHarness](/docs/runtime) -- `getChannelHandle` for external channels.
 - [Error Model](/docs/errors) -- `channel_timeout` and `channel_closed` errors.

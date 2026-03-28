@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import type { Context } from '../../src/types/context';
 import type { Step } from '../../src/types/step';
 
@@ -40,8 +40,8 @@ describe('execute() switch', () => {
       id: 'echo-tool',
       tool,
     };
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+    const harness = new InMemoryAgentHarness();
+    const ctx = harness.createContext();
     const result = await execute(
       step,
       {
@@ -49,7 +49,7 @@ describe('execute() switch', () => {
       },
       ctx,
       undefined,
-      runtime,
+      harness,
     );
     expect(result).toBe('hi');
   });
@@ -164,17 +164,17 @@ describe('execute() switch', () => {
   });
 });
 
-describe('InMemoryRuntime', () => {
+describe('InMemoryAgentHarness', () => {
   it('creates context', () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+    const harness = new InMemoryAgentHarness();
+    const ctx = harness.createContext();
     expect(ctx.id).toBeDefined();
     expect(ctx.stepCount).toBe(0);
   });
 
   it('creates context with options', () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext({
+    const harness = new InMemoryAgentHarness();
+    const ctx = harness.createContext({
       state: {
         count: 0,
       },
@@ -188,15 +188,15 @@ describe('InMemoryRuntime', () => {
     expect(ctx.resourceId).toBe('user-1');
   });
 
-  it('executes steps via runtime', async () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+  it('executes steps via harness', async () => {
+    const harness = new InMemoryAgentHarness();
+    const ctx = harness.createContext();
     const step: Step<string, number> = {
       kind: 'run',
       id: 'len',
       execute: async (s: string) => s.length,
     };
-    const result = await runtime.execute(step, 'hello', ctx);
+    const result = await harness.run(step, 'hello', ctx);
     expect(result).toBe(5);
   });
 
@@ -221,22 +221,22 @@ describe('InMemoryRuntime', () => {
         outputTokens: 3,
       },
     });
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     const step: Step<string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
     };
-    const result = await runtime.execute(step, 'hello', ctx);
+    const result = await harness.run(step, 'hello', ctx);
     expect(result).toBe('hi');
   });
 
   it('createSpan returns a valid span', () => {
-    const runtime = new InMemoryRuntime();
-    const span = runtime.createSpan('test', null);
+    const harness = new InMemoryAgentHarness();
+    const span = harness.createSpan('test', null);
     expect(span.traceId).toBeDefined();
     expect(span.spanId).toBeDefined();
     expect(span.parentSpanId).toBeNull();

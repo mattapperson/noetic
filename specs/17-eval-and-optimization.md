@@ -1,6 +1,6 @@
 # Eval and Optimization
 
-> **Depends On:** `01-step-type` (Step), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-runtime` (Runtime, execute), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
+> **Depends On:** `01-step-type` (Step), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-agent-harness` (AgentHarness, run), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
 > **Exports:** `describe()`, `it()`, `EvalSuiteOptions`, `DescribeStep`, `ScorerFn`, `createScorer()`, `createAdapter()`, `Baseline`, `OptimizationLevel`, `discoverFieldsFromSource()`
 
 ---
@@ -56,14 +56,14 @@ interface EvalSuiteOptions {
 }
 ```
 
-The eval context has **zero knowledge of `callModel`** — the `InMemoryRuntime` auto-detects from `OPENROUTER_API_KEY`. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
+The eval context has **zero knowledge of `callModel`** — the `InMemoryAgentHarness` auto-detects from `OPENROUTER_API_KEY`. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
 
 ### Execution Model
 
-`describe()` wraps `Runtime.execute()`. Each `it()` case:
+`describe()` wraps `AgentHarness.run()`. Each `it()` case:
 
-1. Creates a fresh `Context` via `runtime.createContext()`.
-2. Calls `runtime.execute(step, input, ctx)` to produce the output.
+1. Creates a fresh `Context` via `harness.createContext()`.
+2. Calls `harness.run(step, input, ctx)` to produce the output.
 3. Passes `{ input, output, expected, context, ctx }` to each scorer.
 4. Collects scores into an `EvalResult`.
 
@@ -475,7 +475,7 @@ function createAdapter(opts: {
 }): EvalAdapter;
 ```
 
-When an `EvalSuiteConfig` includes an `adapter`, the eval runner calls `adapter.execute(input)` instead of `runtime.execute(step, input, ctx)`. Scorers receive the same `ScorerInput` shape regardless of whether the execution came from a native step or an adapter.
+When an `EvalSuiteConfig` includes an `adapter`, the eval runner calls `adapter.execute(input)` instead of `harness.run(step, input, ctx)`. Scorers receive the same `ScorerInput` shape regardless of whether the execution came from a native step or an adapter.
 
 ```typescript
 // Example: evaluating a Vercel AI SDK agent
@@ -639,7 +639,7 @@ Runs the optimization pipeline after evaluation. The `--level` flag controls the
 - `spawn` is defined in `04-spawn`
 - `loop`, `until` are defined in `05-loop-and-until`
 - `Context`, `Item`, `TokenUsage` are defined in `07-context-and-event-log`
-- `Runtime`, `execute` are defined in `08-runtime`
+- `AgentHarness`, `run` are defined in `08-agent-harness`
 - `Span` is defined in `10-observability`
 - `MemoryLayer` is defined in `11-memory-layer-system`
 - `react`, `ralphWiggum` patterns are defined in `13-patterns`

@@ -26,11 +26,11 @@ description: Complete type reference for all @noetic/core exports, organized by 
 | `adaptivePlan()` | function | Dynamic plan with revision |
 | `PlanNodeSchema` | Zod schema | Validator for `PlanNode` objects |
 
-## Runtime
+## AgentHarness
 
 | Export | Kind | Description |
 |---|---|---|
-| `InMemoryRuntime` | class | Built-in runtime implementation |
+| `InMemoryAgentHarness` | class | Built-in agent harness implementation |
 | `ContextImpl` | class | Context implementation |
 | `ItemLogImpl` | class | Item log implementation |
 | `ChannelStore` | class | Channel state management |
@@ -102,6 +102,6 @@ description: Complete type reference for all @noetic/core exports, organized by 
 - [Step Types](/docs/api/step-types) -- Step, StepRun, StepLLM, StepTool, StepBranch, StepFork, StepSpawn, StepLoop
 - [Channel Types](/docs/api/channel-types) -- Channel, ExternalChannel, ChannelHandle
 - [Context Types](/docs/api/context-types) -- Context, ItemLog, Item, ContentPart
-- [Runtime Types](/docs/api/runtime-types) -- Runtime, AgentConfig, AgentHooks
+- [AgentHarness Types](/docs/api/runtime-types) -- AgentHarness, AgentConfig, AgentHooks
 - [Memory Types](/docs/api/memory-types) -- MemoryLayer, MemoryHooks, ProjectionPolicy, StorageAdapter
 - [Until Types](/docs/api/until-types) -- Until, Verdict, Snapshot, VerifyFn

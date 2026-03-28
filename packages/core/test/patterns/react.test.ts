@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { react } from '../../src/patterns/react';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import type { LLMResponse } from '../../src/types/common';
 
 describe('ReAct pattern', () => {
@@ -122,10 +122,10 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
@@ -135,7 +135,7 @@ describe('ReAct pattern', () => {
       maxSteps: 10,
     });
 
-    const result = await runtime.execute(reactStep, 'What is the answer?', ctx);
+    const result = await harness.run(reactStep, 'What is the answer?', ctx);
 
     // Should have called model twice (once with tool call, once without)
     expect(callCount).toBe(2);
@@ -191,10 +191,10 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
@@ -204,7 +204,7 @@ describe('ReAct pattern', () => {
       maxSteps: 3,
     });
 
-    const _result = await runtime.execute(reactStep, 'go', ctx);
+    const _result = await harness.run(reactStep, 'go', ctx);
     expect(callCount).toBe(3); // Stopped at maxSteps
   });
 
@@ -243,10 +243,10 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
@@ -257,7 +257,7 @@ describe('ReAct pattern', () => {
     });
 
     // noToolCalls only fires after stepCount >= 1
-    const result = await runtime.execute(reactStep, 'hi', ctx);
+    const result = await harness.run(reactStep, 'hi', ctx);
     expect(callCount).toBe(1);
     expect(result).toBe('No tools needed');
   });
@@ -337,10 +337,10 @@ describe('ReAct pattern', () => {
       };
     };
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: mockCallModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     const reactStep = react({
       model: 'gpt-4',
@@ -348,7 +348,7 @@ describe('ReAct pattern', () => {
         tool,
       ],
     });
-    await runtime.execute(reactStep, 'test', ctx);
+    await harness.run(reactStep, 'test', ctx);
 
     expect(ctx.tokens.input).toBe(300);
     expect(ctx.tokens.output).toBe(150);

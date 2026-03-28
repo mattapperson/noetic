@@ -143,10 +143,10 @@ interface ChannelHandle<T> {
 }
 ```
 
-Obtained via the runtime:
+Obtained via the agent harness:
 
 ```typescript
-const handle = runtime.getChannelHandle(userMessages, executionId);
+const handle = harness.getChannelHandle(userMessages, executionId);
 ```
 
 ### Scope Rule
@@ -155,7 +155,7 @@ External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped
 
 ### Lifecycle
 
-- **Open**: External channels are eagerly initialized when `execute()` is called on the root step. The channel is ready to receive before any step runs.
+- **Open**: External channels are eagerly initialized when `run()` is called on the root step. The channel is ready to receive before any step runs.
 - **Closed**: When the root execution completes (success, failure, or cancellation), all external channel handles are closed.
 - **After close**: `handle.send()` throws `channel_closed` (see `09-error-model`). Callers can check `handle.closed` before sending.
 
@@ -163,13 +163,13 @@ External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped
 
 External senders are NOT back-pressured. If a queue channel's buffer is full when an external sender calls `handle.send()`:
 - The **oldest** item in the queue is dropped.
-- A warning is emitted via the runtime's tracing system.
+- A warning is emitted via the agent harness's tracing system.
 
 This design prevents external callers (e.g., HTTP handlers) from blocking on a full queue, which would cause upstream timeouts. Internal senders (`ctx.send`) are still subject to normal back-pressure semantics.
 
 ### Thread Safety
 
-Node.js is single-threaded, so `InMemoryRuntime` handles are inherently thread-safe. `DurableRuntime` translates `handle.send()` to durable signals (e.g., Temporal signals, Inngest events).
+Node.js is single-threaded, so `InMemoryAgentHarness` handles are inherently thread-safe. `DurableAgentHarness` translates `handle.send()` to durable signals (e.g., Temporal signals, Inngest events).
 
 ---
 
@@ -185,25 +185,25 @@ Channels are created on first reference and garbage-collected when the execution
 
 ### Default Timeout and Deadlock Prevention
 
-All `recv` calls have a **default timeout of 30 seconds**. If no data arrives within the timeout, the runtime throws `channel_timeout` (see `09-error-model`). Callers may override the default:
+All `recv` calls have a **default timeout of 30 seconds**. If no data arrives within the timeout, the agent harness throws `channel_timeout` (see `09-error-model`). Callers may override the default:
 
 ```typescript
 ctx.recv(findings, { timeout: 60_000 }); // 60s
 ctx.recv(status, { timeout: 0 });         // no timeout (use with caution)
 ```
 
-Setting `timeout: 0` disables the timeout — this is an explicit opt-in to potential deadlock. The runtime SHOULD emit a warning when `timeout: 0` is used.
+Setting `timeout: 0` disables the timeout — this is an explicit opt-in to potential deadlock. The agent harness SHOULD emit a warning when `timeout: 0` is used.
 
 ### Back-Pressure (Internal Senders)
 
-When a queue channel's buffer reaches `capacity`, `ctx.send` returns a `Promise` that resolves when space is available (a consumer calls `recv`). Like `recv`, back-pressure `send` is subject to the default 30-second timeout. If the timeout fires, the runtime throws `channel_timeout` with the channel name. This prevents silent deadlocks where a producer and consumer are both blocked.
+When a queue channel's buffer reaches `capacity`, `ctx.send` returns a `Promise` that resolves when space is available (a consumer calls `recv`). Like `recv`, back-pressure `send` is subject to the default 30-second timeout. If the timeout fires, the agent harness throws `channel_timeout` with the channel name. This prevents silent deadlocks where a producer and consumer are both blocked.
 
 ### Blocking Model
 
-`recv` returns a `Promise` that resolves when data is available. This works because `recv` is only called inside `step.execute`, which is already async. The runtime manages a waiter queue:
+`recv` returns a `Promise` that resolves when data is available. This works because `recv` is only called inside `step.execute`, which is already async. The agent harness manages a waiter queue:
 
 ```typescript
-// Inside the runtime (simplified)
+// Inside the agent harness (simplified)
 const channelState = new Map<string, {
   mode: 'value' | 'queue' | 'topic';
   buffer: unknown[];
@@ -242,7 +242,7 @@ function tryRecv<T>(ch: Channel<T>): T | null {
 }
 ```
 
-Within a `fork` (see `03-control-flow`), the runtime runs paths as concurrent promises (not sequential), so `send` in one path can wake `recv` in another.
+Within a `fork` (see `03-control-flow`), the agent harness runs paths as concurrent promises (not sequential), so `send` in one path can wake `recv` in another.
 
 ### Topic Mode is Lossy
 

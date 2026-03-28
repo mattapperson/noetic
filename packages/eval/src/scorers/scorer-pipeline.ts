@@ -1,5 +1,5 @@
 import type { CallModelFn } from '@noetic/core';
-import { step as coreStep, InMemoryRuntime } from '@noetic/core';
+import { InMemoryAgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
 import type { EvalExecution, ScoreResult, ScorerFn } from './types';
@@ -65,17 +65,17 @@ function buildAnalyzeScorerFn<T, R>(
     const prompt = analyzeConfig.createPrompt(preprocessed, objective);
 
     const model = judge?.model ?? 'openai/gpt-4o-mini';
-    const judgeStep = coreStep.llm<string, unknown>({
+    const judgeStep = step.llm<string, unknown>({
       id: `${pipelineId}-judge`,
       model,
       system: prompt,
     });
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel: judge?.callModel,
     });
-    const ctx = runtime.createContext();
-    const raw = await runtime.execute(judgeStep, background, ctx);
+    const ctx = harness.createContext();
+    const raw = await harness.run(judgeStep, background, ctx);
     const analyzed = parseAnalyzedResult(raw, analyzeConfig.outputSchema);
 
     const score = scoreFn({
@@ -128,17 +128,17 @@ function makePipelineStep4(
           }
 
           const model = judge.model ?? 'openai/gpt-4o-mini';
-          const reasonStep = coreStep.llm({
+          const reasonStep = step.llm({
             id: `${pipelineId}-reason`,
             model,
             system: reasonConfig.createPrompt(result.score),
           });
 
-          const runtime = new InMemoryRuntime({
+          const harness = new InMemoryAgentHarness({
             callModel: judge.callModel,
           });
-          const ctx = runtime.createContext();
-          const reason = await runtime.execute(reasonStep, '', ctx);
+          const ctx = harness.createContext();
+          const reason = await harness.run(reasonStep, '', ctx);
           return {
             ...result,
             reason: String(reason),

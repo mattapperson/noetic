@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { agentInbox, buildAsyncDelegateAgent } from '../../examples/async-delegate';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('async delegate demo', () => {
@@ -31,13 +31,13 @@ describe('async delegate demo', () => {
       textOnlyResponse('Based on the sub-agent results, quantum computing uses qubits.'),
     ]);
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     // Pre-load an inbox message to simulate sub-agent completion
-    runtime.send(
+    harness.send(
       agentInbox,
       '[Sub-agent sub-1 completed] Result: Quantum computing uses qubits for computation.',
       ctx,
@@ -48,7 +48,7 @@ describe('async delegate demo', () => {
       parkTimeout: 50,
     });
 
-    const result = await runtime.execute(agent, 'Tell me about quantum computing', ctx);
+    const result = await harness.run(agent, 'Tell me about quantum computing', ctx);
 
     expect(result).toBe('Based on the sub-agent results, quantum computing uses qubits.');
   });

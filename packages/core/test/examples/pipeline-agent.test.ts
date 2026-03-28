@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { buildPipelineAgent } from '../../examples/pipeline-agent';
 import type { CallModelParams } from '../../src/interpreter/execute-llm';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('pipeline agent', () => {
@@ -18,13 +18,13 @@ describe('pipeline agent', () => {
     const callModel = createScriptedCallModel([
       textOnlyResponse('SENTIMENT: positive\nTHEMES: AI\nPATTERNS: growth'),
     ]);
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     const agent = buildPipelineAgent();
 
-    const result = await runtime.execute(agent, '  Hello   world!!!  ', ctx);
+    const result = await harness.run(agent, '  Hello   world!!!  ', ctx);
 
     expect(result).toContain('=== Text Analysis Report ===');
     expect(result).toContain('=== End Report ===');
@@ -46,13 +46,13 @@ describe('pipeline agent', () => {
       }
       return Promise.resolve(textOnlyResponse('SENTIMENT: neutral\nTHEMES: test\nPATTERNS: none'));
     };
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     const agent = buildPipelineAgent();
 
-    await runtime.execute(agent, '  extra   spaces   here  ', ctx);
+    await harness.run(agent, '  extra   spaces   here  ', ctx);
 
     // The LLM should have received the normalized text: no leading/trailing
     // spaces and no consecutive internal spaces.

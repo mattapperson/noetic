@@ -11,7 +11,7 @@ import { toolMemoryLayer } from '../../src/memory/layers/tool-memory-layer';
 import { react } from '../../src/patterns/react';
 import type { MemoryLayer } from '../../src/types/memory';
 import type { StepLoop, StepSpawn } from '../../src/types/step';
-import { createExampleRuntime } from '../create-example-runtime';
+import { createExampleHarness } from '../create-example-harness';
 import type { SubAgentResolver } from '../delegate-tools';
 import { createConfigurableDelegateTool } from '../delegate-tools';
 import { skillsLayer } from './memory/skills-layer';
@@ -89,10 +89,10 @@ export function buildDeepAgent(
 }
 
 export async function runDeepAgent(config: DeepAgentConfig, input: string): Promise<string> {
-  const runtime = createExampleRuntime();
+  const harness = createExampleHarness();
   const agent = buildDeepAgent(config);
-  const ctx = runtime.createContext();
-  return runtime.execute(agent, input, ctx);
+  const ctx = harness.createContext();
+  return harness.run(agent, input, ctx);
 }
 
 //#endregion

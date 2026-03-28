@@ -29,7 +29,7 @@ step.llm<I, O>({
 }): StepLLM<I, O>
 ```
 
-The runtime assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
 
 ### step.tool
 
@@ -195,12 +195,12 @@ adaptivePlan<O>({
 }): Step
 ```
 
-**Important:** When plans mix sequential and parallel execution (e.g., a fork inside a sequential chain), `executeStep` must be provided. Without it, only `run`-kind children can be executed in sequential nodes. When using the eval framework, the runtime's `execute` method serves as `executeStep`:
+**Important:** When plans mix sequential and parallel execution (e.g., a fork inside a sequential chain), `executeStep` must be provided. Without it, only `run`-kind children can be executed in sequential nodes. When using the eval framework, the agent harness's `run` method serves as `executeStep`:
 
 ```typescript
 // callModel auto-detected from OPENROUTER_API_KEY when omitted
-const runtime = new InMemoryRuntime();
-const compiled = compilePlan(plan, agents, undefined, runtime.execute.bind(runtime));
+const harness = new InMemoryAgentHarness();
+const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness));
 ```
 
 ## Memory Layers
@@ -274,21 +274,21 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
-## Runtime
+## AgentHarness
 
 ```typescript
-const runtime = new InMemoryRuntime();
-const ctx = runtime.createContext({ threadId?, resourceId? });
-const result = await runtime.execute(step, input, ctx);
+const harness = new InMemoryAgentHarness();
+const ctx = harness.createContext({ threadId?, resourceId? });
+const result = await harness.run(step, input, ctx);
 
 // Background execution
-const handle = runtime.detachedSpawn(step, input, ctx);
+const handle = harness.detachedSpawn(step, input, ctx);
 await handle.await();
 
 // Channels
-runtime.send(channel, value, ctx);
-const msg = await runtime.recv(channel, ctx);
-const msg = runtime.tryRecv(channel, ctx);
+harness.send(channel, value, ctx);
+const msg = await harness.recv(channel, ctx);
+const msg = harness.tryRecv(channel, ctx);
 ```
 
 ## Slot Constants
@@ -311,10 +311,10 @@ Available inside tool `execute` functions:
 
 ```typescript
 interface ToolExecutionContext {
-  ctx: Context;           // Step execution context
-  runtime: Runtime;       // Runtime instance (guaranteed non-undefined)
-  memory: ToolMemory;     // Per-layer state accessor (get/set by layer id)
-  assembledView: Item[];  // Current conversation view
+  ctx: Context;                 // Step execution context
+  harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
+  memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
+  assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
 ```

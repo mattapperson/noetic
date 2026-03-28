@@ -7,7 +7,7 @@
 
 ## Variant: `run` — Arbitrary Async Work
 
-Pure computation. The runtime can retry freely, cache results, and doesn't need to track token usage.
+Pure computation. The agent harness can retry freely, cache results, and doesn't need to track token usage.
 
 ```typescript
 interface StepRunOpts<I, O> {
@@ -73,7 +73,7 @@ const analyze = step.llm({
 
 ### The `CallModelFn` Contract
 
-The runtime delegates LLM calls through a `CallModelFn` — a function provided at construction time. This is the adapter seam: any LLM provider can be wired in by implementing this contract.
+The agent harness delegates LLM calls through a `CallModelFn` — a function provided at construction time. This is the adapter seam: any LLM provider can be wired in by implementing this contract.
 
 ```typescript
 interface CallModelParams {
@@ -102,10 +102,10 @@ The `createOpenRouterCallModel(client)` factory returns a `CallModelFn` backed b
 
 ```typescript
 import OpenRouter from '@openrouter/sdk';
-import { createOpenRouterCallModel, InMemoryRuntime } from '@noetic/core';
+import { createOpenRouterCallModel, InMemoryAgentHarness } from '@noetic/core';
 
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-const runtime = new InMemoryRuntime({ callModel: createOpenRouterCallModel(client) });
+const harness = new InMemoryAgentHarness({ callModel: createOpenRouterCallModel(client) });
 ```
 
 ### Tool Call Execution
@@ -117,9 +117,9 @@ The `executeLLM` function delegates to the OpenRouter SDK's `callModel`, which h
 3. The model is called again with the updated conversation.
 4. This repeats until the model responds without tool calls or a terminal condition is met.
 
-The runtime does NOT implement its own tool call loop — `callModel` owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether `callModel`'s internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
+The agent harness does NOT implement its own tool call loop — `callModel` owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether `callModel`'s internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
 
-`callModel` returns a `ModelResult` with `getItemsStream()`. The runtime appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
+`callModel` returns a `ModelResult` with `getItemsStream()`. The agent harness appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
 
 ```typescript
 const result = await execute(analyze, codeSnippet, ctx);
@@ -131,7 +131,7 @@ const result = await execute(analyze, codeSnippet, ctx);
 
 ### What the LLM Actually Sees: The View
 
-An `llm` step does NOT simply send the `system` prompt and the raw input. The runtime assembles a **View** — the complete `Item[]` array sent to the model — via the Memory Layer system (see `11-memory-layer-system`). Before each LLM call, the runtime:
+An `llm` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the Memory Layer system (see `11-memory-layer-system`). Before each LLM call, the agent harness:
 
 1. Runs `recall()` on each memory layer to gather contextual content.
 2. Assembles system prompt item (`role: system`) + memory layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
@@ -193,10 +193,10 @@ interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodType
 
 ## Why Three Execution Variants?
 
-The runtime needs to treat them differently:
+The agent harness needs to treat them differently:
 
 - **LLM steps** have cost implications, need model routing, produce telemetry with GenAI semantic conventions, and their output may contain tool calls that drive the next iteration.
 - **Tool steps** may have side effects, may need human approval before execution, and may need sandboxing.
-- **Run steps** are pure computation — the runtime can retry freely, cache results, and doesn't need to track token usage.
+- **Run steps** are pure computation — the agent harness can retry freely, cache results, and doesn't need to track token usage.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.

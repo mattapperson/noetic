@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildDynamicDelegateAgent, delegateInbox } from '../../examples/dynamic-delegate';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { InMemoryAgentHarness } from '../../src/runtime/in-memory-agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('dynamic delegate demo', () => {
@@ -29,7 +29,7 @@ describe('dynamic delegate demo', () => {
       textOnlyResponse('The answer is 4.'),
     ]);
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel,
     });
 
@@ -38,8 +38,8 @@ describe('dynamic delegate demo', () => {
       parkTimeout: 50,
     });
 
-    const ctx = runtime.createContext();
-    const result = await runtime.execute(agent, 'What is 2+2?', ctx);
+    const ctx = harness.createContext();
+    const result = await harness.run(agent, 'What is 2+2?', ctx);
     expect(result).toBe('The answer is 4.');
   });
 
@@ -58,20 +58,20 @@ describe('dynamic delegate demo', () => {
       textOnlyResponse('Got the results from the background agent.'),
     ]);
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     // Pre-load inbox message to simulate sub-agent completion
-    runtime.send(delegateInbox, '[Sub-agent bg-1 completed] Topic is interesting.', ctx);
+    harness.send(delegateInbox, '[Sub-agent bg-1 completed] Topic is interesting.', ctx);
 
     const agent = buildDynamicDelegateAgent({
       inbox: delegateInbox,
       parkTimeout: 50,
     });
 
-    const result = await runtime.execute(agent, 'Research a topic for me', ctx);
+    const result = await harness.run(agent, 'Research a topic for me', ctx);
     expect(result).toBe('Got the results from the background agent.');
   });
 
@@ -97,20 +97,20 @@ describe('dynamic delegate demo', () => {
       textOnlyResponse('All done with both sync and async results.'),
     ]);
 
-    const runtime = new InMemoryRuntime({
+    const harness = new InMemoryAgentHarness({
       callModel,
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     // Pre-load inbox message for the async agent
-    runtime.send(delegateInbox, '[Sub-agent bg-2 completed] Background findings.', ctx);
+    harness.send(delegateInbox, '[Sub-agent bg-2 completed] Background findings.', ctx);
 
     const agent = buildDynamicDelegateAgent({
       inbox: delegateInbox,
       parkTimeout: 50,
     });
 
-    const result = await runtime.execute(agent, 'Do both sync and async work', ctx);
+    const result = await harness.run(agent, 'Do both sync and async work', ctx);
     expect(result).toBe('All done with both sync and async results.');
   });
 });

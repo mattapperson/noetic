@@ -1,6 +1,6 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
-import type { Runtime } from '../types/runtime';
+import type { AgentHarness } from '../types/runtime';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
@@ -19,7 +19,7 @@ export async function execute<I, O>(
   input: I,
   ctx: Context,
   callModel?: CallModelFn,
-  runtime?: Runtime,
+  harness?: AgentHarness,
 ): Promise<O> {
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
@@ -57,25 +57,25 @@ export async function execute<I, O>(
           retriesExhausted: false,
         });
       }
-      return executeLLM(step, input, ctx, callModel, runtime);
+      return executeLLM(step, input, ctx, callModel, harness);
     case 'tool':
-      if (!runtime) {
+      if (!harness) {
         throw new NoeticErrorImpl({
           kind: 'step_failed',
           stepId: step.id,
-          cause: new Error('runtime is required for tool steps'),
+          cause: new Error('harness is required for tool steps'),
           retriesExhausted: false,
         });
       }
-      return executeTool(step, input, ctx, runtime);
+      return executeTool(step, input, ctx, harness);
     case 'branch':
-      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
     case 'fork':
-      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
     case 'loop':
-      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
     default: {
       const _exhaustive: never = step;
       throw new NoeticErrorImpl({
