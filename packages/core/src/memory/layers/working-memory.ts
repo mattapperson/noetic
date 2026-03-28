@@ -13,6 +13,13 @@ export interface WorkingMemoryConfig {
   readOnly?: boolean;
 }
 
+/**
+ * Creates a mutable working memory layer that the model can update via `updateWorkingMemory` function calls.
+ *
+ * @public
+ * @param config - Optional configuration for scope, Zod schema, template, and read-only mode.
+ * @returns A `MemoryLayer` providing scratchpad state the model can read and write.
+ */
 export function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryState> {
   const scope: MemoryScope = config?.scope ?? 'thread';
 

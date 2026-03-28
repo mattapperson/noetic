@@ -1,5 +1,6 @@
 import { describe as bunDescribe, expect, test } from 'bun:test';
-import { ContextImpl, step } from '@noetic/core';
+import { step } from '@noetic/core';
+import { ContextImpl } from '@noetic/core/internal/test';
 import { describe } from '../../src/runner/describe';
 import type { EvalContext } from '../../src/runner/eval-context';
 import { it } from '../../src/runner/it';

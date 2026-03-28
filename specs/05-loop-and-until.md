@@ -1,7 +1,7 @@
 # Loop and Until: Iteration and Termination
 
 > **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context), `09-error-model` (NoeticError)
-> **Exports:** `loop()`, `LoopOpts`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates, `any()`, `all()`, `VerifyFn`, `ConvergeOpts`
+> **Exports:** `loop()`, `LoopConfig`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates, `any()`, `all()`, `VerifyFn`, `ConvergeConfig`
 
 ---
 
@@ -10,7 +10,7 @@
 Combines an array of body steps + termination predicate + optional input preparation into repeating execution. Each iteration executes the steps sequentially, piping the output of one into the input of the next.
 
 ```typescript
-interface LoopOpts<I, O> {
+interface LoopConfig<I, O> {
   id: string;
   steps: ReadonlyArray<Step<I, O>>;
   until: Until;
@@ -113,14 +113,14 @@ const until = {
   maxDuration:    (ms: number) => Until,
   noToolCalls:    () => Until,                    // ReAct termination
   verified:       (fn: VerifyFn) => Until,        // Ralph Wiggum external check
-  converged:      (opts: ConvergeOpts) => Until,  // recursive self-refinement
+  converged:      (opts: ConvergeConfig) => Until,  // recursive self-refinement
   outputContains: (marker: string) => Until,      // completion promise marker
   custom:         (fn: Until) => Until,           // escape hatch
 };
 
 type VerifyFn = (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
 
-interface ConvergeOpts {
+interface ConvergeConfig {
   threshold?: number;        // default 1 (exact match). When embed is provided and threshold < 1, uses cosine similarity
   embed?: EmbedFn;           // when provided + threshold < 1, embed both outputs and compare via cosine similarity
   cache?: StorageAdapter;    // persist previous output vector across ephemeral invocations
@@ -152,7 +152,7 @@ const verified = (fn: VerifyFn): Until => async (snap) => {
 A loop can optionally define an **inbox channel** that lets external messages prevent the loop from stopping. This enables async sub-agent patterns where the loop parks, waiting for background work to complete.
 
 ```typescript
-interface LoopOpts<I, O> {
+interface LoopConfig<I, O> {
   // ... existing fields
   inbox?: Channel<string>;   // messages injected as developer items
   parkTimeout?: number;       // ms to wait on inbox before truly stopping (default: 0 = tryRecv only)

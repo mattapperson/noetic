@@ -320,6 +320,13 @@ function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkT
 
 //#region Public API
 
+/**
+ * Creates a `CallModelFn` that delegates to an OpenRouter client for LLM inference.
+ *
+ * @public
+ * @param client - An OpenRouter client (or compatible mock) implementing `callModel`.
+ * @returns A `CallModelFn` suitable for use with `InMemoryAgentHarness`.
+ */
 export function createOpenRouterCallModel(client: OpenRouterClientLike): CallModelFn {
   return async (params: CallModelParams): Promise<LLMResponse> => {
     const { instructions, remaining } = extractSystemInstruction(params.items);
@@ -359,6 +366,14 @@ export function createOpenRouterCallModel(client: OpenRouterClientLike): CallMod
   };
 }
 
+/**
+ * Creates an `EmbedFn` that calls the OpenRouter embeddings API.
+ *
+ * @public
+ * @param apiKey - OpenRouter API key.
+ * @param embeddingModel - Model identifier (default: `'openai/text-embedding-3-small'`).
+ * @returns An `EmbedFn` that produces embedding vectors for the given texts.
+ */
 export function createOpenRouterEmbed(apiKey: string, embeddingModel?: string): EmbedFn {
   const model = embeddingModel ?? 'openai/text-embedding-3-small';
 

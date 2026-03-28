@@ -14,6 +14,7 @@ export interface PlanNode {
 
 // PlanNode schema — the variable annotation provides the recursive type;
 // z.lazy() returns a compatible type that TypeScript checks against it.
+/** @public Zod schema for recursive `PlanNode` validation. */
 export const PlanNodeSchema: z.ZodType<PlanNode> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -40,6 +41,16 @@ interface CompileOpts {
   executeStep?: ExecuteStepFn;
 }
 
+/**
+ * Compiles a `PlanNode` tree into an executable step graph using the provided agent factories.
+ *
+ * @public
+ * @param plan - Root plan node describing the task tree.
+ * @param agents - Map of agent names to factory functions producing steps.
+ * @param constraints - Optional constraints for tool allowlists and approval.
+ * @param executeStep - Optional step executor for non-run step kinds.
+ * @returns A compiled `Step` ready for execution.
+ */
 export function compilePlan<O>(
   plan: PlanNode,
   agents: Record<string, (prompt: string) => Step<string, unknown>>,
@@ -102,6 +113,14 @@ function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
   };
 }
 
+/**
+ * Creates a step that dynamically generates a plan via a planner step and executes it,
+ * retrying with error feedback up to `maxRevisions` times on failure.
+ *
+ * @public
+ * @param opts - Planner step, agent factories, optional constraints, max revision count, and step executor.
+ * @returns A `Step` that adaptively plans and executes.
+ */
 export function adaptivePlan<O>(opts: {
   planner: Step<string, PlanNode>;
   agents: Record<string, (prompt: string) => Step<string, unknown>>;

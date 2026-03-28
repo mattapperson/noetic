@@ -4,6 +4,7 @@ import type { Channel, ExternalChannel } from '../types/channel';
 /**
  * Creates a typed communication channel writable from outside the execution tree.
  *
+ * @public
  * @param name - Channel name for identification and debugging.
  * @param opts.schema - Zod schema used to validate every message sent through the channel.
  * @param opts.mode - Delivery semantics: `'value'` (last-write-wins), `'queue'` (FIFO), `'topic'` (pub/sub).
@@ -24,6 +25,7 @@ export function channel<T>(
 /**
  * Creates a typed communication channel for inter-step messaging within an execution tree.
  *
+ * @public
  * @param name - Channel name for identification and debugging.
  * @param opts.schema - Zod schema used to validate every message sent through the channel.
  * @param opts.mode - Delivery semantics: `'value'` (last-write-wins), `'queue'` (FIFO), `'topic'` (pub/sub).

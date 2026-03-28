@@ -9,6 +9,13 @@ interface StaticContentOpts {
   tag?: string;
 }
 
+/**
+ * Creates a read-only memory layer that loads static content once at init and injects it into recall.
+ *
+ * @public
+ * @param opts - Configuration with a `load` function and optional id, slot, scope, and XML tag name.
+ * @returns A `MemoryLayer` that provides static instructional content to the model.
+ */
 export function staticContent(opts: StaticContentOpts): MemoryLayer<string> {
   const tag = opts.tag ?? 'instructions';
 

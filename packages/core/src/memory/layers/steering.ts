@@ -290,6 +290,13 @@ async function evaluateRules({
 
 //#region Public API
 
+/**
+ * Creates a steering memory layer that evaluates rules before tool calls and after model calls.
+ *
+ * @public
+ * @param config - Steering configuration including rules, optional callModel for LLM-based evaluation, scope, and max ledger size.
+ * @returns A `MemoryLayer` that enforces steering rules via allow/deny/guide decisions.
+ */
 export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
   const maxLedger = config.maxLedgerEntries ?? DEFAULT_MAX_LEDGER_ENTRIES;
   const scope: MemoryScope = config.scope ?? 'execution';

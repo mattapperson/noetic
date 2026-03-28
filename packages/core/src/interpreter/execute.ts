@@ -14,6 +14,19 @@ import { isMutableContext } from './typeguards';
 
 const MAX_DEPTH = 64;
 
+/**
+ * Executes a step within the interpreter, dispatching to the appropriate handler by step kind.
+ *
+ * @public
+ * @param step - The step to execute.
+ * @param input - Input value passed to the step.
+ * @param ctx - Execution context carrying state, tokens, and observability.
+ * @param callModel - Optional model-calling function required for LLM steps.
+ * @param harness - Optional agent harness required for tool steps and memory lifecycle.
+ * @returns The step's output value.
+ * @throws `NoeticError` with kind `step_failed` if max depth is exceeded or an unknown step kind is encountered.
+ * @throws `NoeticError` with kind `cancelled` if the context is aborted.
+ */
 export async function execute<I, O>(
   step: Step<I, O>,
   input: I,

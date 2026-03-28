@@ -1,5 +1,10 @@
 import type { NoeticError } from '../types/error';
 
+/**
+ * Runtime error thrown during step execution (LLM failures, fork failures, budget exceeded, etc.).
+ *
+ * @public
+ */
 export class NoeticErrorImpl extends Error {
   readonly noeticError: NoeticError;
 
@@ -10,6 +15,13 @@ export class NoeticErrorImpl extends Error {
   }
 }
 
+/**
+ * Type guard for `NoeticErrorImpl`.
+ *
+ * @public
+ * @param e - Value to check.
+ * @returns `true` if `e` is a `NoeticErrorImpl`.
+ */
 export function isNoeticError(e: unknown): e is NoeticErrorImpl {
   return e instanceof NoeticErrorImpl;
 }

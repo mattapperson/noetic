@@ -1,5 +1,6 @@
 import type { ZodError, ZodType } from 'zod';
 
+/** @public Discriminated union of all structured error kinds raised by the runtime. */
 export type NoeticError =
   | {
       kind: 'step_failed';

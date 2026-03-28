@@ -1,6 +1,6 @@
 # Semantic Conditions and Embedding-Based Routing
 
-> **Depends On:** `03-control-flow` (branch, StepBranch), `05-loop-and-until` (ConvergeOpts)
+> **Depends On:** `03-control-flow` (branch, StepBranch), `05-loop-and-until` (ConvergeConfig)
 > **Exports:** `Condition`, `WhenClause`, `OtherwiseClause`, `when()`, `otherwise()`, `semanticRoute()`, `semanticSwitch()`, `embeddingMatch()`, `aiCondition()`, `anyCondition()`, `allCondition()`, `cosineSimilarity()`, `EmbedFn`
 
 ---

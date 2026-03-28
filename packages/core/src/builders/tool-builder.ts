@@ -1,4 +1,5 @@
 import type { ZodTypeAny, z } from 'zod';
+import { NoeticConfigError } from '../errors/noetic-config-error';
 import type { Tool } from '../types/common';
 import type { ToolExecutionContext } from '../types/tool-context';
 
@@ -16,7 +17,10 @@ import type { ToolExecutionContext } from '../types/tool-context';
  * @param config.execute - Async function `(args, toolCtx) => result` that performs the tool's work.
  * @param config.needsApproval - When true, execution pauses for human approval before running.
  * @returns A `Tool` instance usable in `step.llm` tool arrays.
+ * @throws `NoeticConfigError` with code `EMPTY_TOOL_NAME` if `name` is empty.
+ * @throws `NoeticConfigError` with code `MISSING_EXECUTE_FUNCTION` if `execute` is not provided.
  *
+ * @public
  * @example
  * ```ts
  * const myTool = tool({
@@ -37,10 +41,18 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(config: {
   needsApproval?: boolean;
 }): Tool<I, O> {
   if (!config.name || config.name.trim() === '') {
-    throw new Error('tool() requires a non-empty name');
+    throw new NoeticConfigError({
+      code: 'EMPTY_TOOL_NAME',
+      message: 'tool() requires a non-empty name.',
+      hint: "Pass a unique name for the tool, e.g. tool({ name: 'greet', ... }).",
+    });
   }
   if (!config.execute) {
-    throw new Error('tool() requires an execute function');
+    throw new NoeticConfigError({
+      code: 'MISSING_EXECUTE_FUNCTION',
+      message: 'tool() requires an execute function.',
+      hint: 'Provide an async execute function, e.g. execute: async (args, toolCtx) => result.',
+    });
   }
   return {
     name: config.name,

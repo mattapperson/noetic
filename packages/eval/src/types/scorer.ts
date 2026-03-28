@@ -1,4 +1,4 @@
-import type { Context, SpanImpl } from '@noetic/core';
+import type { Context, Span } from '@noetic/core';
 import type { ZodType } from 'zod';
 
 import type { ScoreResult } from './eval';
@@ -8,7 +8,7 @@ import type { ScoreResult } from './eval';
 export interface EvalExecution {
   output: unknown;
   context: Context;
-  traces: SpanImpl[];
+  traces: Span[];
   score(scorers: ScorerFn[]): Promise<ScoreResult[]>;
 }
 

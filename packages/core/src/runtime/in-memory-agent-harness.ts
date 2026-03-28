@@ -49,6 +49,12 @@ interface InMemoryAgentHarnessOpts<
 
 //#region InMemoryAgentHarness
 
+/**
+ * In-memory implementation of `AgentHarness` for testing and simple deployments.
+ * Provides channel store, memory layer lifecycle, and trace export with no external dependencies.
+ *
+ * @public
+ */
 export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>>
   implements AgentHarness<TParams>
 {

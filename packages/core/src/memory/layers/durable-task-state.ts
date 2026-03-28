@@ -24,6 +24,13 @@ export interface DurableTaskStateConfig {
   serializer?: DurableTaskStateSerializer;
 }
 
+/**
+ * Creates a memory layer that persists task checkpoints, files, and arbitrary data across iterations.
+ *
+ * @public
+ * @param _config - Optional configuration for base directory, git commit behavior, schema, and serializer.
+ * @returns A `MemoryLayer` scoped to the execution with durable task state.
+ */
 export function durableTaskState(_config?: DurableTaskStateConfig): MemoryLayer<DurableTaskState> {
   return {
     id: 'durable-task-state',

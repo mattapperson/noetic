@@ -7,6 +7,14 @@ import type { VerifyFn } from '../until/predicates';
 import { until } from '../until/predicates';
 import { react } from './react';
 
+/**
+ * Creates a retry-with-feedback loop wrapping a ReAct agent. Each iteration spawns an inner agent
+ * and retries with verification feedback until the verifier passes or max iterations is reached.
+ *
+ * @public
+ * @param opts - Model, tools, system prompt, verify function, and optional iteration/step limits.
+ * @returns A `StepLoop` that retries the inner agent with feedback.
+ */
 export function ralphWiggum(opts: {
   model: string;
   system: string;

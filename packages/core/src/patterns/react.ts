@@ -7,6 +7,13 @@ import type { StepLoop, StepSpawn } from '../types/step';
 import { any } from '../until/combinators';
 import { until } from '../until/predicates';
 
+/**
+ * Creates a ReAct (Reason + Act) agent loop: an LLM step with tools iterated until no tool calls or limits are hit.
+ *
+ * @public
+ * @param opts - Model, tools, optional system prompt, step/cost limits, and memory layers.
+ * @returns A `StepLoop` (no memory) or `StepSpawn` wrapping a loop (with memory).
+ */
 export function react(opts: {
   model: string;
   system?: string;

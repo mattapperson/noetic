@@ -87,6 +87,14 @@ async function getLabelVectors(
 
 //#region Clause Builders
 
+/**
+ * Creates a conditional clause that routes to the given step when the condition is true.
+ *
+ * @public
+ * @param condition - Async predicate evaluated against the input and context.
+ * @param step - Step to execute when the condition matches.
+ * @returns A `WhenClause` for use in `semanticRoute`.
+ */
 export function when<I, O>(condition: Condition<I>, step: Step<I, O>): WhenClause<I, O> {
   return {
     kind: 'when',
@@ -95,6 +103,13 @@ export function when<I, O>(condition: Condition<I>, step: Step<I, O>): WhenClaus
   };
 }
 
+/**
+ * Creates a fallback clause that always matches, used as the last clause in `semanticRoute`.
+ *
+ * @public
+ * @param step - Step to execute when no prior `when` clause matches.
+ * @returns An `OtherwiseClause` for use in `semanticRoute`.
+ */
 export function otherwise<I, O>(step: Step<I, O>): OtherwiseClause<I, O> {
   return {
     kind: 'otherwise',
@@ -110,6 +125,14 @@ function isOtherwise<I, O>(clause: Clause<I, O>): clause is OtherwiseClause<I, O
   return clause.kind === 'otherwise';
 }
 
+/**
+ * Builds a route function from an ordered list of `when`/`otherwise` clauses.
+ * Evaluates clauses sequentially, returning the first matching step or `null`.
+ *
+ * @public
+ * @param clauses - Ordered `WhenClause` and optional trailing `OtherwiseClause`.
+ * @returns A route function suitable for `branch({ route })`.
+ */
 export function semanticRoute<I, O>(
   ...clauses: Clause<I, O>[]
 ): (input: I, ctx: Context) => Promise<Step<I, O> | null> {
@@ -150,10 +173,18 @@ interface SemanticSwitchAdvanced<I, O> {
   cache?: StorageAdapter;
 }
 
+/**
+ * Builds a route function that selects the best-matching case via embedding cosine similarity.
+ *
+ * @public
+ * @param opts - Simple form with `Record<string, Step>` cases, or advanced form with multi-label cases.
+ * @returns A route function suitable for `branch({ route })`.
+ */
 export function semanticSwitch<I, O>(
   opts: SemanticSwitchSimple<I, O>,
 ): (input: I, ctx: Context) => Promise<Step<I, O> | null>;
 
+/** @public */
 export function semanticSwitch<I, O>(
   opts: SemanticSwitchAdvanced<I, O>,
 ): (input: I, ctx: Context) => Promise<Step<I, O> | null>;
@@ -222,8 +253,18 @@ export function semanticSwitch<I, O>(
 
 //#region embeddingMatch
 
+/**
+ * Creates a condition that matches when the input embedding is within a cosine similarity threshold of a label.
+ *
+ * @public
+ * @param embed - Embedding function or advanced options object.
+ * @param label - Label string (simple form).
+ * @param threshold - Minimum cosine similarity score to match.
+ * @returns A `Condition` usable in `when()` clauses.
+ */
 export function embeddingMatch<I>(embed: EmbedFn, label: string, threshold: number): Condition<I>;
 
+/** @public */
 export function embeddingMatch<I>(opts: {
   embed: EmbedFn;
   labels: string[];
@@ -306,6 +347,13 @@ export function embeddingMatch<I>(
 
 //#region Combinators
 
+/**
+ * Combines conditions with OR semantics; returns true on the first truthy condition.
+ *
+ * @public
+ * @param conditions - Conditions to evaluate.
+ * @returns A `Condition` that short-circuits on the first match.
+ */
 export function anyCondition<I>(...conditions: Condition<I>[]): Condition<I> {
   return async (input: I, ctx: Context): Promise<boolean> => {
     for (const condition of conditions) {
@@ -317,6 +365,13 @@ export function anyCondition<I>(...conditions: Condition<I>[]): Condition<I> {
   };
 }
 
+/**
+ * Combines conditions with AND semantics; returns false on the first falsy condition.
+ *
+ * @public
+ * @param conditions - Conditions to evaluate.
+ * @returns A `Condition` that short-circuits on the first non-match.
+ */
 export function allCondition<I>(...conditions: Condition<I>[]): Condition<I> {
   return async (input: I, ctx: Context): Promise<boolean> => {
     for (const condition of conditions) {
@@ -336,6 +391,13 @@ const AiConditionResponseSchema = z.object({
   answer: z.boolean(),
 });
 
+/**
+ * Creates a condition that uses an LLM to classify the input as true or false.
+ *
+ * @public
+ * @param opts - Configuration with callModel function, model identifier, and classification prompt.
+ * @returns A `Condition` that delegates boolean classification to the model.
+ */
 export function aiCondition<I>(opts: {
   callModel: CallModelFn;
   model: string;

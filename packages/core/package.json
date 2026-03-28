@@ -4,6 +4,20 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./unstable": {
+      "types": "./src/unstable.ts",
+      "default": "./src/unstable.ts"
+    },
+    "./internal/test": {
+      "types": "./src/internal-test.ts",
+      "default": "./src/internal-test.ts"
+    }
+  },
   "devDependencies": {
     "@openrouter/sdk": "0.10.2",
     "bun-types": "latest"

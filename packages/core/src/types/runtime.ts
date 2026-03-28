@@ -8,11 +8,13 @@ import type { Span } from './observability';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
 
+/** @public Optional lifecycle hooks invoked before and after each step execution. */
 export interface AgentHooks {
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
 }
 
+/** @public Top-level configuration object that defines an agent's model, tools, memory, and behavior. */
 export interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   storage?: StorageAdapter;
@@ -20,6 +22,7 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   params: TParams;
 }
 
+/** @public Core runtime interface for executing steps, managing channels, and coordinating memory layers. */
 export interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly config: AgentConfig<TParams>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
@@ -67,6 +70,7 @@ export interface AgentHarness<TParams extends Record<string, unknown> = Record<s
 /** @deprecated Use AgentHarness instead. */
 export type Runtime = AgentHarness;
 
+/** @public Output from a single memory layer's recall phase, including items and token budget used. */
 export interface RecallLayerOutput {
   layerId: string;
   items: Item[];

@@ -1,13 +1,14 @@
 import type { Span, TraceExporter } from '../types/observability';
 import { SpanImpl } from './span-impl';
 
+/** @public No-op trace exporter that silently discards all spans. */
 export class NoopExporter implements TraceExporter {
   async export(_spans: Span[]): Promise<void> {
     // No-op
   }
 }
 
-/** Collects SpanImpl instances for test assertions and diagnostics. Non-SpanImpl spans are filtered out. */
+/** @public Collects SpanImpl instances for test assertions and diagnostics. Non-SpanImpl spans are filtered out. */
 export class InMemoryExporter implements TraceExporter {
   readonly spans: SpanImpl[] = [];
 

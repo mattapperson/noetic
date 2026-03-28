@@ -114,7 +114,7 @@ until.verified(fn: VerifyFn): Until
 Stops when the output text is identical to the previous iteration's output.
 
 ```ts
-until.converged(opts: ConvergeOpts): Until
+until.converged(opts: ConvergeConfig): Until
 ```
 
 ### until.outputContains(marker)
@@ -149,10 +149,10 @@ type VerifyFn = (output: unknown) => Promise<{
 | `pass` | `boolean` | Whether verification succeeded |
 | `feedback` | `string` | Feedback for the next iteration (optional) |
 
-## ConvergeOpts
+## ConvergeConfig
 
 ```ts
-interface ConvergeOpts {
+interface ConvergeConfig {
   threshold?: number;
   embed?: EmbedFn;
   cache?: StorageAdapter;

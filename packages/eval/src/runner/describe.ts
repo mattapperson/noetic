@@ -1,5 +1,5 @@
 import type { Step } from '@noetic/core';
-import { frameworkCast } from '@noetic/core';
+import { frameworkCast } from '@noetic/core/unstable';
 
 import type { EvalSuiteOptions } from '../types/eval';
 import type { EvalContext } from './eval-context';

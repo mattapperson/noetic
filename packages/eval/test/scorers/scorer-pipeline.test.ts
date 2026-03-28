@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ContextImpl, SpanImpl } from '@noetic/core';
+import { ContextImpl, SpanImpl } from '@noetic/core/internal/test';
 import { createScorer } from '../../src/scorers/scorer-pipeline';
 import type { EvalExecution, ScoreResult, ScorerFn } from '../../src/scorers/types';
 

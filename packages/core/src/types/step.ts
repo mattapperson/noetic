@@ -5,7 +5,10 @@ import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { MemoryLayer } from './memory';
 
-/** Cumulative execution snapshot passed to loop `until` predicates. */
+/**
+ * Cumulative execution snapshot passed to loop `until` predicates.
+ * @public
+ */
 export interface Snapshot {
   /** Number of loop iterations completed so far. */
   stepCount: number;
@@ -31,7 +34,10 @@ export interface Snapshot {
   lastStepMeta?: StepMeta | null;
 }
 
-/** Decision returned by a loop `until` predicate. */
+/**
+ * Decision returned by a loop `until` predicate.
+ * @public
+ */
 export interface Verdict {
   /** When true, the loop terminates after this iteration. */
   stop: boolean;
@@ -41,9 +47,13 @@ export interface Verdict {
   feedback?: string;
 }
 
+/** @public Predicate function evaluated after each loop iteration to decide whether to stop. */
 export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
-/** Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`). */
+/**
+ * Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`).
+ * @public
+ */
 export interface SettleResult<O> {
   /** Id of the step that produced this result. */
   stepId: string;
@@ -55,7 +65,7 @@ export interface SettleResult<O> {
   error?: NoeticError;
 }
 
-// The main Step discriminated union
+/** @public Discriminated union of all step kinds that can be composed into an execution tree. */
 export type Step<I = unknown, O = unknown> =
   | StepRun<I, O>
   | StepLLM<I, O>
@@ -65,6 +75,7 @@ export type Step<I = unknown, O = unknown> =
   | StepSpawn<I, O>
   | StepLoop<I, O>;
 
+/** @public A step that executes arbitrary async logic via a user-supplied function. */
 export interface StepRun<I, O> {
   kind: 'run';
   id: string;
@@ -72,6 +83,7 @@ export interface StepRun<I, O> {
   retry?: RetryPolicy;
 }
 
+/** @public A step that sends a prompt to a language model and returns its response. */
 export interface StepLLM<_I, O> {
   kind: 'llm';
   id: string;
@@ -82,6 +94,7 @@ export interface StepLLM<_I, O> {
   params?: ModelParams;
 }
 
+/** @public A step that invokes a single tool directly, bypassing the LLM. */
 export interface StepTool<I, O> {
   kind: 'tool';
   id: string;
@@ -89,6 +102,7 @@ export interface StepTool<I, O> {
   args?: Partial<I>;
 }
 
+/** @public A step that dynamically selects and executes one of several possible sub-steps. */
 export interface StepBranch<I, O> {
   kind: 'branch';
   id: string;
@@ -96,9 +110,10 @@ export interface StepBranch<I, O> {
   _optimizable?: Step[];
 }
 
-// Fork with type-safe mode variants
+/** @public Union of fork step variants (`race`, `all`, `settle`) for concurrent path execution. */
 export type StepFork<I, O> = StepForkRace<I, O> | StepForkAll<I, O> | StepForkSettle<I, O>;
 
+/** @public A fork step that returns the result of the first path to complete. */
 export interface StepForkRace<I, O> {
   kind: 'fork';
   id: string;
@@ -108,6 +123,7 @@ export interface StepForkRace<I, O> {
   _optimizable?: Step[];
 }
 
+/** @public A fork step that runs all paths and merges their results. */
 export interface StepForkAll<I, O> {
   kind: 'fork';
   id: string;
@@ -118,6 +134,7 @@ export interface StepForkAll<I, O> {
   _optimizable?: Step[];
 }
 
+/** @public A fork step that runs all paths and collects fulfilled/rejected outcomes. */
 export interface StepForkSettle<I, O> {
   kind: 'fork';
   id: string;
@@ -128,6 +145,7 @@ export interface StepForkSettle<I, O> {
   _optimizable?: Step[];
 }
 
+/** @public A step that launches a child execution with its own memory scope. */
 export interface StepSpawn<I, O> {
   kind: 'spawn';
   id: string;
@@ -136,7 +154,10 @@ export interface StepSpawn<I, O> {
   timeout?: number;
 }
 
-/** A loop step that iterates a body step until a termination predicate is satisfied. */
+/**
+ * A loop step that iterates a body step until a termination predicate is satisfied.
+ * @public
+ */
 export interface StepLoop<I, O> {
   kind: 'loop';
   /** Unique step identifier used in traces and error messages. */
@@ -159,4 +180,5 @@ export interface StepLoop<I, O> {
   onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
 
+/** @public Function signature used by the interpreter to recursively execute a step. */
 export type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;

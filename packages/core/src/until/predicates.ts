@@ -3,11 +3,13 @@ import type { EmbedFn } from '../types/embed';
 import type { StorageAdapter } from '../types/memory';
 import type { Snapshot, Until, Verdict } from '../types/step';
 
+/** @public Async verification function that checks loop output and optionally returns feedback. */
 export type VerifyFn = (output: unknown) => Promise<{
   pass: boolean;
   feedback?: string;
 }>;
-export interface ConvergeOpts {
+/** @public Configuration for the `converged` until predicate, supporting exact or embedding-based similarity. */
+export interface ConvergeConfig {
   /** Similarity threshold. Default 1 (exact match). When embed is provided and threshold < 1, uses cosine similarity. */
   threshold?: number;
   /** When provided with threshold < 1, enables embedding-based similarity comparison. */
@@ -18,7 +20,13 @@ export interface ConvergeOpts {
 
 const CONVERGE_CACHE_KEY = 'converge:previousVector';
 
+/**
+ * Namespace of built-in loop termination predicates.
+ *
+ * @public
+ */
 export const until = {
+  /** Stops the loop after `n` steps. @public */
   maxSteps(n: number): Until {
     return (snap: Snapshot): Verdict => ({
       stop: snap.stepCount >= n,
@@ -26,6 +34,7 @@ export const until = {
     });
   },
 
+  /** Stops the loop when accumulated cost reaches `usd`. @public */
   maxCost(usd: number): Until {
     return (snap: Snapshot): Verdict => ({
       stop: snap.cost >= usd,
@@ -33,6 +42,7 @@ export const until = {
     });
   },
 
+  /** Stops the loop when elapsed time reaches `ms` milliseconds. @public */
   maxDuration(ms: number): Until {
     return (snap: Snapshot): Verdict => ({
       stop: snap.elapsed >= ms,
@@ -40,6 +50,7 @@ export const until = {
     });
   },
 
+  /** Stops the loop when the last model response contains no tool calls. @public */
   noToolCalls(): Until {
     return (snap: Snapshot): Verdict => {
       if (snap.stepCount < 1) {
@@ -56,6 +67,7 @@ export const until = {
     };
   },
 
+  /** Stops the loop when the verify function returns `{ pass: true }`. @public */
   verified(fn: VerifyFn): Until {
     return async (snap: Snapshot): Promise<Verdict> => {
       const result = await fn(snap.lastOutput);
@@ -67,7 +79,8 @@ export const until = {
     };
   },
 
-  converged(opts: ConvergeOpts): Until {
+  /** Stops the loop when consecutive outputs are similar (exact equality or embedding cosine similarity). @public */
+  converged(opts: ConvergeConfig): Until {
     const threshold = opts.threshold ?? 1;
     const { embed } = opts;
 
@@ -130,6 +143,7 @@ export const until = {
     };
   },
 
+  /** Stops the loop when the last output text contains the given marker string. @public */
   outputContains(marker: string): Until {
     return (snap: Snapshot): Verdict => ({
       stop: snap.lastText.includes(marker),
@@ -137,6 +151,7 @@ export const until = {
     });
   },
 
+  /** Wraps an arbitrary `Until` function as a named predicate. @public */
   custom(fn: Until): Until {
     return fn;
   },

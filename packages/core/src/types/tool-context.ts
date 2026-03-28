@@ -4,12 +4,16 @@ import type { Context } from './context';
 import type { Item } from './items';
 import type { AgentHarness } from './runtime';
 
+/** @public Accessor for reading and writing per-layer state from within a tool execution. */
 export interface ToolMemory {
   get<T>(layerId: string): T | undefined;
   set<T>(layerId: string, state: T): void;
 }
 
-/** Context provided to a tool's `execute` function at invocation time. */
+/**
+ * Context provided to a tool's `execute` function at invocation time.
+ * @public
+ */
 export interface ToolExecutionContext {
   /** The current step execution context (access to item log, parent id, etc.). */
   readonly ctx: Context;

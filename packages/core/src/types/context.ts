@@ -4,11 +4,13 @@ import type { Item } from './items';
 import type { Span } from './observability';
 import type { AgentHarness } from './runtime';
 
+/** @public Append-only log of conversation items accumulated during execution. */
 export interface ItemLog {
   readonly items: ReadonlyArray<Item>;
   append(item: Item): void;
 }
 
+/** @public Execution context threaded through every step, carrying state, metrics, and channels. */
 export interface Context<TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
