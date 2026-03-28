@@ -62,3 +62,6 @@ export type Item =
   | FunctionCallOutputItem
   | ReasoningItem
   | ExtensionItem;
+
+/** @public Accepted input types for `AgentHarness.execute()`: a plain string, a single Item, or an array of Items. */
+export type ExecuteInput = string | Item | Item[];

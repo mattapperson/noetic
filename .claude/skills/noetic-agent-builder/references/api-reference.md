@@ -279,11 +279,22 @@ interface SteeringRule {
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
 
 ```typescript
+// High-level API: pass agent step to constructor, execute with simple inputs
 const harness = new InMemoryAgentHarness({
   name: 'my-agent',
+  initialStep: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
 });
-const ctx = harness.createContext({ threadId?, resourceId? });
+const result = await harness.execute('Hello');           // string input
+const result = await harness.execute(messageItem);       // single Item
+const result = await harness.execute([item1, item2]);    // Item[]
+const result = await harness.execute('Hello', {          // with options
+  threadId: 'thread-1',
+  resourceId: 'user-1',
+});
+
+// Low-level API: manual context creation + run()
+const ctx = harness.createContext({ threadId: 'thread-1' });
 const result = await harness.run(step, input, ctx);
 
 // Access config params from context

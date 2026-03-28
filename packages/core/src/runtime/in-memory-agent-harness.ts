@@ -1,5 +1,6 @@
 import type { ZodType } from 'zod';
 import { getDefaultCallModel } from '../adapters/default-call-model';
+import { NoeticConfigError } from '../errors/noetic-config-error';
 import { execute } from '../interpreter/execute';
 import type { CallModelFn } from '../interpreter/execute-llm';
 import { estimateTokens } from '../interpreter/message-helpers';
@@ -19,10 +20,16 @@ import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
-import type { Item } from '../types/items';
+import type { ExecuteInput, Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
-import type { AgentConfig, AgentHarness, AgentHooks, RecallLayerOutput } from '../types/runtime';
+import type {
+  AgentConfig,
+  AgentHarness,
+  AgentHooks,
+  ExecuteOptions,
+  RecallLayerOutput,
+} from '../types/runtime';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
@@ -36,6 +43,7 @@ interface InMemoryAgentHarnessOpts<
   TParams extends Record<string, unknown> = Record<string, unknown>,
 > {
   name: string;
+  initialStep?: Step<string, string>;
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
@@ -59,6 +67,7 @@ export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Reco
   implements AgentHarness<TParams>
 {
   readonly config: AgentConfig<TParams>;
+  private readonly initialStep?: Step<string, string>;
   private callModel?: CallModelFn;
   private readonly channelStore: ChannelStore;
   readonly layerStateStore: LayerStateStore;
@@ -73,23 +82,50 @@ export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Reco
       hooks: opts.hooks,
       params: validatedParams,
     };
+    this.initialStep = opts.initialStep;
     this.callModel = opts.callModel ?? getDefaultCallModel();
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
   }
 
-  async run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
-    return execute(step, input, ctx, this.callModel, this);
+  async execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string> {
+    if (!this.initialStep) {
+      throw new NoeticConfigError({
+        code: 'NO_STEP_CONFIGURED',
+        message: 'No initialStep configured on this harness.',
+        hint: 'Pass `initialStep` in constructor options, or use run() directly.',
+      });
+    }
+
+    if (typeof input === 'string') {
+      const ctx = this.createContext(options);
+      return this.run(this.initialStep, input, ctx);
+    }
+
+    const items = Array.isArray(input)
+      ? input
+      : [
+          input,
+        ];
+    const ctx = this.createContext({
+      items,
+      ...options,
+    });
+    return this.run(this.initialStep, '', ctx);
   }
 
-  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
+  async run<I, O>(s: Step<I, O>, input: I, ctx: Context): Promise<O> {
+    return execute(s, input, ctx, this.callModel, this);
+  }
+
+  detachedSpawn<I, O>(s: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
     const childCtx = this.createContext({
       parent: parentCtx,
       threadId: parentCtx.threadId,
       resourceId: parentCtx.resourceId,
     });
-    const promise = this.run(step, input, childCtx);
+    const promise = this.run(s, input, childCtx);
     return new DetachedHandleImpl<O>(childCtx.id, promise);
   }
 
@@ -198,6 +234,7 @@ export class InMemoryAgentHarness<TParams extends Record<string, unknown> = Reco
   async restore(_executionId: string): Promise<Context | null> {
     return null;
   }
+
   async cancel(_ctx: Context, _reason?: string): Promise<void> {}
 
   createSpan(name: string, parent: Span | null): Span {

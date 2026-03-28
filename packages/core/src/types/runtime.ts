@@ -2,7 +2,7 @@ import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse } from './common';
 import type { Context } from './context';
 import type { DetachedHandle } from './detached';
-import type { Item } from './items';
+import type { ExecuteInput, Item } from './items';
 import type { MemoryLayer, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { SteeringDecision } from './steering';
@@ -22,9 +22,17 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   params: TParams;
 }
 
+/** @public Options for `AgentHarness.execute()` to configure the execution context. */
+export interface ExecuteOptions {
+  threadId?: string;
+  resourceId?: string;
+  state?: unknown;
+}
+
 /** @public Core runtime interface for executing steps, managing channels, and coordinating memory layers. */
 export interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly config: AgentConfig<TParams>;
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: {

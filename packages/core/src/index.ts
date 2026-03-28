@@ -173,6 +173,7 @@ export type { NoeticError } from './types/error';
 /** @public */
 export type {
   ContentPart,
+  ExecuteInput,
   ExtensionItem,
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -230,6 +231,7 @@ export type {
   AgentConfig,
   AgentHarness,
   AgentHooks,
+  ExecuteOptions,
   RecallLayerOutput,
   Runtime,
 } from './types/runtime';

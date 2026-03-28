@@ -303,6 +303,9 @@ export function makeMockHarness(): AgentHarness {
       name: 'test-harness',
       params: {},
     },
+    execute: async () => {
+      throw new Error('not impl');
+    },
     run: async () => {
       throw new Error('not impl');
     },

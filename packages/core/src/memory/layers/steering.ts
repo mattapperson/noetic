@@ -20,6 +20,9 @@ const STUB_HARNESS: AgentHarness = {
     name: 'steering-eval',
     params: {},
   },
+  execute: () => {
+    throw new Error('not available');
+  },
   run: () => {
     throw new Error('not available');
   },

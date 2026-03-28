@@ -14,9 +14,8 @@ const agent = react({
   maxSteps: 10,
 });
 
-const harness = new InMemoryAgentHarness({ name: 'basic', params: {} });
-const ctx = harness.createContext();
-const result = await harness.run(agent, 'What is 2+2?', ctx);
+const harness = new InMemoryAgentHarness({ name: 'basic', initialStep: agent, params: {} });
+const result = await harness.execute('What is 2+2?');
 ```
 
 ## Pattern: Agent with Memory
