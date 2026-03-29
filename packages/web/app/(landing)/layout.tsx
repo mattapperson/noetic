@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react';
-
-export default function LandingLayout({ children }: { children: ReactNode }): ReactNode {
+export default function LandingLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.ReactNode {
   return <>{children}</>;
 }
