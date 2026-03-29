@@ -34,7 +34,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 
-2. **Execution infrastructure** (`07-context-and-event-log`, `08-agent-harness`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable agent harness backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with `callModel`.
+2. **Execution infrastructure** (`07-context-and-event-log`, `08-agent-harness`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable agent harness backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with the LLM provider.
 
 `@noetic/memory` provides:
 

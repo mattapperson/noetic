@@ -1,10 +1,8 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
-import type { AgentHarnessContract } from '../types/runtime';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
-import type { CallModelFn } from './execute-llm';
 import { executeLLM } from './execute-llm';
 import { executeLoop } from './execute-loop';
 import { executeRun } from './execute-run';
@@ -17,23 +15,14 @@ const MAX_DEPTH = 64;
 /**
  * Executes a step within the interpreter, dispatching to the appropriate handler by step kind.
  *
- * @public
  * @param step - The step to execute.
  * @param input - Input value passed to the step.
  * @param ctx - Execution context carrying state, tokens, and observability.
- * @param callModel - Optional model-calling function required for LLM steps.
- * @param harness - Optional agent harness required for tool steps and memory lifecycle.
  * @returns The step's output value.
  * @throws `NoeticError` with kind `step_failed` if max depth is exceeded or an unknown step kind is encountered.
  * @throws `NoeticError` with kind `cancelled` if the context is aborted.
  */
-export async function execute<I, O>(
-  step: Step<I, O>,
-  input: I,
-  ctx: Context,
-  callModel?: CallModelFn,
-  harness?: AgentHarnessContract,
-): Promise<O> {
+export async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
@@ -62,33 +51,17 @@ export async function execute<I, O>(
     case 'run':
       return executeRun(step, input, ctx);
     case 'llm':
-      if (!callModel) {
-        throw new NoeticErrorImpl({
-          kind: 'step_failed',
-          stepId: step.id,
-          cause: new Error('callModel is required for LLM steps'),
-          retriesExhausted: false,
-        });
-      }
-      return executeLLM(step, input, ctx, callModel, harness);
+      return executeLLM(step, input, ctx, ctx.layers);
     case 'tool':
-      if (!harness) {
-        throw new NoeticErrorImpl({
-          kind: 'step_failed',
-          stepId: step.id,
-          cause: new Error('harness is required for tool steps'),
-          retriesExhausted: false,
-        });
-      }
-      return executeTool(step, input, ctx, harness);
+      return executeTool(step, input, ctx, ctx.harness);
     case 'branch':
-      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
+      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'fork':
-      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
+      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'loop':
-      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, harness));
+      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
     default: {
       const _exhaustive: never = step;
       throw new NoeticErrorImpl({

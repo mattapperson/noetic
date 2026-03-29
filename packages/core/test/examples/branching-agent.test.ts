@@ -28,13 +28,12 @@ describe('branching agent', () => {
   });
 
   it('routes technical keywords to llm handler', async () => {
-    const callModel = createScriptedCallModel([
-      textOnlyResponse('Try clearing your cache and restarting.'),
-    ]);
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('Try clearing your cache and restarting.'),
+      ]),
     });
     const ctx = harness.createContext();
     const agent = buildBranchingAgent();

@@ -11,7 +11,6 @@ import type {
 } from '@openrouter/sdk/models';
 import { z } from 'zod';
 
-import type { CallModelFn, CallModelParams } from '../interpreter/execute-llm';
 import { frameworkCast } from '../interpreter/framework-cast';
 import { isAssistantMessage, isOutputText } from '../interpreter/typeguards';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
@@ -33,7 +32,7 @@ type SdkToolArray = CallModelInput extends {
 }
   ? NonNullable<T>
   : never;
-type SdkTool = SdkToolArray[number];
+export type SdkTool = SdkToolArray[number];
 
 //#endregion
 
@@ -62,14 +61,11 @@ type OpenRouterInputItem =
   | OpenResponsesFunctionToolCall
   | OpenResponsesFunctionCallOutput;
 
-/**
- * Minimal interface covering only the methods used by createOpenRouterCallModel.
- * Allows passing a mock or a real OpenRouter client interchangeably.
- */
-export interface OpenRouterClientLike {
-  callModel(request: CallModelInput<SdkTool[]>): {
-    getResponse(): Promise<OpenResponsesNonStreamingResponse>;
-  };
+export interface ConvertToolsParams {
+  tools: ReadonlyArray<Tool>;
+  ctx: Context;
+  harness: AgentHarnessContract;
+  layers?: MemoryLayer[];
 }
 
 const EmbeddingsResponseSchema = z.object({
@@ -80,13 +76,6 @@ const EmbeddingsResponseSchema = z.object({
     }),
   ),
 });
-
-interface ConvertToolsParams {
-  tools: ReadonlyArray<Tool>;
-  ctx: Context;
-  harness: AgentHarnessContract;
-  layers?: MemoryLayer[];
-}
 
 //#endregion
 
@@ -121,7 +110,7 @@ function contentPartToText(parts: ReadonlyArray<ContentPart>): string {
 
 //#region Item → OpenRouter Input Conversion
 
-function extractSystemInstruction(items: ReadonlyArray<Item>): {
+export function extractSystemInstruction(items: ReadonlyArray<Item>): {
   instructions: string | undefined;
   remaining: Item[];
 } {
@@ -161,7 +150,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   if (item.type === 'function_call') {
     return {
       type: 'function_call',
-      callId: item.call_id,
+      callId: item.callId,
       id: item.id,
       name: item.name,
       arguments: item.arguments,
@@ -171,7 +160,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   if (item.type === 'function_call_output') {
     return {
       type: 'function_call_output',
-      callId: item.call_id,
+      callId: item.callId,
       output: item.output,
     } satisfies OpenResponsesFunctionCallOutput;
   }
@@ -180,7 +169,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   return null;
 }
 
-function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
+export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
   const result: OpenRouterInputItem[] = [];
   for (const item of items) {
     const inputItem = itemToInputItem(item);
@@ -223,7 +212,7 @@ function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
       id: entry.id ?? crypto.randomUUID(),
       status: 'completed',
       type: 'function_call',
-      call_id: entry.callId,
+      callId: entry.callId,
       name: entry.name,
       arguments: entry.arguments,
     } satisfies FunctionCallItem;
@@ -233,7 +222,7 @@ function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
   return null;
 }
 
-function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Item[] {
+export function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Item[] {
   const items: Item[] = [];
   let hasMessage = false;
 
@@ -267,7 +256,7 @@ function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Ite
   return items;
 }
 
-function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse['usage'] {
+export function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse['usage'] {
   if (!usage) {
     return {
       inputTokens: 0,
@@ -289,7 +278,7 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 // the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
 // This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation.
-function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkTool[] {
+export function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
@@ -319,52 +308,6 @@ function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkT
 //#endregion
 
 //#region Public API
-
-/**
- * Creates a `CallModelFn` that delegates to an OpenRouter client for LLM inference.
- *
- * @public
- * @param client - An OpenRouter client (or compatible mock) implementing `callModel`.
- * @returns A `CallModelFn` suitable for use with `AgentHarness`.
- */
-export function createOpenRouterCallModel(client: OpenRouterClientLike): CallModelFn {
-  return async (params: CallModelParams): Promise<LLMResponse> => {
-    const { instructions, remaining } = extractSystemInstruction(params.items);
-    const input = itemsToInput(remaining);
-
-    let tools: SdkTool[] | undefined;
-    if (params.tools && params.tools.length > 0) {
-      if (!params.harness) {
-        throw new Error('harness is required when tools are provided');
-      }
-      tools = convertTools({
-        tools: params.tools,
-        ctx: params.ctx,
-        harness: params.harness,
-        layers: params.layers,
-      });
-    }
-
-    const result = client.callModel({
-      model: params.model,
-      input,
-      instructions,
-      tools,
-      temperature: params.params?.temperature,
-      maxOutputTokens: params.params?.maxTokens,
-      topP: params.params?.topP,
-    });
-
-    const response = await result.getResponse();
-    const noeticItems = responseToNoeticItems(response);
-
-    return {
-      items: noeticItems,
-      usage: extractUsage(response.usage),
-      cost: response.usage?.cost ?? undefined,
-    };
-  };
-}
 
 /**
  * Creates an `EmbedFn` that calls the OpenRouter embeddings API.

@@ -1,6 +1,7 @@
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
 import type { Item } from './items';
+import type { CallModelRequest } from './runtime';
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
@@ -18,7 +19,7 @@ export const Slot = {
   EPISODIC: 300,
   RAG: 350,
   SEMANTIC_RECALL: 400,
-} as const;
+} as const satisfies Record<string, number>;
 
 /** @public Isolation scope controlling how a memory layer's state is keyed and shared. */
 export type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
@@ -61,6 +62,7 @@ export interface ExecutionContext {
   };
   cost: number;
   model?: string;
+  callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   tokenize(text: string): number;
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;

@@ -1,5 +1,5 @@
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
-import type { LLMResponse } from './common';
+import type { LLMResponse, ModelParams, Tool } from './common';
 import type { Context } from './context';
 import type { DetachedHandle } from './detached';
 import type { ExecuteInput, Item } from './items';
@@ -22,6 +22,30 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   params: TParams;
 }
 
+/** @public Base fields shared by all callModel requests. */
+interface CallModelRequestBase {
+  model: string;
+  items: ReadonlyArray<Item>;
+  params?: ModelParams;
+}
+
+/** @public Request shape when tools are provided — ctx is required for tool execution callbacks. */
+interface CallModelRequestWithTools extends CallModelRequestBase {
+  tools: Tool[];
+  ctx: Context;
+  layers?: MemoryLayer[];
+}
+
+/** @public Request shape when no tools are provided — ctx and layers are not needed. */
+interface CallModelRequestWithoutTools extends CallModelRequestBase {
+  tools?: undefined;
+  ctx?: undefined;
+  layers?: undefined;
+}
+
+/** @public Request object for `AgentHarnessContract.callModel()`. Encapsulates all parameters needed for an LLM call using only Noetic types. */
+export type CallModelRequest = CallModelRequestWithTools | CallModelRequestWithoutTools;
+
 /** @public Options for `AgentHarness.execute()` to configure the execution context. */
 export interface ExecuteOptions {
   threadId?: string;
@@ -34,6 +58,7 @@ export interface AgentHarnessContract<
   TParams extends Record<string, unknown> = Record<string, unknown>,
 > {
   readonly config: AgentConfig<TParams>;
+  callModel(request: CallModelRequest): Promise<LLMResponse>;
   execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string>;
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;

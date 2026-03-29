@@ -87,7 +87,7 @@ const router = branch({
   id: 'smart-router',
   route: semanticRoute(
     when(embeddingMatch(embed, 'greeting', 0.8), greetingStep),
-    when(aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
+    when(aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
     otherwise(defaultStep),
   ),
 });
@@ -164,7 +164,6 @@ Uses an LLM as a boolean classifier. The model receives the input and answers a 
 import { aiCondition } from '@noetic/core';
 
 const isUrgent = aiCondition({
-  callModel,
   model: 'gpt-4o-mini',
   prompt: 'Is this message urgent and requiring immediate attention?',
 });
@@ -172,7 +171,6 @@ const isUrgent = aiCondition({
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `callModel` | `CallModelFn` | Yes | Model invocation function |
 | `model` | `string` | Yes | Model identifier |
 | `prompt` | `string` | Yes | Yes/no question to classify against |
 
@@ -189,7 +187,7 @@ import { anyCondition, embeddingMatch, aiCondition } from '@noetic/core';
 
 const isGreetingOrUrgent = anyCondition(
   embeddingMatch(embed, 'greeting', 0.8),
-  aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+  aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
 );
 ```
 
@@ -202,7 +200,7 @@ import { allCondition, embeddingMatch, aiCondition } from '@noetic/core';
 
 const isUrgentGreeting = allCondition(
   embeddingMatch(embed, 'greeting', 0.8),
-  aiCondition({ callModel, model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+  aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
 );
 ```
 
@@ -248,4 +246,4 @@ Label vectors are cached under deterministic keys (`embed:<encoded-label>`). In-
 
 - [branch](/docs/operators/branch) -- the control flow primitive that uses route functions.
 - [fork](/docs/operators/fork) -- parallel execution.
-- [Adapters](/docs/api/adapter-types) -- `EmbedFn` and `CallModelFn` types.
+- [Adapters](/docs/api/adapter-types) -- `EmbedFn` type and `LlmProviderConfig`.

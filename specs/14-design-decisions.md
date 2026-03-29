@@ -53,7 +53,7 @@ We chose to handle all persistence — including task-level artifacts like files
 
 ## Items-native vs. Message/Event duality
 
-We chose to use OpenResponses `Item` types throughout the framework, collapsing the previous `Message` and `Event` types into a single hierarchy (see `07-context-and-event-log`). Items serve as both the record of what happened (in the `ItemLog`) and the input to `callModel` (in the View). This eliminates impedance mismatch — there is no conversion layer between the framework's internal representation and the model API format. The tradeoff: pattern-matching for simple role checks (e.g., "is this a user message?") requires checking `item.type === 'message' && item.role === 'user'` instead of `message.role === 'user'`, which is slightly more verbose. But the zero-conversion guarantee means fewer bugs and less code overall.
+We chose to use OpenResponses `Item` types throughout the framework, collapsing the previous `Message` and `Event` types into a single hierarchy (see `07-context-and-event-log`). Items serve as both the record of what happened (in the `ItemLog`) and the input to the LLM provider (in the View). This eliminates impedance mismatch — there is no conversion layer between the framework's internal representation and the model API format. The tradeoff: pattern-matching for simple role checks (e.g., "is this a user message?") requires checking `item.type === 'message' && item.role === 'user'` instead of `message.role === 'user'`, which is slightly more verbose. But the zero-conversion guarantee means fewer bugs and less code overall.
 
 ## `tryRecv` vs. blocking-only channel reads
 

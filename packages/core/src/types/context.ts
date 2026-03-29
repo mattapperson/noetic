@@ -1,6 +1,7 @@
 import type { Channel } from './channel';
 import type { StepMeta, TokenUsage } from './common';
 import type { Item } from './items';
+import type { MemoryLayer } from './memory';
 import type { Span } from './observability';
 import type { AgentHarnessContract } from './runtime';
 
@@ -26,6 +27,7 @@ export interface Context<TState = unknown> {
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
   readonly harness: AgentHarnessContract;
+  readonly layers?: MemoryLayer[];
   recv<T>(
     channel: Channel<T>,
     opts?: {

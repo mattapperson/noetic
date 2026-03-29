@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { CallModelFn } from '../interpreter/execute-llm';
 import { createMessage, extractAssistantText } from '../interpreter/message-helpers';
+import { isMutableContext } from '../interpreter/typeguards';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { StorageAdapter } from '../types/memory';
@@ -395,14 +395,10 @@ const AiConditionResponseSchema = z.object({
  * Creates a condition that uses an LLM to classify the input as true or false.
  *
  * @public
- * @param opts - Configuration with callModel function, model identifier, and classification prompt.
+ * @param opts - Configuration with model identifier and classification prompt.
  * @returns A `Condition` that delegates boolean classification to the model.
  */
-export function aiCondition<I>(opts: {
-  callModel: CallModelFn;
-  model: string;
-  prompt: string;
-}): Condition<I> {
+export function aiCondition<I>(opts: { model: string; prompt: string }): Condition<I> {
   return async (input: I, ctx: Context): Promise<boolean> => {
     const text = serializeInput(input);
     const systemPrompt = `You are a boolean classifier. Given the user's input, answer the following question with JSON: {"answer": true} or {"answer": false}.\n\nQuestion: ${opts.prompt}`;
@@ -411,21 +407,29 @@ export function aiCondition<I>(opts: {
       createMessage(text, 'user'),
     ];
 
-    const response = await opts.callModel({
+    const response = await ctx.harness.callModel({
       model: opts.model,
       items,
-      ctx,
       params: {
         temperature: 0,
       },
     });
 
+    if (isMutableContext(ctx)) {
+      ctx.tokens.input += response.usage.inputTokens;
+      ctx.tokens.output += response.usage.outputTokens;
+      ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
+      if (response.cost) {
+        ctx.cost = ctx.cost + response.cost;
+      }
+    }
+
     const responseText = extractAssistantText(response.items);
 
     try {
       const parsed = JSON.parse(responseText);
-      const result = AiConditionResponseSchema.parse(parsed);
-      return result.answer;
+      const validated = AiConditionResponseSchema.parse(parsed);
+      return validated.answer;
     } catch {
       return false;
     }

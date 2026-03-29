@@ -119,7 +119,7 @@ All items share this base:
 | Field | Type | Description |
 |---|---|---|
 | `type` | `'function_call'` | Discriminant |
-| `call_id` | `string` | Unique call identifier |
+| `callId` | `string` | Unique call identifier |
 | `name` | `string` | Function name |
 | `arguments` | `string` | JSON-encoded arguments |
 
@@ -128,7 +128,7 @@ All items share this base:
 | Field | Type | Description |
 |---|---|---|
 | `type` | `'function_call_output'` | Discriminant |
-| `call_id` | `string` | Matching call identifier |
+| `callId` | `string` | Matching call identifier |
 | `output` | `string` | JSON-encoded output |
 
 ### ReasoningItem
@@ -138,7 +138,7 @@ All items share this base:
 | `type` | `'reasoning'` | Discriminant |
 | `content` | `ContentPart[]` | Reasoning content |
 | `summary` | `ContentPart[]` | Summary of reasoning (optional) |
-| `encrypted_content` | `string` | Encrypted reasoning content (optional) |
+| `encryptedContent` | `string` | Encrypted reasoning content (optional) |
 
 ### ExtensionItem
 

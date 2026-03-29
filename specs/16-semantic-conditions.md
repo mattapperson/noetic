@@ -91,9 +91,9 @@ embeddingMatch({
 })
 ```
 
-### `aiCondition({ callModel, model, prompt })`
+### `aiCondition({ model, prompt })`
 
-Returns `Condition<I>` that asks an LLM a yes/no question, parses boolean response via Zod.
+Returns `Condition<I>` that asks an LLM a yes/no question, parses boolean response via Zod. Gets the LLM client from `ctx.harness` internally.
 
 ### `anyCondition(...conditions)`
 

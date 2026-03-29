@@ -216,7 +216,7 @@ interface SteeringRule {
   description: string;
   /**
    * Programmatic check. Return a violation message string to block, or null/undefined to pass.
-   * When omitted, the rule is evaluated by the configured `callModel`.
+   * When omitted, the rule is evaluated by an LLM call via the execution context's harness.
    */
   check?: (toolName: string, toolArgs: unknown) => string | null | undefined;
   /** Which hook to apply this rule in. Default: 'beforeToolCall'. */
@@ -225,8 +225,8 @@ interface SteeringRule {
 
 interface SteeringConfig {
   rules: SteeringRule[];
-  /** LLM used to evaluate rules that have no `check` function. Required if any rule is LLM-evaluated. */
-  callModel?: CallModel;
+  /** Model to use for LLM-evaluated rules. Defaults to the harness's configured model. */
+  model?: string;
   /** Max entries retained in the per-execution violation ledger. Default: 100. */
   maxLedgerEntries?: number;
   /** Max retries for LLM-evaluated rule calls before treating as pass. Default: 2. */
@@ -246,7 +246,7 @@ function steering(config: SteeringConfig): MemoryLayer<SteeringState>
 
 **Behavior:**
 
-- `beforeToolCall`: Runs each rule whose `hook` is `'beforeToolCall'` (the default). Programmatic rules call `check(toolName, toolArgs)`. LLM-evaluated rules send a prompt to `callModel` with the rule description and the pending call; a violation response blocks the tool. If any rule returns a violation, tool execution is blocked and the violation message is surfaced as a tool error. The violation is recorded in the in-memory ledger.
+- `beforeToolCall`: Runs each rule whose `hook` is `'beforeToolCall'` (the default). Programmatic rules call `check(toolName, toolArgs)`. LLM-evaluated rules send a prompt to the LLM (via `ctx.harness`) with the rule description and the pending call; a violation response blocks the tool. If any rule returns a violation, tool execution is blocked and the violation message is surfaced as a tool error. The violation is recorded in the in-memory ledger.
 - `afterModelCall`: Runs each rule whose `hook` is `'afterModelCall'`. LLM-evaluated rules receive the full model response text. A violation aborts the current turn with the violation message.
 - **Ledger**: Each execution maintains a bounded log of `{ ruleId, hook, toolName?, violation, timestamp }` entries. Capped at `maxLedgerEntries`. Accessible via `getLayerState(executionId, 'steering')`.
 - **LLM evaluation**: When a rule has no `check` function, the layer sends a structured prompt: the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`). The model responds with `{ violation: true | false, reason?: string }`. Retried up to `maxRetries` on parse failure; treated as pass on exhaustion.
@@ -269,9 +269,8 @@ steering({
   ],
 });
 
-// LLM-evaluated rule example
+// LLM-evaluated rule example (gets LLM client from ctx.harness internally)
 steering({
-  callModel,
   rules: [
     {
       id: 'no-pii',

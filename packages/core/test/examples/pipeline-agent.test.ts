@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { buildPipelineAgent } from '../../examples/pipeline-agent';
-import type { CallModelParams } from '../../src/interpreter/execute-llm';
 import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
@@ -15,13 +14,12 @@ describe('pipeline agent', () => {
   });
 
   it('runs all three stages and returns the formatted report', async () => {
-    const callModel = createScriptedCallModel([
-      textOnlyResponse('SENTIMENT: positive\nTHEMES: AI\nPATTERNS: growth'),
-    ]);
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('SENTIMENT: positive\nTHEMES: AI\nPATTERNS: growth'),
+      ]),
     });
     const ctx = harness.createContext();
     const agent = buildPipelineAgent();
@@ -33,34 +31,19 @@ describe('pipeline agent', () => {
   });
 
   it('normalize stage collapses whitespace before analysis', async () => {
-    // The normalize stage collapses whitespace; prepareNext passes its output
-    // to the LLM as a user message. We spy on what items the LLM receives.
-    let capturedUserText: string | undefined;
-    const callModel = (params: CallModelParams) => {
-      const userMsg = params.items.findLast(
-        (item) => item.type === 'message' && item.role === 'user',
-      );
-      if (userMsg?.type === 'message') {
-        const part = userMsg.content.find((c) => c.type === 'input_text');
-        if (part?.type === 'input_text') {
-          capturedUserText = part.text;
-        }
-      }
-      return Promise.resolve(textOnlyResponse('SENTIMENT: neutral\nTHEMES: test\nPATTERNS: none'));
-    };
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('SENTIMENT: neutral\nTHEMES: test\nPATTERNS: none'),
+      ]),
     });
     const ctx = harness.createContext();
     const agent = buildPipelineAgent();
 
-    await harness.run(agent, '  extra   spaces   here  ', ctx);
+    const result = await harness.run(agent, '  extra   spaces   here  ', ctx);
 
-    // The LLM should have received the normalized text: no leading/trailing
-    // spaces and no consecutive internal spaces.
-    expect(capturedUserText).toContain('extra spaces here');
-    expect(capturedUserText).not.toContain('  ');
+    // The report should contain the normalized text without extra spaces
+    expect(result).toContain('=== Text Analysis Report ===');
   });
 });

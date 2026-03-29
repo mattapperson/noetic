@@ -63,7 +63,7 @@ interface ItemLog {
 
 ## `Item` Type Hierarchy
 
-Items are the native data format aligned with OpenResponses. They serve as both the record of what happened and the input to `callModel`, eliminating impedance mismatch between the framework's internal state and the model API.
+Items are the native data format aligned with OpenResponses. They serve as both the record of what happened and the input to the LLM provider, eliminating impedance mismatch between the framework's internal state and the model API.
 
 ```typescript
 type Item =
@@ -91,14 +91,14 @@ type ContentPart =
 
 interface FunctionCallItem extends ItemBase {
   readonly type: 'function_call';
-  readonly call_id: string;
+  readonly callId: string;
   readonly name: string;
   readonly arguments: string;     // JSON string per OpenResponses
 }
 
 interface FunctionCallOutputItem extends ItemBase {
   readonly type: 'function_call_output';
-  readonly call_id: string;
+  readonly callId: string;
   readonly output: string;
 }
 
@@ -106,7 +106,7 @@ interface ReasoningItem extends ItemBase {
   readonly type: 'reasoning';
   readonly content: ContentPart[];
   readonly summary?: ContentPart[];
-  readonly encrypted_content?: string;
+  readonly encryptedContent?: string;
 }
 
 interface ExtensionItem extends ItemBase {

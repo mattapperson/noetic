@@ -3,11 +3,11 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
-import { ContextImpl } from '../../src/runtime/context-impl';
 import { AgentHarness } from '../../src/runtime/agent-harness';
+import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { Step } from '../../src/types/step';
-import { makeMockHarness } from '../_helpers';
+import { createScriptedCallModel, makeLLMResponse, makeMockHarness } from '../_helpers';
 
 describe('execute() switch', () => {
   it('dispatches run step', async () => {
@@ -54,46 +54,28 @@ describe('execute() switch', () => {
         msg: 'hi',
       },
       ctx,
-      undefined,
-      harness,
     );
     expect(result).toBe('hi');
   });
 
-  it('dispatches llm step with callModel', async () => {
+  it('dispatches llm step via mock callModel', async () => {
     const step: Step<string, string> = {
       kind: 'llm',
       id: 'llm-test',
       model: 'test-model',
     };
+    const harness = makeMockHarness();
+    harness.callModel = createScriptedCallModel([
+      makeLLMResponse('response'),
+    ]);
     const ctx = new ContextImpl({
-      harness: makeMockHarness(),
+      harness,
     });
-    const mockCallModel = async () => ({
-      items: [
-        {
-          id: 'r1',
-          status: 'completed' as const,
-          type: 'message' as const,
-          role: 'assistant' as const,
-          content: [
-            {
-              type: 'output_text' as const,
-              text: 'response',
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 10,
-        outputTokens: 5,
-      },
-    });
-    const result = await execute(step, 'prompt', ctx, mockCallModel);
+    const result = await execute(step, 'prompt', ctx);
     expect(result).toBe('response');
   });
 
-  it('throws when llm step has no callModel', async () => {
+  it('throws when harness has no client configured', async () => {
     const step: Step<string, string> = {
       kind: 'llm',
       id: 'test',
@@ -102,7 +84,7 @@ describe('execute() switch', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    expect(execute(step, 'hi', ctx)).rejects.toThrow('callModel is required');
+    expect(execute(step, 'hi', ctx)).rejects.toThrow('not impl');
   });
 
   it('increments stepCount', async () => {
@@ -228,31 +210,13 @@ describe('AgentHarness', () => {
     expect(result).toBe(5);
   });
 
-  it('executes LLM steps when callModel provided', async () => {
-    const mockCallModel = async () => ({
-      items: [
-        {
-          id: 'r1',
-          status: 'completed' as const,
-          type: 'message' as const,
-          role: 'assistant' as const,
-          content: [
-            {
-              type: 'output_text' as const,
-              text: 'hi',
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 5,
-        outputTokens: 3,
-      },
-    });
+  it('executes LLM steps when _testCallModel provided', async () => {
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel: mockCallModel,
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('hi'),
+      ]),
     });
     const ctx = harness.createContext();
     const step: Step<string, string> = {

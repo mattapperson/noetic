@@ -56,7 +56,7 @@ interface EvalSuiteOptions {
 }
 ```
 
-The eval context has **zero knowledge of `callModel`** — the `AgentHarness` auto-detects from `OPENROUTER_API_KEY`. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
+The eval context has **zero knowledge of LLM provider configuration** — the `AgentHarness` auto-resolves from `OPENROUTER_API_KEY` or its `llm` config. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
 
 ### Execution Model
 

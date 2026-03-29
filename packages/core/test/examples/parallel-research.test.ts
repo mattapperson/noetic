@@ -13,11 +13,9 @@ describe('parallel research agent', () => {
   });
 
   it('forks into three spawn paths', () => {
-    const callModel = createScriptedCallModel([]);
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
     });
     const agent = buildParallelResearchAgent();
     const paths = agent.paths('any-input', harness.createContext());
@@ -29,15 +27,14 @@ describe('parallel research agent', () => {
   });
 
   it('merges three perspective results into a structured summary', async () => {
-    const callModel = createScriptedCallModel([
-      textOnlyResponse('Historical perspective on the topic.'),
-      textOnlyResponse('Technical perspective on the topic.'),
-      textOnlyResponse('Societal perspective on the topic.'),
-    ]);
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('Historical perspective on the topic.'),
+        textOnlyResponse('Technical perspective on the topic.'),
+        textOnlyResponse('Societal perspective on the topic.'),
+      ]),
     });
     const ctx = harness.createContext();
     const agent = buildParallelResearchAgent();

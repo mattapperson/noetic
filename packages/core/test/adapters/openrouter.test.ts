@@ -4,83 +4,114 @@ import type {
   OpenResponsesNonStreamingResponse,
   ResponsesOutputItem,
 } from '@openrouter/sdk/models';
-import { z } from 'zod';
-import type { OpenRouterClientLike } from '../../src/adapters/openrouter';
-import { createOpenRouterCallModel } from '../../src/adapters/openrouter';
 import {
-  makeFunctionCall,
-  makeFunctionCallOutput,
-  makeMessage,
-  makeMockContext,
-} from '../_helpers';
+  extractSystemInstruction,
+  extractUsage,
+  itemsToInput,
+  responseToNoeticItems,
+} from '../../src/adapters/openrouter';
+import { frameworkCast } from '../../src/interpreter/framework-cast';
+import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
-//#region Schemas
+describe('extractSystemInstruction', () => {
+  it('extracts system messages as instructions', () => {
+    const items = [
+      makeMessage('system', 'You are helpful'),
+      makeMessage('user', 'Hello'),
+    ];
+    const { instructions, remaining } = extractSystemInstruction(items);
+    expect(instructions).toBe('You are helpful');
+    expect(remaining).toHaveLength(1);
+    assert(remaining[0].type === 'message');
+    expect(remaining[0].role).toBe('user');
+  });
 
-const CallParamsSchema = z.record(z.string(), z.unknown());
-const InputArraySchema = z.array(z.record(z.string(), z.unknown()));
+  it('returns undefined instructions when no system messages', () => {
+    const items = [
+      makeMessage('user', 'Hello'),
+    ];
+    const { instructions, remaining } = extractSystemInstruction(items);
+    expect(instructions).toBeUndefined();
+    expect(remaining).toHaveLength(1);
+  });
+});
 
-//#endregion
+describe('itemsToInput', () => {
+  it('converts user messages to SDK input format', () => {
+    const items = [
+      makeMessage('user', 'Hello'),
+    ];
+    const input = itemsToInput(items);
+    expect(input).toHaveLength(1);
+    expect(
+      frameworkCast<{
+        role: string;
+      }>(input[0]).role,
+    ).toBe('user');
+  });
 
-//#region Mock Factory
+  it('converts function_call items to OpenRouter format with callId', () => {
+    const fc = makeFunctionCall('search', '{"q":"test"}');
+    const fco = makeFunctionCallOutput(fc.callId, '{"results":[]}');
 
-// Base response shape shared by all mock responses
-const BASE_RESPONSE = {
-  id: 'resp-1',
-  object: 'response',
-  createdAt: 0,
-  model: 'test-model',
-  status: 'completed',
-  completedAt: 0,
-  error: null,
-  incompleteDetails: null,
-  metadata: null,
-  tools: [],
-  toolChoice: 'auto',
-  parallelToolCalls: false,
-  temperature: null,
-  topP: null,
-  presencePenalty: null,
-  frequencyPenalty: null,
-} satisfies Omit<OpenResponsesNonStreamingResponse, 'output' | 'outputText' | 'usage'>;
+    const input = itemsToInput([
+      makeMessage('user', 'search'),
+      fc,
+      fco,
+    ]);
 
-// Minimal mock of OpenRouter client
-function makeMockClient(response: {
-  output: ResponsesOutputItem[];
-  outputText?: string;
-  usage?: OpenResponsesNonStreamingResponse['usage'];
-}): {
-  client: OpenRouterClientLike;
-  calls: unknown[];
-} {
-  const calls: unknown[] = [];
+    // User message + function_call + function_call_output
+    expect(input).toHaveLength(3);
 
-  const client: OpenRouterClientLike = {
-    callModel(params) {
-      calls.push(params);
-      return {
-        async getResponse(): Promise<OpenResponsesNonStreamingResponse> {
-          return {
-            ...BASE_RESPONSE,
-            createdAt: Date.now(),
-            completedAt: Date.now(),
-            ...response,
-          };
-        },
-      };
-    },
-  };
+    // function_call should use callId (SDK format)
+    expect(input[1].type).toBe('function_call');
+    expect(
+      frameworkCast<{
+        callId: string;
+      }>(input[1]).callId,
+    ).toBe(fc.callId);
 
-  return {
-    client,
-    calls,
-  };
-}
+    // function_call_output should use callId
+    expect(input[2].type).toBe('function_call_output');
+    expect(
+      frameworkCast<{
+        callId: string;
+      }>(input[2]).callId,
+    ).toBe(fc.callId);
+  });
 
-//#endregion
+  it('skips reasoning items in input conversion', () => {
+    const input = itemsToInput([
+      makeMessage('user', 'Hi'),
+      {
+        id: 'reasoning-1',
+        type: 'reasoning',
+        status: 'completed',
+        content: [
+          {
+            type: 'output_text',
+            text: 'thinking...',
+          },
+        ],
+      },
+    ]);
+    // Reasoning item should be skipped
+    expect(input).toHaveLength(1);
+    expect(
+      frameworkCast<{
+        role: string;
+      }>(input[0]).role,
+    ).toBe('user');
+  });
+});
 
-describe('createOpenRouterCallModel', () => {
-  it('converts a simple text response to Noetic items', async () => {
-    const { client } = makeMockClient({
+describe('responseToNoeticItems', () => {
+  it('converts a simple text response to Noetic items', () => {
+    const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
+      id: 'resp-1',
+      object: 'response',
+      createdAt: Date.now(),
+      status: 'completed',
       output: [
         {
           type: 'message',
@@ -93,8 +124,9 @@ describe('createOpenRouterCallModel', () => {
               annotations: [],
             },
           ],
-        },
+        } satisfies ResponsesOutputItem,
       ],
+      outputText: 'Hello world',
       usage: {
         inputTokens: 10,
         outputTokens: 5,
@@ -108,137 +140,17 @@ describe('createOpenRouterCallModel', () => {
       },
     });
 
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    const result = await callModel({
-      model: 'anthropic/claude-sonnet-4-20250514',
-      items: [
-        makeMessage('user', 'Hi'),
-      ],
-      ctx,
-    });
-
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].type).toBe('message');
-    expect(result.usage.inputTokens).toBe(10);
-    expect(result.usage.outputTokens).toBe(5);
-    expect(result.usage.cachedTokens).toBe(2);
+    const items = responseToNoeticItems(sdkResponse);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('message');
   });
 
-  it('extracts system messages as instructions', async () => {
-    const { client, calls } = makeMockClient({
-      output: [
-        {
-          type: 'message',
-          id: 'msg-1',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: 'response',
-              annotations: [],
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        inputTokensDetails: {
-          cachedTokens: 0,
-        },
-        outputTokensDetails: {
-          reasoningTokens: 0,
-        },
-        totalTokens: 0,
-      },
-    });
-
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('system', 'You are helpful'),
-        makeMessage('user', 'Hello'),
-      ],
-      ctx,
-    });
-
-    const callParams = CallParamsSchema.parse(calls[0]);
-    expect(callParams.instructions).toBe('You are helpful');
-
-    const input = InputArraySchema.parse(callParams.input);
-    // System message should be extracted, only user message remains
-    expect(input).toHaveLength(1);
-    expect(input[0].role).toBe('user');
-  });
-
-  it('converts function_call items to OpenRouter format with callId', async () => {
-    const { client, calls } = makeMockClient({
-      output: [
-        {
-          type: 'message',
-          id: 'msg-1',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: 'done',
-              annotations: [],
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        inputTokensDetails: {
-          cachedTokens: 0,
-        },
-        outputTokensDetails: {
-          reasoningTokens: 0,
-        },
-        totalTokens: 0,
-      },
-    });
-
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    const fc = makeFunctionCall('search', '{"q":"test"}');
-    const fco = makeFunctionCallOutput(fc.call_id, '{"results":[]}');
-
-    await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'search'),
-        fc,
-        fco,
-      ],
-      ctx,
-    });
-
-    const callParams = CallParamsSchema.parse(calls[0]);
-    const input = InputArraySchema.parse(callParams.input);
-
-    // User message + function_call + function_call_output
-    expect(input).toHaveLength(3);
-
-    // function_call should use callId (SDK format) not call_id (Noetic format)
-    expect(input[1].type).toBe('function_call');
-    expect(input[1].callId).toBe(fc.call_id);
-    expect(input[1].name).toBe('search');
-
-    // function_call_output should use callId
-    expect(input[2].type).toBe('function_call_output');
-    expect(input[2].callId).toBe(fc.call_id);
-  });
-
-  it('converts function_call response items back to Noetic format', async () => {
-    const { client } = makeMockClient({
+  it('converts function_call response items back to Noetic format', () => {
+    const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
+      id: 'resp-1',
+      object: 'response',
+      createdAt: Date.now(),
+      status: 'completed',
       output: [
         {
           type: 'function_call',
@@ -247,7 +159,7 @@ describe('createOpenRouterCallModel', () => {
           name: 'search',
           arguments: '{"q":"test"}',
           status: 'completed',
-        },
+        } satisfies ResponsesOutputItem,
         {
           type: 'message',
           id: 'msg-1',
@@ -259,8 +171,9 @@ describe('createOpenRouterCallModel', () => {
               annotations: [],
             },
           ],
-        },
+        } satisfies ResponsesOutputItem,
       ],
+      outputText: 'Found results',
       usage: {
         inputTokens: 0,
         outputTokens: 0,
@@ -274,31 +187,25 @@ describe('createOpenRouterCallModel', () => {
       },
     });
 
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
+    const items = responseToNoeticItems(sdkResponse);
+    expect(items).toHaveLength(2);
 
-    const result = await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'search'),
-      ],
-      ctx,
-    });
-
-    expect(result.items).toHaveLength(2);
-
-    const fcItem = result.items[0];
+    const fcItem = items[0];
     assert(fcItem.type === 'function_call');
-    expect(fcItem.call_id).toBe('call_123');
+    expect(fcItem.callId).toBe('call_123');
     expect(fcItem.name).toBe('search');
     expect(fcItem.arguments).toBe('{"q":"test"}');
 
-    const msgItem = result.items[1];
+    const msgItem = items[1];
     expect(msgItem.type).toBe('message');
   });
 
-  it('falls back to outputText when no message items in output', async () => {
-    const { client } = makeMockClient({
+  it('falls back to outputText when no message items in output', () => {
+    const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
+      id: 'resp-1',
+      object: 'response',
+      createdAt: Date.now(),
+      status: 'completed',
       output: [],
       outputText: 'fallback text',
       usage: {
@@ -314,204 +221,35 @@ describe('createOpenRouterCallModel', () => {
       },
     });
 
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
+    const items = responseToNoeticItems(sdkResponse);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('message');
+  });
+});
 
-    const result = await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'Hi'),
-      ],
-      ctx,
+describe('extractUsage', () => {
+  it('extracts usage from SDK response', () => {
+    const usage = extractUsage({
+      inputTokens: 100,
+      outputTokens: 50,
+      inputTokensDetails: {
+        cachedTokens: 2,
+      },
+      outputTokensDetails: {
+        reasoningTokens: 0,
+      },
+      totalTokens: 150,
+      cost: 0.003,
     });
 
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].type).toBe('message');
+    expect(usage.inputTokens).toBe(100);
+    expect(usage.outputTokens).toBe(50);
+    expect(usage.cachedTokens).toBe(2);
   });
 
-  it('passes model params to the SDK', async () => {
-    const { client, calls } = makeMockClient({
-      output: [
-        {
-          type: 'message',
-          id: 'msg-1',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: 'ok',
-              annotations: [],
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        inputTokensDetails: {
-          cachedTokens: 0,
-        },
-        outputTokensDetails: {
-          reasoningTokens: 0,
-        },
-        totalTokens: 0,
-      },
-    });
-
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'Hi'),
-      ],
-      params: {
-        temperature: 0.7,
-        maxTokens: 1e3,
-        topP: 0.9,
-      },
-      ctx,
-    });
-
-    const callParams = CallParamsSchema.parse(calls[0]);
-    expect(callParams.temperature).toBe(0.7);
-    expect(callParams.maxOutputTokens).toBe(1e3);
-    expect(callParams.topP).toBe(0.9);
-  });
-
-  it('extracts cost from usage', async () => {
-    const { client } = makeMockClient({
-      output: [
-        {
-          type: 'message',
-          id: 'msg-1',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: 'ok',
-              annotations: [],
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 100,
-        outputTokens: 50,
-        inputTokensDetails: {
-          cachedTokens: 0,
-        },
-        outputTokensDetails: {
-          reasoningTokens: 0,
-        },
-        totalTokens: 150,
-        cost: 0.003,
-      },
-    });
-
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    const result = await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'Hi'),
-      ],
-      ctx,
-    });
-
-    expect(result.cost).toBe(0.003);
-  });
-
-  it('handles missing usage gracefully', async () => {
-    const { client } = makeMockClient({
-      output: [
-        {
-          type: 'message',
-          id: 'msg-1',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: 'ok',
-              annotations: [],
-            },
-          ],
-        },
-      ],
-    });
-
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    const result = await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'Hi'),
-      ],
-      ctx,
-    });
-
-    expect(result.usage.inputTokens).toBe(0);
-    expect(result.usage.outputTokens).toBe(0);
-  });
-
-  it('skips reasoning items in input conversion', async () => {
-    const { client, calls } = makeMockClient({
-      output: [
-        {
-          type: 'message',
-          id: 'msg-1',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: 'ok',
-              annotations: [],
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        inputTokensDetails: {
-          cachedTokens: 0,
-        },
-        outputTokensDetails: {
-          reasoningTokens: 0,
-        },
-        totalTokens: 0,
-      },
-    });
-
-    const callModel = createOpenRouterCallModel(client);
-    const ctx = makeMockContext();
-
-    await callModel({
-      model: 'test-model',
-      items: [
-        makeMessage('user', 'Hi'),
-        {
-          id: 'reasoning-1',
-          type: 'reasoning',
-          status: 'completed',
-          content: [
-            {
-              type: 'output_text',
-              text: 'thinking...',
-            },
-          ],
-        },
-      ],
-      ctx,
-    });
-
-    const callParams = CallParamsSchema.parse(calls[0]);
-    const input = InputArraySchema.parse(callParams.input);
-    // Reasoning item should be skipped
-    expect(input).toHaveLength(1);
-    expect(input[0].role).toBe('user');
+  it('handles missing usage gracefully', () => {
+    const usage = extractUsage(undefined);
+    expect(usage.inputTokens).toBe(0);
+    expect(usage.outputTokens).toBe(0);
   });
 });

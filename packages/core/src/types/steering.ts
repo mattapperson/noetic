@@ -1,4 +1,3 @@
-import type { CallModelFn } from '../interpreter/execute-llm';
 import type { LLMResponse } from './common';
 import type { ExecutionContext, MemoryScope } from './memory';
 
@@ -9,7 +8,7 @@ export const SteeringAction = {
   Allow: 'allow',
   Deny: 'deny',
   Guide: 'guide',
-} as const;
+} satisfies Record<string, string>;
 
 export type SteeringAction = (typeof SteeringAction)[keyof typeof SteeringAction];
 
@@ -18,7 +17,7 @@ export const LedgerEntryKind = {
   ToolCall: 'tool_call',
   ModelTurn: 'model_turn',
   Custom: 'custom',
-} as const;
+} satisfies Record<string, string>;
 
 export type LedgerEntryKind = (typeof LedgerEntryKind)[keyof typeof LedgerEntryKind];
 
@@ -97,7 +96,6 @@ export interface SteeringConfig {
   maxLedgerEntries?: number;
   maxRetries?: number;
   scope?: MemoryScope;
-  callModel?: CallModelFn;
 }
 
 /** @public Mutable runtime state maintained by the steering layer across an execution. */

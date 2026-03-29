@@ -17,24 +17,22 @@ describe('async delegate demo', () => {
   });
 
   it('agent launches sub-agent, continues, and receives result via inbox', async () => {
-    const callModel = createScriptedCallModel([
-      // Step 1: launch a sub-agent
-      toolCallResponse({
-        toolName: 'launch_agent',
-        args: '{"task":"research quantum computing"}',
-        output: '{"agentId":"sub-1"}',
-        finalText: 'I launched a sub-agent to research quantum computing.',
-      }),
-      // Step 2: no tool calls — agent stops, inbox check happens
-      textOnlyResponse('I launched the agent and will wait for results.'),
-      // Step 3: after inbox wake, final answer
-      textOnlyResponse('Based on the sub-agent results, quantum computing uses qubits.'),
-    ]);
-
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        // Step 1: launch a sub-agent
+        toolCallResponse({
+          toolName: 'launch_agent',
+          args: '{"task":"research quantum computing"}',
+          output: '{"agentId":"sub-1"}',
+          finalText: 'I launched a sub-agent to research quantum computing.',
+        }),
+        // Step 2: no tool calls — agent stops, inbox check happens
+        textOnlyResponse('I launched the agent and will wait for results.'),
+        // Step 3: after inbox wake, final answer
+        textOnlyResponse('Based on the sub-agent results, quantum computing uses qubits.'),
+      ]),
     });
     const ctx = harness.createContext();
 

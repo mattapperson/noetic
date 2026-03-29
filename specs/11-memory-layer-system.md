@@ -464,7 +464,7 @@ interface ProjectionPolicy {
 3. Run recall() hooks (sequential, slot order)
 4. Assemble: system prompt item (role: system) + layer output items (role: developer) + conversation history items
 5. Conversation history gets remaining budget after layers, with overflow policy applied
-6. Result is Item[] — directly passable to callModel
+6. Result is Item[] — directly passable to the LLM provider
 ```
 
 ### Conversation History is Not a Memory Layer

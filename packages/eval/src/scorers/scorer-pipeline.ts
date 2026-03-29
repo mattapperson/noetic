@@ -1,4 +1,4 @@
-import type { CallModelFn } from '@noetic/core';
+import type { LlmProviderConfig } from '@noetic/core';
 import { AgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
@@ -10,13 +10,13 @@ interface ScorerPipelineConfig {
   id: string;
   judge?: {
     model: string;
-    callModel?: CallModelFn;
+    llm?: LlmProviderConfig;
   };
 }
 
 interface JudgeConfig {
   model: string;
-  callModel?: CallModelFn;
+  llm?: LlmProviderConfig;
 }
 
 interface PipelineStep1 {
@@ -74,7 +74,7 @@ function buildAnalyzeScorerFn<T, R>(
     const harness = new AgentHarness({
       name: 'scorer-analyze',
       params: {},
-      callModel: judge?.callModel,
+      llm: judge?.llm,
     });
     const ctx = harness.createContext();
     const raw = await harness.run(judgeStep, background, ctx);
@@ -139,7 +139,7 @@ function makePipelineStep4(
           const harness = new AgentHarness({
             name: 'scorer-reason',
             params: {},
-            callModel: judge.callModel,
+            llm: judge.llm,
           });
           const ctx = harness.createContext();
           const reason = await harness.run(reasonStep, '', ctx);

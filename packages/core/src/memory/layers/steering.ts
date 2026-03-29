@@ -1,8 +1,10 @@
-import type { CallModelFn } from '../../interpreter/execute-llm';
-import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
+import {
+  createMessage,
+  estimateTokens,
+  extractAssistantText,
+} from '../../interpreter/message-helpers';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
-import type { AgentHarnessContract } from '../../types/runtime';
 import type {
   AfterModelCallParams,
   BeforeToolCallParams,
@@ -14,54 +16,6 @@ import type {
 } from '../../types/steering';
 import { LedgerEntryKind, SteeringAction } from '../../types/steering';
 import { mostRestrictive } from '../layer-lifecycle';
-
-const STUB_HARNESS: AgentHarnessContract = {
-  config: {
-    name: 'steering-eval',
-    params: {},
-  },
-  execute: () => {
-    throw new Error('not available');
-  },
-  run: () => {
-    throw new Error('not available');
-  },
-  detachedSpawn: () => {
-    throw new Error('not available');
-  },
-  createContext: () => {
-    throw new Error('not available');
-  },
-  send: () => {},
-  recv: () => Promise.reject(new Error('not available')),
-  tryRecv: () => null,
-  getChannelHandle: () => {
-    throw new Error('not available');
-  },
-  initLayers: async () => {},
-  recallLayers: async () => [],
-  storeLayers: async () => {},
-  disposeLayers: async () => {},
-  checkpoint: async () => {},
-  restore: async () => null,
-  cancel: async () => {},
-  createSpan: (name) => ({
-    traceId: 't',
-    spanId: name,
-    parentSpanId: null,
-    setAttribute() {},
-    addEvent() {},
-    end() {},
-  }),
-  getLayerState: () => undefined,
-  setLayerState: () => {},
-  beforeToolCall: async () => ({
-    action: SteeringAction.Allow,
-  }),
-  afterModelCall: async () => ({
-    action: SteeringAction.Allow,
-  }),
-};
 
 //#region Constants
 
@@ -84,9 +38,14 @@ function evaluateProgrammaticRule(
 async function evaluateLlmRuleSync(
   rule: SteeringRule,
   params: BeforeToolCallParams | AfterModelCallParams,
-  callModel: CallModelFn,
 ): Promise<SteeringDecision> {
   if (!rule.llmEval) {
+    return {
+      action: SteeringAction.Allow,
+    };
+  }
+
+  if (!params.ctx.callModel) {
     return {
       action: SteeringAction.Allow,
     };
@@ -99,94 +58,16 @@ async function evaluateLlmRuleSync(
 
   const prompt = `${rule.llmEval.prompt}\n\nContext: ${contextSummary}\n\nRespond with exactly "ALLOW", "DENY", or "GUIDE: <guidance text>".`;
 
-  const response = await callModel({
-    model: rule.llmEval.model ?? params.ctx.model ?? 'openai/gpt-4o-mini',
-    items: [
-      {
-        id: crypto.randomUUID(),
-        status: 'completed',
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: prompt,
-          },
-        ],
-      },
-    ],
-    ctx: {
-      id: params.ctx.executionId,
-      stepCount: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        total: 0,
-      },
-      elapsed: 0,
-      cost: 0,
-      state: {},
-      parent: null,
-      depth: 0,
-      span: {
-        traceId: 't',
-        spanId: 's',
-        parentSpanId: null,
-        setAttribute() {},
-        addEvent() {},
-        end() {},
-      },
-      threadId: params.ctx.threadId,
-      itemLog: {
-        items: [],
-        append() {},
-      },
-      lastStepMeta: null,
-      harness: STUB_HARNESS,
-      recv: async () => {
-        throw new Error('not available in steering eval');
-      },
-      send: () => {
-        throw new Error('not available in steering eval');
-      },
-      tryRecv: () => {
-        throw new Error('not available in steering eval');
-      },
-      checkpoint: async () => {},
-      complete: () => {},
-      completed: false,
-      completionValue: undefined,
-      aborted: false,
-      abort: () => {},
-    },
-  });
+  const userMessage = createMessage(prompt, 'user');
+  const model = rule.llmEval.model ?? params.ctx.model ?? 'openai/gpt-4o-mini';
 
-  const text = response.items
-    .filter(
-      (
-        i,
-      ): i is Extract<
-        typeof i,
-        {
-          type: 'message';
-        }
-      > => i.type === 'message',
-    )
-    .flatMap((m) => m.content)
-    .filter(
-      (
-        c,
-      ): c is Extract<
-        typeof c,
-        {
-          type: 'output_text';
-        }
-      > => c.type === 'output_text',
-    )
-    .map((c) => c.text)
-    .join('')
-    .trim()
-    .toUpperCase();
+  const response = await params.ctx.callModel({
+    model,
+    items: [
+      userMessage,
+    ],
+  });
+  const text = extractAssistantText(response.items).trim().toUpperCase();
 
   if (text.startsWith('DENY')) {
     return {
@@ -208,12 +89,11 @@ async function evaluateLlmRuleSync(
 interface FireLlmRuleAsyncParams {
   rule: SteeringRule;
   params: BeforeToolCallParams | AfterModelCallParams;
-  callModel: CallModelFn;
   pendingAsync: SteeringState['pendingAsync'];
 }
 
-function fireLlmRuleAsync({ rule, params, callModel, pendingAsync }: FireLlmRuleAsyncParams): void {
-  evaluateLlmRuleSync(rule, params, callModel)
+function fireLlmRuleAsync({ rule, params, pendingAsync }: FireLlmRuleAsyncParams): void {
+  evaluateLlmRuleSync(rule, params)
     .then((decision) => {
       if (decision.action !== SteeringAction.Allow) {
         pendingAsync.push({
@@ -239,7 +119,6 @@ interface EvaluateRulesParams {
   hookName: 'beforeToolCall' | 'afterModelCall';
   params: BeforeToolCallParams | AfterModelCallParams;
   state: SteeringState;
-  callModel?: CallModelFn;
 }
 
 async function evaluateRules({
@@ -247,7 +126,6 @@ async function evaluateRules({
   hookName,
   params,
   state,
-  callModel,
 }: EvaluateRulesParams): Promise<SteeringDecision> {
   const applicable = rules.filter((r) => r.appliesTo.includes(hookName));
   const decisions: SteeringDecision[] = [];
@@ -264,12 +142,12 @@ async function evaluateRules({
     }
 
     // LLM eval
-    if (!rule.llmEval || !callModel) {
+    if (!rule.llmEval || !params.ctx.callModel) {
       continue;
     }
 
     if (rule.llmEval.mode === 'sync') {
-      const decision = await evaluateLlmRuleSync(rule, params, callModel);
+      const decision = await evaluateLlmRuleSync(rule, params);
       decisions.push(decision);
       if (decision.action === SteeringAction.Deny) {
         return mostRestrictive(decisions);
@@ -281,7 +159,6 @@ async function evaluateRules({
     fireLlmRuleAsync({
       rule,
       params,
-      callModel,
       pendingAsync: state.pendingAsync,
     });
   }
@@ -297,7 +174,7 @@ async function evaluateRules({
  * Creates a steering memory layer that evaluates rules before tool calls and after model calls.
  *
  * @public
- * @param config - Steering configuration including rules, optional callModel for LLM-based evaluation, scope, and max ledger size.
+ * @param config - Steering configuration including rules, scope, and max ledger size.
  * @returns A `MemoryLayer` that enforces steering rules via allow/deny/guide decisions.
  */
 export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
@@ -361,7 +238,6 @@ export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
             state,
           },
           state,
-          callModel: config.callModel,
         });
 
         const entry: LedgerEntry = {
@@ -392,7 +268,6 @@ export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
             state,
           },
           state,
-          callModel: config.callModel,
         });
 
         const entry: LedgerEntry = {

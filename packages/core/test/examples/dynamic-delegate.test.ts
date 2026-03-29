@@ -17,22 +17,20 @@ describe('dynamic delegate demo', () => {
   });
 
   it('LLM uses sync delegate tool and gets result immediately', async () => {
-    const callModel = createScriptedCallModel([
-      // Step 1: LLM calls delegate (sync) tool
-      toolCallResponse({
-        toolName: 'delegate',
-        args: '{"task":"What is 2+2?"}',
-        output: '"4"',
-        finalText: 'I delegated the math question.',
-      }),
-      // Step 2: LLM gives final answer (no tool calls → stops)
-      textOnlyResponse('The answer is 4.'),
-    ]);
-
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        // Step 1: LLM calls delegate (sync) tool
+        toolCallResponse({
+          toolName: 'delegate',
+          args: '{"task":"What is 2+2?"}',
+          output: '"4"',
+          finalText: 'I delegated the math question.',
+        }),
+        // Step 2: LLM gives final answer (no tool calls -> stops)
+        textOnlyResponse('The answer is 4.'),
+      ]),
     });
 
     const agent = buildDynamicDelegateAgent({
@@ -46,24 +44,22 @@ describe('dynamic delegate demo', () => {
   });
 
   it('LLM uses async launch tool and receives result via inbox', async () => {
-    const callModel = createScriptedCallModel([
-      // Step 1: LLM calls launch_agent (async) tool
-      toolCallResponse({
-        toolName: 'launch_agent',
-        args: '{"task":"research topic"}',
-        output: '{"agentId":"bg-1"}',
-        finalText: 'Launched background research.',
-      }),
-      // Step 2: no tool calls → until says stop → inbox has message → continue
-      textOnlyResponse('Waiting for background work.'),
-      // Step 3: no tool calls → until says stop → inbox empty → truly stop
-      textOnlyResponse('Got the results from the background agent.'),
-    ]);
-
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        // Step 1: LLM calls launch_agent (async) tool
+        toolCallResponse({
+          toolName: 'launch_agent',
+          args: '{"task":"research topic"}',
+          output: '{"agentId":"bg-1"}',
+          finalText: 'Launched background research.',
+        }),
+        // Step 2: no tool calls -> until says stop -> inbox has message -> continue
+        textOnlyResponse('Waiting for background work.'),
+        // Step 3: no tool calls -> until says stop -> inbox empty -> truly stop
+        textOnlyResponse('Got the results from the background agent.'),
+      ]),
     });
     const ctx = harness.createContext();
 
@@ -80,31 +76,29 @@ describe('dynamic delegate demo', () => {
   });
 
   it('LLM can mix sync and async in the same conversation', async () => {
-    const callModel = createScriptedCallModel([
-      // Step 1: LLM uses async launch for background research
-      toolCallResponse({
-        toolName: 'launch_agent',
-        args: '{"task":"background research"}',
-        output: '{"agentId":"bg-2"}',
-        finalText: 'Started background research.',
-      }),
-      // Step 2: LLM uses sync delegate for immediate answer
-      toolCallResponse({
-        toolName: 'delegate',
-        args: '{"task":"quick question"}',
-        output: '"quick answer"',
-        finalText: 'Got the quick answer.',
-      }),
-      // Step 3: no tool calls → until says stop → inbox has bg result → continue
-      textOnlyResponse('Now incorporating background results.'),
-      // Step 4: no tool calls → until says stop → inbox empty → truly stop
-      textOnlyResponse('All done with both sync and async results.'),
-    ]);
-
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel,
+      _testCallModel: createScriptedCallModel([
+        // Step 1: LLM uses async launch for background research
+        toolCallResponse({
+          toolName: 'launch_agent',
+          args: '{"task":"background research"}',
+          output: '{"agentId":"bg-2"}',
+          finalText: 'Started background research.',
+        }),
+        // Step 2: LLM uses sync delegate for immediate answer
+        toolCallResponse({
+          toolName: 'delegate',
+          args: '{"task":"quick question"}',
+          output: '"quick answer"',
+          finalText: 'Got the quick answer.',
+        }),
+        // Step 3: no tool calls -> until says stop -> inbox has bg result -> continue
+        textOnlyResponse('Now incorporating background results.'),
+        // Step 4: no tool calls -> until says stop -> inbox empty -> truly stop
+        textOnlyResponse('All done with both sync and async results.'),
+      ]),
     });
     const ctx = harness.createContext();
 

@@ -29,7 +29,7 @@ export interface MessageItem extends ItemBase {
 /** @public A tool/function invocation requested by the model. */
 export interface FunctionCallItem extends ItemBase {
   readonly type: 'function_call';
-  readonly call_id: string;
+  readonly callId: string;
   readonly name: string;
   readonly arguments: string;
 }
@@ -37,7 +37,7 @@ export interface FunctionCallItem extends ItemBase {
 /** @public The serialized output returned by a tool after execution. */
 export interface FunctionCallOutputItem extends ItemBase {
   readonly type: 'function_call_output';
-  readonly call_id: string;
+  readonly callId: string;
   readonly output: string;
 }
 
@@ -46,7 +46,7 @@ export interface ReasoningItem extends ItemBase {
   readonly type: 'reasoning';
   readonly content: ContentPart[];
   readonly summary?: ContentPart[];
-  readonly encrypted_content?: string;
+  readonly encryptedContent?: string;
 }
 
 /** @public User-defined extension item with a namespaced `x-` type prefix. */

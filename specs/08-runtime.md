@@ -115,7 +115,7 @@ interface DetachedHandle<O> {
 
 | Backend                    | When to Use                                                     | Channel Handles |
 |----------------------------|-----------------------------------------------------------------|-----------------|
-| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-detects `callModel` from `OPENROUTER_API_KEY` when none is provided. | In-process handles |
+| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-resolves LLM provider from `OPENROUTER_API_KEY` or `llm` config. | In-process handles |
 | `DurableAgentHarness`      | Production — backed by Temporal, Inngest, or custom event store | Translates to durable signals |
 | `DistributedAgentHarness`  | Multi-node — A2A, worker pools, cloud functions                 | Translates to network messages |
 
@@ -186,7 +186,7 @@ In serverless functions (AWS Lambda, Cloudflare Workers, etc.), the agent harnes
 setHarness(new AgentHarness({
   name: 'lambda-agent',
   params: {},
-  callModel: createOpenRouterCallModel(),
+  llm: { provider: 'openrouter' },
 }));
 
 export const handler = async (event) => {

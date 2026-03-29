@@ -91,7 +91,7 @@ describe('workingMemory layer', () => {
       id: 'fc1',
       status: 'completed',
       type: 'function_call',
-      call_id: 'c1',
+      callId: 'c1',
       name: 'updateWorkingMemory',
       arguments: '{"notes":"updated"}',
     };
@@ -128,7 +128,7 @@ describe('workingMemory layer', () => {
       id: 'fc1',
       status: 'completed',
       type: 'function_call',
-      call_id: 'c1',
+      callId: 'c1',
       name: 'updateWorkingMemory',
       arguments: '{"notes":"updated"}',
     };
@@ -188,7 +188,7 @@ describe('workingMemory layer', () => {
       id: 'fc1',
       status: 'completed',
       type: 'function_call',
-      call_id: 'c1',
+      callId: 'c1',
       name: 'updateWorkingMemory',
       arguments: '{"nested":{"a":99}}',
     };

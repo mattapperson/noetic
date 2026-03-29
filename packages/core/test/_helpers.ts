@@ -14,7 +14,7 @@ import type {
   MessageItem,
 } from '../src/types/items';
 import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
-import type { AgentHarnessContract } from '../src/types/runtime';
+import type { AgentHarnessContract, CallModelRequest } from '../src/types/runtime';
 import { SteeringAction } from '../src/types/steering';
 import type { ExecuteStepFn, Step } from '../src/types/step';
 import type { ToolExecutionContext } from '../src/types/tool-context';
@@ -120,7 +120,7 @@ export function makeFunctionCall(name: string, args: string, id?: string): Funct
     id: resolvedId,
     type: 'function_call',
     status: 'completed',
-    call_id: `call_${resolvedId}`,
+    callId: `call_${resolvedId}`,
     name,
     arguments: args,
   };
@@ -135,7 +135,7 @@ export function makeFunctionCallOutput(
     id: id ?? `fco-${callId}`,
     type: 'function_call_output',
     status: 'completed',
-    call_id: callId,
+    callId,
     output,
   };
 }
@@ -177,6 +177,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     itemLog: makeItemLog(),
     lastStepMeta: null,
     harness,
+    layers: undefined,
     recv: async () => {
       throw new Error('not impl');
     },
@@ -203,12 +204,12 @@ export function makeLLMResponse(text: string, overrides?: Partial<LLMResponse>):
     items: [
       {
         id: `resp-${Date.now()}`,
-        status: 'completed' as const,
-        type: 'message' as const,
-        role: 'assistant' as const,
+        status: 'completed',
+        type: 'message',
+        role: 'assistant',
         content: [
           {
-            type: 'output_text' as const,
+            type: 'output_text',
             text,
           },
         ],
@@ -303,6 +304,9 @@ export function makeMockHarness(): AgentHarnessContract {
       name: 'test-harness',
       params: {},
     },
+    callModel: async () => {
+      throw new Error('not impl');
+    },
     execute: async () => {
       throw new Error('not impl');
     },
@@ -351,7 +355,43 @@ export function makeMockHarness(): AgentHarnessContract {
   return harness;
 }
 
-/** @deprecated Use makeMockHarness instead. */
+/**
+ * Creates a mock context whose harness.callModel returns scripted LLM responses
+ * in order. Used by tests that exercise code paths requiring an LLM.
+ */
+export function makeMockContextWithClient(script: LLMResponse[]): Context {
+  const harness = makeMockHarness();
+  harness.callModel = createScriptedCallModel(script);
+  return makeMockContext({
+    harness,
+  });
+}
+
+/**
+ * Creates a scripted callModel function that returns responses in order.
+ * For use with AgentHarness `_testCallModel` option.
+ */
+export function createScriptedCallModel(
+  script: LLMResponse[],
+): (request: CallModelRequest) => Promise<LLMResponse> {
+  let callIndex = 0;
+  return async () => {
+    if (callIndex >= script.length) {
+      throw new Error(`Mock callModel exhausted after ${script.length} calls`);
+    }
+    return script[callIndex++];
+  };
+}
+
+/**
+ * Creates a dynamic callModel function that calls a factory on each invocation.
+ * For use with AgentHarness `_testCallModel` option.
+ */
+export function createDynamicCallModel(
+  factory: () => LLMResponse,
+): (request: CallModelRequest) => Promise<LLMResponse> {
+  return async () => factory();
+}
 
 // ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
 
@@ -366,27 +406,7 @@ export const simpleExecute: ExecuteStepFn = async <I, O>(
   throw new Error(`Unsupported step kind: ${step.kind}`);
 };
 
-//#region Scripted Call Model
-
-type MockCallModelScript = LLMResponse[];
-
-interface ToolCallResponseOpts {
-  toolName: string;
-  args: string;
-  output: string;
-  finalText: string;
-}
-
-/** Creates a mock callModel that returns scripted LLM responses in order. */
-export function createScriptedCallModel(script: MockCallModelScript): () => Promise<LLMResponse> {
-  let callIndex = 0;
-  return async (): Promise<LLMResponse> => {
-    if (callIndex >= script.length) {
-      throw new Error(`Mock callModel exhausted after ${script.length} calls`);
-    }
-    return script[callIndex++];
-  };
-}
+//#region Response Factories
 
 export function assistantMessage(text: string, id?: string): MessageItem {
   return {
@@ -403,6 +423,13 @@ export function assistantMessage(text: string, id?: string): MessageItem {
   };
 }
 
+interface ToolCallResponseOpts {
+  toolName: string;
+  args: string;
+  output: string;
+  finalText: string;
+}
+
 export function toolCallResponse(opts: ToolCallResponseOpts): LLMResponse {
   const callId = `call_${crypto.randomUUID()}`;
   return {
@@ -411,7 +438,7 @@ export function toolCallResponse(opts: ToolCallResponseOpts): LLMResponse {
         id: `fc-${callId}`,
         status: 'completed',
         type: 'function_call',
-        call_id: callId,
+        callId,
         name: opts.toolName,
         arguments: opts.args,
       } satisfies FunctionCallItem,
@@ -419,7 +446,7 @@ export function toolCallResponse(opts: ToolCallResponseOpts): LLMResponse {
         id: `fco-${callId}`,
         status: 'completed',
         type: 'function_call_output',
-        call_id: callId,
+        callId,
         output: opts.output,
       } satisfies FunctionCallOutputItem,
       assistantMessage(opts.finalText),

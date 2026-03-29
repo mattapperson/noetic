@@ -71,55 +71,49 @@ const analyze = step.llm({
 });
 ```
 
-### The `CallModelFn` Contract
+### LLM Provider Configuration
 
-The agent harness delegates LLM calls through a `CallModelFn` — a function provided at construction time. This is the adapter seam: any LLM provider can be wired in by implementing this contract.
+The agent harness uses the OpenRouter SDK internally for all LLM calls. The provider is configured via `LlmProviderConfig` on the `AgentHarness`:
 
 ```typescript
-interface CallModelParams {
-  model: string;
-  items: ReadonlyArray<Item>;
-  tools?: Tool[];
-  params?: ModelParams;
-  output?: ZodType;
-  ctx: Context;                 // execution context — tools need this for side effects
+interface LlmProviderConfig {
+  provider: 'openrouter';
+  apiKey?: string;  // defaults to process.env.OPENROUTER_API_KEY
 }
-
-type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
 ```
 
-The `ctx` field is required so that tool `execute` functions (which accept `(args, ctx)`) can receive the current execution context when the adapter delegates tool execution to the provider SDK.
+The agent harness constructs and manages the OpenRouter client internally. There is no user-facing `CallModelFn` — the adapter seam is the `LlmProviderConfig` on the harness.
 
-### OpenRouter Adapter
+```typescript
+import { AgentHarness } from '@noetic/core';
 
-The `createOpenRouterCallModel(client)` factory returns a `CallModelFn` backed by the `@openrouter/sdk`. It:
+const harness = new AgentHarness({
+  llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
+});
+```
+
+### OpenRouter Integration
+
+The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
 1. Extracts system messages from `items` and passes them as `instructions`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Wraps Noetic `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
-4. Calls `client.callModel()` — the SDK handles the tool call loop internally.
+4. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
 5. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
-
-```typescript
-import OpenRouter from '@openrouter/sdk';
-import { createOpenRouterCallModel, AgentHarness } from '@noetic/core';
-
-const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-const harness = new AgentHarness({ callModel: createOpenRouterCallModel(client) });
-```
 
 ### Tool Call Execution
 
-The `executeLLM` function delegates to the OpenRouter SDK's `callModel`, which handles the tool call loop internally. When the model response contains tool calls:
+The `executeLLM` function delegates to the OpenRouter SDK's `callModel` method, which handles the tool call loop internally. When the model response contains tool calls:
 
-1. `callModel` executes each tool call using the `Tool.execute` function.
+1. The SDK executes each tool call using the `Tool.execute` function.
 2. Tool results are appended to the conversation.
 3. The model is called again with the updated conversation.
 4. This repeats until the model responds without tool calls or a terminal condition is met.
 
-The agent harness does NOT implement its own tool call loop — `callModel` owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether `callModel`'s internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
+The agent harness does NOT implement its own tool call loop — the SDK owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether the SDK's internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
 
-`callModel` returns a `ModelResult` with `getItemsStream()`. The agent harness appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
+The SDK returns a `ModelResult` with `getItemsStream()`. The agent harness appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
 
 ```typescript
 const result = await execute(analyze, codeSnippet, ctx);
@@ -135,7 +129,7 @@ An `llm` step does NOT simply send the `system` prompt and the raw input. The ag
 
 1. Runs `recall()` on each memory layer to gather contextual content.
 2. Assembles system prompt item (`role: system`) + memory layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
-3. Sends the View to the model. The View is `Item[]` — directly passable to `callModel` as input.
+3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
 4. After the response, runs `store()` on each memory layer to persist learnings.
 
 The `system` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Memory layers inject additional context as `MessageItem` entries with `role: developer`.

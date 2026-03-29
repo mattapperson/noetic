@@ -9,10 +9,15 @@ import {
   semanticSwitch,
   when,
 } from '../../src/conditions';
-import type { CallModelFn } from '../../src/interpreter/execute-llm';
 import type { EmbedFn } from '../../src/types/embed';
 import type { Step } from '../../src/types/step';
-import { makeLLMResponse, makeMockContext, makeStorage, mockEmbed } from '../_helpers';
+import {
+  makeLLMResponse,
+  makeMockContext,
+  makeMockContextWithClient,
+  makeStorage,
+  mockEmbed,
+} from '../_helpers';
 
 //#region Mock Factories
 
@@ -24,8 +29,11 @@ function makeStep(id: string): Step<string, string> {
   };
 }
 
-function mockCallModel(responseText: string): CallModelFn {
-  return async () => makeLLMResponse(responseText);
+/** Shorthand: create a mock context with a single scripted LLM text response. */
+function mockCtxWithLlm(text: string): ReturnType<typeof makeMockContext> {
+  return makeMockContextWithClient([
+    makeLLMResponse(text),
+  ]);
 }
 
 //#endregion
@@ -62,11 +70,9 @@ describe('semanticRoute', () => {
 });
 
 describe('aiCondition', () => {
-  const ctx = makeMockContext();
-
   it('parses true from mock LLM', async () => {
+    const ctx = mockCtxWithLlm('{"answer": true}');
     const condition = aiCondition<string>({
-      callModel: mockCallModel('{"answer": true}'),
       model: 'test-model',
       prompt: 'Is this positive?',
     });
@@ -75,8 +81,8 @@ describe('aiCondition', () => {
   });
 
   it('parses false from mock LLM', async () => {
+    const ctx = mockCtxWithLlm('{"answer": false}');
     const condition = aiCondition<string>({
-      callModel: mockCallModel('{"answer": false}'),
       model: 'test-model',
       prompt: 'Is this positive?',
     });
@@ -85,8 +91,8 @@ describe('aiCondition', () => {
   });
 
   it('returns false on invalid JSON', async () => {
+    const ctx = mockCtxWithLlm('not json');
     const condition = aiCondition<string>({
-      callModel: mockCallModel('not json'),
       model: 'test-model',
       prompt: 'Is this positive?',
     });

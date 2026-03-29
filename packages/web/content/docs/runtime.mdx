@@ -45,7 +45,7 @@ const harness = new AgentHarness({
 | `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
-| `callModel` | `CallModelFn` | `undefined` | Custom function that calls the LLM. Required for `step.llm` execution. |
+| `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
 

@@ -158,7 +158,7 @@ interface MessageItem extends ItemBase {
 ```ts
 interface FunctionCallItem extends ItemBase {
   readonly type: 'function_call';
-  readonly call_id: string;
+  readonly callId: string;
   readonly name: string;
   readonly arguments: string;
 }
@@ -169,7 +169,7 @@ interface FunctionCallItem extends ItemBase {
 ```ts
 interface FunctionCallOutputItem extends ItemBase {
   readonly type: 'function_call_output';
-  readonly call_id: string;
+  readonly callId: string;
   readonly output: string;
 }
 ```
@@ -181,7 +181,7 @@ interface ReasoningItem extends ItemBase {
   readonly type: 'reasoning';
   readonly content: ContentPart[];
   readonly summary?: ContentPart[];
-  readonly encrypted_content?: string;
+  readonly encryptedContent?: string;
 }
 ```
 

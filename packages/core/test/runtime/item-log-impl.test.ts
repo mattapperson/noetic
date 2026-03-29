@@ -25,7 +25,7 @@ const makeFunctionCall = (id: string): FunctionCallItem => ({
   id,
   type: 'function_call',
   status: 'completed',
-  call_id: `call_${id}`,
+  callId: `call_${id}`,
   name: 'myFunc',
   arguments: '{}',
 });
@@ -34,7 +34,7 @@ const makeFunctionCallOutput = (id: string): FunctionCallOutputItem => ({
   id,
   type: 'function_call_output',
   status: 'completed',
-  call_id: `call_${id}`,
+  callId: `call_${id}`,
   output: '{"result": true}',
 });
 

@@ -95,3 +95,9 @@ export interface LLMResponse {
   };
   cost?: number;
 }
+
+/** @public Configuration for the LLM provider used by the agent harness. */
+export interface LlmProviderConfig {
+  provider: 'openrouter';
+  apiKey?: string;
+}

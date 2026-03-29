@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { react } from '../../src/patterns/react';
 import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { LLMResponse } from '../../src/types/common';
+import { createScriptedCallModel } from '../_helpers';
 
 describe('ReAct pattern', () => {
   it('creates a loop step with correct structure', () => {
@@ -54,55 +55,49 @@ describe('ReAct pattern', () => {
       }),
     };
 
-    let callCount = 0;
-    const mockCallModel = async (): Promise<LLMResponse> => {
-      callCount++;
-
-      if (callCount === 1) {
-        // First call: LLM decides to use search tool
-        return {
-          items: [
-            {
-              id: `fc-${callCount}`,
-              status: 'completed',
-              type: 'function_call',
-              call_id: `call_${callCount}`,
-              name: 'search',
-              arguments: '{"query":"test query"}',
-            } satisfies LLMResponse['items'][number],
-            {
-              id: `fco-${callCount}`,
-              status: 'completed',
-              type: 'function_call_output',
-              call_id: `call_${callCount}`,
-              output: '{"results":["found: test query"]}',
-            } satisfies LLMResponse['items'][number],
-            {
-              id: `msg-${callCount}`,
-              status: 'completed',
-              type: 'message',
-              role: 'assistant',
-              content: [
-                {
-                  type: 'output_text',
-                  text: 'I searched and found results.',
-                },
-              ],
-            } satisfies LLMResponse['items'][number],
-          ],
-          usage: {
-            inputTokens: 50,
-            outputTokens: 30,
-          },
-          cost: 0.001,
-        };
-      }
-
-      // Second call: LLM responds without tool calls (stops)
-      return {
+    const script: LLMResponse[] = [
+      // First call: LLM decides to use search tool
+      {
         items: [
           {
-            id: `msg-${callCount}`,
+            id: 'fc-1',
+            status: 'completed',
+            type: 'function_call',
+            callId: 'call_1',
+            name: 'search',
+            arguments: '{"query":"test query"}',
+          } satisfies LLMResponse['items'][number],
+          {
+            id: 'fco-1',
+            status: 'completed',
+            type: 'function_call_output',
+            callId: 'call_1',
+            output: '{"results":["found: test query"]}',
+          } satisfies LLMResponse['items'][number],
+          {
+            id: 'msg-1',
+            status: 'completed',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'output_text',
+                text: 'I searched and found results.',
+              },
+            ],
+          } satisfies LLMResponse['items'][number],
+        ],
+        usage: {
+          inputTokens: 50,
+          outputTokens: 30,
+        },
+        cost: 0.001,
+      },
+      // Second call: LLM responds without tool calls (stops)
+      {
+        items: [
+          {
+            id: 'msg-2',
             status: 'completed',
             type: 'message',
             role: 'assistant',
@@ -119,13 +114,13 @@ describe('ReAct pattern', () => {
           outputTokens: 40,
         },
         cost: 0.002,
-      };
-    };
+      },
+    ];
 
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel: mockCallModel,
+      _testCallModel: createScriptedCallModel(script),
     });
     const ctx = harness.createContext();
 
@@ -139,8 +134,6 @@ describe('ReAct pattern', () => {
 
     const result = await harness.run(reactStep, 'What is the answer?', ctx);
 
-    // Should have called model twice (once with tool call, once without)
-    expect(callCount).toBe(2);
     expect(result).toBe('Based on my search, here is the answer.');
   });
 
@@ -153,50 +146,51 @@ describe('ReAct pattern', () => {
       execute: async () => 'ok',
     };
 
-    let callCount = 0;
-    const mockCallModel = async (): Promise<LLMResponse> => {
-      callCount++;
-      return {
+    const script: LLMResponse[] = Array.from(
+      {
+        length: 3,
+      },
+      (_, i) => ({
         items: [
           {
-            id: `fc-${callCount}`,
-            status: 'completed',
-            type: 'function_call',
-            call_id: `call_${callCount}`,
+            id: `fc-${i + 1}`,
+            status: 'completed' as const,
+            type: 'function_call' as const,
+            callId: `call_${i + 1}`,
             name: 'always',
             arguments: '{}',
-          } satisfies LLMResponse['items'][number],
+          },
           {
-            id: `fco-${callCount}`,
-            status: 'completed',
-            type: 'function_call_output',
-            call_id: `call_${callCount}`,
+            id: `fco-${i + 1}`,
+            status: 'completed' as const,
+            type: 'function_call_output' as const,
+            callId: `call_${i + 1}`,
             output: '"ok"',
-          } satisfies LLMResponse['items'][number],
+          },
           {
-            id: `msg-${callCount}`,
-            status: 'completed',
-            type: 'message',
-            role: 'assistant',
+            id: `msg-${i + 1}`,
+            status: 'completed' as const,
+            type: 'message' as const,
+            role: 'assistant' as const,
             content: [
               {
-                type: 'output_text',
-                text: `Step ${callCount}`,
+                type: 'output_text' as const,
+                text: `Step ${i + 1}`,
               },
             ],
-          } satisfies LLMResponse['items'][number],
+          },
         ],
         usage: {
           inputTokens: 10,
           outputTokens: 10,
         },
-      };
-    };
+      }),
+    );
 
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel: mockCallModel,
+      _testCallModel: createScriptedCallModel(script),
     });
     const ctx = harness.createContext();
 
@@ -208,8 +202,9 @@ describe('ReAct pattern', () => {
       maxSteps: 3,
     });
 
-    const _result = await harness.run(reactStep, 'go', ctx);
-    expect(callCount).toBe(3); // Stopped at maxSteps
+    await harness.run(reactStep, 'go', ctx);
+    // If maxSteps is respected, we consumed all 3 scripted responses
+    expect(ctx.tokens.input).toBe(30);
   });
 
   it('terminates on noToolCalls', async () => {
@@ -221,36 +216,33 @@ describe('ReAct pattern', () => {
       execute: async () => 'ok',
     };
 
-    let callCount = 0;
-    const mockCallModel = async (): Promise<LLMResponse> => {
-      callCount++;
-      // First call has no tool calls — should stop immediately after step 1
-      return {
+    const script: LLMResponse[] = [
+      {
         items: [
           {
-            id: `msg-${callCount}`,
-            status: 'completed',
-            type: 'message',
-            role: 'assistant',
+            id: 'msg-1',
+            status: 'completed' as const,
+            type: 'message' as const,
+            role: 'assistant' as const,
             content: [
               {
-                type: 'output_text',
+                type: 'output_text' as const,
                 text: 'No tools needed',
               },
             ],
-          } satisfies LLMResponse['items'][number],
+          },
         ],
         usage: {
           inputTokens: 10,
           outputTokens: 10,
         },
-      };
-    };
+      },
+    ];
 
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel: mockCallModel,
+      _testCallModel: createScriptedCallModel(script),
     });
     const ctx = harness.createContext();
 
@@ -264,7 +256,7 @@ describe('ReAct pattern', () => {
 
     // noToolCalls only fires after stepCount >= 1
     const result = await harness.run(reactStep, 'hi', ctx);
-    expect(callCount).toBe(1);
+    expect(ctx.tokens.input).toBe(10); // Only one call
     expect(result).toBe('No tools needed');
   });
 
@@ -279,74 +271,70 @@ describe('ReAct pattern', () => {
       execute: async () => 'found',
     };
 
-    let callCount = 0;
-    const mockCallModel = async (): Promise<LLMResponse> => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          items: [
-            {
-              id: 'fc1',
-              status: 'completed',
-              type: 'function_call',
-              call_id: 'c1',
-              name: 'search',
-              arguments: '{"q":"x"}',
-            } satisfies LLMResponse['items'][number],
-            {
-              id: 'fco1',
-              status: 'completed',
-              type: 'function_call_output',
-              call_id: 'c1',
-              output: '"found"',
-            } satisfies LLMResponse['items'][number],
-            {
-              id: 'm1',
-              status: 'completed',
-              type: 'message',
-              role: 'assistant',
-              content: [
-                {
-                  type: 'output_text',
-                  text: 'searching',
-                },
-              ],
-            } satisfies LLMResponse['items'][number],
-          ],
-          usage: {
-            inputTokens: 100,
-            outputTokens: 50,
+    const script: LLMResponse[] = [
+      {
+        items: [
+          {
+            id: 'fc1',
+            status: 'completed' as const,
+            type: 'function_call' as const,
+            callId: 'c1',
+            name: 'search',
+            arguments: '{"q":"x"}',
           },
-          cost: 0.01,
-        };
-      }
-      return {
+          {
+            id: 'fco1',
+            status: 'completed' as const,
+            type: 'function_call_output' as const,
+            callId: 'c1',
+            output: '"found"',
+          },
+          {
+            id: 'm1',
+            status: 'completed' as const,
+            type: 'message' as const,
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'output_text' as const,
+                text: 'searching',
+              },
+            ],
+          },
+        ],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+        },
+        cost: 0.01,
+      },
+      {
         items: [
           {
             id: 'm2',
-            status: 'completed',
-            type: 'message',
-            role: 'assistant',
+            status: 'completed' as const,
+            type: 'message' as const,
+            role: 'assistant' as const,
             content: [
               {
-                type: 'output_text',
+                type: 'output_text' as const,
                 text: 'done',
               },
             ],
-          } satisfies LLMResponse['items'][number],
+          },
         ],
         usage: {
           inputTokens: 200,
           outputTokens: 100,
         },
         cost: 0.02,
-      };
-    };
+      },
+    ];
 
     const harness = new AgentHarness({
       name: 'test',
       params: {},
-      callModel: mockCallModel,
+      _testCallModel: createScriptedCallModel(script),
     });
     const ctx = harness.createContext();
 

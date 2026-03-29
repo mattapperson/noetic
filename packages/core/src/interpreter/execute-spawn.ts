@@ -32,7 +32,7 @@ const naiveTokenize = (text: string): number => Math.ceil(text.length / 4);
 const noopTrace = {
   setAttribute(): void {},
   addEvent(): void {},
-} as const;
+} satisfies ExecutionContext['trace'];
 
 //#endregion
 
@@ -135,6 +135,7 @@ export async function executeSpawn<I, O>(
     state: cloneWithGuard(ctx.state, `Spawn '${step.id}'`),
     threadId: ctx.threadId,
     resourceId: ctx.resourceId,
+    layers: layers.length > 0 ? layers : undefined,
   });
 
   try {

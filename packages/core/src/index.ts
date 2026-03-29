@@ -1,9 +1,7 @@
 //#region Adapters
 
 /** @public */
-export { getDefaultCallModel } from './adapters/default-call-model';
-/** @public */
-export { createOpenRouterCallModel, createOpenRouterEmbed } from './adapters/openrouter';
+export { createOpenRouterEmbed } from './adapters/openrouter';
 
 //#endregion
 
@@ -58,8 +56,6 @@ export { isNoeticError, NoeticErrorImpl } from './errors/noetic-error';
 
 /** @public */
 export { execute } from './interpreter/execute';
-/** @public */
-export type { CallModelFn, CallModelParams } from './interpreter/execute-llm';
 
 //#endregion
 
@@ -128,6 +124,7 @@ export type { Channel, ChannelHandle, ExternalChannel } from './types/channel';
 /** @public */
 export type {
   LLMResponse,
+  LlmProviderConfig,
   ModelParams,
   RetryPolicy,
   StepMeta,
@@ -231,6 +228,7 @@ export type {
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
+  CallModelRequest,
   ExecuteOptions,
   RecallLayerOutput,
 } from './types/runtime';

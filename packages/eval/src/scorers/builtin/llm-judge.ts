@@ -1,4 +1,4 @@
-import type { CallModelFn } from '@noetic/core';
+import type { LlmProviderConfig } from '@noetic/core';
 import { AgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
@@ -6,7 +6,7 @@ import type { ZodType } from 'zod';
 
 export interface JudgeConfig {
   model?: string;
-  callModel?: CallModelFn;
+  llm?: LlmProviderConfig;
 }
 
 interface JudgeRunConfig<T> {
@@ -35,7 +35,7 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const harness = new AgentHarness({
     name: 'llm-judge',
     params: {},
-    callModel: config.judge?.callModel,
+    llm: config.judge?.llm,
   });
   const ctx = harness.createContext();
 

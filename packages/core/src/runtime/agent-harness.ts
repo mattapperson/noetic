@@ -1,8 +1,14 @@
+import { OpenRouter } from '@openrouter/sdk';
 import type { ZodType } from 'zod';
-import { getDefaultCallModel } from '../adapters/default-call-model';
+import {
+  convertTools,
+  extractSystemInstruction,
+  extractUsage,
+  itemsToInput,
+  responseToNoeticItems,
+} from '../adapters/openrouter';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { execute } from '../interpreter/execute';
-import type { CallModelFn } from '../interpreter/execute-llm';
 import { estimateTokens } from '../interpreter/message-helpers';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
@@ -17,7 +23,7 @@ import {
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
-import type { LLMResponse } from '../types/common';
+import type { LLMResponse, LlmProviderConfig } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { ExecuteInput, Item } from '../types/items';
@@ -27,6 +33,7 @@ import type {
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
+  CallModelRequest,
   ExecuteOptions,
   RecallLayerOutput,
 } from '../types/runtime';
@@ -46,9 +53,32 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   hooks?: AgentHooks;
   params: TParams;
   paramsSchema?: ZodType<TParams>;
-  callModel?: CallModelFn;
+  llm?: LlmProviderConfig;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
+  /** @internal Test-only escape hatch to inject a mock callModel implementation. */
+  _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
+}
+
+//#endregion
+
+//#region Helpers
+
+function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
+  if (config && config.provider !== 'openrouter') {
+    throw new NoeticConfigError({
+      code: 'UNSUPPORTED_PROVIDER',
+      message: `Unsupported LLM provider: ${config.provider}`,
+      hint: 'Currently only "openrouter" is supported.',
+    });
+  }
+  const apiKey = config?.apiKey ?? process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    return undefined;
+  }
+  return new OpenRouter({
+    apiKey,
+  });
 }
 
 //#endregion
@@ -66,8 +96,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 {
   readonly config: AgentConfig<TParams>;
   private readonly initialStep?: Step<string, string>;
-  private callModel?: CallModelFn;
+  private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
+  private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
 
@@ -81,10 +112,61 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       params: validatedParams,
     };
     this.initialStep = opts.initialStep;
-    this.callModel = opts.callModel ?? getDefaultCallModel();
+    this.callModelOverride = opts._testCallModel;
+    this.client = opts._testCallModel ? undefined : createClient(opts.llm);
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
+  }
+
+  async callModel(request: CallModelRequest): Promise<LLMResponse> {
+    if (this.callModelOverride) {
+      return this.callModelOverride(request);
+    }
+
+    if (!this.client) {
+      throw new NoeticConfigError({
+        code: 'NO_LLM_PROVIDER',
+        message: 'No LLM provider configured on this harness.',
+        hint: 'Pass `llm: { provider: "openrouter", apiKey: "..." }` in constructor options or set OPENROUTER_API_KEY.',
+      });
+    }
+
+    const { instructions } = extractSystemInstruction(request.items);
+    const nonSystemItems = request.items.filter(
+      (i) => !(i.type === 'message' && i.role === 'system'),
+    );
+    const sdkInput = itemsToInput(nonSystemItems);
+
+    let sdkTools: ReturnType<typeof convertTools> | undefined;
+    if (request.tools && request.tools.length > 0) {
+      sdkTools = convertTools({
+        tools: request.tools,
+        ctx: request.ctx,
+        harness: this,
+        layers: request.layers,
+      });
+    }
+
+    const callResult = this.client.callModel({
+      model: request.model,
+      input: sdkInput,
+      instructions,
+      tools: sdkTools,
+      temperature: request.params?.temperature,
+      maxOutputTokens: request.params?.maxTokens,
+      topP: request.params?.topP,
+    });
+
+    const sdkResponse = await callResult.getResponse();
+    const noeticItems = responseToNoeticItems(sdkResponse);
+    const usage = extractUsage(sdkResponse.usage);
+
+    return {
+      items: noeticItems,
+      usage,
+      cost: sdkResponse.usage?.cost ?? undefined,
+    };
   }
 
   async execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string> {
@@ -114,7 +196,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async run<I, O>(s: Step<I, O>, input: I, ctx: Context): Promise<O> {
-    return execute(s, input, ctx, this.callModel, this);
+    return execute(s, input, ctx);
   }
 
   detachedSpawn<I, O>(s: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
@@ -175,6 +257,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         output: ctx.tokens.output,
       },
       cost: ctx.cost,
+      callModel: (request) => this.callModel(request),
       tokenize: estimateTokens,
       trace: {
         setAttribute: (key, value) => ctx.span.setAttribute(key, value),
