@@ -7,11 +7,11 @@
 Pure async computation. The runtime can retry freely and doesn't track token usage.
 
 ```typescript
-step.run<I, O>({
+step.run<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
-  execute: (input: I, ctx: Context) => Promise<O>;
+  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
   retry?: RetryPolicy;
-}): StepRun<I, O>
+}): StepRun<TMemory, I, O>
 ```
 
 ### step.llm
@@ -19,14 +19,14 @@ step.run<I, O>({
 Model call with optional tools and structured output.
 
 ```typescript
-step.llm<I, O>({
+step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   model: string;
   system?: string;
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
-}): StepLLM<I, O>
+}): StepLLM<TMemory, I, O>
 ```
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
@@ -36,11 +36,11 @@ The agent harness assembles the View before calling the model: system message + 
 Direct tool execution (not via LLM selection).
 
 ```typescript
-step.tool<I, O>({
+step.tool<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
-}): StepTool<I, O>
+}): StepTool<TMemory, I, O>
 ```
 
 ### branch
@@ -76,12 +76,12 @@ Each fork path gets a deep clone of parent state. Mutations in one path don't af
 Child execution with context boundary. Memory layers control what state crosses the boundary.
 
 ```typescript
-spawn<I, O>({
+spawn<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
-  child: Step<I, O>;
-  memory?: MemoryLayer[];
+  child: Step<TMemory, I, O>;
+  memory?: MemoryConfig | MemoryLayer[];
   timeout?: number;
-}): StepSpawn<I, O>
+}): StepSpawn<TMemory, I, O>
 ```
 
 ### loop
@@ -157,7 +157,7 @@ react({
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-  memory?: MemoryLayer[];
+  memory?: MemoryConfig | MemoryLayer[];
 }): StepLoop | StepSpawn
 ```
 
@@ -312,7 +312,36 @@ interface SteeringRule {
 
 ## Layer Provides API
 
-Layers can expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on the handle returned by `ctx.layer(ref)`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
+Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.memory['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
+
+### memory()
+
+Wraps a layer tuple for type-safe inference. Uses `const` type parameter to preserve literal types without `as const`.
+
+```typescript
+memory<const T extends readonly MemoryLayer[]>(layers: T): MemoryConfig<T>
+```
+
+### InferMemory\<T\>
+
+Extracts the typed memory shape from a `MemoryConfig` (like `z.infer<>` for Zod).
+
+```typescript
+const mem = memory([workingMemory(), counterLayer()]);
+type Mem = InferMemory<typeof mem>;
+// Use as: step.run<Mem>({ execute: (input, ctx) => { ctx.memory.counter.value } })
+```
+
+### MemoryConfig
+
+Typed wrapper preserving individual layer types for compile-time inference.
+
+```typescript
+interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly MemoryLayer[]> {
+  readonly layers: TLayers;
+  readonly _shape: InferMemoryShape<TLayers>;  // phantom — never accessed at runtime
+}
+```
 
 ### layerData
 
@@ -338,16 +367,21 @@ layerFn<TInput, TOutput, TState>({
 }): LayerFunctionDecl<TInput, TOutput, TState>
 ```
 
-### ctx.layer(ref)
+### ctx.memory
 
-Returns a typed `LayerHandle` for a layer reference. Data entries are live property reads; function entries are async callable methods.
+Layer provides keyed by layer ID. Data entries are live property reads; function entries are async callable methods.
 
 ```typescript
-const wm = workingMemory();
-// In a code step:
-const handle = ctx.layer(wm);
-handle.snapshot;              // WorkingMemoryState (live read)
-await handle.update({ k: 1 }); // calls layerFn, updates state
+const mem = memory([workingMemory()]);
+type Mem = InferMemory<typeof mem>;
+
+step.run<Mem>({
+  id: 'work',
+  execute: async (input, ctx) => {
+    ctx.memory['working-memory'].snapshot;        // WorkingMemoryState (live read)
+    await ctx.memory['working-memory'].update({ k: 1 }); // calls layerFn, updates state
+  },
+});
 ```
 
 ### Automatic LLM tool injection

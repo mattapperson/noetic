@@ -66,10 +66,11 @@ provides: {
 }
 ```
 
-- **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.layer(wm).snapshot`, which returns the full `WorkingMemoryState`.
-- **`update`** — A function declaration. Code steps call it as `await ctx.layer(wm).update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism.
+- **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.memory['working-memory'].snapshot`, which returns the full `WorkingMemoryState`.
+- **`update`** — A function declaration. Code steps call it as `await ctx.memory['working-memory'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism.
 - **Prototype poisoning protection:** The `update` function strips `__proto__` and `constructor` keys from incoming arguments before merging.
 - **Backward compatibility:** The `store` hook still detects `findFunctionCall(newItems, 'updateWorkingMemory')` for LLMs that emit the legacy function-call convention. Both paths apply the same prototype-stripping and merge logic.
+- **Type-safe access:** The `workingMemory()` factory returns its result `satisfies MemoryLayer<WorkingMemoryState>`, preserving the literal layer id and provides shape at the type level. Combine `memory([workingMemory()])` with `InferMemory<typeof mem>` to get compile-time typed access to `ctx.memory['working-memory']`.
 
 ---
 

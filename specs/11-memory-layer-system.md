@@ -2,7 +2,7 @@
 
 > **Package:** `@noetic/memory`
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `LayerHandle`, `layerData`, `layerFn`
+> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
 
 ## Package Boundary
 
@@ -444,15 +444,14 @@ Data entries become synchronous property reads (via getter). Function entries be
 
 ### Accessing Provides from Code Steps
 
-Code steps access a layer's provides via `ctx.layer(ref)`, where `ref` is the `MemoryLayer` object used at agent construction:
+Code steps access a layer's provides via `ctx.memory['layerId']`, where the key is the layer's `id` string:
 
 ```typescript
-const handle = ctx.layer(myLayer);
-const value = handle.someData;              // synchronous read
-const result = await handle.someFunction({ query: 'test' });  // async call
+const value = ctx.memory['layerId'].someData;              // synchronous read
+const result = await ctx.memory['layerId'].someFunction({ query: 'test' });  // async call
 ```
 
-The agent harness MUST throw `layer_not_found` if the referenced layer is not registered in the current execution context.
+Layers without `provides` produce an empty `{}` entry in `ctx.memory`.
 
 ### Automatic LLM Tool Injection
 
@@ -478,6 +477,42 @@ function layerFn<TInput, TOutput, TState>(opts: {
   ) => Promise<{ result: TOutput; state?: TState }>;
 }): LayerFunctionDecl<TInput, TOutput, TState>;
 ```
+
+### Type-Safe Memory Access
+
+The `memory()` builder wraps a layer tuple in a `MemoryConfig` that preserves individual layer types for compile-time inference:
+
+```typescript
+function memory<const T extends readonly MemoryLayer[]>(layers: T): MemoryConfig<T>;
+
+interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly MemoryLayer[]> {
+  readonly layers: TLayers;
+  readonly _shape: InferMemoryShape<TLayers>;
+}
+```
+
+`InferMemory<T>` extracts the typed memory shape from a config (analogous to `z.infer<>` for Zod):
+
+```typescript
+type InferMemory<T extends MemoryConfig> = T['_shape'];
+```
+
+`TMemory` is the first generic parameter on `Step` and `Context`, enabling end-to-end type safety:
+
+```typescript
+const mem = memory([workingMemory(), counterLayer()]);
+type Mem = InferMemory<typeof mem>;
+
+step.run<Mem>({
+  id: 'work',
+  execute: async (input, ctx) => {
+    ctx.memory['working-memory'].snapshot;  // typed
+    await ctx.memory.counter.increment({ amount: 1 });  // typed
+  },
+});
+```
+
+Layer factories MUST use `satisfies MemoryLayer<TState>` (not a return type annotation) and `as const` on the `id` field to preserve literal types for inference.
 
 ---
 

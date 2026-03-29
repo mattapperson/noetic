@@ -11,7 +11,7 @@ Noetic is a TypeScript agent framework where all agent patterns decompose into c
 
 ### Everything is a Step
 
-All agent patterns compose through a single `Step<I, O>` type. Steps are pure data (no side effects until executed). The agent harness dispatches by `step.kind`:
+All agent patterns compose through a single `Step<TMemory, I, O>` type. Steps are pure data (no side effects until executed). The agent harness dispatches by `step.kind`:
 
 - **`run`** -- pure async computation
 - **`llm`** -- model call with optional tools and structured output
@@ -20,6 +20,22 @@ All agent patterns compose through a single `Step<I, O>` type. Steps are pure da
 - **`fork`** -- parallel execution (race, all, or settle)
 - **`spawn`** -- new context boundary with optional memory layers
 - **`loop`** -- iteration with termination predicates
+
+### Typed Memory Access
+
+Memory layers expose typed data and functions via `ctx.memory['layerId']`. Use the `memory()` builder with `InferMemory<>` for compile-time type safety:
+
+```typescript
+const mem = memory([workingMemory()]);
+type Mem = InferMemory<typeof mem>;
+
+step.run<Mem>({
+  id: 'work',
+  execute: async (input, ctx) => {
+    ctx.memory['working-memory'].snapshot;  // typed
+  },
+});
+```
 
 ### The AgentHarness
 

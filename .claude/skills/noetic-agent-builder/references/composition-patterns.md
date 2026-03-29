@@ -319,25 +319,26 @@ const entityMemory: MemoryLayer<EntityState> = {
 
 ## Pattern: Layer Provides
 
-Expose typed data and functions from a layer. Functions are automatically available as LLM tools.
+Expose typed data and functions from a layer. Functions are automatically available as LLM tools. Use `memory()` + `InferMemory<>` for end-to-end type safety.
 
 ```typescript
 import { z } from 'zod';
-import { step, loop, spawn, until, any, layerData, layerFn, Slot } from '@noetic/core';
-import type { MemoryLayer, MemoryScope } from '@noetic/core';
+import {
+  memory, step, loop, spawn, until, any, layerData, layerFn, Slot,
+  type InferMemory, type MemoryLayer, type MemoryScope,
+} from '@noetic/core';
 
 interface TaskState {
   tasks: string[];
   completed: number;
 }
 
-const SCOPE: MemoryScope = 'execution';
-
-function taskLayer(): MemoryLayer<TaskState> {
+// Layer factory: use `satisfies` + `as const` on id to preserve literal types
+function taskLayer() {
   return {
-    id: 'tasks',
+    id: 'tasks' as const,
     slot: Slot.WORKING_MEMORY,
-    scope: SCOPE,
+    scope: 'execution' as const satisfies MemoryScope,
     hooks: {
       async init() {
         return { state: { tasks: [], completed: 0 } };
@@ -360,20 +361,22 @@ function taskLayer(): MemoryLayer<TaskState> {
         }),
       }),
     },
-  };
+  } satisfies MemoryLayer<TaskState>;
 }
 
-// Code step reads data, LLM step gets `tasks/complete` as a tool automatically
-const layer = taskLayer();
+// 1. Create typed memory config
+const mem = memory([taskLayer()]);
+type Mem = InferMemory<typeof mem>;
 
-const checkStep = step.run({
+// 2. Code step reads data — fully typed via TMemory generic
+const checkStep = step.run<Mem>({
   id: 'check-progress',
   execute: async (_input, ctx) => {
-    const handle = ctx.layer(layer);
-    return `${handle.pending.length} tasks remaining`;
+    return `${ctx.memory.tasks.pending.length} tasks remaining`;
   },
 });
 
+// 3. LLM step gets `tasks/complete` as a tool automatically
 const agent = spawn({
   id: 'task-agent',
   child: loop({
@@ -383,6 +386,6 @@ const agent = spawn({
     ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
   }),
-  memory: [layer],
+  memory: mem,
 });
 ```
