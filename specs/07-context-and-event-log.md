@@ -110,10 +110,12 @@ interface ReasoningItem extends ItemBase {
 }
 
 interface ExtensionItem extends ItemBase {
-  readonly type: `x-${string}`;
+  readonly type: `${string}:${string}`;  // e.g., 'noetic:analytics', 'openrouter:web_search'
   readonly data: Record<string, unknown>;
 }
 ```
+
+Extension items use the `prefix:name` convention established by the OpenResponses `ResponsesServerToolOutput` type. The prefix identifies the vendor or domain (e.g., `openrouter`, `noetic`, `myapp`) and the name identifies the specific item kind. None of the standard item types contain a colon, so the presence of `:` in the type string cleanly distinguishes extensions from standard items.
 
 ---
 

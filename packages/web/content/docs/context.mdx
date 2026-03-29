@@ -187,14 +187,16 @@ interface ReasoningItem extends ItemBase {
 
 ### ExtensionItem
 
-Custom item types prefixed with `x-`:
+Custom item types using the `prefix:name` convention (e.g., `noetic:analytics`, `openrouter:web_search`):
 
 ```ts
 interface ExtensionItem extends ItemBase {
-  readonly type: `x-${string}`;
+  readonly type: `${string}:${string}`;
   readonly data: Record<string, unknown>;
 }
 ```
+
+For the complete reference of all item shapes, streaming events, and how they map to the OpenResponses specification, see [Items & Events](/docs/api/items-and-events).
 
 ### ContentPart
 

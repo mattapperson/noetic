@@ -144,8 +144,10 @@ All items share this base:
 
 | Field | Type | Description |
 |---|---|---|
-| `type` | `` `x-${string}` `` | Custom type prefixed with `x-` |
-| `data` | `Record<string, unknown>` | Arbitrary data |
+| `type` | `` `${string}:${string}` `` | Namespaced type using `prefix:name` convention (e.g., `openrouter:web_search`, `noetic:analytics`) |
+| `data` | `Record<string, unknown>` | Arbitrary structured data |
+
+See [Items & Events](/docs/api/items-and-events) for the complete reference including built-in extended items, streaming events, and the adapter flow.
 
 ## ContentPart
 

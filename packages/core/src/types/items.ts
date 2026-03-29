@@ -49,9 +49,9 @@ export interface ReasoningItem extends ItemBase {
   readonly encryptedContent?: string;
 }
 
-/** @public User-defined extension item with a namespaced `x-` type prefix. */
+/** @public User-defined extension item with a namespaced `prefix:name` type (e.g., `noetic:custom`, `openrouter:web_search`). */
 export interface ExtensionItem extends ItemBase {
-  readonly type: `x-${string}`;
+  readonly type: `${string}:${string}`;
   readonly data: Record<string, unknown>;
 }
 

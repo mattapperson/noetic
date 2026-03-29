@@ -500,7 +500,7 @@ export function assertOpenResponsesCompliance(items: readonly Item[]): void {
     expect(item.id.length).toBeGreaterThan(0);
     expect(VALID_STATUSES.has(item.status)).toBe(true);
 
-    const isExtension = item.type.startsWith('x-');
+    const isExtension = item.type.includes(':');
     if (!isExtension) {
       expect(VALID_ITEM_TYPES.has(item.type)).toBe(true);
     }
