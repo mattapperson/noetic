@@ -1,12 +1,15 @@
+import { buildContextMemory } from '../memory/layer-api';
 import type { Channel } from '../types/channel';
 import type { StepMeta, TokenUsage } from '../types/common';
 import type { Context, ItemLog } from '../types/context';
 import type { Item } from '../types/items';
-import type { MemoryLayer } from '../types/memory';
+import type { ContextMemory, MemoryLayer } from '../types/memory';
 import type { Span } from '../types/observability';
 import type { AgentHarnessContract } from '../types/runtime';
 import type { ChannelStore } from './channel-store';
 import { ItemLogImpl } from './item-log-impl';
+
+const EMPTY_MEMORY: ContextMemory = Object.freeze({});
 
 class NoopSpan implements Span {
   readonly traceId = crypto.randomUUID();
@@ -17,7 +20,7 @@ class NoopSpan implements Span {
   end(): void {}
 }
 
-export class ContextImpl implements Context {
+export class ContextImpl implements Context<ContextMemory> {
   readonly id: string;
   stepCount = 0;
   tokens: TokenUsage = {
@@ -27,7 +30,7 @@ export class ContextImpl implements Context {
   };
   cost = 0;
   state: unknown;
-  readonly parent: Context | null;
+  readonly parent: Context<ContextMemory> | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;
@@ -44,6 +47,7 @@ export class ContextImpl implements Context {
   private _completed = false;
   private _aborted = false;
   private _abortReason?: string;
+  private _memory?: ContextMemory;
 
   constructor(opts: {
     harness: AgentHarnessContract;
@@ -85,6 +89,13 @@ export class ContextImpl implements Context {
 
   get aborted(): boolean {
     return this._aborted;
+  }
+
+  get memory(): ContextMemory {
+    if (!this._memory) {
+      this._memory = this.layers ? buildContextMemory(this.layers, this) : EMPTY_MEMORY;
+    }
+    return this._memory;
   }
 
   recv<T>(

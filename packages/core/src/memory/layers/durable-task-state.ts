@@ -31,9 +31,9 @@ export interface DurableTaskStateConfig {
  * @param _config - Optional configuration for base directory, git commit behavior, schema, and serializer.
  * @returns A `MemoryLayer` scoped to the execution with durable task state.
  */
-export function durableTaskState(_config?: DurableTaskStateConfig): MemoryLayer<DurableTaskState> {
+export function durableTaskState(_config?: DurableTaskStateConfig) {
   return {
-    id: 'durable-task-state',
+    id: 'durable-task-state' as const,
     name: 'Durable Task State',
     slot: Slot.WORKING_MEMORY + 10, // 110
     scope: 'execution',
@@ -143,5 +143,5 @@ export function durableTaskState(_config?: DurableTaskStateConfig): MemoryLayer<
         };
       },
     },
-  };
+  } satisfies MemoryLayer<DurableTaskState>;
 }

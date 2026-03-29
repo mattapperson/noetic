@@ -2,6 +2,7 @@ import type { ZodType } from 'zod';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import type { ModelParams, RetryPolicy, Tool } from '../types/common';
 import type { Context } from '../types/context';
+import type { ContextMemory } from '../types/memory';
 import type { StepLLM, StepRun, StepTool } from '../types/step';
 
 export const step = {
@@ -16,11 +17,11 @@ export const step = {
    * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
    * @throws `NoeticConfigError` with code `MISSING_EXECUTE_FUNCTION` if `execute` is not provided.
    */
-  run<I, O>(opts: {
+  run<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
     id: string;
-    execute: (input: I, ctx: Context) => Promise<O>;
+    execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
     retry?: RetryPolicy;
-  }): StepRun<I, O> {
+  }): StepRun<TMemory, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
         code: 'EMPTY_STEP_ID',
@@ -55,14 +56,14 @@ export const step = {
    * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
    * @throws `NoeticConfigError` with code `MISSING_MODEL` if `model` is empty.
    */
-  llm<I, O>(opts: {
+  llm<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
     id: string;
     model: string;
     system?: string;
     tools?: Tool[];
     output?: ZodType<O>;
     params?: ModelParams;
-  }): StepLLM<I, O> {
+  }): StepLLM<TMemory, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
         code: 'EMPTY_STEP_ID',
@@ -94,11 +95,11 @@ export const step = {
    * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
    * @throws `NoeticConfigError` with code `MISSING_TOOL` if `tool` is not provided.
    */
-  tool<I, O>(opts: {
+  tool<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
     id: string;
     tool: Tool<ZodType<I>, ZodType<O>>;
     args?: Partial<I>;
-  }): StepTool<I, O> {
+  }): StepTool<TMemory, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
         code: 'EMPTY_STEP_ID',

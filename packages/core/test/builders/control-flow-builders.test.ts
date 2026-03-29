@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { branch, fork } from '../../src/builders/control-flow-builders';
+import type { ContextMemory } from '../../src/types/memory';
 import type { SettleResult } from '../../src/types/step';
 import { makeMockContext } from '../_helpers';
 
 describe('fork builder', () => {
   it('creates race mode fork', () => {
-    const f = fork<string, string>({
+    const f = fork<ContextMemory, string, string>({
       id: 'race-test',
       mode: 'race',
       paths: () => [
@@ -27,7 +28,7 @@ describe('fork builder', () => {
   });
 
   it('creates all mode fork with merge', () => {
-    const f = fork<string, string>({
+    const f = fork<ContextMemory, string, string>({
       id: 'all-test',
       mode: 'all',
       paths: () => [
@@ -54,7 +55,7 @@ describe('fork builder', () => {
   });
 
   it('creates settle mode fork with merge', () => {
-    const f = fork<string, string>({
+    const f = fork<ContextMemory, string, string>({
       id: 'settle-test',
       mode: 'settle',
       paths: () => [
@@ -75,7 +76,7 @@ describe('fork builder', () => {
   });
 
   it('supports concurrency option', () => {
-    const f = fork<string, string>({
+    const f = fork<ContextMemory, string, string>({
       id: 'conc-test',
       mode: 'all',
       paths: () => [],
@@ -87,7 +88,7 @@ describe('fork builder', () => {
 
   it('throws on empty id', () => {
     expect(() =>
-      fork<string, string>({
+      fork<ContextMemory, string, string>({
         id: '',
         mode: 'race',
         paths: () => [],
@@ -98,7 +99,7 @@ describe('fork builder', () => {
   it('throws when all mode lacks merge', () => {
     expect(() =>
       // @ts-expect-error — intentionally passing invalid opts to test runtime validation
-      fork<string, string>({
+      fork<ContextMemory, string, string>({
         id: 'test',
         mode: 'all',
         paths: () => [],
@@ -109,7 +110,7 @@ describe('fork builder', () => {
   it('throws when settle mode lacks merge', () => {
     expect(() =>
       // @ts-expect-error — intentionally passing invalid opts to test runtime validation
-      fork<string, string>({
+      fork<ContextMemory, string, string>({
         id: 'test',
         mode: 'settle',
         paths: () => [],
@@ -118,7 +119,7 @@ describe('fork builder', () => {
   });
 
   it('paths is a function', () => {
-    const f = fork<number, number>({
+    const f = fork<ContextMemory, number, number>({
       id: 'fn-test',
       mode: 'race',
       paths: (input) => [
@@ -140,7 +141,7 @@ describe('fork builder', () => {
 describe('branch builder', () => {
   it('throws on empty id', () => {
     expect(() =>
-      branch<string, string>({
+      branch<ContextMemory, string, string>({
         id: '',
         route: () => null,
       }),
@@ -149,7 +150,7 @@ describe('branch builder', () => {
 
   it('throws on missing route', () => {
     expect(() =>
-      branch<string, string>({
+      branch<ContextMemory, string, string>({
         id: 'test',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         route: undefined,

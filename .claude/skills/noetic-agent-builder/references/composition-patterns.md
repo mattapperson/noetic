@@ -316,3 +316,73 @@ const entityMemory: MemoryLayer<EntityState> = {
   },
 };
 ```
+
+## Pattern: Layer Provides
+
+Expose typed data and functions from a layer. Functions are automatically available as LLM tools.
+
+```typescript
+import { z } from 'zod';
+import { step, loop, spawn, until, any, layerData, layerFn, Slot } from '@noetic/core';
+import type { MemoryLayer, MemoryScope } from '@noetic/core';
+
+interface TaskState {
+  tasks: string[];
+  completed: number;
+}
+
+const SCOPE: MemoryScope = 'execution';
+
+function taskLayer(): MemoryLayer<TaskState> {
+  return {
+    id: 'tasks',
+    slot: Slot.WORKING_MEMORY,
+    scope: SCOPE,
+    hooks: {
+      async init() {
+        return { state: { tasks: [], completed: 0 } };
+      },
+    },
+    provides: {
+      pending: layerData<string[], TaskState>({
+        read: (state) => state.tasks,
+      }),
+      complete: layerFn<{ task: string }, void, TaskState>({
+        description: 'Mark a task as complete.',
+        input: z.object({ task: z.string() }),
+        output: z.void(),
+        execute: async (args, state) => ({
+          result: undefined,
+          state: {
+            tasks: state.tasks.filter((t) => t !== args.task),
+            completed: state.completed + 1,
+          },
+        }),
+      }),
+    },
+  };
+}
+
+// Code step reads data, LLM step gets `tasks/complete` as a tool automatically
+const layer = taskLayer();
+
+const checkStep = step.run({
+  id: 'check-progress',
+  execute: async (_input, ctx) => {
+    const handle = ctx.layer(layer);
+    return `${handle.pending.length} tasks remaining`;
+  },
+});
+
+const agent = spawn({
+  id: 'task-agent',
+  child: loop({
+    id: 'task-loop',
+    steps: [
+      step.llm({ id: 'work', model: 'anthropic/claude-sonnet-4', tools: [] }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(10)),
+  }),
+  memory: [layer],
+});
+```

@@ -3,12 +3,13 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeLLM } from '../../src/interpreter/execute-llm';
+import type { ContextMemory } from '../../src/types/memory';
 import type { StepLLM } from '../../src/types/step';
 import { makeLLMResponse, makeMockContextWithClient } from '../_helpers';
 
 describe('executeLLM', () => {
   it('calls the client and returns text output', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -22,7 +23,7 @@ describe('executeLLM', () => {
   });
 
   it('appends input as user message to ItemLog', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -37,7 +38,7 @@ describe('executeLLM', () => {
   });
 
   it('appends response items to ItemLog', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -54,7 +55,7 @@ describe('executeLLM', () => {
   });
 
   it('does not append user message for empty string input', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -69,7 +70,7 @@ describe('executeLLM', () => {
   });
 
   it('sets ctx.lastStepMeta with usage', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -91,7 +92,7 @@ describe('executeLLM', () => {
   });
 
   it('accumulates token usage on context', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -116,7 +117,7 @@ describe('executeLLM', () => {
       answer: z.string(),
       confidence: z.number(),
     });
-    const step: StepLLM<string, z.infer<typeof schema>> = {
+    const step: StepLLM<ContextMemory, string, z.infer<typeof schema>> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -137,7 +138,7 @@ describe('executeLLM', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const step: StepLLM<string, z.infer<typeof schema>> = {
+    const step: StepLLM<ContextMemory, string, z.infer<typeof schema>> = {
       kind: 'llm',
       id: 'parse-fail',
       model: 'gpt-4',
@@ -160,7 +161,7 @@ describe('executeLLM', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const step: StepLLM<string, z.infer<typeof schema>> = {
+    const step: StepLLM<ContextMemory, string, z.infer<typeof schema>> = {
       kind: 'llm',
       id: 'parse-fail',
       model: 'gpt-4',
@@ -180,7 +181,7 @@ describe('executeLLM', () => {
   });
 
   it('identifies tool calls in response', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -229,7 +230,7 @@ describe('executeLLM', () => {
   });
 
   it('stores responseItems in lastStepMeta', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -243,7 +244,7 @@ describe('executeLLM', () => {
   });
 
   it('accumulates cost on context', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -264,6 +265,7 @@ describe('executeLLM', () => {
 
   it('does not create user message for non-string input', async () => {
     const step: StepLLM<
+      ContextMemory,
       {
         data: number;
       },
@@ -287,7 +289,7 @@ describe('executeLLM', () => {
   });
 
   it('handles empty tools array', async () => {
-    const step: StepLLM<string, string> = {
+    const step: StepLLM<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',

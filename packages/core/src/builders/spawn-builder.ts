@@ -1,5 +1,5 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { MemoryLayer } from '../types/memory';
+import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { Step, StepSpawn } from '../types/step';
 
 /**
@@ -8,18 +8,18 @@ import type { Step, StepSpawn } from '../types/step';
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.child - Step to execute in the isolated child context.
- * @param opts.memory - Optional memory layers for the child context (replaces parent layers entirely).
+ * @param opts.memory - Optional memory config or layers for the child context (replaces parent layers entirely).
  * @param opts.timeout - Optional execution timeout in ms; the child is aborted if it exceeds this.
  * @returns A `StepSpawn` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
  */
-export function spawn<I, O>(opts: {
+export function spawn<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
   id: string;
-  child: Step<I, O>;
-  memory?: MemoryLayer[];
+  child: Step<TMemory, I, O>;
+  memory?: MemoryConfig | MemoryLayer[];
   timeout?: number;
-}): StepSpawn<I, O> {
+}): StepSpawn<TMemory, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',

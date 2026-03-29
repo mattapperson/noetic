@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { fork } from '../builders/control-flow-builders';
 import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
+import type { ContextMemory } from '../types/memory';
 import type { ExecuteStepFn, Step } from '../types/step';
 
 export interface PlanNode {
@@ -36,7 +37,7 @@ export interface PlanConstraints {
 }
 
 interface CompileOpts {
-  agents: Record<string, (prompt: string) => Step<string, unknown>>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, unknown>>;
   constraints?: PlanConstraints;
   executeStep?: ExecuteStepFn;
 }
@@ -53,11 +54,11 @@ interface CompileOpts {
  */
 export function compilePlan<O>(
   plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step<string, unknown>>,
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, unknown>>,
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
-): Step<string, O> {
-  return frameworkCast<Step<string, O>>(
+): Step<ContextMemory, string, O> {
+  return frameworkCast<Step<ContextMemory, string, O>>(
     compileNode(plan, {
       agents,
       constraints,
@@ -66,7 +67,7 @@ export function compilePlan<O>(
   );
 }
 
-function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
+function compileNode(node: PlanNode, opts: CompileOpts): Step<ContextMemory, string, unknown> {
   const agentFactory = opts.agents[node.assignee];
   if (!agentFactory) {
     throw new Error(`Unknown agent: ${node.assignee}`);
@@ -81,7 +82,7 @@ function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
   const childSteps = node.children.map((child) => compileNode(child, opts));
 
   if (node.execution === 'parallel') {
-    return fork<string, unknown>({
+    return fork<ContextMemory, string, unknown>({
       id: `plan-fork-${node.id}`,
       mode: 'all',
       paths: () => childSteps,
@@ -122,12 +123,12 @@ function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
  * @returns A `Step` that adaptively plans and executes.
  */
 export function adaptivePlan<O>(opts: {
-  planner: Step<string, PlanNode>;
-  agents: Record<string, (prompt: string) => Step<string, unknown>>;
+  planner: Step<ContextMemory, string, PlanNode>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, unknown>>;
   constraints?: PlanConstraints;
   maxRevisions: number;
   executeStep?: ExecuteStepFn;
-}): Step<string, O> {
+}): Step<ContextMemory, string, O> {
   return {
     kind: 'run',
     id: 'adaptive-plan',

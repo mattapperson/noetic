@@ -7,6 +7,7 @@ import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { executeLoop } from '../../src/interpreter/execute-loop';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Snapshot } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
 import { makeMockHarness, simpleExecute } from '../_helpers';
@@ -14,7 +15,7 @@ import { makeMockHarness, simpleExecute } from '../_helpers';
 describe('executeLoop', () => {
   it('repeats body until predicate fires', async () => {
     let count = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'test-loop',
       steps: [
         {
@@ -39,7 +40,7 @@ describe('executeLoop', () => {
 
   it('uses prepareNext to transform input between iterations', async () => {
     const inputs: string[] = [];
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'prep-loop',
       steps: [
         {
@@ -66,7 +67,7 @@ describe('executeLoop', () => {
 
   it('onError retry re-runs same iteration', async () => {
     let attempts = 0;
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'retry-loop',
       steps: [
         {
@@ -100,7 +101,7 @@ describe('executeLoop', () => {
 
   it('onError skip uses last successful output', async () => {
     let callCount = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'skip-loop',
       steps: [
         {
@@ -134,7 +135,7 @@ describe('executeLoop', () => {
   });
 
   it('onError abort propagates error', async () => {
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'abort-loop',
       steps: [
         {
@@ -167,7 +168,7 @@ describe('executeLoop', () => {
 
   it('predicate throw treated as stop', async () => {
     let count = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'pred-throw-loop',
       steps: [
         {
@@ -194,7 +195,7 @@ describe('executeLoop', () => {
 
   it('snapshot population is correct', async () => {
     let capturedSnapshot: Snapshot | null = null;
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'snap-loop',
       steps: [
         {
@@ -228,7 +229,7 @@ describe('executeLoop', () => {
   });
 
   it('enforces maxIterations ceiling', async () => {
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'ceiling-loop',
       steps: [
         {
@@ -259,7 +260,7 @@ describe('executeLoop', () => {
 
   it('default maxIterations is 1000', async () => {
     let count = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'default-ceiling-loop',
       steps: [
         {
@@ -290,7 +291,7 @@ describe('executeLoop', () => {
 
   it('retry counts against maxIterations ceiling', async () => {
     let attempts = 0;
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'retry-ceiling-loop',
       steps: [
         {
@@ -329,7 +330,7 @@ describe('executeLoop', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'abort-mid-loop',
       steps: [
         {
@@ -359,7 +360,7 @@ describe('executeLoop', () => {
   });
 
   it('rejects invalid maxIterations (NaN)', async () => {
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'nan-loop',
       steps: [
         {
@@ -386,7 +387,7 @@ describe('executeLoop', () => {
   });
 
   it('rejects invalid maxIterations (0)', async () => {
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'zero-loop',
       steps: [
         {
@@ -414,7 +415,7 @@ describe('executeLoop', () => {
 
   it('trims history to maxHistorySize', async () => {
     let capturedHistory: unknown[] = [];
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'history-loop',
       steps: [
         {
@@ -446,7 +447,7 @@ describe('executeLoop', () => {
 
   it('onError skip on first iteration (no previous output) continues', async () => {
     let callCount = 0;
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'skip-first-loop',
       steps: [
         {
@@ -481,7 +482,7 @@ describe('executeLoop', () => {
   });
 
   it('negative maxIterations throws validation error', async () => {
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'neg-loop',
       steps: [
         {
@@ -511,7 +512,7 @@ describe('executeLoop', () => {
     let iteration = 0;
     const feedbacks: (string | undefined)[] = [];
 
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'verify-loop',
       steps: [
         {
@@ -551,7 +552,7 @@ describe('executeLoop', () => {
 
   it('executes multiple body steps sequentially', async () => {
     const order: string[] = [];
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'multi-step-loop',
       steps: [
         {
@@ -615,7 +616,7 @@ describe('executeLoop inbox channel', () => {
     const { ctx, channelStore } = makeInboxCtx();
 
     let callCount = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'inbox-continue-loop',
       steps: [
         {
@@ -645,7 +646,7 @@ describe('executeLoop inbox channel', () => {
     const { ctx } = makeInboxCtx();
 
     let callCount = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'inbox-empty-loop',
       steps: [
         {
@@ -671,7 +672,7 @@ describe('executeLoop inbox channel', () => {
     const { ctx, channelStore } = makeInboxCtx();
 
     let callCount = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'inbox-park-loop',
       steps: [
         {
@@ -702,7 +703,7 @@ describe('executeLoop inbox channel', () => {
     const { ctx } = makeInboxCtx();
 
     let callCount = 0;
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'inbox-timeout-loop',
       steps: [
         {
@@ -728,7 +729,7 @@ describe('executeLoop inbox channel', () => {
   it('developer message appears in ctx.itemLog when inbox delivers', async () => {
     const { ctx, channelStore } = makeInboxCtx();
 
-    const loopStep = loop<number, number>({
+    const loopStep = loop<ContextMemory, number, number>({
       id: 'inbox-log-loop',
       steps: [
         {

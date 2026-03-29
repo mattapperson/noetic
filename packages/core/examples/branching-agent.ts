@@ -13,6 +13,7 @@
 import { branch } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepLoop } from '../src/types/step';
 import { until } from '../src/until/predicates';
 
@@ -45,7 +46,7 @@ function containsKeyword(input: string, keywords: readonly string[]): boolean {
   return keywords.some((keyword) => lower.includes(keyword));
 }
 
-const billingHandler = step.run<string, string>({
+const billingHandler = step.run<ContextMemory, string, string>({
   id: 'billing-handler',
   execute: async (input) => {
     return [
@@ -59,7 +60,7 @@ const billingHandler = step.run<string, string>({
   },
 });
 
-const technicalHandler = step.llm<string, string>({
+const technicalHandler = step.llm<ContextMemory, string, string>({
   id: 'technical-handler',
   model: 'gpt-4o',
   system: [
@@ -69,7 +70,7 @@ const technicalHandler = step.llm<string, string>({
   ].join(' '),
 });
 
-const fallbackHandler = step.run<string, string>({
+const fallbackHandler = step.run<ContextMemory, string, string>({
   id: 'fallback-handler',
   execute: async (input) => {
     return [
@@ -87,8 +88,8 @@ const fallbackHandler = step.run<string, string>({
 //#region Agent Builder
 
 /** Builds a support ticket router using branch + loop. */
-export function buildBranchingAgent(): StepLoop<string, string> {
-  const router = branch<string, string>({
+export function buildBranchingAgent(): StepLoop<ContextMemory, string, string> {
+  const router = branch<ContextMemory, string, string>({
     id: 'ticket-router',
     route: (input) => {
       if (containsKeyword(input, BILLING_KEYWORDS)) {

@@ -3,6 +3,7 @@ import { execute } from '../../src/interpreter/execute';
 import type { PlanNode } from '../../src/patterns/plans';
 import { adaptivePlan, compilePlan } from '../../src/patterns/plans';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
 import { makeMockHarness } from '../_helpers';
 
@@ -335,7 +336,7 @@ describe('adaptivePlan', () => {
   });
 
   it('non-run planner without executeStep throws', async () => {
-    const planner: Step<string, PlanNode> = {
+    const planner: Step<ContextMemory, string, PlanNode> = {
       kind: 'loop' as const,
       id: 'planner',
       steps: [

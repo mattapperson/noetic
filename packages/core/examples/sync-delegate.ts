@@ -7,13 +7,16 @@
  * Flow: User input → LLM loop → delegate tool call → sub-agent executes → result returned
  */
 import { react } from '../src/patterns/react';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepLoop, StepSpawn } from '../src/types/step';
 import { createSyncDelegateTool } from './delegate-tools';
 
 //#region Agent Builder
 
 /** Builds the main agent loop with sync delegation capability. */
-export function buildSyncDelegateAgent(): StepLoop<string, string> | StepSpawn<string, string> {
+export function buildSyncDelegateAgent():
+  | StepLoop<ContextMemory, string, string>
+  | StepSpawn<ContextMemory, string, string> {
   const delegateTool = createSyncDelegateTool();
 
   return react({

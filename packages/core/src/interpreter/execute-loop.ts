@@ -1,5 +1,6 @@
 import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
+import type { ContextMemory } from '../types/memory';
 import type { ExecuteStepFn, Snapshot, StepLoop, Verdict } from '../types/step';
 import { frameworkCast } from './framework-cast';
 import { createMessage } from './message-helpers';
@@ -7,7 +8,7 @@ import { isMutableContext } from './typeguards';
 
 //#region Types
 
-type InboxFields = Pick<StepLoop<unknown, unknown>, 'inbox' | 'parkTimeout'>;
+type InboxFields = Pick<StepLoop<unknown, unknown, unknown>, 'inbox' | 'parkTimeout'>;
 
 //#endregion
 
@@ -36,11 +37,11 @@ async function recvInboxWithTimeout(ctx: Context, step: InboxFields): Promise<st
   }
 }
 
-function prepareNextInput<I, O>(
-  step: StepLoop<I, O>,
+function prepareNextInput<TMemory, I, O>(
+  step: StepLoop<TMemory, I, O>,
   lastOutput: O,
   verdict: Verdict,
-  ctx: Context,
+  ctx: Context<TMemory>,
 ): I {
   if (step.prepareNext) {
     return step.prepareNext(lastOutput, verdict, ctx);
@@ -54,12 +55,13 @@ function prepareNextInput<I, O>(
 
 //#region Public API
 
-export async function executeLoop<I, O>(
-  step: StepLoop<I, O>,
+export async function executeLoop<TMemory, I, O>(
+  step: StepLoop<TMemory, I, O>,
   input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
+  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
   let currentInput: I = input;
   let lastOutput: O | undefined;
   let lastText = '';
@@ -158,7 +160,7 @@ export async function executeLoop<I, O>(
         ...history,
       ],
       depth: ctx.depth,
-      lastStepMeta: isMutableContext(ctx) ? ctx.lastStepMeta : null,
+      lastStepMeta: isMutableContext(baseCtx) ? baseCtx.lastStepMeta : null,
     };
 
     // Evaluate until predicate
@@ -185,9 +187,9 @@ export async function executeLoop<I, O>(
 
       // Check inbox before truly stopping
       if (step.inbox) {
-        const inboxMessage = await recvInboxWithTimeout(ctx, step);
+        const inboxMessage = await recvInboxWithTimeout(baseCtx, step);
         if (inboxMessage !== null) {
-          ctx.itemLog.append(createMessage(inboxMessage, 'developer'));
+          baseCtx.itemLog.append(createMessage(inboxMessage, 'developer'));
           // Continue the loop — don't stop
           currentInput = prepareNextInput(step, lastOutput, verdict, ctx);
           continue;

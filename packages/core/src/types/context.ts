@@ -1,7 +1,7 @@
 import type { Channel } from './channel';
 import type { StepMeta, TokenUsage } from './common';
 import type { Item } from './items';
-import type { MemoryLayer } from './memory';
+import type { ContextMemory, MemoryLayer } from './memory';
 import type { Span } from './observability';
 import type { AgentHarnessContract } from './runtime';
 
@@ -12,14 +12,14 @@ export interface ItemLog {
 }
 
 /** @public Execution context threaded through every step, carrying state, metrics, and channels. */
-export interface Context<TState = unknown> {
+export interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
   state: TState;
-  readonly parent: Context | null;
+  readonly parent: Context<ContextMemory> | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;
@@ -28,6 +28,8 @@ export interface Context<TState = unknown> {
   readonly lastStepMeta: StepMeta | null;
   readonly harness: AgentHarnessContract;
   readonly layers?: MemoryLayer[];
+  /** Layer provides keyed by layer ID. Access data/functions via `ctx.memory['layerId'].prop`. */
+  readonly memory: TMemory;
   recv<T>(
     channel: Channel<T>,
     opts?: {

@@ -179,6 +179,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     lastStepMeta: null,
     harness,
     layers: undefined,
+    memory: {},
     recv: async () => {
       throw new Error('not impl');
     },
@@ -396,10 +397,10 @@ export function createDynamicCallModel(
 
 // ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
 
-export const simpleExecute: ExecuteStepFn = async <I, O>(
-  step: Step<I, O>,
+export const simpleExecute: ExecuteStepFn = async <TMemory, I, O>(
+  step: Step<TMemory, I, O>,
   input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
 ): Promise<O> => {
   if (step.kind === 'run') {
     return step.execute(input, ctx);

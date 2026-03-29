@@ -6,18 +6,18 @@ import { createLayerStateStore } from '../../src/memory/layer-lifecycle';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { Item } from '../../src/types/items';
-import type { MemoryLayer } from '../../src/types/memory';
+import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
 import type { StepSpawn } from '../../src/types/step';
 import { makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
-function makeSpawnStep<I, O>(
+function makeSpawnStep<TMemory = ContextMemory, I = unknown, O = unknown>(
   id: string,
-  execute: (input: I, ctx: Context) => Promise<O>,
-  overrides?: Partial<Pick<StepSpawn<I, O>, 'memory' | 'timeout'>>,
-): StepSpawn<I, O> {
+  execute: (input: I, ctx: Context<TMemory>) => Promise<O>,
+  overrides?: Partial<Pick<StepSpawn<TMemory, I, O>, 'memory' | 'timeout'>>,
+): StepSpawn<TMemory, I, O> {
   return {
     kind: 'spawn',
     id,
@@ -53,10 +53,13 @@ describe('executeSpawn', () => {
       parentCtx.itemLog.append(makeMessage('user', 'hello', 'p1'));
 
       let childItemCount = -1;
-      const step = makeSpawnStep<string, string>('empty-spawn', async (_input, ctx) => {
-        childItemCount = ctx.itemLog.items.length;
-        return 'done';
-      });
+      const step = makeSpawnStep<ContextMemory, string, string>(
+        'empty-spawn',
+        async (_input, ctx) => {
+          childItemCount = ctx.itemLog.items.length;
+          return 'done';
+        },
+      );
 
       await executeSpawn(step, 'input', parentCtx, simpleExecute);
       expect(childItemCount).toBe(0);
@@ -95,12 +98,15 @@ describe('executeSpawn', () => {
         state: initialState,
       });
 
-      const step = makeSpawnStep<string, string>('state-test', async (_input, ctx) => {
-        assertsIsTestState(ctx.state);
-        ctx.state.count = 99;
-        ctx.state.nested.val = 'modified';
-        return 'done';
-      });
+      const step = makeSpawnStep<ContextMemory, string, string>(
+        'state-test',
+        async (_input, ctx) => {
+          assertsIsTestState(ctx.state);
+          ctx.state.count = 99;
+          ctx.state.nested.val = 'modified';
+          return 'done';
+        },
+      );
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
 
@@ -117,10 +123,13 @@ describe('executeSpawn', () => {
       });
       let childDepth = -1;
 
-      const step = makeSpawnStep<string, string>('depth-test', async (_input, ctx) => {
-        childDepth = ctx.depth;
-        return 'done';
-      });
+      const step = makeSpawnStep<ContextMemory, string, string>(
+        'depth-test',
+        async (_input, ctx) => {
+          childDepth = ctx.depth;
+          return 'done';
+        },
+      );
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
       expect(parentCtx.depth).toBe(0);
@@ -133,7 +142,7 @@ describe('executeSpawn', () => {
       const parentCtx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const step = makeSpawnStep<string, string>('error-test', async () => {
+      const step = makeSpawnStep<ContextMemory, string, string>('error-test', async () => {
         throw new Error('child boom');
       });
 
@@ -165,7 +174,7 @@ describe('executeSpawn', () => {
       });
 
       let childItems: readonly Item[] = [];
-      const step = makeSpawnStep<string, string>(
+      const step = makeSpawnStep<ContextMemory, string, string>(
         'layer-spawn',
         async (_input, ctx) => {
           childItems = ctx.itemLog.items;
@@ -214,11 +223,15 @@ describe('executeSpawn', () => {
         }),
       });
 
-      const step = makeSpawnStep<string, string>('pipeline-test', async () => 'raw-output', {
-        memory: [
-          layer,
-        ],
-      });
+      const step = makeSpawnStep<ContextMemory, string, string>(
+        'pipeline-test',
+        async () => 'raw-output',
+        {
+          memory: [
+            layer,
+          ],
+        },
+      );
 
       const result = await executeSpawn(step, '', parentCtx, simpleExecute, {
         layerStore,
@@ -266,7 +279,7 @@ describe('executeSpawn', () => {
       });
 
       let childItems: readonly Item[] = [];
-      const step = makeSpawnStep<string, string>(
+      const step = makeSpawnStep<ContextMemory, string, string>(
         'replace-test',
         async (_input, ctx) => {
           childItems = ctx.itemLog.items;
@@ -330,7 +343,7 @@ describe('executeSpawn', () => {
 
       let childItems: readonly Item[] = [];
       // Pass layers in reverse slot order to verify sorting
-      const step = makeSpawnStep<string, string>(
+      const step = makeSpawnStep<ContextMemory, string, string>(
         'merge-test',
         async (_input, ctx) => {
           childItems = ctx.itemLog.items;

@@ -1,9 +1,10 @@
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
 import type { ContentPart, MessageItem } from '../types/items';
+import type { ContextMemory } from '../types/memory';
 import type { MutableContext } from '../types/mutable-context';
 
-export function isMutableContext(ctx: Context): ctx is MutableContext {
+export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableContext {
   // Check if the context has writable mutable fields (ContextImpl or compatible mock)
   if (ctx instanceof ContextImpl) {
     return true;
@@ -13,7 +14,7 @@ export function isMutableContext(ctx: Context): ctx is MutableContext {
   return desc !== undefined && desc.writable !== false;
 }
 
-export function isContextImpl(ctx: Context): ctx is ContextImpl {
+export function isContextImpl(ctx: Context<ContextMemory>): ctx is ContextImpl {
   return ctx instanceof ContextImpl;
 }
 

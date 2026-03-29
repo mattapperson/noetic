@@ -15,6 +15,7 @@ import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { Channel } from '../src/types/channel';
 import type { DetachedHandle } from '../src/types/detached';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepLoop } from '../src/types/step';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
@@ -35,7 +36,7 @@ export const delegateInbox = channel('delegate-inbox', {
 export function buildDynamicDelegateAgent(opts: {
   inbox: Channel<string>;
   parkTimeout?: number;
-}): StepLoop<string, string> {
+}): StepLoop<ContextMemory, string, string> {
   const handles = new Map<string, DetachedHandle<string>>();
 
   const syncTool = createSyncDelegateTool();

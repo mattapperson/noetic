@@ -2,7 +2,7 @@
 
 > **Package:** `@noetic/memory`
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
+> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `LayerHandle`, `layerData`, `layerFn`
 
 ## Package Boundary
 
@@ -65,6 +65,7 @@ interface MemoryLayer<TState = unknown> {
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
   timeouts?: Partial<LayerTimeouts>;
+  provides?: LayerProvides;
 }
 
 type MemoryScope =
@@ -381,6 +382,102 @@ A layer declaring `scope: 'thread'` CANNOT accidentally read another thread's da
 ### Cross-Scope Access
 
 To read a different scope, declare the broader scope. No escape hatches.
+
+---
+
+## Layer Provides
+
+A memory layer MAY declare a `provides` map exposing typed data projections and callable functions to the rest of the agent. This gives code steps structured access to layer state without reaching into layer internals, and gives LLM steps automatic tool access to layer capabilities.
+
+### Declaration Types
+
+```typescript
+type LayerProvides = Record<string, LayerDataDecl | LayerFunctionDecl>;
+```
+
+**`LayerDataDecl`** — a read-only data projection from layer state:
+
+```typescript
+interface LayerDataDecl<T = unknown, TState = unknown> {
+  kind: 'data';
+  read(state: TState): T;
+}
+```
+
+The `read` function is called on demand against the layer's current state. It MUST be a pure projection with no side effects.
+
+**`LayerFunctionDecl`** — a callable function backed by layer state:
+
+```typescript
+interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknown> {
+  kind: 'function';
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute(
+    args: TInput,
+    state: TState,
+    ctx: ExecutionContext,
+  ): Promise<{ result: TOutput; state?: TState }>;
+}
+```
+
+The `description` is used as the tool description when exposed to LLMs. The `input` and `output` Zod schemas provide runtime validation and JSON Schema generation. If `execute` returns a `state` value, the agent harness replaces the layer's current state with the returned value.
+
+### `LayerHandle<T>`
+
+A mapped type that produces a flat access interface from a layer's `provides` declaration:
+
+```typescript
+type LayerHandle<T extends MemoryLayer> = T extends { provides: infer P }
+  ? {
+      [K in keyof P]: P[K] extends LayerDataDecl<infer D, unknown>
+        ? D
+        : P[K] extends LayerFunctionDecl<infer I, infer O, unknown>
+          ? (args: I) => Promise<O>
+          : never;
+    }
+  : Record<string, never>;
+```
+
+Data entries become synchronous property reads (via getter). Function entries become async methods. A layer with no `provides` produces an empty handle.
+
+### Accessing Provides from Code Steps
+
+Code steps access a layer's provides via `ctx.layer(ref)`, where `ref` is the `MemoryLayer` object used at agent construction:
+
+```typescript
+const handle = ctx.layer(myLayer);
+const value = handle.someData;              // synchronous read
+const result = await handle.someFunction({ query: 'test' });  // async call
+```
+
+The agent harness MUST throw `layer_not_found` if the referenced layer is not registered in the current execution context.
+
+### Automatic LLM Tool Injection
+
+Every `LayerFunctionDecl` in a layer's `provides` map is automatically exposed as a tool to any LLM step running within the layer's context. Tool names are namespaced as `{layerId}/{functionName}` to avoid collisions across layers. The `description`, `input` schema, and `output` schema from the declaration are used directly as the tool definition. The agent harness handles argument validation, state lookup, and state updates transparently.
+
+### Builder Helpers
+
+Two convenience functions construct declaration objects for use in a `provides` map:
+
+```typescript
+function layerData<T, TState>(opts: {
+  read: (state: TState) => T;
+}): LayerDataDecl<T, TState>;
+
+function layerFn<TInput, TOutput, TState>(opts: {
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (
+    args: TInput,
+    state: TState,
+    ctx: ExecutionContext,
+  ) => Promise<{ result: TOutput; state?: TState }>;
+}): LayerFunctionDecl<TInput, TOutput, TState>;
+```
 
 ---
 

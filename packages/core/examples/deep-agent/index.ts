@@ -9,7 +9,7 @@ import { observationalMemory } from '../../src/memory/layers/observational-memor
 import { staticContent } from '../../src/memory/layers/static-content';
 import { toolMemoryLayer } from '../../src/memory/layers/tool-memory-layer';
 import { react } from '../../src/patterns/react';
-import type { MemoryLayer } from '../../src/types/memory';
+import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
 import type { StepLoop, StepSpawn } from '../../src/types/step';
 import { createExampleHarness } from '../create-example-harness';
 import type { SubAgentResolver } from '../delegate-tools';
@@ -35,7 +35,7 @@ function defaultResolver(model: string): SubAgentResolver {
 
 export function buildDeepAgent(
   config: DeepAgentConfig,
-): StepLoop<string, string> | StepSpawn<string, string> {
+): StepLoop<ContextMemory, string, string> | StepSpawn<ContextMemory, string, string> {
   const fsTools = createFilesystemTools(config.rootDir);
   const todoTools = createTodoTools();
   const delegateTool = createConfigurableDelegateTool(

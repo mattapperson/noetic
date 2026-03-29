@@ -16,7 +16,7 @@ interface StaticContentOpts {
  * @param opts - Configuration with a `load` function and optional id, slot, scope, and XML tag name.
  * @returns A `MemoryLayer` that provides static instructional content to the model.
  */
-export function staticContent(opts: StaticContentOpts): MemoryLayer<string> {
+export function staticContent(opts: StaticContentOpts) {
   const tag = opts.tag ?? 'instructions';
 
   return {
@@ -43,5 +43,5 @@ export function staticContent(opts: StaticContentOpts): MemoryLayer<string> {
         return state;
       },
     },
-  };
+  } satisfies MemoryLayer<string>;
 }

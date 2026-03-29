@@ -1,3 +1,4 @@
+import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
 import type { Item } from './items';
@@ -8,6 +9,97 @@ import type {
   BeforeToolCallParams,
   BeforeToolCallResult,
 } from './steering';
+
+//#region Layer Provides
+
+/** @public A read-only data projection from layer state, accessible via `ctx.memory['layerId'].prop`. */
+export interface LayerDataDecl<T = unknown, TState = unknown> {
+  kind: 'data';
+  /** Project a value from the layer's current state. Method syntax enables bivariant assignability. */
+  read(state: TState): T;
+}
+
+/** @public A callable function backed by layer state, accessible via `ctx.memory['layerId'].fn()` or as an LLM tool. */
+export interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknown> {
+  kind: 'function';
+  /** Human-readable description (used as tool description when exposed to LLM). */
+  description: string;
+  /** Zod schema for input arguments. */
+  input: ZodType<TInput>;
+  /** Zod schema for return value. */
+  output: ZodType<TOutput>;
+  /** Execute the function with the layer's current state. Return optional state update. */
+  execute(
+    args: TInput,
+    state: TState,
+    ctx: ExecutionContext,
+  ): Promise<{
+    result: TOutput;
+    state?: TState;
+  }>;
+}
+
+/** @public Map of named data and function declarations exposed by a memory layer. */
+export type LayerProvides = Record<string, LayerDataDecl | LayerFunctionDecl>;
+
+/**
+ * Mapped type that produces a flat handle from a layer's `provides` declaration.
+ * Data entries become direct property reads; function entries become callable async methods.
+ * @public
+ */
+export type LayerHandle<T extends MemoryLayer> = T extends {
+  provides: infer P;
+}
+  ? {
+      [K in keyof P]: P[K] extends LayerDataDecl<infer D, unknown>
+        ? D
+        : P[K] extends LayerFunctionDecl<infer I, infer O, unknown>
+          ? (args: I) => Promise<O>
+          : never;
+    }
+  : Record<string, never>;
+
+/** @public Object keyed by layer ID, where each value is a resolved handle for that layer's provides. */
+export type ContextMemory = Readonly<Record<string, Record<string, unknown>>>;
+
+/**
+ * Maps a tuple of memory layers to a typed object keyed by layer ID.
+ * Each layer's `provides` is flattened: data → value type, function → async callable.
+ * @public
+ */
+export type InferMemoryShape<T extends readonly MemoryLayer[]> = {
+  [L in T[number] as L extends {
+    readonly id: infer Id extends string;
+  }
+    ? Id
+    : never]: L extends {
+    provides: infer P;
+  }
+    ? {
+        [K in keyof P]: P[K] extends LayerDataDecl<infer D, unknown>
+          ? D
+          : P[K] extends LayerFunctionDecl<infer I, infer O, unknown>
+            ? (args: I) => Promise<O>
+            : never;
+      }
+    : Record<string, never>;
+};
+
+/**
+ * Typed wrapper around a tuple of memory layers. Preserves individual layer types
+ * for compile-time inference via `InferMemory<typeof config>`.
+ * @public
+ */
+export interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly MemoryLayer[]> {
+  readonly layers: TLayers;
+  /** Phantom field carrying the inferred memory shape. Never accessed at runtime. */
+  readonly _shape: InferMemoryShape<TLayers>;
+}
+
+/** @public Extract the typed memory shape from a MemoryConfig. Usage: `type Mem = InferMemory<typeof config>` */
+export type InferMemory<T extends MemoryConfig> = T['_shape'];
+
+//#endregion
 
 /** @public Well-known ordering slots for positioning memory layers in the recall/store pipeline. */
 export const Slot = {
@@ -166,22 +258,22 @@ export interface DisposeParams<TState> {
   state: TState;
 }
 
-/** @public Lifecycle hook implementations for a memory layer. */
+/** @public Lifecycle hook implementations for a memory layer. Method syntax enables bivariant assignability for typed layers. */
 export interface MemoryHooks<TState = unknown> {
-  init?: (params: InitParams) => Promise<InitResult<TState>>;
-  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | string | null>;
-  store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
-  onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
-  onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
-  onComplete?: (params: CompleteParams<TState>) => Promise<
+  init?(params: InitParams): Promise<InitResult<TState>>;
+  recall?(params: RecallParams<TState>): Promise<RecallResult<TState> | string | null>;
+  store?(params: StoreParams<TState>): Promise<StoreResult<TState> | undefined>;
+  onSpawn?(params: SpawnParams<TState>): Promise<SpawnResult<TState> | null>;
+  onReturn?(params: ReturnParams<TState>): Promise<ReturnResult<TState> | undefined>;
+  onComplete?(params: CompleteParams<TState>): Promise<
     | undefined
     | {
         state: TState;
       }
   >;
-  dispose?: (params: DisposeParams<TState>) => Promise<void>;
-  beforeToolCall?: (params: BeforeToolCallParams<TState>) => Promise<BeforeToolCallResult<TState>>;
-  afterModelCall?: (params: AfterModelCallParams<TState>) => Promise<AfterModelCallResult<TState>>;
+  dispose?(params: DisposeParams<TState>): Promise<void>;
+  beforeToolCall?(params: BeforeToolCallParams<TState>): Promise<BeforeToolCallResult<TState>>;
+  afterModelCall?(params: AfterModelCallParams<TState>): Promise<AfterModelCallResult<TState>>;
 }
 
 /**
@@ -203,6 +295,8 @@ export interface MemoryLayer<TState = unknown> {
   hooks: MemoryHooks<TState>;
   /** Per-hook timeout overrides in ms. */
   timeouts?: Partial<LayerTimeouts>;
+  /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
+  provides?: LayerProvides;
 }
 
 /** @public Configuration for how the runtime projects conversation items into the model's context window. */

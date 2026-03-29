@@ -14,7 +14,7 @@ import { executeLoop } from '../src/interpreter/execute-loop';
 import { ChannelStore } from '../src/runtime/channel-store';
 import { ContextImpl } from '../src/runtime/context-impl';
 import type { NoeticError } from '../src/types/error';
-import type { MemoryLayer } from '../src/types/memory';
+import type { ContextMemory, MemoryLayer } from '../src/types/memory';
 import { SteeringAction } from '../src/types/steering';
 import type { Step } from '../src/types/step';
 import { until } from '../src/until/predicates';
@@ -56,11 +56,11 @@ async function expectNoeticError(
 }
 
 async function expectInvalidMaxIterations(maxIterations: number): Promise<void> {
-  const bodyStep = step.run<string, string>({
+  const bodyStep = step.run<ContextMemory, string, string>({
     id: 'noop',
     execute: async (input) => input,
   });
-  const loopStep = loop<string, string>({
+  const loopStep = loop<ContextMemory, string, string>({
     id: `invalid-max-${maxIterations}`,
     steps: [
       bodyStep,
@@ -131,7 +131,7 @@ describe('empty fork paths', () => {
 
 describe('loop edge cases', () => {
   test('all iterations failing with onError returning skip hits maxIterations', async () => {
-    const failingStep = step.run<string, string>({
+    const failingStep = step.run<ContextMemory, string, string>({
       id: 'always-fail',
       execute: async () => {
         throw new NoeticErrorImpl({
@@ -143,7 +143,7 @@ describe('loop edge cases', () => {
       },
     });
 
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'fail-loop',
       steps: [
         failingStep,
@@ -164,7 +164,7 @@ describe('loop edge cases', () => {
 
   test('predicate throws is treated as stop: true', async () => {
     let callCount = 0;
-    const bodyStep = step.run<string, string>({
+    const bodyStep = step.run<ContextMemory, string, string>({
       id: 'counter',
       execute: async (input) => {
         callCount++;
@@ -172,7 +172,7 @@ describe('loop edge cases', () => {
       },
     });
 
-    const loopStep = loop<string, string>({
+    const loopStep = loop<ContextMemory, string, string>({
       id: 'pred-throw-loop',
       steps: [
         bodyStep,
@@ -246,6 +246,7 @@ describe('structured output parse failures', () => {
       answer: z.string(),
     });
     const llmStep = step.llm<
+      ContextMemory,
       string,
       {
         answer: string;
@@ -281,6 +282,7 @@ describe('structured output parse failures', () => {
       answer: z.string(),
     });
     const llmStep = step.llm<
+      ContextMemory,
       string,
       {
         answer: string;
@@ -316,7 +318,7 @@ describe('structured output parse failures', () => {
 
 describe('steering retry exhaustion', () => {
   test('falls through after MAX_STEERING_RETRIES', async () => {
-    const llmStep = step.llm<string, string>({
+    const llmStep = step.llm<ContextMemory, string, string>({
       id: 'steered',
       model: 'test/model',
     });
@@ -365,12 +367,12 @@ describe('steering retry exhaustion', () => {
 
 describe('race fork aborts losers', () => {
   test('winner resolves, loser context is aborted', async () => {
-    const fastStep = step.run<string, string>({
+    const fastStep = step.run<ContextMemory, string, string>({
       id: 'fast',
       execute: async () => 'fast-wins',
     });
 
-    const slowStep = step.run<string, string>({
+    const slowStep = step.run<ContextMemory, string, string>({
       id: 'slow',
       execute: async () => {
         await new Promise((resolve) => setTimeout(resolve, 2e2));
@@ -378,7 +380,7 @@ describe('race fork aborts losers', () => {
       },
     });
 
-    const forkStep = fork<string, string>({
+    const forkStep = fork<ContextMemory, string, string>({
       id: 'race-abort',
       mode: 'race',
       paths: () => [
@@ -404,8 +406,8 @@ describe('fork with concurrency=1 executes sequentially', () => {
   test('paths run one at a time', async () => {
     const timestamps: number[][] = [];
 
-    function makeTimedStep(index: number): Step<string, string> {
-      return step.run<string, string>({
+    function makeTimedStep(index: number): Step<ContextMemory, string, string> {
+      return step.run<ContextMemory, string, string>({
         id: `timed-${index}`,
         execute: async () => {
           const start = Date.now();
@@ -420,7 +422,7 @@ describe('fork with concurrency=1 executes sequentially', () => {
       });
     }
 
-    const forkStep = fork<string, string>({
+    const forkStep = fork<ContextMemory, string, string>({
       id: 'sequential-fork',
       mode: 'all',
       paths: () => [
@@ -451,7 +453,7 @@ describe('fork with concurrency=1 executes sequentially', () => {
 
 describe('branch null route passes input through', () => {
   test('output === input when route returns null', async () => {
-    const branchStep = branch<string, string>({
+    const branchStep = branch<ContextMemory, string, string>({
       id: 'skip',
       route: () => null,
     });

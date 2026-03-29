@@ -118,6 +118,6 @@ describe('staticContent', () => {
     const layer = staticContent({
       load: async () => 'content',
     });
-    expect(layer.name).toBeUndefined();
+    expect('name' in layer).toBe(false);
   });
 });

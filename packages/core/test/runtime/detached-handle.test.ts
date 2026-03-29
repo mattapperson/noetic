@@ -4,6 +4,7 @@ import { isNoeticError } from '../../src/errors/noetic-error';
 import { AgentHarness } from '../../src/runtime/agent-harness';
 import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
 import { DetachedStatus } from '../../src/types/detached';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
 
 describe('DetachedHandleImpl', () => {
@@ -67,7 +68,7 @@ describe('AgentHarness.detachedSpawn', () => {
     });
     const ctx = harness.createContext();
 
-    const step: Step<number, number> = {
+    const step: Step<ContextMemory, number, number> = {
       kind: 'run',
       id: 'delayed',
       execute: async (input: number) => {
@@ -100,7 +101,7 @@ describe('AgentHarness.detachedSpawn', () => {
     });
     const ctx = harness.createContext();
 
-    const step: Step<string, string> = {
+    const step: Step<ContextMemory, string, string> = {
       kind: 'run',
       id: 'echo',
       execute: async (input: string) => input,

@@ -11,7 +11,6 @@ import {
 } from '../adapters/openrouter';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { execute } from '../interpreter/execute';
-import { estimateTokens } from '../interpreter/message-helpers';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
   afterModelCallLayers,
@@ -29,7 +28,7 @@ import type { LLMResponse, LlmProviderConfig } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { ExecuteInput, Item } from '../types/items';
-import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
+import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
 import type {
   AgentConfig,
@@ -45,12 +44,13 @@ import type { Step } from '../types/step';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { DetachedHandleImpl } from './detached-handle';
+import { contextToExecCtx } from './exec-context-factory';
 
 //#region Types
 
 interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  initialStep?: Step<string, string>;
+  initialStep?: Step<ContextMemory, string, string>;
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
@@ -109,7 +109,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   implements AgentHarnessContract<TParams>
 {
   readonly config: AgentConfig<TParams>;
-  private readonly initialStep?: Step<string, string>;
+  private readonly initialStep?: Step<ContextMemory, string, string>;
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
@@ -287,11 +287,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return this.run(this.initialStep, '', ctx);
   }
 
-  async run<I, O>(s: Step<I, O>, input: I, ctx: Context): Promise<O> {
+  async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
     return execute(s, input, ctx);
   }
 
-  detachedSpawn<I, O>(s: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O> {
+  detachedSpawn<I, O>(
+    s: Step<ContextMemory, I, O>,
+    input: I,
+    parentCtx: Context,
+  ): DetachedHandle<O> {
     const childCtx = this.createContext({
       parent: parentCtx,
       threadId: parentCtx.threadId,
@@ -338,24 +342,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   private toExecCtx(ctx: Context): ExecutionContext {
-    return {
-      executionId: ctx.id,
-      threadId: ctx.threadId,
-      resourceId: ctx.resourceId,
-      depth: ctx.depth,
-      stepNumber: ctx.stepCount,
-      tokenUsage: {
-        input: ctx.tokens.input,
-        output: ctx.tokens.output,
-      },
-      cost: ctx.cost,
-      callModel: (request) => this.callModel(request),
-      tokenize: estimateTokens,
-      trace: {
-        setAttribute: (key, value) => ctx.span.setAttribute(key, value),
-        addEvent: (name, attributes) => ctx.span.addEvent(name, attributes),
-      },
-    };
+    return contextToExecCtx(ctx, (request) => this.callModel(request));
   }
 
   async initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {

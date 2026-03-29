@@ -198,12 +198,12 @@ async function evaluateRules({
  * @param config - Steering configuration including rules, scope, and max ledger size.
  * @returns A `MemoryLayer` that enforces steering rules via allow/deny/guide decisions.
  */
-export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
+export function steering(config: SteeringConfig) {
   const maxLedger = config.maxLedgerEntries ?? DEFAULT_MAX_LEDGER_ENTRIES;
   const scope: MemoryScope = config.scope ?? 'execution';
 
   return {
-    id: 'steering',
+    id: 'steering' as const,
     name: 'Steering',
     slot: Slot.STEERING,
     scope,
@@ -335,7 +335,7 @@ export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
         };
       },
     },
-  };
+  } satisfies MemoryLayer<SteeringState>;
 }
 
 //#endregion

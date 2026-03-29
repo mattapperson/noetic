@@ -4,7 +4,7 @@ import type { LLMResponse, ModelParams, Tool } from './common';
 import type { Context } from './context';
 import type { DetachedHandle } from './detached';
 import type { ExecuteInput, Item } from './items';
-import type { MemoryLayer, StorageAdapter } from './memory';
+import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
@@ -64,8 +64,12 @@ export interface AgentHarnessContract<
   readonly config: AgentConfig<TParams>;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
   execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string>;
-  run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
-  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
+  run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  detachedSpawn<I, O>(
+    step: Step<ContextMemory, I, O>,
+    input: I,
+    parentCtx: Context,
+  ): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;
     items?: Item[];

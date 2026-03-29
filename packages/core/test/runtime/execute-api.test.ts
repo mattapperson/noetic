@@ -2,10 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
 import { AgentHarness } from '../../src/runtime/agent-harness';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
 import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
 
-const echoStep: Step<string, string> = {
+const echoStep: Step<ContextMemory, string, string> = {
   kind: 'llm',
   id: 'echo',
   model: 'test/echo',

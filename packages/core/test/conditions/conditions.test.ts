@@ -10,6 +10,7 @@ import {
   when,
 } from '../../src/conditions';
 import type { EmbedFn } from '../../src/types/embed';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
 import {
   makeLLMResponse,
@@ -21,7 +22,7 @@ import {
 
 //#region Mock Factories
 
-function makeStep(id: string): Step<string, string> {
+function makeStep(id: string): Step<ContextMemory, string, string> {
   return {
     kind: 'run',
     id,
@@ -45,7 +46,7 @@ describe('semanticRoute', () => {
   const fallback = makeStep('fallback');
 
   it('evaluates conditions in order and returns first match', async () => {
-    const route = semanticRoute<string, string>(
+    const route = semanticRoute<ContextMemory, string, string>(
       when(async () => false, stepA),
       when(async () => true, stepB),
     );
@@ -54,7 +55,7 @@ describe('semanticRoute', () => {
   });
 
   it('falls through to otherwise', async () => {
-    const route = semanticRoute<string, string>(
+    const route = semanticRoute<ContextMemory, string, string>(
       when(async () => false, stepA),
       otherwise(fallback),
     );
@@ -63,7 +64,7 @@ describe('semanticRoute', () => {
   });
 
   it('returns null with no match and no otherwise', async () => {
-    const route = semanticRoute<string, string>(when(async () => false, stepA));
+    const route = semanticRoute<ContextMemory, string, string>(when(async () => false, stepA));
     const result = await route('input', ctx);
     expect(result).toBeNull();
   });
@@ -260,7 +261,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,
@@ -290,7 +291,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,
@@ -316,7 +317,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,
@@ -345,7 +346,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: [
         {
@@ -376,7 +377,7 @@ describe('semanticSwitch', () => {
     };
 
     const cache = makeStorage();
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,

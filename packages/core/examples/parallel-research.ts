@@ -10,6 +10,7 @@
 import { fork } from '../src/builders/control-flow-builders';
 import { spawn } from '../src/builders/spawn-builder';
 import { step } from '../src/builders/step-builders';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepForkAll } from '../src/types/step';
 
 //#region Perspective Definitions
@@ -52,15 +53,15 @@ const PERSPECTIVES = [
 //#region Agent Builder
 
 /** Builds a parallel research agent that forks into perspective-specific sub-agents. */
-export function buildParallelResearchAgent(): StepForkAll<string, string> {
-  return fork<string, string>({
+export function buildParallelResearchAgent(): StepForkAll<ContextMemory, string, string> {
+  return fork<ContextMemory, string, string>({
     id: 'parallel-research',
     mode: 'all',
     paths: () =>
       PERSPECTIVES.map((perspective) =>
-        spawn<string, string>({
+        spawn<ContextMemory, string, string>({
           id: `research-${perspective.id}`,
-          child: step.llm<string, string>({
+          child: step.llm<ContextMemory, string, string>({
             id: `llm-${perspective.id}`,
             model: 'gpt-4o',
             system: perspective.system,

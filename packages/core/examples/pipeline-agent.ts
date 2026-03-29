@@ -14,12 +14,13 @@
 import { branch } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepLoop } from '../src/types/step';
 import { until } from '../src/until/predicates';
 
 //#region Stage Handlers
 
-const normalizeStage = step.run<string, string>({
+const normalizeStage = step.run<ContextMemory, string, string>({
   id: 'normalize-text',
   execute: async (input) => {
     return input
@@ -29,7 +30,7 @@ const normalizeStage = step.run<string, string>({
   },
 });
 
-const analyzeStage = step.llm<string, string>({
+const analyzeStage = step.llm<ContextMemory, string, string>({
   id: 'analyze-text',
   model: 'gpt-4o',
   system: [
@@ -41,7 +42,7 @@ const analyzeStage = step.llm<string, string>({
   ].join(' '),
 });
 
-const formatStage = step.run<string, string>({
+const formatStage = step.run<ContextMemory, string, string>({
   id: 'format-report',
   execute: async (input) => {
     return [
@@ -59,7 +60,7 @@ const formatStage = step.run<string, string>({
 //#region Agent Builder
 
 /** Builds a 3-stage text processing pipeline using branch + loop + prepareNext. */
-export function buildPipelineAgent(): StepLoop<string, string> {
+export function buildPipelineAgent(): StepLoop<ContextMemory, string, string> {
   const stages = [
     normalizeStage,
     analyzeStage,
@@ -67,7 +68,7 @@ export function buildPipelineAgent(): StepLoop<string, string> {
   ] as const;
   let phase = 0;
 
-  const router = branch<string, string>({
+  const router = branch<ContextMemory, string, string>({
     id: 'phase-router',
     route: () => stages[phase] ?? null,
   });

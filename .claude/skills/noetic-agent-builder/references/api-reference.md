@@ -310,6 +310,50 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
+## Layer Provides API
+
+Layers can expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on the handle returned by `ctx.layer(ref)`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
+
+### layerData
+
+Creates a read-only data projection from layer state.
+
+```typescript
+layerData<T, TState>({
+  read: (state: TState) => T;
+}): LayerDataDecl<T, TState>
+```
+
+### layerFn
+
+Creates a callable function backed by layer state. Input is Zod-validated at runtime.
+
+```typescript
+layerFn<TInput, TOutput, TState>({
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (args: TInput, state: TState, ctx: ExecutionContext)
+    => Promise<{ result: TOutput; state?: TState }>;
+}): LayerFunctionDecl<TInput, TOutput, TState>
+```
+
+### ctx.layer(ref)
+
+Returns a typed `LayerHandle` for a layer reference. Data entries are live property reads; function entries are async callable methods.
+
+```typescript
+const wm = workingMemory();
+// In a code step:
+const handle = ctx.layer(wm);
+handle.snapshot;              // WorkingMemoryState (live read)
+await handle.update({ k: 1 }); // calls layerFn, updates state
+```
+
+### Automatic LLM tool injection
+
+Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
+
 ## AgentHarness
 
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.

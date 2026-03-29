@@ -1,8 +1,12 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
+import type { ContextMemory } from '../types/memory';
 import type { StepLoop } from '../types/step';
 
 /** @public Configuration options accepted by the `loop()` builder, excluding the `kind` discriminant. */
-export type LoopConfig<I, O> = Omit<StepLoop<I, O>, 'kind'>;
+export type LoopConfig<TMemory = ContextMemory, I = unknown, O = unknown> = Omit<
+  StepLoop<TMemory, I, O>,
+  'kind'
+>;
 
 /**
  * Creates a loop step that iterates a body step until a termination predicate is satisfied.
@@ -22,7 +26,9 @@ export type LoopConfig<I, O> = Omit<StepLoop<I, O>, 'kind'>;
  * @throws `NoeticConfigError` with code `MISSING_LOOP_BODY` if `steps` is empty.
  * @throws `NoeticConfigError` with code `MISSING_UNTIL_PREDICATE` if `until` is not provided.
  */
-export function loop<I, O>(opts: LoopConfig<I, O>): StepLoop<I, O> {
+export function loop<TMemory = ContextMemory, I = unknown, O = unknown>(
+  opts: LoopConfig<TMemory, I, O>,
+): StepLoop<TMemory, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',

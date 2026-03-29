@@ -3,6 +3,7 @@ import { branch } from '../../src/builders/control-flow-builders';
 import { otherwise, semanticRoute, when } from '../../src/conditions';
 import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import type { ContextMemory } from '../../src/types/memory';
 import { makeMockHarness, mockEmbed, simpleExecute } from '../_helpers';
 
 describe('semantic branch integration', () => {
@@ -31,7 +32,7 @@ describe('semantic branch integration', () => {
       execute: async () => 'handled fallback',
     };
 
-    const step = branch<string, string>({
+    const step = branch<ContextMemory, string, string>({
       id: 'semantic-branch',
       route: semanticRoute(
         when(async (input: string) => {
@@ -60,7 +61,7 @@ describe('semantic branch integration', () => {
   });
 
   it('async route in branch() works end-to-end', async () => {
-    const step = branch<string, string>({
+    const step = branch<ContextMemory, string, string>({
       id: 'async-branch',
       route: async (input) => {
         // Simulate async operation

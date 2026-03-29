@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeRun } from '../../src/interpreter/execute-run';
 import type { Context } from '../../src/types/context';
+import type { ContextMemory } from '../../src/types/memory';
 import type { StepRun } from '../../src/types/step';
 import { makeMockContext } from '../_helpers';
 
@@ -42,7 +43,7 @@ function interceptDelays(): {
 
 describe('executeRun', () => {
   it('calls execute function and returns output', async () => {
-    const s: StepRun<string, number> = {
+    const s: StepRun<ContextMemory, string, number> = {
       kind: 'run',
       id: 'test',
       execute: async (input) => input.length,
@@ -53,7 +54,7 @@ describe('executeRun', () => {
 
   it('passes context to execute function', async () => {
     let receivedCtx: Context | undefined;
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'test',
       execute: async (input, ctx) => {
@@ -66,7 +67,7 @@ describe('executeRun', () => {
   });
 
   it('throws step_failed on error without retry', async () => {
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'failing',
       execute: async () => {
@@ -90,7 +91,7 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'retry-test',
       execute: async (_input) => {
@@ -123,7 +124,7 @@ describe('executeRun', () => {
   it('retries with exponential backoff and exhausts', async () => {
     const { delays, restore } = interceptDelays();
     let attempts = 0;
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'exhaust-test',
       execute: async () => {
@@ -158,7 +159,7 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'cap-test',
       execute: async () => {
@@ -199,7 +200,7 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'default-cap-test',
       execute: async () => {
@@ -230,7 +231,7 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'linear-test',
       execute: async () => {
@@ -261,7 +262,7 @@ describe('executeRun', () => {
   });
 
   it('wraps non-Error throws in NoeticErrorImpl', async () => {
-    const s: StepRun<string, string> = {
+    const s: StepRun<ContextMemory, string, string> = {
       kind: 'run',
       id: 'string-throw',
       execute: async () => {

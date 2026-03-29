@@ -2,12 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
+import type { ContextMemory } from '../../src/types/memory';
 import type { StepBranch } from '../../src/types/step';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
 describe('executeBranch', () => {
   it('route selects a step and executes it', async () => {
-    const step: StepBranch<string, string> = {
+    const step: StepBranch<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'test',
       route: (input) =>
@@ -31,7 +32,7 @@ describe('executeBranch', () => {
   });
 
   it('null route is no-op, returns input', async () => {
-    const step: StepBranch<string, string> = {
+    const step: StepBranch<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'noop',
       route: () => null,
@@ -48,7 +49,7 @@ describe('executeBranch', () => {
   });
 
   it('route function throws — error propagates unwrapped', async () => {
-    const step: StepBranch<string, string> = {
+    const step: StepBranch<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'throw-test',
       route: () => {
@@ -69,7 +70,7 @@ describe('executeBranch', () => {
 
   it('route receives context as second arg', async () => {
     let capturedCtx: Context | undefined;
-    const step: StepBranch<string, string> = {
+    const step: StepBranch<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'ctx-test',
       route: (_input, ctx) => {
@@ -89,7 +90,7 @@ describe('executeBranch', () => {
   });
 
   it('async route function is awaited correctly', async () => {
-    const step: StepBranch<string, string> = {
+    const step: StepBranch<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'async-test',
       route: async (input) => {
@@ -112,7 +113,7 @@ describe('executeBranch', () => {
 
   it('selected step is executed with correct input', async () => {
     let receivedInput = '';
-    const step: StepBranch<string, string> = {
+    const step: StepBranch<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'input-test',
       route: () => ({

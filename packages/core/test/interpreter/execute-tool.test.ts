@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeTool } from '../../src/interpreter/execute-tool';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
+import type { ContextMemory } from '../../src/types/memory';
 import type { StepTool } from '../../src/types/step';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
 import { makeMockContext, makeMockHarness } from '../_helpers';
@@ -28,6 +29,7 @@ describe('executeTool', () => {
       }),
     };
     const s: StepTool<
+      ContextMemory,
       {
         a: number;
         b: number;
@@ -73,6 +75,7 @@ describe('executeTool', () => {
       name: string;
     };
     const s: StepTool<
+      ContextMemory,
       GreetInput,
       {
         greeting: string;
@@ -120,6 +123,7 @@ describe('executeTool', () => {
       },
     };
     const s: StepTool<
+      ContextMemory,
       {
         query: string;
         limit: number;
@@ -160,7 +164,7 @@ describe('executeTool', () => {
         return 'ok';
       },
     };
-    const s: StepTool<Record<string, never>, string> = {
+    const s: StepTool<ContextMemory, Record<string, never>, string> = {
       kind: 'tool',
       id: 'ctx-test',
       tool,
@@ -182,7 +186,7 @@ describe('executeTool', () => {
         throw new Error('tool broke');
       },
     };
-    const s: StepTool<Record<string, never>, string> = {
+    const s: StepTool<ContextMemory, Record<string, never>, string> = {
       kind: 'tool',
       id: 'fail-test',
       tool,

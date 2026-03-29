@@ -1,5 +1,6 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
+import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
@@ -8,6 +9,7 @@ import { executeLoop } from './execute-loop';
 import { executeRun } from './execute-run';
 import { executeSpawn } from './execute-spawn';
 import { executeTool } from './execute-tool';
+import { frameworkCast } from './framework-cast';
 import { isMutableContext } from './typeguards';
 
 const MAX_DEPTH = 64;
@@ -22,7 +24,12 @@ const MAX_DEPTH = 64;
  * @throws `NoeticError` with kind `step_failed` if max depth is exceeded or an unknown step kind is encountered.
  * @throws `NoeticError` with kind `cancelled` if the context is aborted.
  */
-export async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
+export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>(
+  step: Step<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
+): Promise<O> {
+  const baseCtx = frameworkCast<Context>(ctx);
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
@@ -43,17 +50,17 @@ export async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): P
   }
 
   // Increment step count
-  if (isMutableContext(ctx)) {
-    ctx.stepCount = (ctx.stepCount || 0) + 1;
+  if (isMutableContext(baseCtx)) {
+    baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
   switch (step.kind) {
     case 'run':
       return executeRun(step, input, ctx);
     case 'llm':
-      return executeLLM(step, input, ctx, ctx.layers);
+      return executeLLM(step, input, ctx, baseCtx.layers);
     case 'tool':
-      return executeTool(step, input, ctx, ctx.harness);
+      return executeTool(step, input, ctx, baseCtx.harness);
     case 'branch':
       return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'fork':

@@ -11,7 +11,7 @@ import { react } from '../src/patterns/react';
 import type { Channel } from '../src/types/channel';
 import type { Tool } from '../src/types/common';
 import type { DetachedHandle, DetachedStatus } from '../src/types/detached';
-import type { MemoryLayer } from '../src/types/memory';
+import type { ContextMemory, MemoryLayer } from '../src/types/memory';
 import type { AgentHarnessContract } from '../src/types/runtime';
 import type { ToolExecutionContext } from '../src/types/tool-context';
 
@@ -40,8 +40,8 @@ type CheckToolResult = {
 
 //#region Shared Helpers
 
-function buildSubAgentStep(id: string): ReturnType<typeof step.llm<string, string>> {
-  return step.llm<string, string>({
+function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextMemory, string, string>> {
+  return step.llm<ContextMemory, string, string>({
     id,
     model: 'gpt-4o',
     system: 'You are a research assistant. Answer concisely.',
@@ -50,8 +50,8 @@ function buildSubAgentStep(id: string): ReturnType<typeof step.llm<string, strin
 
 function buildConfiguredSubAgentStep(
   config: SubAgentConfig,
-): ReturnType<typeof spawn<string, string>> {
-  const llmStep = step.llm<string, string>({
+): ReturnType<typeof spawn<ContextMemory, string, string>> {
+  const llmStep = step.llm<ContextMemory, string, string>({
     id: `${config.id}-llm`,
     model: config.model,
     system: config.system,

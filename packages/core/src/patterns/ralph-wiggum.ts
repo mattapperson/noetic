@@ -1,6 +1,7 @@
 import { loop } from '../builders/loop-builder';
 import { spawn } from '../builders/spawn-builder';
 import type { Tool } from '../types/common';
+import type { ContextMemory } from '../types/memory';
 import type { StepLoop } from '../types/step';
 import { any } from '../until/combinators';
 import type { VerifyFn } from '../until/predicates';
@@ -22,7 +23,7 @@ export function ralphWiggum(opts: {
   verify: VerifyFn;
   maxIterations?: number;
   innerMaxSteps?: number;
-}): StepLoop<string, string> {
+}): StepLoop<ContextMemory, string, string> {
   const inner = react({
     model: opts.model,
     system: opts.system,
@@ -30,10 +31,10 @@ export function ralphWiggum(opts: {
     maxSteps: opts.innerMaxSteps ?? 20,
   });
 
-  return loop({
+  return loop<ContextMemory, string, string>({
     id: 'ralph-wiggum-loop',
     steps: [
-      spawn<string, string>({
+      spawn<ContextMemory, string, string>({
         id: 'ralph-iteration',
         child: inner,
       }),

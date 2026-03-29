@@ -5,6 +5,7 @@ import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeFork } from '../../src/interpreter/execute-fork';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
+import type { ContextMemory } from '../../src/types/memory';
 import type { SettleResult, StepForkAll, StepForkRace, StepForkSettle } from '../../src/types/step';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
@@ -13,7 +14,7 @@ const _StateSchema = z.record(z.string(), z.unknown());
 describe('executeFork', () => {
   describe('all mode', () => {
     it('executes all paths and merges results', async () => {
-      const step: StepForkAll<number, number> = {
+      const step: StepForkAll<ContextMemory, number, number> = {
         kind: 'fork',
         id: 'all-test',
         mode: 'all',
@@ -39,7 +40,7 @@ describe('executeFork', () => {
     });
 
     it('throws fork_partial when any path fails', async () => {
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'fail-test',
         mode: 'all',
@@ -76,7 +77,7 @@ describe('executeFork', () => {
     });
 
     it('state is isolated between paths', async () => {
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'iso-test',
         mode: 'all',
@@ -123,7 +124,7 @@ describe('executeFork', () => {
     it('respects concurrency limit', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'conc-test',
         mode: 'all',
@@ -186,7 +187,7 @@ describe('executeFork', () => {
           return id;
         },
       });
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'serial-test',
         mode: 'all',
@@ -209,7 +210,7 @@ describe('executeFork', () => {
     it('paths() receives input and context', async () => {
       let capturedInput: string | undefined;
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'args-test',
         mode: 'all',
@@ -236,7 +237,7 @@ describe('executeFork', () => {
 
     it('merge() receives context as second arg', async () => {
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'merge-ctx-test',
         mode: 'all',
@@ -260,7 +261,7 @@ describe('executeFork', () => {
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'empty-all',
         mode: 'all',
@@ -277,7 +278,7 @@ describe('executeFork', () => {
 
   describe('race mode', () => {
     it('returns first completed result', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'race-test',
         mode: 'race',
@@ -308,7 +309,7 @@ describe('executeFork', () => {
     });
 
     it('winner state replaces parent state', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'state-test',
         mode: 'race',
@@ -347,7 +348,7 @@ describe('executeFork', () => {
 
     it('aborts loser contexts after winner resolves', async () => {
       const childContexts: Context[] = [];
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'abort-test',
         mode: 'race',
@@ -387,7 +388,7 @@ describe('executeFork', () => {
     it('respects concurrency limit in race mode', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'race-conc-test',
         mode: 'race',
@@ -436,7 +437,7 @@ describe('executeFork', () => {
     });
 
     it('all fail throws fork_partial', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'all-fail',
         mode: 'race',
@@ -473,7 +474,7 @@ describe('executeFork', () => {
     });
 
     it('throws fork_partial on empty paths', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'empty-race',
         mode: 'race',
@@ -494,7 +495,7 @@ describe('executeFork', () => {
 
   describe('settle mode', () => {
     it('waits for all and never throws', async () => {
-      const step: StepForkSettle<string, string> = {
+      const step: StepForkSettle<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'settle-test',
         mode: 'settle',
@@ -527,7 +528,7 @@ describe('executeFork', () => {
 
     it('settle result has correct shape', async () => {
       let capturedResults: SettleResult<string>[] = [];
-      const step: StepForkSettle<string, string> = {
+      const step: StepForkSettle<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'shape-test',
         mode: 'settle',
@@ -566,7 +567,7 @@ describe('executeFork', () => {
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkSettle<string, string> = {
+      const step: StepForkSettle<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'empty-settle',
         mode: 'settle',

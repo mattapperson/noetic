@@ -41,6 +41,36 @@ function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryS
 - `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Validates against schema if provided. Deep-merges structured state.
 - `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
 
+**Provides:**
+
+Working memory exposes two declarations via its `provides` map, making state available to code steps and LLM tool calls:
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `snapshot` | `layerData` | Returns the current working memory state as-is. |
+| `update` | `layerFn` | Merges new key-value pairs into the state. Exposed as `working-memory/update` LLM tool. |
+
+```typescript
+provides: {
+  snapshot: layerData({ read: (state) => state }),
+  update: layerFn({
+    description: 'Update the agent working memory with new key-value pairs.',
+    input: z.record(z.string(), z.unknown()),
+    output: z.void(),
+    execute: async (args, state) => {
+      // Prototype poisoning protection: __proto__ and constructor are stripped
+      const merged = { ...state, ...safeArgs };
+      return { result: undefined, state: merged };
+    },
+  }),
+}
+```
+
+- **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.layer(wm).snapshot`, which returns the full `WorkingMemoryState`.
+- **`update`** — A function declaration. Code steps call it as `await ctx.layer(wm).update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism.
+- **Prototype poisoning protection:** The `update` function strips `__proto__` and `constructor` keys from incoming arguments before merging.
+- **Backward compatibility:** The `store` hook still detects `findFunctionCall(newItems, 'updateWorkingMemory')` for LLMs that emit the legacy function-call convention. Both paths apply the same prototype-stripping and merge logic.
+
 ---
 
 ## `semanticRecall()`

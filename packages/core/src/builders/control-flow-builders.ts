@@ -1,6 +1,7 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
+import type { ContextMemory } from '../types/memory';
 import type {
   SettleResult,
   Step,
@@ -22,13 +23,13 @@ import type {
  * @returns A `StepForkRace` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  */
-export function fork<I, O>(opts: {
+export function fork<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
   id: string;
   mode: 'race';
-  paths: (input: I, ctx: Context) => Step<I, O>[];
+  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
   concurrency?: number;
-  _optimizable?: Step[];
-}): StepForkRace<I, O>;
+  _optimizable?: Step<TMemory>[];
+}): StepForkRace<TMemory, I, O>;
 
 /**
  * Creates a parallel execution step that waits for all paths and merges results.
@@ -43,14 +44,14 @@ export function fork<I, O>(opts: {
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_MERGE_FUNCTION` if `merge` is not provided.
  */
-export function fork<I, O>(opts: {
+export function fork<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
   id: string;
   mode: 'all';
-  paths: (input: I, ctx: Context) => Step<I, O>[];
-  merge: (results: O[], ctx: Context) => O;
+  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
+  merge: (results: O[], ctx: Context<TMemory>) => O;
   concurrency?: number;
-  _optimizable?: Step[];
-}): StepForkAll<I, O>;
+  _optimizable?: Step<TMemory>[];
+}): StepForkAll<TMemory, I, O>;
 
 /**
  * Creates a parallel execution step that waits for all paths, collecting errors as results.
@@ -65,23 +66,25 @@ export function fork<I, O>(opts: {
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_MERGE_FUNCTION` if `merge` is not provided.
  */
-export function fork<I, O>(opts: {
+export function fork<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
   id: string;
   mode: 'settle';
-  paths: (input: I, ctx: Context) => Step<I, O>[];
-  merge: (results: SettleResult<O>[], ctx: Context) => O;
+  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
+  merge: (results: SettleResult<O>[], ctx: Context<TMemory>) => O;
   concurrency?: number;
-  _optimizable?: Step[];
-}): StepForkSettle<I, O>;
+  _optimizable?: Step<TMemory>[];
+}): StepForkSettle<TMemory, I, O>;
 
-export function fork<I, O>(opts: {
+export function fork<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
   id: string;
   mode: 'race' | 'all' | 'settle';
-  paths: (input: I, ctx: Context) => Step<I, O>[];
-  merge?: ((results: O[], ctx: Context) => O) | ((results: SettleResult<O>[], ctx: Context) => O);
+  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
+  merge?:
+    | ((results: O[], ctx: Context<TMemory>) => O)
+    | ((results: SettleResult<O>[], ctx: Context<TMemory>) => O);
   concurrency?: number;
-  _optimizable?: Step[];
-}): StepFork<I, O> {
+  _optimizable?: Step<TMemory>[];
+}): StepFork<TMemory, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -96,7 +99,7 @@ export function fork<I, O>(opts: {
       hint: 'Provide a merge function that combines path results into a single output.',
     });
   }
-  return frameworkCast<StepFork<I, O>>({
+  return frameworkCast<StepFork<TMemory, I, O>>({
     kind: 'fork',
     ...opts,
   });
@@ -113,11 +116,14 @@ export function fork<I, O>(opts: {
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_ROUTE_FUNCTION` if `route` is not provided.
  */
-export function branch<I, O>(opts: {
+export function branch<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
   id: string;
-  route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
-  _optimizable?: Step[];
-}): StepBranch<I, O> {
+  route: (
+    input: I,
+    ctx: Context<TMemory>,
+  ) => Step<TMemory, I, O> | null | Promise<Step<TMemory, I, O> | null>;
+  _optimizable?: Step<TMemory>[];
+}): StepBranch<TMemory, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',

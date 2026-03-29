@@ -1,9 +1,10 @@
 import { ZodError } from 'zod';
 import { NoeticErrorImpl } from '../errors/noetic-error';
-import type { StepMeta } from '../types/common';
+import { resolveLayerTools } from '../memory/layer-api';
+import type { StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { FunctionCallItem } from '../types/items';
-import type { MemoryLayer } from '../types/memory';
+import type { ContextMemory, MemoryLayer } from '../types/memory';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
@@ -12,40 +13,57 @@ import { isMutableContext } from './typeguards';
 
 const MAX_STEERING_RETRIES = 3;
 
-export async function executeLLM<I, O>(
-  step: StepLLM<I, O>,
-  input: I,
+function mergeTools(
+  stepTools: Tool[] | undefined,
+  layers: MemoryLayer[] | undefined,
   ctx: Context,
+): Tool[] | undefined {
+  const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
+  if (layerTools.length === 0) {
+    return stepTools;
+  }
+  return [
+    ...(stepTools ?? []),
+    ...layerTools,
+  ];
+}
+
+export async function executeLLM<TMemory, I, O>(
+  step: StepLLM<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
   layers?: MemoryLayer[],
 ): Promise<O> {
+  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+
   if (typeof input === 'string' && input.length > 0) {
-    ctx.itemLog.append(createMessage(input, 'user'));
+    baseCtx.itemLog.append(createMessage(input, 'user'));
   }
 
-  const harness = ctx.harness;
+  const allTools = mergeTools(step.tools, layers, baseCtx);
   let retries = 0;
 
   while (retries <= MAX_STEERING_RETRIES) {
-    const request = step.tools
+    const request = allTools
       ? {
           model: step.model,
-          items: ctx.itemLog.items,
-          tools: step.tools,
+          items: baseCtx.itemLog.items,
+          tools: allTools,
           params: step.params,
           outputSchema: step.output,
-          ctx,
+          ctx: baseCtx,
           layers,
         }
       : {
           model: step.model,
-          items: ctx.itemLog.items,
+          items: baseCtx.itemLog.items,
           params: step.params,
           outputSchema: step.output,
         };
-    const response = await harness.callModel(request);
+    const response = await baseCtx.harness.callModel(request);
 
     if (layers && layers.length > 0) {
-      const decision = await harness.afterModelCall(layers, response, ctx);
+      const decision = await baseCtx.harness.afterModelCall(layers, response, baseCtx);
 
       if (decision.action === SteeringAction.Deny) {
         throw new NoeticErrorImpl({
@@ -55,7 +73,7 @@ export async function executeLLM<I, O>(
       }
 
       if (decision.action === SteeringAction.Guide && retries < MAX_STEERING_RETRIES) {
-        ctx.itemLog.append(
+        baseCtx.itemLog.append(
           createMessage(decision.guidance ?? 'Please adjust your response.', 'developer'),
         );
         retries++;
@@ -65,7 +83,7 @@ export async function executeLLM<I, O>(
 
     const toolCalls: FunctionCallItem[] = [];
     for (const item of response.items) {
-      ctx.itemLog.append(item);
+      baseCtx.itemLog.append(item);
       if (item.type === 'function_call') {
         toolCalls.push(item);
       }
@@ -78,10 +96,10 @@ export async function executeLLM<I, O>(
       responseItems: response.items,
     };
 
-    if (isMutableContext(ctx)) {
-      ctx.lastStepMeta = meta;
+    if (isMutableContext(baseCtx)) {
+      baseCtx.lastStepMeta = meta;
     }
-    trackUsage(ctx, response);
+    trackUsage(baseCtx, response);
 
     const lastText = extractAssistantText(response.items);
 
