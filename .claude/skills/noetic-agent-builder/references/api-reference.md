@@ -239,11 +239,45 @@ staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 
 ### toolMemoryLayer
 
-Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state.
+Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state. Defaults to `'execution'` scope.
 
 ```typescript
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
+
+### ToolMemoryDeclaration
+
+Declared on a `Tool`'s `memory` property. The runtime auto-generates a `MemoryLayer` per unique `id`.
+
+```typescript
+interface ToolMemoryDeclaration<TState = unknown> {
+  id?: string;                              // shared id (defaults to tool.name)
+  init: () => TState;                       // factory for initial state
+  recall: (state: TState) => string | null; // project into LLM context
+}
+```
+
+Tools read/write state imperatively via `toolCtx.memory`:
+
+```typescript
+interface ToolMemory {
+  get<T>(layerId: string): T | undefined;
+  set<T>(layerId: string, state: T): void;
+}
+```
+
+### findFunctionCall
+
+Utility for function-call memory patterns. Searches items for the first `function_call` matching a name, returns parsed JSON arguments.
+
+```typescript
+import { findFunctionCall } from '@noetic/core';
+
+const args = findFunctionCall(newItems, 'updateWorkingMemory');
+// Returns Record<string, unknown> | null
+```
+
+Used in `store()` hooks to let the LLM update layer state via pseudo-tool calls (no registered tool schema required).
 
 ### steering
 

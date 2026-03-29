@@ -240,6 +240,51 @@ const instructions = staticContent({
 });
 ```
 
+## Pattern: Function-Call Memory
+
+Let the LLM update memory layer state by emitting function calls. The `store()` hook intercepts via `findFunctionCall()`. No tool schema is registered -- instruct the LLM in the system prompt.
+
+```typescript
+import { findFunctionCall, createMessage, estimateTokens, Slot } from '@noetic/core';
+import type { MemoryLayer } from '@noetic/core';
+
+function notesMemory(): MemoryLayer<{ notes: string[] }> {
+  return {
+    id: 'notes',
+    name: 'Notes Memory',
+    slot: Slot.PROCEDURAL,
+    scope: 'thread',
+    budget: { min: 100, max: 500 },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<{ notes: string[] }>('state');
+        return { state: saved ?? { notes: [] } };
+      },
+      async recall({ state }) {
+        if (!state.notes.length) return null;
+        const content = `<notes>\n${state.notes.join('\n')}\n</notes>`;
+        return {
+          items: [createMessage(content, 'developer')],
+          tokenCount: estimateTokens(content),
+        };
+      },
+      async store({ newItems, state, storage }) {
+        const args = findFunctionCall(newItems, 'saveNote');
+        if (!args) return;
+        const updated = { notes: [...state.notes, args.text as string] };
+        await storage.set('state', updated);
+        return { state: updated };
+      },
+    },
+  };
+}
+
+// System prompt must instruct the LLM:
+// "Call saveNote({ text: '...' }) to remember important observations."
+```
+
+The built-in `workingMemory()` uses this same pattern with `updateWorkingMemory`.
+
 ## Pattern: Custom Memory Layer
 
 Build a custom memory layer for domain-specific needs:
