@@ -67,7 +67,7 @@ export function Hero(): ReactNode {
           marginBottom: '16px',
         }}
       >
-        {'// agent framework'}
+        {'// seven primitives, infinite possibilities'}
       </motion.span>
 
       <motion.h1
@@ -80,7 +80,7 @@ export function Hero(): ReactNode {
           y: 0,
         }}
         transition={{
-          delay: 0.2,
+          delay: 0.15,
           duration: 0.5,
         }}
         className="tui-glow"
@@ -103,19 +103,41 @@ export function Hero(): ReactNode {
           opacity: 1,
         }}
         transition={{
-          delay: 0.5,
+          delay: 0.3,
         }}
         style={{
-          fontSize: '16px',
-          color: 'var(--color-tui-secondary)',
-          maxWidth: '500px',
-          margin: '0 0 32px',
-          lineHeight: 1.6,
+          fontSize: '18px',
+          color: 'var(--color-tui-fg)',
+          maxWidth: '560px',
+          margin: '0 0 12px',
+          lineHeight: 1.5,
         }}
       >
-        Primitives to build agents from scratch.
-        <br />
-        Patterns to start fast.
+        Seven primitives. Your agent stays readable at 10 lines and at 10,000.
+      </motion.p>
+
+      <motion.p
+        initial={{
+          opacity: 0,
+        }}
+        animate={{
+          opacity: 1,
+        }}
+        transition={{
+          delay: 0.45,
+        }}
+        style={{
+          fontSize: '14px',
+          color: 'var(--color-tui-muted)',
+          maxWidth: '560px',
+          margin: '0 0 32px',
+          lineHeight: 1.7,
+        }}
+      >
+        Start with ReAct, task trees, or dual-agent loops — each one just a composition of
+        primitives you already understand. Or build your own. Reactive memory handles the context
+        window automatically: keep, compress, retrieve. Long conversations stay coherent without you
+        thinking about it.
       </motion.p>
 
       <motion.div
@@ -126,7 +148,7 @@ export function Hero(): ReactNode {
           opacity: 1,
         }}
         transition={{
-          delay: 0.8,
+          delay: 0.6,
         }}
         style={{
           marginBottom: '32px',
@@ -169,7 +191,7 @@ export function Hero(): ReactNode {
           opacity: 1,
         }}
         transition={{
-          delay: 1,
+          delay: 0.75,
         }}
         style={{
           display: 'flex',
@@ -190,7 +212,7 @@ export function Hero(): ReactNode {
             letterSpacing: '0.05em',
           }}
         >
-          Read the docs
+          Build your first agent →
         </Link>
         <a
           href={GITHUB_URL}
@@ -198,8 +220,8 @@ export function Hero(): ReactNode {
           rel="noopener noreferrer"
           style={{
             padding: '10px 24px',
-            border: '1px solid var(--color-tui-border)',
-            color: 'var(--color-tui-fg)',
+            border: '1px solid var(--color-tui-green)',
+            color: 'var(--color-tui-green)',
             fontSize: '13px',
             fontWeight: 600,
             textDecoration: 'none',
@@ -207,7 +229,7 @@ export function Hero(): ReactNode {
             letterSpacing: '0.05em',
           }}
         >
-          View on GitHub
+          {'GitHub ★'}
         </a>
       </motion.div>
 
@@ -221,12 +243,13 @@ export function Hero(): ReactNode {
           y: 0,
         }}
         transition={{
-          delay: 1.5,
+          delay: 0.9,
           duration: 0.5,
         }}
         style={{
           width: '100%',
           maxWidth: '640px',
+          textAlign: 'left',
         }}
       >
         <TuiWindow title="react-agent.ts">

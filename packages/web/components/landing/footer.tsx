@@ -33,7 +33,6 @@ export function Footer(): ReactNode {
     <footer
       style={{
         padding: '40px 24px',
-        borderTop: '1px solid var(--color-tui-border)',
       }}
     >
       <div
@@ -48,6 +47,7 @@ export function Footer(): ReactNode {
             fontSize: '12px',
             margin: '0 0 24px',
             overflow: 'hidden',
+            whiteSpace: 'nowrap',
           }}
         >
           {FOOTER_RULE}

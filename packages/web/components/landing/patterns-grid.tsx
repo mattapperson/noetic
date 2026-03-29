@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
+import { PatternsIsometricSvg } from '@/components/landing/svgs/patterns-isometric';
 import { TuiBadge } from '@/components/tui/tui-badge';
 import { TuiWindow } from '@/components/tui/tui-window';
 import type { PrimitiveName } from '@/lib/tui-theme';
@@ -11,6 +12,7 @@ import { HOVER_BG } from '@/lib/tui-theme';
 
 interface PatternCard {
   name: string;
+  subtitle: string;
   lines: string;
   primitives: PrimitiveName[];
   href: string;
@@ -19,6 +21,7 @@ interface PatternCard {
 const PATTERNS: PatternCard[] = [
   {
     name: 'ReAct',
+    subtitle: 'Reason, act, observe loops',
     lines: '~15 lines',
     primitives: [
       'loop',
@@ -29,6 +32,7 @@ const PATTERNS: PatternCard[] = [
   },
   {
     name: 'Ralph Wiggum',
+    subtitle: 'Simple single-shot LLM calls',
     lines: '~10 lines',
     primitives: [
       'loop',
@@ -39,6 +43,7 @@ const PATTERNS: PatternCard[] = [
   },
   {
     name: 'Task Trees',
+    subtitle: 'Parallel sub-agent hierarchies',
     lines: '~40 lines',
     primitives: [
       'fork',
@@ -49,6 +54,7 @@ const PATTERNS: PatternCard[] = [
   },
   {
     name: 'Adaptive Plans',
+    subtitle: 'Dynamic plan rewriting mid-run',
     lines: '~35 lines',
     primitives: [
       'loop',
@@ -59,6 +65,7 @@ const PATTERNS: PatternCard[] = [
   },
   {
     name: 'Thread Weaving',
+    subtitle: 'Interleaved parallel workstreams',
     lines: '~25 lines',
     primitives: [
       'fork',
@@ -69,6 +76,7 @@ const PATTERNS: PatternCard[] = [
   },
   {
     name: 'Dual Agent',
+    subtitle: 'Critic + generator collaboration',
     lines: '~20 lines',
     primitives: [
       'spawn',
@@ -84,11 +92,50 @@ export function PatternsGrid(): ReactNode {
     <section
       style={{
         padding: '80px 24px',
-        maxWidth: '960px',
+        maxWidth: '1280px',
         margin: '0 auto',
       }}
     >
-      <SectionHeader label="batteries included" title="Built-in Patterns" />
+      <div
+        className="section-split"
+        style={{
+          marginBottom: '48px',
+        }}
+      >
+        <div>
+          <SectionHeader label="ready to use" title="Batteries included." margin="8px 0 12px" />
+          <p
+            style={{
+              fontSize: '17px',
+              color: 'var(--color-tui-secondary)',
+              margin: '0 0 8px',
+              lineHeight: 1.5,
+            }}
+          >
+            Common agent patterns built-in for convenience.
+          </p>
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--color-tui-muted)',
+              margin: '0',
+              lineHeight: 1.7,
+            }}
+          >
+            Each pattern is a composition of the primitives above — no special cases, no hidden
+            behavior. Read the source. Fork it. The framework doesn't care.
+          </p>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <PatternsIsometricSvg />
+        </div>
+      </div>
 
       <div className="tui-bento patterns-grid">
         {PATTERNS.map((pattern) => (
@@ -112,7 +159,16 @@ export function PatternsGrid(): ReactNode {
               <TuiWindow title={pattern.name}>
                 <div
                   style={{
-                    fontSize: '12px',
+                    fontSize: '13px',
+                    color: 'var(--color-tui-secondary)',
+                    marginBottom: '8px',
+                  }}
+                >
+                  {pattern.subtitle}
+                </div>
+                <div
+                  style={{
+                    fontSize: '11px',
                     color: 'var(--color-tui-muted)',
                     marginBottom: '12px',
                   }}

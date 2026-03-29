@@ -2,8 +2,7 @@
 
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
-import { SectionHeader } from '@/components/landing/section-header';
-import { TuiFrame } from '@/components/tui/tui-frame';
+import { MemoryIsometricSvg } from '@/components/landing/svgs/memory-isometric';
 
 const LAYERS = [
   {
@@ -38,17 +37,77 @@ export function MemorySystem(): ReactNode {
     <section
       style={{
         padding: '80px 24px',
-        maxWidth: '640px',
+        maxWidth: '1280px',
         margin: '0 auto',
       }}
     >
-      <SectionHeader label="memory layers" title="Layered Memory System" />
+      <div
+        className="section-split"
+        style={{
+          marginBottom: '48px',
+        }}
+      >
+        {/* Left: isometric SVG */}
+        <div>
+          <MemoryIsometricSvg />
+        </div>
 
+        {/* Right: copy only */}
+        <div>
+          <span
+            style={{
+              fontSize: '13px',
+              color: 'var(--color-tui-muted)',
+              letterSpacing: '0.1em',
+            }}
+          >
+            {'// context management'}
+          </span>
+          <h2
+            style={{
+              fontSize: '38px',
+              fontWeight: 700,
+              margin: '8px 0 12px',
+              textTransform: 'uppercase',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Unparalleled memory management
+          </h2>
+          <p
+            style={{
+              fontSize: '17px',
+              color: 'var(--color-tui-secondary)',
+              margin: '0 0 8px',
+              lineHeight: 1.5,
+            }}
+          >
+            Long multi-turn conversations without blowing up the context window.
+          </p>
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--color-tui-muted)',
+              margin: '0',
+              lineHeight: 1.7,
+            }}
+          >
+            Working memory, observation extraction, vector recall, episode summaries, durable
+            checkpoints. Let Noetic handle it or build your own. Token costs stay predictable as
+            conversations grow.
+          </p>
+        </div>
+      </div>
+
+      {/* Layer list: full width below */}
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '2px',
+          background: 'var(--color-tui-surface)',
+          border: '1px solid var(--color-tui-border)',
+          padding: '16px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(5, 1fr)',
+          gap: '4px',
         }}
       >
         {LAYERS.map((layer, i) => (
@@ -56,77 +115,47 @@ export function MemorySystem(): ReactNode {
             key={layer.name}
             initial={{
               opacity: 0,
-              x: -20,
+              y: 10,
             }}
             whileInView={{
               opacity: 1,
-              x: 0,
+              y: 0,
             }}
             transition={{
-              delay: i * 0.1,
+              delay: i * 0.08,
               duration: 0.3,
             }}
             viewport={{
               once: true,
             }}
+            style={{
+              border: '1px solid var(--color-tui-border)',
+              padding: '12px 16px',
+            }}
           >
-            <TuiFrame title={layer.name}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: '13px',
-                    color: 'var(--color-tui-secondary)',
-                  }}
-                >
-                  {layer.description}
-                </span>
-                <span
-                  style={{
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    background: layer.color,
-                  }}
-                />
-              </div>
-            </TuiFrame>
+            <div
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                color: layer.color,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                marginBottom: '4px',
+              }}
+            >
+              {layer.name}
+            </div>
+            <div
+              style={{
+                fontSize: '12px',
+                color: 'var(--color-tui-muted)',
+              }}
+            >
+              {layer.description}
+            </div>
           </motion.div>
         ))}
       </div>
-
-      <motion.div
-        initial={{
-          opacity: 0,
-        }}
-        whileInView={{
-          opacity: 1,
-        }}
-        transition={{
-          delay: 0.6,
-        }}
-        viewport={{
-          once: true,
-        }}
-        style={{
-          textAlign: 'center',
-          margin: '24px 0 0',
-          padding: '16px',
-          border: '1px solid var(--color-tui-border)',
-          background: 'var(--color-tui-surface)',
-          fontSize: '12px',
-          color: 'var(--color-tui-muted)',
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-        }}
-      >
-        {'assembleView() → merged context → LLM'}
-      </motion.div>
     </section>
   );
 }

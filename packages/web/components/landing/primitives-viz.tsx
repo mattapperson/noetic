@@ -3,6 +3,7 @@
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
+import { PrimitivesIsometricSvg } from '@/components/landing/svgs/primitives-isometric';
 import { TuiBadge } from '@/components/tui/tui-badge';
 import { HOVER_BG } from '@/lib/tui-theme';
 
@@ -15,13 +16,7 @@ interface Primitive {
 }
 
 const PRIMITIVES: Primitive[] = [
-  {
-    name: 'run',
-    description: 'Execute a pure function',
-    signature: '(fn: (ctx) => T) => Step',
-    color: 'cyan',
-    colSpan: 1,
-  },
+  // model & agents
   {
     name: 'llm',
     description: 'Call a language model',
@@ -30,10 +25,18 @@ const PRIMITIVES: Primitive[] = [
     colSpan: 2,
   },
   {
-    name: 'tool',
-    description: 'Invoke an external tool',
-    signature: '(name, input, fn) => Step',
-    color: 'amber',
+    name: 'spawn',
+    description: 'Launch a child agent',
+    signature: '(agentConfig) => Step',
+    color: 'green',
+    colSpan: 1,
+  },
+  // control flow
+  {
+    name: 'run',
+    description: 'Execute a pure function',
+    signature: '(fn: (ctx) => T) => Step',
+    color: 'cyan',
     colSpan: 1,
   },
   {
@@ -50,19 +53,21 @@ const PRIMITIVES: Primitive[] = [
     color: 'cyan',
     colSpan: 1,
   },
-  {
-    name: 'spawn',
-    description: 'Launch a child agent',
-    signature: '(agentConfig) => Step',
-    color: 'green',
-    colSpan: 1,
-  },
+  // control flow (continued)
   {
     name: 'loop',
     description: 'Repeat steps until condition',
     signature: '(steps[], until) => Step',
-    color: 'amber',
+    color: 'cyan',
     colSpan: 2,
+  },
+  // integration
+  {
+    name: 'tool',
+    description: 'Invoke an external tool',
+    signature: '(name, input, fn) => Step',
+    color: 'amber',
+    colSpan: 1,
   },
 ];
 
@@ -71,11 +76,117 @@ export function PrimitivesViz(): ReactNode {
     <section
       style={{
         padding: '80px 24px',
-        maxWidth: '960px',
+        maxWidth: '1280px',
         margin: '0 auto',
       }}
     >
-      <SectionHeader label="primitives" title="Seven Primitives. Any Pattern." />
+      <div
+        className="section-split"
+        style={{
+          marginBottom: '48px',
+        }}
+      >
+        <div>
+          <SectionHeader
+            label="the complete surface area"
+            title="Meet the building blocks"
+            margin="8px 0 12px"
+          />
+          <p
+            style={{
+              fontSize: '17px',
+              color: 'var(--color-tui-secondary)',
+              margin: '0 0 8px',
+              lineHeight: 1.5,
+            }}
+          >
+            The entire API consists of seven core primitives, building blocks that can be composed
+            to create any complex pattern you choose.
+          </p>
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--color-tui-muted)',
+              margin: '0',
+              lineHeight: 1.7,
+            }}
+          >
+            Reasoning loops, parallel workloads, sub-agents — all of it falls out of these seven.
+            The ReAct pattern is 15 lines. A task tree is 40. You can read both in under a minute.
+          </p>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <PrimitivesIsometricSvg />
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          gap: '24px',
+          alignItems: 'center',
+          marginBottom: '12px',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '11px',
+            color: 'var(--color-tui-muted)',
+            letterSpacing: '0.08em',
+          }}
+        >
+          LEGEND
+        </span>
+        {(
+          [
+            {
+              color: 'var(--color-tui-green)',
+              label: 'model & agents',
+            },
+            {
+              color: 'var(--color-tui-cyan)',
+              label: 'control flow',
+            },
+            {
+              color: 'var(--color-tui-amber)',
+              label: 'integration',
+            },
+          ] as const
+        ).map((item) => (
+          <div
+            key={item.label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: item.color,
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                fontSize: '11px',
+                color: 'var(--color-tui-muted)',
+              }}
+            >
+              {item.label}
+            </span>
+          </div>
+        ))}
+      </div>
 
       <div className="tui-bento primitives-grid">
         {PRIMITIVES.map((primitive) => (
@@ -85,7 +196,7 @@ export function PrimitivesViz(): ReactNode {
             data-col-span={primitive.colSpan}
             style={{
               background: 'var(--color-tui-surface)',
-              padding: '20px',
+              padding: '32px',
               transition: 'background 0.1s',
             }}
           >
@@ -101,7 +212,7 @@ export function PrimitivesViz(): ReactNode {
             </div>
             <p
               style={{
-                fontSize: '13px',
+                fontSize: '14px',
                 color: 'var(--color-tui-secondary)',
                 margin: '0 0 8px',
               }}

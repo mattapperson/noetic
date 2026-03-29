@@ -11,7 +11,7 @@ export const BOX = {
 
 export const FRAME_FILL = BOX.horizontal.repeat(48);
 export const FRAME_TITLE_FILL = BOX.horizontal.repeat(40);
-export const FOOTER_RULE = BOX.horizontal.repeat(80);
+export const FOOTER_RULE = BOX.horizontal.repeat(300);
 
 export const GITHUB_URL = 'https://github.com/noetic-tools/noetic';
 
@@ -46,7 +46,7 @@ export const PRIMITIVE_COLORS = {
   branch: 'tui-cyan',
   fork: 'tui-cyan',
   spawn: 'tui-green',
-  loop: 'tui-amber',
+  loop: 'tui-cyan',
 } as const satisfies Record<string, string>;
 
 export type PrimitiveName = keyof typeof PRIMITIVE_COLORS;

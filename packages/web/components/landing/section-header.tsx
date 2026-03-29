@@ -24,11 +24,11 @@ export function SectionHeader({
       </span>
       <h2
         style={{
-          fontSize: '28px',
+          fontSize: '38px',
           fontWeight: 700,
           margin,
           textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          letterSpacing: '-0.01em',
         }}
       >
         {title}
