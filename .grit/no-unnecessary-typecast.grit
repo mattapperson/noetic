@@ -13,27 +13,11 @@
 engine biome(2.0)
 language js(typescript)
 
-// Match type assertion expressions: `expr as Type`
-// The `as const` variant is a separate node kind and won't match here.
-// Import aliases (`import { X as Y }`) are import_specifier nodes, not
-// as-expressions, so they are excluded by construction — but biome's grit
-// engine currently conflates the two. To work around this, the rule uses
-// a `bubble` on assignment-like contexts where real type casts appear.
 or {
+  // Explicitly allow const assertions (short-circuits before diagnostic)
   `$expr as const`,
-  `const $name = $expr as $type` as $match where {
-    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, or 'satisfies' instead.", severity="error")
-  },
-  `const $name: $ann = $expr as $type` as $match where {
-    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, or 'satisfies' instead.", severity="error")
-  },
-  `let $name = $expr as $type` as $match where {
-    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, or 'satisfies' instead.", severity="error")
-  },
-  `return $expr as $type` as $match where {
-    register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, or 'satisfies' instead.", severity="error")
-  },
-  `($expr as $type)` as $match where {
+  // Flag all other `as` type assertions
+  `$expr as $type` as $match where {
     register_diagnostic(span=$match, message="Review type casting with 'as'. Use Zod schemas, or 'satisfies' instead.", severity="error")
   }
 }

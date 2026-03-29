@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticError } from '../../src/errors/noetic-error';
-import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
 import { AgentHarness } from '../../src/runtime/agent-harness';
+import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
 import { DetachedStatus } from '../../src/types/detached';
 import type { Step } from '../../src/types/step';
 

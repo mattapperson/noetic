@@ -9,11 +9,13 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 //#region Constants
 
-const CONTENT_DIR = 'packages/web/content';
-const OUTPUT_DIR = 'packages/web/.typecheck-snippets';
+const ROOT_DIR = fileURLToPath(new URL('..', import.meta.url));
+const CONTENT_DIR = path.join(ROOT_DIR, 'packages/web/content');
+const OUTPUT_DIR = path.join(ROOT_DIR, 'packages/web/.typecheck-snippets');
 
 const PREAMBLE = `// Auto-generated — do not edit. Run scripts/extract-doc-snippets.ts to regenerate.
 /* eslint-disable */
