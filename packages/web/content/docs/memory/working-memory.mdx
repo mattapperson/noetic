@@ -94,3 +94,30 @@ const layer = workingMemory({
 ```
 
 The LLM can then call `updateWorkingMemory({ currentGoal: 'Deploy v2', completedSteps: ['write tests'] })` to update specific fields without overwriting the rest.
+
+## Provides
+
+Working Memory exposes two entries via the `provides` API, making them accessible on `ctx.memory['working-memory']`:
+
+### `snapshot` (data)
+
+A read-only projection of the current working memory state.
+
+```ts
+const current = ctx.memory['working-memory'].snapshot;
+// Returns WorkingMemoryState (string | Record<string, unknown>)
+```
+
+### `update` (function)
+
+Merges key-value pairs into the current state. Accepts a `Record<string, unknown>` argument.
+
+```ts
+await ctx.memory['working-memory'].update({ currentGoal: 'Ship v2' });
+```
+
+Because `update` is a `layerFn`, the runtime automatically injects it as an LLM tool named `working-memory/update`. The model can call this tool directly to modify working memory during a conversation turn.
+
+### Backward Compatibility
+
+The `store` hook also detects the legacy `updateWorkingMemory` function-call convention. If the model emits an `updateWorkingMemory` call (rather than `working-memory/update`), the layer handles it identically -- shallow-merging the arguments into state.

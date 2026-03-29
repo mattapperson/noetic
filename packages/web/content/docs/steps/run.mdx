@@ -27,6 +27,14 @@ The `execute` function receives two arguments:
 
 The return value becomes the output of the step, passed to whatever comes next.
 
+## Type Signature
+
+```ts
+step.run<TMemory, I, O>(opts: RunStepOptions<TMemory, I, O>): StepRun<TMemory, I, O>
+```
+
+`TMemory` is the typed memory shape (from `InferMemory`), `I` is the input type, and `O` is the output type.
+
 ## API Reference
 
 ### Options
@@ -34,7 +42,7 @@ The return value becomes the output of the step, passed to whatever comes next.
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `execute` | `(input: I, ctx: Context) => Promise<O>` | Yes | The async function to run |
+| `execute` | `(input: I, ctx: Context<TMemory>) => Promise<O>` | Yes | The async function to run |
 | `retry` | `RetryPolicy` | No | Retry configuration on failure |
 
 ### RetryPolicy
@@ -87,10 +95,15 @@ const contextAware = step.run({
     // Access token usage
     console.log('Tokens used so far:', ctx.tokens.total);
 
+    // Access memory layer data
+    const snapshot = ctx.memory['working-memory'].snapshot;
+
     return `Processed: ${input}`;
   },
 });
 ```
+
+The `ctx.memory` property provides typed access to data and functions exposed by memory layers via their `provides` field. See [Context](/docs/context) for the full property reference.
 
 ## Related
 

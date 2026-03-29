@@ -40,7 +40,7 @@ const harness = new AgentHarness({
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `name` | `string` | required | Agent name (populates `config.name`). |
-| `initialStep` | `Step<string, string>` | `undefined` | The agent step to execute when calling `execute()`. |
+| `initialStep` | `Step<TMemory, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TMemory` defaults to `ContextMemory`. |
 | `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
 | `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
@@ -86,7 +86,7 @@ const result = await harness.run(myStep, input, ctx);
 
 | Parameter | Type | Description |
 |---|---|---|
-| `step` | `Step<I, O>` | The step to execute. |
+| `step` | `Step<TMemory, I, O>` | The step to execute. |
 | `input` | `I` | Input value for the step. |
 | `ctx` | `Context` | Execution context. |
 

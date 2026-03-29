@@ -99,6 +99,10 @@ const researcher = step.llm({
 
 When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/operators/loop-and-until) with `until.noToolCalls()`.
 
+### Auto-Injected Layer Tools
+
+In addition to explicitly provided tools, functions declared in a memory layer's `provides` field are automatically injected as tools for every `step.llm` call. These tools are namespaced as `layerId/fnName` (e.g., `working-memory/update`). You do not need to pass them in the `tools` array -- the runtime resolves them from the active memory layers.
+
 ## Tuning Generation
 
 ```ts

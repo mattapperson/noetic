@@ -31,11 +31,13 @@ This is the primitive for sub-agents, delegation, and sandboxed execution.
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `child` | `Step<I, O>` | Yes | The step to execute in isolation |
-| `memory` | `MemoryLayer[]` | No | Spawn-local memory layers |
+| `child` | `Step<TMemory, I, O>` | Yes | The step to execute in isolation |
+| `memory` | `MemoryConfig \| MemoryLayer[]` | No | Spawn-local memory layers (use the `memory()` builder for typed access) |
 | `timeout` | `number` | No | Timeout in milliseconds |
 
 ## Memory Layers
+
+The `memory` field accepts either a raw `MemoryLayer[]` array or a `MemoryConfig` object produced by the `memory()` builder. The builder provides typed access to layer state and is the recommended approach.
 
 Spawn-local memory layers control what the child sees and how results are transformed when the child completes.
 

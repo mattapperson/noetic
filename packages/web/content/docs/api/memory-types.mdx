@@ -15,6 +15,7 @@ interface MemoryLayer<TState = unknown> {
   scope: MemoryScope;
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
+  provides?: LayerProvides;
   timeouts?: Partial<LayerTimeouts>;
 }
 ```
@@ -27,6 +28,7 @@ interface MemoryLayer<TState = unknown> {
 | `scope` | `MemoryScope` | yes | Persistence boundary |
 | `budget` | `BudgetConfig` | no | Token budget allocation |
 | `hooks` | `MemoryHooks<TState>` | yes | Lifecycle callbacks |
+| `provides` | `LayerProvides` | no | Typed data and function declarations exposed on `ctx.memory` |
 | `timeouts` | `Partial<LayerTimeouts>` | no | Per-hook timeout overrides (ms) |
 
 ## MemoryScope
@@ -273,3 +275,112 @@ interface MemoryTraceSpan {
   error?: { message: string; stack?: string };
 }
 ```
+
+## ContextMemory
+
+The default memory shape used when no typed memory config is provided.
+
+```ts
+type ContextMemory = Readonly<Record<string, Record<string, unknown>>>;
+```
+
+## MemoryConfig
+
+A typed memory configuration that carries a phantom `_shape` for compile-time memory access. Created via the `memory()` builder.
+
+```ts
+interface MemoryConfig<TLayers extends MemoryLayer[] = MemoryLayer[]> {
+  layers: TLayers;
+  _shape: InferMemoryShape<TLayers>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `layers` | `TLayers` | Array of memory layers |
+| `_shape` | `InferMemoryShape<TLayers>` | Phantom field for compile-time shape inference (never set at runtime) |
+
+## InferMemory
+
+Extracts the memory shape type from a `MemoryConfig`.
+
+```ts
+type InferMemory<T extends MemoryConfig> = T['_shape'];
+```
+
+## InferMemoryShape
+
+A mapped type that collects each layer's `provides` declarations into a record keyed by layer `id`. Each key maps to the resolved data/function types declared by that layer.
+
+## LayerProvides
+
+```ts
+type LayerProvides = Record<string, LayerDataDecl | LayerFunctionDecl>;
+```
+
+A record of named declarations that a layer exposes on `ctx.memory[layerId]`.
+
+## LayerDataDecl
+
+```ts
+interface LayerDataDecl<T = unknown, TState = unknown> {
+  kind: 'data';
+  read: (state: TState) => T;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `'data'` | Discriminant |
+| `read` | `(state: TState) => T` | Derives the value from layer state |
+
+## LayerFunctionDecl
+
+```ts
+interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknown> {
+  kind: 'function';
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (args: TInput, state: TState) => Promise<TOutput>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `'function'` | Discriminant |
+| `description` | `string` | Human-readable description for the LLM |
+| `input` | `ZodType<TInput>` | Zod schema for input validation |
+| `output` | `ZodType<TOutput>` | Zod schema for output validation |
+| `execute` | `(args: TInput, state: TState) => Promise<TOutput>` | Execution function |
+
+## Builder Functions
+
+### layerData
+
+```ts
+function layerData<T, TState>(read: (state: TState) => T): LayerDataDecl<T, TState>;
+```
+
+Creates a `LayerDataDecl` that derives a value from layer state.
+
+### layerFn
+
+```ts
+function layerFn<TInput, TOutput, TState>(opts: {
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (args: TInput, state: TState) => Promise<TOutput>;
+}): LayerFunctionDecl<TInput, TOutput, TState>;
+```
+
+Creates a `LayerFunctionDecl` that exposes a callable function on the memory object.
+
+### memory
+
+```ts
+function memory<TLayers extends MemoryLayer[]>(...layers: TLayers): MemoryConfig<TLayers>;
+```
+
+Collects layers into a `MemoryConfig` with inferred `_shape`. Pass the result to `StepSpawn.memory` or `AgentConfig` to get typed `ctx.memory` access.

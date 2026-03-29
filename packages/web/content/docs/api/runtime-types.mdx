@@ -10,8 +10,8 @@ The core execution engine interface.
 ```ts
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly config: AgentConfig<TParams>;
-  run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
-  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
+  run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  detachedSpawn<I, O>(step: Step<ContextMemory, I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;

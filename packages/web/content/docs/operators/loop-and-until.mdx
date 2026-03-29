@@ -28,7 +28,7 @@ The loop executes its `steps` array sequentially on each iteration, piping the o
 | Property | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | -- | Unique step identifier |
-| `steps` | `ReadonlyArray<Step<I, O>>` | Yes | -- | Steps to execute sequentially on each iteration |
+| `steps` | `ReadonlyArray<Step<TMemory, I, O>>` | Yes | -- | Steps to execute sequentially on each iteration |
 | `until` | `Until` | Yes | -- | Predicate that decides when to stop |
 | `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries) |
 | `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array |

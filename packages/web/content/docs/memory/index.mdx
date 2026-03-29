@@ -168,6 +168,25 @@ interface LayerTimeouts {
 
 If a hook exceeds its timeout, the runtime logs a warning and continues without that layer's contribution.
 
+## Layer Provides API
+
+Layers can expose typed data and functions via the `provides` field. Provided entries are accessible in code steps through `ctx.memory['layerId']`, and provided functions are automatically injected as LLM tools (namespaced as `layerId/fnName`).
+
+Use the `memory()` builder and `InferMemory<>` utility type for compile-time type safety:
+
+```ts
+import { memory, workingMemory, type InferMemory } from '@noetic/core';
+
+const mem = memory([workingMemory()]);
+type Mem = InferMemory<typeof mem>;
+
+// In a step, ctx.memory is fully typed:
+const snap = ctx.memory['working-memory'].snapshot; // WorkingMemoryState
+await ctx.memory['working-memory'].update({ key: 'value' });
+```
+
+See [Custom Layers](/docs/memory/custom-layers) for how to define your own `provides` entries using `layerData()` and `layerFn()`.
+
 ## Next Steps
 
 - [Working Memory](/docs/memory/working-memory) -- scratchpad for the current turn

@@ -8,26 +8,30 @@ description: Type definitions for all step variants in Noetic's discriminated un
 The `Step` type is a discriminated union over the `kind` field:
 
 ```ts
-type Step<I = unknown, O = unknown> =
-  | StepRun<I, O>
-  | StepLLM<I, O>
-  | StepTool<I, O>
-  | StepBranch<I, O>
-  | StepFork<I, O>
-  | StepSpawn<I, O>
-  | StepLoop<I, O>;
+type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
+  | StepRun<TMemory, I, O>
+  | StepLLM<TMemory, I, O>
+  | StepTool<TMemory, I, O>
+  | StepBranch<TMemory, I, O>
+  | StepFork<TMemory, I, O>
+  | StepSpawn<TMemory, I, O>
+  | StepLoop<TMemory, I, O>;
 ```
 
 ## StepRun
+
+`StepRun<TMemory, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'run'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `execute` | `(input: I, ctx: Context) => Promise<O>` | yes | Async function to execute |
+| `execute` | `(input: I, ctx: Context<TMemory>) => Promise<O>` | yes | Async function to execute |
 | `retry` | `RetryPolicy` | no | Retry configuration |
 
 ## StepLLM
+
+`StepLLM<TMemory, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -41,6 +45,8 @@ type Step<I = unknown, O = unknown> =
 
 ## StepTool
 
+`StepTool<TMemory, I, O>`
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'tool'` | yes | Discriminant |
@@ -50,11 +56,13 @@ type Step<I = unknown, O = unknown> =
 
 ## StepBranch
 
+`StepBranch<TMemory, I, O>`
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'branch'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `route` | `(input: I, ctx: Context) => Step<I, O> \| null` | yes | Routing function (null skips) |
+| `route` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O> \| null` | yes | Routing function (null skips) |
 
 ## StepFork
 
@@ -62,60 +70,70 @@ Fork has three mode variants, each a separate interface.
 
 ### StepForkRace
 
+`StepForkRace<TMemory, I, O>`
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'fork'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'race'` | yes | First completion wins |
-| `paths` | `(input: I, ctx: Context) => Step<I, O>[]` | yes | Path factory |
+| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ### StepForkAll
+
+`StepForkAll<TMemory, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'fork'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'all'` | yes | Wait for all paths |
-| `paths` | `(input: I, ctx: Context) => Step<I, O>[]` | yes | Path factory |
-| `merge` | `(results: O[], ctx: Context) => O` | yes | Merge function |
+| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
+| `merge` | `(results: O[], ctx: Context<TMemory>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ### StepForkSettle
+
+`StepForkSettle<TMemory, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'fork'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'settle'` | yes | Wait for all, include errors |
-| `paths` | `(input: I, ctx: Context) => Step<I, O>[]` | yes | Path factory |
-| `merge` | `(results: SettleResult<O>[], ctx: Context) => O` | yes | Merge function |
+| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
+| `merge` | `(results: SettleResult<O>[], ctx: Context<TMemory>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ## StepSpawn
+
+`StepSpawn<TMemory, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'spawn'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `child` | `Step<I, O>` | yes | Child step to execute |
-| `memory` | `MemoryLayer[]` | no | Spawn-local memory layers |
+| `child` | `Step<TMemory, I, O>` | yes | Child step to execute |
+| `memory` | `MemoryConfig \| MemoryLayer[]` | no | Spawn-local memory layers |
 | `timeout` | `number` | no | Timeout in milliseconds |
 
 ## StepLoop
+
+`StepLoop<TMemory, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'loop'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `body` | `Step<I, O>` | yes | Loop body step |
+| `steps` | `ReadonlyArray<Step<TMemory, I, O>>` | yes | Loop body steps |
 | `until` | `Until` | yes | Termination predicate |
 | `maxIterations` | `number` | no | Safety limit on iterations |
 | `maxHistorySize` | `number` | no | Max history items to retain |
 | `inbox` | `Channel<string>` | no | Channel for external messages that prevent loop from stopping |
 | `parkTimeout` | `number` | no | Milliseconds to wait on inbox before stopping (0 = non-blocking) |
-| `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | no | Transform output to next input |
-| `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
+| `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TMemory>) => I` | no | Transform output to next input |
+| `onError` | `(error: NoeticError, ctx: Context<TMemory>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
 
 ## Supporting Types
 
@@ -160,5 +178,5 @@ Fork has three mode variants, each a separate interface.
 ### ExecuteStepFn
 
 ```ts
-type ExecuteStepFn = <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
+type ExecuteStepFn = <TMemory, I, O>(step: Step<TMemory, I, O>, input: I, ctx: Context<TMemory>) => Promise<O>;
 ```

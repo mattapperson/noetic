@@ -8,12 +8,13 @@ description: Type definitions for Context, ItemLog, Item variants, and content p
 The execution context threaded through every step.
 
 ```ts
-interface Context<TState = unknown> {
+interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
+  readonly memory: TMemory;
   state: TState;
   readonly parent: Context | null;
   readonly depth: number;
@@ -43,6 +44,7 @@ interface Context<TState = unknown> {
 | `tokens` | `TokenUsage` | Accumulated token usage |
 | `elapsed` | `number` | Elapsed time in milliseconds |
 | `cost` | `number` | Accumulated cost in USD |
+| `memory` | `TMemory` | Typed memory object. Access layer data via `ctx.memory['layerId'].prop`. Defaults to `ContextMemory` when no `MemoryConfig` is provided. |
 | `state` | `TState` | Mutable user state |
 | `parent` | `Context \| null` | Parent context (for spawned agents) |
 | `depth` | `number` | Nesting depth (0 for root) |
