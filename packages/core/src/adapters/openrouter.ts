@@ -32,6 +32,7 @@ type SdkToolArray = CallModelInput extends {
 }
   ? NonNullable<T>
   : never;
+/** @internal */
 export type SdkTool = SdkToolArray[number];
 
 //#endregion
@@ -61,6 +62,7 @@ type OpenRouterInputItem =
   | OpenResponsesFunctionToolCall
   | OpenResponsesFunctionCallOutput;
 
+/** @internal */
 export interface ConvertToolsParams {
   tools: ReadonlyArray<Tool>;
   ctx: Context;
@@ -110,6 +112,7 @@ function contentPartToText(parts: ReadonlyArray<ContentPart>): string {
 
 //#region Item → OpenRouter Input Conversion
 
+/** @internal */
 export function extractSystemInstruction(items: ReadonlyArray<Item>): {
   instructions: string | undefined;
   remaining: Item[];
@@ -169,6 +172,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   return null;
 }
 
+/** @internal */
 export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
   const result: OpenRouterInputItem[] = [];
   for (const item of items) {
@@ -222,6 +226,7 @@ function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
   return null;
 }
 
+/** @internal */
 export function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Item[] {
   const items: Item[] = [];
   let hasMessage = false;
@@ -256,6 +261,7 @@ export function responseToNoeticItems(response: OpenResponsesNonStreamingRespons
   return items;
 }
 
+/** @internal */
 export function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse['usage'] {
   if (!usage) {
     return {
@@ -278,6 +284,7 @@ export function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMR
 // the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
 // This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation.
+/** @internal */
 export function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({

@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { createMessage, extractAssistantText } from '../interpreter/message-helpers';
-import { isMutableContext } from '../interpreter/typeguards';
+import { createMessage, extractAssistantText, trackUsage } from '../interpreter/message-helpers';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { StorageAdapter } from '../types/memory';
@@ -415,14 +414,7 @@ export function aiCondition<I>(opts: { model: string; prompt: string }): Conditi
       },
     });
 
-    if (isMutableContext(ctx)) {
-      ctx.tokens.input += response.usage.inputTokens;
-      ctx.tokens.output += response.usage.outputTokens;
-      ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
-      if (response.cost) {
-        ctx.cost = ctx.cost + response.cost;
-      }
-    }
+    trackUsage(ctx, response);
 
     const responseText = extractAssistantText(response.items);
 

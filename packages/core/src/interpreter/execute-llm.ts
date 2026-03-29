@@ -7,7 +7,7 @@ import type { MemoryLayer } from '../types/memory';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
-import { createMessage, extractAssistantText } from './message-helpers';
+import { createMessage, extractAssistantText, trackUsage } from './message-helpers';
 import { isMutableContext } from './typeguards';
 
 const MAX_STEERING_RETRIES = 3;
@@ -78,13 +78,8 @@ export async function executeLLM<I, O>(
 
     if (isMutableContext(ctx)) {
       ctx.lastStepMeta = meta;
-      ctx.tokens.input += response.usage.inputTokens;
-      ctx.tokens.output += response.usage.outputTokens;
-      ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
-      if (response.cost) {
-        ctx.cost = ctx.cost + response.cost;
-      }
     }
+    trackUsage(ctx, response);
 
     const lastText = extractAssistantText(response.items);
 
@@ -118,7 +113,9 @@ export async function executeLLM<I, O>(
     return frameworkCast<O>(lastText);
   }
 
-  // Retries exhausted — should not reach here in normal flow
+  // Safety net: the loop above always returns or throws within the body.
+  // This throw is unreachable but protects against future refactors that
+  // might break the loop invariant.
   throw new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,

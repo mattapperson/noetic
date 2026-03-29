@@ -61,7 +61,6 @@ export interface ExecutionContext {
     output: number;
   };
   cost: number;
-  model?: string;
   callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   tokenize(text: string): number;
   trace: {

@@ -65,13 +65,6 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
 //#region Helpers
 
 function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
-  if (config && config.provider !== 'openrouter') {
-    throw new NoeticConfigError({
-      code: 'UNSUPPORTED_PROVIDER',
-      message: `Unsupported LLM provider: ${config.provider}`,
-      hint: 'Currently only "openrouter" is supported.',
-    });
-  }
   const apiKey = config?.apiKey ?? process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return undefined;
@@ -132,11 +125,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       });
     }
 
-    const { instructions } = extractSystemInstruction(request.items);
-    const nonSystemItems = request.items.filter(
-      (i) => !(i.type === 'message' && i.role === 'system'),
-    );
-    const sdkInput = itemsToInput(nonSystemItems);
+    const { instructions, remaining } = extractSystemInstruction(request.items);
+    const sdkInput = itemsToInput(remaining);
 
     let sdkTools: ReturnType<typeof convertTools> | undefined;
     if (request.tools && request.tools.length > 0) {

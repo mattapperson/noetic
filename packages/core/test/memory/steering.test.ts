@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
 import {
   afterModelCallLayers,
@@ -650,5 +651,99 @@ describe('layer-lifecycle steering functions', () => {
     });
 
     expect(decision.action).toBe(SteeringAction.Allow);
+  });
+});
+
+describe('LLM-evaluated rules without callModel', () => {
+  it('throws NoeticConfigError when sync LLM rule has no callModel', async () => {
+    const rule: SteeringRule = {
+      id: 'llm-sync',
+      name: 'LLM sync rule',
+      appliesTo: [
+        'beforeToolCall',
+      ],
+      llmEval: {
+        mode: 'sync',
+        prompt: 'Is this safe?',
+      },
+    };
+    const { layer, store } = await setupSteering({
+      rules: [
+        rule,
+      ],
+    });
+    const ctx = makeCtx(); // no callModel
+
+    try {
+      await beforeToolCallLayers({
+        layers: [
+          layer,
+        ],
+        toolName: 'test-tool',
+        toolArgs: {},
+        ctx,
+        store,
+      });
+      throw new Error('Expected NoeticConfigError');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('MISSING_CALL_MODEL');
+    }
+  });
+
+  it('throws NoeticConfigError for afterModelCall LLM rule without callModel', async () => {
+    const rule: SteeringRule = {
+      id: 'llm-after',
+      name: 'LLM after rule',
+      appliesTo: [
+        'afterModelCall',
+      ],
+      llmEval: {
+        mode: 'sync',
+        prompt: 'Was this appropriate?',
+      },
+    };
+    const { layer, store } = await setupSteering({
+      rules: [
+        rule,
+      ],
+    });
+    const ctx = makeCtx();
+
+    try {
+      await afterModelCallLayers({
+        layers: [
+          layer,
+        ],
+        response: makeLLMResponse('test'),
+        ctx,
+        store,
+      });
+      throw new Error('Expected NoeticConfigError');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('MISSING_CALL_MODEL');
+    }
+  });
+
+  it('programmatic rules still work without callModel', async () => {
+    const { layer, store } = await setupSteering({
+      rules: [
+        denyToolRule('blocked'),
+      ],
+    });
+    const ctx = makeCtx(); // no callModel — but rule is programmatic
+
+    const decision = await beforeToolCallLayers({
+      layers: [
+        layer,
+      ],
+      toolName: 'blocked',
+      toolArgs: {},
+      ctx,
+      store,
+    });
+
+    expect(decision.action).toBe(SteeringAction.Deny);
   });
 });

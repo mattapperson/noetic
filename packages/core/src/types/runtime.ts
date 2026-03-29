@@ -36,7 +36,8 @@ interface CallModelRequestWithTools extends CallModelRequestBase {
   layers?: MemoryLayer[];
 }
 
-/** @public Request shape when no tools are provided — ctx and layers are not needed. */
+/** @public Request shape when no tools are provided — ctx is only needed for tool
+ *  execution callbacks in convertTools, so it is omitted here. */
 interface CallModelRequestWithoutTools extends CallModelRequestBase {
   tools?: undefined;
   ctx?: undefined;

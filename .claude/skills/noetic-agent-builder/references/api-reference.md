@@ -255,8 +255,10 @@ steering({
   maxLedgerEntries?: number;  // default 100
   maxRetries?: number;        // default 3
   scope?: MemoryScope;        // default 'execution'
-  callModel?: CallModelFn;    // required if any rule uses llmEval
 }): MemoryLayer<SteeringState>
+// LLM-evaluated rules use callModel from the execution context (configured
+// via AgentHarness's `llm` option or OPENROUTER_API_KEY). If no LLM provider
+// is configured, LLM-evaluated rules throw NoeticConfigError (MISSING_CALL_MODEL).
 ```
 
 **SteeringRule:**

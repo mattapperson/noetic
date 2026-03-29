@@ -1,9 +1,10 @@
+import { NoeticConfigError } from '../../errors/noetic-config-error';
 import {
   createMessage,
   estimateTokens,
   extractAssistantText,
 } from '../../interpreter/message-helpers';
-import type { MemoryLayer, MemoryScope } from '../../types/memory';
+import type { ExecutionContext, MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
 import type {
   AfterModelCallParams,
@@ -25,6 +26,23 @@ const DEFAULT_MAX_LEDGER_ENTRIES = 100;
 
 //#region Rule Evaluation Helpers
 
+function requireCallModel(
+  params: BeforeToolCallParams | AfterModelCallParams,
+  ruleId: string,
+): asserts params is (BeforeToolCallParams | AfterModelCallParams) & {
+  ctx: {
+    callModel: NonNullable<ExecutionContext['callModel']>;
+  };
+} {
+  if (!params.ctx.callModel) {
+    throw new NoeticConfigError({
+      code: 'MISSING_CALL_MODEL',
+      message: `LLM-evaluated steering rule "${ruleId}" requires a callModel but none is available.`,
+      hint: 'Pass `llm: { provider: "openrouter", apiKey: "..." }` to AgentHarness or set OPENROUTER_API_KEY.',
+    });
+  }
+}
+
 function evaluateProgrammaticRule(
   rule: SteeringRule,
   params: BeforeToolCallParams | AfterModelCallParams,
@@ -45,7 +63,8 @@ async function evaluateLlmRuleSync(
     };
   }
 
-  if (!params.ctx.callModel) {
+  const { callModel } = params.ctx;
+  if (!callModel) {
     return {
       action: SteeringAction.Allow,
     };
@@ -59,9 +78,9 @@ async function evaluateLlmRuleSync(
   const prompt = `${rule.llmEval.prompt}\n\nContext: ${contextSummary}\n\nRespond with exactly "ALLOW", "DENY", or "GUIDE: <guidance text>".`;
 
   const userMessage = createMessage(prompt, 'user');
-  const model = rule.llmEval.model ?? params.ctx.model ?? 'openai/gpt-4o-mini';
+  const model = rule.llmEval.model ?? 'openai/gpt-4o-mini';
 
-  const response = await params.ctx.callModel({
+  const response = await callModel({
     model,
     items: [
       userMessage,
@@ -141,10 +160,12 @@ async function evaluateRules({
       continue;
     }
 
-    // LLM eval
-    if (!rule.llmEval || !params.ctx.callModel) {
+    // LLM eval — throws NoeticConfigError if callModel is missing
+    if (!rule.llmEval) {
       continue;
     }
+
+    requireCallModel(params, rule.id);
 
     if (rule.llmEval.mode === 'sync') {
       const decision = await evaluateLlmRuleSync(rule, params);
@@ -273,7 +294,6 @@ export function steering(config: SteeringConfig): MemoryLayer<SteeringState> {
         const entry: LedgerEntry = {
           kind: LedgerEntryKind.ModelTurn,
           timestamp: Date.now(),
-          model: ctx.model,
           tokenUsage: {
             input: response.usage.inputTokens,
             output: response.usage.outputTokens,
