@@ -53,7 +53,7 @@ interface Span {
 Every [Context](/docs/context) has a `span` property. You can add custom attributes from within any step:
 
 ```ts
-const myStep = step.run('annotated', async (input: string, ctx) => {
+const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) => {
   ctx.span.setAttribute('input.length', input.length);
   ctx.span.addEvent('processing_started');
 
@@ -61,7 +61,7 @@ const myStep = step.run('annotated', async (input: string, ctx) => {
 
   ctx.span.addEvent('processing_finished', { resultSize: result.length });
   return result;
-});
+}});
 ```
 
 ## SpanImpl

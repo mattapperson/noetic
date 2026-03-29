@@ -1,7 +1,9 @@
 import { OpenRouter } from '@openrouter/sdk';
 import type { ZodType } from 'zod';
+import { z } from 'zod';
 import {
   convertTools,
+  executeToolCall,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
@@ -62,6 +64,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
 
 //#endregion
 
+const MAX_TOOL_ROUNDS = 32;
+
 //#region Helpers
 
 function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
@@ -72,6 +76,23 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   return new OpenRouter({
     apiKey,
   });
+}
+
+function buildTextFormat(schema: ZodType): {
+  format: {
+    type: 'json_schema';
+    name: string;
+    schema: Record<string, unknown>;
+  };
+} {
+  const jsonSchema = z.toJSONSchema(schema);
+  return {
+    format: {
+      type: 'json_schema',
+      name: 'output',
+      schema: jsonSchema,
+    },
+  };
 }
 
 //#endregion
@@ -126,36 +147,117 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     }
 
     const { instructions, remaining } = extractSystemInstruction(request.items);
-    const sdkInput = itemsToInput(remaining);
 
     let sdkTools: ReturnType<typeof convertTools> | undefined;
     if (request.tools && request.tools.length > 0) {
       sdkTools = convertTools({
         tools: request.tools,
-        ctx: request.ctx,
-        harness: this,
-        layers: request.layers,
       });
     }
 
-    const callResult = this.client.callModel({
-      model: request.model,
-      input: sdkInput,
-      instructions,
-      tools: sdkTools,
-      temperature: request.params?.temperature,
-      maxOutputTokens: request.params?.maxTokens,
-      topP: request.params?.topP,
-    });
+    const allItems: Item[] = [];
+    const totalUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
+    let totalCost = 0;
 
-    const sdkResponse = await callResult.getResponse();
-    const noeticItems = responseToNoeticItems(sdkResponse);
-    const usage = extractUsage(sdkResponse.usage);
+    const conversationInput = itemsToInput(remaining);
+    const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
+
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const callResult = this.client.callModel({
+        model: request.model,
+        input: conversationInput,
+        instructions,
+        tools: sdkTools,
+        temperature: request.params?.temperature,
+        maxOutputTokens: request.params?.maxTokens,
+        topP: request.params?.topP,
+        ...(textFormat
+          ? {
+              text: textFormat,
+            }
+          : {}),
+      });
+
+      const sdkResponse = await callResult.getResponse();
+      const roundItems = responseToNoeticItems(sdkResponse);
+      const roundUsage = extractUsage(sdkResponse.usage);
+
+      totalUsage.inputTokens += roundUsage.inputTokens;
+      totalUsage.outputTokens += roundUsage.outputTokens;
+      totalUsage.cachedTokens += roundUsage.cachedTokens ?? 0;
+      totalCost += sdkResponse.usage?.cost ?? 0;
+
+      allItems.push(...roundItems);
+
+      const functionCalls = roundItems.filter((item) => item.type === 'function_call');
+      if (functionCalls.length === 0 || !request.tools) {
+        break;
+      }
+
+      // Add function calls to conversation, then execute and append results
+      for (const fc of functionCalls) {
+        conversationInput.push({
+          type: 'function_call',
+          callId: fc.callId,
+          id: fc.id,
+          name: fc.name,
+          arguments: fc.arguments,
+        });
+      }
+
+      for (const fc of functionCalls) {
+        let parsedArgs: unknown;
+        try {
+          parsedArgs = JSON.parse(fc.arguments);
+        } catch {
+          const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
+          allItems.push({
+            id: crypto.randomUUID(),
+            status: 'completed',
+            type: 'function_call_output',
+            callId: fc.callId,
+            output: errorOutput,
+          });
+          conversationInput.push({
+            type: 'function_call_output',
+            callId: fc.callId,
+            output: errorOutput,
+          });
+          continue;
+        }
+
+        const output = await executeToolCall({
+          toolName: fc.name,
+          args: parsedArgs,
+          tools: request.tools,
+          context: request.ctx,
+          harness: this,
+          layers: request.layers,
+        });
+
+        allItems.push({
+          id: crypto.randomUUID(),
+          status: 'completed',
+          type: 'function_call_output',
+          callId: fc.callId,
+          output,
+        });
+        conversationInput.push({
+          type: 'function_call_output',
+          callId: fc.callId,
+          output,
+        });
+      }
+    }
 
     return {
-      items: noeticItems,
-      usage,
-      cost: sdkResponse.usage?.cost ?? undefined,
+      items: allItems,
+      usage: totalUsage,
+      cost: totalCost > 0 ? totalCost : undefined,
     };
   }
 

@@ -1,4 +1,4 @@
-import type { CallModelInput, TurnContext } from '@openrouter/sdk';
+import type { CallModelInput } from '@openrouter/sdk';
 import type {
   OpenResponsesEasyInputMessage,
   OpenResponsesFunctionCallOutput,
@@ -65,9 +65,6 @@ type OpenRouterInputItem =
 /** @internal */
 export interface ConvertToolsParams {
   tools: ReadonlyArray<Tool>;
-  ctx: Context;
-  harness: AgentHarnessContract;
-  layers?: MemoryLayer[];
 }
 
 const EmbeddingsResponseSchema = z.object({
@@ -284,8 +281,13 @@ export function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMR
 // the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
 // This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation.
+//
+// IMPORTANT: We intentionally omit `execute` from the SDK tool definitions.
+// This prevents the SDK from handling tool calls internally, which would
+// make tool interactions invisible to Noetic's itemLog, token tracking,
+// and observability. Instead, the AgentHarness manages the tool loop.
 /** @internal */
-export function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams): SdkTool[] {
+export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
@@ -293,23 +295,50 @@ export function convertTools({ tools, ctx, harness, layers }: ConvertToolsParams
         name: t.name,
         description: t.description,
         inputSchema: t.input,
-        execute: async (args: unknown, turnContext?: TurnContext) => {
-          // Run beforeToolCall steering check if layers are present
-          if (layers && layers.length > 0) {
-            const decision = await harness.beforeToolCall(layers, t.name, args, ctx);
-            if (decision.action === SteeringAction.Deny) {
-              return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
-            }
-            if (decision.action === SteeringAction.Guide) {
-              return `Tool call redirected: ${decision.guidance}`;
-            }
-          }
-          const toolCtx = buildToolExecutionContext(ctx, harness, turnContext);
-          return t.execute(args, toolCtx);
-        },
       },
     }),
   );
+}
+
+/** @internal */
+export interface ExecuteToolCallParams {
+  toolName: string;
+  args: unknown;
+  tools: ReadonlyArray<Tool>;
+  context: Context;
+  harness: AgentHarnessContract;
+  layers?: MemoryLayer[];
+}
+
+/** @internal Execute a single tool call with steering checks. */
+export async function executeToolCall(params: ExecuteToolCallParams): Promise<string> {
+  const matchedTool = params.tools.find((t) => t.name === params.toolName);
+  if (!matchedTool) {
+    return `Error: unknown tool '${params.toolName}'`;
+  }
+
+  if (params.layers && params.layers.length > 0) {
+    const decision = await params.harness.beforeToolCall(
+      params.layers,
+      params.toolName,
+      params.args,
+      params.context,
+    );
+    if (decision.action === SteeringAction.Deny) {
+      return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
+    }
+    if (decision.action === SteeringAction.Guide) {
+      return `Tool call redirected: ${decision.guidance}`;
+    }
+  }
+
+  const toolCtx = buildToolExecutionContext(params.context, params.harness);
+  try {
+    const result = await matchedTool.execute(params.args, toolCtx);
+    return typeof result === 'string' ? result : JSON.stringify(result);
+  } catch (e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 //#endregion

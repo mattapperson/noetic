@@ -91,7 +91,7 @@ import { step, loop, until } from '@noetic/core';
 
 const resilientLoop = loop({
   id: 'retry-loop',
-  body: step.llm({ id: 'generate', model: 'gpt-4o' }),
+  steps: [step.llm({ id: 'generate', model: 'gpt-4o' })],
   until: until.noToolCalls(),
   onError(error, ctx) {
     if (error.kind === 'llm_rate_limit') {

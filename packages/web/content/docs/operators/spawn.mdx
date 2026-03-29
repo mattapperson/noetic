@@ -63,7 +63,7 @@ const withMemory = spawn({
           childState: parentState,
           items: [
             {
-              kind: 'message',
+              type: 'message',
               role: 'user',
               content: [
                 {
@@ -106,12 +106,12 @@ const researchAgent = spawn({
   child: {
     kind: 'loop',
     id: 'research-loop',
-    body: step.llm({
+    steps: [step.llm({
       id: 'researcher-llm',
       model: 'gpt-4o',
       system: 'You are a research assistant. Use tools to find information.',
       tools: [searchTool, fetchTool],
-    }),
+    })],
     until: until.noToolCalls(),
     maxIterations: 10,
   },
@@ -126,7 +126,7 @@ const researchAgent = spawn({
           childState: null,
           items: [
             {
-              kind: 'message',
+              type: 'message',
               role: 'user',
               content: [
                 {
@@ -198,7 +198,7 @@ handle.await().then((result) => {
 const agentLoop = {
   kind: 'loop',
   id: 'async-agent',
-  body: llmStep,
+  steps: [llmStep],
   until: until.noToolCalls(),
   inbox,
   parkTimeout: 3e4,
@@ -253,14 +253,14 @@ const launchTool = tool({
 const agent = {
   kind: 'loop',
   id: 'smart-delegator',
-  body: step.llm({
+  steps: [step.llm({
     id: 'orchestrator',
     model: 'gpt-4o',
     system: `You are an orchestrator. You have two delegation tools:
 - delegate: blocks and returns the result. Use for tasks you need answered before continuing.
 - launch_agent: runs in background. Use when you can keep working while it runs.`,
     tools: [delegateTool, launchTool],
-  }),
+  })],
   until: until.noToolCalls(),
   inbox,           // wakes the loop when background agents finish
   parkTimeout: 3e4,

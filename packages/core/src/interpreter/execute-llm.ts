@@ -32,6 +32,7 @@ export async function executeLLM<I, O>(
           items: ctx.itemLog.items,
           tools: step.tools,
           params: step.params,
+          outputSchema: step.output,
           ctx,
           layers,
         }
@@ -39,6 +40,7 @@ export async function executeLLM<I, O>(
           model: step.model,
           items: ctx.itemLog.items,
           params: step.params,
+          outputSchema: step.output,
         };
     const response = await harness.callModel(request);
 

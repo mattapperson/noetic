@@ -1,3 +1,4 @@
+import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, Tool } from './common';
 import type { Context } from './context';
@@ -27,6 +28,8 @@ interface CallModelRequestBase {
   model: string;
   items: ReadonlyArray<Item>;
   params?: ModelParams;
+  /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
+  outputSchema?: ZodType;
 }
 
 /** @public Request shape when tools are provided — ctx is required for tool execution callbacks. */

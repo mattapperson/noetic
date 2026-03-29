@@ -8,7 +8,7 @@ description: The Context object tracks execution state, metrics, and conversatio
 ```ts
 import { step } from '@noetic/core';
 
-const greet = step.run('greet', async (input: string, ctx) => {
+const greet = step.run({ id: 'greet', execute: async (input: string, ctx) => {
   console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
   console.log(`Tokens so far: ${ctx.tokens.total}`);
 
@@ -22,7 +22,7 @@ const greet = step.run('greet', async (input: string, ctx) => {
   });
 
   return `Hello, ${input}!`;
-});
+}});
 ```
 
 Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.

@@ -2,6 +2,7 @@
  * Shared test helpers — single source of truth for all test factories.
  */
 
+import { expect } from 'bun:test';
 import { z } from 'zod';
 import { frameworkCast } from '../src/interpreter/framework-cast';
 import type { LLMResponse, Tool } from '../src/types/common';
@@ -463,6 +464,65 @@ export function textOnlyResponse(text: string): LLMResponse {
   return makeLLMResponse(text, {
     cost: 0.001,
   });
+}
+
+//#endregion
+
+//#region OpenResponses Compliance
+
+const VALID_ITEM_TYPES = new Set([
+  'message',
+  'function_call',
+  'function_call_output',
+  'reasoning',
+]);
+
+const VALID_STATUSES = new Set([
+  'in_progress',
+  'completed',
+  'incomplete',
+  'failed',
+]);
+
+const VALID_CONTENT_PART_TYPES = new Set([
+  'output_text',
+  'input_text',
+  'refusal',
+]);
+
+/**
+ * Asserts that every item in a log conforms to the OpenResponses item shape.
+ * Checks id, status, type discriminator, and per-type field presence.
+ */
+export function assertOpenResponsesCompliance(items: readonly Item[]): void {
+  for (const item of items) {
+    expect(typeof item.id).toBe('string');
+    expect(item.id.length).toBeGreaterThan(0);
+    expect(VALID_STATUSES.has(item.status)).toBe(true);
+
+    const isExtension = item.type.startsWith('x-');
+    if (!isExtension) {
+      expect(VALID_ITEM_TYPES.has(item.type)).toBe(true);
+    }
+
+    if (item.type === 'message') {
+      expect(Array.isArray(item.content)).toBe(true);
+      for (const part of item.content) {
+        expect(VALID_CONTENT_PART_TYPES.has(part.type)).toBe(true);
+      }
+    }
+
+    if (item.type === 'function_call') {
+      expect(typeof item.callId).toBe('string');
+      expect(typeof item.name).toBe('string');
+      expect(typeof item.arguments).toBe('string');
+    }
+
+    if (item.type === 'function_call_output') {
+      expect(typeof item.callId).toBe('string');
+      expect(typeof item.output).toBe('string');
+    }
+  }
 }
 
 //#endregion

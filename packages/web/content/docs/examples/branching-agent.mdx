@@ -73,7 +73,7 @@ export function buildBranchingAgent() {
 
   return loop({
     id: 'ticket-processing-loop',
-    body: router,
+    steps: [router],
     until: until.maxSteps(1),
   });
 }

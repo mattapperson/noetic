@@ -77,7 +77,7 @@ function react(opts) {
   return {
     kind: 'loop',
     id: 'react-loop',
-    body: llmStep,
+    steps: [llmStep],
     until: any(
       until.noToolCalls(),
       until.maxSteps(opts.maxSteps ?? 10),
