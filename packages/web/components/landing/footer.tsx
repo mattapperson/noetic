@@ -33,12 +33,11 @@ export function Footer(): ReactNode {
     <footer
       style={{
         padding: '40px 24px',
-        borderTop: '1px solid var(--color-tui-border)',
       }}
     >
       <div
         style={{
-          maxWidth: '960px',
+          maxWidth: '1280px',
           margin: '0 auto',
         }}
       >
@@ -48,6 +47,7 @@ export function Footer(): ReactNode {
             fontSize: '12px',
             margin: '0 0 24px',
             overflow: 'hidden',
+            whiteSpace: 'nowrap',
           }}
         >
           {FOOTER_RULE}
@@ -70,18 +70,20 @@ export function Footer(): ReactNode {
               alignItems: 'center',
               gap: '8px',
               padding: '8px 16px',
-              background: 'var(--color-tui-surface)',
-              border: '1px solid var(--color-tui-border)',
+              background: copied ? 'var(--color-tui-green)' : 'var(--color-tui-surface)',
+              border: '1px solid',
+              borderColor: copied ? 'var(--color-tui-green)' : 'var(--color-tui-border)',
               borderRadius: '4px',
-              color: 'var(--color-tui-secondary)',
+              color: copied ? 'var(--color-tui-bg)' : 'var(--color-tui-secondary)',
               fontSize: '13px',
               cursor: 'pointer',
               fontFamily: 'inherit',
+              transition: 'all 0.2s ease',
             }}
           >
             <span
               style={{
-                color: 'var(--color-tui-green)',
+                color: copied ? 'var(--color-tui-bg)' : 'var(--color-tui-green)',
                 fontWeight: 700,
               }}
             >
@@ -90,12 +92,13 @@ export function Footer(): ReactNode {
             {INSTALL_CMD}
             <span
               style={{
-                color: 'var(--color-tui-muted)',
+                color: copied ? 'var(--color-tui-bg)' : 'var(--color-tui-muted)',
                 fontSize: '11px',
                 marginLeft: '8px',
+                fontWeight: copied ? 600 : 400,
               }}
             >
-              {copied ? 'copied!' : 'click to copy'}
+              {copied ? '✓ copied!' : 'click to copy'}
             </span>
           </button>
 

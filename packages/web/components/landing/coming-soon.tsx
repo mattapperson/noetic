@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { SectionHeader } from '@/components/landing/section-header';
 import { TuiBadge } from '@/components/tui/tui-badge';
 import { TuiWindow } from '@/components/tui/tui-window';
 
@@ -24,10 +25,32 @@ export function ComingSoon(): ReactNode {
     <section
       style={{
         padding: '80px 24px',
-        maxWidth: '640px',
         margin: '0 auto',
       }}
     >
+      <SectionHeader label="what's next" title="Eval Framework + RL Pipeline" margin="8px 0 12px" />
+      <p
+        style={{
+          fontSize: '17px',
+          color: 'var(--color-tui-secondary)',
+          margin: '0 0 8px',
+          lineHeight: 1.5,
+        }}
+      >
+        Write evals as easily as Jest tests. Train agents with reinforcement learning.
+      </p>
+      <p
+        style={{
+          fontSize: '14px',
+          color: 'var(--color-tui-muted)',
+          margin: '0 0 32px',
+          lineHeight: 1.7,
+        }}
+      >
+        Define what "good" looks like for your agent, run it against a dataset, and let the
+        optimizer improve it. Same primitives. Same runtime. Just a feedback loop added.
+      </p>
+
       <TuiWindow title="eval-framework">
         <div
           style={{
@@ -38,26 +61,7 @@ export function ComingSoon(): ReactNode {
           }}
         >
           <TuiBadge color="amber">Coming Soon</TuiBadge>
-          <span
-            style={{
-              fontSize: '14px',
-              fontWeight: 600,
-              letterSpacing: '0.05em',
-            }}
-          >
-            Eval Framework + RL Pipeline
-          </span>
         </div>
-        <p
-          style={{
-            fontSize: '13px',
-            color: 'var(--color-tui-secondary)',
-            margin: '0 0 16px',
-            lineHeight: 1.6,
-          }}
-        >
-          Write evals as easily as Jest tests. Train agents with reinforcement learning.
-        </p>
         <pre
           style={{
             margin: 0,

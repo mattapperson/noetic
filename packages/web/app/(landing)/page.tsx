@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { CodeExamples } from '@/components/landing/code-examples';
+import { CodePeek } from '@/components/landing/code-peek';
 import { ComingSoon } from '@/components/landing/coming-soon';
+import { Differentiation } from '@/components/landing/differentiation';
 import { Footer } from '@/components/landing/footer';
 import { Hero } from '@/components/landing/hero';
 import { MemorySystem } from '@/components/landing/memory-system';
@@ -14,11 +15,20 @@ export default function LandingPage(): ReactNode {
       <Nav />
       <main>
         <Hero />
-        <PrimitivesViz />
-        <CodeExamples />
-        <MemorySystem />
-        <PatternsGrid />
-        <ComingSoon />
+        <div
+          style={{
+            position: 'relative',
+            zIndex: 2,
+            background: 'var(--color-tui-bg)',
+          }}
+        >
+          <PrimitivesViz />
+          <MemorySystem />
+          <PatternsGrid />
+          <CodePeek />
+          <Differentiation />
+          <ComingSoon />
+        </div>
       </main>
       <Footer />
     </>

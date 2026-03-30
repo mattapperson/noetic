@@ -5,4 +5,5 @@ packages/web/.source/
 packages/web/next-env.d.ts
 *.lock
 .vercel
+.superpowers/
 packages/web/.typecheck-snippets/

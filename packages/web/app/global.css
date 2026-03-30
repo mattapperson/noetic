@@ -17,16 +17,46 @@
   --radius: 4px;
 }
 
+:root {
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 32px;
+  --spacing-xl: 48px;
+  --spacing-2xl: 80px;
+}
+
 @layer base {
   :root {
     --background: var(--color-tui-bg);
     --foreground: var(--color-tui-fg);
   }
 
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  html {
+    min-width: 0;
+  }
+
   body {
     background: var(--color-tui-bg);
     color: var(--color-tui-fg);
     font-family: "JetBrains Mono", monospace;
+    overflow-x: hidden;
+    min-width: 0;
+  }
+
+  main {
+    min-width: 0;
+  }
+
+  section {
+    min-width: 0;
   }
 }
 
@@ -78,24 +108,78 @@
   gap: 1px;
   background: var(--color-tui-border);
   border: 1px solid var(--color-tui-border);
+  width: 100%;
+  min-width: 0;
 }
 
 .tui-bento > [data-col-span="2"] {
   grid-column: span 2;
 }
 
+.landing-section + .landing-section,
+.side-by-side-sections + .landing-section,
+.landing-section + .side-by-side-sections {
+  border-top: 1px solid var(--color-tui-border);
+}
+
 .primitives-grid {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .patterns-grid {
   grid-template-columns: repeat(3, 1fr);
 }
 
-@media (max-width: 767px) {
+.memory-layers-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+@media (max-width: 1024px) {
   .primitives-grid,
   .patterns-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .primitives-grid > [data-col-span="2"] {
+    grid-column: span 1;
+  }
+
+  .side-by-side-sections {
+    flex-direction: column;
+  }
+
+  .section-split {
+    grid-template-columns: 1fr;
+  }
+
+  .section-split > :last-child {
+    order: 2;
+    margin-top: 32px;
+  }
+
+  /* Reset memory section order for single column (content first, then SVG) */
+  .section-split > .memory-visual {
+    order: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .primitives-grid,
+  .patterns-grid,
+  .memory-layers-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .section-split > :last-child {
+    margin-top: 24px;
+  }
+}
+
+@media (min-width: 1025px) {
+  main section {
+    max-width: 1280px;
   }
 }
 
@@ -106,5 +190,92 @@
 
   .tui-scanlines::after {
     display: none;
+  }
+}
+
+.side-by-side-sections {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.side-by-side-sections > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.side-by-side-sections section {
+  max-width: 100%;
+}
+
+.section-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+}
+
+.section-split > * {
+  min-width: 0;
+}
+
+/* Memory section: swap order on desktop so SVG appears on left */
+.section-split > .memory-visual {
+  order: -1;
+}
+
+@media (max-width: 1024px) {
+  .side-by-side-sections {
+    flex-direction: column;
+  }
+
+  .section-split {
+    grid-template-columns: 1fr;
+  }
+
+  .section-split > :last-child {
+    order: 2;
+    margin-top: 32px;
+  }
+
+  /* Reset memory section order for single column (content first, then SVG) */
+  .section-split > .memory-visual {
+    order: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .section-split > :last-child {
+    margin-top: 24px;
+  }
+}
+
+@media (min-width: 1025px) {
+  main section {
+    max-width: 1280px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  svg * {
+    animation-play-state: paused;
+  }
+}
+
+.diff-row {
+  grid-template-columns: 140px 1fr;
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .diff-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .diff-row > div:first-child {
+    border-right: none;
+    border-bottom: 1px solid var(--color-tui-border);
+    min-width: 0;
   }
 }

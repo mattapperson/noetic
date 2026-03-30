@@ -1,5 +1,4 @@
 import { RootProvider } from 'fumadocs-ui/provider/next';
-import type { ReactNode } from 'react';
 import { jetbrainsMono } from '@/lib/fonts';
 import './global.css';
 
@@ -8,7 +7,7 @@ export const metadata = {
   description: 'Primitives to build agents from scratch. Patterns to start fast.',
 };
 
-export default function RootLayout({ children }: { children: ReactNode }): ReactNode {
+export default function RootLayout({ children }: { children: React.ReactNode }): React.ReactNode {
   return (
     <html lang="en" className={jetbrainsMono.variable} suppressHydrationWarning>
       <body
