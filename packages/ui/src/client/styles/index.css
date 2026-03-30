@@ -1,5 +1,8 @@
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind CSS directives */
 @tailwind base;
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind CSS directives */
 @tailwind components;
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind CSS directives */
 @tailwind utilities;
 
 /* CSS Custom Properties for Theming */
