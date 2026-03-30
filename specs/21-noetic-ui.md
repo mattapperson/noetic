@@ -1,0 +1,1428 @@
+# Noetic UI Spec
+
+> **Depends On:** `08-runtime` (AgentHarness), `10-observability` (TraceExporter, Span), `07-context-and-event-log` (Context, Item, ItemLog), `01-step-type` (Step, StepKind)
+> **Exports:** (none — developer tool only, no public API exports)
+
+---
+
+## Package
+
+`@noetic/ui` — Optional developer tool package for visual debugging.
+
+Published from `packages/ui/` as a separate optional install: `npm install -D @noetic/ui`
+
+---
+
+## Overview
+
+Noetic UI is an independent, optional developer tool package that provides a visual interface for debugging Noetic agent workflows. It serves as a comprehensive execution recorder and playback debugger when enabled in development environments.
+
+**Key Capabilities:**
+- **Agent Browser** - Discover and browse agents from your codebase, organized by file path
+- **Execution Recording** - Automatically records every agent run with full trace data (debug mode only)
+- **Playback Debugging** - Scrub through recorded execution history to see what happened at any point
+- **Visual Execution Flow** - Interactive node graph showing step-by-step execution
+- **Data Inspection** - Inspect input, output, and state at any point in time
+
+**Zero Production Impact:**
+- UI instrumentation is **completely disabled** by default
+- No performance overhead in production environments
+- No additional dependencies loaded unless explicitly enabled
+- All debug hooks are tree-shaken from production builds
+
+**Workflow:**
+1. Enable debug mode with `NOETIC_UI_ENABLED=true`
+2. Browse agents in the left sidebar (organized by file path)
+3. Select an agent to see its execution history (runs)
+4. Select a run to view its execution trace in the center canvas
+5. Use the playback controls to scrub through execution time
+6. Click any step to inspect its data in the right panel
+
+In debug mode, all executions are recorded automatically, enabling retroactive debugging and analysis. In production, the core API runs at full speed with zero instrumentation overhead.
+
+---
+
+## Core Concepts
+
+### Visual Design Philosophy
+
+Noetic UI design principles:
+
+- **System theme** as default (auto-switches between light/dark based on OS preference)
+- **Card-based nodes** with subtle borders and status-colored accents
+- **Top-down hierarchical layout** for execution flow
+- **Three-panel layout:** left navigation, center canvas, right inspector
+- **Playback timeline** at bottom with transport controls
+- **Status badges** prominently displayed on each node
+
+### 1. Execution Visualization
+
+The UI renders the execution tree as an interactive node graph:
+
+- **Nodes** represent steps (run, llm, tool, branch, fork, spawn, loop)
+- **Node cards** display:
+  - Step kind badge (icon + text: LLM, TOOL, FORK, etc.)
+  - Branch/fork indicator (e.g., "BRANCH 3")
+  - Step title
+  - Status badge (DONE, QUEUED, RUNNING, ERROR, PAUSED)
+  - Duration (e.g., "25.5 s", "17m 43s")
+  - Attempt count
+  - Tool/pattern tags as pills
+  - Connection ports (input left, output right)
+- **Edges** show data flow between steps with animated progress indicators
+- **Nested graphs** for spawn/loop children (collapsible)
+- **Parallel lanes** for fork paths with visual grouping
+- **Color coding:**
+  - **Green** - completed/success
+  - **Blue** - active/running/focus
+  - **Yellow/Orange** - warning/paused
+  - **Red** - error
+  - **Gray** - pending/not visited
+
+### 2. Data Inspection
+
+Each node can be selected to show details in the right panel:
+
+- **Tabs:** session | attempt | events
+- **Content areas:**
+  - **System prompts** (for LLM steps)
+  - **Input/output data** with syntax highlighting
+  - **Context state** (memory, tokens, cost, depth)
+  - **Step metadata** (execution time, retry count, LLM usage)
+  - **Item log** (conversation history for LLM steps)
+  - **Raw traces** (OpenTelemetry span data)
+- **Text display** with monospace fonts for code/JSON
+- **Follow/Overview toggle** for different detail levels
+
+### 3. Debugging Controls
+
+Playback controls at bottom (like a media player):
+- **Transport buttons:** ⏮ (restart), ⏴ (step back), ⏯ (play/pause), ⏵ (step forward), ⏭ (end)
+- **Playback speed:** 1x, 2x, 5x, 10x toggle buttons
+- **Timeline scrubber** showing execution progress
+- **Current position** display (e.g., "Step 9 / 24")
+
+Debug actions:
+- **Pause/Resume** - halt execution at current step
+- **Step Over** - execute current step, pause at next sibling
+- **Step Into** - if step has children (spawn/loop/fork), pause at first child
+- **Step Out** - run until current context completes, pause at parent
+- **Breakpoints** - pause when specific steps or conditions are hit
+- **Restart** - re-run from beginning with same or modified input
+
+### 4. Recording, Event Log & Traces
+
+**Recording Architecture:**
+- **Automatic recording** - Every execution is captured in full
+- **Runs are first-class** - Each execution creates a run entry
+- **Persistent storage** - Runs stored locally with configurable retention
+- **Real-time streaming** - Live runs stream to UI as they execute
+- **Retroactive inspection** - Access any historical run from the agent browser
+
+**Time-Travel Debugging (Observational Only):**
+- **Scrub through history** - Navigate to any point in any recorded run to see what happened
+- **View historical state** - See execution state at any moment (stored snapshots only)
+- **Comparison mode** - Compare two runs or two points within a run
+- **Export at any point** - Export trace data from any execution state
+
+**Note:** Time-travel is purely observational like watching a video recording. It displays stored snapshots without re-executing any code.
+
+**Event Log Features:**
+- **Real-time event stream** - all step start/completion events
+- **Chronological view** - Scroll through execution timeline
+- **Searchable/filterable** by step kind, status, time range, step ID
+- **Full trace export** - OpenTelemetry-compatible span export
+- **Diff view** - compare two execution runs side-by-side
+- **Bookmark important steps** - Mark steps for quick navigation
+
+---
+
+## Architecture
+
+### Package Structure
+
+```
+packages/ui/
+├── src/
+│   ├── server/           # Dev server & WebSocket API
+│   │   ├── index.ts      # Server entry point
+│   │   ├── websocket.ts  # WebSocket message protocol
+│   │   ├── storage.ts    # Execution trace persistence
+│   │   └── api.ts        # REST API for queries
+│   ├── client/           # Web UI (React/Vue/Svelte)
+│   │   ├── components/   # Node graph, inspectors, controls
+│   │   ├── stores/       # State management
+│   │   ├── types/        # Client-side type definitions
+│   │   └── app.tsx       # Main application
+│   ├── runtime/          # Runtime integration
+│   │   ├── hook.ts       # Execution hooks for capturing events
+│   │   ├── exporter.ts   # TraceExporter implementation
+│   │   └── debugger.ts   # Debug runtime with pause/resume
+│   └── shared/           # Shared types & protocol
+│       ├── protocol.ts   # WebSocket message types
+│       └── types.ts      # Common interfaces
+├── package.json
+└── README.md
+```
+
+### Integration Points
+
+Noetic UI integrates with the core framework through three mechanisms:
+
+#### 1. TraceExporter (Read-only Observation)
+
+```typescript
+import { setTraceExporter } from '@noetic/core';
+import { NoeticUITraceExporter } from '@noetic/ui/runtime';
+
+// In your app entry point when dev mode is enabled
+if (process.env.NOETIC_UI_ENABLED) {
+  const uiExporter = new NoeticUITraceExporter({
+    port: 3333,  // WebSocket port for UI server
+  });
+  setTraceExporter(uiExporter);
+}
+```
+
+The exporter receives span data and forwards it to the UI server via WebSocket.
+
+#### 2. Debug Runtime (Full Control)
+
+```typescript
+import { AgentHarness } from '@noetic/core';
+import { createDebugHarness } from '@noetic/ui/runtime';
+
+// Replace AgentHarness with DebugAgentHarness for full debugging
+const harness = createDebugHarness({
+  name: 'my-agent',
+  initialStep: myStep,
+  // ... other config
+  debugger: {
+    breakpoints: ['step-3', 'verify-loop'],
+    pauseOnError: true,
+    autoStart: false,  // Wait for UI to initiate
+  }
+});
+```
+
+The debug harness wraps execution and allows external control.
+
+### Debug Mode vs Production Mode
+
+Noetic UI operates in two distinct modes to ensure zero production impact:
+
+#### Debug Mode (Development)
+
+When `NOETIC_UI_ENABLED=true` or calling `createDebugHarness()`:
+
+- **Enhanced Data Collection:**
+  - Full execution traces with step-by-step data
+  - Input/output snapshots at every step
+  - Memory layer state changes
+  - Context snapshots (tokens, cost, depth)
+  - Item log entries (full conversation history)
+  - Breakpoint hit history
+  - Pause/resume event log
+
+- **Real-time Streaming:**
+  - WebSocket connection to UI server
+  - Live execution updates
+  - Pause/resume control from UI
+  - Breakpoint evaluation
+
+- **Performance Impact:** Acceptable overhead in development (10-20% slower due to full recording)
+- **Memory Monitoring:** Real-time memory usage indicator with color-coded warnings
+
+**Memory Warning System:**
+- **Visual indicators** during execution:
+  - 🟢 **Green:** < 50 MB - Healthy
+  - 🟡 **Yellow:** 50-200 MB - Monitor closely
+  - 🟠 **Orange:** 200-500 MB - Consider stopping for large traces
+  - 🔴 **Red:** > 500 MB - Very large trace, user discretion
+- **No automatic limits** - users decide when to stop based on warnings
+- **Memory displayed** in run list and during live execution
+- **Tooltip** on memory indicator shows breakdown (input data, output data, snapshots)
+
+#### Production Mode (Default)
+
+When Noetic UI is **not** enabled (default behavior):
+
+- **Zero Runtime Overhead:**
+  - No trace collection
+  - No WebSocket connections
+  - No additional memory allocation
+  - No breakpoint checks
+  - No state snapshots
+
+- **Standard Execution:**
+  - Core API runs at full speed
+  - No instrumentation hooks active
+  - Results and errors returned normally
+  - No external dependencies loaded
+
+#### Implementation Strategy
+
+**Tree-shaking Compatible:**
+```typescript
+// Debug imports only loaded when needed
+if (process.env.NOETIC_UI_ENABLED) {
+  const { createDebugHarness } = await import('@noetic/ui/runtime');
+  const { NoeticUITraceExporter } = await import('@noetic/ui/runtime');
+  
+  // Setup debugging
+  const harness = createDebugHarness(config);
+  setTraceExporter(new NoeticUITraceExporter());
+}
+```
+
+**Conditional Hook Registration:**
+```typescript
+// In core runtime - hooks check for debugger presence
+export function execute(step, input, ctx) {
+  // Standard execution path (always runs)
+  
+  // Debug path only executes if debugger attached
+  if (ctx.harness.debugger?.isAttached) {
+    ctx.harness.debugger.onStepStart(step, input, ctx);
+  }
+  
+  const result = executeStep(step, input, ctx);
+  
+  // Debug path only executes if debugger attached
+  if (ctx.harness.debugger?.isAttached) {
+    ctx.harness.debugger.onStepComplete(step, result, ctx);
+  }
+  
+  return result;
+}
+```
+
+**Performance Guarantees:**
+- No UI-related code in production bundles (tree-shaken)
+- No additional memory allocation when disabled
+- Hook checks are simple boolean flags (nanosecond cost)
+- WebSocket and storage layers not loaded unless explicitly enabled
+- Breakpoint engine completely bypassed in production
+
+### CLI Integration
+
+```bash
+# Start the UI server and run agent with debugging enabled
+npx @noetic/ui serve --port 3333 &
+npx my-agent --noetic-ui-port 3333
+
+# Or combined command
+npx @noetic/ui run -- npm start
+```
+
+---
+
+## Data Model
+
+### Agent
+
+Represents a discovered agent in the codebase:
+
+```typescript
+interface Agent {
+  id: string;                    // Unique agent identifier (hash of file path + export name)
+  name: string;                  // Human-readable agent name
+  filePath: string;             // Absolute file path to agent definition
+  exportName: string;           // Export name (e.g., "default" or "myAgent")
+  
+  // Discovery metadata
+  discoveredAt: number;         // When first discovered
+  lastModified: number;         // Last file modification time
+  
+  // Execution tracking
+  runs: Run[];                  // Execution history (sorted by time, newest first)
+  runCount: number;            // Total number of runs
+  lastRunAt: number | null;    // Most recent execution timestamp
+  
+  // Configuration (optional)
+  description?: string;         // Auto-extracted from JSDoc or comments
+  tags?: string[];              // Agent categorization
+}
+```
+
+### Run
+
+A single execution instance of an agent - the core unit of recording:
+
+```typescript
+interface Run {
+  id: string;                   // Unique run identifier (UUID)
+  agentId: string;              // Reference to parent agent
+  
+  // Timing
+  startTime: number;          // When execution began
+  endTime: number | null;     // When execution completed (null if still running)
+  durationMs: number | null;
+  
+  // Status
+  status: 'running' | 'completed' | 'error' | 'paused' | 'cancelled';
+  
+  // Input
+  input: unknown;              // The input data that started this run
+  inputPreview: string;        // Truncated string representation for display
+  
+  // Execution data
+  trace: ExecutionTrace;        // Full step-by-step execution data
+  rootNodeId: string;          // ID of the root execution node
+  
+  // Timeline data (for scrubbing)
+  timelineEvents: TimelineEvent[];  // Ordered list of events for timeline visualization
+  currentTimelinePosition: number;    // Current scrub position (0.0 to 1.0, or step index)
+  
+  // Aggregated metrics
+  totalSteps: number;
+  totalTokens: TokenUsage;
+  totalCost: number;
+  maxDepth: number;
+  
+  // Memory tracking
+  memoryBytes: number;         // Total memory used by this run's trace data
+  maxMemoryBytes: number;      // Peak memory during execution
+  
+  // Recording metadata
+  recordingVersion: string;    // Version of recording format
+  isLive: boolean;            // Whether this is a currently executing run
+  
+  // Debugging
+  breakpointsHit: string[];    // Step IDs where execution paused
+  pauseHistory: PausePoint[];  // History of all pause/resume events
+}
+
+### Large Trace Handling (v1)
+
+**Current Limitations:**
+
+Initial implementation has basic large trace support:
+
+- **Step Limit:** 1000 steps per run maximum
+- **Warning Threshold:** Display warning at 500 steps
+- **Hard Stop:** Execution continues, but recording stops at 1000 steps with notification
+
+**Warning Display:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ ⚠️  Large Execution Warning                            │
+│                                                          │
+│ This run has 750 steps. Performance may degrade          │
+│ when viewing traces with many steps.                     │
+│                                                          │
+│ [Continue Recording]  [Stop Recording]                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Maximum Steps Reached:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ ⚠️  Maximum Steps Reached                               │
+│                                                          │
+│ Recording stopped at 1000 steps. Execution continues.   │
+│                                                          │
+│ Trace is complete up to step 1000.                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Lazy Loading:**
+- Node details loaded on-demand when clicked
+- Timeline markers rendered progressively
+- Simple virtualization: render visible nodes + buffer of 50
+
+**Future Improvements:**
+- Virtual scrolling for 10,000+ steps
+- Timeline aggregation/LOD when zoomed out
+- Configurable step limits
+- Auto-segmentation of long runs
+
+### Execution Node
+
+```typescript
+interface ExecutionNode {
+  id: string;                    // Unique execution instance ID
+  stepId: string;                // Static step definition ID
+  kind: StepKind;                // 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop'
+  parentId: string | null;       // Parent execution node (null for root)
+  depth: number;               // Nesting depth
+  
+  // Timing
+  startTime: number;           // Unix timestamp (ms)
+  endTime: number | null;    // null until complete
+  durationMs: number | null;
+  
+  // Status
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'error' | 'cancelled';
+  error?: NoeticError;
+  
+  // Data
+  input: unknown;
+  output: unknown | null;
+  contextSnapshot: ContextSnapshot;
+  
+  // Step-specific data
+  stepData: StepData;
+  
+  // Relationships
+  children: string[];          // Child execution IDs (for spawn/loop/fork)
+  forkPaths?: string[][];      // For fork: array of path node arrays
+}
+
+type StepData =
+  | RunStepData
+  | LLMStepData
+  | ToolStepData
+  | BranchStepData
+  | ForkStepData
+  | SpawnStepData
+  | LoopStepData;
+
+interface LLMStepData {
+  model: string;
+  messages: MessageItem[];
+  toolCalls: FunctionCallItem[];
+  tokenUsage: TokenUsage;
+  cost: number;
+}
+
+interface ToolStepData {
+  toolName: string;
+  arguments: unknown;
+  result: unknown;
+}
+
+interface ForkStepData {
+  mode: 'race' | 'all' | 'settle';
+  pathCount: number;
+  winnerPath?: number;  // For race mode
+}
+
+// ... other step data types
+```
+
+### Context Snapshot
+
+```typescript
+interface ContextSnapshot {
+  depth: number;
+  stepCount: number;
+  tokens: TokenUsage;
+  cost: number;
+  elapsedMs: number;
+  state: unknown;
+  itemLogLength: number;
+}
+```
+
+### Execution Trace
+
+```typescript
+interface ExecutionTrace {
+  traceId: string;             // UUID for this execution
+  rootStepId: string;          // ID of top-level step
+  startTime: number;
+  endTime: number | null;
+  status: 'running' | 'completed' | 'error' | 'cancelled';
+  nodes: Map<string, ExecutionNode>;
+  rootNodeId: string;
+}
+```
+
+### Storage Management
+
+**Storage Model:**
+- **User-controlled deletion** - No automatic cleanup of traces
+- **Raw storage** - Traces stored uncompressed for fast access
+- **Compression** - Future enhancement (marked for v2)
+- **Visual indicators** - Storage usage displayed in UI
+
+**Storage Tracking:**
+```typescript
+interface StorageMetrics {
+  totalRuns: number;           // Total runs stored across all agents
+  totalSizeBytes: number;      // Total storage used
+  availableBytes: number;      // Available disk space
+  byAgent: Map<string, {       // Per-agent breakdown
+    runCount: number;
+    sizeBytes: number;
+  }>;
+}
+```
+
+**UI Storage Bar:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ Storage: 45 runs · 234 MB used · 1.2 GB available      │
+│ [████████░░░░░░░░░░░░] 16% used                        │
+│                                                         │
+│ ⚠️ Warning at 80%   🗑️ Clear all runs                │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Storage Indicators:**
+- **Visual bar** showing used vs available space
+- **Run count** and **size in MB/GB**
+- **Warning threshold** at 80% capacity (orange bar)
+- **Critical threshold** at 95% capacity (red bar)
+- **No enforced limits** - users manage their own storage
+
+**User Actions:**
+- **Clear all runs** - Delete all stored traces (confirmation required)
+- **Clear agent runs** - Delete all runs for a specific agent
+- **Clear single run** - Delete individual run
+- **Export before delete** - Option to export trace before deletion
+- **Sort by size** - Find largest traces to delete first
+
+**Storage Location:**
+- **Default:** `~/.noetic-ui/traces/` (user home directory)
+- **Configurable** via `NOETIC_UI_STORAGE_PATH` env var
+- **Storage backend:** File system (memory/redis for future)
+
+---
+
+## WebSocket Protocol
+
+### Server → Client Messages
+
+```typescript
+type ServerMessage =
+  | { type: 'execution.start'; trace: ExecutionTrace }
+  | { type: 'node.start'; node: ExecutionNode }
+  | { type: 'node.complete'; nodeId: string; output: unknown; durationMs: number }
+  | { type: 'node.error'; nodeId: string; error: NoeticError }
+  | { type: 'node.pause'; nodeId: string; reason: 'breakpoint' | 'step' | 'error' }
+  | { type: 'node.data'; nodeId: string; data: Partial<ExecutionNode> }
+  | { type: 'execution.complete'; traceId: string; summary: ExecutionSummary }
+  | { type: 'execution.error'; traceId: string; error: NoeticError }
+  | { type: 'pong'; timestamp: number };
+```
+
+### Client → Server Messages
+
+```typescript
+type ClientMessage =
+  | { type: 'execution.list' }  // List active/completed executions
+  | { type: 'execution.get'; traceId: string }
+  | { type: 'execution.replay'; traceId: string; fromNodeId?: string }
+  | { type: 'node.stepOver'; traceId: string; nodeId: string }
+  | { type: 'node.stepInto'; traceId: string; nodeId: string }
+  | { type: 'node.stepOut'; traceId: string; nodeId: string }
+  | { type: 'node.resume'; traceId: string; nodeId: string }
+  | { type: 'breakpoint.add'; stepId: string; condition?: string }
+  | { type: 'breakpoint.remove'; stepId: string }
+  | { type: 'ping'; timestamp: number };
+```
+
+### WebSocket Reliability
+
+**Connection Management:**
+
+**Auto-Reconnection:**
+- **Exponential backoff:** 1s → 2s → 4s → 8s → max 30s between retries
+- **Max retry duration:** 5 minutes, then show manual reconnect button
+- **Visual indicator:** Connection status shown in UI header
+  - 🟢 Green dot: Connected
+  - 🟡 Yellow dot: Reconnecting (attempt in progress)
+  - 🔴 Red dot: Disconnected (retry limit reached)
+
+**Heartbeat Protocol:**
+- **Client ping:** Every 30 seconds
+- **Server pong:** Response within 5 seconds
+- **Missed heartbeats:** After 2 missed pongs (10s), trigger reconnection
+
+**Message Buffering:**
+- **Server-side buffer:** Messages queued during disconnection
+- **Buffer size:** Up to 1000 messages (configurable)
+- **Buffer overflow:** Oldest messages dropped when full
+- **Client sync:** On reconnect, server sends "missed events" summary
+- **Best effort:** If buffer exceeds limit, execution continues but trace may be incomplete
+
+**Reconnection Flow:**
+```
+1. Connection drops
+2. Show yellow "Reconnecting..." indicator
+3. Attempt reconnection with exponential backoff
+4. On success:
+   - Green indicator restored
+   - Sync missed events from buffer
+   - Continue real-time updates
+5. On failure (after 5 min):
+   - Show red "Disconnected" indicator
+   - Display "Reconnect" button
+   - Show last successful sync time
+```
+
+**Graceful Degradation:**
+- If disconnected during live execution, data continues recording locally
+- On reconnect, recorded data syncs to UI
+- Warning shown if trace is incomplete: "⚠️ Connection lost at [timestamp]. Some events may be missing."
+
+---
+
+## UI Components
+
+### Layout Structure (Three-Panel Design)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Left Sidebar    │      Center Canvas       │  Right Panel  │
+│  (Agent Browser) │    (Node Graph)          │  (Inspector)  │
+│                  │                          │               │
+│  ▼ agents/       │     ┌──────────┐         │  ┌─────────┐  │
+│  ├─ review.ts    │     │  Node 1  │────────▶│  │session  │  │
+│  │  ├─ 🟢 2m     │     └──────────┘         │  │attempt  │  │
+│  │  ├─ ⚪ 1h     │          │               │  │events   │  │
+│  │  └─ 🔴 3h     │     ┌────┴────┐         │  └─────────┘  │
+│  ▶ workflow/     │     │         │         │  ┌─────────┐  │
+│                  │  ┌──┴──┐   ┌──┴──┐      │  │Content  │  │
+│                  │  │Node │   │Node │      │  │         │  │
+│                  │  │ 2   │   │ 3   │      │  │         │  │
+│                  │  └──┬──┘   └──┬──┘      │  │         │  │
+│                  │     └────┬────┘         │  └─────────┘  │
+│                  │          │               │               │
+├─────────────────────────────────────────────────────────────┤
+│  Bottom Playback Bar                  ● Connected  📡        │
+│  ⏮  ⏴  ⏯  ⏵  ⏭     Timeline    1x  2x  5x  10x        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Panel Functions:**
+
+1. **Left Sidebar (Agent Browser)** - Browse agents and their execution history
+2. **Center Canvas (Node Graph)** - Visual execution flow with time-travel scrubbing
+3. **Right Panel (Inspector)** - Detailed data for selected step/run
+4. **Bottom Bar (Playback)** - Time-travel controls and connection status
+
+**Connection Indicator:**
+- **Location:** Bottom bar or header (persistent visibility)
+- **States:**
+  - 🟢 **Green dot** "Connected" - Live WebSocket connection
+  - 🟡 **Yellow dot** "Connecting..." - Reconnection in progress
+  - 🔴 **Red dot** "Disconnected" - Connection lost, manual reconnect needed
+
+### 1. Left Sidebar (Agent Browser)
+
+The left sidebar serves as an agent and execution history browser:
+
+**Top-Level: Agents**
+- **Agent entries** showing:
+  - Agent name (bold)
+  - File path (monospace, truncated with ellipsis if long)
+  - Last run timestamp
+  - Status indicator dot (🟢 active, 🔴 error, ⚪ inactive)
+- **Expand/collapse** arrow to show/hide runs
+- **Search/filter** box at top to find agents by name or path
+- **Group by:** file directory, agent name, recent activity
+
+**Second Level: Runs**
+When an agent is expanded, show its execution runs:
+- **Run entries** showing:
+  - Run timestamp (relative: "2 min ago", absolute on hover)
+  - Status badge (RUNNING, COMPLETED, ERROR, PAUSED)
+  - Duration (e.g., "25.5 s", "17m 43s")
+  - Input preview (truncated first 50 chars)
+  - Token count and cost
+  - **Memory indicator** - color-coded chip showing trace size:
+    - 🟢 Green: < 50 MB (healthy)
+    - 🟡 Yellow: 50-200 MB (warning)
+    - 🟠 Orange: 200-500 MB (caution)
+    - 🔴 Red: > 500 MB (high memory usage)
+- **Live runs** animate with pulsing border
+- **Click to load** the run's trace into the center canvas
+- **Context menu** (right-click) for actions:
+  - Replay run
+  - Export trace
+  - Compare with another run
+  - Delete (if persisted)
+
+**Navigation Features:**
+- **Sort options:** recent first, oldest first, duration, cost
+- **Filter:** show only errors, show only completed, show running
+- **Pin runs** to keep them at top
+- **Batch selection** for comparing multiple runs
+- **Auto-refresh** for live agents (new runs appear automatically)
+
+```
+┌─────────────────────────────┐
+│ 🔍 Search agents...          │
+├─────────────────────────────┤
+│                             │
+│ ▼ src/agents/               │
+│ ├─ code-review-agent.ts    │
+│ │  ├─ 🟢 2 min ago · 45s   │
+│ │  ├─ ⚪ 1 hour ago · 2m    │
+│ │  └─ 🔴 3 hours ago · 30s  │
+│ │                           │
+│ ▶ src/workflows/            │
+│ ├─ pr-analysis.ts          │
+│ │  └─ 🟡 5 min ago · LIVE  │
+│ │                           │
+│ ▶ lib/eval/                 │
+│ └─ test-runner.ts          │
+│    └─ ⚪ 2 days ago · 5m   │
+│                             │
+└─────────────────────────────┘
+```
+
+### Agent Discovery
+
+**Discovery Strategy: Hybrid Approach**
+
+Combines automatic discovery with manual registration for maximum flexibility.
+
+**Phase 1: Build-Time Static Analysis (Primary)**
+
+Scans codebase at build/dev server start to find agents:
+
+- **File patterns scanned:**
+  - `**/*.agent.ts`
+  - `**/agents/**/*.ts`
+  - `**/*.noetic.ts`
+  - Configurable via `NOETIC_UI_AGENT_PATTERNS` env var
+
+- **Detection method:**
+  - AST parsing of TypeScript/JavaScript files
+  - Looks for `AgentHarness` constructor calls
+  - Extracts: file path, export name, variable name
+  - Parses JSDoc comments for agent descriptions
+
+- **Discovery output:**
+```typescript
+interface DiscoveredAgent {
+  id: string;                    // Hash of (filePath + exportName)
+  filePath: string;             // Absolute path
+  exportName: string;           // "default", "myAgent", etc.
+  variableName: string;         // Variable name in code (optional)
+  name: string;                 // Inferred or JSDoc @name
+  description?: string;         // JSDoc description
+  discoveredAt: number;        // Timestamp
+  discoveryMethod: 'static';
+}
+```
+
+- **Re-scan triggers:**
+  - Initial dev server start
+  - Manual "Refresh agents" button
+  - File watcher (future enhancement)
+
+**Phase 2: Manual Registration (Fallback)**
+
+For agents not caught by static analysis or dynamically created:
+
+```typescript
+// Register an agent manually
+import { registerAgent } from '@noetic/ui/runtime';
+
+registerAgent({
+  id: 'custom-agent-1',         // Unique identifier
+  filePath: './src/custom.ts',  // Source location
+  name: 'Custom Agent',         // Display name
+  description: 'My custom agent',
+  harness: myAgentHarness,      // Reference to harness
+});
+```
+
+**Manual Registration Features:**
+- **"Add Agent" button** in sidebar
+- Opens file picker or text input for module path
+- Dynamically imports and registers
+- Persisted in local storage for next session
+- **"Register current file"** code action in editor extensions (future)
+
+**Agent Status in Browser:**
+- **Discovered (static)** - Found via build-time analysis
+- **Registered (manual)** - Added manually via `registerAgent()`
+- **Active** - Currently running or has recent runs
+- **Stale** - No runs in last 30 days
+
+**Discovery Refresh:**
+```
+┌─────────────────────────────┐
+│ 🔍 Search agents...    🔄   │  ← Manual refresh button
+├─────────────────────────────┤
+│ ▼ src/agents/               │
+│ ├─ review.ts (auto)       │
+│ ├─ custom.ts (manual) +   │  ← Manual badge
+└─────────────────────────────┘
+```
+
+**Discovery Status Panel:**
+```
+┌─────────────────────────────┐
+│ Discovery                   │
+├─────────────────────────────┤
+│ Last scan: 5 min ago        │
+│ Files scanned: 47           │
+│ Agents found: 3             │
+│ Manual registrations: 1       │
+│                             │
+│ [Rescan project]            │
+│ [Add agent manually]        │
+└─────────────────────────────┘
+```
+
+**Future Enhancements:**
+- Runtime hook discovery (Phase 3)
+- File watcher for automatic re-scan
+- Editor extension for one-click registration
+- Agent template/snippets generation
+
+---
+
+### 2. Node Graph Canvas (Center)
+
+**Node Card Design:**
+```
+┌─────────────────────────────────────┐
+│  [ICON]  STEP_KIND  │  BRANCH 2     │
+│  Step Title Goes Here               │
+│  step_id_snake_case                 │
+│  ┌────────┐ ┌────────┐ ┌────────┐  │
+│  │tool1   │ │tool2   │ │pattern │  │
+│  └────────┘ └────────┘ └────────┘  │
+│  2 attempts           │  [STATUS]   │
+│                              25.5 s │
+└─────────────────────────────────────┘
+```
+
+- **Card styling:**
+  - Rounded corners (8px radius)
+  - Subtle border with color-coded accent
+  - Semi-transparent dark background
+  - Shadow for depth
+  
+- **Header row:**
+  - Step kind icon + label (e.g., "ACP", "ACTION")
+  - Branch/fork identifier (e.g., "BRANCH 2", "BRANCH 3")
+  - Status badge (DONE, QUEUED, FOCUS, ERROR)
+  
+- **Content:**
+  - Bold step title
+  - Monospace step ID below
+  - Tool/pattern tags as small pills
+  - Attempt count (e.g., "1 attempt", "2 attempts")
+  - Duration on right side
+  
+- **Color scheme by status:**
+  - **DONE** (green accent): #10b981 border, #065f46 background
+  - **QUEUED** (gray accent): #6b7280 border, #374151 background
+  - **FOCUS/ACTIVE** (blue accent): #3b82f6 border, #1e40af background
+  - **ERROR** (red accent): #ef4444 border, #991b1b background
+  - **PAUSED** (yellow accent): #f59e0b border, #92400e background
+
+- **Connection edges:**
+  - Solid lines for normal flow
+  - Dashed lines for conditional/branches
+  - Animated pulse for active execution
+  - Arrowheads showing direction
+  - Color matches source node status
+
+- **Canvas features:**
+  - **Pan/Zoom** - Infinite canvas with mouse drag and scroll wheel
+  - **Auto-fit** - Fit graph to viewport button
+  - **Mini-map** - Small overview in corner for navigation
+  - **Grid background** - Subtle dot grid pattern
+
+### 3. Right Inspector Panel
+
+**Tab Navigation:**
+- session | attempt | events
+- Pill-style tabs with active state highlight
+
+**Content Display:**
+- **Monospace text** for code/system prompts
+- **JSON tree** for structured data with syntax highlighting
+- **Scrollable areas** with custom dark scrollbar
+- **Collapsible sections** for nested data
+
+**Example content layout:**
+```
+┌────────────────────────────────────┐
+│  session │ attempt │ events      │
+├────────────────────────────────────┤
+│                                    │
+│  Return exactly one JSON object    │
+│  and nothing else...               │
+│                                    │
+│  {                                   │
+│    "route": "collect_review",      │
+│    "summary": "short..."           │
+│  }                                   │
+│                                    │
+│  I'm reading the saved CI state    │
+│  for the current branch head...    │
+│                                    │
+├────────────────────────────────────┤
+│  [Follow] [Overview]              │
+└────────────────────────────────────┘
+```
+
+### 4. Bottom Playback Bar (Time Travel Controls)
+
+The playback bar enables time-travel debugging - scrub back and forth through recorded execution:
+
+**Transport Controls:**
+```
+┌────────────────────────────────────────────────────────────┐
+│  Step Name                    │◄◄  ◄  ▶▶  ►  ►►│  Speed   │
+│  9 / 24 · step-9 · 70%       │        ◯        │ 1x 2x 5x │
+│  REC ● 0:45:23               │    [Timeline]   │  ▶ Live  │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Architecture Note:** WebSocket provides bidirectional communication needed for control commands (pause, resume, breakpoints). Server-Sent Events (SSE) could be an alternative for server→client streaming with separate HTTP endpoints for client→server commands, but WebSockets provide lower latency and simpler implementation for real-time debugging.
+
+**Transport Buttons:**
+- ⏮ **First** - Jump to start of execution
+- ⏴ **Step Back** - Move to previous step (maintains state context)
+- ⏯ **Play/Pause** - Auto-play through execution at selected speed
+- ⏵ **Step Forward** - Move to next step
+- ⏭ **Last/Next Major** - Jump to end or next breakpoint
+
+**Timeline with Event Markers:**
+
+A dedicated timeline track sits underneath the transport controls, with the draggable playhead serving as the interactive scrubbing mechanism:
+
+```
+Timeline View (spacing = wall clock time):
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ●        ●  ●  ◆        ●  ●  ◆  ●  ●  ●              ●  ●  ○   │
+│  ▲                                                               │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+     ▲ = Playhead (drag to scrub)
+     
+Spacing between markers represents actual time elapsed:
+  ●──────●  = Longer duration between steps
+  ●  ●      = Shorter duration between steps
+  
+Event marker types:
+  ● = Step completed    ◆ = Branch/Fork point    ○ = Pending/Not executed
+```
+
+**Event Markers:**
+- **Vertical markers** along the timeline representing each executed step
+- **Color-coded by step kind:**
+  - Purple - LLM steps
+  - Orange - Tool steps  
+  - Cyan - Run steps
+  - Yellow - Branch steps
+  - Pink - Fork steps (multiple markers for parallel paths)
+  - Indigo - Spawn steps
+  - Teal - Loop steps
+- **Height indicates depth** - taller markers for deeper nesting levels
+- **Status glow:**
+  - Green - completed successfully
+  - Red - error occurred
+  - Blue - currently at this step
+  - Yellow - paused at breakpoint
+
+**Draggable Playhead (The Scrubbing Mechanism):**
+- **The playhead IS the scrubber** - grab and drag it to scrub through execution
+- **Drag anywhere on the timeline track** - the playhead follows your cursor
+- **Real-time updates** during drag:
+  - Canvas updates instantly to show execution state at that position
+  - Right panel updates with current step's data
+  - Position indicator updates ("Step 9 / 24")
+- **Snap-to-step behavior:**
+  - While dragging, playhead smoothly follows cursor
+  - On release, snaps to nearest step marker
+  - Option: "Free scrub" mode for smooth interpolation between steps
+- **Visual feedback during drag:**
+  - Playhead grows slightly larger when grabbed
+  - Glow effect around playhead
+  - Tooltip shows current step info while dragging
+  - Timeline highlights the current segment
+
+**Click Interactions:**
+- **Click on marker** - playhead jumps to that step, execution state updates
+- **Click anywhere on timeline** - playhead jumps to nearest step at that position
+- **Shift+click** - select range for comparison
+- **Hover over marker** - tooltip shows step name, timestamp, duration
+
+**Timeline Tracks:**
+- **Primary track** - shows all steps in chronological order
+- **Fork track** - when inside a fork, shows parallel execution lanes
+  - Each lane represents one fork path
+  - Lanes stacked vertically under main timeline
+  - Playhead spans all active lanes simultaneously
+- **Loop track** - when inside a loop, shows iterations
+  - Iteration markers grouped visually
+  - Expand to see individual iteration steps
+  - Collapse to single "LOOP" marker
+
+**Timeline Controls:**
+- **Zoom** - pinch gesture or +/- buttons to see more/fewer steps
+  - Zoom out: see entire execution at a glance
+  - Zoom in: focus on specific section with detailed markers
+- **Fit to view** - auto-zoom to show all steps
+- **Bookmark markers** - diamond icons on timeline for breakpoints
+
+**Real-Time Scrubbing Behavior:**
+- **Immediate response** - canvas and panels update within 16ms of dragging
+- **Smooth drag** - no lag, playhead follows cursor precisely
+- **Lazy loading** - detailed data fetched on-demand when scrubbing
+- **Cache recent states** - last 50 scrubbed positions cached for instant return
+- **Animation** - smooth 100ms transition when jumping between distant steps
+- **History tracking** - browser-style back/forward for scrub positions
+
+**Time-Travel Features (Observational Only):**
+- **View stored state** - When scrubbing to a point, UI displays the stored snapshot of execution state at that moment
+- **Branch visualization** - For fork steps, timeline shows all parallel paths
+- **History stack** - Navigate backward/forward through your browsing history (like browser back/forward)
+- **Snapshot comparison** - Compare two points in time side-by-side
+
+**Important:** Time-travel displays stored data only. No code is re-executed. All inputs, outputs, and state are read from the recorded trace.
+
+**Playback Modes:**
+- **1x, 2x, 5x, 10x** - Speed multiplier for auto-play
+- **Live** - Real-time following of active execution
+- **Recorded** - Replaying from stored trace
+- **Step** - Manual stepping mode
+
+**Current Position Display:**
+- Step name and number ("Step 9 / 24")
+- Execution depth and context
+- Percentage through execution
+
+### 5. Node Types (Visual Variants)
+
+Each step kind has a distinct visual treatment:
+
+**LLM Step:**
+- Icon: 💬 or "LLM"
+- Color: Purple accent (#8b5cf6)
+- Shows: Model name, token count
+- Badge: "LLM"
+
+**Tool Step:**
+- Icon: 🔧 or "TOOL"
+- Color: Orange accent (#f97316)
+- Shows: Tool name prominently
+- Badge: "TOOL"
+
+**Run Step:**
+- Icon: ⚡ or "RUN"
+- Color: Cyan accent (#06b6d4)
+- Shows: Function name or description
+- Badge: "RUN"
+
+**Branch Step:**
+- Icon: 🔀 or diamond shape
+- Color: Yellow accent (#eab308)
+- Shows: Branch condition
+- Badge: "BRANCH"
+
+**Fork Step:**
+- Icon: ⫚ or parallel lines
+- Color: Pink accent (#ec4899)
+- Shows: Fork mode (race/all/settle)
+- Badge: "FORK"
+
+**Spawn Step:**
+- Icon: 📦 or nested squares
+- Color: Indigo accent (#6366f1)
+- Shows: Context depth indicator
+- Badge: "SPAWN"
+- Expandable to show child graph
+
+**Loop Step:**
+- Icon: 🔄 or circular arrow
+- Color: Teal accent (#14b8a6)
+- Shows: Iteration count
+- Badge: "LOOP"
+- Shows iteration number in badge (e.g., "LOOP · 3/5")
+
+### 6. Interactive States
+
+**Node Hover:**
+- Subtle glow effect
+- Slight scale up (1.02x)
+- Cursor changes to pointer
+- Shows tooltip with quick info
+
+**Node Selected:**
+- Bright border highlight
+- Shadow intensifies
+- Right panel updates
+- Auto-scroll to node if off-screen
+
+**Node Running:**
+- Animated border (pulsing)
+- Status badge shows "RUNNING"
+- Edge animates with traveling dot
+- Duration counter increments live
+
+**Node Paused (Breakpoint):**
+- Yellow border pulse
+- "PAUSED" badge
+- Playback controls active
+- Inspector shows current state
+
+### 7. Theme
+
+**Theme Modes:**
+
+Noetic UI supports three theme modes:
+1. **System** (default) - Automatically follows OS preference via `prefers-color-scheme`
+2. **Dark** - Force dark mode regardless of system setting
+3. **Light** - Force light mode regardless of system setting
+
+**Dark Theme:**
+```
+Background: #0f172a (slate-900)
+Canvas: #1e293b (slate-800)
+Node Background: rgba(30, 41, 59, 0.8)
+Node Border: #334155 (slate-700)
+Text Primary: #f1f5f9 (slate-100)
+Text Secondary: #94a3b8 (slate-400)
+Timeline Track: #1e293b (slate-800)
+Timeline Markers: 
+  - LLM: #8b5cf6 (purple-500)
+  - Tool: #f97316 (orange-500)
+  - Run: #06b6d4 (cyan-500)
+  - Branch: #eab308 (yellow-500)
+  - Fork: #ec4899 (pink-500)
+  - Spawn: #6366f1 (indigo-500)
+  - Loop: #14b8a6 (teal-500)
+Accent Colors:
+  - Success: #10b981 (emerald-500)
+  - Info: #3b82f6 (blue-500)
+  - Warning: #f59e0b (amber-500)
+  - Error: #ef4444 (red-500)
+```
+
+**Light Theme:**
+```
+Background: #f8fafc (slate-50)
+Canvas: #f1f5f9 (slate-100)
+Node Background: #ffffff
+Node Border: #e2e8f0 (slate-200)
+Text Primary: #0f172a (slate-900)
+Text Secondary: #64748b (slate-500)
+Timeline Track: #e2e8f0 (slate-200)
+Timeline Markers:
+  - LLM: #7c3aed (purple-600)
+  - Tool: #ea580c (orange-600)
+  - Run: #0891b2 (cyan-600)
+  - Branch: #ca8a04 (yellow-600)
+  - Fork: #db2777 (pink-600)
+  - Spawn: #4f46e5 (indigo-600)
+  - Loop: #0d9488 (teal-600)
+Accent Colors:
+  - Success: #059669 (emerald-600)
+  - Info: #2563eb (blue-600)
+  - Warning: #d97706 (amber-600)
+  - Error: #dc2626 (red-600)
+```
+
+**Theme Detection & Persistence:**
+- Default: `system` mode (queries `window.matchMedia('(prefers-color-scheme: dark)')`)
+- User preference stored in `localStorage` key `noetic-ui-theme`
+- Toggle in settings panel or keyboard shortcut `Cmd/Ctrl + Shift + T`
+- Theme changes apply instantly without page reload
+- CSS custom properties for dynamic theme switching
+
+---
+
+## API Reference
+
+### Runtime Integration
+
+```typescript
+import { NoeticUITraceExporter } from '@noetic/ui/runtime';
+
+const exporter = new NoeticUITraceExporter({
+  port: 3333,                    // WebSocket server port
+  host: 'localhost',             // WebSocket server host
+  bufferSize: 100,               // Max events to buffer before dropping
+  flushIntervalMs: 100,          // How often to flush events
+});
+
+setTraceExporter(exporter);
+```
+
+```typescript
+import { createDebugHarness } from '@noetic/ui/runtime';
+
+const harness = createDebugHarness({
+  name: 'my-agent',
+  initialStep: myStep,
+  debugger: {
+    // Breakpoint configuration
+    breakpoints: [
+      { stepId: 'validate-step', condition: 'input.attempt > 3' },
+      'loop-step',  // Simple step ID breakpoint
+    ],
+    
+    // Behavior settings
+    pauseOnError: true,
+    pauseOnSpawn: false,
+    autoStart: true,  // If false, waits for UI signal
+    
+    // External control (optional)
+    controller: externalController,  // For programmatic control
+  }
+});
+
+// Execution automatically pauses at breakpoints
+const result = await harness.execute('user input');
+```
+
+### CLI Usage
+
+```bash
+# Start the UI server
+npx @noetic/ui serve [--port 3333] [--host 0.0.0.0]
+
+# Run with debugging enabled (spawns server automatically)
+npx @noetic/ui run -- npm start
+
+# Replay a saved trace
+npx @noetic/ui replay <trace-file.json>
+```
+
+### WebSocket API
+
+See `src/shared/protocol.ts` for complete message types.
+
+---
+
+## Dependencies
+
+### Production Dependencies
+
+- `ws` - WebSocket server/client
+- `express` - REST API server (optional, can use pure WS)
+- `zod` - Schema validation (shared with core)
+
+### Dev Dependencies (Client)
+
+- `react` / `react-dom` - UI framework
+- `@tanstack/react-query` or `zustand` - State management
+- `reactflow` or `@xyflow/react` - Node graph (optional, can build custom)
+- `monaco-editor` - JSON/code editing (optional)
+- `tailwindcss` or `styled-components` - Styling
+
+### Peer Dependencies
+
+- `@noetic/core` - The core framework being debugged
+
+---
+
+## Configuration
+
+### v1 MVP - Essential Configuration
+
+Minimal configuration needed to get started:
+
+#### Environment Variables
+
+```bash
+NOETIC_UI_ENABLED=true         # Enable UI integration (required)
+NOETIC_UI_PORT=3333            # WebSocket server port (optional, default: 3333)
+NOETIC_UI_THEME=system         # Theme: system, dark, light (optional, default: system)
+```
+
+#### Config File (noetic.ui.json) - Optional
+
+```json
+{
+  "port": 3333,
+  "theme": "system",
+  "storagePath": "./.noetic-ui/traces"
+}
+```
+
+**That's it.** The UI works with just `NOETIC_UI_ENABLED=true`.
+
+---
+
+### Extended Configuration (Future)
+
+Additional options for advanced use cases:
+
+#### All Environment Variables
+
+```bash
+NOETIC_UI_ENABLED=true         # Enable UI integration
+NOETIC_UI_PORT=3333            # WebSocket server port
+NOETIC_UI_HOST=localhost       # WebSocket server host
+NOETIC_UI_AUTO_OPEN=true       # Auto-open browser on start
+NOETIC_UI_STORAGE=memory       # Storage backend: memory, file, redis
+NOETIC_UI_STORAGE_PATH=./.noetic-ui  # For file storage
+NOETIC_UI_THEME=system         # Theme: system, dark, light
+```
+
+#### Full Config File
+
+```json
+{
+  "port": 3333,
+  "storage": {
+    "type": "file",
+    "path": "./.noetic-ui/traces"
+  },
+  "breakpoints": {
+    "pauseOnError": true,
+    "pauseOnSpawn": false
+  },
+  "theme": "system",
+  "shortcuts": {
+    "pause": "F8",
+    "stepOver": "F10",
+    "stepInto": "F11",
+    "stepOut": "Shift+F11"
+  }
+}
+```
+
+---
+
+## Security Considerations
+
+**Initial Implementation (v1):**
+
+1. **Local Development Only** - Designed for single developer use on localhost
+2. **No Production** - Never enable in production builds (complete disable by default)
+3. **Localhost Binding** - Server binds to `127.0.0.1` only (no external access)
+4. **Plain Text Storage** - Traces stored locally in plaintext (encryption not required for v1)
+5. **No PII Redaction** - Automatic redaction deferred to future version
+6. **No Authentication** - Single user, no auth required for initial implementation
+
+**Security Hardening (Future):**
+
+For multi-developer or shared environments, consider:
+
+- **PII Detection** - Automatic detection and redaction of sensitive data (regex patterns for emails, phone numbers, API keys)
+- **Field Exclusion** - Configurable patterns to exclude specific fields from traces
+- **Encryption at Rest** - Encrypt stored traces with user-provided key
+- **Authentication** - Basic auth or token-based access control
+- **Audit Logging** - Track who accessed which traces and when
+
+---
+
+## Future Enhancements
+
+1. **Edit and Replay** - Modify node inputs directly in the UI and execute from that point forward (creates new execution branch)
+2. **Collaborative Debugging** - Multiple developers viewing same trace simultaneously
+3. **Performance Profiling** - Visual flame charts for execution time analysis
+4. **Custom Visualizers** - Plugin system for domain-specific node views
+5. **Mobile App** - React Native companion for on-the-go monitoring
+6. **Timeline Compression** - Compress stored traces to reduce disk usage
+7. **Runtime Agent Discovery** - File watcher for automatic agent discovery as you edit code
+8. **Execution Throttling** - Skip recording for very high-frequency executions (configurable steps/second threshold)
+9. **SSE Alternative** - Evaluate Server-Sent Events as alternative to WebSockets for server→client streaming
+10. **Large Trace Support** - Virtual scrolling, timeline aggregation/LOD, support for 10,000+ steps
+11. **Extended Configuration** - Auto-open browser, storage backend selection, customizable keyboard shortcuts
+
+---
+
+## Open Questions
+
+1. Should the UI be a separate process (current plan) or embeddable in the host app?
+2. React Flow vs custom D3 for the node graph? React Flow is easier but less flexible.
+3. Real-time collaboration support needed for v1?
+4. Should traces persist across UI server restarts?
