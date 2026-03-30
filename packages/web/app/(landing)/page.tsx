@@ -15,12 +15,21 @@ export default function LandingPage(): ReactNode {
       <Nav />
       <main>
         <Hero />
-        <PrimitivesViz />
-        <MemorySystem />
-        <PatternsGrid />
-        <CodePeek />
-        <Differentiation />
-        <ComingSoon />
+        <div
+          style={{
+            marginTop: '100vh',
+            position: 'relative',
+            zIndex: 2,
+            background: 'var(--color-tui-bg)',
+          }}
+        >
+          <PrimitivesViz />
+          <MemorySystem />
+          <PatternsGrid />
+          <CodePeek />
+          <Differentiation />
+          <ComingSoon />
+        </div>
       </main>
       <Footer />
     </>
