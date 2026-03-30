@@ -47,13 +47,8 @@ export function MemorySystem(): ReactNode {
           marginBottom: '48px',
         }}
       >
-        {/* Left: isometric SVG */}
-        <div>
-          <MemoryIsometricSvg />
-        </div>
-
-        {/* Right: copy only */}
-        <div>
+        {/* Copy - appears first in DOM for mobile, reordered on desktop */}
+        <div className="memory-content">
           <span
             style={{
               fontSize: '13px',
@@ -96,6 +91,11 @@ export function MemorySystem(): ReactNode {
             checkpoints. Let Noetic handle it or build your own. Token costs stay predictable as
             conversations grow.
           </p>
+        </div>
+
+        {/* SVG - appears second in DOM for mobile, reordered on desktop */}
+        <div className="memory-visual">
+          <MemoryIsometricSvg />
         </div>
       </div>
 

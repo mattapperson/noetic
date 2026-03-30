@@ -161,6 +161,11 @@
   min-width: 0;
 }
 
+/* Memory section: swap order on desktop so SVG appears on left */
+.section-split > .memory-visual {
+  order: -1;
+}
+
 @media (max-width: 1024px) {
   .side-by-side-sections {
     flex-direction: column;
@@ -168,6 +173,16 @@
 
   .section-split {
     grid-template-columns: 1fr;
+  }
+
+  .section-split > :last-child {
+    order: 2;
+    margin-top: 32px;
+  }
+
+  /* Reset memory section order for single column (content first, then SVG) */
+  .section-split > .memory-visual {
+    order: 0;
   }
 
   section {
