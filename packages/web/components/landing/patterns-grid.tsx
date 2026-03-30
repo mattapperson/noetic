@@ -167,16 +167,26 @@ export function PatternsGrid(): ReactNode {
               <div
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
+                  alignItems: 'baseline',
+                  gap: '12px',
                   marginBottom: '12px',
                 }}
               >
-                <TuiBadge color="green">{pattern.name}</TuiBadge>
                 <span
                   style={{
-                    fontSize: '11px',
+                    fontSize: '18px',
+                    fontWeight: 700,
+                    color: 'var(--color-tui-fg)',
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  {pattern.name}
+                </span>
+                <span
+                  style={{
+                    fontSize: '12px',
                     color: 'var(--color-tui-muted)',
+                    fontWeight: 500,
                   }}
                 >
                   {pattern.lines}
