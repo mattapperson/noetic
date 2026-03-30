@@ -81,15 +81,12 @@ export function Hero(): ReactNode {
       ref={containerRef}
       style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        inset: 0,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '120px 24px 80px',
+        padding: '80px 24px',
         textAlign: 'center',
         zIndex: 0,
       }}
@@ -102,8 +99,6 @@ export function Hero(): ReactNode {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          maxHeight: '100%',
-          overflow: 'auto',
         }}
       >
         <motion.span
