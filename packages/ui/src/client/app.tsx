@@ -56,7 +56,8 @@ const LeftSidebar: React.FC = () => {
 };
 
 const CenterCanvas: React.FC = () => {
-  const { currentRun } = useExecutionStore();
+  // TODO: Implement execution store and node graph
+  // const { currentRun } = useExecutionStore();
 
   return (
     <div className="flex-1 h-full bg-[var(--noetic-canvas-bg)] relative overflow-hidden">

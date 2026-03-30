@@ -65,7 +65,7 @@ export class Debugger implements DebugController {
   /**
    * Start a new debug run
    */
-  startRun(_agentId: string, runId: string, _input: unknown): void {
+  startRun(agentId: string, runId: string, input: unknown): void {
     this.startTime = Date.now();
     this.stepCounter = 0;
     this.parentStack = [];
