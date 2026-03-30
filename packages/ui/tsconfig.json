@@ -11,9 +11,14 @@
     "outDir": "dist",
     "rootDir": ".",
     "skipLibCheck": true,
-    "jsx": "react-jsx",
+    "jsx": "preserve",
     "lib": ["ESNext", "DOM"],
-    "types": ["node", "react", "react-dom"]
+    "types": ["node", "react", "react-dom"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
 }
