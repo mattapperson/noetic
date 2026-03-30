@@ -36,6 +36,11 @@
   *::before,
   *::after {
     box-sizing: border-box;
+    min-width: 0;
+  }
+
+  html {
+    min-width: 0;
   }
 
   body {
@@ -43,6 +48,15 @@
     color: var(--color-tui-fg);
     font-family: "JetBrains Mono", monospace;
     overflow-x: hidden;
+    min-width: 0;
+  }
+
+  main {
+    min-width: 0;
+  }
+
+  section {
+    min-width: 0;
   }
 }
 
@@ -193,21 +207,9 @@
   .section-split > .memory-visual {
     order: 0;
   }
-
-  main section {
-    padding-left: 16px !important;
-    padding-right: 16px !important;
-    max-width: 100% !important;
-  }
 }
 
 @media (max-width: 480px) {
-  main section {
-    padding-left: 12px !important;
-    padding-right: 12px !important;
-    max-width: 100% !important;
-  }
-
   .section-split > :last-child {
     margin-top: 24px;
   }
@@ -227,15 +229,18 @@
 
 .diff-row {
   grid-template-columns: 140px 1fr;
+  min-width: 0;
 }
 
 @media (max-width: 480px) {
   .diff-row {
     grid-template-columns: 1fr;
+    min-width: 0;
   }
 
   .diff-row > div:first-child {
     border-right: none;
     border-bottom: 1px solid var(--color-tui-border);
+    min-width: 0;
   }
 }
