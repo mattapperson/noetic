@@ -67,7 +67,7 @@ export function Hero(): ReactNode {
           marginBottom: '16px',
         }}
       >
-        {'// seven primitives, infinite possibilities'}
+        {'// constrain the agent, not the intelligence'}
       </motion.span>
 
       <motion.h1
@@ -113,7 +113,7 @@ export function Hero(): ReactNode {
           lineHeight: 1.5,
         }}
       >
-        Seven primitives. Your agent stays readable at 10 lines and at 10,000.
+        Composable primitives. Clean code from 10 lines to 10,000.
       </motion.p>
 
       <motion.p
@@ -134,10 +134,8 @@ export function Hero(): ReactNode {
           lineHeight: 1.7,
         }}
       >
-        Start with ReAct, task trees, or dual-agent loops — each one just a composition of
-        primitives you already understand. Or build your own. Reactive memory handles the context
-        window automatically: keep, compress, retrieve. Long conversations stay coherent without you
-        thinking about it.
+        Start with pre-built patterns — ReAct, task trees, dual-agent loops. Or compose your own.
+        Reactive memory keeps context windows manageable automatically.
       </motion.p>
 
       <motion.div

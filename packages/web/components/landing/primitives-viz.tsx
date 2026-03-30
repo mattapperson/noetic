@@ -88,7 +88,7 @@ export function PrimitivesViz(): ReactNode {
       >
         <div>
           <SectionHeader
-            label="the complete surface area"
+            label="core primitives"
             title="Meet the building blocks"
             margin="8px 0 12px"
           />
@@ -100,8 +100,8 @@ export function PrimitivesViz(): ReactNode {
               lineHeight: 1.5,
             }}
           >
-            The entire API consists of seven core primitives, building blocks that can be composed
-            to create any complex pattern you choose.
+            A small set of composable primitives. Build any agent pattern by combining the pieces
+            you need.
           </p>
           <p
             style={{

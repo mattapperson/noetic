@@ -99,12 +99,72 @@ export function MemorySystem(): ReactNode {
         </div>
       </div>
 
+      {/* Legend */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '24px',
+          alignItems: 'center',
+          marginBottom: '12px',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '11px',
+            color: 'var(--color-tui-muted)',
+            letterSpacing: '0.08em',
+          }}
+        >
+          LEGEND
+        </span>
+        {(
+          [
+            {
+              color: 'var(--color-tui-cyan)',
+              label: 'working layers',
+            },
+            {
+              color: 'var(--color-tui-green)',
+              label: 'retrieval layers',
+            },
+            {
+              color: 'var(--color-tui-amber)',
+              label: 'persistence',
+            },
+          ] as const
+        ).map((item) => (
+          <div
+            key={item.label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: item.color,
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                fontSize: '11px',
+                color: 'var(--color-tui-muted)',
+              }}
+            >
+              {item.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
       {/* Layer list: full width below */}
       <div
         style={{
-          background: 'var(--color-tui-surface)',
-          border: '1px solid var(--color-tui-border)',
-          padding: '16px',
           display: 'grid',
           gridTemplateColumns: 'repeat(5, 1fr)',
           gap: '4px',
@@ -129,6 +189,7 @@ export function MemorySystem(): ReactNode {
               once: true,
             }}
             style={{
+              background: 'var(--color-tui-surface)',
               border: '1px solid var(--color-tui-border)',
               padding: '12px 16px',
             }}
