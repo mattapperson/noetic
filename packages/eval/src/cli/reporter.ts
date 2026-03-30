@@ -1,5 +1,5 @@
-import type { CaseResult, SuiteResult } from '../types/eval';
-import { averageScores } from '../utils/scores';
+import type { CaseResult, ScoreResult, SuiteResult } from '../types/eval';
+import { averageScores, maxScore, medianScore, minScore, stddevScore } from '../utils/scores';
 
 //#region Types
 
@@ -17,6 +17,30 @@ function formatCaseScore(caseResult: CaseResult): string {
     return 'N/A';
   }
   return averageScores(caseResult.scores).toFixed(2);
+}
+
+function printAggregates(cases: CaseResult[]): void {
+  const allScores = cases.flatMap((c) => c.scores);
+  if (allScores.length === 0) {
+    return;
+  }
+
+  const byScorer = new Map<string, ScoreResult[]>();
+  for (const s of allScores) {
+    const existing = byScorer.get(s.scorerId) ?? [];
+    existing.push(s);
+    byScorer.set(s.scorerId, existing);
+  }
+
+  console.log('  Aggregates:');
+  for (const [id, scores] of byScorer) {
+    const mean = averageScores(scores).toFixed(2);
+    const med = medianScore(scores).toFixed(2);
+    const mn = minScore(scores).toFixed(2);
+    const mx = maxScore(scores).toFixed(2);
+    const sd = stddevScore(scores).toFixed(2);
+    console.log(`    ${id}: mean=${mean} median=${med} min=${mn} max=${mx} stddev=${sd}`);
+  }
 }
 
 //#endregion
@@ -48,6 +72,11 @@ export function reportResults(results: SuiteResult[], options?: ReporterOptions)
         console.log(`      Error: ${c.error}`);
       }
     }
+
+    if (options?.verbose) {
+      printAggregates(suite.cases);
+    }
+
     console.log(`  Suite score: ${suite.aggregateScore.toFixed(2)}`);
     console.log('');
   }

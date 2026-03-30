@@ -1,9 +1,16 @@
 import type { Step } from '@noetic/core';
 
 import type { OptimizeConfig } from '../types/eval';
-import type { Candidate, CodingAgent, OptimizableField } from '../types/optimizer';
+import { OptimizeScope } from '../types/eval';
+import type {
+  Candidate,
+  CodingAgent,
+  OptimizableField,
+  OptimizationRecommendation,
+} from '../types/optimizer';
 import type { SourceLocation } from '../types/source-location';
 import { discoverFields } from './field-discovery';
+import type { GepaConfig } from './gepa-bridge';
 import { optimizeWithGepa } from './gepa-bridge';
 import type { WriteBackEntry } from './source-writer';
 import { writeOptimizedValues } from './source-writer';
@@ -19,6 +26,7 @@ export interface OptimizeOptions {
   dryRun?: boolean;
   codingAgent?: CodingAgent;
   preEnrichedFields?: OptimizableField[];
+  gepa?: GepaConfig;
 }
 
 export interface OptimizeResult {
@@ -60,6 +68,33 @@ function buildWriteBackEntries(
     }));
 }
 
+function buildCodingAgentRecommendation(
+  fields: OptimizableField[],
+  result: {
+    bestCandidate: Candidate;
+    score: number;
+    iterations: number;
+  },
+): OptimizationRecommendation {
+  const fieldsWithLocation = fields.filter(
+    (
+      f,
+    ): f is OptimizableField & {
+      sourceLocation: SourceLocation;
+    } => f.sourceLocation !== undefined,
+  );
+
+  return {
+    description: `Optimization completed: ${result.iterations} iterations, score ${result.score.toFixed(2)}`,
+    targetFiles: fieldsWithLocation.map((f) => ({
+      path: f.sourceLocation.filePath,
+      currentContent: f.value,
+    })),
+    sourceLocations: fieldsWithLocation.map((f) => f.sourceLocation),
+    gepaFeedback: JSON.stringify(result.bestCandidate),
+  };
+}
+
 //#endregion
 
 //#region Public API
@@ -82,7 +117,15 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
     fields,
     runEval: options.runEval,
     maxMetricCalls: options.maxMetricCalls,
+    budget: options.budget,
+    gepa: options.gepa,
   });
+
+  // L3 optimization: delegate structural changes to coding agent
+  if (options.scope === OptimizeScope.Full && options.codingAgent) {
+    const recommendation = buildCodingAgentRecommendation(fields, result);
+    await options.codingAgent.apply(recommendation);
+  }
 
   let writtenBack = false;
   if (!options.dryRun) {

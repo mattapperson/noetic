@@ -44,6 +44,22 @@ interface PipelineStep4 {
 
 //#region Helper Functions
 
+function clampScore(raw: number): {
+  score: number;
+  clamped: boolean;
+} {
+  if (raw < 0 || raw > 1) {
+    return {
+      score: Math.max(0, Math.min(1, raw)),
+      clamped: true,
+    };
+  }
+  return {
+    score: raw,
+    clamped: false,
+  };
+}
+
 function parseAnalyzedResult<R>(raw: unknown, schema: ZodType<R>): R {
   return schema.parse(raw);
 }
@@ -80,9 +96,21 @@ function buildAnalyzeScorerFn<T, R>(
     const raw = await harness.run(judgeStep, background, ctx);
     const analyzed = parseAnalyzedResult(raw, analyzeConfig.outputSchema);
 
-    const score = scoreFn({
+    const rawScore = scoreFn({
       results: analyzed,
     });
+    const { score, clamped } = clampScore(rawScore);
+
+    if (clamped) {
+      return {
+        scorerId: pipelineId,
+        score,
+        metadata: {
+          originalScore: rawScore,
+          clamped: true,
+        },
+      };
+    }
     return {
       scorerId: pipelineId,
       score,
@@ -99,9 +127,21 @@ function buildDirectScorerFn<T>(
     const preprocessed = await preprocessFn({
       execution,
     });
-    const score = scoreFn({
+    const rawScore = scoreFn({
       results: preprocessed,
     });
+    const { score, clamped } = clampScore(rawScore);
+
+    if (clamped) {
+      return {
+        scorerId: pipelineId,
+        score,
+        metadata: {
+          originalScore: rawScore,
+          clamped: true,
+        },
+      };
+    }
     return {
       scorerId: pipelineId,
       score,

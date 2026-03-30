@@ -186,7 +186,7 @@ async function handleOptimization(
   const astFields = evalFiles.flatMap((f) => discoverFieldsFromSource(f));
 
   for (const suite of suites) {
-    const runtimeFields = discoverFields(suite.step);
+    const runtimeFields = discoverFields(suite.step, undefined, args.scope);
     await optimize({
       step: suite.step,
       preEnrichedFields:

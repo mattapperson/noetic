@@ -21,6 +21,7 @@ type DescribeStep = {
 
 interface EvalSuiteOptions {
   objective: string;
+  passThreshold?: number;  // default: 0.5; cases pass when all scores >= threshold
   background?: string;
   optimize?: OptimizeConfig;
   regression?: RegressionConfig;
@@ -136,6 +137,42 @@ createScorer({ id: string; judge?: { model: string; callModel?: CallModelFn } })
 .generateReason({ createPrompt: (score: number) => string }): ScorerFn
 ```
 
+### Score Clamping
+
+Scorer pipelines (`createScorer`) automatically clamp scores outside [0, 1] to valid range. When clamped, the `ScoreResult` includes `metadata: { originalScore, clamped: true }`.
+
+## Score Utilities
+
+### `averageScores(scores)`
+
+```typescript
+function averageScores(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+```
+
+### `medianScore(scores)`
+
+```typescript
+function medianScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+```
+
+### `minScore(scores)`
+
+```typescript
+function minScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+```
+
+### `maxScore(scores)`
+
+```typescript
+function maxScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+```
+
+### `stddevScore(scores)`
+
+```typescript
+function stddevScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+```
+
 ## Optimization API
 
 ### `optimize(options)`
@@ -152,6 +189,7 @@ interface OptimizeOptions {
   dryRun?: boolean;
   codingAgent?: CodingAgent;
   preEnrichedFields?: OptimizableField[];  // AST-enriched fields with source locations
+  gepa?: GepaConfig;
 }
 
 interface OptimizeResult {
@@ -161,14 +199,26 @@ interface OptimizeResult {
   iterations: number;
   writtenBack: boolean;
 }
+
+interface GepaConfig {
+  studentModel?: string;
+  teacherModel?: string;
+  numTrials?: number;
+  earlyStoppingTrials?: number;
+  verbose?: boolean;
+}
 ```
 
-### `discoverFields(step)`
+### `discoverFields(step, prefix?, scope?)`
 
-Walks a step tree to find optimizable text fields.
+Walks a step tree to find optimizable text fields. Optionally filters by optimization scope.
 
 ```typescript
-function discoverFields(step: Step, prefix?: string): OptimizableField[];
+function discoverFields(
+  step: Step,
+  prefix?: string,
+  scope?: 'prompts-only' | 'flow-structure' | 'full',
+): OptimizableField[];
 
 interface OptimizableField {
   path: string;

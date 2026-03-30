@@ -99,4 +99,52 @@ describe('createScorer pipeline', () => {
   });
 });
 
+describe('clampScore behavior', () => {
+  async function scoreWithRawValue(rawScore: number): Promise<ScoreResult> {
+    const scorer = createScorer({
+      id: 'clamp-test',
+    })
+      .preprocess(() => ({}))
+      .generateScore(() => rawScore);
+
+    const execution = createMockExecution('test');
+    return scorer(execution, '', '');
+  }
+
+  test('score exactly 0 is not clamped', async () => {
+    const result = await scoreWithRawValue(0);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata).toBeUndefined();
+  });
+
+  test('score exactly 1 is not clamped', async () => {
+    const result = await scoreWithRawValue(1);
+
+    expect(result.score).toBe(1);
+    expect(result.metadata).toBeUndefined();
+  });
+
+  test('score -0.1 is clamped to 0 with metadata', async () => {
+    const result = await scoreWithRawValue(-0.1);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata?.clamped).toBe(true);
+  });
+
+  test('score 1.5 is clamped to 1 with metadata', async () => {
+    const result = await scoreWithRawValue(1.5);
+
+    expect(result.score).toBe(1);
+    expect(result.metadata?.clamped).toBe(true);
+  });
+
+  test('score 0.5 is not clamped', async () => {
+    const result = await scoreWithRawValue(0.5);
+
+    expect(result.score).toBe(0.5);
+    expect(result.metadata).toBeUndefined();
+  });
+});
+
 //#endregion

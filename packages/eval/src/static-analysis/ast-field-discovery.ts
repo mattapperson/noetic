@@ -50,9 +50,49 @@ function getSourceLocation(
   };
 }
 
-function extractStringLiteral(node: ts.Expression): string | undefined {
+function resolveIdentifierToString(
+  identifier: ts.Identifier,
+  sourceFile: ts.SourceFile,
+):
+  | {
+      value: string;
+      declaration: ts.Node;
+    }
+  | undefined {
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) {
+      continue;
+    }
+    for (const decl of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(decl.name) || decl.name.text !== identifier.text) {
+        continue;
+      }
+      if (!decl.initializer) {
+        continue;
+      }
+      if (
+        ts.isStringLiteral(decl.initializer) ||
+        ts.isNoSubstitutionTemplateLiteral(decl.initializer)
+      ) {
+        return {
+          value: decl.initializer.text,
+          declaration: decl.initializer,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+function extractStringLiteral(node: ts.Expression, sourceFile?: ts.SourceFile): string | undefined {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
     return node.text;
+  }
+  if (ts.isIdentifier(node) && sourceFile) {
+    const resolved = resolveIdentifierToString(node, sourceFile);
+    if (resolved) {
+      return resolved.value;
+    }
   }
   return undefined;
 }
@@ -70,21 +110,32 @@ function extractIdFromObjectLiteral(objectLiteral: ts.ObjectLiteralExpression): 
   return undefined;
 }
 
+function getSourceNodeForExpression(node: ts.Expression, sourceFile: ts.SourceFile): ts.Node {
+  if (ts.isIdentifier(node)) {
+    const resolved = resolveIdentifierToString(node, sourceFile);
+    if (resolved) {
+      return resolved.declaration;
+    }
+  }
+  return node;
+}
+
 function processSystemField(
   ctx: AstDiscoveryContext,
   prop: ts.PropertyAssignment,
   stepId: string,
 ): void {
-  const value = extractStringLiteral(prop.initializer);
+  const value = extractStringLiteral(prop.initializer, ctx.sourceFile);
   if (!value) {
     return;
   }
+  const sourceNode = getSourceNodeForExpression(prop.initializer, ctx.sourceFile);
   ctx.fields.push({
     path: `${stepId}.system`,
     value,
     stepId,
     fieldKind: FieldKind.System,
-    sourceLocation: getSourceLocation(prop.initializer, ctx.sourceFile, ctx.filePath),
+    sourceLocation: getSourceLocation(sourceNode, ctx.sourceFile, ctx.filePath),
   });
 }
 
@@ -156,7 +207,7 @@ function processToolBuilderCall(
     }
 
     if (prop.name.text === 'name') {
-      toolName = extractStringLiteral(prop.initializer);
+      toolName = extractStringLiteral(prop.initializer, ctx.sourceFile);
       nameProp = prop;
     }
     if (prop.name.text === 'description') {
@@ -169,29 +220,27 @@ function processToolBuilderCall(
   }
 
   if (descriptionProp) {
-    const descValue = extractStringLiteral(descriptionProp.initializer);
+    const descValue = extractStringLiteral(descriptionProp.initializer, ctx.sourceFile);
     if (descValue) {
+      const sourceNode = getSourceNodeForExpression(descriptionProp.initializer, ctx.sourceFile);
       ctx.fields.push({
         path: `${toolName}.description`,
         value: descValue,
         stepId: toolName,
         fieldKind: FieldKind.ToolDescription,
-        sourceLocation: getSourceLocation(
-          descriptionProp.initializer,
-          ctx.sourceFile,
-          ctx.filePath,
-        ),
+        sourceLocation: getSourceLocation(sourceNode, ctx.sourceFile, ctx.filePath),
       });
     }
   }
 
   if (nameProp) {
+    const sourceNode = getSourceNodeForExpression(nameProp.initializer, ctx.sourceFile);
     ctx.fields.push({
       path: `${toolName}.name`,
       value: toolName,
       stepId: toolName,
       fieldKind: FieldKind.ToolName,
-      sourceLocation: getSourceLocation(nameProp.initializer, ctx.sourceFile, ctx.filePath),
+      sourceLocation: getSourceLocation(sourceNode, ctx.sourceFile, ctx.filePath),
     });
   }
 }

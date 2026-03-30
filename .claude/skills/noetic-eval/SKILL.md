@@ -26,7 +26,7 @@ const agent = react({
 
 describe(
   agent,
-  { objective: 'Classifies and resolves customer issues accurately' },
+  { objective: 'Classifies and resolves customer issues accurately', passThreshold: 0.5 },
   () => {
     it('classifies billing issues', async (ctx) => {
       const exec = await ctx.execute('I was double-charged');
@@ -174,18 +174,30 @@ noetic test --check                # Fail if scores regress
 
 ### How It Works
 
-1. **Field Discovery** -- walks the step tree to find optimizable text (system prompts, tool descriptions/names)
-2. **AST Source Discovery** -- parses imported source files (not the eval file itself) to find exact source locations of optimizable fields
-3. **GEPA Bridge** -- maps fields to AxGEPA candidates, runs eval as the metric function
-4. **Source Writer** -- writes optimized values back to source files at tracked locations
+1. **Field Discovery** -- walks the step tree to find optimizable text (system prompts, tool descriptions/names). Accepts an optional `scope` parameter to filter by optimization level.
+2. **AST Source Discovery** -- parses imported source files (not the eval file itself) to find exact source locations of optimizable fields. Follows variable references to declarations.
+3. **GEPA Bridge** -- implements an `AxGEPAAdapter` from `@ax-llm/ax` that evaluates candidates via `applyCandidate()` + eval suite scoring. Uses `AxGEPA.compile()` with student/teacher AI models via OpenRouter.
+4. **Source Writer** -- writes optimized values back to source files at tracked locations. Validates that the current value at each location matches expectations before writing. Supports multi-line template literals.
+
+### GepaConfig
+
+```typescript
+interface GepaConfig {
+  studentModel?: string;     // Default: 'openai/gpt-4o-mini'
+  teacherModel?: string;     // Default: 'openai/gpt-4o'
+  numTrials?: number;        // Default: 5
+  earlyStoppingTrials?: number; // Default: 3
+  verbose?: boolean;
+}
+```
 
 ### Optimization Levels
 
 | Level | Scope | What Changes |
 |-------|-------|--------------|
 | 1 | `prompts-only` | System prompts, tool descriptions |
-| 2 | `flow-structure` | L1 + routing logic, composition |
-| 3 | `full` | Full program optimization (requires coding agent) |
+| 2 | `flow-structure` | L1 + tool names |
+| 3 | `full` | All fields + structural changes via coding agent |
 
 ### Annotating Dynamic Steps
 

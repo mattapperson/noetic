@@ -40,7 +40,13 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const ctx = harness.createContext();
 
   const raw = await harness.run(judgeStep, config.input, ctx);
-  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    throw new Error(`LLM judge "${config.id}" returned invalid JSON: ${String(raw).slice(0, 200)}`);
+  }
   return config.outputSchema.parse(parsed);
 }
 

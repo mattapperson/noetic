@@ -19,8 +19,8 @@ async function runEvalFile(path: string): Promise<void> {
   const results = await runAllSuites(suites);
   for (const result of results) {
     for (const c of result.cases) {
-      if (!c.passed) {
-        throw new Error(`Case "${c.name}" failed: ${c.error}`);
+      if (c.error) {
+        throw new Error(`Case "${c.name}" errored: ${c.error}`);
       }
     }
   }

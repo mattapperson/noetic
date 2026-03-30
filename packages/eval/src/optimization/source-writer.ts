@@ -1,4 +1,4 @@
-import * as fs from 'node:fs';
+import * as fs from 'node:fs/promises';
 
 import type { SourceLocation } from '../types/source-location';
 
@@ -6,7 +6,15 @@ import type { SourceLocation } from '../types/source-location';
 
 export interface WriteBackEntry {
   sourceLocation: SourceLocation;
+  expectedValue?: string;
   newValue: string;
+}
+
+interface ReplaceArgs {
+  content: string;
+  location: SourceLocation;
+  newValue: string;
+  expectedValue?: string;
 }
 
 //#endregion
@@ -23,11 +31,74 @@ function groupByFile(entries: WriteBackEntry[]): Map<string, WriteBackEntry[]> {
   return byFile;
 }
 
-function replaceStringAtLocation(
-  content: string,
+function findClosingQuoteSingleLine(line: string, quoteChar: string, startCol: number): number {
+  let end = startCol + 1;
+  while (end < line.length) {
+    if (line[end] === '\\') {
+      end += 2;
+      continue;
+    }
+    if (line[end] === quoteChar) {
+      break;
+    }
+    end++;
+  }
+  return end;
+}
+
+function findClosingBacktickMultiLine(
+  lines: string[],
+  lineIdx: number,
+  startCol: number,
+): {
+  endLineIdx: number;
+  endCol: number;
+} {
+  const joined = lines.slice(lineIdx).join('\n');
+  const localStart = startCol + 1;
+
+  let pos = localStart;
+  while (pos < joined.length) {
+    if (joined[pos] === '\\') {
+      pos += 2;
+      continue;
+    }
+    if (joined[pos] === '`') {
+      break;
+    }
+    pos++;
+  }
+
+  let currentLine = lineIdx;
+  let currentCol = startCol + 1;
+  for (let i = localStart; i < pos; i++) {
+    if (joined[i] === '\n') {
+      currentLine++;
+      currentCol = 0;
+    } else {
+      currentCol++;
+    }
+  }
+
+  return {
+    endLineIdx: currentLine,
+    endCol: currentCol,
+  };
+}
+
+function throwSourceMismatch(
   location: SourceLocation,
-  newValue: string,
-): string {
+  expectedValue: string,
+  currentValue: string,
+): never {
+  throw new Error(
+    `Source mismatch at ${location.filePath}:${location.line}:${location.column}: ` +
+      `expected ${JSON.stringify(expectedValue)} but found ${JSON.stringify(currentValue)}`,
+  );
+}
+
+function replaceStringAtLocation(args: ReplaceArgs): string {
+  const { content, location, newValue, expectedValue } = args;
   const lines = content.split('\n');
   const lineIdx = location.line - 1;
   if (lineIdx < 0 || lineIdx >= lines.length) {
@@ -41,16 +112,41 @@ function replaceStringAtLocation(
     return content;
   }
 
-  let end = col + 1;
-  while (end < line.length) {
-    if (line[end] === '\\') {
-      end += 2;
-      continue;
+  if (quoteChar === '`') {
+    const { endLineIdx, endCol } = findClosingBacktickMultiLine(lines, lineIdx, col);
+
+    const beforeQuote = lines[lineIdx].slice(0, col + 1);
+    const afterQuote = lines[endLineIdx].slice(endCol);
+
+    const currentParts: string[] = [];
+    if (lineIdx === endLineIdx) {
+      currentParts.push(lines[lineIdx].slice(col + 1, endCol));
+    } else {
+      currentParts.push(lines[lineIdx].slice(col + 1));
+      for (let i = lineIdx + 1; i < endLineIdx; i++) {
+        currentParts.push(lines[i]);
+      }
+      currentParts.push(lines[endLineIdx].slice(0, endCol));
     }
-    if (line[end] === quoteChar) {
-      break;
+    const currentValue = currentParts.join('\n');
+
+    if (expectedValue !== undefined && currentValue !== expectedValue) {
+      throwSourceMismatch(location, expectedValue, currentValue);
     }
-    end++;
+
+    const escaped = newValue.replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+
+    const replacementLines = `${beforeQuote}${escaped}${afterQuote}`.split('\n');
+
+    lines.splice(lineIdx, endLineIdx - lineIdx + 1, ...replacementLines);
+    return lines.join('\n');
+  }
+
+  const end = findClosingQuoteSingleLine(line, quoteChar, col);
+  const currentValue = line.slice(col + 1, end);
+
+  if (expectedValue !== undefined && currentValue !== expectedValue) {
+    throwSourceMismatch(location, expectedValue, currentValue);
   }
 
   const escaped = newValue
@@ -62,7 +158,7 @@ function replaceStringAtLocation(
 }
 
 async function writeToFile(filePath: string, entries: WriteBackEntry[]): Promise<void> {
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const content = await fs.readFile(filePath, 'utf-8');
 
   const sorted = [
     ...entries,
@@ -70,10 +166,15 @@ async function writeToFile(filePath: string, entries: WriteBackEntry[]): Promise
 
   let result = content;
   for (const entry of sorted) {
-    result = replaceStringAtLocation(result, entry.sourceLocation, entry.newValue);
+    result = replaceStringAtLocation({
+      content: result,
+      location: entry.sourceLocation,
+      newValue: entry.newValue,
+      expectedValue: entry.expectedValue,
+    });
   }
 
-  fs.writeFileSync(filePath, result, 'utf-8');
+  await fs.writeFile(filePath, result, 'utf-8');
 }
 
 //#endregion
@@ -82,9 +183,11 @@ async function writeToFile(filePath: string, entries: WriteBackEntry[]): Promise
 
 export async function writeOptimizedValues(entries: WriteBackEntry[]): Promise<void> {
   const byFile = groupByFile(entries);
-  for (const [filePath, fileEntries] of byFile) {
-    await writeToFile(filePath, fileEntries);
-  }
+  await Promise.all(
+    [
+      ...byFile.entries(),
+    ].map(([filePath, fileEntries]) => writeToFile(filePath, fileEntries)),
+  );
 }
 
 //#endregion
