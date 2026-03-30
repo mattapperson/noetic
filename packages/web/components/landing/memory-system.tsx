@@ -166,7 +166,6 @@ export function MemorySystem(): ReactNode {
         className="memory-layers-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: '4px',
         }}
       >
