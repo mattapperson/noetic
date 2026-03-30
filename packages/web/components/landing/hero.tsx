@@ -92,6 +92,7 @@ export function Hero(): ReactNode {
         padding: '120px 24px 80px',
         textAlign: 'center',
         zIndex: 0,
+        width: '100vw',
       }}
     >
       <motion.div
