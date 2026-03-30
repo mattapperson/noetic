@@ -5,6 +5,22 @@ interface WebSocketMessage {
   [key: string]: unknown;
 }
 
+/**
+ * Type guard to validate WebSocket message structure
+ */
+function isWebSocketMessage(value: unknown): value is WebSocketMessage {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  // Type guard requires casting from unknown to check properties
+  // This is the only way to validate object structure at runtime in TypeScript
+  // biome-ignore lint: Type guard implementation requires property access on unknown
+  const obj = value as {
+    type: unknown;
+  };
+  return 'type' in value && typeof obj.type === 'string';
+}
+
 interface WebSocketClientOptions {
   url: string;
   onMessage?: (message: WebSocketMessage) => void;
@@ -98,22 +114,19 @@ export class WebSocketClient {
 
       this.ws.onmessage = (event) => {
         try {
-          // biome-ignore lint: JSON parsing returns unknown
-          const parsedData = JSON.parse(event.data) as unknown;
-          if (typeof parsedData !== 'object' || parsedData === null || !('type' in parsedData)) {
+          const parsedData = JSON.parse(event.data);
+          if (!isWebSocketMessage(parsedData)) {
             throw new Error('Invalid message format');
           }
-          // biome-ignore lint: Type validated above - parsedData has type property
-          const message = parsedData as WebSocketMessage;
 
           // Handle pong response
-          if (message.type === 'pong') {
+          if (parsedData.type === 'pong') {
             this.handlePong();
             return;
           }
 
-          this.onMessage(message);
-        } catch (err) {
+          this.onMessage(parsedData);
+        } catch (_err) {
           this.onError(new Error(`Failed to parse message: ${event.data}`));
         }
       };

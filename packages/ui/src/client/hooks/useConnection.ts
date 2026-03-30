@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { WebSocketClient } from '../lib/websocket-client';
+import type { WebSocketClient, WebSocketMessage } from '../lib/websocket-client';
 import { createWebSocketClient } from '../lib/websocket-client';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
@@ -14,8 +14,8 @@ interface UseConnectionReturn {
   client: WebSocketClient | null;
   connect: () => void;
   disconnect: () => void;
-  send: (message: unknown) => void;
-  lastMessage: unknown | null;
+  send: (message: WebSocketMessage) => void;
+  lastMessage: WebSocketMessage | null;
 }
 
 export function useConnection(options: UseConnectionOptions = {}): UseConnectionReturn {
@@ -23,7 +23,7 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
 
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [client, setClient] = useState<WebSocketClient | null>(null);
-  const [lastMessage, setLastMessage] = useState<unknown>(null);
+  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
 
   useEffect(() => {
     const wsClient = createWebSocketClient(url, {
@@ -60,14 +60,8 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
     client?.disconnect();
   };
 
-  const send = (message: unknown): void => {
-    if (!client) {
-      return;
-    }
-    if (typeof message === 'object' && message !== null) {
-      // biome-ignore lint: Type validated above - message is a non-null object
-      client.send(message as Record<string, unknown>);
-    }
+  const send = (message: WebSocketMessage): void => {
+    client?.send(message);
   };
 
   return {

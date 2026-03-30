@@ -3,15 +3,7 @@
  * Provides JSON tree visualization and syntax highlighting
  */
 
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | {
-      [key: string]: JsonValue;
-    };
+export type JsonValue = string | number | boolean | null | unknown[] | Record<string, unknown>;
 
 export interface FormattedNode {
   key: string;
@@ -27,11 +19,39 @@ export interface FormattedNode {
  */
 export function formatJsonValue(value: unknown, key = '', depth = 0): FormattedNode {
   const type = getValueType(value);
-  // biome-ignore lint: Value validated as JSON-compatible by getValueType
-  const jsonValue = value as JsonValue;
+
+  // Build node with properly typed value based on the type
+  let nodeValue: JsonValue;
+  switch (type) {
+    case 'string':
+      nodeValue = String(value);
+      break;
+    case 'number':
+      nodeValue = Number(value);
+      break;
+    case 'boolean':
+      nodeValue = Boolean(value);
+      break;
+    case 'null':
+      nodeValue = null;
+      break;
+    case 'array':
+      nodeValue = Array.isArray(value) ? value : [];
+      break;
+    case 'object':
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        nodeValue = value;
+      } else {
+        nodeValue = {};
+      }
+      break;
+    default:
+      nodeValue = null;
+  }
+
   const node: FormattedNode = {
     key,
-    value: jsonValue,
+    value: nodeValue,
     type,
     depth,
     isExpandable: type === 'object' || type === 'array',
