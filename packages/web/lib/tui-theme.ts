@@ -37,6 +37,7 @@ export const CODE_PRE_STYLE: CSSProperties = {
   lineHeight: 1.7,
   color: 'var(--color-tui-secondary)',
   overflow: 'auto',
+  maxWidth: '100%',
 };
 
 export const PRIMITIVE_COLORS = {
