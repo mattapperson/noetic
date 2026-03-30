@@ -93,6 +93,7 @@ export function Hero(): ReactNode {
         textAlign: 'center',
         zIndex: 0,
         width: '100vw',
+        margin: 'auto',
       }}
     >
       <motion.div
