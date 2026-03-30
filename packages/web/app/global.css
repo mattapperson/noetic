@@ -213,6 +213,12 @@
   }
 }
 
+@media (min-width: 1025px) {
+  main section {
+    max-width: 1280px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   svg * {
     animation-play-state: paused;

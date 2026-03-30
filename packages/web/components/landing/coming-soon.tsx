@@ -25,7 +25,6 @@ export function ComingSoon(): ReactNode {
     <section
       style={{
         padding: '80px 24px',
-        maxWidth: '1280px',
         margin: '0 auto',
       }}
     >
