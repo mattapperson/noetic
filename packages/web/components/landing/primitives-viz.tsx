@@ -1,6 +1,7 @@
 'use client';
 
 import { motion } from 'motion/react';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
 import { PrimitivesIsometricSvg } from '@/components/landing/svgs/primitives-isometric';
@@ -190,44 +191,53 @@ export function PrimitivesViz(): ReactNode {
 
       <div className="tui-bento primitives-grid">
         {PRIMITIVES.map((primitive) => (
-          <motion.div
+          <Link
             key={primitive.name}
-            whileHover={HOVER_BG}
-            data-col-span={primitive.colSpan}
+            href={`/docs/primitives/${primitive.name}`}
             style={{
-              background: 'var(--color-tui-surface)',
-              padding: '32px',
-              transition: 'background 0.1s',
+              textDecoration: 'none',
+              color: 'inherit',
             }}
           >
-            <div
+            <motion.div
+              whileHover={HOVER_BG}
+              data-col-span={primitive.colSpan}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                marginBottom: '8px',
+                background: 'var(--color-tui-surface)',
+                padding: '32px',
+                height: '100%',
+                transition: 'background 0.1s',
               }}
             >
-              <TuiBadge color={primitive.color}>{primitive.name}</TuiBadge>
-            </div>
-            <p
-              style={{
-                fontSize: '14px',
-                color: 'var(--color-tui-secondary)',
-                margin: '0 0 8px',
-              }}
-            >
-              {primitive.description}
-            </p>
-            <code
-              style={{
-                fontSize: '11px',
-                color: 'var(--color-tui-muted)',
-              }}
-            >
-              {primitive.signature}
-            </code>
-          </motion.div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '8px',
+                }}
+              >
+                <TuiBadge color={primitive.color}>{primitive.name}</TuiBadge>
+              </div>
+              <p
+                style={{
+                  fontSize: '14px',
+                  color: 'var(--color-tui-secondary)',
+                  margin: '0 0 8px',
+                }}
+              >
+                {primitive.description}
+              </p>
+              <code
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--color-tui-muted)',
+                }}
+              >
+                {primitive.signature}
+              </code>
+            </motion.div>
+          </Link>
         ))}
       </div>
     </section>
