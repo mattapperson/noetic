@@ -138,6 +138,7 @@ export function PatternsGrid(): ReactNode {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            width: '100%',
           }}
         >
           <PatternsIsometricSvg />
