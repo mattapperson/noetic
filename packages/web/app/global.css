@@ -130,6 +130,10 @@
   grid-template-columns: repeat(3, 1fr);
 }
 
+.memory-layers-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+
 @media (max-width: 1024px) {
   .primitives-grid,
   .patterns-grid {
@@ -150,13 +154,34 @@
 }
 
 @media (max-width: 1024px) {
-  .primitives-grid,
-  .patterns-grid {
-    grid-template-columns: repeat(2, 1fr);
+  .side-by-side-sections {
+    flex-direction: column;
   }
 
-  .primitives-grid > [data-col-span="2"] {
-    grid-column: span 1;
+  .section-split {
+    grid-template-columns: 1fr;
+  }
+
+  .section-split > :last-child {
+    order: 2;
+    margin-top: 32px;
+  }
+
+  /* Reset memory section order for single column (content first, then SVG) */
+  .section-split > .memory-visual {
+    order: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .section-split > :last-child {
+    margin-top: 24px;
+  }
+}
+
+@media (min-width: 1025px) {
+  main section {
+    max-width: 1280px;
   }
 }
 
