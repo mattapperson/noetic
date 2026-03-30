@@ -118,6 +118,13 @@
   }
 }
 
+@media (max-width: 768px) {
+  .primitives-grid,
+  .patterns-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tui-cursor {
     animation: none;
