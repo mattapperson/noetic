@@ -1,16 +1,17 @@
 ---
-title: Runtime Types
-description: Type definitions for the Runtime interface, AgentConfig, and related runtime types in Noetic.
+title: AgentHarness Types
+description: Type definitions for the AgentHarness interface, AgentConfig, and related types in Noetic.
 ---
 
-## Runtime
+## AgentHarness
 
 The core execution engine interface.
 
 ```ts
-interface Runtime {
-  execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
-  detachedSpawn<I, O>(step: Step<I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
+interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  readonly config: AgentConfig<TParams>;
+  run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  detachedSpawn<I, O>(step: Step<ContextMemory, I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
@@ -20,7 +21,6 @@ interface Runtime {
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
-  assembleView(agent: AgentConfig, input: string, ctx: Context): Promise<Item[]>;
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;
@@ -28,11 +28,12 @@ interface Runtime {
 }
 ```
 
-### Runtime Methods
+### AgentHarness Methods
 
 | Method | Description |
 |---|---|
-| `execute(step, input, ctx)` | Execute a step with the given input and context |
+| `config` | The `AgentConfig<TParams>` the harness was constructed with |
+| `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
 | `createContext(opts?)` | Create a new execution context |
 | `send(channel, value, ctx)` | Send a value to a channel |
@@ -43,7 +44,6 @@ interface Runtime {
 | `recallLayers(layers, input, ctx)` | Run recall on all layers |
 | `storeLayers(layers, response, ctx)` | Run store on all layers |
 | `disposeLayers(layers, ctx)` | Dispose all layers |
-| `assembleView(agent, input, ctx)` | Merge all layer outputs into prompt items |
 | `checkpoint(ctx)` | Persist current execution state |
 | `restore(executionId)` | Restore a previously checkpointed context |
 | `cancel(ctx, reason?)` | Cancel an execution |
@@ -51,35 +51,23 @@ interface Runtime {
 
 ## AgentConfig
 
-Declarative configuration for an agent.
+Declarative configuration for an agent harness. Generic over `TParams`, an arbitrary key-value record accessible via `ctx.harness.config.params`.
 
 ```ts
-interface AgentConfig {
+interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  description: string;
-  model: string;
-  instructions: string | (() => string | Promise<string>);
-  tools?: Tool[];
-  outputSchema?: ZodType;
-  memory?: MemoryLayer[];
   storage?: StorageAdapter;
-  projection?: ProjectionPolicy;
   hooks?: AgentHooks;
+  params: TParams;
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | yes | Agent name |
-| `description` | `string` | yes | Agent description |
-| `model` | `string` | yes | Default model identifier |
-| `instructions` | `string \| (() => string \| Promise<string>)` | yes | System instructions (static or dynamic) |
-| `tools` | `Tool[]` | no | Available tools |
-| `outputSchema` | `ZodType` | no | Structured output schema |
-| `memory` | `MemoryLayer[]` | no | Memory layers to attach |
 | `storage` | `StorageAdapter` | no | Storage backend for memory persistence |
-| `projection` | `ProjectionPolicy` | no | Token budget and overflow policy |
 | `hooks` | `AgentHooks` | no | Before/after step hooks |
+| `params` | `TParams` | yes | Arbitrary key-value parameters for steps and tools |
 
 ## AgentHooks
 
@@ -97,7 +85,7 @@ interface AgentHooks {
 
 ## DetachedHandle
 
-A handle returned by `runtime.detachedSpawn()` to track a concurrently running child step.
+A handle returned by `harness.detachedSpawn()` to track a concurrently running child step.
 
 ```ts
 interface DetachedHandle<O> {

@@ -4,12 +4,13 @@ import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeTool } from '../../src/interpreter/execute-tool';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
+import type { ContextMemory } from '../../src/types/memory';
 import type { StepTool } from '../../src/types/step';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
-import { makeMockContext, makeMockRuntime } from '../_helpers';
+import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx = makeMockContext();
-const mockRuntime = makeMockRuntime();
+const mockHarness = makeMockHarness();
 
 describe('executeTool', () => {
   it('calls tool.execute() and returns typed output', async () => {
@@ -28,6 +29,7 @@ describe('executeTool', () => {
       }),
     };
     const s: StepTool<
+      ContextMemory,
       {
         a: number;
         b: number;
@@ -47,7 +49,7 @@ describe('executeTool', () => {
         b: 4,
       },
       mockCtx,
-      mockRuntime,
+      mockHarness,
     );
     expect(result).toEqual({
       sum: 7,
@@ -73,6 +75,7 @@ describe('executeTool', () => {
       name: string;
     };
     const s: StepTool<
+      ContextMemory,
       GreetInput,
       {
         greeting: string;
@@ -87,7 +90,7 @@ describe('executeTool', () => {
     });
 
     try {
-      await executeTool(s, badInput, mockCtx, mockRuntime);
+      await executeTool(s, badInput, mockCtx, mockHarness);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -120,6 +123,7 @@ describe('executeTool', () => {
       },
     };
     const s: StepTool<
+      ContextMemory,
       {
         query: string;
         limit: number;
@@ -142,7 +146,7 @@ describe('executeTool', () => {
         limit: 10,
       },
       mockCtx,
-      mockRuntime,
+      mockHarness,
     );
     expect(receivedArgs?.query).toBe('test');
     expect(receivedArgs?.limit).toBe(5); // step.args overrides
@@ -160,12 +164,12 @@ describe('executeTool', () => {
         return 'ok';
       },
     };
-    const s: StepTool<Record<string, never>, string> = {
+    const s: StepTool<ContextMemory, Record<string, never>, string> = {
       kind: 'tool',
       id: 'ctx-test',
       tool,
     };
-    await executeTool(s, {}, mockCtx, mockRuntime);
+    await executeTool(s, {}, mockCtx, mockHarness);
     assert(receivedToolCtx !== undefined);
     expect(receivedToolCtx.ctx).toBe(mockCtx);
     expect(receivedToolCtx.memory).toBeDefined();
@@ -182,14 +186,14 @@ describe('executeTool', () => {
         throw new Error('tool broke');
       },
     };
-    const s: StepTool<Record<string, never>, string> = {
+    const s: StepTool<ContextMemory, Record<string, never>, string> = {
       kind: 'tool',
       id: 'fail-test',
       tool,
     };
 
     try {
-      await executeTool(s, {}, mockCtx, mockRuntime);
+      await executeTool(s, {}, mockCtx, mockHarness);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));

@@ -45,7 +45,7 @@ The `conditions` module provides helpers for building async route functions:
 - **`semanticRoute(...clauses)`** — evaluates when-clauses in order, returns first match or otherwise
 - **`semanticSwitch({ embed, cases, ... })`** — embedding-based routing: embeds the input and all case labels, picks the best cosine-similarity match above a threshold
 - **`embeddingMatch(embed, label, threshold)`** — condition that checks if input is semantically similar to a label via embeddings
-- **`aiCondition({ callModel, model, prompt })`** — condition that asks an LLM a yes/no question
+- **`aiCondition({ model, prompt })`** — condition that asks an LLM a yes/no question (gets client from `ctx.harness` internally)
 - **`anyCondition(...conditions)`** — true if any sub-condition is true (short-circuits)
 - **`allCondition(...conditions)`** — true if all sub-conditions are true (short-circuits)
 

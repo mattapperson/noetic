@@ -88,6 +88,7 @@ describe('spawn builder', () => {
     });
 
     assert(s.memory !== undefined);
+    assert(Array.isArray(s.memory));
     expect(s.memory).toHaveLength(1);
     expect(s.memory[0].id).toBe('test-layer');
   });

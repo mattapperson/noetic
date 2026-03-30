@@ -8,7 +8,7 @@ description: The Context object tracks execution state, metrics, and conversatio
 ```ts
 import { step } from '@noetic/core';
 
-const greet = step.run('greet', async (input: string, ctx) => {
+const greet = step.run({ id: 'greet', execute: async (input: string, ctx) => {
   console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
   console.log(`Tokens so far: ${ctx.tokens.total}`);
 
@@ -22,12 +22,18 @@ const greet = step.run('greet', async (input: string, ctx) => {
   });
 
   return `Hello, ${input}!`;
-});
+}});
 ```
 
-Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
+Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, memory layer handles, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
 
 ## Context Interface
+
+```ts
+interface Context<TMemory = ContextMemory, TState = unknown>
+```
+
+The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `InferMemory<typeof config>` to supply a fully typed shape.
 
 | Property | Type | Description |
 |---|---|---|
@@ -37,6 +43,7 @@ Every step in Noetic receives a `Context` object as its second argument. The con
 | `elapsed` | `number` | Wall-clock milliseconds since context creation. |
 | `cost` | `number` | Cumulative cost estimate for LLM calls. |
 | `state` | `TState` | Mutable, generic state object. You can read and write to this freely. |
+| `memory` | `TMemory` | Layer provides keyed by layer ID. See [Memory](#memory) below. |
 | `parent` | `Context \| null` | Parent context when running inside a spawn. |
 | `depth` | `number` | Nesting depth (0 for root). |
 | `span` | [`Span`](/docs/observability) | The active tracing span for this execution. |
@@ -44,6 +51,31 @@ Every step in Noetic receives a `Context` object as its second argument. The con
 | `resourceId` | `string \| undefined` | Optional resource identifier (e.g., a user or tenant ID). |
 | `itemLog` | [`ItemLog`](#itemlog) | The conversation event log. |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the most recently completed step (tool calls, usage, cost). |
+
+### Memory
+
+The `ctx.memory` property is a readonly object keyed by layer ID. Each key maps to a handle containing the data projections and callable functions that the layer declared in its `provides` field.
+
+```ts
+// Data access -- read a value projected from layer state
+const snap = ctx.memory['working-memory'].snapshot;
+
+// Function call -- invokes the layer function, may update layer state
+await ctx.memory['working-memory'].update({ key: 'value' });
+```
+
+At runtime, data entries use getters (reading live state on each access), while function entries are async closures that validate input via Zod and may update the layer's internal state.
+
+When layers are wrapped with the `memory()` builder, use `InferMemory<typeof config>` to get compile-time types:
+
+```ts
+import { memory, workingMemory, type InferMemory } from '@noetic/core';
+
+const mem = memory([workingMemory()]);
+type Mem = InferMemory<typeof mem>;
+
+// ctx: Context<Mem> gives fully typed ctx.memory
+```
 
 ### TokenUsage
 
@@ -102,7 +134,7 @@ const maybe = ctx.tryRecv(approvals); // null if empty
 await ctx.checkpoint();
 ```
 
-Persists the current execution state so it can be restored later. In the `InMemoryRuntime` this is a no-op; durable runtimes use it for crash recovery.
+Persists the current execution state so it can be restored later. In the `AgentHarness` this is a no-op; durable agent harnesses use it for crash recovery.
 
 ### Complete
 
@@ -158,7 +190,7 @@ interface MessageItem extends ItemBase {
 ```ts
 interface FunctionCallItem extends ItemBase {
   readonly type: 'function_call';
-  readonly call_id: string;
+  readonly callId: string;
   readonly name: string;
   readonly arguments: string;
 }
@@ -169,7 +201,7 @@ interface FunctionCallItem extends ItemBase {
 ```ts
 interface FunctionCallOutputItem extends ItemBase {
   readonly type: 'function_call_output';
-  readonly call_id: string;
+  readonly callId: string;
   readonly output: string;
 }
 ```
@@ -181,20 +213,22 @@ interface ReasoningItem extends ItemBase {
   readonly type: 'reasoning';
   readonly content: ContentPart[];
   readonly summary?: ContentPart[];
-  readonly encrypted_content?: string;
+  readonly encryptedContent?: string;
 }
 ```
 
 ### ExtensionItem
 
-Custom item types prefixed with `x-`:
+Custom item types using the `prefix:name` convention (e.g., `noetic:analytics`, `openrouter:web_search`):
 
 ```ts
 interface ExtensionItem extends ItemBase {
-  readonly type: `x-${string}`;
+  readonly type: `${string}:${string}`;
   readonly data: Record<string, unknown>;
 }
 ```
+
+For the complete reference of all item shapes, streaming events, and how they map to the OpenResponses specification, see [Items & Events](/docs/api/items-and-events).
 
 ### ContentPart
 
@@ -208,7 +242,7 @@ Content arrays use these discriminated variants:
 
 ## Related Pages
 
-- [Runtime](/docs/runtime) -- creates and manages contexts.
+- [AgentHarness](/docs/runtime) -- creates and manages contexts.
 - [Channels](/docs/operators/channels) -- typed messaging between steps.
 - [Observability](/docs/observability) -- the `span` property and tracing.
 - [Error Model](/docs/errors) -- errors thrown when abort or timeout occurs.

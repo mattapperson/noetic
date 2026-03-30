@@ -59,7 +59,7 @@ export function buildPipelineAgent() {
 
   return loop({
     id: 'pipeline-loop',
-    body: router,
+    steps: [router],
     until: until.maxSteps(3),
     prepareNext: (output: string) => {
       phase++;

@@ -2,6 +2,7 @@
  * Shared test helpers — single source of truth for all test factories.
  */
 
+import { expect } from 'bun:test';
 import { z } from 'zod';
 import { frameworkCast } from '../src/interpreter/framework-cast';
 import type { LLMResponse, Tool } from '../src/types/common';
@@ -14,7 +15,7 @@ import type {
   MessageItem,
 } from '../src/types/items';
 import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
-import type { Runtime } from '../src/types/runtime';
+import type { AgentHarnessContract, CallModelRequest } from '../src/types/runtime';
 import { SteeringAction } from '../src/types/steering';
 import type { ExecuteStepFn, Step } from '../src/types/step';
 import type { ToolExecutionContext } from '../src/types/tool-context';
@@ -120,7 +121,7 @@ export function makeFunctionCall(name: string, args: string, id?: string): Funct
     id: resolvedId,
     type: 'function_call',
     status: 'completed',
-    call_id: `call_${resolvedId}`,
+    callId: `call_${resolvedId}`,
     name,
     arguments: args,
   };
@@ -135,14 +136,23 @@ export function makeFunctionCallOutput(
     id: id ?? `fco-${callId}`,
     type: 'function_call_output',
     status: 'completed',
-    call_id: callId,
+    callId,
     output,
   };
 }
 
 // ── Mock Context (full Context interface) ────────────────────────────
 
+let _sharedMockHarness: AgentHarnessContract | undefined;
+function getSharedMockHarness(): AgentHarnessContract {
+  if (!_sharedMockHarness) {
+    _sharedMockHarness = makeMockHarness();
+  }
+  return _sharedMockHarness;
+}
+
 export function makeMockContext(overrides?: Partial<Context>): Context {
+  const harness = overrides?.harness ?? getSharedMockHarness();
   return {
     id: 'test-ctx',
     stepCount: 0,
@@ -167,6 +177,9 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     threadId: 'thread-1',
     itemLog: makeItemLog(),
     lastStepMeta: null,
+    harness,
+    layers: undefined,
+    memory: {},
     recv: async () => {
       throw new Error('not impl');
     },
@@ -193,12 +206,12 @@ export function makeLLMResponse(text: string, overrides?: Partial<LLMResponse>):
     items: [
       {
         id: `resp-${Date.now()}`,
-        status: 'completed' as const,
-        type: 'message' as const,
-        role: 'assistant' as const,
+        status: 'completed',
+        type: 'message',
+        role: 'assistant',
         content: [
           {
-            type: 'output_text' as const,
+            type: 'output_text',
             text,
           },
         ],
@@ -277,7 +290,7 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   const resolvedCtx = ctx ?? makeMockContext();
   return {
     ctx: resolvedCtx,
-    runtime: makeMockRuntime(),
+    harness: makeMockHarness(),
     memory: {
       get: () => undefined,
       set: () => {},
@@ -287,15 +300,28 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   };
 }
 
-export function makeMockRuntime(): Runtime {
-  return {
+export function makeMockHarness(): AgentHarnessContract {
+  const harness: AgentHarnessContract = {
+    config: {
+      name: 'test-harness',
+      params: {},
+    },
+    callModel: async () => {
+      throw new Error('not impl');
+    },
     execute: async () => {
+      throw new Error('not impl');
+    },
+    run: async () => {
       throw new Error('not impl');
     },
     detachedSpawn: () => {
       throw new Error('not impl');
     },
-    createContext: () => makeMockContext(),
+    createContext: () =>
+      makeMockContext({
+        harness,
+      }),
     send: () => {},
     recv: async () => {
       throw new Error('not impl');
@@ -308,9 +334,6 @@ export function makeMockRuntime(): Runtime {
     recallLayers: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},
-    assembleView: async (_agent, _input, ctx) => [
-      ...ctx.itemLog.items,
-    ],
     checkpoint: async () => {},
     restore: async () => null,
     cancel: async () => {},
@@ -331,14 +354,53 @@ export function makeMockRuntime(): Runtime {
       action: SteeringAction.Allow,
     }),
   };
+  return harness;
+}
+
+/**
+ * Creates a mock context whose harness.callModel returns scripted LLM responses
+ * in order. Used by tests that exercise code paths requiring an LLM.
+ */
+export function makeMockContextWithClient(script: LLMResponse[]): Context {
+  const harness = makeMockHarness();
+  harness.callModel = createScriptedCallModel(script);
+  return makeMockContext({
+    harness,
+  });
+}
+
+/**
+ * Creates a scripted callModel function that returns responses in order.
+ * For use with AgentHarness `_testCallModel` option.
+ */
+export function createScriptedCallModel(
+  script: LLMResponse[],
+): (request: CallModelRequest) => Promise<LLMResponse> {
+  let callIndex = 0;
+  return async () => {
+    if (callIndex >= script.length) {
+      throw new Error(`Mock callModel exhausted after ${script.length} calls`);
+    }
+    return script[callIndex++];
+  };
+}
+
+/**
+ * Creates a dynamic callModel function that calls a factory on each invocation.
+ * For use with AgentHarness `_testCallModel` option.
+ */
+export function createDynamicCallModel(
+  factory: () => LLMResponse,
+): (request: CallModelRequest) => Promise<LLMResponse> {
+  return async () => factory();
 }
 
 // ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
 
-export const simpleExecute: ExecuteStepFn = async <I, O>(
-  step: Step<I, O>,
+export const simpleExecute: ExecuteStepFn = async <TMemory, I, O>(
+  step: Step<TMemory, I, O>,
   input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
 ): Promise<O> => {
   if (step.kind === 'run') {
     return step.execute(input, ctx);
@@ -346,27 +408,7 @@ export const simpleExecute: ExecuteStepFn = async <I, O>(
   throw new Error(`Unsupported step kind: ${step.kind}`);
 };
 
-//#region Scripted Call Model
-
-type MockCallModelScript = LLMResponse[];
-
-interface ToolCallResponseOpts {
-  toolName: string;
-  args: string;
-  output: string;
-  finalText: string;
-}
-
-/** Creates a mock callModel that returns scripted LLM responses in order. */
-export function createScriptedCallModel(script: MockCallModelScript): () => Promise<LLMResponse> {
-  let callIndex = 0;
-  return async (): Promise<LLMResponse> => {
-    if (callIndex >= script.length) {
-      throw new Error(`Mock callModel exhausted after ${script.length} calls`);
-    }
-    return script[callIndex++];
-  };
-}
+//#region Response Factories
 
 export function assistantMessage(text: string, id?: string): MessageItem {
   return {
@@ -383,6 +425,13 @@ export function assistantMessage(text: string, id?: string): MessageItem {
   };
 }
 
+interface ToolCallResponseOpts {
+  toolName: string;
+  args: string;
+  output: string;
+  finalText: string;
+}
+
 export function toolCallResponse(opts: ToolCallResponseOpts): LLMResponse {
   const callId = `call_${crypto.randomUUID()}`;
   return {
@@ -391,7 +440,7 @@ export function toolCallResponse(opts: ToolCallResponseOpts): LLMResponse {
         id: `fc-${callId}`,
         status: 'completed',
         type: 'function_call',
-        call_id: callId,
+        callId,
         name: opts.toolName,
         arguments: opts.args,
       } satisfies FunctionCallItem,
@@ -399,7 +448,7 @@ export function toolCallResponse(opts: ToolCallResponseOpts): LLMResponse {
         id: `fco-${callId}`,
         status: 'completed',
         type: 'function_call_output',
-        call_id: callId,
+        callId,
         output: opts.output,
       } satisfies FunctionCallOutputItem,
       assistantMessage(opts.finalText),
@@ -416,6 +465,65 @@ export function textOnlyResponse(text: string): LLMResponse {
   return makeLLMResponse(text, {
     cost: 0.001,
   });
+}
+
+//#endregion
+
+//#region OpenResponses Compliance
+
+const VALID_ITEM_TYPES = new Set([
+  'message',
+  'function_call',
+  'function_call_output',
+  'reasoning',
+]);
+
+const VALID_STATUSES = new Set([
+  'in_progress',
+  'completed',
+  'incomplete',
+  'failed',
+]);
+
+const VALID_CONTENT_PART_TYPES = new Set([
+  'output_text',
+  'input_text',
+  'refusal',
+]);
+
+/**
+ * Asserts that every item in a log conforms to the OpenResponses item shape.
+ * Checks id, status, type discriminator, and per-type field presence.
+ */
+export function assertOpenResponsesCompliance(items: readonly Item[]): void {
+  for (const item of items) {
+    expect(typeof item.id).toBe('string');
+    expect(item.id.length).toBeGreaterThan(0);
+    expect(VALID_STATUSES.has(item.status)).toBe(true);
+
+    const isExtension = item.type.includes(':');
+    if (!isExtension) {
+      expect(VALID_ITEM_TYPES.has(item.type)).toBe(true);
+    }
+
+    if (item.type === 'message') {
+      expect(Array.isArray(item.content)).toBe(true);
+      for (const part of item.content) {
+        expect(VALID_CONTENT_PART_TYPES.has(part.type)).toBe(true);
+      }
+    }
+
+    if (item.type === 'function_call') {
+      expect(typeof item.callId).toBe('string');
+      expect(typeof item.name).toBe('string');
+      expect(typeof item.arguments).toBe('string');
+    }
+
+    if (item.type === 'function_call_output') {
+      expect(typeof item.callId).toBe('string');
+      expect(typeof item.output).toBe('string');
+    }
+  }
 }
 
 //#endregion

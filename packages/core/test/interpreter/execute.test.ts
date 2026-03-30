@@ -3,19 +3,23 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
 import type { Context } from '../../src/types/context';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
+import { createScriptedCallModel, makeLLMResponse, makeMockHarness } from '../_helpers';
 
 describe('execute() switch', () => {
   it('dispatches run step', async () => {
-    const step: Step<string, number> = {
+    const step: Step<ContextMemory, string, number> = {
       kind: 'run',
       id: 'test',
       execute: async (input: string) => input.length,
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     const result = await execute(step, 'hello', ctx);
     expect(result).toBe(5);
   });
@@ -31,6 +35,7 @@ describe('execute() switch', () => {
       execute: async (args: { msg: string }) => args.msg,
     };
     const step: Step<
+      ContextMemory,
       {
         msg: string;
       },
@@ -40,68 +45,59 @@ describe('execute() switch', () => {
       id: 'echo-tool',
       tool,
     };
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const ctx = harness.createContext();
     const result = await execute(
       step,
       {
         msg: 'hi',
       },
       ctx,
-      undefined,
-      runtime,
     );
     expect(result).toBe('hi');
   });
 
-  it('dispatches llm step with callModel', async () => {
-    const step: Step<string, string> = {
+  it('dispatches llm step via mock callModel', async () => {
+    const step: Step<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'llm-test',
       model: 'test-model',
     };
-    const ctx = new ContextImpl();
-    const mockCallModel = async () => ({
-      items: [
-        {
-          id: 'r1',
-          status: 'completed' as const,
-          type: 'message' as const,
-          role: 'assistant' as const,
-          content: [
-            {
-              type: 'output_text' as const,
-              text: 'response',
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 10,
-        outputTokens: 5,
-      },
+    const harness = makeMockHarness();
+    harness.callModel = createScriptedCallModel([
+      makeLLMResponse('response'),
+    ]);
+    const ctx = new ContextImpl({
+      harness,
     });
-    const result = await execute(step, 'prompt', ctx, mockCallModel);
+    const result = await execute(step, 'prompt', ctx);
     expect(result).toBe('response');
   });
 
-  it('throws when llm step has no callModel', async () => {
-    const step: Step<string, string> = {
+  it('throws when harness has no client configured', async () => {
+    const step: Step<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'x',
     };
-    const ctx = new ContextImpl();
-    expect(execute(step, 'hi', ctx)).rejects.toThrow('callModel is required');
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    expect(execute(step, 'hi', ctx)).rejects.toThrow('not impl');
   });
 
   it('increments stepCount', async () => {
-    const step: Step<string, string> = {
+    const step: Step<ContextMemory, string, string> = {
       kind: 'run',
       id: 'test',
       execute: async (input: string) => input,
     };
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     expect(ctx.stepCount).toBe(0);
     await execute(step, 'a', ctx);
     expect(ctx.stepCount).toBe(1);
@@ -111,14 +107,17 @@ describe('execute() switch', () => {
 
   it('throws budget_exceeded when depth exceeds MAX_DEPTH', async () => {
     // Build a context chain 64 levels deep
-    let ctx: Context = new ContextImpl();
+    let ctx: Context = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     for (let i = 0; i < 64; i++) {
       ctx = new ContextImpl({
+        harness: makeMockHarness(),
         parent: ctx,
       });
     }
     expect(ctx.depth).toBe(64);
-    const step: Step<string, string> = {
+    const step: Step<ContextMemory, string, string> = {
       kind: 'run',
       id: 'deep',
       execute: async (input: string) => input,
@@ -135,9 +134,11 @@ describe('execute() switch', () => {
   });
 
   it('throws cancelled when context is aborted', async () => {
-    const ctx = new ContextImpl();
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
     ctx.abort('test abort');
-    const step: Step<string, string> = {
+    const step: Step<ContextMemory, string, string> = {
       kind: 'run',
       id: 'test',
       execute: async (input: string) => input,
@@ -153,8 +154,10 @@ describe('execute() switch', () => {
   });
 
   it('branch step routes correctly', async () => {
-    const ctx = new ContextImpl();
-    const branchStep: Step<string, string> = {
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    const branchStep: Step<ContextMemory, string, string> = {
       kind: 'branch',
       id: 'b',
       route: () => null,
@@ -164,17 +167,23 @@ describe('execute() switch', () => {
   });
 });
 
-describe('InMemoryRuntime', () => {
+describe('AgentHarness', () => {
   it('creates context', () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const ctx = harness.createContext();
     expect(ctx.id).toBeDefined();
     expect(ctx.stepCount).toBe(0);
   });
 
   it('creates context with options', () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext({
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const ctx = harness.createContext({
       state: {
         count: 0,
       },
@@ -188,55 +197,45 @@ describe('InMemoryRuntime', () => {
     expect(ctx.resourceId).toBe('user-1');
   });
 
-  it('executes steps via runtime', async () => {
-    const runtime = new InMemoryRuntime();
-    const ctx = runtime.createContext();
-    const step: Step<string, number> = {
+  it('executes steps via harness', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const step: Step<ContextMemory, string, number> = {
       kind: 'run',
       id: 'len',
       execute: async (s: string) => s.length,
     };
-    const result = await runtime.execute(step, 'hello', ctx);
+    const result = await harness.run(step, 'hello', ctx);
     expect(result).toBe(5);
   });
 
-  it('executes LLM steps when callModel provided', async () => {
-    const mockCallModel = async () => ({
-      items: [
-        {
-          id: 'r1',
-          status: 'completed' as const,
-          type: 'message' as const,
-          role: 'assistant' as const,
-          content: [
-            {
-              type: 'output_text' as const,
-              text: 'hi',
-            },
-          ],
-        },
-      ],
-      usage: {
-        inputTokens: 5,
-        outputTokens: 3,
-      },
+  it('executes LLM steps when _testCallModel provided', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('hi'),
+      ]),
     });
-    const runtime = new InMemoryRuntime({
-      callModel: mockCallModel,
-    });
-    const ctx = runtime.createContext();
-    const step: Step<string, string> = {
+    const ctx = harness.createContext();
+    const step: Step<ContextMemory, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
     };
-    const result = await runtime.execute(step, 'hello', ctx);
+    const result = await harness.run(step, 'hello', ctx);
     expect(result).toBe('hi');
   });
 
   it('createSpan returns a valid span', () => {
-    const runtime = new InMemoryRuntime();
-    const span = runtime.createSpan('test', null);
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const span = harness.createSpan('test', null);
     expect(span.traceId).toBeDefined();
     expect(span.spanId).toBeDefined();
     expect(span.parentSpanId).toBeNull();

@@ -23,15 +23,20 @@ export interface ObservationalMemoryConfig {
   observer?: ObserverFn;
 }
 
-export function observationalMemory(
-  config?: ObservationalMemoryConfig,
-): MemoryLayer<ObservationalState> {
+/**
+ * Creates a memory layer that buffers raw items and distills them into observations when a token threshold is reached.
+ *
+ * @public
+ * @param config - Optional configuration for buffer threshold, max observations, scope, and observer function.
+ * @returns A `MemoryLayer` that accumulates and summarizes observations over time.
+ */
+export function observationalMemory(config?: ObservationalMemoryConfig) {
   const maxObs = config?.maxObservations ?? DEFAULT_MAX_OBSERVATIONS;
   const threshold = config?.bufferThreshold ?? DEFAULT_BUFFER_THRESHOLD_TOKENS;
   const observer = config?.observer;
 
   return {
-    id: 'observational-memory',
+    id: 'observational-memory' as const,
     name: 'Observational Memory',
     slot: Slot.OBSERVATIONS,
     scope: config?.scope ?? 'resource',
@@ -130,5 +135,5 @@ export function observationalMemory(
         };
       },
     },
-  };
+  } satisfies MemoryLayer<ObservationalState>;
 }

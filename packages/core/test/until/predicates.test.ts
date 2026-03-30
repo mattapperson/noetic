@@ -163,7 +163,7 @@ describe('until predicates', () => {
               id: '1',
               status: 'completed' as const,
               type: 'function_call' as const,
-              call_id: 'c1',
+              callId: 'c1',
               name: 'search',
               arguments: '{}',
             },

@@ -7,11 +7,11 @@
 Pure async computation. The runtime can retry freely and doesn't track token usage.
 
 ```typescript
-step.run<I, O>({
+step.run<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
-  execute: (input: I, ctx: Context) => Promise<O>;
+  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
   retry?: RetryPolicy;
-}): StepRun<I, O>
+}): StepRun<TMemory, I, O>
 ```
 
 ### step.llm
@@ -19,28 +19,28 @@ step.run<I, O>({
 Model call with optional tools and structured output.
 
 ```typescript
-step.llm<I, O>({
+step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   model: string;
   system?: string;
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
-}): StepLLM<I, O>
+}): StepLLM<TMemory, I, O>
 ```
 
-The runtime assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
 
 ### step.tool
 
 Direct tool execution (not via LLM selection).
 
 ```typescript
-step.tool<I, O>({
+step.tool<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
-}): StepTool<I, O>
+}): StepTool<TMemory, I, O>
 ```
 
 ### branch
@@ -76,12 +76,12 @@ Each fork path gets a deep clone of parent state. Mutations in one path don't af
 Child execution with context boundary. Memory layers control what state crosses the boundary.
 
 ```typescript
-spawn<I, O>({
+spawn<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
-  child: Step<I, O>;
-  memory?: MemoryLayer[];
+  child: Step<TMemory, I, O>;
+  memory?: MemoryConfig | MemoryLayer[];
   timeout?: number;
-}): StepSpawn<I, O>
+}): StepSpawn<TMemory, I, O>
 ```
 
 ### loop
@@ -91,7 +91,7 @@ Iteration with termination predicates.
 ```typescript
 loop<I, O>({
   id: string;
-  body: Step<I, O>;
+  steps: ReadonlyArray<Step<I, O>>;
   until: Until;
   maxIterations?: number;
   inbox?: Channel<string>;
@@ -157,7 +157,7 @@ react({
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-  memory?: MemoryLayer[];
+  memory?: MemoryConfig | MemoryLayer[];
 }): StepLoop | StepSpawn
 ```
 
@@ -195,12 +195,12 @@ adaptivePlan<O>({
 }): Step
 ```
 
-**Important:** When plans mix sequential and parallel execution (e.g., a fork inside a sequential chain), `executeStep` must be provided. Without it, only `run`-kind children can be executed in sequential nodes. When using the eval framework, the runtime's `execute` method serves as `executeStep`:
+**Important:** When plans mix sequential and parallel execution (e.g., a fork inside a sequential chain), `executeStep` must be provided. Without it, only `run`-kind children can be executed in sequential nodes. When using the eval framework, the agent harness's `run` method serves as `executeStep`:
 
 ```typescript
 // callModel auto-detected from OPENROUTER_API_KEY when omitted
-const runtime = new InMemoryRuntime();
-const compiled = compilePlan(plan, agents, undefined, runtime.execute.bind(runtime));
+const harness = new AgentHarness({ name: 'planner', params: {} });
+const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness));
 ```
 
 ## Memory Layers
@@ -239,11 +239,45 @@ staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 
 ### toolMemoryLayer
 
-Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state.
+Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state. Defaults to `'execution'` scope.
 
 ```typescript
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
+
+### ToolMemoryDeclaration
+
+Declared on a `Tool`'s `memory` property. The runtime auto-generates a `MemoryLayer` per unique `id`.
+
+```typescript
+interface ToolMemoryDeclaration<TState = unknown> {
+  id?: string;                              // shared id (defaults to tool.name)
+  init: () => TState;                       // factory for initial state
+  recall: (state: TState) => string | null; // project into LLM context
+}
+```
+
+Tools read/write state imperatively via `toolCtx.memory`:
+
+```typescript
+interface ToolMemory {
+  get<T>(layerId: string): T | undefined;
+  set<T>(layerId: string, state: T): void;
+}
+```
+
+### findFunctionCall
+
+Utility for function-call memory patterns. Searches items for the first `function_call` matching a name, returns parsed JSON arguments.
+
+```typescript
+import { findFunctionCall } from '@noetic/core';
+
+const args = findFunctionCall(newItems, 'updateWorkingMemory');
+// Returns Record<string, unknown> | null
+```
+
+Used in `store()` hooks to let the LLM update layer state via pseudo-tool calls (no registered tool schema required).
 
 ### steering
 
@@ -255,8 +289,10 @@ steering({
   maxLedgerEntries?: number;  // default 100
   maxRetries?: number;        // default 3
   scope?: MemoryScope;        // default 'execution'
-  callModel?: CallModelFn;    // required if any rule uses llmEval
 }): MemoryLayer<SteeringState>
+// LLM-evaluated rules use callModel from the execution context (configured
+// via AgentHarness's `llm` option or OPENROUTER_API_KEY). If no LLM provider
+// is configured, LLM-evaluated rules throw NoeticConfigError (MISSING_CALL_MODEL).
 ```
 
 **SteeringRule:**
@@ -274,21 +310,118 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
-## Runtime
+## Layer Provides API
+
+Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.memory['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
+
+### memory()
+
+Wraps a layer tuple for type-safe inference. Uses `const` type parameter to preserve literal types without `as const`.
 
 ```typescript
-const runtime = new InMemoryRuntime();
-const ctx = runtime.createContext({ threadId?, resourceId? });
-const result = await runtime.execute(step, input, ctx);
+memory<const T extends readonly MemoryLayer[]>(layers: T): MemoryConfig<T>
+```
+
+### InferMemory\<T\>
+
+Extracts the typed memory shape from a `MemoryConfig` (like `z.infer<>` for Zod).
+
+```typescript
+const mem = memory([workingMemory(), counterLayer()]);
+type Mem = InferMemory<typeof mem>;
+// Use as: step.run<Mem>({ execute: (input, ctx) => { ctx.memory.counter.value } })
+```
+
+### MemoryConfig
+
+Typed wrapper preserving individual layer types for compile-time inference.
+
+```typescript
+interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly MemoryLayer[]> {
+  readonly layers: TLayers;
+  readonly _shape: InferMemoryShape<TLayers>;  // phantom — never accessed at runtime
+}
+```
+
+### layerData
+
+Creates a read-only data projection from layer state.
+
+```typescript
+layerData<T, TState>({
+  read: (state: TState) => T;
+}): LayerDataDecl<T, TState>
+```
+
+### layerFn
+
+Creates a callable function backed by layer state. Input is Zod-validated at runtime.
+
+```typescript
+layerFn<TInput, TOutput, TState>({
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (args: TInput, state: TState, ctx: ExecutionContext)
+    => Promise<{ result: TOutput; state?: TState }>;
+}): LayerFunctionDecl<TInput, TOutput, TState>
+```
+
+### ctx.memory
+
+Layer provides keyed by layer ID. Data entries are live property reads; function entries are async callable methods.
+
+```typescript
+const mem = memory([workingMemory()]);
+type Mem = InferMemory<typeof mem>;
+
+step.run<Mem>({
+  id: 'work',
+  execute: async (input, ctx) => {
+    ctx.memory['working-memory'].snapshot;        // WorkingMemoryState (live read)
+    await ctx.memory['working-memory'].update({ k: 1 }); // calls layerFn, updates state
+  },
+});
+```
+
+### Automatic LLM tool injection
+
+Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
+
+## AgentHarness
+
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
+
+```typescript
+// High-level API: pass agent step to constructor, execute with simple inputs
+const harness = new AgentHarness({
+  name: 'my-agent',
+  initialStep: myStep,
+  params: { model: 'anthropic/claude-sonnet-4-20250514' },
+});
+const result = await harness.execute('Hello');           // string input
+const result = await harness.execute(messageItem);       // single Item
+const result = await harness.execute([item1, item2]);    // Item[]
+const result = await harness.execute('Hello', {          // with options
+  threadId: 'thread-1',
+  resourceId: 'user-1',
+});
+
+// Low-level API: manual context creation + run()
+const ctx = harness.createContext({ threadId: 'thread-1' });
+const result = await harness.run(step, input, ctx);
+
+// Access config params from context
+// ctx.harness.config.params.model
 
 // Background execution
-const handle = runtime.detachedSpawn(step, input, ctx);
+const handle = harness.detachedSpawn(step, input, ctx);
 await handle.await();
 
 // Channels
-runtime.send(channel, value, ctx);
-const msg = await runtime.recv(channel, ctx);
-const msg = runtime.tryRecv(channel, ctx);
+harness.send(channel, value, ctx);
+const msg = await harness.recv(channel, ctx);
+const msg = harness.tryRecv(channel, ctx);
 ```
 
 ## Slot Constants
@@ -311,10 +444,12 @@ Available inside tool `execute` functions:
 
 ```typescript
 interface ToolExecutionContext {
-  ctx: Context;           // Step execution context
-  runtime: Runtime;       // Runtime instance (guaranteed non-undefined)
-  memory: ToolMemory;     // Per-layer state accessor (get/set by layer id)
-  assembledView: Item[];  // Current conversation view
+  ctx: Context;                 // Step execution context (ctx.harness also available)
+  harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
+  memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
+  assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
+// Access harness params: toolCtx.harness.config.params
+// Or via context: toolCtx.ctx.harness.config.params
 ```

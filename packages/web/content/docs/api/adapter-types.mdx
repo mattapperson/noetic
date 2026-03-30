@@ -11,25 +11,25 @@ Batch embedding function that maps N texts to N vectors. Used by `semanticSwitch
 type EmbedFn = (texts: readonly string[]) => Promise<readonly number[][]>;
 ```
 
-## OpenRouter Adapter
+## LlmProviderConfig
 
-Factory functions that create `CallModelFn` and `EmbedFn` implementations backed by the `@openrouter/sdk`.
-
-### createOpenRouterCallModel(client)
-
-Creates a `CallModelFn` from an existing `OpenRouter` client instance.
+Configuration for the LLM provider, passed to `AgentHarness` via the `llm` option.
 
 ```ts
-import { OpenRouter } from '@openrouter/sdk';
-import { createOpenRouterCallModel } from '@noetic/core';
-
-const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-const callModel = createOpenRouterCallModel(client);
+interface LlmProviderConfig {
+  provider: 'openrouter';
+  apiKey?: string; // defaults to process.env.OPENROUTER_API_KEY
+}
 ```
 
-| Parameter | Type | Required | Description |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `client` | `OpenRouter` | Yes | An initialized `@openrouter/sdk` client |
+| `provider` | `'openrouter'` | Yes | LLM provider identifier |
+| `apiKey` | `string` | No | API key. Defaults to `process.env.OPENROUTER_API_KEY`. |
+
+## OpenRouter Adapter
+
+Factory function that creates an `EmbedFn` implementation backed by the `@openrouter/sdk`.
 
 ### createOpenRouterEmbed(apiKey, embeddingModel?)
 
@@ -49,11 +49,8 @@ const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 ### Usage with Semantic Routing
 
 ```ts
-import { OpenRouter } from '@openrouter/sdk';
-import { branch, createOpenRouterCallModel, createOpenRouterEmbed, semanticSwitch, step } from '@noetic/core';
+import { branch, createOpenRouterEmbed, semanticSwitch, step } from '@noetic/core';
 
-const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-const callModel = createOpenRouterCallModel(client);
 const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 
 const router = branch({

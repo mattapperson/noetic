@@ -48,7 +48,7 @@ const recursiveStep = spawn({
           childState: null,
           items: [
             {
-              kind: 'message',
+              type: 'message',
               role: 'user',
               content: [
                 { type: 'input_text', text: `Sub-task: ${parentState.task}` },

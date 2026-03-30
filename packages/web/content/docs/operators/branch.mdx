@@ -44,7 +44,7 @@ This is the idiomatic way to add conditional logic to an Noetic pipeline. Instea
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `route` | `(input: I, ctx: Context) => Step<I, O> \| null \| Promise<Step<I, O> \| null>` | Yes | Function that picks the step to run (sync or async) |
+| `route` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O> \| null \| Promise<Step<TMemory, I, O> \| null>` | Yes | Function that picks the step to run (sync or async) |
 
 ## How Null Routes Work
 

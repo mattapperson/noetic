@@ -15,6 +15,7 @@ import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { Channel } from '../src/types/channel';
 import type { DetachedHandle } from '../src/types/detached';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepLoop } from '../src/types/step';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
@@ -35,7 +36,7 @@ export const delegateInbox = channel('delegate-inbox', {
 export function buildDynamicDelegateAgent(opts: {
   inbox: Channel<string>;
   parkTimeout?: number;
-}): StepLoop<string, string> {
+}): StepLoop<ContextMemory, string, string> {
   const handles = new Map<string, DetachedHandle<string>>();
 
   const syncTool = createSyncDelegateTool();
@@ -46,18 +47,20 @@ export function buildDynamicDelegateAgent(opts: {
 
   return loop({
     id: 'dynamic-delegate-loop',
-    body: step.llm({
-      id: 'dynamic-delegate-llm',
-      model: 'gpt-4o',
-      system: `You are an orchestrator with two delegation strategies:
+    steps: [
+      step.llm({
+        id: 'dynamic-delegate-llm',
+        model: 'gpt-4o',
+        system: `You are an orchestrator with two delegation strategies:
 - delegate: blocks and returns the result. Use for tasks you need answered before continuing.
 - launch_agent: runs in background. Use when you can keep working while it runs.
 Choose the right strategy based on each task.`,
-      tools: [
-        syncTool,
-        asyncTool,
-      ],
-    }),
+        tools: [
+          syncTool,
+          asyncTool,
+        ],
+      }),
+    ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
     parkTimeout: opts.parkTimeout ?? 5e3,

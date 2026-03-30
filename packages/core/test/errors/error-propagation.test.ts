@@ -4,51 +4,61 @@ import { loop } from '../../src/builders/loop-builder';
 import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import type { ContextMemory } from '../../src/types/memory';
 import type { SettleResult, Step } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
+import { makeMockHarness } from '../_helpers';
 
 describe('Error propagation', () => {
   describe('loop error handling', () => {
     it('default propagates error', async () => {
-      const loopStep = loop<string, string>({
+      const loopStep = loop<ContextMemory, string, string>({
         id: 'test-loop',
-        body: {
-          kind: 'run',
-          id: 'fail',
-          execute: async () => {
-            throw new Error('body fail');
+        steps: [
+          {
+            kind: 'run',
+            id: 'fail',
+            execute: async () => {
+              throw new Error('body fail');
+            },
           },
-        },
+        ],
         until: until.maxSteps(5),
       });
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await expect(execute(loopStep, 'go', ctx)).rejects.toThrow('body fail');
     });
 
     it('onError retry re-runs', async () => {
       let attempts = 0;
-      const loopStep = loop<string, string>({
+      const loopStep = loop<ContextMemory, string, string>({
         id: 'retry-loop',
-        body: {
-          kind: 'run',
-          id: 'flaky',
-          execute: async () => {
-            attempts++;
-            if (attempts < 3) {
-              throw new NoeticErrorImpl({
-                kind: 'step_failed',
-                stepId: 'flaky',
-                cause: new Error('flaky'),
-                retriesExhausted: false,
-              });
-            }
-            return 'ok';
+        steps: [
+          {
+            kind: 'run',
+            id: 'flaky',
+            execute: async () => {
+              attempts++;
+              if (attempts < 3) {
+                throw new NoeticErrorImpl({
+                  kind: 'step_failed',
+                  stepId: 'flaky',
+                  cause: new Error('flaky'),
+                  retriesExhausted: false,
+                });
+              }
+              return 'ok';
+            },
           },
-        },
+        ],
         until: until.maxSteps(1),
         onError: () => 'retry',
       });
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await execute(loopStep, '', ctx);
       expect(result).toBe('ok');
       expect(attempts).toBe(3);
@@ -56,21 +66,25 @@ describe('Error propagation', () => {
 
     it('until predicate throw treated as stop', async () => {
       let bodyCount = 0;
-      const loopStep = loop<string, string>({
+      const loopStep = loop<ContextMemory, string, string>({
         id: 'pred-throw',
-        body: {
-          kind: 'run',
-          id: 'inc',
-          execute: async () => {
-            bodyCount++;
-            return 'ok';
+        steps: [
+          {
+            kind: 'run',
+            id: 'inc',
+            execute: async () => {
+              bodyCount++;
+              return 'ok';
+            },
           },
-        },
+        ],
         until: () => {
           throw new Error('predicate boom');
         },
       });
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await execute(loopStep, '', ctx);
       expect(bodyCount).toBe(1);
       expect(result).toBe('ok');
@@ -79,7 +93,7 @@ describe('Error propagation', () => {
 
   describe('fork error handling', () => {
     it('all mode throws fork_partial on failure', async () => {
-      const step: Step<string, string> = {
+      const step: Step<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'fail-fork',
         mode: 'all',
@@ -99,7 +113,9 @@ describe('Error propagation', () => {
         ],
         merge: (r) => r.join(','),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');
@@ -110,7 +126,7 @@ describe('Error propagation', () => {
     });
 
     it('settle mode never throws', async () => {
-      const step: Step<string, string> = {
+      const step: Step<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'settle-fork',
         mode: 'settle',
@@ -131,13 +147,15 @@ describe('Error propagation', () => {
         merge: (results: SettleResult<string>[]) =>
           `${results.filter((r) => r.status === 'fulfilled').length} ok`,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await execute(step, '', ctx);
       expect(result).toBe('1 ok');
     });
 
     it('race mode all-fail throws fork_partial', async () => {
-      const step: Step<string, string> = {
+      const step: Step<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'race-fail',
         mode: 'race',
@@ -158,7 +176,9 @@ describe('Error propagation', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await execute(step, '', ctx);
         expect.unreachable('should have thrown');

@@ -1,63 +1,69 @@
-import type { ZodType } from 'zod';
 import { ZodError } from 'zod';
 import { NoeticErrorImpl } from '../errors/noetic-error';
-import type { LLMResponse, ModelParams, StepMeta, Tool } from '../types/common';
+import { resolveLayerTools } from '../memory/layer-api';
+import type { StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
-import type { FunctionCallItem, Item } from '../types/items';
-import type { MemoryLayer } from '../types/memory';
-import type { Runtime } from '../types/runtime';
+import type { FunctionCallItem } from '../types/items';
+import type { ContextMemory, MemoryLayer } from '../types/memory';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
-import { createMessage, extractAssistantText } from './message-helpers';
+import { createMessage, extractAssistantText, trackUsage } from './message-helpers';
 import { isMutableContext } from './typeguards';
-
-export interface CallModelParams {
-  model: string;
-  items: ReadonlyArray<Item>;
-  tools?: Tool[];
-  params?: ModelParams;
-  output?: ZodType;
-  ctx: Context;
-  runtime?: Runtime;
-  layers?: MemoryLayer[];
-}
-
-export type CallModelFn = (params: CallModelParams) => Promise<LLMResponse>;
 
 const MAX_STEERING_RETRIES = 3;
 
-export async function executeLLM<I, O>(
-  step: StepLLM<I, O>,
-  input: I,
+function mergeTools(
+  stepTools: Tool[] | undefined,
+  layers: MemoryLayer[] | undefined,
   ctx: Context,
-  callModel: CallModelFn,
-  runtime?: Runtime,
+): Tool[] | undefined {
+  const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
+  if (layerTools.length === 0) {
+    return stepTools;
+  }
+  return [
+    ...(stepTools ?? []),
+    ...layerTools,
+  ];
+}
+
+export async function executeLLM<TMemory, I, O>(
+  step: StepLLM<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
   layers?: MemoryLayer[],
 ): Promise<O> {
-  // Add the input as a user message if it's a non-empty string
+  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+
   if (typeof input === 'string' && input.length > 0) {
-    ctx.itemLog.append(createMessage(input, 'user'));
+    baseCtx.itemLog.append(createMessage(input, 'user'));
   }
 
+  const allTools = mergeTools(step.tools, layers, baseCtx);
   let retries = 0;
 
-  while (true) {
-    // Call the model
-    const response = await callModel({
-      model: step.model,
-      items: ctx.itemLog.items,
-      tools: step.tools,
-      params: step.params,
-      output: step.output,
-      ctx,
-      runtime,
-      layers,
-    });
+  while (retries <= MAX_STEERING_RETRIES) {
+    const request = allTools
+      ? {
+          model: step.model,
+          items: baseCtx.itemLog.items,
+          tools: allTools,
+          params: step.params,
+          outputSchema: step.output,
+          ctx: baseCtx,
+          layers,
+        }
+      : {
+          model: step.model,
+          items: baseCtx.itemLog.items,
+          params: step.params,
+          outputSchema: step.output,
+        };
+    const response = await baseCtx.harness.callModel(request);
 
-    // Check afterModelCall steering layers
-    if (layers && layers.length > 0 && runtime) {
-      const decision = await runtime.afterModelCall(layers, response, ctx);
+    if (layers && layers.length > 0) {
+      const decision = await baseCtx.harness.afterModelCall(layers, response, baseCtx);
 
       if (decision.action === SteeringAction.Deny) {
         throw new NoeticErrorImpl({
@@ -67,25 +73,22 @@ export async function executeLLM<I, O>(
       }
 
       if (decision.action === SteeringAction.Guide && retries < MAX_STEERING_RETRIES) {
-        ctx.itemLog.append(
+        baseCtx.itemLog.append(
           createMessage(decision.guidance ?? 'Please adjust your response.', 'developer'),
         );
         retries++;
         continue;
       }
-      // Guide with retries exhausted — proceed with last response rather than failing
     }
 
-    // Append response items to ItemLog and extract tool calls in a single pass
     const toolCalls: FunctionCallItem[] = [];
     for (const item of response.items) {
-      ctx.itemLog.append(item);
+      baseCtx.itemLog.append(item);
       if (item.type === 'function_call') {
         toolCalls.push(item);
       }
     }
 
-    // Build step metadata
     const meta: StepMeta = {
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: response.usage,
@@ -93,20 +96,13 @@ export async function executeLLM<I, O>(
       responseItems: response.items,
     };
 
-    // Update mutable context fields
-    if (isMutableContext(ctx)) {
-      ctx.lastStepMeta = meta;
-      ctx.tokens.input += response.usage.inputTokens;
-      ctx.tokens.output += response.usage.outputTokens;
-      ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
-      if (response.cost) {
-        ctx.cost = ctx.cost + response.cost;
-      }
+    if (isMutableContext(baseCtx)) {
+      baseCtx.lastStepMeta = meta;
     }
+    trackUsage(baseCtx, response);
 
     const lastText = extractAssistantText(response.items);
 
-    // If output schema is provided, parse with Zod
     if (step.output) {
       try {
         const parsed = JSON.parse(lastText);
@@ -134,9 +130,16 @@ export async function executeLLM<I, O>(
       }
     }
 
-    // O is string when step.output is undefined — callers without an output schema
-    // receive raw text. The type system cannot express "O = string when output is omitted"
-    // without conditional types that would complicate the entire Step contract.
     return frameworkCast<O>(lastText);
   }
+
+  // Safety net: the loop above always returns or throws within the body.
+  // This throw is unreachable but protects against future refactors that
+  // might break the loop invariant.
+  throw new NoeticErrorImpl({
+    kind: 'step_failed',
+    stepId: step.id,
+    cause: new Error('Steering retries exhausted'),
+    retriesExhausted: true,
+  });
 }

@@ -77,7 +77,7 @@ This unified approach means there is one system to learn, one set of hooks to im
 
 ## Detached Spawn
 
-In addition to synchronous spawning, the runtime supports **detached spawns** — background sub-agents that run concurrently while the parent continues working.
+In addition to synchronous spawning, the agent harness supports **detached spawns** — background sub-agents that run concurrently while the parent continues working.
 
 ```typescript
 interface DetachedHandle<O> {
@@ -92,7 +92,7 @@ interface DetachedHandle<O> {
 ### Usage
 
 ```typescript
-const handle = runtime.detachedSpawn(subAgentStep, input, ctx);
+const handle = harness.detachedSpawn(subAgentStep, input, ctx);
 // Parent continues immediately — handle.status === 'running'
 
 // Later, check status or await result:
@@ -103,10 +103,10 @@ const result = await handle.await(5_000);   // throws on timeout
 ### Lifecycle
 
 ```
-Parent calls runtime.detachedSpawn(step, input, ctx)
+Parent calls harness.detachedSpawn(step, input, ctx)
 │
 ├─ Creates child Context with parent: ctx
-├─ Starts execute(step, input, childCtx) without awaiting
+├─ Starts run(step, input, childCtx) without awaiting
 ├─ Wraps promise in DetachedHandle
 ├─ Returns handle immediately
 │
@@ -122,7 +122,7 @@ Parent calls runtime.detachedSpawn(step, input, ctx)
 
 ### Context in Tools
 
-Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, runtime?, memory, assembledView, lastStepMeta, turnContext? }`. Note: `runtime` is `undefined` when the step is executed via bare `execute()` without a Runtime wrapper; tools that need runtime (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `runtime.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, memory layer propagation, and observability tracing. Both `runtime.execute()` and `runtime.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
+Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness?, memory, assembledView, lastStepMeta, turnContext? }`. Note: `harness` is `undefined` when the step is executed via bare `run()` without an AgentHarness wrapper; tools that need the harness (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, memory layer propagation, and observability tracing. Both `harness.run()` and `harness.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
 
 ---
 
@@ -132,7 +132,7 @@ Tools receive a `ToolExecutionContext` as their second argument, which provides 
 
 A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
 
-This is opt-in per memory layer via the `onParentUpdate` hook (see `11-memory-layer-system`). The runtime fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
+This is opt-in per memory layer via the `onParentUpdate` hook (see `11-memory-layer-system`). The agent harness fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
 
 **The child is never forced to accept parent updates.** Returning `void` means the child ignores the update entirely. This preserves the child's autonomy while enabling reactive parent-child relationships where needed.
 

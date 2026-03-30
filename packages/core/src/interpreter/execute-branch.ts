@@ -2,10 +2,10 @@ import type { Context } from '../types/context';
 import type { ExecuteStepFn, StepBranch } from '../types/step';
 import { frameworkCast } from './framework-cast';
 
-export async function executeBranch<I, O>(
-  step: StepBranch<I, O>,
+export async function executeBranch<TMemory, I, O>(
+  step: StepBranch<TMemory, I, O>,
   input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
   const selected = await step.route(input, ctx);
@@ -14,5 +14,5 @@ export async function executeBranch<I, O>(
     // the input passes through. Callers must ensure I is compatible with O.
     return frameworkCast<O>(input);
   }
-  return executeStep<I, O>(selected, input, ctx);
+  return executeStep<TMemory, I, O>(selected, input, ctx);
 }

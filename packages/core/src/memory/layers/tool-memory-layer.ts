@@ -11,6 +11,11 @@ const EXECUTION_SCOPE: MemoryScope = 'execution';
 /**
  * Generates one MemoryLayer per unique memory id among the provided tools.
  * Tools sharing the same `memory.id` share a single layer (and thus state).
+ *
+ * @public
+ * @param tools - Array of tools to extract memory declarations from.
+ * @param opts - Optional slot override for the generated layers.
+ * @returns An array of `MemoryLayer` instances, one per unique tool memory id.
  */
 export function toolMemoryLayer(
   tools: ReadonlyArray<Tool>,

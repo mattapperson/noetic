@@ -6,13 +6,17 @@ description: Built-in distributed tracing with OpenTelemetry-compatible spans.
 ## Quick Example
 
 ```ts
-import { InMemoryRuntime, InMemoryExporter } from '@noetic/core';
+import { AgentHarness, InMemoryExporter } from '@noetic/core';
 
 const exporter = new InMemoryExporter();
-const runtime = new InMemoryRuntime({ traceExporter: exporter });
+const harness = new AgentHarness({
+  name: 'traced-agent',
+  initialStep: myStep,
+  params: {},
+  traceExporter: exporter,
+});
 
-const ctx = runtime.createContext();
-await runtime.execute(myStep, input, ctx);
+await harness.execute('Hello');
 
 // Inspect collected spans
 for (const span of exporter.spans) {
@@ -49,7 +53,7 @@ interface Span {
 Every [Context](/docs/context) has a `span` property. You can add custom attributes from within any step:
 
 ```ts
-const myStep = step.run('annotated', async (input: string, ctx) => {
+const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) => {
   ctx.span.setAttribute('input.length', input.length);
   ctx.span.addEvent('processing_started');
 
@@ -57,12 +61,12 @@ const myStep = step.run('annotated', async (input: string, ctx) => {
 
   ctx.span.addEvent('processing_finished', { resultSize: result.length });
   return result;
-});
+}});
 ```
 
 ## SpanImpl
 
-`SpanImpl` is the concrete implementation used by `InMemoryRuntime`. It adds fields useful for export and inspection:
+`SpanImpl` is the concrete implementation used by `AgentHarness`. It adds fields useful for export and inspection:
 
 | Property | Type | Description |
 |---|---|---|
@@ -118,7 +122,7 @@ Discards all spans. This is the default when no exporter is configured.
 ```ts
 import { NoopExporter } from '@noetic/core';
 
-const runtime = new InMemoryRuntime({
+const harness = new AgentHarness({
   traceExporter: new NoopExporter(),
 });
 ```
@@ -191,7 +195,7 @@ Noetic defines constants following the OpenTelemetry GenAI semantic conventions.
 ```ts
 import { GenAI, ToolAttr } from '@noetic/core';
 
-// These are set automatically by the runtime, but you can use them
+// These are set automatically by the agent harness, but you can use them
 // in custom exporters or assertions:
 const model = span.attributes.get(GenAI.REQUEST_MODEL);
 const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
@@ -200,5 +204,5 @@ const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
 ## Related Pages
 
 - [Context & Event Log](/docs/context) -- every context carries a `span`.
-- [Runtime](/docs/runtime) -- `createSpan` and trace exporter configuration.
+- [AgentHarness](/docs/runtime) -- `createSpan` and trace exporter configuration.
 - [Memory](/docs/memory) -- memory layer operations produce `MemoryTraceSpan` records.

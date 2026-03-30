@@ -110,7 +110,7 @@ function isNoeticConfigError(e: unknown): e is NoeticConfigError;
 ```
 NoeticConfigError: Missing required environment variable.
   code: MISSING_API_KEY
-  hint: Set OPENROUTER_API_KEY in your environment or pass a callModel adapter explicitly.
+  hint: Set OPENROUTER_API_KEY in your environment or pass an llm config to AgentHarness.
   docsUrl: https://noetic.dev/docs/errors#MISSING_API_KEY
 ```
 

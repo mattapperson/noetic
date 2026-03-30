@@ -13,7 +13,7 @@ We chose a single `Step<I, O>` discriminated union with seven `kind` variants (s
 
 ## Three execution variants (`run`, `llm`, `tool`) vs. a single overloaded function
 
-We chose explicit variants (see `02-step-variants`) because the runtime treats them differently: retry semantics, cost tracking, approval gating, sandboxing, and telemetry all differ. The cost is three constructors instead of one. The benefit is that TypeScript enforces correct usage at compile time and the runtime never needs to inspect arguments to determine behavior.
+We chose explicit variants (see `02-step-variants`) because the agent harness treats them differently: retry semantics, cost tracking, approval gating, sandboxing, and telemetry all differ. The cost is three constructors instead of one. The benefit is that TypeScript enforces correct usage at compile time and the agent harness never needs to inspect arguments to determine behavior.
 
 ## `O` as business value only vs. rich return types
 
@@ -41,7 +41,7 @@ We chose `Verdict` (see `05-loop-and-until`) with `stop`, `reason`, and `feedbac
 
 ## Memory layers as a separate plugin system vs. built into Context
 
-We chose to make memory layers a plugin system (see `11-memory-layer-system`) with lifecycle hooks rather than building memory management into the `Context` object. The alternative would make every agent pay for memory features it doesn't use. The tradeoff: more indirection (the View is assembled by the Projector), but memory layers are independently authorable, composable, and replaceable. A simple script uses zero layers; a production agent uses five — same runtime, same Step types.
+We chose to make memory layers a plugin system (see `11-memory-layer-system`) with lifecycle hooks rather than building memory management into the `Context` object. The alternative would make every agent pay for memory features it doesn't use. The tradeoff: more indirection (the View is assembled by the Projector), but memory layers are independently authorable, composable, and replaceable. A simple script uses zero layers; a production agent uses five — same agent harness, same Step types.
 
 ## ItemLog + Memory Layers vs. a single "context" concept
 
@@ -53,15 +53,15 @@ We chose to handle all persistence — including task-level artifacts like files
 
 ## Items-native vs. Message/Event duality
 
-We chose to use OpenResponses `Item` types throughout the framework, collapsing the previous `Message` and `Event` types into a single hierarchy (see `07-context-and-event-log`). Items serve as both the record of what happened (in the `ItemLog`) and the input to `callModel` (in the View). This eliminates impedance mismatch — there is no conversion layer between the framework's internal representation and the model API format. The tradeoff: pattern-matching for simple role checks (e.g., "is this a user message?") requires checking `item.type === 'message' && item.role === 'user'` instead of `message.role === 'user'`, which is slightly more verbose. But the zero-conversion guarantee means fewer bugs and less code overall.
+We chose to use OpenResponses `Item` types throughout the framework, collapsing the previous `Message` and `Event` types into a single hierarchy (see `07-context-and-event-log`). Items serve as both the record of what happened (in the `ItemLog`) and the input to the LLM provider (in the View). This eliminates impedance mismatch — there is no conversion layer between the framework's internal representation and the model API format. The tradeoff: pattern-matching for simple role checks (e.g., "is this a user message?") requires checking `item.type === 'message' && item.role === 'user'` instead of `message.role === 'user'`, which is slightly more verbose. But the zero-conversion guarantee means fewer bugs and less code overall.
 
 ## `tryRecv` vs. blocking-only channel reads
 
 We chose to add `tryRecv` as a non-blocking read that returns `T | null` (see `06-channels`). The alternative — blocking `recv` only — forces steps that want to check for data without suspending to use timeouts or spawn background readers. `tryRecv` never throws for normal control flow. This is Go's `select/default` analogue. The tradeoff: slightly more API surface, but polling patterns (like a worker checking for plan updates) become trivial one-liners instead of requiring channel timeout workarounds.
 
-## `ChannelHandle` vs. bare `runtime.send`
+## `ChannelHandle` vs. bare `harness.send`
 
-We chose `ChannelHandle<T>` as a typed, lifecycle-aware write surface for external callers (see `06-channels`). The alternative — exposing `runtime.send(channel, value, executionId)` directly — would require external callers to hold runtime references and manage execution IDs manually. `ChannelHandle` encapsulates the routing, validates the channel is still open, and provides type safety at the call site. The tradeoff: slightly more API surface (`getChannelHandle` + `ChannelHandle` type), but routing is unambiguous and lifecycle errors (sending to a completed execution) are caught immediately.
+We chose `ChannelHandle<T>` as a typed, lifecycle-aware write surface for external callers (see `06-channels`). The alternative — exposing `harness.send(channel, value, executionId)` directly — would require external callers to hold agent harness references and manage execution IDs manually. `ChannelHandle` encapsulates the routing, validates the channel is still open, and provides type safety at the call site. The tradeoff: slightly more API surface (`getChannelHandle` + `ChannelHandle` type), but routing is unambiguous and lifecycle errors (sending to a completed execution) are caught immediately.
 
 ## External channels survive fresh boundaries
 

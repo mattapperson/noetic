@@ -1,12 +1,12 @@
-import type { CallModelFn } from '@noetic/core';
-import { step as coreStep, InMemoryRuntime } from '@noetic/core';
+import type { LlmProviderConfig } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
 //#region Types
 
 export interface JudgeConfig {
   model?: string;
-  callModel?: CallModelFn;
+  llm?: LlmProviderConfig;
 }
 
 interface JudgeRunConfig<T> {
@@ -26,19 +26,27 @@ const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const model = config.judge?.model ?? DEFAULT_MODEL;
 
-  const judgeStep = coreStep.llm({
+  const judgeStep = step.llm({
     id: config.id,
     model,
     system: `${config.system}\n\nRespond ONLY with valid JSON matching the required schema.`,
   });
 
-  const runtime = new InMemoryRuntime({
-    callModel: config.judge?.callModel,
+  const harness = new AgentHarness({
+    name: 'llm-judge',
+    params: {},
+    llm: config.judge?.llm,
   });
-  const ctx = runtime.createContext();
+  const ctx = harness.createContext();
 
-  const raw = await runtime.execute(judgeStep, config.input, ctx);
-  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  const raw = await harness.run(judgeStep, config.input, ctx);
+
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    throw new Error(`LLM judge "${config.id}" returned invalid JSON: ${String(raw).slice(0, 200)}`);
+  }
   return config.outputSchema.parse(parsed);
 }
 

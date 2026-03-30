@@ -25,7 +25,7 @@ const makeFunctionCall = (id: string): FunctionCallItem => ({
   id,
   type: 'function_call',
   status: 'completed',
-  call_id: `call_${id}`,
+  callId: `call_${id}`,
   name: 'myFunc',
   arguments: '{}',
 });
@@ -34,7 +34,7 @@ const makeFunctionCallOutput = (id: string): FunctionCallOutputItem => ({
   id,
   type: 'function_call_output',
   status: 'completed',
-  call_id: `call_${id}`,
+  callId: `call_${id}`,
   output: '{"result": true}',
 });
 
@@ -99,7 +99,7 @@ describe('ItemLogImpl', () => {
     };
     const ext: ExtensionItem = {
       id: 'e1',
-      type: 'x-custom_type',
+      type: 'noetic:custom_type',
       status: 'completed',
       data: {
         foo: 'bar',
@@ -124,6 +124,6 @@ describe('ItemLogImpl', () => {
     expect(log.items[1].type).toBe('function_call');
     expect(log.items[2].type).toBe('function_call_output');
     expect(log.items[3].type).toBe('reasoning');
-    expect(log.items[4].type).toBe('x-custom_type');
+    expect(log.items[4].type).toBe('noetic:custom_type');
   });
 });

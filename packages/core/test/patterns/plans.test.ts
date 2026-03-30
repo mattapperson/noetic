@@ -3,7 +3,9 @@ import { execute } from '../../src/interpreter/execute';
 import type { PlanNode } from '../../src/patterns/plans';
 import { adaptivePlan, compilePlan } from '../../src/patterns/plans';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
+import { makeMockHarness } from '../_helpers';
 
 describe('compilePlan', () => {
   it('compiles leaf node to executable step', async () => {
@@ -21,7 +23,13 @@ describe('compilePlan', () => {
       }),
     };
     const compiled = compilePlan<string>(plan, agents);
-    const result = await execute(compiled, 'input', new ContextImpl());
+    const result = await execute(
+      compiled,
+      'input',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+    );
     expect(result).toBe('Done: Do something');
   });
 
@@ -58,7 +66,13 @@ describe('compilePlan', () => {
       }),
     };
     const compiled = compilePlan<string>(plan, agents);
-    await execute(compiled, 'start', new ContextImpl());
+    await execute(
+      compiled,
+      'start',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+    );
     expect(receivedInputs[0]).toBe('start');
     expect(receivedInputs[1]).toBe('start -> Step 1');
   });
@@ -106,7 +120,13 @@ describe('compilePlan', () => {
       }),
     };
     const compiled = compilePlan(plan, agents);
-    await execute(compiled, 'start', new ContextImpl());
+    await execute(
+      compiled,
+      'start',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+    );
     expect(results).toContain('Parallel 1');
     expect(results).toContain('Parallel 2');
     expect(results).toHaveLength(2);
@@ -153,7 +173,13 @@ describe('compilePlan', () => {
       }),
     };
     const compiled = compilePlan(plan, agents);
-    await execute(compiled, 'start', new ContextImpl());
+    await execute(
+      compiled,
+      'start',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+    );
     expect(results).toEqual([
       'GC1',
       'GC2',
@@ -186,7 +212,13 @@ describe('adaptivePlan', () => {
       agents,
       maxRevisions: 3,
     });
-    const result = await execute(step, 'goal', new ContextImpl());
+    const result = await execute(
+      step,
+      'goal',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+    );
     expect(result).toBe('success');
   });
 
@@ -224,7 +256,13 @@ describe('adaptivePlan', () => {
       agents,
       maxRevisions: 5,
     });
-    const result = await execute(step, 'goal', new ContextImpl());
+    const result = await execute(
+      step,
+      'goal',
+      new ContextImpl({
+        harness: makeMockHarness(),
+      }),
+    );
     expect(result).toBe('success');
     expect(planCount).toBe(3);
     expect(execCount).toBe(3);
@@ -255,7 +293,15 @@ describe('adaptivePlan', () => {
       agents,
       maxRevisions: 2,
     });
-    await expect(execute(step, 'goal', new ContextImpl())).rejects.toThrow('always fails');
+    await expect(
+      execute(
+        step,
+        'goal',
+        new ContextImpl({
+          harness: makeMockHarness(),
+        }),
+      ),
+    ).rejects.toThrow('always fails');
   });
 
   it('planner throws propagates error', async () => {
@@ -278,24 +324,34 @@ describe('adaptivePlan', () => {
       agents,
       maxRevisions: 3,
     });
-    await expect(execute(step, 'goal', new ContextImpl())).rejects.toThrow('planner exploded');
+    await expect(
+      execute(
+        step,
+        'goal',
+        new ContextImpl({
+          harness: makeMockHarness(),
+        }),
+      ),
+    ).rejects.toThrow('planner exploded');
   });
 
   it('non-run planner without executeStep throws', async () => {
-    const planner: Step<string, PlanNode> = {
+    const planner: Step<ContextMemory, string, PlanNode> = {
       kind: 'loop' as const,
       id: 'planner',
-      body: {
-        kind: 'run' as const,
-        id: 'b',
-        execute: async () =>
-          ({
-            id: 'stub',
-            description: 'stub',
-            assignee: 'none',
-            execution: 'sequential' as const,
-          }) satisfies PlanNode,
-      },
+      steps: [
+        {
+          kind: 'run' as const,
+          id: 'b',
+          execute: async () =>
+            ({
+              id: 'stub',
+              description: 'stub',
+              assignee: 'none',
+              execution: 'sequential' as const,
+            }) satisfies PlanNode,
+        },
+      ],
       until: () => ({
         stop: true,
       }),
@@ -306,8 +362,14 @@ describe('adaptivePlan', () => {
       agents,
       maxRevisions: 1,
     });
-    await expect(execute(step, 'goal', new ContextImpl())).rejects.toThrow(
-      'Planner must be a run step',
-    );
+    await expect(
+      execute(
+        step,
+        'goal',
+        new ContextImpl({
+          harness: makeMockHarness(),
+        }),
+      ),
+    ).rejects.toThrow('Planner must be a run step');
   });
 });

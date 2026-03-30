@@ -1,13 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ContextImpl, SpanImpl } from '@noetic/core';
+import { AgentHarness } from '@noetic/core';
+import { ContextImpl, SpanImpl } from '@noetic/core/internal/test';
 import { createScorer } from '../../src/scorers/scorer-pipeline';
 import type { EvalExecution, ScoreResult, ScorerFn } from '../../src/scorers/types';
 
 //#region Helper Functions
 
+const testHarness = new AgentHarness({
+  name: 'test',
+  params: {},
+});
+
 function createMockExecution(output: unknown): EvalExecution {
-  const ctx = new ContextImpl();
+  const ctx = new ContextImpl({
+    harness: testHarness,
+  });
   ctx.cost = 0.01;
   ctx.tokens = {
     input: 50,
@@ -88,6 +96,54 @@ describe('createScorer pipeline', () => {
     expect(result.scorerId).toBe('reason-scorer');
     expect(result.score).toBe(1.0);
     expect(result.reason).toBe('Score was 1');
+  });
+});
+
+describe('clampScore behavior', () => {
+  async function scoreWithRawValue(rawScore: number): Promise<ScoreResult> {
+    const scorer = createScorer({
+      id: 'clamp-test',
+    })
+      .preprocess(() => ({}))
+      .generateScore(() => rawScore);
+
+    const execution = createMockExecution('test');
+    return scorer(execution, '', '');
+  }
+
+  test('score exactly 0 is not clamped', async () => {
+    const result = await scoreWithRawValue(0);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata).toBeUndefined();
+  });
+
+  test('score exactly 1 is not clamped', async () => {
+    const result = await scoreWithRawValue(1);
+
+    expect(result.score).toBe(1);
+    expect(result.metadata).toBeUndefined();
+  });
+
+  test('score -0.1 is clamped to 0 with metadata', async () => {
+    const result = await scoreWithRawValue(-0.1);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata?.clamped).toBe(true);
+  });
+
+  test('score 1.5 is clamped to 1 with metadata', async () => {
+    const result = await scoreWithRawValue(1.5);
+
+    expect(result.score).toBe(1);
+    expect(result.metadata?.clamped).toBe(true);
+  });
+
+  test('score 0.5 is not clamped', async () => {
+    const result = await scoreWithRawValue(0.5);
+
+    expect(result.score).toBe(0.5);
+    expect(result.metadata).toBeUndefined();
   });
 });
 

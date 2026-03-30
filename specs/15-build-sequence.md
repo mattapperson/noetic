@@ -11,7 +11,7 @@ Each stage produces a working system that can be tested. The spec updates after 
 
 **Specs:** `01-step-type`, `02-step-variants` (run + llm mocked)
 
-The discriminated union `Step` type and the `execute` interpreter. Get the core switch working with `run`, `llm` (mocked), and `loop` + `until`. `ItemLog` established here — `callModel` returns items, runtime appends to `ItemLog`. Write **ReAct** against this.
+The discriminated union `Step` type and the `execute` interpreter. Get the core switch working with `run`, `llm` (mocked), and `loop` + `until`. `ItemLog` established here — the LLM provider returns items, runtime appends to `ItemLog`. Write **ReAct** against this.
 
 ## Stage 2: Fork
 

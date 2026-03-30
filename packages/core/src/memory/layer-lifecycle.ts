@@ -1,3 +1,4 @@
+import { NoeticConfigError } from '../errors/noetic-config-error';
 import { frameworkCast } from '../interpreter/framework-cast';
 import { createMessage, estimateTokens } from '../interpreter/message-helpers';
 import type { LLMResponse } from '../types/common';
@@ -504,6 +505,9 @@ export async function beforeToolCallLayers({
       }
       decisions.push(result.decision);
     } catch (e) {
+      if (e instanceof NoeticConfigError) {
+        throw e;
+      }
       store.diagnostic(layer.id, 'beforeToolCall', e);
     }
   }
@@ -548,6 +552,9 @@ export async function afterModelCallLayers({
       }
       decisions.push(result.decision);
     } catch (e) {
+      if (e instanceof NoeticConfigError) {
+        throw e;
+      }
       store.diagnostic(layer.id, 'afterModelCall', e);
     }
   }

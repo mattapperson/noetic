@@ -2,19 +2,23 @@ import type { TurnContext } from '@openrouter/sdk';
 import type { StepMeta } from './common';
 import type { Context } from './context';
 import type { Item } from './items';
-import type { Runtime } from './runtime';
+import type { AgentHarnessContract } from './runtime';
 
+/** @public Accessor for reading and writing per-layer state from within a tool execution. */
 export interface ToolMemory {
   get<T>(layerId: string): T | undefined;
   set<T>(layerId: string, state: T): void;
 }
 
-/** Context provided to a tool's `execute` function at invocation time. */
+/**
+ * Context provided to a tool's `execute` function at invocation time.
+ * @public
+ */
 export interface ToolExecutionContext {
   /** The current step execution context (access to item log, parent id, etc.). */
   readonly ctx: Context;
-  /** The runtime instance executing this tool. */
-  readonly runtime: Runtime;
+  /** The harness instance executing this tool. */
+  readonly harness: AgentHarnessContract;
   /** Per-layer memory accessor for reading/writing tool-specific state. */
   readonly memory: ToolMemory;
   /** The fully assembled conversation view at the point of tool invocation. */

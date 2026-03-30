@@ -5,15 +5,16 @@ import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeFork } from '../../src/interpreter/execute-fork';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
+import type { ContextMemory } from '../../src/types/memory';
 import type { SettleResult, StepForkAll, StepForkRace, StepForkSettle } from '../../src/types/step';
-import { simpleExecute } from '../_helpers';
+import { makeMockHarness, simpleExecute } from '../_helpers';
 
 const _StateSchema = z.record(z.string(), z.unknown());
 
 describe('executeFork', () => {
   describe('all mode', () => {
     it('executes all paths and merges results', async () => {
-      const step: StepForkAll<number, number> = {
+      const step: StepForkAll<ContextMemory, number, number> = {
         kind: 'fork',
         id: 'all-test',
         mode: 'all',
@@ -31,13 +32,15 @@ describe('executeFork', () => {
         ],
         merge: (results) => results.reduce((a, b) => a + b, 0),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, 5, ctx, simpleExecute);
       expect(result).toBe(25); // 10 + 15
     });
 
     it('throws fork_partial when any path fails', async () => {
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'fail-test',
         mode: 'all',
@@ -57,7 +60,9 @@ describe('executeFork', () => {
         ],
         merge: (results) => results.join(','),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
@@ -72,7 +77,7 @@ describe('executeFork', () => {
     });
 
     it('state is isolated between paths', async () => {
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'iso-test',
         mode: 'all',
@@ -100,6 +105,7 @@ describe('executeFork', () => {
         merge: (results) => results.join('|'),
       };
       const ctx = new ContextImpl({
+        harness: makeMockHarness(),
         state: {
           original: true,
         },
@@ -118,7 +124,7 @@ describe('executeFork', () => {
     it('respects concurrency limit', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'conc-test',
         mode: 'all',
@@ -160,7 +166,9 @@ describe('executeFork', () => {
         merge: (r) => r.join(','),
         concurrency: 2,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
@@ -179,7 +187,7 @@ describe('executeFork', () => {
           return id;
         },
       });
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'serial-test',
         mode: 'all',
@@ -191,7 +199,9 @@ describe('executeFork', () => {
         merge: (r) => r.join(','),
         concurrency: 1,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBe(1);
       expect(result).toBe('a,b,c');
@@ -200,7 +210,7 @@ describe('executeFork', () => {
     it('paths() receives input and context', async () => {
       let capturedInput: string | undefined;
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'args-test',
         mode: 'all',
@@ -217,7 +227,9 @@ describe('executeFork', () => {
         },
         merge: (r) => r.join(','),
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, 'test-input', ctx, simpleExecute);
       expect(capturedInput).toBe('test-input');
       expect(capturedCtx).toBe(ctx);
@@ -225,7 +237,7 @@ describe('executeFork', () => {
 
     it('merge() receives context as second arg', async () => {
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'merge-ctx-test',
         mode: 'all',
@@ -241,20 +253,24 @@ describe('executeFork', () => {
           return results.join(',');
         },
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
       expect(capturedCtx).toBe(ctx);
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkAll<string, string> = {
+      const step: StepForkAll<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'empty-all',
         mode: 'all',
         paths: () => [],
         merge: (results) => `got ${results.length}`,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
     });
@@ -262,7 +278,7 @@ describe('executeFork', () => {
 
   describe('race mode', () => {
     it('returns first completed result', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'race-test',
         mode: 'race',
@@ -285,13 +301,15 @@ describe('executeFork', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('fast');
     });
 
     it('winner state replaces parent state', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'state-test',
         mode: 'race',
@@ -318,6 +336,7 @@ describe('executeFork', () => {
         ],
       };
       const ctx = new ContextImpl({
+        harness: makeMockHarness(),
         state: {
           original: true,
         },
@@ -329,7 +348,7 @@ describe('executeFork', () => {
 
     it('aborts loser contexts after winner resolves', async () => {
       const childContexts: Context[] = [];
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'abort-test',
         mode: 'race',
@@ -354,7 +373,9 @@ describe('executeFork', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('winner');
       // Allow time for abort to propagate
@@ -367,7 +388,7 @@ describe('executeFork', () => {
     it('respects concurrency limit in race mode', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'race-conc-test',
         mode: 'race',
@@ -408,13 +429,15 @@ describe('executeFork', () => {
         ],
         concurrency: 2,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
 
     it('all fail throws fork_partial', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'all-fail',
         mode: 'race',
@@ -435,7 +458,9 @@ describe('executeFork', () => {
           },
         ],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
@@ -449,13 +474,15 @@ describe('executeFork', () => {
     });
 
     it('throws fork_partial on empty paths', async () => {
-      const step: StepForkRace<string, string> = {
+      const step: StepForkRace<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'empty-race',
         mode: 'race',
         paths: () => [],
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       try {
         await executeFork(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
@@ -468,7 +495,7 @@ describe('executeFork', () => {
 
   describe('settle mode', () => {
     it('waits for all and never throws', async () => {
-      const step: StepForkSettle<string, string> = {
+      const step: StepForkSettle<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'settle-test',
         mode: 'settle',
@@ -492,14 +519,16 @@ describe('executeFork', () => {
           return `${fulfilled.length} ok, ${rejected.length} failed`;
         },
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('1 ok, 1 failed');
     });
 
     it('settle result has correct shape', async () => {
       let capturedResults: SettleResult<string>[] = [];
-      const step: StepForkSettle<string, string> = {
+      const step: StepForkSettle<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'shape-test',
         mode: 'settle',
@@ -522,7 +551,9 @@ describe('executeFork', () => {
           return 'done';
         },
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       await executeFork(step, '', ctx, simpleExecute);
 
       expect(capturedResults).toHaveLength(2);
@@ -536,14 +567,16 @@ describe('executeFork', () => {
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkSettle<string, string> = {
+      const step: StepForkSettle<ContextMemory, string, string> = {
         kind: 'fork',
         id: 'empty-settle',
         mode: 'settle',
         paths: () => [],
         merge: (results: SettleResult<string>[]) => `got ${results.length}`,
       };
-      const ctx = new ContextImpl();
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
     });

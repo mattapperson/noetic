@@ -1,6 +1,6 @@
 # Semantic Conditions and Embedding-Based Routing
 
-> **Depends On:** `03-control-flow` (branch, StepBranch), `05-loop-and-until` (ConvergeOpts)
+> **Depends On:** `03-control-flow` (branch, StepBranch), `05-loop-and-until` (ConvergeConfig)
 > **Exports:** `Condition`, `WhenClause`, `OtherwiseClause`, `when()`, `otherwise()`, `semanticRoute()`, `semanticSwitch()`, `embeddingMatch()`, `aiCondition()`, `anyCondition()`, `allCondition()`, `cosineSimilarity()`, `EmbedFn`
 
 ---
@@ -91,9 +91,9 @@ embeddingMatch({
 })
 ```
 
-### `aiCondition({ callModel, model, prompt })`
+### `aiCondition({ model, prompt })`
 
-Returns `Condition<I>` that asks an LLM a yes/no question, parses boolean response via Zod.
+Returns `Condition<I>` that asks an LLM a yes/no question, parses boolean response via Zod. Gets the LLM client from `ctx.harness` internally.
 
 ### `anyCondition(...conditions)`
 

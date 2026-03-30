@@ -13,6 +13,7 @@ import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
 import type { Channel } from '../src/types/channel';
 import type { DetachedHandle } from '../src/types/detached';
+import type { ContextMemory } from '../src/types/memory';
 import type { StepLoop } from '../src/types/step';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
@@ -33,7 +34,7 @@ export const agentInbox = channel('agent-inbox', {
 export function buildAsyncDelegateAgent(opts: {
   inbox: Channel<string>;
   parkTimeout?: number;
-}): StepLoop<string, string> {
+}): StepLoop<ContextMemory, string, string> {
   const handles = new Map<string, DetachedHandle<string>>();
 
   const launchTool = createAsyncLaunchTool({
@@ -44,15 +45,17 @@ export function buildAsyncDelegateAgent(opts: {
 
   return loop({
     id: 'async-delegate-loop',
-    body: step.llm({
-      id: 'async-delegate-llm',
-      model: 'gpt-4o',
-      system: 'You are an assistant that can launch background sub-agents.',
-      tools: [
-        launchTool,
-        checkTool,
-      ],
-    }),
+    steps: [
+      step.llm({
+        id: 'async-delegate-llm',
+        model: 'gpt-4o',
+        system: 'You are an assistant that can launch background sub-agents.',
+        tools: [
+          launchTool,
+          checkTool,
+        ],
+      }),
+    ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
     inbox: opts.inbox,
     parkTimeout: opts.parkTimeout ?? 5e3,

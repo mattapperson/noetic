@@ -1,4 +1,4 @@
-import type { CallModelInput, Tool as SdkTool, TurnContext } from '@openrouter/sdk';
+import type { CallModelInput } from '@openrouter/sdk';
 import type {
   OpenResponsesEasyInputMessage,
   OpenResponsesFunctionCallOutput,
@@ -11,7 +11,6 @@ import type {
 } from '@openrouter/sdk/models';
 import { z } from 'zod';
 
-import type { CallModelFn, CallModelParams } from '../interpreter/execute-llm';
 import { frameworkCast } from '../interpreter/framework-cast';
 import { isAssistantMessage, isOutputText } from '../interpreter/typeguards';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
@@ -20,8 +19,23 @@ import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
-import type { Runtime } from '../types/runtime';
+import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
+
+//#region SDK Tool Type
+
+// Re-export the SDK Tool type under a distinct name to avoid collision with
+// Noetic's Tool type. Import aliases (`as`) are banned by our biome config,
+// so we use a type extracted from CallModelInput's generic parameter instead.
+type SdkToolArray = CallModelInput extends {
+  tools?: infer T;
+}
+  ? NonNullable<T>
+  : never;
+/** @internal */
+export type SdkTool = SdkToolArray[number];
+
+//#endregion
 
 //#region Type Guards
 
@@ -48,14 +62,9 @@ type OpenRouterInputItem =
   | OpenResponsesFunctionToolCall
   | OpenResponsesFunctionCallOutput;
 
-/**
- * Minimal interface covering only the methods used by createOpenRouterCallModel.
- * Allows passing a mock or a real OpenRouter client interchangeably.
- */
-export interface OpenRouterClientLike {
-  callModel(request: CallModelInput<SdkTool[]>): {
-    getResponse(): Promise<OpenResponsesNonStreamingResponse>;
-  };
+/** @internal */
+export interface ConvertToolsParams {
+  tools: ReadonlyArray<Tool>;
 }
 
 const EmbeddingsResponseSchema = z.object({
@@ -66,13 +75,6 @@ const EmbeddingsResponseSchema = z.object({
     }),
   ),
 });
-
-interface ConvertToolsParams {
-  tools: ReadonlyArray<Tool>;
-  ctx: Context;
-  runtime: Runtime;
-  layers?: MemoryLayer[];
-}
 
 //#endregion
 
@@ -107,7 +109,8 @@ function contentPartToText(parts: ReadonlyArray<ContentPart>): string {
 
 //#region Item → OpenRouter Input Conversion
 
-function extractSystemInstruction(items: ReadonlyArray<Item>): {
+/** @internal */
+export function extractSystemInstruction(items: ReadonlyArray<Item>): {
   instructions: string | undefined;
   remaining: Item[];
 } {
@@ -147,7 +150,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   if (item.type === 'function_call') {
     return {
       type: 'function_call',
-      callId: item.call_id,
+      callId: item.callId,
       id: item.id,
       name: item.name,
       arguments: item.arguments,
@@ -157,7 +160,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   if (item.type === 'function_call_output') {
     return {
       type: 'function_call_output',
-      callId: item.call_id,
+      callId: item.callId,
       output: item.output,
     } satisfies OpenResponsesFunctionCallOutput;
   }
@@ -166,7 +169,8 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
   return null;
 }
 
-function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
+/** @internal */
+export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
   const result: OpenRouterInputItem[] = [];
   for (const item of items) {
     const inputItem = itemToInputItem(item);
@@ -209,7 +213,7 @@ function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
       id: entry.id ?? crypto.randomUUID(),
       status: 'completed',
       type: 'function_call',
-      call_id: entry.callId,
+      callId: entry.callId,
       name: entry.name,
       arguments: entry.arguments,
     } satisfies FunctionCallItem;
@@ -219,7 +223,8 @@ function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
   return null;
 }
 
-function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Item[] {
+/** @internal */
+export function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Item[] {
   const items: Item[] = [];
   let hasMessage = false;
 
@@ -253,7 +258,8 @@ function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Ite
   return items;
 }
 
-function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse['usage'] {
+/** @internal */
+export function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse['usage'] {
   if (!usage) {
     return {
       inputTokens: 0,
@@ -275,7 +281,13 @@ function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse
 // the internal Zod type gap between Noetic's Tool interface and the OpenRouter SDK.
 // This is safe because callModel only uses inputSchema for JSON Schema
 // generation and validation.
-function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkTool[] {
+//
+// IMPORTANT: We intentionally omit `execute` from the SDK tool definitions.
+// This prevents the SDK from handling tool calls internally, which would
+// make tool interactions invisible to Noetic's itemLog, token tracking,
+// and observability. Instead, the AgentHarness manages the tool loop.
+/** @internal */
+export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
@@ -283,68 +295,64 @@ function convertTools({ tools, ctx, runtime, layers }: ConvertToolsParams): SdkT
         name: t.name,
         description: t.description,
         inputSchema: t.input,
-        execute: async (args: unknown, turnContext?: TurnContext) => {
-          // Run beforeToolCall steering check if layers are present
-          if (layers && layers.length > 0) {
-            const decision = await runtime.beforeToolCall(layers, t.name, args, ctx);
-            if (decision.action === SteeringAction.Deny) {
-              return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
-            }
-            if (decision.action === SteeringAction.Guide) {
-              return `Tool call redirected: ${decision.guidance}`;
-            }
-          }
-          const toolCtx = buildToolExecutionContext(ctx, runtime, turnContext);
-          return t.execute(args, toolCtx);
-        },
       },
     }),
   );
+}
+
+/** @internal */
+export interface ExecuteToolCallParams {
+  toolName: string;
+  args: unknown;
+  tools: ReadonlyArray<Tool>;
+  context: Context;
+  harness: AgentHarnessContract;
+  layers?: MemoryLayer[];
+}
+
+/** @internal Execute a single tool call with steering checks. */
+export async function executeToolCall(params: ExecuteToolCallParams): Promise<string> {
+  const matchedTool = params.tools.find((t) => t.name === params.toolName);
+  if (!matchedTool) {
+    return `Error: unknown tool '${params.toolName}'`;
+  }
+
+  if (params.layers && params.layers.length > 0) {
+    const decision = await params.harness.beforeToolCall(
+      params.layers,
+      params.toolName,
+      params.args,
+      params.context,
+    );
+    if (decision.action === SteeringAction.Deny) {
+      return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
+    }
+    if (decision.action === SteeringAction.Guide) {
+      return `Tool call redirected: ${decision.guidance}`;
+    }
+  }
+
+  const toolCtx = buildToolExecutionContext(params.context, params.harness);
+  try {
+    const result = await matchedTool.execute(params.args, toolCtx);
+    return typeof result === 'string' ? result : JSON.stringify(result);
+  } catch (e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 //#endregion
 
 //#region Public API
 
-export function createOpenRouterCallModel(client: OpenRouterClientLike): CallModelFn {
-  return async (params: CallModelParams): Promise<LLMResponse> => {
-    const { instructions, remaining } = extractSystemInstruction(params.items);
-    const input = itemsToInput(remaining);
-
-    let tools: SdkTool[] | undefined;
-    if (params.tools && params.tools.length > 0) {
-      if (!params.runtime) {
-        throw new Error('runtime is required when tools are provided');
-      }
-      tools = convertTools({
-        tools: params.tools,
-        ctx: params.ctx,
-        runtime: params.runtime,
-        layers: params.layers,
-      });
-    }
-
-    const result = client.callModel({
-      model: params.model,
-      input,
-      instructions,
-      tools,
-      temperature: params.params?.temperature,
-      maxOutputTokens: params.params?.maxTokens,
-      topP: params.params?.topP,
-    });
-
-    const response = await result.getResponse();
-    const noeticItems = responseToNoeticItems(response);
-
-    return {
-      items: noeticItems,
-      usage: extractUsage(response.usage),
-      cost: response.usage?.cost ?? undefined,
-    };
-  };
-}
-
+/**
+ * Creates an `EmbedFn` that calls the OpenRouter embeddings API.
+ *
+ * @public
+ * @param apiKey - OpenRouter API key.
+ * @param embeddingModel - Model identifier (default: `'openai/text-embedding-3-small'`).
+ * @returns An `EmbedFn` that produces embedding vectors for the given texts.
+ */
 export function createOpenRouterEmbed(apiKey: string, embeddingModel?: string): EmbedFn {
   const model = embeddingModel ?? 'openai/text-embedding-3-small';
 

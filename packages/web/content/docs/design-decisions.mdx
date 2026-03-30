@@ -10,15 +10,17 @@ Every step has a `kind` property (`'run'`, `'llm'`, `'tool'`, `'branch'`, `'fork
 Discriminated unions also make steps serializable as plain data. You can log, inspect, and reconstruct any step from its JSON representation.
 
 ```ts
-type Step<I, O> =
-  | StepRun<I, O>
-  | StepLLM<I, O>
-  | StepTool<I, O>
-  | StepBranch<I, O>
-  | StepFork<I, O>
-  | StepSpawn<I, O>
-  | StepLoop<I, O>;
+type Step<TMemory, I, O> =
+  | StepRun<TMemory, I, O>
+  | StepLLM<TMemory, I, O>
+  | StepTool<TMemory, I, O>
+  | StepBranch<TMemory, I, O>
+  | StepFork<TMemory, I, O>
+  | StepSpawn<TMemory, I, O>
+  | StepLoop<TMemory, I, O>;
 ```
+
+`TMemory` defaults to `ContextMemory`, so `Step<I, O>` still works when you do not need typed memory access.
 
 The `kind` field is the discriminant. A simple `switch (step.kind)` gives you exhaustive handling with full type narrowing.
 
@@ -115,7 +117,7 @@ Agents are configurations (`AgentConfig`), not classes. A config is just data:
 - **Testable** -- no instantiation needed, just assert on the data
 - **Declarative** -- the runtime does the work, the config declares intent
 
-The `Runtime` interface handles execution. This separation of data from behavior makes agents easier to reason about and test.
+The `AgentHarness` interface handles execution. This separation of data from behavior makes agents easier to reason about and test.
 
 ## Related
 

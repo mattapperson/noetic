@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@noetic/core": ["../core/src/index.ts"],
+      "@noetic/core/*": ["../core/src/*"],
+      "@noetic/eval": ["../eval/src/index.ts"]
+    }
+  },
+  "include": [".typecheck-snippets/**/*.ts"]
+}

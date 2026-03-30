@@ -1,3 +1,4 @@
+/** @public Lifecycle states for a detached (background) execution. */
 const DetachedStatus = {
   Running: 'running',
   Completed: 'completed',
@@ -5,6 +6,7 @@ const DetachedStatus = {
 } as const;
 type DetachedStatus = (typeof DetachedStatus)[keyof typeof DetachedStatus];
 
+/** @public Handle returned by `detachedSpawn`, used to poll or await a background execution. */
 interface DetachedHandle<O> {
   readonly id: string;
   readonly status: DetachedStatus;

@@ -91,7 +91,7 @@ Records the execution outcome (`'success'`, `'failure'`, or `'aborted'`) in `dat
 
 ## StorageAdapter
 
-Durable Task State relies on the `StorageAdapter` provided in your `AgentConfig`. The adapter must implement:
+Durable Task State relies on the `StorageAdapter` provided in your `AgentConfig` (via `storage` on the harness constructor). The adapter must implement:
 
 ```ts
 interface StorageAdapter {
@@ -102,7 +102,7 @@ interface StorageAdapter {
 }
 ```
 
-You can use the built-in `InMemoryRuntime` for development or implement a persistent adapter backed by a database or file system.
+You can use the built-in `AgentHarness` for development or implement a persistent adapter backed by a database or file system.
 
 ## Example: Task Recovery
 
@@ -112,7 +112,7 @@ import { durableTaskState } from '@noetic/core';
 const layer = durableTaskState();
 
 // After a crash, the agent resumes with full checkpoint history
-// The runtime calls init(), which loads the saved state
+// The agent harness calls init(), which loads the saved state
 // The LLM sees all previous checkpoints and can continue from where it left off
 ```
 

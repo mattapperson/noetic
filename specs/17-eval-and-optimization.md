@@ -1,6 +1,6 @@
 # Eval and Optimization
 
-> **Depends On:** `01-step-type` (Step), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-runtime` (Runtime, execute), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
+> **Depends On:** `01-step-type` (Step), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-agent-harness` (AgentHarness, run), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
 > **Exports:** `describe()`, `it()`, `EvalSuiteOptions`, `DescribeStep`, `ScorerFn`, `createScorer()`, `createAdapter()`, `Baseline`, `OptimizationLevel`, `discoverFieldsFromSource()`
 
 ---
@@ -48,6 +48,9 @@ interface EvalSuiteOptions {
   /** Optional background context for scorers. */
   background?: string;
 
+  /** Minimum score for a case to pass. Default: 0.5. */
+  passThreshold?: number;
+
   /** Optimization configuration. */
   optimize?: OptimizeConfig;
 
@@ -56,14 +59,14 @@ interface EvalSuiteOptions {
 }
 ```
 
-The eval context has **zero knowledge of `callModel`** — the `InMemoryRuntime` auto-detects from `OPENROUTER_API_KEY`. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
+The eval context has **zero knowledge of LLM provider configuration** — the `AgentHarness` auto-resolves from `OPENROUTER_API_KEY` or its `llm` config. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
 
 ### Execution Model
 
-`describe()` wraps `Runtime.execute()`. Each `it()` case:
+`describe()` wraps `AgentHarness.run()`. Each `it()` case:
 
-1. Creates a fresh `Context` via `runtime.createContext()`.
-2. Calls `runtime.execute(step, input, ctx)` to produce the output.
+1. Creates a fresh `Context` via `harness.createContext()`.
+2. Calls `harness.run(step, input, ctx)` to produce the output.
 3. Passes `{ input, output, expected, context, ctx }` to each scorer.
 4. Collects scores into an `EvalResult`.
 
@@ -84,12 +87,23 @@ interface ScoreValue {
 }
 
 interface EvalSuiteResult {
-  name: string;
-  cases: EvalResult[];
-  aggregates: Record<string, { mean: number; median: number; min: number; max: number; stddev: number }>;
-  totalDuration: number;
-  totalCost: number;
+  suiteName: string;
+  objective: string;
+  cases: CaseResult[];
+  aggregateScore: number;
+  duration: number;
+  timestamp: string;
 }
+```
+
+The reporter computes per-scorer aggregates (mean, median, min, max, stddev) in verbose mode using utility functions from `utils/scores.ts`:
+
+```typescript
+function averageScores(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+function medianScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+function minScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+function maxScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
+function stddevScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
 ```
 
 **Invariant:** Every scorer returns a `value` in `[0.0, 1.0]`. Values outside this range cause the eval runner to throw `EvalError`.
@@ -105,25 +119,34 @@ interface EvalSuiteResult {
 ### `ScorerFn` Contract
 
 ```typescript
-interface ScorerInput {
-  input: unknown;
+interface EvalExecution {
   output: unknown;
-  expected?: unknown;
-  context?: Record<string, unknown>;
-  ctx: Context;
+  context: Context;
+  traces: Span[];
+  score(scorers: ScorerFn[]): Promise<ScoreResult[]>;
 }
 
-type ScorerFn = {
-  (input: ScorerInput): Promise<ScoreValue>;
-  scorerName: string;
-};
+type ScorerFn = (
+  execution: EvalExecution,
+  objective: string,
+  background: string,
+) => Promise<ScoreResult>;
+
+interface ScoreResult {
+  scorerId: string;
+  score: number;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
 ```
 
-Every scorer is an async function with a `scorerName` property. The name is used as the key in `EvalResult.scores`.
+Scorers receive the full `EvalExecution` (output, context with token/cost metadata, traces) along with the suite's objective and background strings. The `scorerId` in the result is used as the key in score aggregations.
 
 **Invariant:** Scorers are pure observers. They must not mutate the `Context` or any input fields.
 
 **Invariant:** Scorers must be idempotent. Calling a scorer twice with the same input produces the same score.
+
+**Invariant:** Score values must be in `[0.0, 1.0]`. The scorer pipeline clamps out-of-range values and adds `metadata.clamped: true` to the result.
 
 ### Built-in Deterministic Scorers
 
@@ -328,52 +351,47 @@ function mutateStep(
 
 ### Phase 3: GEPA Bridge (AxGEPA Integration)
 
-The optimizer integrates with AxGEPA (Generalized Evolutionary Prompt Algorithm) for intelligent prompt optimization. The bridge translates between noetic's step tree representation and AxGEPA's optimization interface.
+The optimizer integrates with `@ax-llm/ax`'s `AxGEPA` (Generalized Evolutionary Prompt Algorithm) for intelligent prompt optimization. The bridge implements a custom `AxGEPAAdapter` that translates between noetic's step tree representation and AxGEPA's optimization interface.
 
 ```typescript
 interface GepaConfig {
-  /** Population size per generation. */
-  populationSize?: number;
+  /** Model for candidate generation (default: openai/gpt-4o-mini). */
+  studentModel?: string;
 
-  /** Maximum generations before stopping. */
-  maxGenerations?: number;
+  /** Model for reflection/teaching (default: openai/gpt-4o). */
+  teacherModel?: string;
 
-  /** Target score threshold — stop early if achieved. */
-  targetScore?: number;
+  /** Number of optimization trials (default: 5). */
+  numTrials?: number;
 
-  /** Fields to optimize. Filtered by optimization level. */
-  fields: DiscoveredField[];
+  /** Stop after N trials with no improvement (default: 3). */
+  earlyStoppingTrials?: number;
 
-  /** The eval suite to use as the fitness function. */
-  evalSuite: EvalSuiteConfig;
-
-  /** Budget cap for the optimization run. */
-  budget?: { maxCost?: number; maxTime?: number };
+  /** Enable verbose logging. */
+  verbose?: boolean;
 }
 
-function createGepaBridge(config: GepaConfig): {
-  optimize(): AsyncGenerator<GenerationResult>;
-  best(): Step<unknown, unknown>;
-};
-
-interface GenerationResult {
-  generation: number;
-  population: Array<{
-    step: Step<unknown, unknown>;
-    scores: Record<string, number>;
-    fitness: number;
-  }>;
-  bestFitness: number;
-  elapsed: number;
-  cost: number;
+interface OptimizeParams {
+  step: Step;
+  fields: OptimizableField[];
+  runEval: (step: Step) => Promise<Record<string, number>>;
+  examples?: ReadonlyArray<Record<string, unknown>>;
+  maxMetricCalls?: number;
+  budget?: number;
+  gepa?: GepaConfig;
 }
+
+function optimizeWithGepa(params: OptimizeParams): Promise<OptimizationResult>;
 ```
 
 The bridge:
-1. Encodes each `DiscoveredField` as a GEPA dimension.
-2. Uses the eval suite as the fitness function — run all `it()` cases, aggregate scores.
-3. Yields `GenerationResult` per generation for progress tracking.
-4. Respects budget constraints (cost, time).
+1. Creates an `AxGEPAAdapter` that evaluates candidates by applying field mutations via `applyCandidate()` and running the eval suite.
+2. Builds a reflective dataset from evaluation scores to guide the teacher model's prompt improvements.
+3. Initializes `AxGEPA` with student/teacher AI services resolved from `OPENROUTER_API_KEY`.
+4. Calls `AxGEPA.compile()` with the adapter, forwarding `maxMetricCalls` for budget control.
+5. Extracts the best candidate from the Pareto front and returns it with the final score.
+
+**Fallback:** If `OPENROUTER_API_KEY` is not set, the bridge evaluates the initial candidate once and returns it unchanged (no optimization). This allows eval suites to run without optimization infrastructure.
 
 **Rationale:** GEPA is the mutation strategy, not the eval strategy. The eval package owns scoring; GEPA owns search. This separation means alternative search strategies (grid search, Bayesian optimization) can be swapped in without changing the eval or mutator layers.
 
@@ -475,7 +493,7 @@ function createAdapter(opts: {
 }): EvalAdapter;
 ```
 
-When an `EvalSuiteConfig` includes an `adapter`, the eval runner calls `adapter.execute(input)` instead of `runtime.execute(step, input, ctx)`. Scorers receive the same `ScorerInput` shape regardless of whether the execution came from a native step or an adapter.
+When an `EvalSuiteConfig` includes an `adapter`, the eval runner calls `adapter.execute(input)` instead of `harness.run(step, input, ctx)`. Scorers receive the same `ScorerInput` shape regardless of whether the execution came from a native step or an adapter.
 
 ```typescript
 // Example: evaluating a Vercel AI SDK agent
@@ -619,7 +637,7 @@ Aggregates:
 3 cases | 2 passed | 1 failed | $0.12 | 4.2s
 ```
 
-A case "fails" when any scorer returns a value below `0.5` (configurable via `EvalSuiteConfig.passThreshold`).
+A case "fails" when any scorer returns a value below `0.5` (configurable via `EvalSuiteOptions.passThreshold`).
 
 ### Optimization via CLI
 
@@ -639,7 +657,7 @@ Runs the optimization pipeline after evaluation. The `--level` flag controls the
 - `spawn` is defined in `04-spawn`
 - `loop`, `until` are defined in `05-loop-and-until`
 - `Context`, `Item`, `TokenUsage` are defined in `07-context-and-event-log`
-- `Runtime`, `execute` are defined in `08-runtime`
+- `AgentHarness`, `run` are defined in `08-agent-harness`
 - `Span` is defined in `10-observability`
 - `MemoryLayer` is defined in `11-memory-layer-system`
 - `react`, `ralphWiggum` patterns are defined in `13-patterns`

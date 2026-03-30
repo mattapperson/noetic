@@ -2,7 +2,7 @@
 
 > **Package:** `@noetic/memory`
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`
+> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
 
 ## Package Boundary
 
@@ -16,7 +16,7 @@ This spec is owned by `@noetic/memory`. The split between packages is:
 | `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) |
 | `ProjectionPolicy` | Projector implementation |
 
-**Dependency direction:** `@noetic/memory` has no runtime dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
+**Dependency direction:** `@noetic/memory` has no run-time dependency on `@noetic/core`. It may import `Item`, `ItemLog`, and `Span` types as type-only imports. `@noetic/core` depends on `@noetic/memory` for the layer contract.
 
 **Custom layer authors** import only from `@noetic/memory`. They do not need `@noetic/core` to implement a layer.
 
@@ -34,7 +34,7 @@ Normative language uses **MUST**, **SHOULD**, and **MAY** per RFC 2119.
 
 The layer system is loosely inspired by reactive programming — not in the formal RxJS/MobX sense, but in spirit: the View (what the LLM sees) is always re-assembled from current layer state before each request, producing a fresh, consistent snapshot.
 
-**Context is the result of all layers converging — it is not itself a layer.** You define layers; the runtime converges them. Their convergence is the context. Context is never exposed as an input, never passed into a layer hook, and never something you construct directly. It is the output.
+**Context is the result of all layers converging — it is not itself a layer.** You define layers; the agent harness converges them. Their convergence is the context. Context is never exposed as an input, never passed into a layer hook, and never something you construct directly. It is the output.
 
 **Memory is a type of layer, not a separate system.** "Memory" (facts recalled from storage) and "context injection" (information injected for this turn) are both expressed as layers with the same hook interface. The mechanism is identical; the purpose differs. The `slot` number determines where in the converged result each layer's contribution appears.
 
@@ -44,7 +44,7 @@ The layer system is loosely inspired by reactive programming — not in the form
 
 **Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated.
 
-**Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the runtime handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
+**Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the agent harness handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
 
 **Loose pattern, not strict formalism.** The reactive inspiration is a mental model, not a contract. Formal reactive concepts (observables, subscriptions, schedulers) do not appear in this API. The goal is the insight — always-fresh context from converging layers — without the boilerplate or jargon.
 
@@ -65,6 +65,7 @@ interface MemoryLayer<TState = unknown> {
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
   timeouts?: Partial<LayerTimeouts>;
+  provides?: LayerProvides;
 }
 
 type MemoryScope =
@@ -94,7 +95,7 @@ export const Slot = {
 } as const;
 ```
 
-The runtime sorts layers by slot ascending. Ties broken by array index (stable sort). Custom layers SHOULD use multiples of 10 within these ranges. The runtime does NOT enforce slot uniqueness.
+The agent harness sorts layers by slot ascending. Ties broken by array index (stable sort). Custom layers SHOULD use multiples of 10 within these ranges. The agent harness does NOT enforce slot uniqueness.
 
 ---
 
@@ -117,7 +118,7 @@ interface MemoryHooks<TState = unknown> {
 
 ### Lifecycle Sequence
 
-The runtime MUST execute hooks in this order:
+The agent harness MUST execute hooks in this order:
 
 ```
 EXECUTION START
@@ -193,7 +194,7 @@ interface RecallResult<TState = unknown> {
 }
 ```
 
-**String shorthand:** `recall` MAY return a plain `string` instead of a `RecallResult`. The runtime wraps it in a `developer` message item and estimates the token count automatically. This avoids boilerplate for layers that only inject text.
+**String shorthand:** `recall` MAY return a plain `string` instead of a `RecallResult`. The agent harness wraps it in a `developer` message item and estimates the token count automatically. This avoids boilerplate for layers that only inject text.
 
 ```typescript
 interface StoreParams<TState> {
@@ -344,7 +345,7 @@ When `recall()` returns `tokenCount` less than allocated, the difference goes to
 
 ### Budget Verification
 
-Runtime independently counts tokens. If layer-reported count diverges by >10%, runtime count is authoritative and a warning is emitted.
+The agent harness independently counts tokens. If layer-reported count diverges by >10%, the agent harness count is authoritative and a warning is emitted.
 
 ---
 
@@ -384,6 +385,137 @@ To read a different scope, declare the broader scope. No escape hatches.
 
 ---
 
+## Layer Provides
+
+A memory layer MAY declare a `provides` map exposing typed data projections and callable functions to the rest of the agent. This gives code steps structured access to layer state without reaching into layer internals, and gives LLM steps automatic tool access to layer capabilities.
+
+### Declaration Types
+
+```typescript
+type LayerProvides = Record<string, LayerDataDecl | LayerFunctionDecl>;
+```
+
+**`LayerDataDecl`** — a read-only data projection from layer state:
+
+```typescript
+interface LayerDataDecl<T = unknown, TState = unknown> {
+  kind: 'data';
+  read(state: TState): T;
+}
+```
+
+The `read` function is called on demand against the layer's current state. It MUST be a pure projection with no side effects.
+
+**`LayerFunctionDecl`** — a callable function backed by layer state:
+
+```typescript
+interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknown> {
+  kind: 'function';
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute(
+    args: TInput,
+    state: TState,
+    ctx: ExecutionContext,
+  ): Promise<{ result: TOutput; state?: TState }>;
+}
+```
+
+The `description` is used as the tool description when exposed to LLMs. The `input` and `output` Zod schemas provide runtime validation and JSON Schema generation. If `execute` returns a `state` value, the agent harness replaces the layer's current state with the returned value.
+
+### `LayerHandle<T>`
+
+A mapped type that produces a flat access interface from a layer's `provides` declaration:
+
+```typescript
+type LayerHandle<T extends MemoryLayer> = T extends { provides: infer P }
+  ? {
+      [K in keyof P]: P[K] extends LayerDataDecl<infer D, unknown>
+        ? D
+        : P[K] extends LayerFunctionDecl<infer I, infer O, unknown>
+          ? (args: I) => Promise<O>
+          : never;
+    }
+  : Record<string, never>;
+```
+
+Data entries become synchronous property reads (via getter). Function entries become async methods. A layer with no `provides` produces an empty handle.
+
+### Accessing Provides from Code Steps
+
+Code steps access a layer's provides via `ctx.memory['layerId']`, where the key is the layer's `id` string:
+
+```typescript
+const value = ctx.memory['layerId'].someData;              // synchronous read
+const result = await ctx.memory['layerId'].someFunction({ query: 'test' });  // async call
+```
+
+Layers without `provides` produce an empty `{}` entry in `ctx.memory`.
+
+### Automatic LLM Tool Injection
+
+Every `LayerFunctionDecl` in a layer's `provides` map is automatically exposed as a tool to any LLM step running within the layer's context. Tool names are namespaced as `{layerId}/{functionName}` to avoid collisions across layers. The `description`, `input` schema, and `output` schema from the declaration are used directly as the tool definition. The agent harness handles argument validation, state lookup, and state updates transparently.
+
+### Builder Helpers
+
+Two convenience functions construct declaration objects for use in a `provides` map:
+
+```typescript
+function layerData<T, TState>(opts: {
+  read: (state: TState) => T;
+}): LayerDataDecl<T, TState>;
+
+function layerFn<TInput, TOutput, TState>(opts: {
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (
+    args: TInput,
+    state: TState,
+    ctx: ExecutionContext,
+  ) => Promise<{ result: TOutput; state?: TState }>;
+}): LayerFunctionDecl<TInput, TOutput, TState>;
+```
+
+### Type-Safe Memory Access
+
+The `memory()` builder wraps a layer tuple in a `MemoryConfig` that preserves individual layer types for compile-time inference:
+
+```typescript
+function memory<const T extends readonly MemoryLayer[]>(layers: T): MemoryConfig<T>;
+
+interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly MemoryLayer[]> {
+  readonly layers: TLayers;
+  readonly _shape: InferMemoryShape<TLayers>;
+}
+```
+
+`InferMemory<T>` extracts the typed memory shape from a config (analogous to `z.infer<>` for Zod):
+
+```typescript
+type InferMemory<T extends MemoryConfig> = T['_shape'];
+```
+
+`TMemory` is the first generic parameter on `Step` and `Context`, enabling end-to-end type safety:
+
+```typescript
+const mem = memory([workingMemory(), counterLayer()]);
+type Mem = InferMemory<typeof mem>;
+
+step.run<Mem>({
+  id: 'work',
+  execute: async (input, ctx) => {
+    ctx.memory['working-memory'].snapshot;  // typed
+    await ctx.memory.counter.increment({ amount: 1 });  // typed
+  },
+});
+```
+
+Layer factories MUST use `satisfies MemoryLayer<TState>` (not a return type annotation) and `as const` on the `id` field to preserve literal types for inference.
+
+---
+
 ## Future Considerations
 
 ### Narrowed Scope (Not Yet Designed)
@@ -396,7 +528,7 @@ This would require extending `MemoryScope` with a selector variant (e.g. key pat
 
 ## `StorageAdapter`
 
-The raw storage backend. The runtime wraps it in `ScopedStorage`.
+The raw storage backend. The agent harness wraps it in `ScopedStorage`.
 
 ```typescript
 interface StorageAdapter {
@@ -464,7 +596,7 @@ interface ProjectionPolicy {
 3. Run recall() hooks (sequential, slot order)
 4. Assemble: system prompt item (role: system) + layer output items (role: developer) + conversation history items
 5. Conversation history gets remaining budget after layers, with overflow policy applied
-6. Result is Item[] — directly passable to callModel
+6. Result is Item[] — directly passable to the LLM provider
 ```
 
 ### Conversation History is Not a Memory Layer

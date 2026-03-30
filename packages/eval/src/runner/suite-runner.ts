@@ -13,10 +13,15 @@ async function runCase(
 
   try {
     await caseDef.fn(ctx);
+    const scores = [
+      ...ctx.accumulatedScores,
+    ];
+    const passThreshold = suite.options.passThreshold ?? 0.5;
+    const passed = scores.length === 0 || scores.every((s) => s.score >= passThreshold);
     return {
       name: caseDef.name,
-      scores: [],
-      passed: true,
+      scores,
+      passed,
       duration: performance.now() - caseStart,
     };
   } catch (error) {

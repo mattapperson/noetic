@@ -88,10 +88,10 @@ function ralphWiggum(opts) {
   return {
     kind: 'loop',
     id: 'ralph-wiggum-loop',
-    body: spawn({
+    steps: [spawn({
       id: 'ralph-iteration',
       child: inner,
-    }),
+    })],
     until: any(
       until.verified(opts.verify),
       until.maxSteps(opts.maxIterations ?? 50),

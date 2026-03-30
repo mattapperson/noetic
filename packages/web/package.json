@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "test:build": "bun run build",
-    "test:links": "bunx lychee --offline 'content/**/*.mdx'"
+    "test:links": "bunx lychee --offline 'content/**/*.mdx'",
+    "typecheck:docs": "bun ../../scripts/extract-doc-snippets.ts && bunx tsc --noEmit --project tsconfig.snippets.json"
   },
   "dependencies": {
     "fumadocs-core": "16.6.17",

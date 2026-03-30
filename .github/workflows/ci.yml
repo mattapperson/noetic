@@ -28,6 +28,12 @@ jobs:
       - name: Typecheck eval
         run: bun --cwd packages/eval run typecheck
 
+      - name: Check export tags
+        run: bun run check:exports
+
+      - name: Typecheck docs
+        run: bun --cwd packages/web run typecheck:docs
+
       - name: Test core
         run: bun --cwd packages/core run test:ci
 

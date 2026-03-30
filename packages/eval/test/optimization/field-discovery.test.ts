@@ -3,6 +3,7 @@ import type { Step, Tool } from '@noetic/core';
 import { branch, spawn, step } from '@noetic/core';
 import { z } from 'zod';
 import { discoverFields, enrichWithSourceLocations } from '../../src/optimization/field-discovery';
+import { OptimizeScope } from '../../src/types/eval';
 import type { OptimizableField } from '../../src/types/optimizer';
 import { FieldKind } from '../../src/types/optimizer';
 
@@ -245,5 +246,50 @@ describe('enrichWithSourceLocations', () => {
   test('returns empty array when both inputs are empty', () => {
     const enriched = enrichWithSourceLocations([], []);
     expect(enriched).toHaveLength(0);
+  });
+});
+
+describe('discoverFields scope filtering', () => {
+  const llmStep: Step = {
+    kind: 'llm',
+    id: 'scoped-llm',
+    model: 'test-model',
+    system: 'You are helpful',
+    tools: [
+      makeMockTool('search', 'Search the web'),
+    ],
+  };
+
+  function expectAllThreeKinds(fields: OptimizableField[]): void {
+    const kinds = fields.map((f) => f.fieldKind);
+    expect(kinds).toContain(FieldKind.System);
+    expect(kinds).toContain(FieldKind.ToolDescription);
+    expect(kinds).toContain(FieldKind.ToolName);
+    expect(fields).toHaveLength(3);
+  }
+
+  test('scope prompts-only returns System and ToolDescription but not ToolName', () => {
+    const fields = discoverFields(llmStep, undefined, OptimizeScope.PromptsOnly);
+
+    const kinds = fields.map((f) => f.fieldKind);
+    expect(kinds).toContain(FieldKind.System);
+    expect(kinds).toContain(FieldKind.ToolDescription);
+    expect(kinds).not.toContain(FieldKind.ToolName);
+    expect(fields).toHaveLength(2);
+  });
+
+  test('scope flow-structure returns all three field kinds', () => {
+    const fields = discoverFields(llmStep, undefined, OptimizeScope.FlowStructure);
+    expectAllThreeKinds(fields);
+  });
+
+  test('scope full returns all three field kinds', () => {
+    const fields = discoverFields(llmStep, undefined, OptimizeScope.Full);
+    expectAllThreeKinds(fields);
+  });
+
+  test('scope undefined returns all fields without filtering', () => {
+    const fields = discoverFields(llmStep, undefined, undefined);
+    expectAllThreeKinds(fields);
   });
 });

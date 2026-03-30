@@ -1,6 +1,6 @@
 # Context and Item Log
 
-> **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `10-observability` (Span)
+> **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
 > **Exports:** `Context`, `ItemLog`, `Item`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `ExtensionItem`, `ContentPart`, `StepMeta`, `TokenUsage`, `LLMResponse`
 
 ---
@@ -20,6 +20,7 @@ interface Context<TState = unknown> {
   readonly parent: Context | null;  // null at root
   readonly depth: number;        // spawn depth (root = 0)
   readonly span: Span;           // OpenTelemetry trace span (see 10-observability)
+  readonly harness: AgentHarness;   // reference to the owning agent harness (see 08-runtime)
 
   // Identifiers for memory layer scope resolution (see 11-memory-layer-system)
   readonly threadId: string;     // stable across calls in the same conversation
@@ -62,7 +63,7 @@ interface ItemLog {
 
 ## `Item` Type Hierarchy
 
-Items are the native data format aligned with OpenResponses. They serve as both the record of what happened and the input to `callModel`, eliminating impedance mismatch between the framework's internal state and the model API.
+Items are the native data format aligned with OpenResponses. They serve as both the record of what happened and the input to the LLM provider, eliminating impedance mismatch between the framework's internal state and the model API.
 
 ```typescript
 type Item =
@@ -90,14 +91,14 @@ type ContentPart =
 
 interface FunctionCallItem extends ItemBase {
   readonly type: 'function_call';
-  readonly call_id: string;
+  readonly callId: string;
   readonly name: string;
   readonly arguments: string;     // JSON string per OpenResponses
 }
 
 interface FunctionCallOutputItem extends ItemBase {
   readonly type: 'function_call_output';
-  readonly call_id: string;
+  readonly callId: string;
   readonly output: string;
 }
 
@@ -105,14 +106,16 @@ interface ReasoningItem extends ItemBase {
   readonly type: 'reasoning';
   readonly content: ContentPart[];
   readonly summary?: ContentPart[];
-  readonly encrypted_content?: string;
+  readonly encryptedContent?: string;
 }
 
 interface ExtensionItem extends ItemBase {
-  readonly type: `x-${string}`;
+  readonly type: `${string}:${string}`;  // e.g., 'noetic:analytics', 'openrouter:web_search'
   readonly data: Record<string, unknown>;
 }
 ```
+
+Extension items use the `prefix:name` convention established by the OpenResponses `ResponsesServerToolOutput` type. The prefix identifies the vendor or domain (e.g., `openrouter`, `noetic`, `myapp`) and the name identifies the specific item kind. None of the standard item types contain a colon, so the presence of `:` in the type string cleanly distinguishes extensions from standard items.
 
 ---
 
@@ -153,6 +156,7 @@ interface LLMResponse {
 
 ## Key Relationships
 
+- **`harness`** gives every step direct access to the `AgentHarness` that owns this context. Steps and tools read harness params via `ctx.harness.config.params` and can call harness methods (e.g., `ctx.harness.run(...)` for sub-agent delegation).
 - **`parent`** enables spawn-tree traversal. The `depth` field enables recursive patterns with depth limits.
 - **`span`** means every step is automatically traced without user instrumentation (see `10-observability`).
 - **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).

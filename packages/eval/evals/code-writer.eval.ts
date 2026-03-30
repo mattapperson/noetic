@@ -54,7 +54,7 @@ function createVerifier(requiredPatterns: string[]): (output: unknown) => Promis
 //#region Converges on First Try
 
 describe(ralphWiggum({
-  model: 'anthropic/claude-sonnet-4-20250514',
+  model: 'anthropic/claude-sonnet-4',
   system: 'You are a code writer. Write clean, working TypeScript code. Use the write_file tool.',
   tools: [
     writeFileTool,
@@ -95,7 +95,7 @@ const feedbackCounter = {
 };
 
 describe(ralphWiggum({
-  model: 'anthropic/claude-sonnet-4-20250514',
+  model: 'anthropic/claude-sonnet-4',
   system:
     'You are a code writer. Follow feedback to improve your code. Use the write_file tool to write files.',
   tools: [
@@ -147,7 +147,7 @@ describe(ralphWiggum({
 //#region Tool Accuracy
 
 describe(ralphWiggum({
-  model: 'anthropic/claude-sonnet-4-20250514',
+  model: 'anthropic/claude-sonnet-4',
   system: 'You are a code writer. Always use write_file to produce output.',
   tools: [
     writeFileTool,

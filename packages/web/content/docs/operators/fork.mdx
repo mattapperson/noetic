@@ -133,15 +133,15 @@ const settleExample = fork({
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `mode` | `'race' \| 'all' \| 'settle'` | Yes | Execution mode |
-| `paths` | `(input: I, ctx: Context) => Step<I, O>[]` | Yes | Function returning the steps to run |
+| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | Yes | Function returning the steps to run |
 | `concurrency` | `number` | No | Max parallel executions |
 
 ### Mode-Specific Options
 
 | Property | Modes | Type | Description |
 | --- | --- | --- | --- |
-| `merge` | `all` | `(results: O[], ctx: Context) => O` | Combine all outputs into one |
-| `merge` | `settle` | `(results: SettleResult<O>[], ctx: Context) => O` | Combine settled results into one |
+| `merge` | `all` | `(results: O[], ctx: Context<TMemory>) => O` | Combine all outputs into one |
+| `merge` | `settle` | `(results: SettleResult<O>[], ctx: Context<TMemory>) => O` | Combine settled results into one |
 
 ## Concurrency Control
 

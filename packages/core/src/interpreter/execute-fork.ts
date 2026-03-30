@@ -2,6 +2,7 @@ import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
 import type { NoeticError } from '../types/error';
+import type { ContextMemory } from '../types/memory';
 import type {
   ExecuteStepFn,
   SettleResult,
@@ -12,6 +13,7 @@ import type {
   StepForkSettle,
 } from '../types/step';
 import { cloneWithGuard } from './clone-guard';
+import { frameworkCast } from './framework-cast';
 import { isContextImpl } from './typeguards';
 
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
@@ -24,6 +26,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
     },
     () =>
       new ContextImpl({
+        harness: ctx.harness,
         parent: ctx,
         items: [
           ...ctx.itemLog.items,
@@ -35,12 +38,13 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
   );
 }
 
-export async function executeFork<I, O>(
-  step: StepFork<I, O>,
+export async function executeFork<TMemory, I, O>(
+  step: StepFork<TMemory, I, O>,
   input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
+  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
   const paths = step.paths(input, ctx);
 
   if (paths.length === 0) {
@@ -58,7 +62,7 @@ export async function executeFork<I, O>(
     });
   }
 
-  const childContexts = createChildContexts(ctx, paths.length, step.id);
+  const childContexts = createChildContexts(baseCtx, paths.length, step.id);
   const concurrency = step.concurrency ?? paths.length;
 
   switch (step.mode) {
@@ -168,16 +172,19 @@ function classifyResults<T>(
   };
 }
 
-async function executeAll<I, O>(
-  step: StepForkAll<I, O>,
-  paths: Step<I, O>[],
+async function executeAll<TMemory, I, O>(
+  step: StepForkAll<TMemory, I, O>,
+  paths: Step<TMemory, I, O>[],
   _input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
-  const tasks = paths.map((path, i) => () => executeStep<I, O>(path, _input, childContexts[i]));
+  const tasks = paths.map(
+    (path, i) => () =>
+      executeStep<TMemory, I, O>(path, _input, frameworkCast<Context<TMemory>>(childContexts[i])),
+  );
   const settled = await runWithConcurrency(tasks, concurrency);
   const { succeeded, failed } = classifyResults(settled, paths);
 
@@ -194,15 +201,16 @@ async function executeAll<I, O>(
   return step.merge(results, ctx);
 }
 
-async function executeRace<I, O>(
-  step: StepForkRace<I, O>,
-  paths: Step<I, O>[],
+async function executeRace<TMemory, I, O>(
+  step: StepForkRace<TMemory, I, O>,
+  paths: Step<TMemory, I, O>[],
   input: I,
-  ctx: Context,
+  ctx: Context<TMemory>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
+  const raceBaseCtx = frameworkCast<Context<ContextMemory>>(ctx);
   return new Promise<O>((resolve, reject) => {
     let settled = false;
     let failedCount = 0;
@@ -216,15 +224,15 @@ async function executeRace<I, O>(
       }
       const i = nextIndex++;
 
-      executeStep<I, O>(paths[i], input, childContexts[i])
+      executeStep<TMemory, I, O>(paths[i], input, frameworkCast<Context<TMemory>>(childContexts[i]))
         .then((result) => {
           if (settled) {
             return;
           }
           settled = true;
           // Winner's state replaces parent's
-          if (isContextImpl(ctx)) {
-            ctx.state = childContexts[i].state;
+          if (isContextImpl(raceBaseCtx)) {
+            raceBaseCtx.state = childContexts[i].state;
           }
           // Resolve first, then abort losers (non-critical path)
           resolve(result);
@@ -268,16 +276,19 @@ async function executeRace<I, O>(
   });
 }
 
-async function executeSettle<I, O>(
-  step: StepForkSettle<I, O>,
-  paths: Step<I, O>[],
+async function executeSettle<TMemory, I, O>(
+  step: StepForkSettle<TMemory, I, O>,
+  paths: Step<TMemory, I, O>[],
   input: I,
-  _ctx: Context,
+  _ctx: Context<TMemory>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
-  const tasks = paths.map((path, i) => () => executeStep<I, O>(path, input, childContexts[i]));
+  const tasks = paths.map(
+    (path, i) => () =>
+      executeStep<TMemory, I, O>(path, input, frameworkCast<Context<TMemory>>(childContexts[i])),
+  );
   const settled = await runWithConcurrency(tasks, concurrency);
 
   const results: SettleResult<O>[] = settled.map((result, i) => {

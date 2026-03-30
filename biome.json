@@ -23,7 +23,8 @@
       "!packages/web/.source",
       "!packages/web/.next",
       "!packages/web/next-env.d.ts",
-      "!.worktrees"
+      "!.worktrees",
+      "!packages/web/.typecheck-snippets"
     ]
   },
   "formatter": {

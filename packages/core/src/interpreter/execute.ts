@@ -1,26 +1,35 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
-import type { Runtime } from '../types/runtime';
+import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
-import type { CallModelFn } from './execute-llm';
 import { executeLLM } from './execute-llm';
 import { executeLoop } from './execute-loop';
 import { executeRun } from './execute-run';
 import { executeSpawn } from './execute-spawn';
 import { executeTool } from './execute-tool';
+import { frameworkCast } from './framework-cast';
 import { isMutableContext } from './typeguards';
 
 const MAX_DEPTH = 64;
 
-export async function execute<I, O>(
-  step: Step<I, O>,
+/**
+ * Executes a step within the interpreter, dispatching to the appropriate handler by step kind.
+ *
+ * @param step - The step to execute.
+ * @param input - Input value passed to the step.
+ * @param ctx - Execution context carrying state, tokens, and observability.
+ * @returns The step's output value.
+ * @throws `NoeticError` with kind `step_failed` if max depth is exceeded or an unknown step kind is encountered.
+ * @throws `NoeticError` with kind `cancelled` if the context is aborted.
+ */
+export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>(
+  step: Step<TMemory, I, O>,
   input: I,
-  ctx: Context,
-  callModel?: CallModelFn,
-  runtime?: Runtime,
+  ctx: Context<TMemory>,
 ): Promise<O> {
+  const baseCtx = frameworkCast<Context>(ctx);
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
@@ -41,41 +50,25 @@ export async function execute<I, O>(
   }
 
   // Increment step count
-  if (isMutableContext(ctx)) {
-    ctx.stepCount = (ctx.stepCount || 0) + 1;
+  if (isMutableContext(baseCtx)) {
+    baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
   switch (step.kind) {
     case 'run':
       return executeRun(step, input, ctx);
     case 'llm':
-      if (!callModel) {
-        throw new NoeticErrorImpl({
-          kind: 'step_failed',
-          stepId: step.id,
-          cause: new Error('callModel is required for LLM steps'),
-          retriesExhausted: false,
-        });
-      }
-      return executeLLM(step, input, ctx, callModel, runtime);
+      return executeLLM(step, input, ctx, baseCtx.layers);
     case 'tool':
-      if (!runtime) {
-        throw new NoeticErrorImpl({
-          kind: 'step_failed',
-          stepId: step.id,
-          cause: new Error('runtime is required for tool steps'),
-          retriesExhausted: false,
-        });
-      }
-      return executeTool(step, input, ctx, runtime);
+      return executeTool(step, input, ctx, baseCtx.harness);
     case 'branch':
-      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'fork':
-      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'loop':
-      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c, callModel, runtime));
+      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
     default: {
       const _exhaustive: never = step;
       throw new NoeticErrorImpl({

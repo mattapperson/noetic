@@ -1,5 +1,5 @@
-import type { CallModelFn } from '@noetic/core';
-import { step as coreStep, InMemoryRuntime } from '@noetic/core';
+import type { LlmProviderConfig } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 import type { ZodType } from 'zod';
 
 import type { EvalExecution, ScoreResult, ScorerFn } from './types';
@@ -10,13 +10,13 @@ interface ScorerPipelineConfig {
   id: string;
   judge?: {
     model: string;
-    callModel?: CallModelFn;
+    llm?: LlmProviderConfig;
   };
 }
 
 interface JudgeConfig {
   model: string;
-  callModel?: CallModelFn;
+  llm?: LlmProviderConfig;
 }
 
 interface PipelineStep1 {
@@ -44,6 +44,22 @@ interface PipelineStep4 {
 
 //#region Helper Functions
 
+function clampScore(raw: number): {
+  score: number;
+  clamped: boolean;
+} {
+  if (raw < 0 || raw > 1) {
+    return {
+      score: Math.max(0, Math.min(1, raw)),
+      clamped: true,
+    };
+  }
+  return {
+    score: raw,
+    clamped: false,
+  };
+}
+
 function parseAnalyzedResult<R>(raw: unknown, schema: ZodType<R>): R {
   return schema.parse(raw);
 }
@@ -65,22 +81,36 @@ function buildAnalyzeScorerFn<T, R>(
     const prompt = analyzeConfig.createPrompt(preprocessed, objective);
 
     const model = judge?.model ?? 'openai/gpt-4o-mini';
-    const judgeStep = coreStep.llm<string, unknown>({
+    const judgeStep = step.llm<string, unknown>({
       id: `${pipelineId}-judge`,
       model,
       system: prompt,
     });
 
-    const runtime = new InMemoryRuntime({
-      callModel: judge?.callModel,
+    const harness = new AgentHarness({
+      name: 'scorer-analyze',
+      params: {},
+      llm: judge?.llm,
     });
-    const ctx = runtime.createContext();
-    const raw = await runtime.execute(judgeStep, background, ctx);
+    const ctx = harness.createContext();
+    const raw = await harness.run(judgeStep, background, ctx);
     const analyzed = parseAnalyzedResult(raw, analyzeConfig.outputSchema);
 
-    const score = scoreFn({
+    const rawScore = scoreFn({
       results: analyzed,
     });
+    const { score, clamped } = clampScore(rawScore);
+
+    if (clamped) {
+      return {
+        scorerId: pipelineId,
+        score,
+        metadata: {
+          originalScore: rawScore,
+          clamped: true,
+        },
+      };
+    }
     return {
       scorerId: pipelineId,
       score,
@@ -97,9 +127,21 @@ function buildDirectScorerFn<T>(
     const preprocessed = await preprocessFn({
       execution,
     });
-    const score = scoreFn({
+    const rawScore = scoreFn({
       results: preprocessed,
     });
+    const { score, clamped } = clampScore(rawScore);
+
+    if (clamped) {
+      return {
+        scorerId: pipelineId,
+        score,
+        metadata: {
+          originalScore: rawScore,
+          clamped: true,
+        },
+      };
+    }
     return {
       scorerId: pipelineId,
       score,
@@ -128,17 +170,19 @@ function makePipelineStep4(
           }
 
           const model = judge.model ?? 'openai/gpt-4o-mini';
-          const reasonStep = coreStep.llm({
+          const reasonStep = step.llm({
             id: `${pipelineId}-reason`,
             model,
             system: reasonConfig.createPrompt(result.score),
           });
 
-          const runtime = new InMemoryRuntime({
-            callModel: judge.callModel,
+          const harness = new AgentHarness({
+            name: 'scorer-reason',
+            params: {},
+            llm: judge.llm,
           });
-          const ctx = runtime.createContext();
-          const reason = await runtime.execute(reasonStep, '', ctx);
+          const ctx = harness.createContext();
+          const reason = await harness.run(reasonStep, '', ctx);
           return {
             ...result,
             reason: String(reason),

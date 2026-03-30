@@ -1,5 +1,5 @@
 import { describe as bunDescribe, expect, test } from 'bun:test';
-import { ContextImpl, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 import { describe } from '../../src/runner/describe';
 import type { EvalContext } from '../../src/runner/eval-context';
 import { it } from '../../src/runner/it';
@@ -73,12 +73,16 @@ bunDescribe('it.each()', () => {
     const suite = suites[0];
 
     // Execute each case fn with a mock EvalContext
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
     const mockCtx: EvalContext = {
       objective: 'capture test',
       background: '',
       execute: async () => ({
         output: null,
-        context: new ContextImpl(),
+        context: harness.createContext(),
         traces: [],
         score: async () => [],
       }),

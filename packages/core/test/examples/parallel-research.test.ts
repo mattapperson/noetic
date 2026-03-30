@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildParallelResearchAgent } from '../../examples/parallel-research';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('parallel research agent', () => {
@@ -13,12 +13,12 @@ describe('parallel research agent', () => {
   });
 
   it('forks into three spawn paths', () => {
-    const callModel = createScriptedCallModel([]);
-    const runtime = new InMemoryRuntime({
-      callModel,
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
     });
     const agent = buildParallelResearchAgent();
-    const paths = agent.paths('any-input', runtime.createContext());
+    const paths = agent.paths('any-input', harness.createContext());
 
     expect(paths).toHaveLength(3);
     for (const path of paths) {
@@ -27,18 +27,19 @@ describe('parallel research agent', () => {
   });
 
   it('merges three perspective results into a structured summary', async () => {
-    const callModel = createScriptedCallModel([
-      textOnlyResponse('Historical perspective on the topic.'),
-      textOnlyResponse('Technical perspective on the topic.'),
-      textOnlyResponse('Societal perspective on the topic.'),
-    ]);
-    const runtime = new InMemoryRuntime({
-      callModel,
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('Historical perspective on the topic.'),
+        textOnlyResponse('Technical perspective on the topic.'),
+        textOnlyResponse('Societal perspective on the topic.'),
+      ]),
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
     const agent = buildParallelResearchAgent();
 
-    const result = await runtime.execute(agent, 'artificial intelligence', ctx);
+    const result = await harness.run(agent, 'artificial intelligence', ctx);
 
     expect(result).toContain('# Research Summary');
     expect(result).toContain('## Historical Context');

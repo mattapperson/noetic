@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { agentInbox, buildAsyncDelegateAgent } from '../../examples/async-delegate';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('async delegate demo', () => {
@@ -13,31 +13,31 @@ describe('async delegate demo', () => {
     expect(agent.id).toBe('async-delegate-loop');
     expect(agent.inbox).toBe(agentInbox);
     expect(agent.parkTimeout).toBe(5e3);
-    expect(agent.body.kind).toBe('llm');
+    expect(agent.steps[0].kind).toBe('llm');
   });
 
   it('agent launches sub-agent, continues, and receives result via inbox', async () => {
-    const callModel = createScriptedCallModel([
-      // Step 1: launch a sub-agent
-      toolCallResponse({
-        toolName: 'launch_agent',
-        args: '{"task":"research quantum computing"}',
-        output: '{"agentId":"sub-1"}',
-        finalText: 'I launched a sub-agent to research quantum computing.',
-      }),
-      // Step 2: no tool calls — agent stops, inbox check happens
-      textOnlyResponse('I launched the agent and will wait for results.'),
-      // Step 3: after inbox wake, final answer
-      textOnlyResponse('Based on the sub-agent results, quantum computing uses qubits.'),
-    ]);
-
-    const runtime = new InMemoryRuntime({
-      callModel,
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        // Step 1: launch a sub-agent
+        toolCallResponse({
+          toolName: 'launch_agent',
+          args: '{"task":"research quantum computing"}',
+          output: '{"agentId":"sub-1"}',
+          finalText: 'I launched a sub-agent to research quantum computing.',
+        }),
+        // Step 2: no tool calls — agent stops, inbox check happens
+        textOnlyResponse('I launched the agent and will wait for results.'),
+        // Step 3: after inbox wake, final answer
+        textOnlyResponse('Based on the sub-agent results, quantum computing uses qubits.'),
+      ]),
     });
-    const ctx = runtime.createContext();
+    const ctx = harness.createContext();
 
     // Pre-load an inbox message to simulate sub-agent completion
-    runtime.send(
+    harness.send(
       agentInbox,
       '[Sub-agent sub-1 completed] Result: Quantum computing uses qubits for computation.',
       ctx,
@@ -48,7 +48,7 @@ describe('async delegate demo', () => {
       parkTimeout: 50,
     });
 
-    const result = await runtime.execute(agent, 'Tell me about quantum computing', ctx);
+    const result = await harness.run(agent, 'Tell me about quantum computing', ctx);
 
     expect(result).toBe('Based on the sub-agent results, quantum computing uses qubits.');
   });

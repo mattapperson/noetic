@@ -153,28 +153,30 @@ timeouts: {
 }
 ```
 
-## Step 7: Register with AgentConfig
+## Step 7: Register with the Agent
+
+Pass custom layers to a `react` pattern (or `spawn`'s `memory` option):
 
 ```ts
-import type { AgentConfig } from '@noetic/core';
-
-const agent: AgentConfig = {
-  name: 'my-agent',
-  description: 'An agent with custom memory',
+const agent = react({
   model: 'gpt-4o',
-  instructions: 'You are a helpful assistant.',
+  system: 'You are a helpful assistant.',
   memory: [
     workingMemory(),
     myCustomLayer(),
     observationalMemory(),
   ],
+});
+```
+
+Configure persistence via `AgentConfig.storage` on the harness:
+
+```ts
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
   storage: myStorageAdapter,
-  projection: {
-    tokenBudget: 8000,
-    responseReserve: 4000,
-    overflow: 'truncate',
-  },
-};
+});
 ```
 
 Layers are ordered by slot number regardless of array order. The runtime calls each layer's hooks in slot order.
@@ -240,3 +242,110 @@ Layers are ordered by slot number regardless of array order. The runtime calls e
 | Field | Type |
 |---|---|
 | `state` | `TState` |
+
+## Step 8: Add a `provides` Map (Optional)
+
+The `provides` field exposes typed data and functions from your layer. Data entries are accessible in code steps via `ctx.memory['layerId'].prop`. Function entries are also automatically injected as LLM tools, namespaced as `layerId/fnName`.
+
+Use the `layerData()` and `layerFn()` builders:
+
+```ts
+import { z } from 'zod';
+import { layerData, layerFn } from '@noetic/core';
+import type { MemoryLayer } from '@noetic/core';
+
+interface MyLayerState {
+  entries: string[];
+  lastUpdated: number;
+}
+
+function myCustomLayer() {
+  return {
+    id: 'my-custom-layer' as const,
+    name: 'My Custom Layer',
+    slot: 275,
+    scope: 'thread',
+    budget: { min: 200, max: 1e3 },
+    provides: {
+      // Data: read-only projection from state
+      entryCount: layerData<number, MyLayerState>({
+        read: (state) => state.entries.length,
+      }),
+      // Function: callable from code and auto-injected as LLM tool
+      addEntry: layerFn<{ text: string }, void, MyLayerState>({
+        description: 'Add a new entry to the custom layer.',
+        input: z.object({ text: z.string() }),
+        output: z.void(),
+        execute: async (args, state) => ({
+          result: undefined,
+          state: {
+            entries: [...state.entries, args.text],
+            lastUpdated: Date.now(),
+          },
+        }),
+      }),
+    },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<MyLayerState>('state');
+        return { state: saved ?? { entries: [], lastUpdated: 0 } };
+      },
+      async recall({ state }) {
+        if (!state.entries.length) return null;
+        const text = state.entries.join('\n');
+        const content = `<my_context>\n${text}\n</my_context>`;
+        return {
+          items: [{
+            id: 'my-layer-recall',
+            type: 'message' as const,
+            role: 'developer' as const,
+            status: 'completed' as const,
+            content: [{ type: 'input_text' as const, text: content }],
+          }],
+          tokenCount: Math.ceil(content.length / 4),
+        };
+      },
+    },
+  } satisfies MemoryLayer<MyLayerState>;
+}
+```
+
+Note the `as const` on the `id` field and the `satisfies MemoryLayer<MyLayerState>` pattern. This preserves the literal `'my-custom-layer'` type so that `InferMemory` can map the layer ID to its provides shape at compile time.
+
+### Type-Safe Access with `memory()` and `InferMemory`
+
+Wrap your layers in the `memory()` builder to get full type inference:
+
+```ts
+import { memory, workingMemory, type InferMemory } from '@noetic/core';
+
+const mem = memory([workingMemory(), myCustomLayer()]);
+type Mem = InferMemory<typeof mem>;
+
+// Mem is:
+// {
+//   'working-memory': { snapshot: WorkingMemoryState; update: (args: Record<string, unknown>) => Promise<void> };
+//   'my-custom-layer': { entryCount: number; addEntry: (args: { text: string }) => Promise<void> };
+// }
+```
+
+In a `step.run`, access the typed memory:
+
+```ts
+const myStep = step.run({
+  id: 'use-memory',
+  execute: async (input: string, ctx: Context<Mem>) => {
+    const count = ctx.memory['my-custom-layer'].entryCount;
+    await ctx.memory['my-custom-layer'].addEntry({ text: input });
+    return count;
+  },
+});
+```
+
+### Auto-Injected LLM Tools
+
+Every `layerFn` in a layer's `provides` is automatically registered as an LLM tool. The tool name follows the `layerId/fnName` convention. In the example above, the model sees a tool named `my-custom-layer/addEntry` with the description and input schema you defined.
+
+## See Also
+
+- [Tool Memory](/docs/memory/tool-memory) -- imperative state access via `toolCtx.memory` and function-call memory patterns

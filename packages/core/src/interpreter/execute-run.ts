@@ -3,7 +3,11 @@ import type { RetryPolicy } from '../types/common';
 import type { Context } from '../types/context';
 import type { StepRun } from '../types/step';
 
-export async function executeRun<I, O>(step: StepRun<I, O>, input: I, ctx: Context): Promise<O> {
+export async function executeRun<TMemory, I, O>(
+  step: StepRun<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
+): Promise<O> {
   const retry = step.retry;
   const maxAttempts = retry?.maxAttempts ?? 1;
 

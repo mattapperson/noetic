@@ -1,8 +1,8 @@
 import type { Step } from '@noetic/core';
-import { InMemoryExporter, InMemoryRuntime } from '@noetic/core';
+import { AgentHarness, InMemoryExporter } from '@noetic/core';
 
-import type { EvalSuiteOptions } from '../types/eval';
-import type { EvalExecution, ScoreResult, ScorerFn } from './eval-execution';
+import type { EvalSuiteOptions, ScoreResult } from '../types/eval';
+import type { EvalExecution, ScorerFn } from './eval-execution';
 
 //#region Types
 
@@ -10,6 +10,11 @@ export interface EvalContext {
   execute(input: unknown): Promise<EvalExecution>;
   objective: string;
   background: string;
+}
+
+/** Internal extension used only by the suite runner to read accumulated scores. */
+export interface EvalContextInternal extends EvalContext {
+  readonly accumulatedScores: ReadonlyArray<ScoreResult>;
 }
 
 //#endregion
@@ -33,21 +38,28 @@ async function runScorers(opts: RunScorersOpts): Promise<ScoreResult[]> {
 
 //#region Public API
 
-export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalContext {
+export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalContextInternal {
   const objective = options.objective;
   const background = options.background ?? '';
+
+  const scores: ScoreResult[] = [];
 
   return {
     objective,
     background,
+    get accumulatedScores(): ReadonlyArray<ScoreResult> {
+      return scores;
+    },
     async execute(input: unknown): Promise<EvalExecution> {
       const exporter = new InMemoryExporter();
-      const runtime = new InMemoryRuntime({
+      const harness = new AgentHarness({
+        name: 'eval',
+        params: {},
         traceExporter: exporter,
       });
 
-      const ctx = runtime.createContext();
-      const output = await runtime.execute(step, input, ctx);
+      const ctx = harness.createContext();
+      const output = await harness.run(step, input, ctx);
       const traces = [
         ...exporter.spans,
       ];
@@ -57,12 +69,14 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
         context: ctx,
         traces,
         async score(scorers: ScorerFn[]): Promise<ScoreResult[]> {
-          return runScorers({
+          const results = await runScorers({
             scorers,
             execution,
             objective,
             background,
           });
+          scores.push(...results);
+          return results;
         },
       };
 

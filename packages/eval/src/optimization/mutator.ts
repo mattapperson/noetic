@@ -60,7 +60,7 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
     case 'loop':
       return {
         ...step,
-        body: cloneAndReplace(step.body, candidate, `${path}.`),
+        steps: step.steps.map((s) => cloneAndReplace(s, candidate, `${path}.`)),
       };
     case 'branch':
       return {

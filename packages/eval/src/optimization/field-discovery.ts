@@ -1,6 +1,36 @@
 import type { Step } from '@noetic/core';
+
+import { OptimizeScope } from '../types/eval';
 import type { OptimizableField } from '../types/optimizer';
 import { FieldKind } from '../types/optimizer';
+
+//#region Types
+
+type ScopeValue = (typeof OptimizeScope)[keyof typeof OptimizeScope];
+type FieldKindValue = (typeof FieldKind)[keyof typeof FieldKind];
+
+//#endregion
+
+//#region Constants
+
+const SCOPE_ALLOWED_KINDS: Record<ScopeValue, ReadonlySet<FieldKindValue>> = {
+  [OptimizeScope.PromptsOnly]: new Set([
+    FieldKind.System,
+    FieldKind.ToolDescription,
+  ]),
+  [OptimizeScope.FlowStructure]: new Set([
+    FieldKind.System,
+    FieldKind.ToolDescription,
+    FieldKind.ToolName,
+  ]),
+  [OptimizeScope.Full]: new Set([
+    FieldKind.System,
+    FieldKind.ToolDescription,
+    FieldKind.ToolName,
+  ]),
+};
+
+//#endregion
 
 //#region Helper Functions
 
@@ -86,7 +116,9 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
       walkStep(step.child, `${path}.`, fields);
       return;
     case 'loop':
-      walkStep(step.body, `${path}.`, fields);
+      for (const s of step.steps) {
+        walkStep(s, `${path}.`, fields);
+      }
       return;
     case 'branch':
       walkOptimizableChildren(step._optimizable, path, fields);
@@ -99,33 +131,57 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
   }
 }
 
+function filterByScope(fields: OptimizableField[], scope: ScopeValue): OptimizableField[] {
+  const allowed = SCOPE_ALLOWED_KINDS[scope];
+  return fields.filter((f) => allowed.has(f.fieldKind));
+}
+
 //#endregion
 
 //#region Public API
 
-export function discoverFields(step: Step, prefix?: string): OptimizableField[] {
+export function discoverFields(
+  step: Step,
+  prefix?: string,
+  scope?: ScopeValue,
+): OptimizableField[] {
   const fields: OptimizableField[] = [];
   const pathPrefix = prefix ? `${prefix}.` : '';
   walkStep(step, pathPrefix, fields);
-  return fields;
+
+  if (!scope) {
+    return fields;
+  }
+  return filterByScope(fields, scope);
 }
 
 export function enrichWithSourceLocations(
   runtimeFields: OptimizableField[],
   astFields: OptimizableField[],
 ): OptimizableField[] {
-  const astIndex = new Map<string, OptimizableField>();
+  const astIndex = new Map<string, OptimizableField[]>();
   for (const af of astFields) {
-    if (af.sourceLocation) {
-      astIndex.set(`${af.stepId}:${af.fieldKind}:${af.value}`, af);
+    if (!af.sourceLocation) {
+      continue;
     }
+    const key = `${af.stepId}:${af.fieldKind}:${af.value}`;
+    const existing = astIndex.get(key) ?? [];
+    existing.push(af);
+    astIndex.set(key, existing);
   }
 
+  const consumed = new Set<OptimizableField>();
+
   return runtimeFields.map((rf) => {
-    const match = astIndex.get(`${rf.stepId}:${rf.fieldKind}:${rf.value}`);
+    const candidates = astIndex.get(`${rf.stepId}:${rf.fieldKind}:${rf.value}`);
+    if (!candidates) {
+      return rf;
+    }
+    const match = candidates.find((c) => !consumed.has(c));
     if (!match?.sourceLocation) {
       return rf;
     }
+    consumed.add(match);
     return {
       ...rf,
       sourceLocation: match.sourceLocation,

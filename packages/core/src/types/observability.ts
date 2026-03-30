@@ -1,3 +1,4 @@
+/** @public A trace span representing a unit of work within the observability pipeline. */
 export interface Span {
   readonly traceId: string;
   readonly spanId: string;
@@ -7,10 +8,12 @@ export interface Span {
   end(): void;
 }
 
+/** @public Backend that receives and persists completed trace spans. */
 export interface TraceExporter {
   export(spans: Span[]): Promise<void>;
 }
 
+/** @public Diagnostic span recording a single memory layer hook invocation and its outcome. */
 export interface MemoryTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';

@@ -9,14 +9,20 @@ import {
   semanticSwitch,
   when,
 } from '../../src/conditions';
-import type { CallModelFn } from '../../src/interpreter/execute-llm';
 import type { EmbedFn } from '../../src/types/embed';
+import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
-import { makeLLMResponse, makeMockContext, makeStorage, mockEmbed } from '../_helpers';
+import {
+  makeLLMResponse,
+  makeMockContext,
+  makeMockContextWithClient,
+  makeStorage,
+  mockEmbed,
+} from '../_helpers';
 
 //#region Mock Factories
 
-function makeStep(id: string): Step<string, string> {
+function makeStep(id: string): Step<ContextMemory, string, string> {
   return {
     kind: 'run',
     id,
@@ -24,8 +30,11 @@ function makeStep(id: string): Step<string, string> {
   };
 }
 
-function mockCallModel(responseText: string): CallModelFn {
-  return async () => makeLLMResponse(responseText);
+/** Shorthand: create a mock context with a single scripted LLM text response. */
+function mockCtxWithLlm(text: string): ReturnType<typeof makeMockContext> {
+  return makeMockContextWithClient([
+    makeLLMResponse(text),
+  ]);
 }
 
 //#endregion
@@ -37,7 +46,7 @@ describe('semanticRoute', () => {
   const fallback = makeStep('fallback');
 
   it('evaluates conditions in order and returns first match', async () => {
-    const route = semanticRoute<string, string>(
+    const route = semanticRoute<ContextMemory, string, string>(
       when(async () => false, stepA),
       when(async () => true, stepB),
     );
@@ -46,7 +55,7 @@ describe('semanticRoute', () => {
   });
 
   it('falls through to otherwise', async () => {
-    const route = semanticRoute<string, string>(
+    const route = semanticRoute<ContextMemory, string, string>(
       when(async () => false, stepA),
       otherwise(fallback),
     );
@@ -55,18 +64,16 @@ describe('semanticRoute', () => {
   });
 
   it('returns null with no match and no otherwise', async () => {
-    const route = semanticRoute<string, string>(when(async () => false, stepA));
+    const route = semanticRoute<ContextMemory, string, string>(when(async () => false, stepA));
     const result = await route('input', ctx);
     expect(result).toBeNull();
   });
 });
 
 describe('aiCondition', () => {
-  const ctx = makeMockContext();
-
   it('parses true from mock LLM', async () => {
+    const ctx = mockCtxWithLlm('{"answer": true}');
     const condition = aiCondition<string>({
-      callModel: mockCallModel('{"answer": true}'),
       model: 'test-model',
       prompt: 'Is this positive?',
     });
@@ -75,8 +82,8 @@ describe('aiCondition', () => {
   });
 
   it('parses false from mock LLM', async () => {
+    const ctx = mockCtxWithLlm('{"answer": false}');
     const condition = aiCondition<string>({
-      callModel: mockCallModel('{"answer": false}'),
       model: 'test-model',
       prompt: 'Is this positive?',
     });
@@ -85,8 +92,8 @@ describe('aiCondition', () => {
   });
 
   it('returns false on invalid JSON', async () => {
+    const ctx = mockCtxWithLlm('not json');
     const condition = aiCondition<string>({
-      callModel: mockCallModel('not json'),
       model: 'test-model',
       prompt: 'Is this positive?',
     });
@@ -254,7 +261,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,
@@ -284,7 +291,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,
@@ -310,7 +317,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,
@@ -339,7 +346,7 @@ describe('semanticSwitch', () => {
         0,
       ],
     });
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: [
         {
@@ -370,7 +377,7 @@ describe('semanticSwitch', () => {
     };
 
     const cache = makeStorage();
-    const route = semanticSwitch<string, string>({
+    const route = semanticSwitch<ContextMemory, string, string>({
       embed,
       cases: {
         greeting: stepGreeting,

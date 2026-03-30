@@ -41,6 +41,37 @@ function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryS
 - `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Validates against schema if provided. Deep-merges structured state.
 - `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
 
+**Provides:**
+
+Working memory exposes two declarations via its `provides` map, making state available to code steps and LLM tool calls:
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `snapshot` | `layerData` | Returns the current working memory state as-is. |
+| `update` | `layerFn` | Merges new key-value pairs into the state. Exposed as `working-memory/update` LLM tool. |
+
+```typescript
+provides: {
+  snapshot: layerData({ read: (state) => state }),
+  update: layerFn({
+    description: 'Update the agent working memory with new key-value pairs.',
+    input: z.record(z.string(), z.unknown()),
+    output: z.void(),
+    execute: async (args, state) => {
+      // Prototype poisoning protection: __proto__ and constructor are stripped
+      const merged = { ...state, ...safeArgs };
+      return { result: undefined, state: merged };
+    },
+  }),
+}
+```
+
+- **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.memory['working-memory'].snapshot`, which returns the full `WorkingMemoryState`.
+- **`update`** — A function declaration. Code steps call it as `await ctx.memory['working-memory'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism.
+- **Prototype poisoning protection:** The `update` function strips `__proto__` and `constructor` keys from incoming arguments before merging.
+- **Backward compatibility:** The `store` hook still detects `findFunctionCall(newItems, 'updateWorkingMemory')` for LLMs that emit the legacy function-call convention. Both paths apply the same prototype-stripping and merge logic.
+- **Type-safe access:** The `workingMemory()` factory returns its result `satisfies MemoryLayer<WorkingMemoryState>`, preserving the literal layer id and provides shape at the type level. Combine `memory([workingMemory()])` with `InferMemory<typeof mem>` to get compile-time typed access to `ctx.memory['working-memory']`.
+
 ---
 
 ## `semanticRecall()`
@@ -216,7 +247,7 @@ interface SteeringRule {
   description: string;
   /**
    * Programmatic check. Return a violation message string to block, or null/undefined to pass.
-   * When omitted, the rule is evaluated by the configured `callModel`.
+   * When omitted, the rule is evaluated by an LLM call via the execution context's harness.
    */
   check?: (toolName: string, toolArgs: unknown) => string | null | undefined;
   /** Which hook to apply this rule in. Default: 'beforeToolCall'. */
@@ -225,8 +256,8 @@ interface SteeringRule {
 
 interface SteeringConfig {
   rules: SteeringRule[];
-  /** LLM used to evaluate rules that have no `check` function. Required if any rule is LLM-evaluated. */
-  callModel?: CallModel;
+  /** Model to use for LLM-evaluated rules. Defaults to the harness's configured model. */
+  model?: string;
   /** Max entries retained in the per-execution violation ledger. Default: 100. */
   maxLedgerEntries?: number;
   /** Max retries for LLM-evaluated rule calls before treating as pass. Default: 2. */
@@ -246,10 +277,10 @@ function steering(config: SteeringConfig): MemoryLayer<SteeringState>
 
 **Behavior:**
 
-- `beforeToolCall`: Runs each rule whose `hook` is `'beforeToolCall'` (the default). Programmatic rules call `check(toolName, toolArgs)`. LLM-evaluated rules send a prompt to `callModel` with the rule description and the pending call; a violation response blocks the tool. If any rule returns a violation, tool execution is blocked and the violation message is surfaced as a tool error. The violation is recorded in the in-memory ledger.
+- `beforeToolCall`: Runs each rule whose `hook` is `'beforeToolCall'` (the default). Programmatic rules call `check(toolName, toolArgs)`. LLM-evaluated rules send a prompt to the LLM (via `ctx.harness`) with the rule description and the pending call; a violation response blocks the tool. If any rule returns a violation, tool execution is blocked and the violation message is surfaced as a tool error. The violation is recorded in the in-memory ledger.
 - `afterModelCall`: Runs each rule whose `hook` is `'afterModelCall'`. LLM-evaluated rules receive the full model response text. A violation aborts the current turn with the violation message.
 - **Ledger**: Each execution maintains a bounded log of `{ ruleId, hook, toolName?, violation, timestamp }` entries. Capped at `maxLedgerEntries`. Accessible via `getLayerState(executionId, 'steering')`.
-- **LLM evaluation**: When a rule has no `check` function, the layer sends a structured prompt: the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`). The model responds with `{ violation: true | false, reason?: string }`. Retried up to `maxRetries` on parse failure; treated as pass on exhaustion.
+- **LLM evaluation**: When a rule has no `check` function, the layer sends a structured prompt: the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`). The model responds with `{ violation: true | false, reason?: string }`. Retried up to `maxRetries` on parse failure; treated as pass on exhaustion. If no LLM provider is configured (no `callModel` on the execution context), LLM-evaluated rules throw a `NoeticConfigError` with code `MISSING_CALL_MODEL` — this is a fail-closed design to prevent silent bypass of security rules.
 - **Slot 90**: Runs before all other layers (slot 100+) in `beforeToolCall` and `afterModelCall` to ensure policy enforcement precedes any side effects.
 
 ```typescript
@@ -269,9 +300,8 @@ steering({
   ],
 });
 
-// LLM-evaluated rule example
+// LLM-evaluated rule example (gets LLM client from ctx.harness internally)
 steering({
-  callModel,
   rules: [
     {
       id: 'no-pii',

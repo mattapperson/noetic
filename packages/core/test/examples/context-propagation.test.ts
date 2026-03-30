@@ -2,18 +2,19 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/delegate-tools';
 import { channel } from '../../src/builders/channel-builder';
-import { InMemoryRuntime } from '../../src/runtime/in-memory-runtime';
+import { AgentHarness } from '../../src/runtime/agent-harness';
 import type { DetachedHandle } from '../../src/types/detached';
+import type { AgentHarnessContract } from '../../src/types/runtime';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
 
-function makeToolCtxWithRuntime(runtime: InMemoryRuntime): ToolExecutionContext {
-  const ctx = runtime.createContext({
+function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionContext {
+  const ctx = harness.createContext({
     threadId: 'thread-abc',
     resourceId: 'resource-xyz',
   });
   return {
     ctx,
-    runtime,
+    harness,
     memory: {
       get: () => undefined,
       set: () => {},
@@ -25,8 +26,11 @@ function makeToolCtxWithRuntime(runtime: InMemoryRuntime): ToolExecutionContext 
 
 describe('context propagation in delegate tools', () => {
   it('sync delegate tool uses parent context, not a new root context', async () => {
-    const runtime = new InMemoryRuntime();
-    const toolCtx = makeToolCtxWithRuntime(runtime);
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const toolCtx = makeToolCtxWithHarness(harness);
 
     const delegateTool = createSyncDelegateTool();
 
@@ -49,13 +53,16 @@ describe('context propagation in delegate tools', () => {
   });
 
   it('async launch tool uses parent context, not a new root context', async () => {
-    const runtime = new InMemoryRuntime();
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
     const inbox = channel('test-inbox', {
       schema: z.string(),
       mode: 'queue',
     });
     const handles = new Map<string, DetachedHandle<string>>();
-    const toolCtx = makeToolCtxWithRuntime(runtime);
+    const toolCtx = makeToolCtxWithHarness(harness);
 
     const launchTool = createAsyncLaunchTool({
       inbox,
@@ -81,13 +88,16 @@ describe('context propagation in delegate tools', () => {
   });
 
   it('detachedSpawn forwards threadId and resourceId to child context', () => {
-    const runtime = new InMemoryRuntime();
-    const parentCtx = runtime.createContext({
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const parentCtx = harness.createContext({
       threadId: 'parent-thread',
       resourceId: 'parent-resource',
     });
 
-    const childCtx = runtime.createContext({
+    const childCtx = harness.createContext({
       parent: parentCtx,
       threadId: parentCtx.threadId,
       resourceId: parentCtx.resourceId,

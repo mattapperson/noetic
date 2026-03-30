@@ -8,18 +8,20 @@ description: Type definitions for Context, ItemLog, Item variants, and content p
 The execution context threaded through every step.
 
 ```ts
-interface Context<TState = unknown> {
+interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
+  readonly memory: TMemory;
   state: TState;
   readonly parent: Context | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;
   readonly resourceId?: string;
+  readonly harness: AgentHarness;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
@@ -42,12 +44,14 @@ interface Context<TState = unknown> {
 | `tokens` | `TokenUsage` | Accumulated token usage |
 | `elapsed` | `number` | Elapsed time in milliseconds |
 | `cost` | `number` | Accumulated cost in USD |
+| `memory` | `TMemory` | Typed memory object. Access layer data via `ctx.memory['layerId'].prop`. Defaults to `ContextMemory` when no `MemoryConfig` is provided. |
 | `state` | `TState` | Mutable user state |
 | `parent` | `Context \| null` | Parent context (for spawned agents) |
 | `depth` | `number` | Nesting depth (0 for root) |
 | `span` | `Span` | Observability span |
 | `threadId` | `string` | Thread identifier for memory scoping |
 | `resourceId` | `string` | Resource identifier for memory scoping (optional) |
+| `harness` | `AgentHarness` | Reference to the owning agent harness. Access params via `ctx.harness.config.params`. |
 | `itemLog` | `ItemLog` | Conversation history |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last executed step |
 | `completed` | `boolean` | Whether `complete()` has been called |
@@ -117,7 +121,7 @@ All items share this base:
 | Field | Type | Description |
 |---|---|---|
 | `type` | `'function_call'` | Discriminant |
-| `call_id` | `string` | Unique call identifier |
+| `callId` | `string` | Unique call identifier |
 | `name` | `string` | Function name |
 | `arguments` | `string` | JSON-encoded arguments |
 
@@ -126,7 +130,7 @@ All items share this base:
 | Field | Type | Description |
 |---|---|---|
 | `type` | `'function_call_output'` | Discriminant |
-| `call_id` | `string` | Matching call identifier |
+| `callId` | `string` | Matching call identifier |
 | `output` | `string` | JSON-encoded output |
 
 ### ReasoningItem
@@ -136,14 +140,16 @@ All items share this base:
 | `type` | `'reasoning'` | Discriminant |
 | `content` | `ContentPart[]` | Reasoning content |
 | `summary` | `ContentPart[]` | Summary of reasoning (optional) |
-| `encrypted_content` | `string` | Encrypted reasoning content (optional) |
+| `encryptedContent` | `string` | Encrypted reasoning content (optional) |
 
 ### ExtensionItem
 
 | Field | Type | Description |
 |---|---|---|
-| `type` | `` `x-${string}` `` | Custom type prefixed with `x-` |
-| `data` | `Record<string, unknown>` | Arbitrary data |
+| `type` | `` `${string}:${string}` `` | Namespaced type using `prefix:name` convention (e.g., `openrouter:web_search`, `noetic:analytics`) |
+| `data` | `Record<string, unknown>` | Arbitrary structured data |
+
+See [Items & Events](/docs/api/items-and-events) for the complete reference including built-in extended items, streaming events, and the adapter flow.
 
 ## ContentPart
 

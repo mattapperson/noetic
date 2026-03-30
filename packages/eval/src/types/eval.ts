@@ -17,6 +17,7 @@ type OptimizeScope = (typeof OptimizeScope)[keyof typeof OptimizeScope];
 export interface EvalSuiteOptions {
   objective: string;
   background?: string;
+  passThreshold?: number;
   optimize?: OptimizeConfig;
   regression?: RegressionConfig;
 }

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { fork } from '../builders/control-flow-builders';
 import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
+import type { ContextMemory } from '../types/memory';
 import type { ExecuteStepFn, Step } from '../types/step';
 
 export interface PlanNode {
@@ -14,6 +15,7 @@ export interface PlanNode {
 
 // PlanNode schema — the variable annotation provides the recursive type;
 // z.lazy() returns a compatible type that TypeScript checks against it.
+/** @public Zod schema for recursive `PlanNode` validation. */
 export const PlanNodeSchema: z.ZodType<PlanNode> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -35,18 +37,28 @@ export interface PlanConstraints {
 }
 
 interface CompileOpts {
-  agents: Record<string, (prompt: string) => Step<string, unknown>>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, unknown>>;
   constraints?: PlanConstraints;
   executeStep?: ExecuteStepFn;
 }
 
+/**
+ * Compiles a `PlanNode` tree into an executable step graph using the provided agent factories.
+ *
+ * @public
+ * @param plan - Root plan node describing the task tree.
+ * @param agents - Map of agent names to factory functions producing steps.
+ * @param constraints - Optional constraints for tool allowlists and approval.
+ * @param executeStep - Optional step executor for non-run step kinds.
+ * @returns A compiled `Step` ready for execution.
+ */
 export function compilePlan<O>(
   plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step<string, unknown>>,
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, unknown>>,
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
-): Step<string, O> {
-  return frameworkCast<Step<string, O>>(
+): Step<ContextMemory, string, O> {
+  return frameworkCast<Step<ContextMemory, string, O>>(
     compileNode(plan, {
       agents,
       constraints,
@@ -55,7 +67,7 @@ export function compilePlan<O>(
   );
 }
 
-function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
+function compileNode(node: PlanNode, opts: CompileOpts): Step<ContextMemory, string, unknown> {
   const agentFactory = opts.agents[node.assignee];
   if (!agentFactory) {
     throw new Error(`Unknown agent: ${node.assignee}`);
@@ -70,7 +82,7 @@ function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
   const childSteps = node.children.map((child) => compileNode(child, opts));
 
   if (node.execution === 'parallel') {
-    return fork<string, unknown>({
+    return fork<ContextMemory, string, unknown>({
       id: `plan-fork-${node.id}`,
       mode: 'all',
       paths: () => childSteps,
@@ -102,13 +114,21 @@ function compileNode(node: PlanNode, opts: CompileOpts): Step<string, unknown> {
   };
 }
 
+/**
+ * Creates a step that dynamically generates a plan via a planner step and executes it,
+ * retrying with error feedback up to `maxRevisions` times on failure.
+ *
+ * @public
+ * @param opts - Planner step, agent factories, optional constraints, max revision count, and step executor.
+ * @returns A `Step` that adaptively plans and executes.
+ */
 export function adaptivePlan<O>(opts: {
-  planner: Step<string, PlanNode>;
-  agents: Record<string, (prompt: string) => Step<string, unknown>>;
+  planner: Step<ContextMemory, string, PlanNode>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, unknown>>;
   constraints?: PlanConstraints;
   maxRevisions: number;
   executeStep?: ExecuteStepFn;
-}): Step<string, O> {
+}): Step<ContextMemory, string, O> {
   return {
     kind: 'run',
     id: 'adaptive-plan',

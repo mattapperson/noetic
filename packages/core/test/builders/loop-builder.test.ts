@@ -13,12 +13,16 @@ describe('loop builder', () => {
   it('creates correct step shape', () => {
     const s = loop({
       id: 'test-loop',
-      body,
+      steps: [
+        body,
+      ],
       until: until.maxSteps(3),
     });
     expect(s.kind).toBe('loop');
     expect(s.id).toBe('test-loop');
-    expect(s.body).toBe(body);
+    expect(s.steps).toEqual([
+      body,
+    ]);
   });
 
   it('forwards all optional fields', () => {
@@ -26,7 +30,9 @@ describe('loop builder', () => {
     const onError = () => 'retry' as const;
     const s = loop({
       id: 'full-loop',
-      body,
+      steps: [
+        body,
+      ],
       until: until.maxSteps(5),
       maxIterations: 50,
       maxHistorySize: 10,
@@ -47,7 +53,9 @@ describe('loop builder', () => {
     expect(() =>
       loop({
         id: '',
-        body,
+        steps: [
+          body,
+        ],
         until: until.maxSteps(1),
       }),
     ).toThrow('non-empty id');
@@ -57,18 +65,30 @@ describe('loop builder', () => {
     expect(() =>
       loop({
         id: '  ',
-        body,
+        steps: [
+          body,
+        ],
         until: until.maxSteps(1),
       }),
     ).toThrow('non-empty id');
   });
 
-  it('throws on missing body', () => {
+  it('throws on missing steps', () => {
     expect(() =>
       loop({
         id: 'test',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
-        body: undefined,
+        steps: undefined,
+        until: until.maxSteps(1),
+      }),
+    ).toThrow('body step');
+  });
+
+  it('throws on empty steps array', () => {
+    expect(() =>
+      loop({
+        id: 'test',
+        steps: [],
         until: until.maxSteps(1),
       }),
     ).toThrow('body step');
@@ -78,7 +98,9 @@ describe('loop builder', () => {
     expect(() =>
       loop({
         id: 'test',
-        body,
+        steps: [
+          body,
+        ],
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         until: undefined,
       }),

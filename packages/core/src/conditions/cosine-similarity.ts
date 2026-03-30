@@ -2,6 +2,11 @@
  * Cosine similarity between two vectors.
  * Returns a value in [-1, 1]. Throws on dimension mismatch.
  * Returns 0 for zero-magnitude vectors.
+ *
+ * @public
+ * @param a - First vector.
+ * @param b - Second vector (must have the same length as `a`).
+ * @returns Cosine similarity score.
  */
 export function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
   if (a.length !== b.length) {
