@@ -143,10 +143,8 @@ export function Hero(): ReactNode {
             fontSize: 'clamp(36px, 8vw, 96px)',
             fontWeight: 800,
             color: 'var(--color-tui-green)',
-            margin: '0 0 16px 0',
+            marginBottom: '16px',
             lineHeight: 1.1,
-            textAlign: 'center',
-            width: '100%',
           }}
         >
           NOETIC
@@ -166,10 +164,8 @@ export function Hero(): ReactNode {
             fontSize: 'clamp(16px, 2.5vw, 18px)',
             color: 'var(--color-tui-fg)',
             maxWidth: '560px',
-            margin: '0 0 12px 0',
+            marginBottom: '12px',
             lineHeight: 1.5,
-            textAlign: 'center',
-            padding: '0 16px',
           }}
         >
           Composable primitives. Clean code from 10 lines to 10,000.
@@ -189,10 +185,8 @@ export function Hero(): ReactNode {
             fontSize: 'clamp(13px, 2vw, 14px)',
             color: 'var(--color-tui-muted)',
             maxWidth: '560px',
-            margin: '0 0 40px 0',
+            marginBottom: '40px',
             lineHeight: 1.7,
-            textAlign: 'center',
-            padding: '0 16px',
           }}
         >
           Start with pre-built patterns — ReAct, task trees, dual-agent loops. Or compose your own.
@@ -275,7 +269,6 @@ export function Hero(): ReactNode {
             marginBottom: '48px',
             flexWrap: 'wrap',
             justifyContent: 'center',
-            padding: '0 16px',
           }}
         >
           <Link
@@ -328,9 +321,6 @@ export function Hero(): ReactNode {
           style={{
             width: '100%',
             maxWidth: '640px',
-            margin: '0 auto',
-            textAlign: 'left',
-            padding: '0 16px',
           }}
         >
           <TuiWindow title="react-agent.ts">
