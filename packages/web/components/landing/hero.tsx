@@ -80,25 +80,21 @@ export function Hero(): ReactNode {
     <section
       ref={containerRef}
       style={{
-        position: 'fixed',
-        top: '64px',
-        left: 0,
-        right: 0,
-        bottom: 0,
+        position: 'sticky',
+        inset: '64px 0px 0px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
+        justifyContent: 'flex-start',
+        padding: '24px 0',
         textAlign: 'center',
         zIndex: 0,
         margin: 'auto',
+        height: '100vh',
       }}
     >
       <motion.div
         style={{
-          opacity,
-          pointerEvents,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -106,6 +102,8 @@ export function Hero(): ReactNode {
           width: '100%',
           maxWidth: '1200px',
           margin: 'auto',
+          opacity,
+          pointerEvents,
         }}
       >
         <motion.span
