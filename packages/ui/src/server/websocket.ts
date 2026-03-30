@@ -484,11 +484,9 @@ export class NoeticUIServer {
         break;
 
       default: {
-        // biome-ignore lint: Safe cast - type property validated by isClientMessage
-        const msg = message as {
-          type: string;
-        };
-        console.warn(`Unknown message type: ${msg.type}`);
+        // Exhaustiveness check - if we get here, it's an unknown message type
+        // but isClientMessage validated it has a 'type' property
+        console.warn(`Unknown message type: ${message.type}`);
       }
     }
   }

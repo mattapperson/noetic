@@ -10,6 +10,66 @@ import { join } from 'node:path';
 import type { ExecutionTrace, Run } from '../shared/protocol.js';
 
 // ============================================================================
+// Type Guards
+// ============================================================================
+
+/**
+ * Type guard for NodeJS.ErrnoException
+ * Type guard pattern: required cast to check properties on unknown error type
+ */
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  // Type guard requires cast from unknown to check properties
+  const err = error as {
+    code: unknown;
+  };
+  return typeof err.code === 'string';
+}
+
+/**
+ * Type guard to validate if a parsed object matches Run structure
+ * Type guard pattern: required cast to check properties on unknown value
+ */
+function isValidRun(value: unknown): value is Run {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  // Type guard requires cast from unknown to check properties
+  const obj = value as Record<string, unknown>;
+  return (
+    'id' in obj &&
+    typeof obj.id === 'string' &&
+    'agentId' in obj &&
+    typeof obj.agentId === 'string' &&
+    'trace' in obj &&
+    typeof obj.trace === 'object' &&
+    obj.trace !== null
+  );
+}
+
+/**
+ * Type guard for serialized Map structure
+ */
+function isSerializedMap(value: unknown): value is {
+  dataType: 'Map';
+  value: [
+    string,
+    unknown,
+  ][];
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  // Type guard requires cast from unknown to check properties
+  const obj = value as Record<string, unknown>;
+  return obj.dataType === 'Map' && Array.isArray(obj.value);
+}
+
+// ============================================================================
+// Configuration
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -165,13 +225,18 @@ export class TraceStorage {
     try {
       const filePath = this.getRunFilePath(agentId, runId);
       const content = await readFile(filePath, 'utf-8');
-      // biome-ignore lint: Data serialized by this class, safe to parse
-      const run = JSON.parse(content, this.reviver) as Run;
-      return run;
+      const parsed = JSON.parse(content, this.reviver);
+      if (!isValidRun(parsed)) {
+        console.error(`[Storage] Invalid run data loaded for ${agentId}/${runId}`);
+        return null;
+      }
+      return parsed;
     } catch (error) {
-      // biome-ignore lint: Standard NodeJS error type check
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
+      if (!isNodeError(error)) {
+        console.error(`[Storage] Failed to load run ${agentId}/${runId}:`, error);
+        throw error;
+      }
+      if (error.code === 'ENOENT') {
         return null;
       }
       console.error(`[Storage] Failed to load run ${agentId}/${runId}:`, error);
@@ -199,9 +264,11 @@ export class TraceStorage {
       this.metricsCacheTime = 0;
       return true;
     } catch (error) {
-      // biome-ignore lint: Standard NodeJS error type check
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
+      if (!isNodeError(error)) {
+        console.error(`[Storage] Failed to delete run ${agentId}/${runId}:`, error);
+        throw error;
+      }
+      if (error.code === 'ENOENT') {
         return false;
       }
       console.error(`[Storage] Failed to delete run ${agentId}/${runId}:`, error);
@@ -376,17 +443,8 @@ export class TraceStorage {
 
   // JSON reviver for deserializing Maps
   private reviver(_key: string, value: unknown): unknown {
-    if (typeof value === 'object' && value !== null) {
-      // biome-ignore lint: Type guard for Map deserialization
-      const obj = value as Record<string, unknown>;
-      if (obj.dataType === 'Map') {
-        // biome-ignore lint: Map entries array type for deserialization
-        const entries = obj.value as [
-          string,
-          unknown,
-        ][];
-        return new Map(entries);
-      }
+    if (isSerializedMap(value)) {
+      return new Map(value.value);
     }
     return value;
   }
