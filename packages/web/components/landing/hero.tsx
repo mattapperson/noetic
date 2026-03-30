@@ -81,14 +81,18 @@ export function Hero(): ReactNode {
       ref={containerRef}
       style={{
         position: 'fixed',
-        inset: 0,
+        top: '64px',
+        left: 0,
+        right: 0,
+        bottom: 0,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '80px 24px',
+        padding: '24px',
         textAlign: 'center',
         zIndex: 0,
+        overflow: 'auto',
       }}
     >
       <motion.div
@@ -99,6 +103,9 @@ export function Hero(): ReactNode {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
+          width: '100%',
+          maxWidth: '1200px',
+          margin: 'auto',
         }}
       >
         <motion.span
@@ -133,11 +140,13 @@ export function Hero(): ReactNode {
           }}
           className="tui-glow"
           style={{
-            fontSize: 'clamp(48px, 10vw, 96px)',
+            fontSize: 'clamp(36px, 8vw, 96px)',
             fontWeight: 800,
             color: 'var(--color-tui-green)',
-            margin: '0 auto 16px',
-            lineHeight: 1,
+            margin: '0 0 16px 0',
+            lineHeight: 1.1,
+            textAlign: 'center',
+            width: '100%',
           }}
         >
           NOETIC
@@ -154,11 +163,13 @@ export function Hero(): ReactNode {
             delay: 0.3,
           }}
           style={{
-            fontSize: '18px',
+            fontSize: 'clamp(16px, 2.5vw, 18px)',
             color: 'var(--color-tui-fg)',
             maxWidth: '560px',
-            margin: '0 auto 12px',
+            margin: '0 0 12px 0',
             lineHeight: 1.5,
+            textAlign: 'center',
+            padding: '0 16px',
           }}
         >
           Composable primitives. Clean code from 10 lines to 10,000.
@@ -175,11 +186,13 @@ export function Hero(): ReactNode {
             delay: 0.45,
           }}
           style={{
-            fontSize: '14px',
+            fontSize: 'clamp(13px, 2vw, 14px)',
             color: 'var(--color-tui-muted)',
             maxWidth: '560px',
-            margin: '0 auto 40px',
+            margin: '0 0 40px 0',
             lineHeight: 1.7,
+            textAlign: 'center',
+            padding: '0 16px',
           }}
         >
           Start with pre-built patterns — ReAct, task trees, dual-agent loops. Or compose your own.
@@ -260,6 +273,9 @@ export function Hero(): ReactNode {
             display: 'flex',
             gap: '12px',
             marginBottom: '48px',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+            padding: '0 16px',
           }}
         >
           <Link
@@ -314,6 +330,7 @@ export function Hero(): ReactNode {
             maxWidth: '640px',
             margin: '0 auto',
             textAlign: 'left',
+            padding: '0 16px',
           }}
         >
           <TuiWindow title="react-agent.ts">
