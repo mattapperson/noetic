@@ -134,6 +134,7 @@ export function TuiWindow({ children, title, className }: TuiWindowProps): React
           padding: '16px',
           fontSize: '14px',
           lineHeight: '1.6',
+          textAlign: 'left',
         }}
       >
         {children}
