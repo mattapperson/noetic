@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Custom Properties for Theming */
+:root {
+  /* Dark theme (default) - from spec */
+  --noetic-bg: #0f172a;
+  --noetic-canvas-bg: #1e293b;
+  --noetic-sidebar-bg: #0f172a;
+  --noetic-node-bg: rgba(30, 41, 59, 0.8);
+  --noetic-border: #334155;
+  --noetic-text: #f1f5f9;
+  --noetic-text-secondary: #94a3b8;
+  --noetic-text-muted: #64748b;
+  --noetic-accent: #3b82f6;
+  --noetic-input-bg: #1e293b;
+  --noetic-button-bg: #334155;
+  --noetic-button-hover: #475569;
+  --noetic-hover: rgba(255, 255, 255, 0.05);
+  --noetic-grid-color: #334155;
+
+  /* Step kind colors - from spec */
+  --noetic-llm-color: #8b5cf6;
+  --noetic-tool-color: #f97316;
+  --noetic-run-color: #06b6d4;
+  --noetic-branch-color: #eab308;
+  --noetic-fork-color: #ec4899;
+  --noetic-spawn-color: #6366f1;
+  --noetic-loop-color: #14b8a6;
+
+  /* Status colors */
+  --noetic-success: #10b981;
+  --noetic-warning: #f59e0b;
+  --noetic-error: #ef4444;
+  --noetic-info: #3b82f6;
+}
+
+/* Light theme - from spec */
+html.light,
+:root:not(.dark):not(.light) {
+  /* Only apply light theme if explicitly set via class or if system prefers light */
+}
+
+html.light {
+  --noetic-bg: #f8fafc;
+  --noetic-canvas-bg: #f1f5f9;
+  --noetic-sidebar-bg: #ffffff;
+  --noetic-node-bg: #ffffff;
+  --noetic-border: #e2e8f0;
+  --noetic-text: #0f172a;
+  --noetic-text-secondary: #64748b;
+  --noetic-text-muted: #94a3b8;
+  --noetic-accent: #2563eb;
+  --noetic-input-bg: #ffffff;
+  --noetic-button-bg: #e2e8f0;
+  --noetic-button-hover: #cbd5e1;
+  --noetic-hover: rgba(0, 0, 0, 0.03);
+  --noetic-grid-color: #e2e8f0;
+
+  /* Step kind colors - light theme */
+  --noetic-llm-color: #7c3aed;
+  --noetic-tool-color: #ea580c;
+  --noetic-run-color: #0891b2;
+  --noetic-branch-color: #ca8a04;
+  --noetic-fork-color: #db2777;
+  --noetic-spawn-color: #4f46e5;
+  --noetic-loop-color: #0d9488;
+
+  /* Status colors */
+  --noetic-success: #059669;
+  --noetic-warning: #d97706;
+  --noetic-error: #dc2626;
+  --noetic-info: #2563eb;
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--noetic-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--noetic-text-secondary);
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--noetic-accent);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: var(--noetic-accent);
+  color: white;
+}
