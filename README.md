@@ -14,6 +14,7 @@ A TypeScript agent framework that decomposes AI agent patterns into seven compos
 | Package | Description |
 |---------|-------------|
 | [`@noetic/core`](packages/core) | Core framework — step primitives, agent harness, memory layers, patterns |
+| [`@noetic/ui`](packages/ui) | Visual debugging UI — real-time execution visualization and time-travel debugging |
 | [`@noetic/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
 | [`@noetic/web`](packages/web) | Documentation site (Next.js + Fumadocs) |
 
@@ -72,6 +73,50 @@ cd packages/web
 bun run dev    # localhost:3000
 bun run build
 ```
+
+### Development UI (Visual Debugger)
+
+The Noetic UI provides a visual debugging interface for inspecting agent execution in real-time.
+
+**Setup:**
+
+```bash
+# Install UI dependencies (from repo root)
+bun install
+
+# Build the UI package
+cd packages/ui && bun run build
+```
+
+**Running the dev UI from source:**
+
+```bash
+# Terminal 1: Start the UI server
+cd packages/ui
+bun run serve              # Starts WebSocket server on port 3333
+
+# Terminal 2: Run your agent with debugging enabled
+NOETIC_UI_ENABLED=true bun run your-agent.ts
+```
+
+**Using the UI:**
+
+1. The UI server will start at `http://localhost:3333`
+2. When `NOETIC_UI_ENABLED=true`, agents automatically connect and stream execution traces
+3. Open the browser to view the three-panel interface:
+   - **Left**: Agent browser with execution history
+   - **Center**: Interactive node graph of execution flow
+   - **Right**: Inspector panel for step details
+4. Use the timeline at the bottom to scrub through execution history
+
+**Features:**
+- Real-time execution visualization
+- Time-travel debugging (scrub to any point in execution)
+- Data inspection at each step (input, output, context)
+- Breakpoint support with pause/resume
+- Zero production impact (only enabled via env var)
+
+See [packages/ui/README.md](packages/ui/README.md) for detailed documentation.
 
 ## Quick Example
 
