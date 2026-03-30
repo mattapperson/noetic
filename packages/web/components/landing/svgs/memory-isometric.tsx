@@ -253,7 +253,7 @@ export function MemoryIsometricSvg(): ReactNode {
           refY="5"
           orient="auto"
         >
-          <polyline points="1,1 9,5 1,9" stroke={GREEN} strokeWidth="1.5" fill="none" />
+          <polyline points="5,1 9,5 5,9" stroke={GREEN} strokeWidth="0.8" fill="none" />
         </marker>
         <marker
           id="mem-arrow-cyan"
@@ -263,7 +263,7 @@ export function MemoryIsometricSvg(): ReactNode {
           refY="5"
           orient="auto"
         >
-          <polyline points="1,1 9,5 1,9" stroke={CYAN} strokeWidth="1.5" fill="none" />
+          <polyline points="5,1 9,5 5,9" stroke={CYAN} strokeWidth="0.8" fill="none" />
         </marker>
       </defs>
 

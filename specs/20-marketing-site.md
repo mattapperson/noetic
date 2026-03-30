@@ -198,20 +198,167 @@ Each tab renders a `<TuiWindow>` with the code snippet.
 
 ---
 
-## SVG Technical Spec
+## SVG Design System
 
-### Geometry
-- All angles: 0°, 45°, or 90° only (no other angles)
-- Node depth: 14px (front→top face diagonal)
-- Wire stroke: `0.8px`
-- Arrow marker: open chevron `>`, `stroke-width: 1.5`, no fill
+All marketing site SVGs must follow these specifications exactly.
+
+### Node Geometry
+
+```tsx
+const NODE_W = 72;   // Width
+const NODE_H = 36;   // Height
+const NODE_D = 10;   // Isometric depth (extends beyond front face)
+```
+
+**Structure:**
+- **Top face**: polygon extending `NODE_D` pixels back and up
+- **Front face**: rectangle (main visible surface)
+- **Right face**: polygon extending `NODE_D` pixels back
+- **Pulse animation**: `fill-opacity` 0 → 0.06 → 0, 3s duration
+
+### Color Palette
+
+| Variable | Hex | Usage |
+|----------|-----|-------|
+| `GREEN` | `#39ff14` | LLM nodes, primary flow, success states |
+| `CYAN` | `#38bdf8` | Tool nodes, read operations, actions |
+| `AMBER` | `#ffb000` | Memory/observation, loops, feedback |
+| `MUTED` | `#475569` | External inputs, boundaries |
+| `SURFACE` | `#080808` | Node fill color |
+| `BORDER_COLOR` | `#1a1a1a` | Memory layer borders |
+
+### Typography
+
+- **Font**: JetBrains Mono, monospace
+- **Weights**: 700 (labels), 400 (descriptions)
+- **Sizes**: 11px (nodes), 9px (headers), 8px (descriptions)
+- **Letter spacing**: 0.06em
+
+### Connection Lines
+
+- **Stroke width**: 0.8px
+- **Stroke opacity**: 0.5 (standard), 0.45 (dashed loops)
+- **Dash pattern**: `"4 3"` for feedback/loop lines
+- **Angles**: 45° segments (horizontal + diagonal), 90° when necessary
+- **Segment minimum**: 28px per segment
+
+**Wire Termination:**
+- Terminate at node edges, not through nodes
+- For arrow visibility: terminate 12px before edge, or render wire **after** node in SVG document order (higher z-index)
+
+### Arrow Head Specifications
+
+**Marker Definition:**
+```tsx
+<marker
+  id="[prefix]-arrow-[color]"
+  markerWidth="10"
+  markerHeight="10"
+  refX="9"
+  refY="5"
+  orient="auto"
+>
+  <polyline 
+    points="5,1 9,5 5,9"  // 45° angle chevron
+    stroke={COLOR}         // Must match line color exactly
+    strokeWidth="0.8"      // Matches line width
+    fill="none"
+  />
+</marker>
+```
+
+**Critical Requirements:**
+1. **45° angles**: Use `points="5,1 9,5 5,9"` (not `"1,1 9,5 1,9"`)
+2. **Color match**: Arrow stroke must exactly match connection line stroke
+3. **Width match**: 0.8px to match connection lines
+4. **No fill**: `fill="none"`
 
 ### Animation
-- Sphere travel: SVG `<animateMotion>` with `path` attribute and `calcMode="linear"`
-- Multiple spheres per wire with staggered `begin` offsets (typically `dur/2`)
-- Glow: `<radialGradient>` + `<feGaussianBlur stdDeviation="2.5">` filter on large circle
-- No JavaScript required for SVG animations
 
-### Accessibility
-- All SVGs include `role="img"` and `aria-label` describing what they show
-- Animations respect `prefers-reduced-motion` via CSS: `@media (prefers-reduced-motion: reduce) { svg * { animation-play-state: paused; } }`
+**Glow Spheres:**
+```tsx
+<circle r="8" fill={`url(#${gradientId})`} />
+<circle r="2.5" fill={color} />
+<animateMotion
+  path={wirePath}
+  dur="2.5s"
+  begin="0s"  // Stagger: 0s, 0.3s, 0.6s, 0.9s...
+  repeatCount="indefinite"
+  calcMode="linear"
+/>
+```
+
+**Gradients:**
+```tsx
+<radialGradient id="glow-green" cx="50%" cy="50%" r="50%">
+  <stop offset="0%" stopColor={GREEN} stopOpacity="0.8" />
+  <stop offset="100%" stopColor={GREEN} stopOpacity="0" />
+</radialGradient>
+```
+
+**Blur Filter:**
+```tsx
+<filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur stdDeviation="2.5" />
+</filter>
+```
+
+### Grouping/Container Boxes
+
+When showing grouped concepts (e.g., "ReAct pattern"):
+
+- **Padding**: 10px minimum on all sides
+- **Stroke**: Dashed `"6 4"` pattern
+- **Stroke width**: 1px
+- **Stroke opacity**: 0.4
+- **Fill**: Color with 0.02 opacity
+- **Label**: Positioned at top-left with 12px inset
+
+**Account for depth**: The isometric right face extends `NODE_D` (10px) beyond the front face, so right padding must include this extension.
+
+### ViewBox Guidelines
+
+- **Minimum padding**: 16px around all elements
+- **Consistent sizing**: Use `maxHeight` in CSS (e.g., `maxHeight: '232px'`)
+- **Calculate coordinates**: Use absolute positioning with documented calculations
+
+### Implementation Checklist
+
+Before committing a new SVG:
+
+- [ ] All connection segments ≥ 28px
+- [ ] All angles are 45° (or 90° where necessary)
+- [ ] Arrow heads use 45° points: `points="5,1 9,5 5,9"`
+- [ ] Arrow stroke width is 0.8px (matches lines)
+- [ ] Arrow colors match line colors exactly
+- [ ] Wires with visible arrows render **after** nodes in document order
+- [ ] Node depth (10px) accounted for in container padding
+- [ ] Typography follows JetBrains Mono stack
+- [ ] Glow spheres with staggered animation timing
+- [ ] Pulse animation on all interactive nodes
+- [ ] 10px minimum padding in container boxes
+- [ ] No text overlapping nodes (36px reserved for labels)
+- [ ] `role="img"` and `aria-label` for accessibility
+- [ ] `prefers-reduced-motion` CSS support
+
+---
+
+## Legacy SVG Technical Spec (Deprecated)
+
+*The above SVG Design System section replaces these older specifications.*
+
+~~### Geometry~~
+~~- All angles: 0°, 45°, or 90° only (no other angles)~~
+~~- Node depth: 14px (front→top face diagonal)~~
+~~- Wire stroke: `0.8px`~~
+~~- Arrow marker: open chevron `>`, `stroke-width: 1.5`, no fill~~
+
+~~### Animation~~
+~~- Sphere travel: SVG `<animateMotion>` with `path` attribute and `calcMode="linear"`~~
+~~- Multiple spheres per wire with staggered `begin` offsets (typically `dur/2`)~~
+~~- Glow: `<radialGradient>` + `<feGaussianBlur stdDeviation="2.5">` filter on large circle~~
+~~- No JavaScript required for SVG animations~~
+
+~~### Accessibility~~
+~~- All SVGs include `role="img"` and `aria-label` describing what they show~~
+~~- Animations respect `prefers-reduced-motion` via CSS: `@media (prefers-reduced-motion: reduce) { svg * { animation-play-state: paused; } }`~~
