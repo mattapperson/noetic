@@ -156,6 +156,59 @@ const hashLine = (str: string): string => {
   return Math.abs(hash).toString(36);
 };
 
+interface HighlightedSegment {
+  text: string;
+  className?: string;
+}
+
+/**
+ * Parse a line into highlighted segments for safe React rendering
+ * Avoids dangerouslySetInnerHTML by building segment arrays
+ */
+const parseLineToSegments = (line: string): HighlightedSegment[] => {
+  const segments: HighlightedSegment[] = [];
+  let remaining = line;
+
+  // Helper to add segment
+  const addSegment = (text: string, className?: string) => {
+    segments.push({
+      text,
+      className,
+    });
+  };
+
+  // Helper to consume matched text
+  const consume = (pattern: RegExp, className: string): boolean => {
+    const match = remaining.match(pattern);
+    if (match && match.index === 0) {
+      addSegment(match[0], className);
+      remaining = remaining.slice(match[0].length);
+      return true;
+    }
+    return false;
+  };
+
+  while (remaining.length > 0) {
+    let consumed = false;
+
+    // Try patterns in order of specificity
+    consumed = consumed || consume(/^"(?:[^"\\]|\\.)*"/, 'text-[var(--noetic-json-string)]');
+    consumed = consumed || consume(/^\b(?:true|false|null)\b/, 'text-[var(--noetic-json-boolean)]');
+    consumed = consumed || consume(/^\b\d+(?:\.\d+)?\b/, 'text-[var(--noetic-json-number)]');
+    consumed = consumed || consume(/^[{}[\],]/, 'text-[var(--noetic-text-muted)]');
+    consumed = consumed || consume(/^\s+/, undefined); // Whitespace, no special styling
+    consumed = consumed || consume(/^./, 'text-[var(--noetic-json-object)]'); // Any other char
+
+    if (!consumed) {
+      // Safety valve: consume one character to avoid infinite loop
+      addSegment(remaining[0], undefined);
+      remaining = remaining.slice(1);
+    }
+  }
+
+  return segments;
+};
+
 const SyntaxHighlightedJson: React.FC<SyntaxHighlightedJsonProps> = ({ content }) => {
   const lines = content.split('\n');
 
@@ -166,53 +219,21 @@ const SyntaxHighlightedJson: React.FC<SyntaxHighlightedJsonProps> = ({ content }
           <span className="w-8 text-right pr-3 text-[var(--noetic-text-muted)] select-none flex-shrink-0">
             {hashLine(line).slice(0, 4)}
           </span>
-          <span
-            className="flex-1 whitespace-pre"
-            dangerouslySetInnerHTML={{
-              __html: highlightLine(line),
-            }}
-          />
+          <span className="flex-1 whitespace-pre">
+            {parseLineToSegments(line).map((segment) =>
+              segment.className ? (
+                <span key={hashLine(segment.text)} className={segment.className}>
+                  {segment.text}
+                </span>
+              ) : (
+                <span key={hashLine(segment.text)}>{segment.text}</span>
+              ),
+            )}
+          </span>
         </div>
       ))}
     </div>
   );
-};
-
-const highlightLine = (line: string): string => {
-  // Escape HTML
-  let highlighted = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  // Highlight strings
-  highlighted = highlighted.replace(
-    /"([^"\\]*(\\.[^"\\]*)*)"/g,
-    '<span class="text-[var(--noetic-json-string)]">"$1"</span>',
-  );
-
-  // Highlight numbers
-  highlighted = highlighted.replace(
-    /\b(\d+\.?\d*)\b/g,
-    '<span class="text-[var(--noetic-json-number)]">$1</span>',
-  );
-
-  // Highlight booleans and null
-  highlighted = highlighted.replace(
-    /\b(true|false|null)\b/g,
-    '<span class="text-[var(--noetic-json-boolean)]">$1</span>',
-  );
-
-  // Highlight keys
-  highlighted = highlighted.replace(
-    /(<span[^>]*>"[^"]*"<\/span>)(\s*:)/g,
-    '<span class="text-[var(--noetic-json-object)]">$1</span>$2',
-  );
-
-  // Highlight punctuation
-  highlighted = highlighted.replace(
-    /([{}[\],])/g,
-    '<span class="text-[var(--noetic-text-muted)]">$1</span>',
-  );
-
-  return highlighted;
 };
 
 const highlightSearch = (content: string, query: string): string => {

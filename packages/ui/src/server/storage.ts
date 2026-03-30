@@ -7,51 +7,45 @@
 import { access, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 import type { ExecutionTrace, Run } from '../shared/protocol.js';
 
 // ============================================================================
-// Type Guards
+// Zod Schemas for Runtime Validation
 // ============================================================================
 
-/**
- * Type guard for NodeJS.ErrnoException
- * Type guard pattern: required cast to check properties on unknown error type
- */
+const nodeErrorSchema = z.object({
+  code: z.string(),
+});
+
+const runSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  trace: z.object({}),
+});
+
+const serializedMapSchema = z.object({
+  dataType: z.literal('Map'),
+  value: z.array(
+    z.tuple([
+      z.string(),
+      z.unknown(),
+    ]),
+  ),
+});
+
+// ============================================================================
+// Type Guards using Zod
+// ============================================================================
+
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  // Type guard requires cast from unknown to check properties
-  const err = error as {
-    code: unknown;
-  };
-  return typeof err.code === 'string';
+  return nodeErrorSchema.safeParse(error).success;
 }
 
-/**
- * Type guard to validate if a parsed object matches Run structure
- * Type guard pattern: required cast to check properties on unknown value
- */
 function isValidRun(value: unknown): value is Run {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  // Type guard requires cast from unknown to check properties
-  const obj = value as Record<string, unknown>;
-  return (
-    'id' in obj &&
-    typeof obj.id === 'string' &&
-    'agentId' in obj &&
-    typeof obj.agentId === 'string' &&
-    'trace' in obj &&
-    typeof obj.trace === 'object' &&
-    obj.trace !== null
-  );
+  return runSchema.safeParse(value).success;
 }
 
-/**
- * Type guard for serialized Map structure
- */
 function isSerializedMap(value: unknown): value is {
   dataType: 'Map';
   value: [
@@ -59,16 +53,9 @@ function isSerializedMap(value: unknown): value is {
     unknown,
   ][];
 } {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  // Type guard requires cast from unknown to check properties
-  const obj = value as Record<string, unknown>;
-  return obj.dataType === 'Map' && Array.isArray(obj.value);
+  return serializedMapSchema.safeParse(value).success;
 }
 
-// ============================================================================
-// Configuration
 // ============================================================================
 // Configuration
 // ============================================================================
