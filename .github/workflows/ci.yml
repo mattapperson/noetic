@@ -6,8 +6,37 @@ on:
   pull_request:
 
 jobs:
-  ci:
-    name: CI
+  # Determine which packages changed
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      core: ${{ steps.filter.outputs.core }}
+      eval: ${{ steps.filter.outputs.eval }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            web:
+              - 'packages/web/**'
+              - '.github/workflows/ci.yml'
+            core:
+              - 'packages/core/**'
+              - 'packages/memory/**'
+              - '.github/workflows/ci.yml'
+            eval:
+              - 'packages/eval/**'
+              - '.github/workflows/ci.yml'
+
+  ci-core:
+    name: Core & Memory
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' || needs.changes.outputs.web == 'true' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -31,14 +60,30 @@ jobs:
       - name: Check export tags
         run: bun run check:exports
 
-      - name: Typecheck docs
-        run: bun --cwd packages/web run typecheck:docs
-
       - name: Test core
         run: bun --cwd packages/core run test:ci
 
       - name: Test eval
         run: bun --cwd packages/eval run test:ci
+
+  ci-web:
+    name: Web (Vercel)
+    needs: changes
+    # Only run web jobs if web package changed, or on push to main
+    if: ${{ needs.changes.outputs.web == 'true' || github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Typecheck docs
+        run: bun --cwd packages/web run typecheck:docs
 
       - name: Build web
         run: bun --cwd packages/web run test:build
@@ -46,6 +91,21 @@ jobs:
       - name: Link check
         run: bun --cwd packages/web run test:links
 
+  eval-regression:
+    name: Eval Regression
+    needs: changes
+    if: ${{ needs.changes.outputs.eval == 'true' || github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: oven-sh/setup-bun@v2
+      
+      - name: Install dependencies
+        run: bun install
+      
       - name: Eval regression (if baselines exist)
         if: hashFiles('.noetic/baselines/**') != ''
         run: |
