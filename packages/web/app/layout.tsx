@@ -20,10 +20,13 @@ export const metadata = {
   ],
   authors: [
     {
-      name: 'Noetic',
+      name: 'Matt Apperson',
+    },
+    {
+      name: 'Ian White',
     },
   ],
-  creator: 'Noetic',
+  creator: 'Matt Apperson',
   publisher: 'Noetic',
   robots: {
     index: true,

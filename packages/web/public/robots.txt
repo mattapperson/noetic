@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://noetic.dev/sitemap.xml
+Sitemap: https://noetic.tools/sitemap.xml
