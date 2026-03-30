@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { TuiWindow } from '@/components/tui/tui-window';
+import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 
 const TABS = [
@@ -161,7 +162,7 @@ export function CodePeek(): ReactNode {
           }}
         >
           <TuiWindow title={TAB_FILES[active]}>
-            <pre style={CODE_PRE_STYLE}>{TAB_CODE[active]}</pre>
+            <pre style={CODE_PRE_STYLE}>{highlightCode(TAB_CODE[active])}</pre>
           </TuiWindow>
         </motion.div>
       </AnimatePresence>

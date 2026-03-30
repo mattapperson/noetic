@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TuiWindow } from '@/components/tui/tui-window';
+import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 
 const INSTALL_COMMANDS = [
@@ -320,7 +321,7 @@ export function Hero(): ReactNode {
           }}
         >
           <TuiWindow title="react-agent.ts">
-            <pre style={CODE_PRE_STYLE}>{HERO_CODE}</pre>
+            <pre style={CODE_PRE_STYLE}>{highlightCode(HERO_CODE)}</pre>
           </TuiWindow>
         </motion.div>
       </motion.div>

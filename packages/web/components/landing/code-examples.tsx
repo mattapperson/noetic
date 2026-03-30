@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
 import { TuiWindow } from '@/components/tui/tui-window';
+import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 
 const EXAMPLES = {
@@ -128,7 +129,7 @@ export function CodeExamples(): ReactNode {
           }}
         >
           <TuiWindow title={TAB_FILENAMES[activeTab]}>
-            <pre style={CODE_PRE_STYLE}>{EXAMPLES[activeTab]}</pre>
+            <pre style={CODE_PRE_STYLE}>{highlightCode(EXAMPLES[activeTab])}</pre>
           </TuiWindow>
         </motion.div>
       </AnimatePresence>
