@@ -16,7 +16,8 @@
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
-    "check:exports": "bun scripts/check-export-tags.ts"
+    "check:exports": "bun scripts/check-export-tags.ts",
+    "dev:ui": "bun --cwd packages/ui run serve"
   },
   "patchedDependencies": {
     "@openrouter/sdk@0.10.2": "patches/@openrouter%2Fsdk@0.10.2.patch"
