@@ -84,7 +84,7 @@ export function Hero(): ReactNode {
         top: 0,
         left: 0,
         right: 0,
-        height: '100vh',
+        bottom: 0,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -92,9 +92,6 @@ export function Hero(): ReactNode {
         padding: '120px 24px 80px',
         textAlign: 'center',
         zIndex: 0,
-        width: '100vw',
-        margin: 'auto',
-        marginTop: '100px',
       }}
     >
       <motion.div
@@ -105,8 +102,8 @@ export function Hero(): ReactNode {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          width: '100%',
-          height: '100%',
+          maxHeight: '100%',
+          overflow: 'auto',
         }}
       >
         <motion.span
