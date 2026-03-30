@@ -14,6 +14,7 @@ interface Primitive {
   signature: string;
   color: 'cyan' | 'green' | 'amber';
   colSpan: 1 | 2;
+  href: string;
 }
 
 const PRIMITIVES: Primitive[] = [
@@ -24,6 +25,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(params: ModelParams) => Step',
     color: 'green',
     colSpan: 2,
+    href: '/docs/steps/llm',
   },
   {
     name: 'spawn',
@@ -31,6 +33,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(agentConfig) => Step',
     color: 'green',
     colSpan: 1,
+    href: '/docs/operators/spawn',
   },
   // control flow
   {
@@ -39,6 +42,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(fn: (ctx) => T) => Step',
     color: 'cyan',
     colSpan: 1,
+    href: '/docs/steps/run',
   },
   {
     name: 'branch',
@@ -46,6 +50,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(condition, then, else) => Step',
     color: 'cyan',
     colSpan: 1,
+    href: '/docs/operators/branch',
   },
   {
     name: 'fork',
@@ -53,6 +58,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(steps[], strategy) => Step',
     color: 'cyan',
     colSpan: 1,
+    href: '/docs/operators/fork',
   },
   // control flow (continued)
   {
@@ -61,6 +67,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(steps[], until) => Step',
     color: 'cyan',
     colSpan: 2,
+    href: '/docs/operators/loop-and-until',
   },
   // integration
   {
@@ -69,6 +76,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(name, input, fn) => Step',
     color: 'amber',
     colSpan: 1,
+    href: '/docs/steps/tool',
   },
 ];
 
@@ -193,7 +201,7 @@ export function PrimitivesViz(): ReactNode {
         {PRIMITIVES.map((primitive) => (
           <Link
             key={primitive.name}
-            href={`/docs/primitives/${primitive.name}`}
+            href={primitive.href}
             style={{
               textDecoration: 'none',
               color: 'inherit',
