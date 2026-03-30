@@ -86,7 +86,7 @@ export function Hero(): ReactNode {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'flex-start',
-        padding: '24px 0',
+        padding: '24px',
         textAlign: 'center',
         zIndex: 0,
         margin: 'auto',

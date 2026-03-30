@@ -17,7 +17,6 @@ export default function LandingPage(): ReactNode {
         <Hero />
         <div
           style={{
-            marginTop: '100vh',
             position: 'relative',
             zIndex: 2,
             background: 'var(--color-tui-bg)',
