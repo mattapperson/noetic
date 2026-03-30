@@ -8,9 +8,18 @@ import { TuiWindow } from '@/components/tui/tui-window';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 
 const INSTALL_COMMANDS = [
-  '$ bun add @noetic/core',
-  '$ npm install @noetic/core',
-  '$ pnpm add @noetic/core',
+  {
+    prefix: '$ bun add ',
+    package: '@noetic/core',
+  },
+  {
+    prefix: '$ npm install ',
+    package: '@noetic/core',
+  },
+  {
+    prefix: '$ pnpm add ',
+    package: '@noetic/core',
+  },
 ] as const;
 
 const HERO_CODE = `import { react } from '@noetic/core';
@@ -173,7 +182,7 @@ export function Hero(): ReactNode {
             fontSize: '14px',
             color: 'var(--color-tui-muted)',
             maxWidth: '560px',
-            margin: '0 0 32px',
+            margin: '0 0 40px',
             lineHeight: 1.7,
           }}
         >
@@ -192,8 +201,7 @@ export function Hero(): ReactNode {
             delay: 0.6,
           }}
           style={{
-            marginBottom: '32px',
-            height: '24px',
+            marginBottom: '40px',
             fontSize: '14px',
           }}
         >
@@ -216,10 +224,28 @@ export function Hero(): ReactNode {
                 duration: 0.15,
               }}
               style={{
-                color: 'var(--color-tui-muted)',
+                background: 'var(--color-tui-surface)',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                fontFamily: 'var(--font-mono)',
+                border: '1px solid var(--color-tui-border)',
+                display: 'inline-block',
               }}
             >
-              {INSTALL_COMMANDS[commandIndex]}
+              <span
+                style={{
+                  color: 'var(--color-tui-muted)',
+                }}
+              >
+                {INSTALL_COMMANDS[commandIndex].prefix}
+              </span>
+              <span
+                style={{
+                  color: 'var(--color-tui-fg)',
+                }}
+              >
+                {INSTALL_COMMANDS[commandIndex].package}
+              </span>
             </motion.span>
           </AnimatePresence>
         </motion.div>

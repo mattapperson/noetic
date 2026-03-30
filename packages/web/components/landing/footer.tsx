@@ -37,7 +37,7 @@ export function Footer(): ReactNode {
     >
       <div
         style={{
-          maxWidth: '960px',
+          maxWidth: '1280px',
           margin: '0 auto',
         }}
       >

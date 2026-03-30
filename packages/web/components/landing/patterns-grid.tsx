@@ -103,7 +103,7 @@ export function PatternsGrid(): ReactNode {
         }}
       >
         <div>
-          <SectionHeader label="ready to use" title="Batteries included." margin="8px 0 12px" />
+          <SectionHeader label="ready to use" title="Batteries included" margin="8px 0 12px" />
           <p
             style={{
               fontSize: '17px',
