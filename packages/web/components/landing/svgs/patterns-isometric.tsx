@@ -326,11 +326,9 @@ export function PatternsIsometricSvg(): ReactNode {
       viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
       width="100%"
       height="100%"
+      preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="ReAct loop: Thought → Action → Observation → loop back to Thought"
-      style={{
-        maxHeight: '232px',
-      }}
     >
       <defs>
         <filter id="pat-blur" x="-50%" y="-50%" width="200%" height="200%">
