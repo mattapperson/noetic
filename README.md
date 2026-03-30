@@ -90,19 +90,17 @@ cd packages/ui && bun run build
 
 **Running the dev UI from source:**
 
-```bash
-# Option 1: Use the convenient root script (recommended)
-bun run dev:ui              # Starts UI server on port 3333
+You need to run **both** the UI server and your agent (in separate terminals):
 
-# Option 2: Run directly from packages/ui
-cd packages/ui
-bun run serve              # Starts WebSocket server on port 3333
+```bash
+# Terminal 1: Start the UI server
+bun run dev:ui              # or: cd packages/ui && bun run serve
+
+# Terminal 2: Run your agent with debugging enabled
+NOETIC_UI_ENABLED=true bun run your-agent.ts
 ```
 
-**Using the UI:**
-
-1. The UI server will start at `http://localhost:3333`
-2. When `NOETIC_UI_ENABLED=true`, agents automatically connect and stream execution traces
+The UI server runs on port 3333. When `NOETIC_UI_ENABLED=true`, agents automatically connect and stream execution traces to the UI.
 3. Open the browser to view the three-panel interface:
    - **Left**: Agent browser with execution history
    - **Center**: Interactive node graph of execution flow
