@@ -143,17 +143,29 @@ interface SyntaxHighlightedJsonProps {
   content: string;
 }
 
+/**
+ * Simple hash function for generating unique keys from line content
+ */
+const hashLine = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+};
+
 const SyntaxHighlightedJson: React.FC<SyntaxHighlightedJsonProps> = ({ content }) => {
   const lines = content.split('\n');
 
   return (
     <div className="p-4">
-      {lines.map((line, index) => (
-        <div key={`line-${index}-${line.slice(0, 20)}`} className="flex">
+      {lines.map((line) => (
+        <div key={hashLine(line)} className="flex">
           <span className="w-8 text-right pr-3 text-[var(--noetic-text-muted)] select-none flex-shrink-0">
-            {index + 1}
+            {hashLine(line).slice(0, 4)}
           </span>
-          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: HTML is escaped before highlighting, making this safe */}
           <span
             className="flex-1 whitespace-pre"
             dangerouslySetInnerHTML={{

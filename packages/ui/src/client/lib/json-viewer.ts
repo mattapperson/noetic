@@ -72,12 +72,24 @@ export function formatJsonValue(value: unknown, key = '', depth = 0): FormattedN
  * Get the type of a value for syntax highlighting
  */
 export function getValueType(value: unknown): FormattedNode['type'] {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return 'array';
-  if (typeof value === 'object') return 'object';
-  if (typeof value === 'string') return 'string';
-  if (typeof value === 'number') return 'number';
-  if (typeof value === 'boolean') return 'boolean';
+  if (value === null) {
+    return 'null';
+  }
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+  if (typeof value === 'object') {
+    return 'object';
+  }
+  if (typeof value === 'string') {
+    return 'string';
+  }
+  if (typeof value === 'number') {
+    return 'number';
+  }
+  if (typeof value === 'boolean') {
+    return 'boolean';
+  }
   return 'null';
 }
 
@@ -125,7 +137,9 @@ export function prettyPrintJson(value: unknown, indent = 2): string {
  * Truncate a string to a maximum length
  */
 export function truncateString(str: string, maxLength = 100): string {
-  if (str.length <= maxLength) return str;
+  if (str.length <= maxLength) {
+    return str;
+  }
   return str.slice(0, maxLength) + '...';
 }
 
@@ -147,7 +161,9 @@ export function estimateSize(value: unknown): number {
  * Format bytes into a human-readable string
  */
 export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
+  if (bytes === 0) {
+    return '0 B';
+  }
   const k = 1024;
   const sizes = [
     'B',
@@ -207,9 +223,15 @@ export function getSyntaxColor(type: FormattedNode['type'], isDark = true): stri
  * Check if a value is empty (empty object, array, or null/undefined)
  */
 export function isEmptyValue(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (Array.isArray(value) && value.length === 0) return true;
-  if (typeof value === 'object' && Object.keys(value).length === 0) return true;
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    return true;
+  }
+  if (typeof value === 'object' && Object.keys(value).length === 0) {
+    return true;
+  }
   return false;
 }
 
@@ -229,9 +251,15 @@ export function deepClone<T>(value: T): T {
  * Get a preview string for a value (first 50 chars)
  */
 export function getPreview(value: unknown, maxLength = 50): string {
-  if (value === null || value === undefined) return 'null';
-  if (typeof value === 'string') return truncateString(value, maxLength);
-  if (Array.isArray(value)) return `Array(${value.length})`;
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+  if (typeof value === 'string') {
+    return truncateString(value, maxLength);
+  }
+  if (Array.isArray(value)) {
+    return `Array(${value.length})`;
+  }
   if (typeof value === 'object') {
     const keys = Object.keys(value);
     return `Object(${keys.length}) {${keys.slice(0, 3).join(', ')}${keys.length > 3 ? '...' : ''}}`;

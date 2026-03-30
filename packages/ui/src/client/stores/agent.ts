@@ -210,7 +210,9 @@ export const useAgentStore = create<AgentState>()(
       addRun: (agentId, run) =>
         set((state) => ({
           agents: state.agents.map((agent) => {
-            if (agent.id !== agentId) return agent;
+            if (agent.id !== agentId) {
+              return agent;
+            }
             const runs = [
               run,
               ...agent.runs,
@@ -227,7 +229,9 @@ export const useAgentStore = create<AgentState>()(
       updateRun: (agentId, runId, updates) =>
         set((state) => ({
           agents: state.agents.map((agent) => {
-            if (agent.id !== agentId) return agent;
+            if (agent.id !== agentId) {
+              return agent;
+            }
             return {
               ...agent,
               runs: agent.runs.map((run) =>
@@ -245,7 +249,9 @@ export const useAgentStore = create<AgentState>()(
       removeRun: (agentId, runId) =>
         set((state) => ({
           agents: state.agents.map((agent) => {
-            if (agent.id !== agentId) return agent;
+            if (agent.id !== agentId) {
+              return agent;
+            }
             const runs = agent.runs.filter((r) => r.id !== runId);
             return {
               ...agent,
@@ -259,7 +265,9 @@ export const useAgentStore = create<AgentState>()(
       removeAllRuns: (agentId) =>
         set((state) => ({
           agents: state.agents.map((agent) => {
-            if (agent.id !== agentId) return agent;
+            if (agent.id !== agentId) {
+              return agent;
+            }
             return {
               ...agent,
               runs: [],

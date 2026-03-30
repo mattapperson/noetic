@@ -152,7 +152,13 @@ export const FileJson: React.FC<IconProps> = ({ className }) => (
 );
 
 export const Copy: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -163,7 +169,13 @@ export const Copy: React.FC<IconProps> = ({ className }) => (
 );
 
 export const Download: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -174,7 +186,13 @@ export const Download: React.FC<IconProps> = ({ className }) => (
 );
 
 export const Maximize: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -185,7 +203,13 @@ export const Maximize: React.FC<IconProps> = ({ className }) => (
 );
 
 export const Search: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -196,7 +220,13 @@ export const Search: React.FC<IconProps> = ({ className }) => (
 );
 
 export const Eye: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -213,7 +243,13 @@ export const Eye: React.FC<IconProps> = ({ className }) => (
 );
 
 export const EyeOff: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -224,7 +260,13 @@ export const EyeOff: React.FC<IconProps> = ({ className }) => (
 );
 
 export const AlertCircle: React.FC<IconProps> = ({ className }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+  <svg
+    className={className}
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    aria-hidden="true"
+  >
     <path
       strokeLinecap="round"
       strokeLinejoin="round"

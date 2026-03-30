@@ -36,8 +36,6 @@ export class Debugger implements DebugController {
   private timelineEvents: TimelineEvent[] = [];
   private pauseResolvers = new Map<string, () => void>();
   private onEvent: ((message: ServerMessage) => void) | null = null;
-  private runId: string | null = null;
-  private agentId: string | null = null;
   private startTime = 0;
   private stepCounter = 0;
   private parentStack: string[] = [];
@@ -67,9 +65,7 @@ export class Debugger implements DebugController {
   /**
    * Start a new debug run
    */
-  startRun(agentId: string, runId: string, input: unknown): void {
-    this.runId = runId;
-    this.agentId = agentId;
+  startRun(_agentId: string, runId: string, _input: unknown): void {
     this.startTime = Date.now();
     this.stepCounter = 0;
     this.parentStack = [];
@@ -628,7 +624,7 @@ export class Debugger implements DebugController {
     };
   }
 
-  private extractStepData(step: Step, result: unknown): Record<string, unknown> {
+  private extractStepData(step: Step, _result: unknown): Record<string, unknown> {
     const stepData: Record<string, unknown> = {};
 
     if (step.kind === 'llm') {

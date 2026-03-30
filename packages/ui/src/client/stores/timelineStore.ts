@@ -134,7 +134,7 @@ export const useTimelineStore = create<TimelineState>()(
         startTime;
       const totalDuration = endTime - startTime;
 
-      const markers: TimelineMarker[] = sortedNodes.map((node, index) => ({
+      const markers: TimelineMarker[] = sortedNodes.map((node) => ({
         id: `marker-${node.id}`,
         nodeId: node.id,
         stepKind: node.kind,
@@ -249,7 +249,7 @@ export const useTimelineStore = create<TimelineState>()(
     },
 
     snapToNearestMarker: () => {
-      const { playheadPosition, markers } = get();
+      const { playheadPosition } = get();
       const nearest = get().getNearestMarker(playheadPosition);
       if (nearest) {
         set({

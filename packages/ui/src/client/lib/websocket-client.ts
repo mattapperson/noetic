@@ -59,7 +59,6 @@ export class WebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastPingTime = 0;
   private missedHeartbeats = 0;
   private reconnectStartTime = 0;
   private messageQueue: WebSocketMessage[] = [];
@@ -143,7 +142,7 @@ export class WebSocketClient {
         }
       };
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = (_error) => {
         this.onError(new Error('WebSocket error'));
       };
     } catch (err) {
@@ -229,7 +228,6 @@ export class WebSocketClient {
 
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
-      this.lastPingTime = Date.now();
       this.ping();
 
       // Set timeout for pong response

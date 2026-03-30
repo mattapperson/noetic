@@ -228,7 +228,9 @@ export const useExecutionStore = create<ExecutionState>()(
     updateRun: (runId, updates) => {
       set((state) => {
         const run = state.runs.get(runId);
-        if (!run) return state;
+        if (!run) {
+          return state;
+        }
 
         const newRuns = new Map(state.runs);
         newRuns.set(runId, {
@@ -275,7 +277,9 @@ export const useExecutionStore = create<ExecutionState>()(
     updateNode: (nodeId, updates) => {
       set((state) => {
         const node = state.nodes.get(nodeId);
-        if (!node) return state;
+        if (!node) {
+          return state;
+        }
 
         const newNodes = new Map(state.nodes);
         const updatedNode = {
