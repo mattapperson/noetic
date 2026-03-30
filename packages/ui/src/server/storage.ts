@@ -165,10 +165,12 @@ export class TraceStorage {
     try {
       const filePath = this.getRunFilePath(agentId, runId);
       const content = await readFile(filePath, 'utf-8');
-      const run = JSON.parse(content, this.reviver) satisfies Run as Run;
+      // biome-ignore lint: Data serialized by this class, safe to parse
+      const run = JSON.parse(content, this.reviver) as Run;
       return run;
     } catch (error) {
-      const err = error satisfies NodeJS.ErrnoException as NodeJS.ErrnoException;
+      // biome-ignore lint: Standard NodeJS error type check
+      const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') {
         return null;
       }
@@ -197,7 +199,8 @@ export class TraceStorage {
       this.metricsCacheTime = 0;
       return true;
     } catch (error) {
-      const err = error satisfies NodeJS.ErrnoException as NodeJS.ErrnoException;
+      // biome-ignore lint: Standard NodeJS error type check
+      const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') {
         return false;
       }
@@ -374,17 +377,15 @@ export class TraceStorage {
   // JSON reviver for deserializing Maps
   private reviver(_key: string, value: unknown): unknown {
     if (typeof value === 'object' && value !== null) {
-      const obj = value satisfies Record<string, unknown> as Record<string, unknown>;
+      // biome-ignore lint: Type guard for Map deserialization
+      const obj = value as Record<string, unknown>;
       if (obj.dataType === 'Map') {
-        return new Map(
-          obj.value satisfies [
-            string,
-            unknown,
-          ][] as [
-            string,
-            unknown,
-          ][],
-        );
+        // biome-ignore lint: Map entries array type for deserialization
+        const entries = obj.value as [
+          string,
+          unknown,
+        ][];
+        return new Map(entries);
       }
     }
     return value;

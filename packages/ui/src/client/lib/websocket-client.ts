@@ -98,10 +98,12 @@ export class WebSocketClient {
 
       this.ws.onmessage = (event) => {
         try {
-          const parsedData: unknown = JSON.parse(event.data);
+          // biome-ignore lint: JSON parsing returns unknown
+          const parsedData = JSON.parse(event.data) as unknown;
           if (typeof parsedData !== 'object' || parsedData === null || !('type' in parsedData)) {
             throw new Error('Invalid message format');
           }
+          // biome-ignore lint: Type validated above - parsedData has type property
           const message = parsedData as WebSocketMessage;
 
           // Handle pong response

@@ -5,6 +5,41 @@
  * via WebSocket connections.
  */
 
+import { z } from 'zod';
+
+// ============================================================================
+// Zod Schemas for Runtime Validation
+// ============================================================================
+
+const baseMessageSchema = z.object({
+  type: z.string(),
+});
+
+const serverMessageTypes = z.enum([
+  'execution.start',
+  'node.start',
+  'node.complete',
+  'node.error',
+  'node.pause',
+  'node.data',
+  'execution.complete',
+  'execution.error',
+  'pong',
+]);
+
+const clientMessageTypes = z.enum([
+  'execution.list',
+  'execution.get',
+  'execution.replay',
+  'node.stepOver',
+  'node.stepInto',
+  'node.stepOut',
+  'node.resume',
+  'breakpoint.add',
+  'breakpoint.remove',
+  'ping',
+]);
+
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -330,48 +365,17 @@ export type ClientMessage =
 // ============================================================================
 
 export function isServerMessage(msg: unknown): msg is ServerMessage {
-  if (typeof msg !== 'object' || msg === null) {
+  const result = baseMessageSchema.safeParse(msg);
+  if (!result.success) {
     return false;
   }
-  const m = msg satisfies Record<string, unknown> as Record<string, unknown>;
-  if (typeof m.type !== 'string') {
-    return false;
-  }
-
-  const serverTypes = [
-    'execution.start',
-    'node.start',
-    'node.complete',
-    'node.error',
-    'node.pause',
-    'node.data',
-    'execution.complete',
-    'execution.error',
-    'pong',
-  ];
-  return serverTypes.includes(m.type);
+  return serverMessageTypes.safeParse(result.data.type).success;
 }
 
 export function isClientMessage(msg: unknown): msg is ClientMessage {
-  if (typeof msg !== 'object' || msg === null) {
+  const result = baseMessageSchema.safeParse(msg);
+  if (!result.success) {
     return false;
   }
-  const m = msg satisfies Record<string, unknown> as Record<string, unknown>;
-  if (typeof m.type !== 'string') {
-    return false;
-  }
-
-  const clientTypes = [
-    'execution.list',
-    'execution.get',
-    'execution.replay',
-    'node.stepOver',
-    'node.stepInto',
-    'node.stepOut',
-    'node.resume',
-    'breakpoint.add',
-    'breakpoint.remove',
-    'ping',
-  ];
-  return clientTypes.includes(m.type);
+  return clientMessageTypes.safeParse(result.data.type).success;
 }

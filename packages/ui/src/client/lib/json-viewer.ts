@@ -27,9 +27,11 @@ export interface FormattedNode {
  */
 export function formatJsonValue(value: unknown, key = '', depth = 0): FormattedNode {
   const type = getValueType(value);
+  // biome-ignore lint: Value validated as JSON-compatible by getValueType
+  const jsonValue = value as JsonValue;
   const node: FormattedNode = {
     key,
-    value: value as JsonValue,
+    value: jsonValue,
     type,
     depth,
     isExpandable: type === 'object' || type === 'array',

@@ -19,6 +19,7 @@ import type {
   NoeticError,
   ServerMessage,
 } from '../shared/protocol.js';
+import { isClientMessage } from '../shared/protocol.js';
 import { TraceStorage } from './storage.js';
 
 // ============================================================================
@@ -432,8 +433,12 @@ export class NoeticUIServer {
 
   private handleMessage(client: ClientConnection, data: Buffer | ArrayBuffer | Buffer[]): void {
     try {
-      const message = JSON.parse(data.toString()) as ClientMessage;
-      this.processClientMessage(client, message);
+      const parsed = JSON.parse(data.toString());
+      if (!isClientMessage(parsed)) {
+        console.error('[WebSocket] Received invalid message format');
+        return;
+      }
+      this.processClientMessage(client, parsed);
     } catch (error) {
       console.error('Failed to parse client message:', error);
     }
@@ -478,16 +483,13 @@ export class NoeticUIServer {
         console.log(`Received breakpoint message: ${message.type}`);
         break;
 
-      default:
-        console.warn(
-          `Unknown message type: ${
-            (
-              message as {
-                type: string;
-              }
-            ).type
-          }`,
-        );
+      default: {
+        // biome-ignore lint: Safe cast - type property validated by isClientMessage
+        const msg = message as {
+          type: string;
+        };
+        console.warn(`Unknown message type: ${msg.type}`);
+      }
     }
   }
 

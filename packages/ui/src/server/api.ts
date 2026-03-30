@@ -195,13 +195,14 @@ export class NoeticUIAPI {
   private async listAgentRuns(agentId: string): Promise<APIResponse<Run[]>> {
     const runs = await this.config.storage.listAgentRuns(agentId);
     // Sanitize runs for API response (remove large trace data)
+    // biome-ignore lint: Intentionally removing trace data for list response
     const sanitizedRuns = runs.map((run) => ({
       ...run,
       trace: undefined, // Don't send full trace in list
-    }));
+    })) as Run[];
     return {
       success: true,
-      data: sanitizedRuns satisfies Run[] as Run[],
+      data: sanitizedRuns,
     };
   }
 

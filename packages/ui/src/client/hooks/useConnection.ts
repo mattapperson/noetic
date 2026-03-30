@@ -65,6 +65,7 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
       return;
     }
     if (typeof message === 'object' && message !== null) {
+      // biome-ignore lint: Type validated above - message is a non-null object
       client.send(message as Record<string, unknown>);
     }
   };
