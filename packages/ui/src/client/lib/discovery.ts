@@ -99,10 +99,10 @@ export function containsAgentHarness(content: string): boolean {
  * This would be called during dev server start or build
  */
 export async function discoverAgents(
-  projectRoot: string,
+  _projectRoot: string,
   patterns?: string[],
 ): Promise<DiscoveredAgent[]> {
-  const scanPatterns = patterns ?? getAgentPatterns();
+  const _scanPatterns = patterns ?? getAgentPatterns();
   const discovered: DiscoveredAgent[] = [];
 
   // In a real implementation, this would use glob to find files

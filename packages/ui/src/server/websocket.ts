@@ -16,9 +16,7 @@ import type {
   ExecutionNode,
   ExecutionSummary,
   ExecutionTrace,
-  NodeStatus,
   NoeticError,
-  RunStatus,
   ServerMessage,
 } from '../shared/protocol.js';
 import { TraceStorage } from './storage.js';

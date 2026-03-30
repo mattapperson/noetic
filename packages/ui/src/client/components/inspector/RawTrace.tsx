@@ -149,10 +149,11 @@ const SyntaxHighlightedJson: React.FC<SyntaxHighlightedJsonProps> = ({ content }
   return (
     <div className="p-4">
       {lines.map((line, index) => (
-        <div key={index} className="flex">
+        <div key={`line-${index}-${line.slice(0, 20)}`} className="flex">
           <span className="w-8 text-right pr-3 text-[var(--noetic-text-muted)] select-none flex-shrink-0">
             {index + 1}
           </span>
+          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: HTML is escaped before highlighting, making this safe */}
           <span
             className="flex-1 whitespace-pre"
             dangerouslySetInnerHTML={{

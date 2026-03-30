@@ -3,6 +3,17 @@ import { useState } from 'react';
 import { prettyPrintJson, truncateString } from '../../lib/json-viewer';
 import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, MessageSquare } from './icons';
 
+// Simple hash function for generating unique keys
+const simpleHash = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36);
+};
+
 export interface MessageItem {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
@@ -98,7 +109,7 @@ export const ItemLog: React.FC<ItemLogProps> = ({ messages, toolCalls, model }) 
         <div className="space-y-2">
           {messages.map((message, index) => (
             <MessageCard
-              key={index}
+              key={simpleHash(`${message.role}-${message.content}`)}
               message={message}
               index={index}
               isExpanded={expandedMessages.has(index)}
@@ -115,9 +126,9 @@ export const ItemLog: React.FC<ItemLogProps> = ({ messages, toolCalls, model }) 
                 </span>
               </div>
               <div className="p-3 space-y-2">
-                {toolCalls.map((call, index) => (
+                {toolCalls.map((call) => (
                   <div
-                    key={index}
+                    key={simpleHash(`${call.name}-${JSON.stringify(call.arguments)}`)}
                     className="p-2 rounded bg-[var(--noetic-code-bg)] border border-[var(--noetic-border)]"
                   >
                     <div className="flex items-center justify-between mb-1">

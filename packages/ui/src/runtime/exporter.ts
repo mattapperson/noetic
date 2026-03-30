@@ -155,7 +155,7 @@ export class NoeticUITraceExporter implements TraceExporter {
         // Silently handle errors - UI is optional
         console.debug('[Noetic UI] WebSocket error:', error.message);
       });
-    } catch (error) {
+    } catch (_error) {
       this.isConnecting = false;
       this.handleDisconnect();
     }
