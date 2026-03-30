@@ -142,7 +142,7 @@ export function Hero(): ReactNode {
             fontSize: 'clamp(48px, 10vw, 96px)',
             fontWeight: 800,
             color: 'var(--color-tui-green)',
-            margin: '0 0 16px',
+            margin: '0 auto 16px',
             lineHeight: 1,
           }}
         >
@@ -163,7 +163,7 @@ export function Hero(): ReactNode {
             fontSize: '18px',
             color: 'var(--color-tui-fg)',
             maxWidth: '560px',
-            margin: '0 0 12px',
+            margin: '0 auto 12px',
             lineHeight: 1.5,
           }}
         >
@@ -184,7 +184,7 @@ export function Hero(): ReactNode {
             fontSize: '14px',
             color: 'var(--color-tui-muted)',
             maxWidth: '560px',
-            margin: '0 0 40px',
+            margin: '0 auto 40px',
             lineHeight: 1.7,
           }}
         >
@@ -318,6 +318,7 @@ export function Hero(): ReactNode {
           style={{
             width: '100%',
             maxWidth: '640px',
+            margin: '0 auto',
             textAlign: 'left',
           }}
         >
