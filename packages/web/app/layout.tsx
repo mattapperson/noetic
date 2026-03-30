@@ -46,7 +46,7 @@ export const metadata = {
       'Build AI agents with composable primitives. ReAct patterns, memory management, and multi-agent workflows in clean TypeScript.',
     images: [
       {
-        url: '/og-image.png',
+        url: '/og-image.svg',
         width: 1200,
         height: 630,
         alt: 'Noetic Agent Framework',
@@ -59,7 +59,7 @@ export const metadata = {
     description:
       'Build AI agents with composable primitives. ReAct patterns, memory management, and multi-agent workflows in clean TypeScript.',
     images: [
-      '/og-image.png',
+      '/og-image.svg',
     ],
   },
   icons: {
