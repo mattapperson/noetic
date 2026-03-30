@@ -507,8 +507,12 @@ export class Debugger implements DebugController {
               this.state.breakpointsHit.push(nodeId);
               return true;
             }
-          } catch {
-            // If condition evaluation fails, break anyway
+          } catch (error) {
+            // If condition evaluation fails, break anyway but log the error
+            console.error(
+              `[Debugger] Breakpoint condition evaluation failed for ${breakpoint.stepId}:`,
+              error,
+            );
             this.state.breakpointsHit.push(nodeId);
             return true;
           }
@@ -559,7 +563,8 @@ export class Debugger implements DebugController {
       }
 
       return false;
-    } catch {
+    } catch (error) {
+      console.error('[Debugger] Failed to evaluate breakpoint condition:', condition, error);
       return false;
     }
   }

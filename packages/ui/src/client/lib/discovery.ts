@@ -187,7 +187,8 @@ export function loadRegisteredAgents(): RegisteredAgent[] {
         typeof item.name === 'string'
       );
     });
-  } catch {
+  } catch (error) {
+    console.error('[Discovery] Failed to load agents from localStorage:', error);
     return [];
   }
 }

@@ -149,6 +149,7 @@ export class TraceStorage {
         warning,
       };
     } catch (error) {
+      console.error('[Storage] Failed to save run:', error);
       return {
         success: false,
         runId,
@@ -171,6 +172,7 @@ export class TraceStorage {
       if (err.code === 'ENOENT') {
         return null;
       }
+      console.error(`[Storage] Failed to load run ${agentId}/${runId}:`, error);
       throw error;
     }
   }
@@ -199,6 +201,7 @@ export class TraceStorage {
       if (err.code === 'ENOENT') {
         return false;
       }
+      console.error(`[Storage] Failed to delete run ${agentId}/${runId}:`, error);
       throw error;
     }
   }
@@ -243,7 +246,8 @@ export class TraceStorage {
 
       // Sort by start time, newest first
       return runs.sort((a, b) => b.startTime - a.startTime);
-    } catch {
+    } catch (error) {
+      console.error('[Storage] Failed to list runs for agent:', agentId, error);
       return [];
     }
   }
@@ -257,7 +261,8 @@ export class TraceStorage {
         withFileTypes: true,
       });
       return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-    } catch {
+    } catch (error) {
+      console.error('[Storage] Failed to list agents:', error);
       return [];
     }
   }
@@ -290,8 +295,9 @@ export class TraceStorage {
         try {
           const stats = await stat(filePath);
           agentSize += stats.size;
-        } catch {
-          // File might be deleted
+        } catch (error) {
+          // File might be deleted or not accessible
+          console.debug(`[Storage] Could not stat file ${filePath}:`, error);
         }
       }
 

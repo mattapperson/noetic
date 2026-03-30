@@ -93,7 +93,8 @@ export function formatValue(value: unknown, type: FormattedNode['type']): string
 export function prettyPrintJson(value: unknown, indent = 2): string {
   try {
     return JSON.stringify(value, null, indent);
-  } catch {
+  } catch (error) {
+    console.error('[JSON] Failed to stringify value:', error);
     return String(value);
   }
 }
@@ -114,7 +115,8 @@ export function estimateSize(value: unknown): number {
     return new Blob([
       JSON.stringify(value),
     ]).size;
-  } catch {
+  } catch (error) {
+    console.error('[JSON] Failed to estimate size:', error);
     return 0;
   }
 }
@@ -195,7 +197,8 @@ export function isEmptyValue(value: unknown): boolean {
 export function deepClone<T>(value: T): T {
   try {
     return JSON.parse(JSON.stringify(value));
-  } catch {
+  } catch (error) {
+    console.error('[JSON] Failed to deep clone value:', error);
     return value;
   }
 }
