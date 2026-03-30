@@ -91,12 +91,12 @@ cd packages/ui && bun run build
 **Running the dev UI from source:**
 
 ```bash
-# Terminal 1: Start the UI server
+# Option 1: Use the convenient root script (recommended)
+bun run dev:ui              # Starts UI server on port 3333
+
+# Option 2: Run directly from packages/ui
 cd packages/ui
 bun run serve              # Starts WebSocket server on port 3333
-
-# Terminal 2: Run your agent with debugging enabled
-NOETIC_UI_ENABLED=true bun run your-agent.ts
 ```
 
 **Using the UI:**
