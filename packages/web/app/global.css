@@ -32,6 +32,12 @@
     --foreground: var(--color-tui-fg);
   }
 
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   body {
     background: var(--color-tui-bg);
     color: var(--color-tui-fg);
