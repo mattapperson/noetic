@@ -20,6 +20,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 ```
 @noetic/memory  ←  @noetic/core  ←  @noetic/eval
+         ↑
+   @noetic/ui (optional dev dependency)
 ```
 
 - **`@noetic/memory`** — The memory API contract and built-in implementations. Contains: the `MemoryLayer` interface, all hook param/result types, `MemoryScope`, `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors depend only on this package — not `@noetic/core`.
@@ -27,6 +29,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 - **`@noetic/core`** — Step primitives and execution infrastructure only. Depends on `@noetic/memory` for the layer contract. Does not contain layer implementations.
 
 - **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
+
+- **`@noetic/ui`** — Visual debugging interface (optional dev dependency). Provides a browser-based UI for inspecting agent execution traces, time-travel debugging, and setting breakpoints. Only enabled in development environments, zero overhead in production. Depends on `@noetic/core` runtime hooks.
 
 ## Architecture
 
@@ -61,6 +65,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
+| `21-noetic-ui` | Visual debugger, time-travel playback, execution recording | Developer tool |
 
 ## Dependency Graph
 

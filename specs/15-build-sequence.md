@@ -68,3 +68,9 @@ Deliberately inject failures at every level and verify propagation matches the d
 **Specs:** `10-observability`
 
 Add span creation to the `execute` interpreter. Verify the trace tree matches the execution tree for all patterns. Verify memory layer trace spans include budget allocation, token usage, and hook duration.
+
+## Stage 11: Visual Debugger (Noetic UI)
+
+**Specs:** `21-noetic-ui`
+
+Build the visual debugging interface. Create the `@noetic/ui` package with WebSocket server, React-based client, and runtime hooks. Implement agent discovery (static analysis), execution recording via TraceExporter, playback timeline with event markers, node graph visualization, and the three-panel layout. The UI should only be enabled via `NOETIC_UI_ENABLED` and have zero impact when disabled. Test with long-running ReAct and Ralph Wiggum patterns to verify time-travel scrubbing and breakpoint functionality work correctly.
