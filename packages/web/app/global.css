@@ -185,9 +185,20 @@
     order: 0;
   }
 
-  section {
-    padding-left: 16px;
-    padding-right: 16px;
+  main > section {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  main > section {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .section-split > :last-child {
+    margin-top: 24px;
   }
 }
 
