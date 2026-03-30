@@ -163,6 +163,7 @@ export function MemorySystem(): ReactNode {
 
       {/* Layer list: full width below */}
       <div
+        className="memory-layers-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(5, 1fr)',

@@ -143,8 +143,20 @@
 
 @media (max-width: 768px) {
   .primitives-grid,
-  .patterns-grid {
+  .patterns-grid,
+  .memory-layers-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1024px) {
+  .primitives-grid,
+  .patterns-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .primitives-grid > [data-col-span="2"] {
+    grid-column: span 1;
   }
 }
 
