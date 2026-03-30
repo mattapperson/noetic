@@ -9,11 +9,10 @@ import { TuiBadge } from '@/components/tui/tui-badge';
 import type { PrimitiveName } from '@/lib/tui-theme';
 import { HOVER_BG, PRIMITIVE_COLORS } from '@/lib/tui-theme';
 
-function getBadgeColor(primitive: PrimitiveName): 'cyan' | 'green' | 'amber' {
-  const colorMap: Record<string, 'cyan' | 'green' | 'amber'> = {
+function getBadgeColor(primitive: PrimitiveName): 'cyan' | 'green' {
+  const colorMap: Record<string, 'cyan' | 'green'> = {
     'tui-cyan': 'cyan',
     'tui-green': 'green',
-    'tui-amber': 'amber',
   };
   return colorMap[PRIMITIVE_COLORS[primitive]] ?? 'cyan';
 }

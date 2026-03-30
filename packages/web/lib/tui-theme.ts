@@ -40,12 +40,14 @@ export const CODE_PRE_STYLE: CSSProperties = {
 };
 
 export const PRIMITIVE_COLORS = {
-  run: 'tui-cyan',
+  // steps
   llm: 'tui-green',
-  tool: 'tui-amber',
-  branch: 'tui-cyan',
+  tool: 'tui-green',
+  run: 'tui-green',
+  // operators
+  spawn: 'tui-cyan',
   fork: 'tui-cyan',
-  spawn: 'tui-green',
+  branch: 'tui-cyan',
   loop: 'tui-cyan',
 } as const satisfies Record<string, string>;
 
