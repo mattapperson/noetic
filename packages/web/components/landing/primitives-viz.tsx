@@ -12,13 +12,13 @@ interface Primitive {
   name: string;
   description: string;
   signature: string;
-  color: 'cyan' | 'green' | 'amber';
+  color: 'cyan' | 'green';
   colSpan: 1 | 2;
   href: string;
 }
 
 const PRIMITIVES: Primitive[] = [
-  // model & agents
+  // steps
   {
     name: 'llm',
     description: 'Call a language model',
@@ -28,21 +28,37 @@ const PRIMITIVES: Primitive[] = [
     href: '/docs/steps/llm',
   },
   {
-    name: 'spawn',
-    description: 'Launch a child agent',
-    signature: '(agentConfig) => Step',
+    name: 'tool',
+    description: 'Invoke an external tool',
+    signature: '(name, input, fn) => Step',
     color: 'green',
     colSpan: 1,
-    href: '/docs/operators/spawn',
+    href: '/docs/steps/tool',
   },
-  // control flow
   {
     name: 'run',
     description: 'Execute a pure function',
     signature: '(fn: (ctx) => T) => Step',
-    color: 'cyan',
+    color: 'green',
     colSpan: 1,
     href: '/docs/steps/run',
+  },
+  // operators
+  {
+    name: 'spawn',
+    description: 'Launch a child agent',
+    signature: '(agentConfig) => Step',
+    color: 'cyan',
+    colSpan: 1,
+    href: '/docs/operators/spawn',
+  },
+  {
+    name: 'fork',
+    description: 'Parallel step execution',
+    signature: '(steps[], strategy) => Step',
+    color: 'cyan',
+    colSpan: 1,
+    href: '/docs/operators/fork',
   },
   {
     name: 'branch',
@@ -53,30 +69,12 @@ const PRIMITIVES: Primitive[] = [
     href: '/docs/operators/branch',
   },
   {
-    name: 'fork',
-    description: 'Parallel step execution',
-    signature: '(steps[], strategy) => Step',
-    color: 'cyan',
-    colSpan: 1,
-    href: '/docs/operators/fork',
-  },
-  // control flow (continued)
-  {
     name: 'loop',
     description: 'Repeat steps until condition',
     signature: '(steps[], until) => Step',
     color: 'cyan',
     colSpan: 2,
     href: '/docs/operators/loop-and-until',
-  },
-  // integration
-  {
-    name: 'tool',
-    description: 'Invoke an external tool',
-    signature: '(name, input, fn) => Step',
-    color: 'amber',
-    colSpan: 1,
-    href: '/docs/steps/tool',
   },
 ];
 
@@ -156,15 +154,11 @@ export function PrimitivesViz(): ReactNode {
           [
             {
               color: 'var(--color-tui-green)',
-              label: 'model & agents',
+              label: 'steps',
             },
             {
               color: 'var(--color-tui-cyan)',
-              label: 'control flow',
-            },
-            {
-              color: 'var(--color-tui-amber)',
-              label: 'integration',
+              label: 'operators',
             },
           ] as const
         ).map((item) => (
