@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#050505"/>
+  
+  <!-- Grid pattern -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  
+  <!-- Glow effect -->
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="15" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Logo -->
+  <text x="600" y="280" font-family="monospace" font-size="180" font-weight="800" fill="#39ff14" text-anchor="middle" filter="url(#glow)">N</text>
+  
+  <!-- Brand name -->
+  <text x="600" y="380" font-family="monospace" font-size="64" font-weight="700" fill="#f8fafc" text-anchor="middle" letter-spacing="0.1em">NOETIC</text>
+  
+  <!-- Tagline -->
+  <text x="600" y="450" font-family="monospace" font-size="28" fill="#94a3b8" text-anchor="middle">Agent Framework</text>
+  
+  <!-- Decorative line -->
+  <line x1="400" y1="490" x2="800" y2="490" stroke="#39ff14" stroke-width="2" opacity="0.5"/>
+</svg>
