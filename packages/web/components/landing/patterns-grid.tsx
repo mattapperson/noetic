@@ -7,7 +7,16 @@ import { SectionHeader } from '@/components/landing/section-header';
 import { PatternsIsometricSvg } from '@/components/landing/svgs/patterns-isometric';
 import { TuiBadge } from '@/components/tui/tui-badge';
 import type { PrimitiveName } from '@/lib/tui-theme';
-import { HOVER_BG } from '@/lib/tui-theme';
+import { HOVER_BG, PRIMITIVE_COLORS } from '@/lib/tui-theme';
+
+function getBadgeColor(primitive: PrimitiveName): 'cyan' | 'green' | 'amber' {
+  const colorMap: Record<string, 'cyan' | 'green' | 'amber'> = {
+    'tui-cyan': 'cyan',
+    'tui-green': 'green',
+    'tui-amber': 'amber',
+  };
+  return colorMap[PRIMITIVE_COLORS[primitive]] ?? 'cyan';
+}
 
 interface PatternCard {
   name: string;
@@ -191,7 +200,7 @@ export function PatternsGrid(): ReactNode {
                 }}
               >
                 {pattern.primitives.map((p) => (
-                  <TuiBadge key={p} color="muted">
+                  <TuiBadge key={p} color={getBadgeColor(p)}>
                     {p}
                   </TuiBadge>
                 ))}
