@@ -94,6 +94,7 @@ export function Hero(): ReactNode {
         zIndex: 0,
         width: '100vw',
         margin: 'auto',
+        marginTop: '80px',
       }}
     >
       <motion.div
