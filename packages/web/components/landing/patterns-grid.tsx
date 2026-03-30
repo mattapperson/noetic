@@ -6,7 +6,6 @@ import type { ReactNode } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
 import { PatternsIsometricSvg } from '@/components/landing/svgs/patterns-isometric';
 import { TuiBadge } from '@/components/tui/tui-badge';
-import { TuiWindow } from '@/components/tui/tui-window';
 import type { PrimitiveName } from '@/lib/tui-theme';
 import { HOVER_BG } from '@/lib/tui-theme';
 
@@ -151,44 +150,52 @@ export function PatternsGrid(): ReactNode {
               whileHover={HOVER_BG}
               style={{
                 background: 'var(--color-tui-surface)',
-                padding: '20px',
+                padding: '32px',
                 height: '100%',
                 transition: 'background 0.1s',
               }}
             >
-              <TuiWindow title={pattern.name}>
-                <div
-                  style={{
-                    fontSize: '13px',
-                    color: 'var(--color-tui-secondary)',
-                    marginBottom: '8px',
-                  }}
-                >
-                  {pattern.subtitle}
-                </div>
-                <div
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '12px',
+                }}
+              >
+                <TuiBadge color="green">{pattern.name}</TuiBadge>
+                <span
                   style={{
                     fontSize: '11px',
                     color: 'var(--color-tui-muted)',
-                    marginBottom: '12px',
                   }}
                 >
                   {pattern.lines}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '6px',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  {pattern.primitives.map((p) => (
-                    <TuiBadge key={p} color="muted">
-                      {p}
-                    </TuiBadge>
-                  ))}
-                </div>
-              </TuiWindow>
+                </span>
+              </div>
+              <p
+                style={{
+                  fontSize: '14px',
+                  color: 'var(--color-tui-secondary)',
+                  margin: '0 0 16px',
+                  lineHeight: 1.5,
+                }}
+              >
+                {pattern.subtitle}
+              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '6px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                {pattern.primitives.map((p) => (
+                  <TuiBadge key={p} color="muted">
+                    {p}
+                  </TuiBadge>
+                ))}
+              </div>
             </motion.div>
           </Link>
         ))}
