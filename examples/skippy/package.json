@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run src/server.ts",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -15,7 +16,9 @@
     "chat": "4.23.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "5.9.3"
+    "@cloudflare/workers-types": "4.20250327.0",
+    "@types/node": "22.15.3",
+    "typescript": "5.9.3",
+    "wrangler": "4.14.4"
   }
 }
