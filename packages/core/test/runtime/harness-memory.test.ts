@@ -26,9 +26,13 @@ describe('AgentHarness memory', () => {
       const layer = makeLayer('harness-layer', Slot.Steering);
       const harness = new AgentHarness({
         name: 'test',
-        memory: [layer],
+        memory: [
+          layer,
+        ],
         params: {},
-        _testCallModel: createScriptedCallModel([textOnlyResponse('ok')]),
+        _testCallModel: createScriptedCallModel([
+          textOnlyResponse('ok'),
+        ]),
       });
 
       const ctx = harness.createContext();
@@ -42,12 +46,20 @@ describe('AgentHarness memory', () => {
       const callLayer = makeLayer('call-layer', Slot.Working);
       const harness = new AgentHarness({
         name: 'test',
-        memory: [harnessLayer],
+        memory: [
+          harnessLayer,
+        ],
         params: {},
-        _testCallModel: createScriptedCallModel([textOnlyResponse('ok')]),
+        _testCallModel: createScriptedCallModel([
+          textOnlyResponse('ok'),
+        ]),
       });
 
-      const ctx = harness.createContext({ memory: [callLayer] });
+      const ctx = harness.createContext({
+        memory: [
+          callLayer,
+        ],
+      });
       expect(ctx.layers).toHaveLength(1);
       expect(ctx.layers![0].id).toBe('call-layer');
     });
@@ -56,7 +68,9 @@ describe('AgentHarness memory', () => {
       const harness = new AgentHarness({
         name: 'test',
         params: {},
-        _testCallModel: createScriptedCallModel([textOnlyResponse('ok')]),
+        _testCallModel: createScriptedCallModel([
+          textOnlyResponse('ok'),
+        ]),
       });
 
       const ctx = harness.createContext();
@@ -79,9 +93,13 @@ describe('AgentHarness memory', () => {
             return 'done';
           },
         },
-        memory: [layer],
+        memory: [
+          layer,
+        ],
         params: {},
-        _testCallModel: createScriptedCallModel([textOnlyResponse('ok')]),
+        _testCallModel: createScriptedCallModel([
+          textOnlyResponse('ok'),
+        ]),
       });
 
       await harness.execute('hello');
