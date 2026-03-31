@@ -345,6 +345,9 @@ export function makeMockHarness(): AgentHarnessContract {
       addEvent() {},
       end() {},
     }),
+    traceExporter: {
+      async export() {},
+    },
     getLayerState: () => undefined,
     setLayerState: () => {},
     beforeToolCall: async () => ({

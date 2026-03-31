@@ -4,7 +4,7 @@
  */
 
 import type React from 'react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { discoverAgents } from '../lib/discovery';
 import { useAgentStore } from '../stores/agent';
 import { useStorageStore } from '../stores/storage';
@@ -26,6 +26,61 @@ export const AgentBrowser: React.FC = () => {
 
   const { clearAllStorage } = useStorageStore();
   const [searchQuery, setSearchQuery] = useState(agentFilter.searchQuery);
+
+  // Fetch agents from server on mount
+  const [serverAgentsLoaded, setServerAgentsLoaded] = useState(false);
+  const { addAgent } = useAgentStore();
+
+  useEffect(() => {
+    if (serverAgentsLoaded) return;
+
+    const fetchAgents = async () => {
+      try {
+        console.log('[AgentBrowser] Fetching agents from server...');
+        const response = await fetch('/api/agents');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        console.log('[AgentBrowser] Server response:', data);
+
+        if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+          // Add each agent from server if not already present
+          const currentIds = new Set(agents.map((a) => a.id));
+
+          data.data.forEach((id: string) => {
+            if (!currentIds.has(id)) {
+              addAgent({
+                id,
+                name: id,
+                filePath: '',
+                exportName: '',
+                discoveredAt: Date.now(),
+                lastModified: Date.now(),
+                discoveryMethod: 'runtime',
+                runs: [],
+                runCount: 0,
+                lastRunAt: null,
+                description: 'Agent auto-discovered via WebSocket',
+                tags: [],
+              });
+              console.log('[AgentBrowser] Added agent:', id);
+            }
+          });
+
+          setServerAgentsLoaded(true);
+        }
+      } catch (error) {
+        console.error('[AgentBrowser] Failed to fetch agents:', error);
+      }
+    };
+
+    fetchAgents();
+  }, [
+    serverAgentsLoaded,
+    agents,
+    addAgent,
+  ]);
 
   const handleSearch = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -178,7 +178,7 @@ const parseLineToSegments = (line: string): HighlightedSegment[] => {
   };
 
   // Helper to consume matched text
-  const consume = (pattern: RegExp, className: string): boolean => {
+  const consume = (pattern: RegExp, className: string | undefined): boolean => {
     const match = remaining.match(pattern);
     if (match && match.index === 0) {
       addSegment(match[0], className);

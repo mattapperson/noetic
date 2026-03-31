@@ -126,7 +126,7 @@ export const ItemLog: React.FC<ItemLogProps> = ({ messages, toolCalls, model }) 
                 </span>
               </div>
               <div className="p-3 space-y-2">
-                {toolCalls.map((call) => (
+                {toolCalls.map((call, index) => (
                   <div
                     key={simpleHash(`${call.name}-${JSON.stringify(call.arguments)}`)}
                     className="p-2 rounded bg-[var(--noetic-code-bg)] border border-[var(--noetic-border)]"

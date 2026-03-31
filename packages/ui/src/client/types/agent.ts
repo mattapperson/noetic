@@ -9,7 +9,7 @@ import type { ExecutionStatus, ExecutionTrace, TimelineEvent } from './index';
 // Agent Types
 // ============================================================================
 
-export type AgentDiscoveryMethod = 'static' | 'manual';
+export type AgentDiscoveryMethod = 'static' | 'manual' | 'runtime';
 
 export interface Agent {
   id: string;

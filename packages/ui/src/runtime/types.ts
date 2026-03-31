@@ -286,6 +286,59 @@ export type ClientMessage =
   | {
       type: 'ping';
       timestamp: number;
+    }
+  // Agent -> Server trace messages
+  | {
+      type: 'agent.register';
+      agentId: string;
+      agentName: string;
+      timestamp: number;
+    }
+  | {
+      type: 'trace.start';
+      traceId: string;
+      agentId: string;
+      input: unknown;
+      startTime: number;
+    }
+  | {
+      type: 'trace.nodeStart';
+      traceId: string;
+      node: ExecutionNode;
+    }
+  | {
+      type: 'trace.nodeComplete';
+      traceId: string;
+      nodeId: string;
+      output: unknown;
+      durationMs: number;
+    }
+  | {
+      type: 'trace.nodeError';
+      traceId: string;
+      nodeId: string;
+      error: {
+        message: string;
+        stack?: string;
+      };
+    }
+  | {
+      type: 'trace.complete';
+      traceId: string;
+      summary: {
+        totalSteps: number;
+        durationMs: number;
+      };
+      endTime: number;
+    }
+  | {
+      type: 'trace.error';
+      traceId: string;
+      error: {
+        message: string;
+        stack?: string;
+      };
+      endTime: number;
     };
 
 /** Exporter options for WebSocket connection */
@@ -300,6 +353,8 @@ export interface ExporterOptions {
   flushIntervalMs?: number;
   /** Auto-reconnect enabled */
   autoReconnect?: boolean;
+  /** Agent name to register with the UI */
+  agentName?: string;
 }
 
 /** Hook registration for step events */

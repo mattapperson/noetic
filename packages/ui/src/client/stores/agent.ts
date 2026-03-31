@@ -99,12 +99,36 @@ export const useAgentStore = create<AgentState>()(
         }),
 
       addAgent: (agent) =>
-        set((state) => ({
-          agents: [
-            ...state.agents,
-            agent,
-          ],
-        })),
+        set((state) => {
+          // Check if agent already exists
+          const existingIndex = state.agents.findIndex((a) => a.id === agent.id);
+          if (existingIndex >= 0) {
+            // Merge with existing agent, preserving runs
+            const existing = state.agents[existingIndex];
+            const merged = {
+              ...existing,
+              ...agent,
+              // Keep existing runs if the new agent doesn't have any
+              runs: agent.runs.length > 0 ? agent.runs : existing.runs,
+              runCount: agent.runs.length > 0 ? agent.runCount : existing.runCount,
+              lastRunAt: agent.lastRunAt ?? existing.lastRunAt,
+            };
+            const newAgents = [
+              ...state.agents,
+            ];
+            newAgents[existingIndex] = merged;
+            return {
+              agents: newAgents,
+            };
+          }
+          // Add new agent
+          return {
+            agents: [
+              ...state.agents,
+              agent,
+            ],
+          };
+        }),
 
       updateAgent: (id, updates) =>
         set((state) => ({

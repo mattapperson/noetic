@@ -8,6 +8,7 @@
 import type { Context, Step } from '@noetic/core';
 import type {
   Breakpoint,
+  ClientMessage,
   DebugController,
   DebuggerConfig,
   DebuggerState,
@@ -620,7 +621,7 @@ export class Debugger implements DebugController {
       cost: ctx.cost ?? 0,
       elapsedMs: Date.now() - this.startTime,
       state: ctx.state,
-      itemLogLength: ctx.itemLog?.length ?? 0,
+      itemLogLength: ctx.itemLog?.items?.length ?? 0,
     };
   }
 

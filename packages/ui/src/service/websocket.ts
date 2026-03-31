@@ -19,8 +19,9 @@ import type {
   NoeticError,
   ServerMessage,
 } from '../shared/protocol.js';
-import { isClientMessage } from '../shared/protocol.js';
-import { TraceStorage } from './storage.js';
+import { isClientMessage, isServerMessage } from '../shared/protocol.js';
+import type { TraceStorage } from './storage.js';
+import { getStorage } from './storage.js';
 
 // ============================================================================
 // Configuration
@@ -36,7 +37,7 @@ const MAX_BUFFER_SIZE = 1000; // Max messages to buffer
 // Types
 // ============================================================================
 
-interface ClientConnection {
+export interface ClientConnection {
   ws: WebSocket;
   id: string;
   connectedAt: number;
@@ -46,7 +47,7 @@ interface ClientConnection {
   isAlive: boolean;
 }
 
-interface ServerConfig {
+export interface ServerConfig {
   port: number;
   host: string;
   storage?: TraceStorage;
@@ -67,6 +68,13 @@ export class NoeticUIServer {
   private httpServer: ReturnType<typeof createServer> | null = null;
   private clients = new Map<string, ClientConnection>();
   private traces = new Map<string, TraceState>();
+  private registeredAgents = new Map<
+    string,
+    {
+      name: string;
+      registeredAt: number;
+    }
+  >();
   private storage: TraceStorage;
   private config: ServerConfig;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -78,7 +86,7 @@ export class NoeticUIServer {
       host: config.host || DEFAULT_HOST,
       storage: config.storage,
     };
-    this.storage = config.storage || new TraceStorage();
+    this.storage = config.storage || getStorage();
   }
 
   /**
@@ -196,6 +204,7 @@ export class NoeticUIServer {
 
     const message: ServerMessage = {
       type: 'execution.start',
+      agentId,
       trace,
     };
 
@@ -344,6 +353,7 @@ export class NoeticUIServer {
 
     const message: ServerMessage = {
       type: 'execution.complete',
+      agentId: traceState.agentId,
       traceId,
       summary,
     };
@@ -368,6 +378,7 @@ export class NoeticUIServer {
 
     const message: ServerMessage = {
       type: 'execution.error',
+      agentId: traceState.agentId,
       traceId,
       error,
     };
@@ -399,7 +410,9 @@ export class NoeticUIServer {
 
     // Handle messages
     ws.on('message', (data) => {
-      this.handleMessage(client, data);
+      this.handleMessage(client, data).catch((error) => {
+        console.error('Failed to handle message:', error);
+      });
     });
 
     // Handle ping/pong
@@ -431,20 +444,27 @@ export class NoeticUIServer {
     });
   }
 
-  private handleMessage(client: ClientConnection, data: Buffer | ArrayBuffer | Buffer[]): void {
+  private async handleMessage(
+    client: ClientConnection,
+    data: Buffer | ArrayBuffer | Buffer[],
+  ): Promise<void> {
     try {
       const parsed = JSON.parse(data.toString());
-      if (!isClientMessage(parsed)) {
+      // Accept both ClientMessage (from UI) and ServerMessage (from agent runtime)
+      if (!isClientMessage(parsed) && !isServerMessage(parsed)) {
         console.error('[WebSocket] Received invalid message format');
         return;
       }
-      this.processClientMessage(client, parsed);
+      await this.processClientMessage(client, parsed);
     } catch (error) {
       console.error('Failed to parse client message:', error);
     }
   }
 
-  private processClientMessage(client: ClientConnection, message: ClientMessage): void {
+  private async processClientMessage(
+    client: ClientConnection,
+    message: ClientMessage | ServerMessage,
+  ): Promise<void> {
     switch (message.type) {
       case 'ping':
         // Respond with pong
@@ -483,10 +503,83 @@ export class NoeticUIServer {
         console.log(`Received breakpoint message: ${message.type}`);
         break;
 
+      // Agent -> Server trace messages
+      case 'agent.register':
+        await this.handleAgentRegister(message.agentId, message.agentName);
+        break;
+
+      case 'trace.start':
+        this.handleTraceStart(message.traceId, message.agentId, message.input, message.startTime);
+        break;
+
+      case 'trace.nodeStart':
+        this.handleTraceNodeStart(message.traceId, message.node);
+        break;
+
+      case 'trace.nodeComplete':
+        this.handleTraceNodeComplete(
+          message.traceId,
+          message.nodeId,
+          message.output,
+          message.durationMs,
+        );
+        break;
+
+      case 'trace.nodeError':
+        this.handleTraceNodeError(message.traceId, message.nodeId, message.error);
+        break;
+
+      case 'trace.complete':
+        this.handleTraceComplete(message.traceId, message.summary, message.endTime);
+        break;
+
+      case 'trace.error':
+        this.handleTraceError(message.traceId, message.error, message.endTime);
+        break;
+
+      // Handle ServerMessage types from agent runtime (forwarded by exporter)
+      case 'execution.start':
+        // Already handled by trace.start - just broadcast to clients
+        this.broadcast(message);
+        break;
+
+      case 'node.start':
+        // Node already tracked by trace.nodeStart - just broadcast
+        this.broadcast(message);
+        break;
+
+      case 'node.complete':
+        // Node already tracked by trace.nodeComplete - just broadcast
+        this.broadcast(message);
+        break;
+
+      case 'node.error':
+        // Node already tracked by trace.nodeError - just broadcast
+        this.broadcast(message);
+        break;
+
+      case 'execution.complete':
+        // Already handled by trace.complete - just broadcast
+        this.broadcast(message);
+        break;
+
+      case 'execution.error':
+        // Already handled by trace.error - just broadcast
+        this.broadcast(message);
+        break;
+
+      case 'pong':
+        // Heartbeat response - no action needed
+        break;
+
       default: {
         // Exhaustiveness check - if we get here, it's an unknown message type
         // but isClientMessage validated it has a 'type' property
-        console.warn(`Unknown message type: ${message.type}`);
+        // Type is 'never' here due to exhaustive switch, but we know it has 'type' from validation
+        const msgWithType: {
+          type: string;
+        } = message;
+        console.warn(`Unknown message type: ${msgWithType.type}`);
       }
     }
   }
@@ -503,6 +596,7 @@ export class NoeticUIServer {
 
     this.sendToClient(client, {
       type: 'execution.complete',
+      agentId: 'system',
       traceId: 'list',
       summary: {
         traceId: 'list',
@@ -525,6 +619,7 @@ export class NoeticUIServer {
     if (traceState) {
       this.sendToClient(client, {
         type: 'execution.start',
+        agentId: traceState.agentId,
         trace: traceState.trace,
       });
     }
@@ -543,6 +638,7 @@ export class NoeticUIServer {
     // Send execution start
     this.sendToClient(client, {
       type: 'execution.start',
+      agentId: traceState.agentId,
       trace: traceState.trace,
     });
 
@@ -628,6 +724,177 @@ export class NoeticUIServer {
     } catch (error) {
       console.error('Failed to save trace:', error);
     }
+  }
+
+  // ============================================================================
+  // Agent Trace Message Handlers
+  // ============================================================================
+
+  private async handleAgentRegister(agentId: string, agentName: string): Promise<void> {
+    console.log(`[WebSocket] Agent registered: ${agentName} (${agentId})`);
+    // Track registered agent in memory
+    this.registeredAgents.set(agentId, {
+      name: agentName,
+      registeredAt: Date.now(),
+    });
+    // Also register with storage so API can list it (persisted to disk)
+    await this.storage.registerAgent(agentId, agentName);
+  }
+
+  private handleTraceStart(
+    traceId: string,
+    agentId: string,
+    input: unknown,
+    startTime: number,
+  ): void {
+    console.log(`[WebSocket] Trace started: ${traceId} for agent ${agentId}`);
+
+    // Create new trace
+    const trace: ExecutionTrace = {
+      traceId,
+      rootStepId: 'root',
+      startTime,
+      endTime: null,
+      status: 'running',
+      nodes: new Map(),
+      rootNodeId: '',
+    };
+
+    // Store trace state
+    this.traces.set(traceId, {
+      trace,
+      agentId,
+      isLive: true,
+    });
+
+    // Broadcast to all clients
+    this.broadcast({
+      type: 'execution.start',
+      agentId,
+      trace,
+    });
+  }
+
+  private handleTraceNodeStart(traceId: string, node: ExecutionNode): void {
+    const traceState = this.traces.get(traceId);
+    if (!traceState) {
+      console.warn(`[WebSocket] Trace not found: ${traceId}`);
+      return;
+    }
+
+    // Add node to trace
+    traceState.trace.nodes.set(node.id, node);
+
+    // Broadcast to all clients
+    this.broadcast({
+      type: 'node.start',
+      node,
+    });
+  }
+
+  private handleTraceNodeComplete(
+    traceId: string,
+    nodeId: string,
+    output: unknown,
+    durationMs: number,
+  ): void {
+    const traceState = this.traces.get(traceId);
+    if (!traceState) {
+      return;
+    }
+
+    const node = traceState.trace.nodes.get(nodeId);
+    if (!node) {
+      return;
+    }
+
+    // Update node
+    node.output = output;
+    node.durationMs = durationMs;
+    node.endTime = Date.now();
+    node.status = 'completed';
+
+    // Broadcast to all clients
+    this.broadcast({
+      type: 'node.complete',
+      nodeId,
+      output,
+      durationMs,
+    });
+  }
+
+  private handleTraceNodeError(traceId: string, nodeId: string, error: NoeticError): void {
+    const traceState = this.traces.get(traceId);
+    if (!traceState) {
+      return;
+    }
+
+    const node = traceState.trace.nodes.get(nodeId);
+    if (node) {
+      node.error = error;
+      node.status = 'error';
+    }
+
+    // Broadcast to all clients
+    this.broadcast({
+      type: 'node.error',
+      nodeId,
+      error,
+    });
+  }
+
+  private async handleTraceComplete(
+    traceId: string,
+    summary: ExecutionSummary,
+    endTime: number,
+  ): Promise<void> {
+    const traceState = this.traces.get(traceId);
+    if (!traceState) {
+      return;
+    }
+
+    // Update trace
+    traceState.trace.status = 'completed';
+    traceState.trace.endTime = endTime;
+    traceState.isLive = false;
+
+    // Broadcast to all clients
+    this.broadcast({
+      type: 'execution.complete',
+      agentId: traceState.agentId,
+      traceId,
+      summary,
+    });
+
+    // Save to storage
+    await this.saveTrace(traceState.trace, traceState.agentId);
+  }
+
+  private async handleTraceError(
+    traceId: string,
+    error: NoeticError,
+    endTime: number,
+  ): Promise<void> {
+    const traceState = this.traces.get(traceId);
+    if (!traceState) {
+      return;
+    }
+
+    // Update trace
+    traceState.trace.status = 'error';
+    traceState.trace.endTime = endTime;
+    traceState.isLive = false;
+
+    // Broadcast to all clients
+    this.broadcast({
+      type: 'execution.error',
+      agentId: traceState.agentId,
+      traceId,
+      error,
+    });
+
+    // Save to storage
+    await this.saveTrace(traceState.trace, traceState.agentId);
   }
 
   private generateClientId(): string {

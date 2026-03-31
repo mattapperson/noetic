@@ -90,10 +90,10 @@ cd packages/ui && bun run build
 
 **Running the dev UI from source:**
 
-You need to run **both** the WebSocket server and the Next.js dev server (in separate terminals):
+You need to run **both** the WebSocket service and the Next.js dev server (in separate terminals):
 
 ```bash
-# Terminal 1: Start the WebSocket server (required for agent connections)
+# Terminal 1: Start the WebSocket service (required for agent connections)
 bun run dev:ui              # or: cd packages/ui && bun run serve
 
 # Terminal 2: Start the Next.js dev UI (client on port 3334)
@@ -104,9 +104,9 @@ NOETIC_UI_ENABLED=true bun run your-agent.ts
 ```
 
 **Architecture:**
-- **WebSocket Server**: Runs on port 3333 - handles agent connections and trace streaming
+- **WebSocket Service**: Runs on port 3333 - handles agent connections and trace streaming
 - **Next.js Dev UI**: Runs on port 3334 - the visual debugger interface
-- **Your Agent**: Connects to WebSocket server when `NOETIC_UI_ENABLED=true`
+- **Your Agent**: Connects to WebSocket service when `NOETIC_UI_ENABLED=true`
 
 **Access the UI:**
 Open http://localhost:3334 in your browser to view the three-panel interface:
@@ -115,11 +115,6 @@ Open http://localhost:3334 in your browser to view the three-panel interface:
 - **Right**: Inspector panel for step details
 
 **Note:** Since Next.js exports static files, the WebSocket connection must be made directly from the browser to ws://localhost:3333.
-3. Open the browser to view the three-panel interface:
-   - **Left**: Agent browser with execution history
-   - **Center**: Interactive node graph of execution flow
-   - **Right**: Inspector panel for step details
-4. Use the timeline at the bottom to scrub through execution history
 
 **Features:**
 - Real-time execution visualization

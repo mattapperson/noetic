@@ -8,3 +8,5 @@ packages/web/next-env.d.ts
 .superpowers/
 packages/web/.typecheck-snippets/
 .DS_Store
+packages/ui/dist/
+packages/ui/dist-server/

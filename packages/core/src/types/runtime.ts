@@ -5,7 +5,7 @@ import type { Context } from './context';
 import type { DetachedHandle } from './detached';
 import type { ExecuteInput, Item } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
-import type { Span } from './observability';
+import type { Span, TraceExporter } from './observability';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
 
@@ -95,6 +95,7 @@ export interface AgentHarnessContract<
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;
   createSpan(name: string, parent: Span | null): Span;
+  readonly traceExporter: TraceExporter;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
   beforeToolCall(

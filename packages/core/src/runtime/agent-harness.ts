@@ -312,10 +312,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     threadId?: string;
     resourceId?: string;
   }): Context {
+    // Create or inherit span
+    const parentSpan = opts?.parent?.span;
+    const span = parentSpan ?? this.createSpan('root', null);
+
     return new ContextImpl({
       ...opts,
       harness: this,
       channelStore: this.channelStore,
+      span,
     });
   }
 

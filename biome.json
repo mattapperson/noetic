@@ -23,6 +23,7 @@
       "!.superpowers",
       "!packages/web/.source",
       "!packages/web/.next",
+      "!packages/ui/.next",
       "!packages/web/next-env.d.ts",
       "!.worktrees",
       "!packages/web/.typecheck-snippets"

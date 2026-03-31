@@ -1,75 +1,23 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import type {
+  ContextSnapshot,
+  ExecutionNode,
+  ExecutionTrace,
+  NodeStatus,
+  NoeticError,
+  RunStatus,
+  StepData,
+  StepKind,
+  TokenUsage,
+} from '../../shared/protocol';
 
-// Types from spec
-type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop';
-type NodeStatus = 'pending' | 'running' | 'paused' | 'completed' | 'error' | 'cancelled';
-type RunStatus = 'running' | 'completed' | 'error' | 'paused' | 'cancelled';
-
-export interface TokenUsage {
-  input: number;
-  output: number;
-  total: number;
-}
-
-export interface ContextSnapshot {
-  depth: number;
-  stepCount: number;
-  tokens: TokenUsage;
-  cost: number;
-  elapsedMs: number;
-  state: unknown;
-  itemLogLength: number;
-}
-
-export interface StepData {
-  // LLM step data
-  model?: string;
-  messages?: Array<{
-    role: string;
-    content: string;
-  }>;
-  toolCalls?: Array<{
-    name: string;
-    arguments: unknown;
-  }>;
-  tokenUsage?: TokenUsage;
-  cost?: number;
-  // Tool step data
-  toolName?: string;
-  arguments?: unknown;
-  result?: unknown;
-  // Fork step data
-  mode?: 'race' | 'all' | 'settle';
-  pathCount?: number;
-  winnerPath?: number;
-  // Other step types
-  [key: string]: unknown;
-}
+export type { ContextSnapshot, ExecutionNode, ExecutionTrace, StepData, TokenUsage };
 
 export interface ExecutionNodeError {
   message: string;
   code?: string;
   stack?: string;
-}
-
-export interface ExecutionNode {
-  id: string;
-  stepId: string;
-  kind: StepKind;
-  parentId: string | null;
-  depth: number;
-  startTime: number;
-  endTime: number | null;
-  durationMs: number | null;
-  status: NodeStatus;
-  input: unknown;
-  output: unknown | null;
-  contextSnapshot: ContextSnapshot;
-  stepData: StepData;
-  children: string[];
-  forkPaths?: string[][];
-  error?: ExecutionNodeError;
 }
 
 export interface Run {
@@ -88,6 +36,7 @@ export interface Run {
   memoryBytes: number;
   isLive: boolean;
   rootNodeId: string;
+  trace?: ExecutionTrace;
 }
 
 export interface Agent {
@@ -102,16 +51,6 @@ export interface Agent {
   description?: string;
   tags?: string[];
   runs: Run[];
-}
-
-export interface ExecutionTrace {
-  traceId: string;
-  rootStepId: string;
-  startTime: number;
-  endTime: number | null;
-  status: RunStatus;
-  nodes: Map<string, ExecutionNode>;
-  rootNodeId: string;
 }
 
 // Store state

@@ -8,9 +8,12 @@
 
 import type {
   AgentConfig,
+  CallModelRequest,
   Context,
+  ContextMemory,
   ExecuteInput,
   ExecuteOptions,
+  Item,
   LLMResponse,
   MemoryLayer,
   Span,
@@ -34,7 +37,7 @@ export interface DebugHarnessConfig<
   /** Agent name */
   name: string;
   /** Initial step to execute */
-  initialStep?: Step;
+  initialStep?: Step<ContextMemory, string, string>;
   /** Agent parameters */
   params?: TParams;
   /** Parameter validation schema */
@@ -105,7 +108,8 @@ export class DebugAgentHarness<TParams extends Record<string, unknown> = Record<
     this.baseHarness = new AgentHarness<TParams>({
       name: config.name,
       initialStep: config.initialStep,
-      params: config.params ?? {},
+      // biome-ignore lint: Type assertion needed for generic TParams with default - {} is always valid for Record<string, unknown>
+      params: (config.params ?? {}) as TParams,
       paramsSchema: config.paramsSchema,
       traceExporter: config.traceExporter ?? this.exporter ?? undefined,
     });
@@ -134,6 +138,16 @@ export class DebugAgentHarness<TParams extends Record<string, unknown> = Record<
           : [
               input,
             ];
+
+    // Register agent with UI server
+    if (this.exporter) {
+      this.exporter.sendEvent({
+        type: 'agent.register',
+        agentId,
+        agentName: this.baseHarness.config.name,
+        timestamp: Date.now(),
+      });
+    }
 
     // Start debug run
     if (this.debugger_) {
@@ -167,7 +181,8 @@ export class DebugAgentHarness<TParams extends Record<string, unknown> = Record<
       await globalHookManager.onStepStart(step, input, ctx);
 
       try {
-        const result = await this.baseHarness.run(step, input, ctx);
+        // biome-ignore lint: Type assertion needed - base harness returns generic type that must be cast to output type O
+        const result = (await this.baseHarness.run(step, input, ctx)) as O;
         await globalHookManager.onStepComplete(step, result, ctx);
         return result;
       } catch (error) {
@@ -181,7 +196,8 @@ export class DebugAgentHarness<TParams extends Record<string, unknown> = Record<
     }
 
     // Normal execution without debugging
-    return this.baseHarness.run(step, input, ctx);
+    // biome-ignore lint: Type assertion needed - base harness returns generic type that must be cast to output type Promise<O>
+    return this.baseHarness.run(step, input, ctx) as Promise<O>;
   }
 
   /**
@@ -274,28 +290,13 @@ export class DebugAgentHarness<TParams extends Record<string, unknown> = Record<
     return this.baseHarness.config;
   }
 
-  async callModel(request: {
-    model: string;
-    items: ReadonlyArray<{
-      type: string;
-    }>;
-    tools?: Tool[];
-    ctx?: Context;
-    params?: {
-      temperature?: number;
-      maxTokens?: number;
-      topP?: number;
-    };
-    outputSchema?: ZodType;
-  }): Promise<LLMResponse> {
+  async callModel(request: CallModelRequest): Promise<LLMResponse> {
     return this.baseHarness.callModel(request);
   }
 
   createContext(opts?: {
     parent?: Context;
-    items?: {
-      type: string;
-    }[];
+    items?: Item[];
     state?: unknown;
     threadId?: string;
     resourceId?: string;

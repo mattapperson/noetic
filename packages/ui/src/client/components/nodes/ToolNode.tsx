@@ -79,7 +79,7 @@ export const ToolNode: React.FC<ToolNodeProps> = ({ node, selected = false, onCl
         <div style={idStyles}>{node.stepId}</div>
 
         {/* Tool Args Preview */}
-        {stepData?.arguments && (
+        {stepData?.arguments !== undefined && stepData?.arguments !== null && (
           <div
             style={{
               marginTop: '8px',

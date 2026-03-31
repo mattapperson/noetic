@@ -30,9 +30,19 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   ctx: Context<TMemory>,
 ): Promise<O> {
   const baseCtx = frameworkCast<Context>(ctx);
+
+  // Create span for this step execution
+  const span = ctx.harness.createSpan(step.id, ctx.span);
+  span.setAttribute('stepKind', step.kind);
+  span.setAttribute('input', JSON.stringify(input));
+
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
+    span.end();
+    await ctx.harness.traceExporter.export([
+      span,
+    ]);
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
@@ -43,6 +53,10 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
 
   // Abort check
   if (ctx.aborted) {
+    span.end();
+    await ctx.harness.traceExporter.export([
+      span,
+    ]);
     throw new NoeticErrorImpl({
       kind: 'cancelled',
       reason: ctx.abortReason ?? 'context aborted',
@@ -54,29 +68,56 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
-  switch (step.kind) {
-    case 'run':
-      return executeRun(step, input, ctx);
-    case 'llm':
-      return executeLLM(step, input, ctx, baseCtx.layers);
-    case 'tool':
-      return executeTool(step, input, ctx, baseCtx.harness);
-    case 'branch':
-      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
-    case 'fork':
-      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
-    case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
-    case 'loop':
-      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
-    default: {
-      const _exhaustive: never = step;
-      throw new NoeticErrorImpl({
-        kind: 'step_failed',
-        stepId: 'unknown',
-        cause: new Error('Unknown step kind'),
-        retriesExhausted: false,
-      });
+  try {
+    let result: O;
+
+    switch (step.kind) {
+      case 'run':
+        result = await executeRun(step, input, ctx);
+        break;
+      case 'llm':
+        result = await executeLLM(step, input, ctx, baseCtx.layers);
+        break;
+      case 'tool':
+        result = await executeTool(step, input, ctx, baseCtx.harness);
+        break;
+      case 'branch':
+        result = await executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'fork':
+        result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'spawn':
+        result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'loop':
+        result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      default: {
+        const _exhaustive: never = step;
+        throw new NoeticErrorImpl({
+          kind: 'step_failed',
+          stepId: 'unknown',
+          cause: new Error('Unknown step kind'),
+          retriesExhausted: false,
+        });
+      }
     }
+
+    // Success - end span and export
+    span.setAttribute('output', JSON.stringify(result));
+    span.end();
+    await ctx.harness.traceExporter.export([
+      span,
+    ]);
+
+    return result;
+  } catch (error) {
+    // Error - end span and export
+    span.end();
+    await ctx.harness.traceExporter.export([
+      span,
+    ]);
+    throw error;
   }
 }

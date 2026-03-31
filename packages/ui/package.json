@@ -4,20 +4,34 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "bin": {
+    "noetic-ui": "./bin/noetic-ui.js"
+  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./server": {
-      "types": "./src/server/index.ts",
-      "default": "./src/server/index.ts"
+    "./service": {
+      "types": "./src/service/index.ts",
+      "default": "./src/service/index.ts"
     },
     "./runtime": {
       "types": "./src/runtime/index.ts",
       "default": "./src/runtime/index.ts"
     }
   },
+  "files": [
+    "dist/",
+    "src/",
+    "bin/",
+    "README.md",
+    "next-env.d.ts",
+    "css.d.ts",
+    "next.config.mjs",
+    "postcss.config.js",
+    "tailwind.config.js"
+  ],
   "dependencies": {
     "next": "^14.2.0",
     "react": "^18.2.0",
@@ -34,7 +48,8 @@
     "autoprefixer": "^10.4.16",
     "bun-types": "latest",
     "postcss": "^8.4.32",
-    "tailwindcss": "^3.4.0"
+    "tailwindcss": "^3.4.0",
+    "typescript": "6.0.2"
   },
   "peerDependencies": {
     "@noetic/core": "workspace:*"
@@ -48,9 +63,10 @@
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
-    "dev": "next dev -p 3334",
-    "build": "next build",
-    "start": "next start -p 3334",
-    "serve": "bun src/server/index.ts"
+    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev -p 3334",
+    "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
+    "start": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next start -p 3334",
+    "serve": "bun src/service/index.ts",
+    "prepublishOnly": "bun run build"
   }
 }

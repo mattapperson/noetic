@@ -1,6 +1,6 @@
 type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
 
-interface WebSocketMessage {
+export interface WebSocketMessage {
   type: string;
   [key: string]: unknown;
 }

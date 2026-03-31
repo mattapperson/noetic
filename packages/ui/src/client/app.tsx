@@ -1,86 +1,61 @@
 import type React from 'react';
 import { useEffect } from 'react';
+import { AgentBrowser } from './components/AgentBrowser';
+import { ConnectionIndicator } from './components/ConnectionIndicator';
+import { NodeGraph } from './components/NodeGraph';
+import { NodeInspector } from './components/NodeInspector';
 import { PlaybackBar } from './components/PlaybackBar';
+import { useConnection } from './hooks/useConnection';
+import { useExecutionMessages } from './hooks/useExecutionMessages';
+import { useExecutionStore } from './stores/execution';
 import { useThemeStore } from './stores/theme';
 
-// Three-panel layout components
-const LeftSidebar: React.FC = () => {
+// Connection status banner shown when disconnected
+const ConnectionBanner: React.FC = () => {
+  const { status } = useConnection();
+
+  if (status === 'connected') {
+    return null;
+  }
+
   return (
-    <div className="w-64 h-full border-r border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
-      <div className="p-4 border-b border-[var(--noetic-border)]">
-        <h1 className="text-lg font-semibold text-[var(--noetic-text)]">Noetic UI</h1>
-        <p className="text-xs text-[var(--noetic-text-secondary)]">Agent Debugger</p>
+    <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <ConnectionIndicator showLabel={false} dotSize={8} />
+        <span className="text-sm text-amber-400">
+          {status === 'connecting' ? 'Connecting to server...' : 'Server disconnected'}
+        </span>
       </div>
-
-      <div className="p-3">
-        <input
-          type="text"
-          placeholder="Search agents..."
-          className="w-full px-3 py-2 text-sm rounded-md bg-[var(--noetic-input-bg)] border border-[var(--noetic-border)] text-[var(--noetic-text)] placeholder-[var(--noetic-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--noetic-accent)]"
-        />
-      </div>
-
-      <div className="flex-1 overflow-auto p-3">
-        <p className="text-xs text-[var(--noetic-text-muted)] uppercase tracking-wide mb-2">
-          Agents
-        </p>
-        <div className="space-y-1">
-          <div className="p-2 rounded-md hover:bg-[var(--noetic-hover)] cursor-pointer">
-            <div className="flex items-center gap-2">
-              <span className="text-green-500">●</span>
-              <span className="text-sm text-[var(--noetic-text)]">code-review-agent.ts</span>
-            </div>
-            <p className="text-xs text-[var(--noetic-text-secondary)] ml-5">2 runs</p>
-          </div>
-          <div className="p-2 rounded-md hover:bg-[var(--noetic-hover)] cursor-pointer">
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400">●</span>
-              <span className="text-sm text-[var(--noetic-text)]">pr-analysis.ts</span>
-            </div>
-            <p className="text-xs text-[var(--noetic-text-secondary)] ml-5">5 runs</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-3 border-t border-[var(--noetic-border)]">
-        <button
-          type="button"
-          onClick={() => useThemeStore.getState().toggleTheme()}
-          className="w-full px-3 py-2 text-sm rounded-md bg-[var(--noetic-button-bg)] hover:bg-[var(--noetic-button-hover)] text-[var(--noetic-text)] transition-colors"
-        >
-          Toggle Theme
-        </button>
-      </div>
+      <span className="text-xs text-amber-400/70">
+        Run: <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">npx @noetic/ui serve</code>
+      </span>
     </div>
   );
 };
 
+// Center canvas shows node graph for selected run
 const CenterCanvas: React.FC = () => {
-  // TODO: Implement execution store and node graph
-  // const { currentRun } = useExecutionStore();
+  const { currentRun, traces, selectedNode, selectNode } = useExecutionStore();
+
+  // Get trace for current run
+  const currentTrace = currentRun ? (traces.get(currentRun.id) ?? null) : null;
 
   return (
     <div className="flex-1 h-full bg-[var(--noetic-canvas-bg)] relative overflow-hidden">
-      {currentRun ? (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-lg font-medium text-[var(--noetic-text)]">Run: {currentRun.id}</p>
-            <p className="text-sm text-[var(--noetic-text-secondary)] mt-2">
-              Status: {currentRun.status}
-            </p>
-            <div className="mt-4 p-4 rounded-lg border border-[var(--noetic-border)] bg-[var(--noetic-node-bg)]">
-              <p className="text-xs text-[var(--noetic-text-muted)]">
-                Node graph will be rendered here
-              </p>
-            </div>
-          </div>
-        </div>
+      {currentTrace ? (
+        <NodeGraph
+          trace={currentTrace}
+          selectedNodeId={selectedNode?.stepId ?? null}
+          onNodeSelect={(nodeId) => selectNode(nodeId)}
+          onNodeDeselect={() => selectNode(null)}
+          fitToView={true}
+        />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
             <div className="text-6xl mb-4">🔮</div>
             <p className="text-lg text-[var(--noetic-text-secondary)]">
-              Select an agent to view execution
+              {currentRun ? 'Loading execution trace...' : 'Select an agent to view execution'}
             </p>
           </div>
         </div>
@@ -103,19 +78,23 @@ const CenterCanvas: React.FC = () => {
 const RightPanel: React.FC = () => {
   return (
     <div className="w-80 h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
-      <div className="p-4 border-b border-[var(--noetic-border)]">
-        <h2 className="text-sm font-semibold text-[var(--noetic-text)]">Inspector</h2>
-        <p className="text-xs text-[var(--noetic-text-secondary)]">Select a step to view details</p>
-      </div>
-      <div className="flex-1 p-4">
-        <p className="text-sm text-[var(--noetic-text-muted)]">Step details will appear here</p>
-      </div>
+      <NodeInspector />
     </div>
   );
 };
 
 export const App: React.FC = () => {
   const { initTheme } = useThemeStore();
+  const { nodes } = useExecutionStore();
+
+  // Establish WebSocket connection to UI service
+  useConnection({
+    url: 'ws://localhost:3333',
+    autoConnect: true,
+  });
+
+  // Process WebSocket messages and update stores
+  useExecutionMessages();
 
   useEffect(() => {
     initTheme();
@@ -125,12 +104,13 @@ export const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-[var(--noetic-bg)]">
+      <ConnectionBanner />
       <div className="flex-1 flex overflow-hidden">
-        <LeftSidebar />
+        <AgentBrowser />
         <CenterCanvas />
         <RightPanel />
       </div>
-      <PlaybackBar nodes={new Map()} />
+      <PlaybackBar nodes={nodes} />
     </div>
   );
 };

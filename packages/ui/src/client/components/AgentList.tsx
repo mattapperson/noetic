@@ -3,7 +3,7 @@
  * Displays agents with expand/collapse functionality
  */
 
-import type React from 'react';
+import React from 'react';
 import { useAgentStore } from '../stores/agent';
 import type { Agent, AgentSortOption } from '../types/agent';
 import RunList from './RunList';
@@ -62,9 +62,19 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
     selectedAgentId,
     toggleAgentExpanded,
     selectAgent,
+    removeAgent,
     agentSort,
     setAgentSort,
   } = useAgentStore();
+
+  const handleDeleteAgent = React.useCallback(
+    (agentId: string) => {
+      removeAgent(agentId);
+    },
+    [
+      removeAgent,
+    ],
+  );
 
   const sortOptions: {
     value: AgentSortOption;
@@ -171,6 +181,7 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
             isSelected={selectedAgentId === agent.id}
             onToggleExpand={() => toggleAgentExpanded(agent.id)}
             onSelect={() => selectAgent(agent.id)}
+            onDelete={handleDeleteAgent}
           />
         ))
       )}
@@ -184,6 +195,7 @@ interface AgentEntryProps {
   isSelected: boolean;
   onToggleExpand: () => void;
   onSelect: () => void;
+  onDelete?: (agentId: string) => void;
 }
 
 const AgentEntry: React.FC<AgentEntryProps> = ({
@@ -192,9 +204,44 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
   isSelected,
   onToggleExpand,
   onSelect,
+  onDelete,
 }) => {
   const status = getAgentStatus(agent);
   const icon = STATUS_ICONS[status];
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDeleting) return;
+
+    const confirmed = window.confirm(
+      `Delete agent "${agent.name}" and all its runs? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agent.id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        onDelete?.(agent.id);
+      } else {
+        throw new Error(data.error || 'Failed to delete agent');
+      }
+    } catch (error) {
+      console.error('Failed to delete agent:', error);
+      alert('Failed to delete agent. See console for details.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div
@@ -314,6 +361,31 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
             {formatRelativeTime(agent.lastRunAt)}
           </span>
         </div>
+
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isDeleting}
+          style={{
+            width: '20px',
+            height: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'transparent',
+            border: 'none',
+            cursor: isDeleting ? 'not-allowed' : 'pointer',
+            color: 'var(--noetic-text-muted)',
+            fontSize: '12px',
+            padding: 0,
+            marginLeft: '4px',
+            opacity: isDeleting ? 0.5 : 1,
+          }}
+          title="Delete agent"
+          aria-label="Delete agent"
+        >
+          {isDeleting ? '...' : '×'}
+        </button>
       </button>
 
       {isExpanded && (

@@ -2,11 +2,14 @@
  * REST API for Noetic UI
  *
  * Provides HTTP endpoints for querying execution traces
+ * and serves the Next.js web UI static files
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
-import { URL } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Run } from '../shared/protocol.js';
 import type { TraceStorage } from './storage.js';
 
@@ -32,6 +35,80 @@ interface APIResponse<T = unknown> {
 type RunSummary = Omit<Run, 'trace'> & {
   trace?: undefined;
 };
+
+// ============================================================================
+// Static File Resolution
+// ============================================================================
+
+/**
+ * Find the dist directory containing static files.
+ * Tries multiple locations to support both development and installed package modes.
+ */
+function findDistDirectory(): string | null {
+  const currentFilePath = fileURLToPath(import.meta.url);
+  const currentDir = dirname(currentFilePath);
+
+  // Search upward for package.json to find package root
+  let searchDir = currentDir;
+  let iterations = 0;
+  const maxIterations = 20; // Prevent infinite loop
+
+  while (iterations < maxIterations) {
+    iterations++;
+    const packageJsonPath = join(searchDir, 'package.json');
+
+    if (existsSync(packageJsonPath)) {
+      // Found a package.json - check if it's @noetic/ui
+      try {
+        const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+
+        // Check for dist folder at this package root
+        const distPath = join(searchDir, 'dist');
+
+        if (existsSync(distPath)) {
+          const indexPath = join(distPath, 'index.html');
+          if (existsSync(indexPath)) {
+            return distPath;
+          }
+        }
+
+        // If this is @noetic/ui package, stop searching
+        if (pkg.name === '@noetic/ui') {
+          break;
+        }
+      } catch {
+        // Ignore errors reading package.json
+      }
+    }
+
+    const parentDir = dirname(searchDir);
+    if (parentDir === searchDir) {
+      break; // Reached filesystem root
+    }
+    searchDir = parentDir;
+  }
+
+  // Fallback: try common relative paths
+  const possiblePaths = [
+    // From src/server/api.ts -> ../../../dist (package root)
+    join(currentDir, '..', '..', '..', 'dist'),
+    // One level up
+    join(currentDir, '..', '..', 'dist'),
+    // Two levels up
+    join(currentDir, '..', 'dist'),
+  ];
+
+  for (const path of possiblePaths) {
+    if (existsSync(path)) {
+      const indexPath = join(path, 'index.html');
+      if (existsSync(indexPath)) {
+        return path;
+      }
+    }
+  }
+
+  return null;
+}
 
 // ============================================================================
 // Noetic UI API Server
@@ -136,6 +213,9 @@ export class NoeticUIAPI {
       // Route handling
       if (pathname === '/api/agents' && method === 'GET') {
         response = await this.listAgents();
+      } else if (pathname.startsWith('/api/agents/') && method === 'DELETE') {
+        const agentId = pathname.split('/')[3];
+        response = await this.deleteAgent(agentId);
       } else if (
         pathname.startsWith('/api/agents/') &&
         pathname.endsWith('/runs') &&
@@ -160,6 +240,22 @@ export class NoeticUIAPI {
             status: 'ok',
           },
         };
+      } else if (method === 'GET') {
+        // Try to serve static files for non-API routes
+        const served = await this.serveStaticFile(pathname, res);
+        if (served) {
+          return;
+        }
+        // If static file not found, return 404
+        response = {
+          success: false,
+          error: 'Not found',
+        };
+        res.writeHead(404, {
+          'Content-Type': 'application/json',
+        });
+        res.end(JSON.stringify(response));
+        return;
       } else {
         response = {
           success: false,
@@ -196,6 +292,27 @@ export class NoeticUIAPI {
     return {
       success: true,
       data: agents,
+    };
+  }
+
+  private async deleteAgent(agentId: string): Promise<
+    APIResponse<{
+      deleted: boolean;
+      runsDeleted: number;
+    }>
+  > {
+    // Delete all runs for the agent
+    const runsDeleted = await this.config.storage.deleteAgentRuns(agentId);
+
+    // Unregister the agent from persistence
+    await this.config.storage.unregisterAgent(agentId);
+
+    return {
+      success: true,
+      data: {
+        deleted: true,
+        runsDeleted,
+      },
     };
   }
 
@@ -264,6 +381,76 @@ export class NoeticUIAPI {
         byAgent,
       },
     };
+  }
+
+  /**
+   * Serve static files from the dist directory
+   */
+  private async serveStaticFile(pathname: string, res: ServerResponse): Promise<boolean> {
+    // Find the dist directory
+    const distPath = findDistDirectory();
+    if (!distPath) {
+      console.error('[API] Could not find dist directory with static files');
+      return false;
+    }
+
+    // Default to index.html for root paths and SPA routes
+    let filePath: string;
+    if (pathname === '/' || !pathname.includes('.')) {
+      filePath = join(distPath, 'index.html');
+    } else {
+      // Remove leading slash and join with dist path
+      const cleanPath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+      filePath = join(distPath, cleanPath);
+    }
+
+    // Security check: ensure the file is within distPath
+    if (!filePath.startsWith(distPath)) {
+      return false;
+    }
+
+    if (!existsSync(filePath)) {
+      // If the file doesn't exist and it's not an API route, serve index.html for SPA routing
+      if (!pathname.startsWith('/api/') && !pathname.startsWith('/health')) {
+        filePath = join(distPath, 'index.html');
+        if (!existsSync(filePath)) {
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
+
+    try {
+      const content = readFileSync(filePath);
+      const ext = filePath.split('.').pop()?.toLowerCase();
+
+      // Set content type based on file extension
+      const contentType: Record<string, string> = {
+        html: 'text/html',
+        js: 'application/javascript',
+        css: 'text/css',
+        json: 'application/json',
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        svg: 'image/svg+xml',
+        ico: 'image/x-icon',
+        woff: 'font/woff',
+        woff2: 'font/woff2',
+        ttf: 'font/ttf',
+      };
+
+      res.writeHead(200, {
+        'Content-Type': contentType[ext || ''] || 'application/octet-stream',
+      });
+      res.end(content);
+      return true;
+    } catch (error) {
+      console.error('[API] Error serving static file:', error);
+      return false;
+    }
   }
 }
 

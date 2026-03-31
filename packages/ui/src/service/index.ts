@@ -5,8 +5,11 @@
  * This module is the main entry point for the server-side infrastructure.
  */
 
+import type { NoeticUIAPI } from './api.js';
 import { getAPI } from './api.js';
+import type { TraceStorage } from './storage.js';
 import { getStorage } from './storage.js';
+import type { NoeticUIServer } from './websocket.js';
 import { getServer } from './websocket.js';
 
 // ============================================================================
@@ -173,24 +176,49 @@ export async function stopNoeticUI(manager: NoeticUIServerManager): Promise<void
 }
 
 // ============================================================================
-// Singleton Instance
+// CLI Entry Point
 // ============================================================================
 
-let globalManager: NoeticUIServerManager | null = null;
+// Start server when this file is run directly
+// @ts-expect-error Bun-specific import.meta.main property
+if (import.meta.main) {
+  const PORT_WS = Number.parseInt(process.env.NOETIC_UI_WS_PORT || '3333', 10);
+  const PORT_API = Number.parseInt(process.env.NOETIC_UI_API_PORT || '3334', 10);
+  const HOST = process.env.NOETIC_UI_HOST || '127.0.0.1';
 
-/**
- * Get or create the global server manager instance
- */
-export function getServerManager(options?: NoeticUIServerOptions): NoeticUIServerManager {
-  if (!globalManager) {
-    globalManager = new NoeticUIServerManager(options);
-  }
-  return globalManager;
-}
+  console.log('🔮 Noetic UI Server');
+  console.log('');
 
-/**
- * Reset the global server manager instance
- */
-export function resetServerManager(): void {
-  globalManager = null;
+  const manager = new NoeticUIServerManager({
+    wsPort: PORT_WS,
+    apiPort: PORT_API,
+    host: HOST,
+  });
+
+  manager
+    .start()
+    .then(() => {
+      console.log('');
+      console.log('✅ Server is running');
+      console.log(`WebSocket: ws://${HOST}:${PORT_WS}`);
+      console.log(`Web UI: http://${HOST}:${PORT_API}`);
+      console.log('');
+      console.log('Press Ctrl+C to stop');
+    })
+    .catch((error) => {
+      console.error('❌ Failed to start server:', error.message);
+      process.exit(1);
+    });
+
+  // Graceful shutdown
+  process.on('SIGINT', async () => {
+    console.log('\n🛑 Shutting down...');
+    await manager.stop();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    await manager.stop();
+    process.exit(0);
+  });
 }

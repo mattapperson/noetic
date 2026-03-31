@@ -63,12 +63,12 @@ export type StepData =
 export interface LLMStepData {
   model: string;
   messages: Array<{
-    role: string;
+    role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
   }>;
   toolCalls: Array<{
     name: string;
-    arguments: unknown;
+    arguments: Record<string, unknown>;
   }>;
   tokenUsage: {
     input: number;
@@ -148,7 +148,7 @@ export interface ExecutionTrace {
   rootStepId: string;
   startTime: number;
   endTime: number | null;
-  status: 'running' | 'completed' | 'error' | 'cancelled';
+  status: 'running' | 'completed' | 'error' | 'paused' | 'cancelled';
   nodes: Map<string, ExecutionNode>;
   rootNodeId: string;
 }

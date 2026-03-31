@@ -6,7 +6,7 @@
 
 import { access, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { ExecutionTrace, Run } from '../shared/protocol.js';
 
@@ -63,6 +63,9 @@ function isSerializedMap(value: unknown): value is {
 const DEFAULT_STORAGE_PATH = join(homedir(), '.noetic-ui', 'traces');
 const STORAGE_PATH = process.env.NOETIC_UI_STORAGE_PATH || DEFAULT_STORAGE_PATH;
 
+// Agents registry file path (stored at storage root, not in traces subdir)
+const AGENTS_REGISTRY_FILE = 'agents.json';
+
 // Maximum steps per run (as per spec v1)
 const MAX_STEPS_PER_RUN = 1000;
 const WARNING_STEPS_THRESHOLD = 500;
@@ -106,18 +109,165 @@ export class TraceStorage {
   private metrics: StorageMetrics | null = null;
   private metricsCacheTime = 0;
   private readonly METRICS_CACHE_MS = 5000; // Cache metrics for 5 seconds
+  private registeredAgents = new Map<
+    string,
+    {
+      name: string;
+      registeredAt: number;
+    }
+  >();
+  private agentsLoaded = false;
 
   constructor(storagePath?: string) {
     this.storagePath = storagePath || STORAGE_PATH;
   }
 
   /**
-   * Initialize storage directory
+   * Register an agent (called when agent connects via WebSocket)
+   */
+  async registerAgent(agentId: string, agentName: string): Promise<void> {
+    // Ensure agents are loaded before registering
+    if (!this.agentsLoaded) {
+      await this.loadRegisteredAgents();
+    }
+
+    this.registeredAgents.set(agentId, {
+      name: agentName,
+      registeredAt: Date.now(),
+    });
+
+    // Persist to disk
+    await this.saveRegisteredAgents();
+  }
+
+  /**
+   * Unregister/delete an agent (removes from memory and disk)
+   */
+  async unregisterAgent(agentId: string): Promise<boolean> {
+    // Ensure agents are loaded
+    if (!this.agentsLoaded) {
+      await this.loadRegisteredAgents();
+    }
+
+    const existed = this.registeredAgents.has(agentId);
+    this.registeredAgents.delete(agentId);
+
+    // Persist deletion to disk
+    await this.saveRegisteredAgents();
+
+    return existed;
+  }
+
+  /**
+   * Load registered agents from disk
+   */
+  private async loadRegisteredAgents(): Promise<void> {
+    try {
+      const filePath = this.getAgentsFilePath();
+      const content = await readFile(filePath, 'utf-8');
+      const parsed = JSON.parse(content);
+
+      if (parsed && typeof parsed === 'object') {
+        for (const [agentId, agentData] of Object.entries(parsed)) {
+          if (agentData && typeof agentData === 'object') {
+            this.registeredAgents.set(agentId, {
+              name:
+                (
+                  agentData as {
+                    name?: string;
+                  }
+                ).name || 'Unknown',
+              registeredAt:
+                (
+                  agentData as {
+                    registeredAt?: number;
+                  }
+                ).registeredAt || Date.now(),
+            });
+          }
+        }
+      }
+
+      this.agentsLoaded = true;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== 'ENOENT') {
+        console.error('[Storage] Failed to load registered agents:', error);
+      }
+      // File doesn't exist yet - that's ok, start with empty map
+      this.agentsLoaded = true;
+    }
+  }
+
+  /**
+   * Save registered agents to disk
+   */
+  private async saveRegisteredAgents(): Promise<void> {
+    try {
+      // Convert Map to plain object for JSON serialization
+      const agentsObj: Record<
+        string,
+        {
+          name: string;
+          registeredAt: number;
+        }
+      > = {};
+      for (const [agentId, agentData] of this.registeredAgents) {
+        agentsObj[agentId] = agentData;
+      }
+
+      const filePath = this.getAgentsFilePath();
+      await writeFile(filePath, JSON.stringify(agentsObj, null, 2), 'utf-8');
+    } catch (error) {
+      console.error('[Storage] Failed to save registered agents:', error);
+    }
+  }
+
+  /**
+   * Get the path to the agents registry file
+   */
+  private getAgentsFilePath(): string {
+    // Store agents.json at the parent of traces directory (storage root)
+    return join(dirname(this.storagePath), AGENTS_REGISTRY_FILE);
+  }
+
+  /**
+   * Initialize storage directory and load registered agents
    */
   async init(): Promise<void> {
     await mkdir(this.storagePath, {
       recursive: true,
     });
+
+    // Load registered agents from disk
+    await this.loadRegisteredAgents();
+  }
+
+  /**
+   * Get list of registered agent IDs (ensures agents are loaded)
+   */
+  async getRegisteredAgents(): Promise<string[]> {
+    if (!this.agentsLoaded) {
+      await this.loadRegisteredAgents();
+    }
+    return Array.from(this.registeredAgents.keys());
+  }
+
+  /**
+   * Get full info for all registered agents
+   */
+  async getRegisteredAgentInfo(): Promise<
+    Map<
+      string,
+      {
+        name: string;
+        registeredAt: number;
+      }
+    >
+  > {
+    if (!this.agentsLoaded) {
+      await this.loadRegisteredAgents();
+    }
+    return new Map(this.registeredAgents);
   }
 
   /**
@@ -310,17 +460,29 @@ export class TraceStorage {
   }
 
   /**
-   * List all agent IDs with stored runs
+   * List all agent IDs with stored runs OR registered agents
    */
   async listAgents(): Promise<string[]> {
     try {
+      // Get agents with stored traces
       const entries = await readdir(this.storagePath, {
         withFileTypes: true,
       });
-      return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      const storedAgents = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+
+      // Get registered agents (from connected agents without traces yet)
+      const registeredAgents = await this.getRegisteredAgents();
+
+      // Combine and deduplicate
+      const allAgents = new Set([
+        ...storedAgents,
+        ...registeredAgents,
+      ]);
+      return Array.from(allAgents);
     } catch (error) {
       console.error('[Storage] Failed to list agents:', error);
-      return [];
+      // Return registered agents even if storage fails
+      return this.getRegisteredAgents();
     }
   }
 

@@ -38,6 +38,14 @@ const clientMessageTypes = z.enum([
   'breakpoint.add',
   'breakpoint.remove',
   'ping',
+  // Agent -> Server messages
+  'agent.register',
+  'trace.start',
+  'trace.nodeStart',
+  'trace.nodeComplete',
+  'trace.nodeError',
+  'trace.complete',
+  'trace.error',
 ]);
 
 // ============================================================================
@@ -228,6 +236,7 @@ export interface Run {
 
 export interface ExecutionStartMessage {
   type: 'execution.start';
+  agentId: string;
   trace: ExecutionTrace;
 }
 
@@ -263,12 +272,14 @@ export interface NodeDataMessage {
 
 export interface ExecutionCompleteMessage {
   type: 'execution.complete';
+  agentId: string;
   traceId: string;
   summary: ExecutionSummary;
 }
 
 export interface ExecutionErrorMessage {
   type: 'execution.error';
+  agentId: string;
   traceId: string;
   error: NoeticError;
 }
@@ -276,6 +287,60 @@ export interface ExecutionErrorMessage {
 export interface PongMessage {
   type: 'pong';
   timestamp: number;
+}
+
+// ============================================================================
+// Agent -> Server Messages (for TraceExporter)
+// ============================================================================
+
+export interface AgentRegisterMessage {
+  type: 'agent.register';
+  agentId: string;
+  agentName: string;
+  timestamp: number;
+}
+
+export interface TraceStartMessage {
+  type: 'trace.start';
+  traceId: string;
+  agentId: string;
+  input: unknown;
+  startTime: number;
+}
+
+export interface TraceNodeStartMessage {
+  type: 'trace.nodeStart';
+  traceId: string;
+  node: ExecutionNode;
+}
+
+export interface TraceNodeCompleteMessage {
+  type: 'trace.nodeComplete';
+  traceId: string;
+  nodeId: string;
+  output: unknown;
+  durationMs: number;
+}
+
+export interface TraceNodeErrorMessage {
+  type: 'trace.nodeError';
+  traceId: string;
+  nodeId: string;
+  error: NoeticError;
+}
+
+export interface TraceCompleteMessage {
+  type: 'trace.complete';
+  traceId: string;
+  summary: ExecutionSummary;
+  endTime: number;
+}
+
+export interface TraceErrorMessage {
+  type: 'trace.error';
+  traceId: string;
+  error: NoeticError;
+  endTime: number;
 }
 
 export type ServerMessage =
@@ -358,7 +423,15 @@ export type ClientMessage =
   | NodeResumeMessage
   | BreakpointAddMessage
   | BreakpointRemoveMessage
-  | PingMessage;
+  | PingMessage
+  // Agent -> Server messages
+  | AgentRegisterMessage
+  | TraceStartMessage
+  | TraceNodeStartMessage
+  | TraceNodeCompleteMessage
+  | TraceNodeErrorMessage
+  | TraceCompleteMessage
+  | TraceErrorMessage;
 
 // ============================================================================
 // Protocol Helpers
