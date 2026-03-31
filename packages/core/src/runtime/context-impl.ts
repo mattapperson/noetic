@@ -7,6 +7,7 @@ import type { ContextMemory, MemoryLayer } from '../types/memory';
 import type { Span } from '../types/observability';
 import type { AgentHarnessContract } from '../types/runtime';
 import type { ChannelStore } from './channel-store';
+import type { EventBroadcaster } from './event-broadcaster';
 import { ItemLogImpl } from './item-log-impl';
 
 const EMPTY_MEMORY: ContextMemory = Object.freeze({});
@@ -40,6 +41,9 @@ export class ContextImpl implements Context<ContextMemory> {
   readonly harness: AgentHarnessContract;
   readonly layers?: MemoryLayer[];
 
+  /** @internal Event broadcaster for streaming — not part of public Context interface. */
+  readonly _broadcaster?: EventBroadcaster;
+
   private readonly _createdAt: number;
   private readonly channelStore?: ChannelStore;
   private _checkpointFn?: () => Promise<void>;
@@ -60,6 +64,7 @@ export class ContextImpl implements Context<ContextMemory> {
     channelStore?: ChannelStore;
     checkpointFn?: () => Promise<void>;
     layers?: MemoryLayer[];
+    _broadcaster?: EventBroadcaster;
   }) {
     this.id = crypto.randomUUID();
     this._createdAt = Date.now();
@@ -73,6 +78,7 @@ export class ContextImpl implements Context<ContextMemory> {
     this.channelStore = opts.channelStore;
     this._checkpointFn = opts.checkpointFn;
     this.layers = opts.layers;
+    this._broadcaster = opts._broadcaster;
 
     const log = new ItemLogImpl();
     if (opts.items) {

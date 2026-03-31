@@ -7,17 +7,18 @@
 
 ## The `Step<I, O>` Discriminated Union
 
-`Step` is a single type with seven variants. The runtime pattern-matches on `kind`. Builder functions (`step.run(...)`, `fork(...)`, etc.) are constructors for the union variants.
+`Step` is a single type with eight variants. The runtime pattern-matches on `kind`. Builder functions (`step.run(...)`, `fork(...)`, etc.) are constructors for the union variants.
 
 ```typescript
 type Step<I, O> =
-  | { kind: 'run';    id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy }
-  | { kind: 'llm';    id: string; model: string; system?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
-  | { kind: 'tool';   id: string; tool: Tool; args?: unknown }
-  | { kind: 'branch'; id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
-  | { kind: 'fork';   id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
-  | { kind: 'spawn';  id: string; child: Step<I, O>; memory?: MemoryLayer[]; timeout?: number }
-  | { kind: 'loop';   id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'run';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy }
+  | { kind: 'llm';     id: string; model: string; system?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
+  | { kind: 'tool';    id: string; tool: Tool; args?: unknown }
+  | { kind: 'branch';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
+  | { kind: 'fork';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
+  | { kind: 'spawn';   id: string; child: Step<I, O>; memory?: MemoryLayer[]; timeout?: number }
+  | { kind: 'provide'; id: string; child: Step<I, O>; memory: MemoryConfig | MemoryLayer[] }
+  | { kind: 'loop';    id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
 Each variant is specified in its own feature spec:
@@ -30,6 +31,7 @@ Each variant is specified in its own feature spec:
 | `branch` | `03-control-flow` | Conditional routing |
 | `fork` | `03-control-flow` | Parallel execution |
 | `spawn` | `04-spawn` | Child execution with context boundary |
+| `provide` | `02-step-variants` | Scoped memory layer injection |
 | `loop` | `05-loop-and-until` | Repeating execution with termination |
 
 ## The `execute()` Interpreter
@@ -39,18 +41,19 @@ The runtime is a single recursive interpreter:
 ```typescript
 async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
   switch (step.kind) {
-    case 'run':    return executeRun(step, input, ctx);
-    case 'llm':    return executeLLM(step, input, ctx);
-    case 'tool':   return executeTool(step, input, ctx);
-    case 'branch': return executeBranch(step, input, ctx);
-    case 'fork':   return executeFork(step, input, ctx);
-    case 'spawn':  return executeSpawn(step, input, ctx);
-    case 'loop':   return executeLoop(step, input, ctx);
+    case 'run':     return executeRun(step, input, ctx);
+    case 'llm':     return executeLLM(step, input, ctx);
+    case 'tool':    return executeTool(step, input, ctx);
+    case 'branch':  return executeBranch(step, input, ctx);
+    case 'fork':    return executeFork(step, input, ctx);
+    case 'spawn':   return executeSpawn(step, input, ctx);
+    case 'provide': return executeProvide(step, input, ctx);
+    case 'loop':    return executeLoop(step, input, ctx);
   }
 }
 ```
 
-This makes the "everything is a Step" claim true at the type level. The primitive count debate dissolves: one type, seven variants.
+This makes the "everything is a Step" claim true at the type level. The primitive count debate dissolves: one type, eight variants.
 
 ## The `O` Contract
 

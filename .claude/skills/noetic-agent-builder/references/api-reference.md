@@ -26,8 +26,11 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepLLM<TMemory, I, O>
 ```
+
+`emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
 
@@ -393,26 +396,42 @@ Layer functions in `provides` are automatically exposed as tools to any `step.ll
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
 
 ```typescript
-// High-level API: pass agent step to constructor, execute with simple inputs
+// High-level API: execute() returns HarnessResult with streaming accessors
 const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
 });
-const result = await harness.execute('Hello');           // string input
-const result = await harness.execute(messageItem);       // single Item
-const result = await harness.execute([item1, item2]);    // Item[]
-const result = await harness.execute('Hello', {          // with options
+
+// Get final text (simplest usage)
+const text = await harness.execute('Hello').getText();
+
+// Get full response with items, usage, cost
+const response = await harness.execute('Hello').getResponse();
+
+// Stream text deltas as they arrive
+for await (const delta of harness.execute('Hello').getTextStream()) {
+  process.stdout.write(delta);
+}
+
+// Stream all events (SDK + framework)
+for await (const event of harness.execute('Hello').getFullStream()) {
+  console.log(event.source, event.type);
+}
+
+// With options
+const result = harness.execute('Hello', {
   threadId: 'thread-1',
   resourceId: 'user-1',
 });
 
+// Item inputs
+const text2 = await harness.execute(messageItem).getText();
+const text3 = await harness.execute([item1, item2]).getText();
+
 // Low-level API: manual context creation + run()
 const ctx = harness.createContext({ threadId: 'thread-1' });
-const result = await harness.run(step, input, ctx);
-
-// Access config params from context
-// ctx.harness.config.params.model
+const runResult = await harness.run(step, input, ctx);
 
 // Background execution
 const handle = harness.detachedSpawn(step, input, ctx);

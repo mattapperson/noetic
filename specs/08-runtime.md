@@ -14,6 +14,9 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Agent configuration
   readonly config: AgentConfig<TParams>;
 
+  // Primary execution — returns a HarnessResult with streaming accessors
+  execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
+
   // Core execution
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
 
@@ -27,6 +30,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     state?: unknown;
     threadId?: string;
     resourceId?: string;
+    memory?: MemoryLayer[];
   }): Context;
 
   // Channel operations (the agent harness owns the backing store)
@@ -90,6 +94,104 @@ interface DetachedHandle<O> {
 
 ---
 
+## HarnessResult
+
+`execute()` returns a `HarnessResult` synchronously. Execution starts eagerly in the background. The result provides six accessors for consuming output in different modes.
+
+```typescript
+interface HarnessResult {
+  getText(): Promise<string>;
+  getResponse(): Promise<HarnessResponse>;
+  getTextStream(): AsyncIterable<string>;
+  getReasoningStream(): AsyncIterable<string>;
+  getItemStream(): AsyncIterable<StreamingItem>;
+  getFullStream(): AsyncIterable<StreamEvent>;
+}
+
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+}
+
+type StreamingItem = Item & { readonly isComplete: boolean };
+```
+
+### Stream Accessors
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getText()` | `Promise<string>` | Complete text after execution finishes |
+| `getResponse()` | `Promise<HarnessResponse>` | Full response with items, usage, cost |
+| `getTextStream()` | `AsyncIterable<string>` | Text deltas as they arrive from the model |
+| `getReasoningStream()` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models) |
+| `getItemStream()` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Replace, do not append. |
+| `getFullStream()` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) |
+
+### StreamEvent
+
+Events have a `source` discriminant: `'sdk'` for raw OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix (e.g., `myagent:step_started`).
+
+```typescript
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+
+interface SdkStreamEvent {
+  readonly source: 'sdk';
+  readonly type: string;  // OpenResponses event type, e.g. 'response.output_text.delta'
+  readonly data: Record<string, unknown>;
+  readonly outputIndex?: number;
+  readonly contentIndex?: number;
+}
+
+interface FrameworkStreamEvent {
+  readonly source: 'framework';
+  readonly type: `${string}:${string}`;  // e.g. 'myagent:step_started'
+  readonly data: Record<string, unknown>;
+}
+```
+
+### Framework Events
+
+| Event | Description |
+|-------|-------------|
+| `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
+| `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
+| `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
+| `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
+| `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
+| `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
+| `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
+
+### Streaming Scope
+
+Events from the entire step composition tree flow through `HarnessResult`. All LLM steps encountered during execution (including within loops, branches, forks, and spawns) emit SDK stream events. Non-LLM steps emit framework lifecycle events only.
+
+### Event Emission Control
+
+LLM steps support an optional `emit` field to control framework event emission:
+
+```typescript
+step.llm({ id: 'quiet', model: '...', emit: false });           // suppress all
+step.llm({ id: 'selective', model: '...', emit: (type) => type === 'step_started' }); // filter
+```
+
+- **`true`** (default): all framework events emitted.
+- **`false`**: no framework events (`step_started`, `step_completed`, `tool_round_*`, `tool_call_*`) for this step.
+- **Filter function**: `(eventType: string, data: Record<string, unknown>) => boolean` — called per event, return `true` to emit.
+
+The `emit` option propagates through `CallModelRequest` to `callModel()`, controlling tool round/call events as well.
+
+### Bounded Buffer
+
+The internal `EventBroadcaster` buffer is capped at 10,000 events. When the buffer exceeds this limit, oldest events are trimmed and active iterator cursors are adjusted. Once all consumers have departed, new events are discarded to prevent unbounded memory growth. Late subscribers receive only the retained window.
+
+### Error Handling
+
+When `execute()` is called without an `initialStep`, all accessors reject with `NoeticConfigError` code `NO_STEP_CONFIGURED`. When execution fails mid-stream, the error propagates to all active stream consumers.
+
+---
+
 ## Key Design Points
 
 - **`send`/`recv`/`tryRecv` on the agent harness** means the agent harness controls channel storage. `AgentHarness` uses a `Map`. `DurableAgentHarness` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `harness.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `harness.tryRecv(ch, ctx)`.
@@ -98,6 +200,7 @@ interface DetachedHandle<O> {
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
 - **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
+- **`memory` on AgentConfig** are default memory layers applied to every context created via `createContext()`. When `createContext` is called with its own `memory` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up memory for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns.
 - **`checkpoint`/`restore`** enable durable execution. `AgentHarness` implements them as no-ops. `DurableAgentHarness` serializes state (including memory layer state) to its backing store.
 - **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
@@ -121,10 +224,12 @@ interface DetachedHandle<O> {
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic/core';
+import { workingMemory, semanticRecall } from '@noetic/core';
 
 setHarness(new AgentHarness({
   name: 'my-agent',
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
+  memory: [workingMemory(), semanticRecall({ embedder })],
 }));
 ```
 
@@ -211,6 +316,9 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Agent-level lifecycle hooks (separate from memory hooks). */
   hooks?: AgentHooks;
+
+  /** Default memory layers applied to every context created via createContext() / execute(). */
+  memory?: MemoryLayer[];
 
   /** Arbitrary key-value parameters accessible via ctx.harness.config.params. */
   params: TParams;

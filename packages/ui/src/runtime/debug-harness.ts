@@ -162,7 +162,8 @@ export class DebugAgentHarness<TParams extends Record<string, unknown> = Record<
         globalHookManager.onRunComplete('completed');
       }
 
-      return result;
+      // Get the text output from the result
+      return await result.getText();
     } catch (error) {
       // Complete with error
       if (this.debugger_) {

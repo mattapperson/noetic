@@ -51,6 +51,7 @@ export async function executeLLM<TMemory, I, O>(
           tools: allTools,
           params: step.params,
           outputSchema: step.output,
+          emit: step.emit,
           ctx: baseCtx,
           layers,
         }
@@ -59,6 +60,7 @@ export async function executeLLM<TMemory, I, O>(
           items: baseCtx.itemLog.items,
           params: step.params,
           outputSchema: step.output,
+          emit: step.emit,
         };
     const response = await baseCtx.harness.callModel(request);
 

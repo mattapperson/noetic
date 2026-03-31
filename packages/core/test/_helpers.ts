@@ -5,6 +5,7 @@
 import { expect } from 'bun:test';
 import { z } from 'zod';
 import { frameworkCast } from '../src/interpreter/framework-cast';
+import { HarnessResultImpl } from '../src/runtime/harness-result';
 import type { LLMResponse, Tool } from '../src/types/common';
 import type { Context, ItemLog } from '../src/types/context';
 import type { EmbedFn } from '../src/types/embed';
@@ -309,8 +310,8 @@ export function makeMockHarness(): AgentHarnessContract {
     callModel: async () => {
       throw new Error('not impl');
     },
-    execute: async () => {
-      throw new Error('not impl');
+    execute: () => {
+      return HarnessResultImpl.fromError(new Error('not impl'));
     },
     run: async () => {
       throw new Error('not impl');

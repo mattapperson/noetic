@@ -8,7 +8,7 @@
 import type { Context, Step } from '@noetic/core';
 
 /** Step kinds supported by the UI visualization */
-export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop';
+export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'provide';
 
 /** Execution status for nodes in the debug UI */
 export type ExecutionStatus =

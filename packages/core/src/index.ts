@@ -20,6 +20,8 @@ export { loop } from './builders/loop-builder';
 /** @public */
 export { memory } from './builders/memory-builder';
 /** @public */
+export { provide } from './builders/provide-builder';
+/** @public */
 export { spawn } from './builders/spawn-builder';
 /** @public */
 export { step } from './builders/step-builders';
@@ -232,6 +234,20 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 
 //#endregion
 
+//#region Types — Harness Result
+
+/** @public */
+export type {
+  FrameworkStreamEvent,
+  HarnessResponse,
+  HarnessResult,
+  SdkStreamEvent,
+  StreamEvent,
+  StreamingItem,
+} from './types/harness-result';
+
+//#endregion
+
 //#region Types — Runtime
 
 /** @public */
@@ -280,6 +296,7 @@ export type {
   StepForkSettle,
   StepLLM,
   StepLoop,
+  StepProvide,
   StepRun,
   StepSpawn,
   StepTool,

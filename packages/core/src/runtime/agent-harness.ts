@@ -27,6 +27,7 @@ import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse, LlmProviderConfig } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
+import type { HarnessResult } from '../types/harness-result';
 import type { ExecuteInput, Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
@@ -41,16 +42,21 @@ import type {
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { DetachedHandleImpl } from './detached-handle';
+import { EventBroadcaster } from './event-broadcaster';
 import { contextToExecCtx } from './exec-context-factory';
+import { HarnessResultImpl } from './harness-result';
 
 //#region Types
 
 interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   initialStep?: Step<ContextMemory, string, string>;
+  /** Default memory layers applied to every context created via `createContext()` / `execute()`. */
+  memory?: MemoryLayer[];
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
@@ -95,6 +101,43 @@ function buildTextFormat(schema: ZodType): {
   };
 }
 
+function isStreamRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+async function pipeStreamEventsToBroadcaster(
+  stream: AsyncIterable<unknown>,
+  broadcaster: EventBroadcaster,
+  agentName: string,
+): Promise<void> {
+  try {
+    for await (const event of stream) {
+      if (!isStreamRecord(event)) {
+        continue;
+      }
+      broadcaster.emit({
+        source: 'sdk',
+        type: typeof event.type === 'string' ? event.type : 'unknown',
+        data: event,
+        outputIndex: typeof event.outputIndex === 'number' ? event.outputIndex : undefined,
+        contentIndex: typeof event.contentIndex === 'number' ? event.contentIndex : undefined,
+      });
+    }
+  } catch (err: unknown) {
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'stream_pipe_error',
+      data: {
+        error: err instanceof Error ? err.message : String(err),
+      },
+    });
+    // Re-throw so pipePromise rejects and the error propagates
+    // through the execution promise to broadcaster.error().
+    throw err;
+  }
+}
+
 //#endregion
 
 //#region AgentHarness
@@ -110,6 +153,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 {
   readonly config: AgentConfig<TParams>;
   private readonly initialStep?: Step<ContextMemory, string, string>;
+  private readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
@@ -126,6 +170,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       params: validatedParams,
     };
     this.initialStep = opts.initialStep;
+    this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm);
     this.channelStore = new ChannelStore();
@@ -147,6 +192,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     }
 
     const { instructions, remaining } = extractSystemInstruction(request.items);
+    const broadcaster = getBroadcaster(request.ctx);
+    const agentName = this.config.name;
+
+    /** Emit a framework event, respecting request.emit filter. */
+    const emitIfAllowed = (eventType: string, data: Record<string, unknown>): void => {
+      if (shouldEmit(request.emit, eventType, data)) {
+        emitFrameworkEvent({
+          broadcaster,
+          agentName,
+          eventType,
+          data,
+        });
+      }
+    };
 
     let sdkTools: ReturnType<typeof convertTools> | undefined;
     if (request.tools && request.tools.length > 0) {
@@ -182,7 +241,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           : {}),
       });
 
+      // The OpenRouter SDK internally tees the HTTP stream, so
+      // getFullResponsesStream() and getResponse() can be consumed
+      // concurrently. Events flow to the broadcaster in real-time while
+      // getResponse() accumulates the final result independently.
+      // `await pipePromise` ensures all events are emitted before
+      // proceeding to tool-round processing.
+      const pipePromise = broadcaster
+        ? pipeStreamEventsToBroadcaster(callResult.getFullResponsesStream(), broadcaster, agentName)
+        : undefined;
+
       const sdkResponse = await callResult.getResponse();
+      await pipePromise;
       const roundItems = responseToNoeticItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 
@@ -198,6 +268,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         break;
       }
 
+      // Emit tool round framework event
+      emitIfAllowed('tool_round_started', {
+        round,
+        toolCount: functionCalls.length,
+      });
+
       // Add function calls to conversation, then execute and append results
       for (const fc of functionCalls) {
         conversationInput.push({
@@ -210,6 +286,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
 
       for (const fc of functionCalls) {
+        emitIfAllowed('tool_call_started', {
+          name: fc.name,
+          callId: fc.callId,
+        });
+
         let parsedArgs: unknown;
         try {
           parsedArgs = JSON.parse(fc.arguments);
@@ -226,6 +307,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             type: 'function_call_output',
             callId: fc.callId,
             output: errorOutput,
+          });
+          emitIfAllowed('tool_call_completed', {
+            name: fc.name,
+            callId: fc.callId,
+            error: true,
           });
           continue;
         }
@@ -251,7 +337,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           callId: fc.callId,
           output,
         });
+
+        emitIfAllowed('tool_call_completed', {
+          name: fc.name,
+          callId: fc.callId,
+          error: false,
+        });
       }
+
+      emitIfAllowed('tool_round_completed', {
+        round,
+        toolCount: functionCalls.length,
+      });
     }
 
     return {
@@ -261,30 +358,49 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     };
   }
 
-  async execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string> {
+  execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult {
     if (!this.initialStep) {
-      throw new NoeticConfigError({
-        code: 'NO_STEP_CONFIGURED',
-        message: 'No initialStep configured on this harness.',
-        hint: 'Pass `initialStep` in constructor options, or use run() directly.',
-      });
+      return HarnessResultImpl.fromError(
+        new NoeticConfigError({
+          code: 'NO_STEP_CONFIGURED',
+          message: 'No initialStep configured on this harness.',
+          hint: 'Pass `initialStep` in constructor options, or use run() directly.',
+        }),
+      );
     }
+
+    const broadcaster = new EventBroadcaster();
+
+    let executionPromise: Promise<string>;
+    let ctx: Context;
 
     if (typeof input === 'string') {
-      const ctx = this.createContext(options);
-      return this.run(this.initialStep, input, ctx);
+      ctx = this.createContext({
+        ...options,
+        _broadcaster: broadcaster,
+      });
+      executionPromise = this.run(this.initialStep, input, ctx);
+    } else {
+      const items = Array.isArray(input)
+        ? input
+        : [
+            input,
+          ];
+      ctx = this.createContext({
+        items,
+        ...options,
+        _broadcaster: broadcaster,
+      });
+      executionPromise = this.run(this.initialStep, '', ctx);
     }
 
-    const items = Array.isArray(input)
-      ? input
-      : [
-          input,
-        ];
-    const ctx = this.createContext({
-      items,
-      ...options,
-    });
-    return this.run(this.initialStep, '', ctx);
+    // Complete broadcaster when execution finishes
+    executionPromise.then(
+      () => broadcaster.complete(),
+      (err: unknown) => broadcaster.error(err instanceof Error ? err : new Error(String(err))),
+    );
+
+    return new HarnessResultImpl(broadcaster, executionPromise, ctx);
   }
 
   async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
@@ -311,16 +427,21 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     state?: unknown;
     threadId?: string;
     resourceId?: string;
+    memory?: MemoryLayer[];
+    _broadcaster?: EventBroadcaster;
   }): Context {
+    const { memory: memoryLayers, ...rest } = opts ?? {};
+
     // Create or inherit span
     const parentSpan = opts?.parent?.span;
     const span = parentSpan ?? this.createSpan('root', null);
 
     return new ContextImpl({
-      ...opts,
+      ...rest,
       harness: this,
       channelStore: this.channelStore,
       span,
+      layers: memoryLayers ?? this._memory,
     });
   }
 

@@ -1,4 +1,5 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
@@ -6,6 +7,7 @@ import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
 import { executeLLM } from './execute-llm';
 import { executeLoop } from './execute-loop';
+import { executeProvide } from './execute-provide';
 import { executeRun } from './execute-run';
 import { executeSpawn } from './execute-spawn';
 import { executeTool } from './execute-tool';
@@ -68,9 +70,25 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
-  try {
-    let result: O;
+  // Emit step_started framework event (respects step.emit option)
+  const broadcaster = getBroadcaster(baseCtx);
+  const agentName = baseCtx.harness.config.name;
+  const startedData = {
+    stepId: step.id,
+    kind: step.kind,
+  };
+  const emit = step.kind === 'llm' ? step.emit : undefined;
+  if (shouldEmit(emit, 'step_started', startedData)) {
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'step_started',
+      data: startedData,
+    });
+  }
 
+  let result: O;
+  try {
     switch (step.kind) {
       case 'run':
         result = await executeRun(step, input, ctx);
@@ -89,6 +107,9 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
         break;
       case 'spawn':
         result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'provide':
+        result = await executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
       case 'loop':
         result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
@@ -111,6 +132,20 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       span,
     ]);
 
+    // Emit step_completed framework event (respects step.emit option)
+    const completedData = {
+      stepId: step.id,
+      kind: step.kind,
+    };
+    if (shouldEmit(emit, 'step_completed', completedData)) {
+      emitFrameworkEvent({
+        broadcaster,
+        agentName,
+        eventType: 'step_completed',
+        data: completedData,
+      });
+    }
+
     return result;
   } catch (error) {
     // Error - end span and export
@@ -118,6 +153,20 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     await ctx.harness.traceExporter.export([
       span,
     ]);
+
+    // Emit step_failed framework event (always emitted for errors)
+    const failedData = {
+      stepId: step.id,
+      kind: step.kind,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'step_failed',
+      data: failedData,
+    });
+
     throw error;
   }
 }
