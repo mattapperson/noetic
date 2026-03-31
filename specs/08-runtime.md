@@ -30,6 +30,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     state?: unknown;
     threadId?: string;
     resourceId?: string;
+    memory?: MemoryLayer[];
   }): Context;
 
   // Channel operations (the agent harness owns the backing store)
@@ -199,6 +200,7 @@ When `execute()` is called without an `initialStep`, all accessors reject with `
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
 - **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
+- **`memory` on AgentConfig** are default memory layers applied to every context created via `createContext()`. When `createContext` is called with its own `memory` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up memory for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns.
 - **`checkpoint`/`restore`** enable durable execution. `AgentHarness` implements them as no-ops. `DurableAgentHarness` serializes state (including memory layer state) to its backing store.
 - **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
@@ -222,10 +224,12 @@ When `execute()` is called without an `initialStep`, all accessors reject with `
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic/core';
+import { workingMemory, semanticRecall } from '@noetic/core';
 
 setHarness(new AgentHarness({
   name: 'my-agent',
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
+  memory: [workingMemory(), semanticRecall({ embedder })],
 }));
 ```
 
@@ -312,6 +316,9 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Agent-level lifecycle hooks (separate from memory hooks). */
   hooks?: AgentHooks;
+
+  /** Default memory layers applied to every context created via createContext() / execute(). */
+  memory?: MemoryLayer[];
 
   /** Arbitrary key-value parameters accessible via ctx.harness.config.params. */
   params: TParams;

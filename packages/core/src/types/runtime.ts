@@ -58,6 +58,8 @@ export interface ExecuteOptions {
   threadId?: string;
   resourceId?: string;
   state?: unknown;
+  /** Memory layers to apply to the execution context. Overrides harness-level memory if provided. */
+  memory?: MemoryLayer[];
 }
 
 /** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, memory layers, and context. Implemented by `AgentHarness`. */
@@ -79,6 +81,7 @@ export interface AgentHarnessContract<
     state?: unknown;
     threadId?: string;
     resourceId?: string;
+    memory?: MemoryLayer[];
   }): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(

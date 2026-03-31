@@ -20,6 +20,8 @@ export { loop } from './builders/loop-builder';
 /** @public */
 export { memory } from './builders/memory-builder';
 /** @public */
+export { provide } from './builders/provide-builder';
+/** @public */
 export { spawn } from './builders/spawn-builder';
 /** @public */
 export { step } from './builders/step-builders';
@@ -294,6 +296,7 @@ export type {
   StepForkSettle,
   StepLLM,
   StepLoop,
+  StepProvide,
   StepRun,
   StepSpawn,
   StepTool,

@@ -15,6 +15,7 @@ type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
   | StepBranch<TMemory, I, O>
   | StepFork<TMemory, I, O>
   | StepSpawn<TMemory, I, O>
+  | StepProvide<TMemory, I, O>
   | StepLoop<TMemory, I, O>;
 ```
 
@@ -105,6 +106,17 @@ Fork has three mode variants, each a separate interface.
 | `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
 | `merge` | `(results: SettleResult<O>[], ctx: Context<TMemory>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
+
+## StepProvide
+
+`StepProvide<TMemory, I, O>`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'provide'` | yes | Discriminant |
+| `id` | `string` | yes | Step identifier |
+| `child` | `Step<TMemory, I, O>` | yes | Child step to execute with the provided layers |
+| `memory` | `MemoryConfig \| MemoryLayer[]` | yes | Memory layers available to all descendant steps |
 
 ## StepSpawn
 

@@ -55,6 +55,8 @@ import { HarnessResultImpl } from './harness-result';
 interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   initialStep?: Step<ContextMemory, string, string>;
+  /** Default memory layers applied to every context created via `createContext()` / `execute()`. */
+  memory?: MemoryLayer[];
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
@@ -151,6 +153,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 {
   readonly config: AgentConfig<TParams>;
   private readonly initialStep?: Step<ContextMemory, string, string>;
+  private readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
@@ -167,6 +170,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       params: validatedParams,
     };
     this.initialStep = opts.initialStep;
+    this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm);
     this.channelStore = new ChannelStore();
@@ -423,12 +427,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     state?: unknown;
     threadId?: string;
     resourceId?: string;
+    memory?: MemoryLayer[];
     _broadcaster?: EventBroadcaster;
   }): Context {
+    const { memory: memoryLayers, ...rest } = opts ?? {};
     return new ContextImpl({
-      ...opts,
+      ...rest,
       harness: this,
       channelStore: this.channelStore,
+      layers: memoryLayers ?? this._memory,
     });
   }
 

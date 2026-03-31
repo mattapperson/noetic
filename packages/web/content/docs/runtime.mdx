@@ -42,6 +42,7 @@ const harness = new AgentHarness({
 | `name` | `string` | required | Agent name (populates `config.name`). |
 | `initialStep` | `Step<TMemory, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TMemory` defaults to `ContextMemory`. |
 | `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
+| `memory` | `MemoryLayer[]` | `undefined` | Default memory layers applied to every context created via `createContext()` / `execute()`. |
 | `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
@@ -156,6 +157,7 @@ const result = await harness.run(myStep, input, ctx);
 | `state` | `unknown` | Initial mutable state. |
 | `threadId` | `string` | Conversation thread identifier. |
 | `resourceId` | `string` | Optional resource/tenant identifier. |
+| `memory` | `MemoryLayer[]` | Memory layers for this context. Overrides harness-level `memory` if provided. |
 
 ## Channel Methods
 
