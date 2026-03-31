@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * WebSocket connection store for Noetic UI
  *
@@ -41,6 +43,11 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   lastMessage: null,
 
   connect: (url = 'ws://localhost:3333') => {
+    // Only run on client
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     const { client: existingClient } = get();
 
     // Don't create multiple connections
@@ -91,6 +98,11 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   },
 
   disconnect: () => {
+    // Only run on client
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     const { client } = get();
     if (client) {
       client.disconnect();
@@ -102,6 +114,11 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   },
 
   send: (message: unknown) => {
+    // Only run on client
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     const { client } = get();
     if (client) {
       client.send(

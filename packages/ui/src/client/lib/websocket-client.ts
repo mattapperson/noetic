@@ -1,3 +1,5 @@
+'use client';
+
 type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
 
 export interface WebSocketMessage {
@@ -82,6 +84,10 @@ export class WebSocketClient {
   }
 
   connect(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     if (this.ws?.readyState === WebSocket.CONNECTING) {
       return;
     }
@@ -152,12 +158,10 @@ export class WebSocketClient {
   }
 
   disconnect(): void {
-    this.stopReconnect();
     this.stopHeartbeat();
+    this.stopReconnect();
 
     if (this.ws) {
-      // Don't reconnect on intentional close
-      this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }
@@ -169,42 +173,84 @@ export class WebSocketClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
-      // Queue message if disconnected
-      if (this.messageQueue.length < 1000) {
-        this.messageQueue.push(message);
-      }
+      // Queue message for later
+      this.messageQueue.push(message);
     }
   }
 
-  ping(): void {
-    this.send({
-      type: 'ping',
-      timestamp: Date.now(),
-    });
-  }
-
-  getStatus(): ConnectionStatus {
-    return this.status;
-  }
-
   private setStatus(status: ConnectionStatus): void {
-    if (this.status !== status) {
-      this.status = status;
-      this.onStatusChange(status);
+    this.status = status;
+    this.onStatusChange(status);
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+
+    this.heartbeatTimer = setInterval(() => {
+      if (this.missedHeartbeats >= 2) {
+        // Too many missed heartbeats, reconnect
+        this.ws?.close();
+        return;
+      }
+
+      // Send ping
+      this.send({
+        type: 'ping',
+        timestamp: Date.now(),
+      });
+
+      this.missedHeartbeats++;
+
+      // Set timeout to wait for pong
+      this.heartbeatTimeoutTimer = setTimeout(() => {
+        if (this.missedHeartbeats > 0) {
+          // Missed heartbeat, will be handled by next ping cycle
+        }
+      }, this.heartbeatTimeout);
+    }, this.heartbeatInterval);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+
+    if (this.heartbeatTimeoutTimer) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
+  }
+
+  private handlePong(): void {
+    this.missedHeartbeats = 0;
+
+    if (this.heartbeatTimeoutTimer) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
     }
   }
 
   private scheduleReconnect(): void {
-    // Check if max reconnect duration exceeded (5 minutes)
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    // Check if we've exceeded max reconnect duration
     if (this.reconnectStartTime === 0) {
       this.reconnectStartTime = Date.now();
     } else if (Date.now() - this.reconnectStartTime > this.maxReconnectDuration) {
       this.setStatus('disconnected');
-      this.onError(new Error('Max reconnection duration exceeded (5 minutes)'));
       return;
     }
 
-    // Calculate exponential backoff delay: 1s → 2s → 4s → 8s → max 30s
+    // Check if we've exceeded max reconnect attempts
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.setStatus('disconnected');
+      return;
+    }
+
+    // Calculate delay with exponential backoff
     const delay = Math.min(
       this.reconnectInterval * this.reconnectDecay ** this.reconnectAttempts,
       this.maxReconnectInterval,
@@ -222,53 +268,10 @@ export class WebSocketClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.reconnectAttempts = 0;
-    this.reconnectStartTime = 0;
-  }
-
-  private startHeartbeat(): void {
-    this.heartbeatTimer = setInterval(() => {
-      this.ping();
-
-      // Set timeout for pong response
-      this.heartbeatTimeoutTimer = setTimeout(() => {
-        this.missedHeartbeats++;
-
-        // After 2 missed heartbeats (10s total), trigger reconnection
-        if (this.missedHeartbeats >= 2) {
-          this.stopHeartbeat();
-          this.setStatus('reconnecting');
-          if (this.ws) {
-            this.ws.close();
-          }
-          this.scheduleReconnect();
-        }
-      }, this.heartbeatTimeout);
-    }, this.heartbeatInterval);
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-    if (this.heartbeatTimeoutTimer) {
-      clearTimeout(this.heartbeatTimeoutTimer);
-      this.heartbeatTimeoutTimer = null;
-    }
-    this.missedHeartbeats = 0;
-  }
-
-  private handlePong(): void {
-    this.missedHeartbeats = 0;
-    if (this.heartbeatTimeoutTimer) {
-      clearTimeout(this.heartbeatTimeoutTimer);
-      this.heartbeatTimeoutTimer = null;
-    }
   }
 
   private flushQueue(): void {
-    while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
+    while (this.messageQueue.length > 0) {
       const message = this.messageQueue.shift();
       if (message) {
         this.send(message);

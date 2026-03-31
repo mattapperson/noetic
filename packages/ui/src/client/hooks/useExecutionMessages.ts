@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * Hook to process WebSocket execution messages and update stores
  */
@@ -17,6 +19,8 @@ export function useExecutionMessages(): void {
   const updateNode = useExecutionStore((state) => state.updateNode);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     console.log('[useExecutionMessages] Registering handler');
 
     const handler = (message: ServerMessage) => {

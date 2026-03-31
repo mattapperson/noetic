@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect } from 'react';
 import type { ServerMessage } from '../../shared/protocol';
 import type { ConnectionStatus } from '../stores/websocket';
@@ -34,6 +36,8 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
 
   // Connect on mount if autoConnect is true
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     if (autoConnect && status === 'disconnected') {
       console.log('[useConnection] Auto-connecting...');
       storeConnect(url);
@@ -46,6 +50,7 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
   ]);
 
   const connect = () => {
+    if (typeof window === 'undefined') return;
     storeConnect(url);
   };
 
