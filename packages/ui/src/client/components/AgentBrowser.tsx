@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { discoverAgents } from '../lib/discovery';
 import { useAgentStore } from '../stores/agent';
 import { useStorageStore } from '../stores/storage';
+import type { Agent } from '../types/agent';
 import AgentList from './AgentList';
 import StorageBar from './StorageBar';
 
@@ -99,7 +100,36 @@ export const AgentBrowser: React.FC = () => {
     setDiscoveryStatus(true);
 
     try {
-      // Discover agents from file system
+      // First, refresh agents from server API (includes runtime-registered agents)
+      const response = await fetch('/api/agents');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && Array.isArray(data.data)) {
+          const currentIds = new Set(agents.map((a) => a.id));
+
+          // Add any new server agents
+          data.data.forEach((id: string) => {
+            if (!currentIds.has(id)) {
+              addAgent({
+                id,
+                name: id,
+                filePath: '',
+                exportName: '',
+                discoveredAt: Date.now(),
+                lastModified: Date.now(),
+                discoveryMethod: 'runtime',
+                runs: [],
+                runCount: 0,
+                lastRunAt: null,
+                description: 'Agent auto-discovered via WebSocket',
+                tags: [],
+              });
+            }
+          });
+        }
+      }
+
+      // Then discover agents from file system
       const discovered = await discoverAgents('/');
       setDiscoveredAgents(discovered);
 
@@ -120,7 +150,7 @@ export const AgentBrowser: React.FC = () => {
       }));
 
       // Merge with existing agents, preserving runs
-      const mergedAgents = newAgents.map((newAgent) => {
+      const mergedAgents: Agent[] = newAgents.map((newAgent) => {
         const existing = agents.find((a) => a.id === newAgent.id);
         if (existing) {
           return {
@@ -133,6 +163,15 @@ export const AgentBrowser: React.FC = () => {
         return newAgent;
       });
 
+      // Add any existing agents that weren't in the file system discovery
+      // (preserves runtime-registered agents)
+      agents.forEach((existingAgent) => {
+        const foundInNew = mergedAgents.find((a) => a.id === existingAgent.id);
+        if (!foundInNew) {
+          mergedAgents.push(existingAgent);
+        }
+      });
+
       setAgents(mergedAgents);
     } catch (error) {
       console.error('Discovery failed:', error);
@@ -142,6 +181,7 @@ export const AgentBrowser: React.FC = () => {
   }, [
     agents,
     setAgents,
+    addAgent,
     setDiscoveredAgents,
     setDiscoveryStatus,
   ]);

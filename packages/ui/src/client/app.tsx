@@ -5,14 +5,14 @@ import { ConnectionIndicator } from './components/ConnectionIndicator';
 import { NodeGraph } from './components/NodeGraph';
 import { NodeInspector } from './components/NodeInspector';
 import { PlaybackBar } from './components/PlaybackBar';
-import { useConnection } from './hooks/useConnection';
+import { useConnection, useConnectionStatus } from './hooks/useConnection';
 import { useExecutionMessages } from './hooks/useExecutionMessages';
 import { useExecutionStore } from './stores/execution';
 import { useThemeStore } from './stores/theme';
 
 // Connection status banner shown when disconnected
 const ConnectionBanner: React.FC = () => {
-  const { status } = useConnection();
+  const status = useConnectionStatus();
 
   if (status === 'connected') {
     return null;
@@ -87,7 +87,7 @@ export const App: React.FC = () => {
   const { initTheme } = useThemeStore();
   const { nodes } = useExecutionStore();
 
-  // Establish WebSocket connection to UI service
+  // Establish single WebSocket connection to UI service
   useConnection({
     url: 'ws://localhost:3333',
     autoConnect: true,
