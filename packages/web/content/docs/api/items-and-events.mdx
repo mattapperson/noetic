@@ -387,6 +387,7 @@ In addition to OpenResponses streaming events, Noetic emits framework-level even
 | `{name}:tool_round_started` | Before a tool execution round | `round`, `toolCount` |
 | `{name}:tool_call_started` | Before each tool call | `name`, `callId` |
 | `{name}:tool_call_completed` | After each tool call | `name`, `callId`, `error` |
+| `{name}:tool_round_completed` | After all tool calls in a round | `round`, `toolCount` |
 
 Framework events are available through `harness.execute(input).getFullStream()` alongside SDK events. They can be distinguished by the `source` field:
 

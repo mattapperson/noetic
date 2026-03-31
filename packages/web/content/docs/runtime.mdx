@@ -128,6 +128,9 @@ Framework events emitted during execution:
 | `{name}:tool_round_started` | Before a tool execution round. |
 | `{name}:tool_call_started` | Before each tool call. |
 | `{name}:tool_call_completed` | After each tool call. |
+| `{name}:tool_round_completed` | After all tool calls in a round. |
+
+LLM steps support an `emit` option to control framework event emission — set `false` to suppress or pass a filter function.
 
 ## run()
 

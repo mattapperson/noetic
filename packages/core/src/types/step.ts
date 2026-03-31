@@ -92,6 +92,8 @@ export interface StepLLM<_TMemory = ContextMemory, _I = unknown, O = unknown> {
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
+  /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 /** @public A step that invokes a single tool directly, bypassing the LLM. */

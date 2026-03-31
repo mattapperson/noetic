@@ -159,10 +159,31 @@ interface FrameworkStreamEvent {
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
 | `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
 | `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
+| `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
+| `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 
 ### Streaming Scope
 
 Events from the entire step composition tree flow through `HarnessResult`. All LLM steps encountered during execution (including within loops, branches, forks, and spawns) emit SDK stream events. Non-LLM steps emit framework lifecycle events only.
+
+### Event Emission Control
+
+LLM steps support an optional `emit` field to control framework event emission:
+
+```typescript
+step.llm({ id: 'quiet', model: '...', emit: false });           // suppress all
+step.llm({ id: 'selective', model: '...', emit: (type) => type === 'step_started' }); // filter
+```
+
+- **`true`** (default): all framework events emitted.
+- **`false`**: no framework events (`step_started`, `step_completed`, `tool_round_*`, `tool_call_*`) for this step.
+- **Filter function**: `(eventType: string, data: Record<string, unknown>) => boolean` — called per event, return `true` to emit.
+
+The `emit` option propagates through `CallModelRequest` to `callModel()`, controlling tool round/call events as well.
+
+### Bounded Buffer
+
+The internal `EventBroadcaster` buffer is capped at 10,000 events. When the buffer exceeds this limit, oldest events are trimmed and active iterator cursors are adjusted. Once all consumers have departed, new events are discarded to prevent unbounded memory growth. Late subscribers receive only the retained window.
 
 ### Error Handling
 

@@ -31,6 +31,8 @@ interface CallModelRequestBase {
   params?: ModelParams;
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
   outputSchema?: ZodType;
+  /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 /** @public Request shape when tools are provided — ctx is required for tool execution callbacks. */

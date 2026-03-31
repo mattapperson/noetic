@@ -26,8 +26,11 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepLLM<TMemory, I, O>
 ```
+
+`emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
 

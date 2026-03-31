@@ -99,30 +99,54 @@ function buildTextFormat(schema: ZodType): {
   };
 }
 
+function isStreamRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+type EmitOption = boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+
+/** Check whether a framework event should be emitted, respecting the emit option from CallModelRequest. */
+function shouldEmitCallModelEvent(
+  emit: EmitOption | undefined,
+  eventType: string,
+  data: Record<string, unknown>,
+): boolean {
+  if (emit === undefined || emit === true) {
+    return true;
+  }
+  if (emit === false) {
+    return false;
+  }
+  return emit(eventType, data);
+}
+
 async function pipeStreamEventsToBroadcaster(
   stream: AsyncIterable<unknown>,
   broadcaster: EventBroadcaster,
+  agentName: string,
 ): Promise<void> {
   try {
     for await (const event of stream) {
-      if (!event || typeof event !== 'object') {
+      if (!isStreamRecord(event)) {
         continue;
       }
-      // Use structuredClone if available, fallback to JSON round-trip
-      const record =
-        typeof structuredClone !== 'undefined'
-          ? structuredClone(event)
-          : JSON.parse(JSON.stringify(event));
       broadcaster.emit({
         source: 'sdk',
-        type: typeof record.type === 'string' ? record.type : 'unknown',
-        data: record,
-        outputIndex: typeof record.outputIndex === 'number' ? record.outputIndex : undefined,
-        contentIndex: typeof record.contentIndex === 'number' ? record.contentIndex : undefined,
+        type: typeof event.type === 'string' ? event.type : 'unknown',
+        data: event,
+        outputIndex: typeof event.outputIndex === 'number' ? event.outputIndex : undefined,
+        contentIndex: typeof event.contentIndex === 'number' ? event.contentIndex : undefined,
       });
     }
-  } catch {
-    // Stream errors are handled by the response promise
+  } catch (err: unknown) {
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'stream_pipe_error',
+      data: {
+        error: err instanceof Error ? err.message : String(err),
+      },
+    });
   }
 }
 
@@ -181,6 +205,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const broadcaster = getBroadcaster(request.ctx);
     const agentName = this.config.name;
 
+    /** Emit a framework event, respecting request.emit filter. */
+    const emitIfAllowed = (eventType: string, data: Record<string, unknown>): void => {
+      if (shouldEmitCallModelEvent(request.emit, eventType, data)) {
+        emitFrameworkEvent({
+          broadcaster,
+          agentName,
+          eventType,
+          data,
+        });
+      }
+    };
+
     let sdkTools: ReturnType<typeof convertTools> | undefined;
     if (request.tools && request.tools.length > 0) {
       sdkTools = convertTools({
@@ -216,11 +252,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       });
 
       // Pipe SDK stream events through the broadcaster if available
-      if (broadcaster) {
-        void pipeStreamEventsToBroadcaster(callResult.getFullResponsesStream(), broadcaster);
-      }
+      const pipePromise = broadcaster
+        ? pipeStreamEventsToBroadcaster(callResult.getFullResponsesStream(), broadcaster, agentName)
+        : undefined;
 
       const sdkResponse = await callResult.getResponse();
+      await pipePromise;
       const roundItems = responseToNoeticItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 
@@ -237,14 +274,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
 
       // Emit tool round framework event
-      emitFrameworkEvent({
-        broadcaster,
-        agentName,
-        eventType: 'tool_round_started',
-        data: {
-          round,
-          toolCount: functionCalls.length,
-        },
+      emitIfAllowed('tool_round_started', {
+        round,
+        toolCount: functionCalls.length,
       });
 
       // Add function calls to conversation, then execute and append results
@@ -259,14 +291,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
 
       for (const fc of functionCalls) {
-        emitFrameworkEvent({
-          broadcaster,
-          agentName,
-          eventType: 'tool_call_started',
-          data: {
-            name: fc.name,
-            callId: fc.callId,
-          },
+        emitIfAllowed('tool_call_started', {
+          name: fc.name,
+          callId: fc.callId,
         });
 
         let parsedArgs: unknown;
@@ -286,15 +313,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             callId: fc.callId,
             output: errorOutput,
           });
-          emitFrameworkEvent({
-            broadcaster,
-            agentName,
-            eventType: 'tool_call_completed',
-            data: {
-              name: fc.name,
-              callId: fc.callId,
-              error: true,
-            },
+          emitIfAllowed('tool_call_completed', {
+            name: fc.name,
+            callId: fc.callId,
+            error: true,
           });
           continue;
         }
@@ -321,17 +343,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           output,
         });
 
-        emitFrameworkEvent({
-          broadcaster,
-          agentName,
-          eventType: 'tool_call_completed',
-          data: {
-            name: fc.name,
-            callId: fc.callId,
-            error: false,
-          },
+        emitIfAllowed('tool_call_completed', {
+          name: fc.name,
+          callId: fc.callId,
+          error: false,
         });
       }
+
+      emitIfAllowed('tool_round_completed', {
+        round,
+        toolCount: functionCalls.length,
+      });
     }
 
     return {

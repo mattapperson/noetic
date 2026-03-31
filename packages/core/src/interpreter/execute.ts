@@ -15,6 +15,24 @@ import { isMutableContext } from './typeguards';
 
 const MAX_DEPTH = 64;
 
+/** Check whether a framework event should be emitted for the given step. */
+function shouldEmitEvent(
+  step: {
+    kind: string;
+    emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  },
+  eventType: string,
+  data: Record<string, unknown>,
+): boolean {
+  if (step.emit === undefined || step.emit === true) {
+    return true;
+  }
+  if (step.emit === false) {
+    return false;
+  }
+  return step.emit(eventType, data);
+}
+
 /**
  * Executes a step within the interpreter, dispatching to the appropriate handler by step kind.
  *
@@ -55,18 +73,21 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
-  // Emit step_started framework event
+  // Emit step_started framework event (respects step.emit option)
   const broadcaster = getBroadcaster(baseCtx);
   const agentName = baseCtx.harness.config.name;
-  emitFrameworkEvent({
-    broadcaster,
-    agentName,
-    eventType: 'step_started',
-    data: {
-      stepId: step.id,
-      kind: step.kind,
-    },
-  });
+  const startedData = {
+    stepId: step.id,
+    kind: step.kind,
+  };
+  if (shouldEmitEvent(step, 'step_started', startedData)) {
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'step_started',
+      data: startedData,
+    });
+  }
 
   let result: O;
   switch (step.kind) {
@@ -102,16 +123,19 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     }
   }
 
-  // Emit step_completed framework event
-  emitFrameworkEvent({
-    broadcaster,
-    agentName,
-    eventType: 'step_completed',
-    data: {
-      stepId: step.id,
-      kind: step.kind,
-    },
-  });
+  // Emit step_completed framework event (respects step.emit option)
+  const completedData = {
+    stepId: step.id,
+    kind: step.kind,
+  };
+  if (shouldEmitEvent(step, 'step_completed', completedData)) {
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'step_completed',
+      data: completedData,
+    });
+  }
 
   return result;
 }

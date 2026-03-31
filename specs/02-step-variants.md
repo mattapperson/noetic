@@ -48,6 +48,7 @@ interface StepLLMOpts<O> {
   tools?: Tool[];             // tools available for THIS call
   output?: ZodType<O>;        // structured output schema
   params?: ModelParams;       // temperature, topP, etc.
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 interface ModelParams {

@@ -1,27 +1,20 @@
 import type { Context } from '../types/context';
+import { ContextImpl } from './context-impl';
 import type { EventBroadcaster } from './event-broadcaster';
-
-//#region Type Guards
-
-function hasOwnBroadcaster(ctx: Context): ctx is Context & {
-  _broadcaster: EventBroadcaster;
-} {
-  return '_broadcaster' in ctx && ctx._broadcaster !== undefined && ctx._broadcaster !== null;
-}
-
-//#endregion
 
 //#region Public API
 
 /**
  * Get the EventBroadcaster from a context if available.
+ * Uses instanceof ContextImpl rather than `in` operator to avoid
+ * leaking the internal `_broadcaster` property through type guards.
  * @internal
  */
 export function getBroadcaster(ctx?: Context): EventBroadcaster | undefined {
   if (!ctx) {
     return undefined;
   }
-  if (hasOwnBroadcaster(ctx)) {
+  if (ctx instanceof ContextImpl) {
     return ctx._broadcaster;
   }
   return undefined;

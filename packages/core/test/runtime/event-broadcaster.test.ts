@@ -153,4 +153,80 @@ describe('EventBroadcaster', () => {
     const after = await iter.next();
     expect(after.done).toBe(true);
   });
+
+  it('trims buffer when exceeding maxBufferSize', async () => {
+    const bc = new EventBroadcaster({
+      maxBufferSize: 5,
+    });
+
+    // Emit 8 events — only last 5 should remain
+    for (let i = 0; i < 8; i++) {
+      bc.emit(textDelta(`event-${i}`));
+    }
+    expect(bc.bufferSize).toBe(5);
+
+    // Late subscriber should only see the retained window
+    const promise = collect(bc);
+    bc.complete();
+
+    const events = await promise;
+    expect(events).toHaveLength(5);
+    expect(events[0].data.delta).toBe('event-3');
+    expect(events[4].data.delta).toBe('event-7');
+  });
+
+  it('adjusts active iterator cursors on buffer trim', async () => {
+    const bc = new EventBroadcaster({
+      maxBufferSize: 3,
+    });
+    const iter = bc[Symbol.asyncIterator]();
+
+    // Read first event
+    bc.emit(textDelta('a'));
+    const first = await iter.next();
+    expect(first.done).toBe(false);
+
+    // Emit enough to trigger trim — cursor should adjust
+    bc.emit(textDelta('b'));
+    bc.emit(textDelta('c'));
+    bc.emit(textDelta('d'));
+    bc.emit(textDelta('e'));
+
+    bc.complete();
+
+    // Collect remaining from iterator
+    const remaining: StreamEvent[] = [];
+    let next = await iter.next();
+    while (!next.done) {
+      remaining.push(next.value);
+      next = await iter.next();
+    }
+
+    // Should get events from trimmed buffer without errors
+    expect(remaining.length).toBeGreaterThan(0);
+  });
+
+  it('stops buffering when all consumers have departed', async () => {
+    const bc = new EventBroadcaster();
+
+    // Subscribe and immediately break
+    const iter = bc[Symbol.asyncIterator]();
+    bc.emit(textDelta('before'));
+    await iter.next();
+    await iter.return?.();
+
+    // Now emit more — buffer should NOT grow since all consumers left
+    const sizeBefore = bc.bufferSize;
+    bc.emit(textDelta('after-1'));
+    bc.emit(textDelta('after-2'));
+    expect(bc.bufferSize).toBe(sizeBefore);
+  });
+
+  it('still buffers when no consumers have subscribed yet (for replay)', () => {
+    const bc = new EventBroadcaster();
+
+    bc.emit(textDelta('early-1'));
+    bc.emit(textDelta('early-2'));
+    expect(bc.bufferSize).toBe(2);
+  });
 });

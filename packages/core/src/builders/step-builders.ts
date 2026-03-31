@@ -63,6 +63,7 @@ export const step = {
     tools?: Tool[];
     output?: ZodType<O>;
     params?: ModelParams;
+    emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   }): StepLLM<TMemory, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({

@@ -168,11 +168,23 @@ function createAccumulatorFromItemAdded(event: StreamEvent): ItemAccumulator | n
   return null;
 }
 
+/** Compute a composite key from round offset and output index to avoid collisions across tool rounds. */
+function accumulatorKey(roundOffset: number, outputIndex: number): number {
+  return roundOffset * 1e4 + outputIndex;
+}
+
 async function* buildItemStream(broadcaster: EventBroadcaster): AsyncIterable<StreamingItem> {
   const accumulators = new Map<number, ItemAccumulator>();
+  let roundOffset = 0;
 
   for await (const event of broadcaster) {
     if (event.source !== 'sdk') {
+      continue;
+    }
+
+    // Track round boundaries — SDK resets outputIndex per response
+    if (event.type === 'response.created') {
+      roundOffset++;
       continue;
     }
 
@@ -180,9 +192,10 @@ async function* buildItemStream(broadcaster: EventBroadcaster): AsyncIterable<St
     if (event.type === 'response.output_item.added') {
       const outputIndex =
         typeof event.outputIndex === 'number' ? event.outputIndex : accumulators.size;
+      const key = accumulatorKey(roundOffset, outputIndex);
       const acc = createAccumulatorFromItemAdded(event);
       if (acc) {
-        accumulators.set(outputIndex, acc);
+        accumulators.set(key, acc);
         yield {
           ...acc.item,
           isComplete: false,
@@ -194,7 +207,8 @@ async function* buildItemStream(broadcaster: EventBroadcaster): AsyncIterable<St
     // Output item done
     if (event.type === 'response.output_item.done') {
       const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : -1;
-      const acc = accumulators.get(outputIndex);
+      const key = accumulatorKey(roundOffset, outputIndex);
+      const acc = accumulators.get(key);
       if (acc) {
         acc.isComplete = true;
         yield {
@@ -209,7 +223,8 @@ async function* buildItemStream(broadcaster: EventBroadcaster): AsyncIterable<St
     // Text delta
     if (event.type === 'response.output_text.delta' || event.type === 'response.output_text.done') {
       const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : 0;
-      const acc = accumulators.get(outputIndex);
+      const key = accumulatorKey(roundOffset, outputIndex);
+      const acc = accumulators.get(key);
       if (acc) {
         updateMessageAccumulator(acc, event);
         yield {
@@ -226,7 +241,8 @@ async function* buildItemStream(broadcaster: EventBroadcaster): AsyncIterable<St
       event.type === 'response.function_call_arguments.done'
     ) {
       const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : 0;
-      const acc = accumulators.get(outputIndex);
+      const key = accumulatorKey(roundOffset, outputIndex);
+      const acc = accumulators.get(key);
       if (acc) {
         updateFunctionCallAccumulator(acc, event);
         yield {
@@ -246,6 +262,12 @@ function errorIterable<T>(err: Error): AsyncIterable<T> {
         next(): Promise<IteratorResult<T>> {
           return Promise.reject(err);
         },
+        return(): Promise<IteratorResult<T>> {
+          return Promise.resolve({
+            done: true,
+            value: undefined,
+          });
+        },
       };
     },
   };
@@ -258,17 +280,34 @@ function errorIterable<T>(err: Error): AsyncIterable<T> {
 /**
  * Implementation of HarnessResult that wraps an EventBroadcaster and execution promise.
  *
+ * Eagerly caches the response when execution completes and releases the Context
+ * reference for garbage collection.
+ *
  * @internal
  */
 export class HarnessResultImpl implements HarnessResult {
   private readonly broadcaster: EventBroadcaster;
   private readonly executionPromise: Promise<string>;
-  private readonly ctx: Context;
+  private ctxRef: Context | undefined;
+  private cachedResponse?: HarnessResponse;
 
   constructor(broadcaster: EventBroadcaster, executionPromise: Promise<string>, ctx: Context) {
     this.broadcaster = broadcaster;
     this.executionPromise = executionPromise;
-    this.ctx = ctx;
+    this.ctxRef = ctx;
+
+    // Eagerly build and cache response, then release context for GC
+    executionPromise.then(
+      (text) => {
+        if (this.ctxRef) {
+          this.cachedResponse = buildHarnessResponse(text, this.ctxRef);
+          this.ctxRef = undefined;
+        }
+      },
+      () => {
+        this.ctxRef = undefined;
+      },
+    );
   }
 
   async getText(): Promise<string> {
@@ -277,7 +316,16 @@ export class HarnessResultImpl implements HarnessResult {
 
   async getResponse(): Promise<HarnessResponse> {
     const text = await this.executionPromise;
-    return buildHarnessResponse(text, this.ctx);
+    if (this.cachedResponse) {
+      return this.cachedResponse;
+    }
+    // Fallback: ctxRef should still be available if cache wasn't populated yet
+    if (this.ctxRef) {
+      this.cachedResponse = buildHarnessResponse(text, this.ctxRef);
+      this.ctxRef = undefined;
+      return this.cachedResponse;
+    }
+    throw new Error('Context was released before response could be built');
   }
 
   getTextStream(): AsyncIterable<string> {
