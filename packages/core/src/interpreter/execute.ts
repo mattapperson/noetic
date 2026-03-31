@@ -6,6 +6,7 @@ import { executeBranch } from './execute-branch';
 import { executeFork } from './execute-fork';
 import { executeLLM } from './execute-llm';
 import { executeLoop } from './execute-loop';
+import { executeProvide } from './execute-provide';
 import { executeRun } from './execute-run';
 import { executeSpawn } from './execute-spawn';
 import { executeTool } from './execute-tool';
@@ -67,6 +68,8 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'spawn':
       return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+    case 'provide':
+      return executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));
     case 'loop':
       return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
     default: {

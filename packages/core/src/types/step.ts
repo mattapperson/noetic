@@ -73,6 +73,7 @@ export type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
   | StepBranch<TMemory, I, O>
   | StepFork<TMemory, I, O>
   | StepSpawn<TMemory, I, O>
+  | StepProvide<TMemory, I, O>
   | StepLoop<TMemory, I, O>;
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
@@ -149,6 +150,19 @@ export interface StepForkSettle<TMemory = ContextMemory, I = unknown, O = unknow
   merge: (results: SettleResult<O>[], ctx: Context<TMemory>) => O;
   concurrency?: number;
   _optimizable?: Step<TMemory>[];
+}
+
+/**
+ * A step that provides memory layers to its child without creating an isolated context.
+ * Like React's Context.Provider — layers are available to all descendant steps.
+ * Spawn and detachedSpawn break the inheritance chain.
+ * @public
+ */
+export interface StepProvide<TMemory = ContextMemory, I = unknown, O = unknown> {
+  kind: 'provide';
+  id: string;
+  child: Step<TMemory, I, O>;
+  memory: MemoryConfig | MemoryLayer[];
 }
 
 /** @public A step that launches a child execution with its own memory scope. */
