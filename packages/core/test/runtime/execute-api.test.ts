@@ -108,9 +108,12 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    await harness.execute('first').getText();
-    await harness.execute('second').getText();
-    // If we got here without error, both calls succeeded with separate contexts
-    expect(true).toBe(true);
+    const r1 = await harness.execute('first').getResponse();
+    const r2 = await harness.execute('second').getResponse();
+    // Each call produces its own response with independent items
+    expect(r1.text).toBe('ok');
+    expect(r2.text).toBe('ok');
+    // Items should not accumulate across calls
+    expect(r1.items.length).toBe(r2.items.length);
   });
 });

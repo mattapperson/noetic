@@ -77,8 +77,9 @@ describe('HarnessResult', () => {
     const response = await result.getResponse();
     expect(response.text).toBe('response text');
     expect(response.items.length).toBeGreaterThan(0);
-    expect(response.usage.inputTokens).toBeGreaterThanOrEqual(0);
-    expect(response.usage.outputTokens).toBeGreaterThanOrEqual(0);
+    // textOnlyResponse sets inputTokens: 10, outputTokens: 5
+    expect(response.usage.inputTokens).toBe(10);
+    expect(response.usage.outputTokens).toBe(5);
   });
 
   it('getFullStream() yields framework events for step lifecycle', async () => {
@@ -159,6 +160,20 @@ describe('HarnessResult', () => {
     } catch (e2: unknown) {
       assert(isNoeticConfigError(e2));
     }
+
+    try {
+      await collect(result.getReasoningStream());
+      expect.unreachable('should have thrown');
+    } catch (e3: unknown) {
+      assert(isNoeticConfigError(e3));
+    }
+
+    try {
+      await collect(result.getItemStream());
+      expect.unreachable('should have thrown');
+    } catch (e4: unknown) {
+      assert(isNoeticConfigError(e4));
+    }
   });
 
   it('multiple accessors can be consumed from the same result', async () => {
@@ -179,6 +194,46 @@ describe('HarnessResult', () => {
 
     expect(text).toBe('multi');
     expect(response.text).toBe('multi');
+  });
+
+  it('getResponse() includes cachedTokens when present', async () => {
+    const bc = new EventBroadcaster();
+    const ctx = makeMockContext({
+      tokens: {
+        input: 100,
+        output: 50,
+        total: 150,
+        cached: 25,
+      },
+    });
+    const executionPromise = Promise.resolve('cached result');
+    const harnessResult = new HarnessResultImpl(bc, executionPromise, ctx);
+
+    queueMicrotask(() => bc.complete());
+
+    const response = await harnessResult.getResponse();
+    expect(response.usage.cachedTokens).toBe(25);
+    expect(response.usage.inputTokens).toBe(100);
+    expect(response.usage.outputTokens).toBe(50);
+  });
+
+  it('getResponse() omits cachedTokens when zero', async () => {
+    const bc = new EventBroadcaster();
+    const ctx = makeMockContext({
+      tokens: {
+        input: 10,
+        output: 5,
+        total: 15,
+        cached: 0,
+      },
+    });
+    const executionPromise = Promise.resolve('no cache');
+    const harnessResult = new HarnessResultImpl(bc, executionPromise, ctx);
+
+    queueMicrotask(() => bc.complete());
+
+    const response = await harnessResult.getResponse();
+    expect(response.usage.cachedTokens).toBeUndefined();
   });
 });
 

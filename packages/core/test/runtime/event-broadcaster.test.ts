@@ -202,8 +202,12 @@ describe('EventBroadcaster', () => {
       next = await iter.next();
     }
 
-    // Should get events from trimmed buffer without errors
-    expect(remaining.length).toBeGreaterThan(0);
+    // After reading 'a', buffer was [a,b,c] → emit d,e trims to [c,d,e].
+    // Iterator cursor adjusts so it continues from 'c' onward.
+    expect(remaining).toHaveLength(3);
+    expect(remaining[0].data.delta).toBe('c');
+    expect(remaining[1].data.delta).toBe('d');
+    expect(remaining[2].data.delta).toBe('e');
   });
 
   it('stops buffering when all consumers have departed', async () => {

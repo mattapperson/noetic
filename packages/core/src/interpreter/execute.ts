@@ -62,7 +62,7 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     stepId: step.id,
     kind: step.kind,
   };
-  const emit = 'emit' in step ? step.emit : undefined;
+  const emit = step.kind === 'llm' ? step.emit : undefined;
   if (shouldEmit(emit, 'step_started', startedData)) {
     emitFrameworkEvent({
       broadcaster,

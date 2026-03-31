@@ -185,6 +185,12 @@ class BroadcastIterator implements AsyncIterator<StreamEvent> {
     });
   }
 
+  async throw(err: Error): Promise<IteratorResult<StreamEvent>> {
+    this.returned = true;
+    this.broadcaster.removeIterator(this);
+    throw err;
+  }
+
   async return(): Promise<IteratorResult<StreamEvent>> {
     this.returned = true;
     this.broadcaster.removeIterator(this);
