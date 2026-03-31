@@ -3,6 +3,7 @@ import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, Tool } from './common';
 import type { Context } from './context';
 import type { DetachedHandle } from './detached';
+import type { HarnessResult } from './harness-result';
 import type { ExecuteInput, Item } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
 import type { Span } from './observability';
@@ -63,7 +64,7 @@ export interface AgentHarnessContract<
 > {
   readonly config: AgentConfig<TParams>;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
-  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<string>;
+  execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(
     step: Step<ContextMemory, I, O>,

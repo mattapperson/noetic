@@ -51,21 +51,31 @@ const harness = new AgentHarness({
 
 ## execute()
 
-The primary way to run an agent. Accepts a string, a single `Item`, or an array of `Item[]`.
+The primary way to run an agent. Returns a `HarnessResult` with multiple stream accessors. Accepts a string, a single `Item`, or an array of `Item[]`.
 
 ```ts
-// String input — creates a user message automatically
-const result = await harness.execute('What is 2+2?');
+// Simple: get the final text
+const text = await harness.execute('What is 2+2?').getText();
+
+// Full response with items and usage
+const response = await harness.execute('Hello').getResponse();
+console.log(response.text, response.usage);
+
+// Stream text as it arrives
+for await (const delta of harness.execute('Write a story').getTextStream()) {
+  process.stdout.write(delta);
+}
+
+// Stream all events (SDK + framework)
+for await (const event of harness.execute('Hello').getFullStream()) {
+  console.log(event.source, event.type);
+}
 
 // With options
-const result = await harness.execute('Hello', {
+const result = harness.execute('Hello', {
   threadId: 'thread-1',
   resourceId: 'user-1',
 });
-
-// Item input — pre-populates the context item log
-const result = await harness.execute(messageItem);
-const result = await harness.execute([item1, item2]);
 ```
 
 | Parameter | Type | Description |
@@ -73,7 +83,51 @@ const result = await harness.execute([item1, item2]);
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
 | `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, and `state`. |
 
+Returns a `HarnessResult` immediately (execution starts eagerly). See [HarnessResult](#harnessresult) for all accessors.
+
 Throws `NoeticConfigError` with code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
+
+## HarnessResult
+
+The object returned by `execute()`. Provides six ways to consume execution output.
+
+| Method | Returns | Description |
+|---|---|---|
+| `getText()` | `Promise<string>` | Complete text after execution finishes. |
+| `getResponse()` | `Promise<HarnessResponse>` | Full response with items, usage, and cost. |
+| `getTextStream()` | `AsyncIterable<string>` | Text deltas as they arrive from the model. |
+| `getReasoningStream()` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
+| `getItemStream()` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. |
+| `getFullStream()` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework). |
+
+### HarnessResponse
+
+```ts
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+}
+```
+
+### StreamEvent
+
+Events have a `source` discriminant: `'sdk'` for OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix.
+
+```ts
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+```
+
+Framework events emitted during execution:
+
+| Event | Description |
+|---|---|
+| `{name}:step_started` | Before each step executes. |
+| `{name}:step_completed` | After each step completes. |
+| `{name}:tool_round_started` | Before a tool execution round. |
+| `{name}:tool_call_started` | Before each tool call. |
+| `{name}:tool_call_completed` | After each tool call. |
 
 ## run()
 

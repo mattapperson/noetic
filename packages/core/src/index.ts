@@ -232,6 +232,20 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 
 //#endregion
 
+//#region Types — Harness Result
+
+/** @public */
+export type {
+  FrameworkStreamEvent,
+  HarnessResponse,
+  HarnessResult,
+  SdkStreamEvent,
+  StreamEvent,
+  StreamingItem,
+} from './types/harness-result';
+
+//#endregion
+
 //#region Types — Runtime
 
 /** @public */

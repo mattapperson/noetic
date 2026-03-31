@@ -1,4 +1,5 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
@@ -54,21 +55,42 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
+  // Emit step_started framework event
+  const broadcaster = getBroadcaster(baseCtx);
+  const agentName = baseCtx.harness.config.name;
+  emitFrameworkEvent({
+    broadcaster,
+    agentName,
+    eventType: 'step_started',
+    data: {
+      stepId: step.id,
+      kind: step.kind,
+    },
+  });
+
+  let result: O;
   switch (step.kind) {
     case 'run':
-      return executeRun(step, input, ctx);
+      result = await executeRun(step, input, ctx);
+      break;
     case 'llm':
-      return executeLLM(step, input, ctx, baseCtx.layers);
+      result = await executeLLM(step, input, ctx, baseCtx.layers);
+      break;
     case 'tool':
-      return executeTool(step, input, ctx, baseCtx.harness);
+      result = await executeTool(step, input, ctx, baseCtx.harness);
+      break;
     case 'branch':
-      return executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
+      result = await executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
+      break;
     case 'fork':
-      return executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
+      result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
+      break;
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+      result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+      break;
     case 'loop':
-      return executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+      result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+      break;
     default: {
       const _exhaustive: never = step;
       throw new NoeticErrorImpl({
@@ -79,4 +101,17 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       });
     }
   }
+
+  // Emit step_completed framework event
+  emitFrameworkEvent({
+    broadcaster,
+    agentName,
+    eventType: 'step_completed',
+    data: {
+      stepId: step.id,
+      kind: step.kind,
+    },
+  });
+
+  return result;
 }

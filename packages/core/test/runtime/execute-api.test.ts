@@ -24,7 +24,7 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute('hello');
+    const result = await harness.execute('hello').getText();
     expect(result).toBe('echo: hello');
   });
 
@@ -40,7 +40,7 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute(item);
+    const result = await harness.execute(item).getText();
     expect(result).toBe('echo: from item');
   });
 
@@ -59,7 +59,7 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute(items);
+    const result = await harness.execute(items).getText();
     expect(result).toBe('echo: second');
   });
 
@@ -73,10 +73,12 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute('hi', {
-      threadId: 'thread-42',
-      resourceId: 'user-7',
-    });
+    const result = await harness
+      .execute('hi', {
+        threadId: 'thread-42',
+        resourceId: 'user-7',
+      })
+      .getText();
     expect(result).toBe('ok');
   });
 
@@ -87,7 +89,7 @@ describe('AgentHarness.execute()', () => {
     });
 
     try {
-      await harness.execute('hello');
+      await harness.execute('hello').getText();
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticConfigError(e));
@@ -106,8 +108,8 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    await harness.execute('first');
-    await harness.execute('second');
+    await harness.execute('first').getText();
+    await harness.execute('second').getText();
     // If we got here without error, both calls succeeded with separate contexts
     expect(true).toBe(true);
   });
