@@ -74,7 +74,7 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('test-layer', Slot.Steering);
+      const layer = makeLayer('test-layer', Slot.STEERING);
       let receivedLayers: MemoryLayer[] | undefined;
 
       const step = makeProvideStep(
@@ -98,7 +98,7 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('temp-layer', Slot.Steering);
+      const layer = makeLayer('temp-layer', Slot.STEERING);
 
       const step = makeProvideStep('provide-restore', async () => 'done', [
         layer,
@@ -113,7 +113,7 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('temp-layer', Slot.Steering);
+      const layer = makeLayer('temp-layer', Slot.STEERING);
 
       const step = makeProvideStep('provide-error', async () => {
         throw new Error('child error');
@@ -143,7 +143,7 @@ describe('executeProvide', () => {
           return 'done';
         },
         [
-          makeLayer('l1', Slot.Steering),
+          makeLayer('l1', Slot.STEERING),
         ],
       );
 
@@ -170,7 +170,7 @@ describe('executeProvide', () => {
           return 'done';
         },
         [
-          makeLayer('l1', Slot.Steering),
+          makeLayer('l1', Slot.STEERING),
         ],
       );
 
@@ -188,8 +188,8 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const outerLayer = makeLayer('outer', Slot.Steering);
-      const innerLayer = makeLayer('inner', Slot.Working);
+      const outerLayer = makeLayer('outer', Slot.STEERING);
+      const innerLayer = makeLayer('inner', Slot.WORKING_MEMORY);
       let receivedLayers: MemoryLayer[] | undefined;
 
       const innerStep: StepProvide<ContextMemory, string, string> = {
@@ -230,8 +230,8 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const outerLayer = makeLayer('shared-id', Slot.Steering);
-      const innerLayer = makeLayer('shared-id', Slot.Working);
+      const outerLayer = makeLayer('shared-id', Slot.STEERING);
+      const innerLayer = makeLayer('shared-id', Slot.WORKING_MEMORY);
       let receivedLayers: MemoryLayer[] | undefined;
 
       const innerStep: StepProvide<ContextMemory, string, string> = {
@@ -263,7 +263,7 @@ describe('executeProvide', () => {
 
       // Only one layer — inner overrode outer
       expect(receivedLayers).toHaveLength(1);
-      expect(receivedLayers![0].slot).toBe(Slot.Working);
+      expect(receivedLayers![0].slot).toBe(Slot.WORKING_MEMORY);
     });
   });
 
@@ -272,7 +272,7 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('config-layer', Slot.Steering);
+      const layer = makeLayer('config-layer', Slot.STEERING);
       let receivedLayers: MemoryLayer[] | undefined;
 
       const step: StepProvide<ContextMemory, string, string> = {
@@ -286,11 +286,9 @@ describe('executeProvide', () => {
             return 'done';
           },
         },
-        memory: {
-          layers: [
-            layer,
-          ],
-        },
+        memory: [
+          layer,
+        ],
       };
 
       await executeProvide(step, 'input', ctx, simpleExecute);
@@ -306,7 +304,7 @@ describe('executeProvide', () => {
       });
 
       const step = makeProvideStep('provide-passthrough', async () => 'result-value', [
-        makeLayer('l1', Slot.Steering),
+        makeLayer('l1', Slot.STEERING),
       ]);
 
       const result = await executeProvide(step, 'input', ctx, simpleExecute);

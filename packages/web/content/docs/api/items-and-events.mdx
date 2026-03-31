@@ -376,6 +376,32 @@ Noetic's adapter layer bridges the framework's `Item` types and the OpenResponse
 
 Extension items and reasoning items are skipped during input conversion (they are internal metadata). The adapter currently converts `message` and `function_call` output items; built-in extended items like `web_search_call` are not yet surfaced as Noetic Items.
 
+## Framework Events
+
+In addition to OpenResponses streaming events, Noetic emits framework-level events during execution. These events use the harness `config.name` as a prefix and have `source: 'framework'`.
+
+| Event | Description | Key Payload |
+|---|---|---|
+| `{name}:step_started` | Before each step executes | `stepId`, `kind` |
+| `{name}:step_completed` | After each step completes | `stepId`, `kind` |
+| `{name}:tool_round_started` | Before a tool execution round | `round`, `toolCount` |
+| `{name}:tool_call_started` | Before each tool call | `name`, `callId` |
+| `{name}:tool_call_completed` | After each tool call | `name`, `callId`, `error` |
+| `{name}:tool_round_completed` | After all tool calls in a round | `round`, `toolCount` |
+
+Framework events are available through `harness.execute(input).getFullStream()` alongside SDK events. They can be distinguished by the `source` field:
+
+```ts
+for await (const event of harness.execute('Hello').getFullStream()) {
+  if (event.source === 'sdk') {
+    // OpenResponses SSE event
+  }
+  if (event.source === 'framework') {
+    // Noetic lifecycle event, e.g. 'myagent:step_started'
+  }
+}
+```
+
 ## Related Pages
 
 - [Context & Event Log](/docs/context) -- the `ItemLog` interface and usage.

@@ -33,6 +33,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | Method | Description |
 |---|---|
 | `config` | The `AgentConfig<TParams>` the harness was constructed with |
+| `execute(input, options?)` | Run the agent's `initialStep`. Returns a [`HarnessResult`](#harnessresult) with streaming accessors. |
 | `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
 | `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
@@ -48,6 +49,67 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `restore(executionId)` | Restore a previously checkpointed context |
 | `cancel(ctx, reason?)` | Cancel an execution |
 | `createSpan(name, parent)` | Create an observability span |
+
+## HarnessResult
+
+Returned by `execute()`. Provides multiple ways to consume execution output.
+
+```ts
+interface HarnessResult {
+  getText(): Promise<string>;
+  getResponse(): Promise<HarnessResponse>;
+  getTextStream(): AsyncIterable<string>;
+  getReasoningStream(): AsyncIterable<string>;
+  getItemStream(): AsyncIterable<StreamingItem>;
+  getFullStream(): AsyncIterable<StreamEvent>;
+}
+```
+
+| Method | Returns | Description |
+|---|---|---|
+| `getText()` | `Promise<string>` | Complete text after execution finishes |
+| `getResponse()` | `Promise<HarnessResponse>` | Full response with items, usage, cost |
+| `getTextStream()` | `AsyncIterable<string>` | Text deltas as they arrive |
+| `getReasoningStream()` | `AsyncIterable<string>` | Reasoning token deltas |
+| `getItemStream()` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` |
+| `getFullStream()` | `AsyncIterable<StreamEvent>` | All raw SDK + framework events |
+
+## HarnessResponse
+
+```ts
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+}
+```
+
+## StreamEvent
+
+```ts
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+
+interface SdkStreamEvent {
+  readonly source: 'sdk';
+  readonly type: string;
+  readonly data: Record<string, unknown>;
+  readonly outputIndex?: number;
+  readonly contentIndex?: number;
+}
+
+interface FrameworkStreamEvent {
+  readonly source: 'framework';
+  readonly type: `${string}:${string}`;
+  readonly data: Record<string, unknown>;
+}
+```
+
+## StreamingItem
+
+```ts
+type StreamingItem = Item & { readonly isComplete: boolean };
+```
 
 ## AgentConfig
 

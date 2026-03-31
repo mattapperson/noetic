@@ -23,7 +23,7 @@ function makeLayer(id: string, slot: number): MemoryLayer {
 describe('AgentHarness memory', () => {
   describe('createContext with harness-level memory', () => {
     it('context inherits harness memory by default', () => {
-      const layer = makeLayer('harness-layer', Slot.Steering);
+      const layer = makeLayer('harness-layer', Slot.STEERING);
       const harness = new AgentHarness({
         name: 'test',
         memory: [
@@ -42,8 +42,8 @@ describe('AgentHarness memory', () => {
     });
 
     it('per-call memory overrides harness memory', () => {
-      const harnessLayer = makeLayer('harness-layer', Slot.Steering);
-      const callLayer = makeLayer('call-layer', Slot.Working);
+      const harnessLayer = makeLayer('harness-layer', Slot.STEERING);
+      const callLayer = makeLayer('call-layer', Slot.WORKING_MEMORY);
       const harness = new AgentHarness({
         name: 'test',
         memory: [
@@ -80,7 +80,7 @@ describe('AgentHarness memory', () => {
 
   describe('execute with harness-level memory', () => {
     it('execute passes harness memory to context', async () => {
-      const layer = makeLayer('exec-layer', Slot.Steering);
+      const layer = makeLayer('exec-layer', Slot.STEERING);
       let contextLayers: MemoryLayer[] | undefined;
 
       const harness = new AgentHarness({
@@ -102,7 +102,7 @@ describe('AgentHarness memory', () => {
         ]),
       });
 
-      await harness.execute('hello');
+      await harness.execute('hello').getText();
       expect(contextLayers).toBeDefined();
       expect(contextLayers).toHaveLength(1);
       expect(contextLayers![0].id).toBe('exec-layer');
