@@ -254,6 +254,60 @@ describe('HarnessResult — getReasoningStream', () => {
       ' about this',
     ]);
   });
+
+  it('filters reasoning deltas when interleaved with text deltas', async () => {
+    const bc = new EventBroadcaster();
+    const ctx = makeMockContext();
+    const executionPromise = Promise.resolve('result');
+
+    const harnessResult = new HarnessResultImpl(bc, executionPromise, ctx);
+
+    emitAsync(bc, [
+      sdkEvent(
+        'response.output_text.delta',
+        {
+          delta: 'Hello',
+        },
+        0,
+      ),
+      sdkEvent(
+        'response.reasoning.delta',
+        {
+          delta: 'Think step 1',
+        },
+        0,
+      ),
+      sdkEvent(
+        'response.output_text.delta',
+        {
+          delta: ' world',
+        },
+        0,
+      ),
+      sdkEvent(
+        'response.reasoning.delta',
+        {
+          delta: ' and step 2',
+        },
+        0,
+      ),
+      sdkEvent('response.output_text.done', {}, 0),
+    ]);
+
+    const [textDeltas, reasoningDeltas] = await Promise.all([
+      collect(harnessResult.getTextStream()),
+      collect(harnessResult.getReasoningStream()),
+    ]);
+
+    expect(textDeltas).toEqual([
+      'Hello',
+      ' world',
+    ]);
+    expect(reasoningDeltas).toEqual([
+      'Think step 1',
+      ' and step 2',
+    ]);
+  });
 });
 
 describe('HarnessResult — getItemStream', () => {
@@ -376,6 +430,48 @@ describe('HarnessResult — getItemStream', () => {
     const lastMsg = messages[messages.length - 1];
     expect(lastFc.isComplete).toBe(true);
     expect(lastMsg.isComplete).toBe(true);
+  });
+
+  it('replays events for late subscriber via broadcaster replay', async () => {
+    const bc = new EventBroadcaster();
+    const ctx = makeMockContext();
+    const executionPromise = Promise.resolve('hello');
+    const harnessResult = new HarnessResultImpl(bc, executionPromise, ctx);
+
+    // Emit ALL events before subscribing to getItemStream
+    bc.emit(sdkEvent('response.created', {}, undefined));
+    bc.emit(
+      sdkEvent(
+        'response.output_item.added',
+        {
+          item: {
+            type: 'message',
+            id: 'msg-1',
+          },
+        },
+        0,
+      ),
+    );
+    bc.emit(
+      sdkEvent(
+        'response.output_text.delta',
+        {
+          delta: 'hello',
+        },
+        0,
+      ),
+    );
+    bc.emit(sdkEvent('response.output_text.done', {}, 0));
+    bc.emit(sdkEvent('response.output_item.done', {}, 0));
+    bc.complete();
+
+    // Subscribe AFTER all events — should replay from buffer
+    const items = await collect(harnessResult.getItemStream());
+
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    const last = items[items.length - 1];
+    expect(last.isComplete).toBe(true);
+    expect(last.type).toBe('message');
   });
 });
 

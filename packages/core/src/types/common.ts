@@ -66,11 +66,12 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   memory?: ToolMemoryDeclaration;
 }
 
-/** @public Aggregate token counts for an execution (input, output, total). */
+/** @public Aggregate token counts for an execution (input, output, total, cached). */
 export interface TokenUsage {
   input: number;
   output: number;
   total: number;
+  cached?: number;
 }
 
 /** @public Metadata captured from the most recent step execution. */

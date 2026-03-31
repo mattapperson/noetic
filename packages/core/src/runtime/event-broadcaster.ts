@@ -26,7 +26,9 @@ const DEFAULT_MAX_BUFFER_SIZE = 1e4;
  * The buffer is bounded to `maxBufferSize` events (default 10,000). When the
  * buffer exceeds this limit, oldest events are trimmed and iterator cursors
  * are adjusted. Once all consumers have departed, new events are discarded
- * to prevent unbounded memory growth.
+ * to prevent unbounded memory growth. This bounded buffer serves as the
+ * backpressure mechanism — no additional flow control is needed for typical
+ * LLM response sizes.
  *
  * @internal
  */

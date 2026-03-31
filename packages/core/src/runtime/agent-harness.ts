@@ -42,7 +42,7 @@ import type {
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
-import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { DetachedHandleImpl } from './detached-handle';
@@ -103,23 +103,6 @@ function isStreamRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-type EmitOption = boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
-
-/** Check whether a framework event should be emitted, respecting the emit option from CallModelRequest. */
-function shouldEmitCallModelEvent(
-  emit: EmitOption | undefined,
-  eventType: string,
-  data: Record<string, unknown>,
-): boolean {
-  if (emit === undefined || emit === true) {
-    return true;
-  }
-  if (emit === false) {
-    return false;
-  }
-  return emit(eventType, data);
-}
-
 async function pipeStreamEventsToBroadcaster(
   stream: AsyncIterable<unknown>,
   broadcaster: EventBroadcaster,
@@ -147,6 +130,9 @@ async function pipeStreamEventsToBroadcaster(
         error: err instanceof Error ? err.message : String(err),
       },
     });
+    // Re-throw so pipePromise rejects and the error propagates
+    // through the execution promise to broadcaster.error().
+    throw err;
   }
 }
 
@@ -207,7 +193,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     /** Emit a framework event, respecting request.emit filter. */
     const emitIfAllowed = (eventType: string, data: Record<string, unknown>): void => {
-      if (shouldEmitCallModelEvent(request.emit, eventType, data)) {
+      if (shouldEmit(request.emit, eventType, data)) {
         emitFrameworkEvent({
           broadcaster,
           agentName,
@@ -251,7 +237,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           : {}),
       });
 
-      // Pipe SDK stream events through the broadcaster if available
+      // The OpenRouter SDK internally tees the HTTP stream, so
+      // getFullResponsesStream() and getResponse() can be consumed
+      // concurrently. Events flow to the broadcaster in real-time while
+      // getResponse() accumulates the final result independently.
+      // `await pipePromise` ensures all events are emitted before
+      // proceeding to tool-round processing.
       const pipePromise = broadcaster
         ? pipeStreamEventsToBroadcaster(callResult.getFullResponsesStream(), broadcaster, agentName)
         : undefined;

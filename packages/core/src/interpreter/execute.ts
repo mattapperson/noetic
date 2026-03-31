@@ -1,5 +1,5 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
-import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
@@ -14,24 +14,6 @@ import { frameworkCast } from './framework-cast';
 import { isMutableContext } from './typeguards';
 
 const MAX_DEPTH = 64;
-
-/** Check whether a framework event should be emitted for the given step. */
-function shouldEmitEvent(
-  step: {
-    kind: string;
-    emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
-  },
-  eventType: string,
-  data: Record<string, unknown>,
-): boolean {
-  if (step.emit === undefined || step.emit === true) {
-    return true;
-  }
-  if (step.emit === false) {
-    return false;
-  }
-  return step.emit(eventType, data);
-}
 
 /**
  * Executes a step within the interpreter, dispatching to the appropriate handler by step kind.
@@ -80,7 +62,8 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     stepId: step.id,
     kind: step.kind,
   };
-  if (shouldEmitEvent(step, 'step_started', startedData)) {
+  const emit = 'emit' in step ? step.emit : undefined;
+  if (shouldEmit(emit, 'step_started', startedData)) {
     emitFrameworkEvent({
       broadcaster,
       agentName,
@@ -128,7 +111,7 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     stepId: step.id,
     kind: step.kind,
   };
-  if (shouldEmitEvent(step, 'step_completed', completedData)) {
+  if (shouldEmit(emit, 'step_completed', completedData)) {
     emitFrameworkEvent({
       broadcaster,
       agentName,
