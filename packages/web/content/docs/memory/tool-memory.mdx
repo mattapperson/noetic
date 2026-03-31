@@ -47,7 +47,7 @@ const tools = [writeTodos, updateTodo, listTodos];
 
 const agent = react({
   model: 'openrouter/anthropic/claude-sonnet-4',
-  system: 'You are a task planner.',
+  instructions: 'You are a task planner.',
   tools,
   memory: [
     ...toolMemoryLayer(tools),
@@ -274,7 +274,7 @@ Register the layer and instruct the LLM in the system prompt:
 ```ts
 const agent = react({
   model: 'openrouter/anthropic/claude-sonnet-4',
-  system: `You are a research assistant.
+  instructions: `You are a research assistant.
 
 When you discover important entities (people, organizations, concepts),
 call updateEntities to remember them:
@@ -294,7 +294,7 @@ const tools = [writeTodos, updateTodo];
 
 const agent = react({
   model: 'openrouter/anthropic/claude-sonnet-4',
-  system: 'You are a planner. Use todos to track tasks. Call updateNotes to save observations.',
+  instructions: 'You are a planner. Use todos to track tasks. Call updateNotes to save observations.',
   tools,
   memory: [
     ...toolMemoryLayer(tools),  // imperative: tools write todo state

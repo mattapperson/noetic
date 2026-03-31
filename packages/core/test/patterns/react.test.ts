@@ -26,7 +26,7 @@ describe('ReAct pattern', () => {
 
     const reactStep = react({
       model: 'gpt-4',
-      system: 'You are a helpful assistant',
+      instructions: 'You are a helpful assistant',
       tools: [
         searchTool,
       ],

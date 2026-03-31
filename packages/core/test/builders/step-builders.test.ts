@@ -38,12 +38,12 @@ describe('step builders', () => {
     const s = step.llm({
       id: 'my-llm',
       model: 'gpt-4',
-      system: 'You are helpful',
+      instructions: 'You are helpful',
     });
     expect(s.kind).toBe('llm');
     expect(s.id).toBe('my-llm');
     expect(s.model).toBe('gpt-4');
-    expect(s.system).toBe('You are helpful');
+    expect(s.instructions).toBe('You are helpful');
   });
 
   it('step.llm() with output schema', () => {

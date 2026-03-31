@@ -191,7 +191,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       });
     }
 
-    const { instructions, remaining } = extractSystemInstruction(request.items);
+    const { instructions: extractedInstructions, remaining } = extractSystemInstruction(
+      request.items,
+    );
+    const instructions =
+      [
+        request.instructions,
+        extractedInstructions,
+      ]
+        .filter(Boolean)
+        .join('\n\n') || undefined;
     const broadcaster = getBroadcaster(request.ctx);
     const agentName = this.config.name;
 

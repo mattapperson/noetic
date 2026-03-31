@@ -29,7 +29,7 @@ export function answerSimilarity(config: AnswerSimilarityConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'answer-similarity-judge',
-      system: `You are an evaluation judge. Compare the given output to the expected answer.
+      instructions: `You are an evaluation judge. Compare the given output to the expected answer.
 Rate their semantic similarity from 0.0 (completely different) to 1.0 (identical meaning).
 Consider meaning and intent, not just exact wording.
 Respond with a similarity score and brief reasoning.`,

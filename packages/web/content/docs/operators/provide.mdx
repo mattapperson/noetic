@@ -13,7 +13,7 @@ const withLayers = provide({
   child: step.llm({
     id: 'researcher',
     model: 'gpt-4o',
-    system: 'Research the topic thoroughly.',
+    instructions: 'Research the topic thoroughly.',
   }),
   memory: [knowledgeLayer, steeringLayer],
 });
@@ -50,7 +50,7 @@ const researchPhase = provide({
     steps: [step.llm({
       id: 'researcher-llm',
       model: 'gpt-4o',
-      system: 'You are a research assistant.',
+      instructions: 'You are a research assistant.',
       tools: [searchTool],
     })],
     until: until.noToolCalls(),

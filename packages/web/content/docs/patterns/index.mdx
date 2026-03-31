@@ -43,7 +43,7 @@ const parallel = fork({
 // Wrap a pattern in verification
 const verified = ralphWiggum({
   model: 'gpt-4o',
-  system: 'Write unit tests.',
+  instructions: 'Write unit tests.',
   tools: [codeTool],
   verify: async (output) => ({
     pass: String(output).includes('expect('),

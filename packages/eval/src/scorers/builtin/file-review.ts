@@ -33,7 +33,7 @@ export function fileReview(config: FileReviewConfig): ScorerFn {
 
     const result = await runJudge({
       id: 'file-review-judge',
-      system: `You are a code/file review judge. Review the file contents against the given instructions.
+      instructions: `You are a code/file review judge. Review the file contents against the given instructions.
 Score 0.0 = completely fails instructions, 1.0 = perfectly follows all instructions.
 Respond with a compliance score and brief reasoning.`,
       input: `Objective: ${objective}\n\nInstructions: ${config.instructions}\n\nFile Path: ${config.path}\n\nFile Contents:\n${contents}`,

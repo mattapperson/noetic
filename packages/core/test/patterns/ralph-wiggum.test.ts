@@ -19,7 +19,7 @@ describe('Ralph Wiggum pattern', () => {
     };
     const rw = ralphWiggum({
       model: 'gpt-4',
-      system: 'Write code',
+      instructions: 'Write code',
       tools: [
         tool,
       ],
@@ -115,7 +115,7 @@ describe('Ralph Wiggum pattern', () => {
     let verifyCount = 0;
     const rw = ralphWiggum({
       model: 'gpt-4',
-      system: 'Write code',
+      instructions: 'Write code',
       tools: [
         tool,
       ],
@@ -180,7 +180,7 @@ describe('Ralph Wiggum pattern', () => {
     const verifyResults: boolean[] = [];
     const rw = ralphWiggum({
       model: 'gpt-4',
-      system: 'Test',
+      instructions: 'Test',
       tools: [
         tool,
       ],
@@ -245,7 +245,7 @@ describe('Ralph Wiggum pattern', () => {
     let verifyCount = 0;
     const rw = ralphWiggum({
       model: 'gpt-4',
-      system: 'Test',
+      instructions: 'Test',
       tools: [
         tool,
       ],
@@ -306,7 +306,7 @@ describe('Ralph Wiggum pattern', () => {
     let iter = 0;
     const rw = ralphWiggum({
       model: 'gpt-4',
-      system: 'Test',
+      instructions: 'Test',
       tools: [
         tool,
       ],

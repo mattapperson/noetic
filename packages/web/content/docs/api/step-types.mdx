@@ -39,7 +39,7 @@ type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
 | `kind` | `'llm'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `model` | `string` | yes | Model identifier |
-| `system` | `string` | no | System prompt |
+| `instructions` | `string` | no | System prompt / instructions for the model |
 | `tools` | `Tool[]` | no | Available tools |
 | `output` | `ZodType<O>` | no | Structured output schema |
 | `params` | `ModelParams` | no | Sampling parameters |

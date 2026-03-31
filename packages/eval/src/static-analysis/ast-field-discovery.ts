@@ -120,7 +120,7 @@ function getSourceNodeForExpression(node: ts.Expression, sourceFile: ts.SourceFi
   return node;
 }
 
-function processSystemField(
+function processInstructionsField(
   ctx: AstDiscoveryContext,
   prop: ts.PropertyAssignment,
   stepId: string,
@@ -131,10 +131,10 @@ function processSystemField(
   }
   const sourceNode = getSourceNodeForExpression(prop.initializer, ctx.sourceFile);
   ctx.fields.push({
-    path: `${stepId}.system`,
+    path: `${stepId}.instructions`,
     value,
     stepId,
-    fieldKind: FieldKind.System,
+    fieldKind: FieldKind.Instructions,
     sourceLocation: getSourceLocation(sourceNode, ctx.sourceFile, ctx.filePath),
   });
 }
@@ -180,8 +180,8 @@ function processBuilderObjectLiteral(
     }
 
     const propName = prop.name.text;
-    if (propName === 'system') {
-      processSystemField(ctx, prop, stepId);
+    if (propName === 'instructions') {
+      processInstructionsField(ctx, prop, stepId);
       continue;
     }
     if (propName === 'tools') {

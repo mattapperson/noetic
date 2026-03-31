@@ -14,7 +14,7 @@ import { spawn, react } from '@noetic/core';
 
 const subTaskAgent = react({
   model: 'gpt-4o',
-  system: 'Solve the given sub-task.',
+  instructions: 'Solve the given sub-task.',
   tools: [searchTool, codeTool],
   maxSteps: 10,
 });

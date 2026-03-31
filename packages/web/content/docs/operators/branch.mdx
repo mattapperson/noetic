@@ -15,7 +15,7 @@ const triageAgent = branch({
       return step.llm({
         id: 'urgent-handler',
         model: 'gpt-4o',
-        system: 'Handle this urgent request immediately.',
+        instructions: 'Handle this urgent request immediately.',
       });
     }
     if (input.includes('ignore')) {
@@ -24,7 +24,7 @@ const triageAgent = branch({
     return step.llm({
       id: 'default-handler',
       model: 'gpt-4o-mini',
-      system: 'Handle this routine request.',
+      instructions: 'Handle this routine request.',
     });
   },
 });
@@ -62,7 +62,7 @@ const maybeTranslate = branch({
     return step.llm({
       id: 'translate',
       model: 'gpt-4o',
-      system: `Translate the following text to English.`,
+      instructions: `Translate the following text to English.`,
     });
   },
 });
@@ -82,7 +82,7 @@ const modelPicker = branch({
     return step.llm({
       id: `${input.task}-llm`,
       model,
-      system: `Perform the following task: ${input.task}`,
+      instructions: `Perform the following task: ${input.task}`,
     });
   },
 });

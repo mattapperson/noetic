@@ -44,7 +44,7 @@ Costs tokens, needs model routing (OpenRouter, gateway, etc.), generates trace m
 interface StepLLMOpts<O> {
   id: string;
   model: string;              // e.g. 'anthropic/claude-sonnet-4-20250514'
-  system?: string;
+  instructions?: string;
   tools?: Tool[];             // tools available for THIS call
   output?: ZodType<O>;        // structured output schema
   params?: ModelParams;       // temperature, topP, etc.
@@ -63,7 +63,7 @@ interface ModelParams {
 const analyze = step.llm({
   id: 'analyze-code',
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'You are a code reviewer. Analyze the code for bugs.',
+  instructions: 'You are a code reviewer. Analyze the code for bugs.',
   tools: [searchTool, readFileTool],
   output: z.object({
     bugs: z.array(z.object({ line: z.number(), description: z.string() })),
@@ -97,7 +97,7 @@ const harness = new AgentHarness({
 
 The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
-1. Extracts system messages from `items` and passes them as `instructions`.
+1. Merges `StepLLM.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Wraps Noetic `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
 4. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
@@ -133,7 +133,7 @@ An `llm` step does NOT simply send the `system` prompt and the raw input. The ag
 3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
 4. After the response, runs `store()` on each memory layer to persist learnings.
 
-The `system` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Memory layers inject additional context as `MessageItem` entries with `role: developer`.
+The `instructions` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Memory layers inject additional context as `MessageItem` entries with `role: developer`.
 
 ### `StepMeta`
 

@@ -19,7 +19,7 @@ import { react } from '@noetic/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'You are a support agent.',
+  instructions: 'You are a support agent.',
   tools: myTools,
   maxSteps: 10,
 });

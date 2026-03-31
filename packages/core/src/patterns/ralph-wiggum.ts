@@ -13,12 +13,12 @@ import { react } from './react';
  * and retries with verification feedback until the verifier passes or max iterations is reached.
  *
  * @public
- * @param opts - Model, tools, system prompt, verify function, and optional iteration/step limits.
+ * @param opts - Model, tools, instructions, verify function, and optional iteration/step limits.
  * @returns A `StepLoop` that retries the inner agent with feedback.
  */
 export function ralphWiggum(opts: {
   model: string;
-  system: string;
+  instructions: string;
   tools: Tool[];
   verify: VerifyFn;
   maxIterations?: number;
@@ -26,7 +26,7 @@ export function ralphWiggum(opts: {
 }): StepLoop<ContextMemory, string, string> {
   const inner = react({
     model: opts.model,
-    system: opts.system,
+    instructions: opts.instructions,
     tools: opts.tools,
     maxSteps: opts.innerMaxSteps ?? 20,
   });

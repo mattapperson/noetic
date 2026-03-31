@@ -15,16 +15,16 @@ type FieldKindValue = (typeof FieldKind)[keyof typeof FieldKind];
 
 const SCOPE_ALLOWED_KINDS: Record<ScopeValue, ReadonlySet<FieldKindValue>> = {
   [OptimizeScope.PromptsOnly]: new Set([
-    FieldKind.System,
+    FieldKind.Instructions,
     FieldKind.ToolDescription,
   ]),
   [OptimizeScope.FlowStructure]: new Set([
-    FieldKind.System,
+    FieldKind.Instructions,
     FieldKind.ToolDescription,
     FieldKind.ToolName,
   ]),
   [OptimizeScope.Full]: new Set([
-    FieldKind.System,
+    FieldKind.Instructions,
     FieldKind.ToolDescription,
     FieldKind.ToolName,
   ]),
@@ -41,12 +41,12 @@ function extractLlmFields(
   path: string,
   fields: OptimizableField[],
 ): void {
-  if (step.system) {
+  if (step.instructions) {
     fields.push({
-      path: `${path}.system`,
-      value: step.system,
+      path: `${path}.instructions`,
+      value: step.instructions,
       stepId: step.id,
-      fieldKind: FieldKind.System,
+      fieldKind: FieldKind.Instructions,
     });
   }
   if (!step.tools) {

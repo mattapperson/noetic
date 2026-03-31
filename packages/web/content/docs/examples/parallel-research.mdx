@@ -27,17 +27,17 @@ const PERSPECTIVES = [
   {
     id: 'historical',
     label: 'Historical Context',
-    system: 'You are a historian. Analyze the topic from a historical perspective.',
+    instructions: 'You are a historian. Analyze the topic from a historical perspective.',
   },
   {
     id: 'technical',
     label: 'Technical Analysis',
-    system: 'You are a technical expert. Analyze the topic from a technical perspective.',
+    instructions: 'You are a technical expert. Analyze the topic from a technical perspective.',
   },
   {
     id: 'societal',
     label: 'Societal Impact',
-    system: 'You are a social scientist. Analyze the topic from a societal perspective.',
+    instructions: 'You are a social scientist. Analyze the topic from a societal perspective.',
   },
 ] as const;
 
@@ -52,7 +52,7 @@ export function buildParallelResearchAgent() {
           child: step.llm<string, string>({
             id: `llm-${perspective.id}`,
             model: 'gpt-4o',
-            system: perspective.system,
+            instructions: perspective.instructions,
           }),
         }),
       ),
