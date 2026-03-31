@@ -1,0 +1,21 @@
+{
+  "name": "skippy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noetic/core": "workspace:*",
+    "@noetic/chat-sdk": "workspace:*",
+    "@chat-adapter/discord": "4.23.0",
+    "@chat-adapter/state-memory": "4.23.0",
+    "chat": "4.23.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "5.9.3"
+  }
+}
