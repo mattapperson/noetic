@@ -275,8 +275,21 @@ The LLM sees both tools and their descriptions, then decides per-task:
 
 When a background agent finishes, its result arrives via the inbox channel as a developer message. The loop wakes, the LLM sees the result, and incorporates it.
 
+## provide vs spawn
+
+Use [`provide`](/docs/operators/provide) when you want to attach memory layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
+
+Use `spawn` when you need full context isolation. The child starts with an empty `ItemLog`, and `onSpawn` / `onReturn` hooks control data flow across the boundary.
+
+| | `provide` | `spawn` |
+|---|---|---|
+| Child context | Shared with parent | Isolated (empty `ItemLog`) |
+| Memory layers | Inherited by descendants | Spawn-local only |
+| Use case | Attach layers to a subtree | Sub-agents, delegation, sandboxing |
+
 ## Related
 
+- [provide](/docs/operators/provide) -- attach memory layers without context isolation.
 - [fork](/docs/operators/fork) -- parallel execution without context isolation.
 - [Loop & Until](/docs/operators/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
 - [Overview](/docs/overview) -- how spawn fits into the seven primitives.

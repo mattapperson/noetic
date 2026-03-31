@@ -1,7 +1,7 @@
-# Step Variants: `run`, `llm`, `tool`
+# Step Variants: `run`, `llm`, `tool`, `provide`
 
-> **Depends On:** `01-step-type` (Step<I,O>, execute)
-> **Exports:** `step.run()`, `step.llm()`, `step.tool()`, `StepRunOpts`, `StepLLMOpts`, `StepToolOpts`, `Tool`, `RetryPolicy`, `ModelParams`
+> **Depends On:** `01-step-type` (Step<I,O>, execute), `11-memory-layer-system` (MemoryLayer, MemoryConfig)
+> **Exports:** `step.run()`, `step.llm()`, `step.tool()`, `step.provide()`, `StepRunOpts`, `StepLLMOpts`, `StepToolOpts`, `StepProvideOpts`, `Tool`, `RetryPolicy`, `ModelParams`
 
 ---
 
@@ -185,12 +185,50 @@ interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodType
 
 ---
 
-## Why Three Execution Variants?
+## Variant: `provide` — Scoped Memory Layer Injection
+
+Attaches memory layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `llm` steps without the context boundary that `spawn` introduces.
+
+```typescript
+interface StepProvideOpts<TMemory, I, O> {
+  id: string;
+  child: Step<TMemory, I, O>;
+  memory: MemoryConfig | MemoryLayer[];
+}
+```
+
+```typescript
+const withMemory = step.provide({
+  id: 'inject-working-memory',
+  child: analyzeAndRespond,
+  memory: memory([workingMemory(), semanticRecall({ embedder })]),
+});
+```
+
+### Semantics
+
+1. **No context boundary.** Unlike `spawn`, the child step shares the parent's `Context` and `ItemLog`. There is no `onSpawn`/`onReturn` lifecycle.
+2. **Layer merging.** The provided layers are appended to whatever layers the parent already has. Descendant `llm` steps see the merged set.
+3. **Scoped lifetime.** Provided layers are initialized when `provide` begins and disposed when the child completes. They do not outlive the `provide` boundary.
+4. **Composable.** `provide` steps can nest. Inner `provide` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-memory-layer-system`).
+
+### When to Use `provide` vs `spawn`
+
+| Concern | `provide` | `spawn` |
+|---------|-----------|---------|
+| Context isolation | Shared — same ItemLog | Isolated — fresh ItemLog |
+| Memory layers | Merged with parent | Replaced or propagated via `onSpawn` |
+| Use case | "Add capabilities to this subtree" | "Run this work with a different context window" |
+
+---
+
+## Why Four Execution Variants?
 
 The agent harness needs to treat them differently:
 
 - **LLM steps** have cost implications, need model routing, produce telemetry with GenAI semantic conventions, and their output may contain tool calls that drive the next iteration.
 - **Tool steps** may have side effects, may need human approval before execution, and may need sandboxing.
 - **Run steps** are pure computation — the agent harness can retry freely, cache results, and doesn't need to track token usage.
+- **Provide steps** are structural — they configure the memory layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.
