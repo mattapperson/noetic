@@ -443,34 +443,17 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
           }
 
           return (
-            <button
+            <div
               key={pos.id}
-              type="button"
               style={{
                 position: 'absolute',
                 left: pos.x,
                 top: pos.y,
                 pointerEvents: 'auto',
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                margin: 0,
-                cursor: 'pointer',
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleNodeClick(pos.id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleNodeClick(pos.id);
-                }
               }}
             >
               {renderNode(node)}
-            </button>
+            </div>
           );
         })}
       </div>
