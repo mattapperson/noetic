@@ -6,7 +6,7 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { calculateHierarchicalLayout, fitToViewport } from '../lib/layout';
+import { calculateSequentialLayout, fitToViewport } from '../lib/sequential-layout';
 import { ensureMap } from '../lib/serialization';
 import type { ExecutionNode, ExecutionTrace, NodeEdge, NodePosition } from '../types';
 import { BranchNode, ForkNode, LLMNode, LoopNode, RunNode, SpawnNode, ToolNode } from './nodes';
@@ -90,11 +90,12 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       sampleKeys: Array.from(nodeMap.keys()).slice(0, 3),
     });
 
-    const { positions, edges } = calculateHierarchicalLayout(nodeMap, trace.rootNodeId, {
+    const { positions, edges } = calculateSequentialLayout(nodeMap, trace.rootNodeId, {
       nodeWidth: NODE_WIDTH,
       nodeHeight: NODE_HEIGHT,
-      levelSpacing: 200,
-      siblingSpacing: 40,
+      verticalSpacing: 200,
+      horizontalSpacing: 400,
+      loopIndent: 60,
     });
 
     return {
@@ -279,28 +280,68 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     const endX = targetPos.x + targetPos.width / 2;
     const endY = targetPos.y;
 
-    // Calculate control points for bezier curve
-    const midY = (startY + endY) / 2;
-    const path = `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`;
+    let path: string;
+
+    if (edge.type === 'loop') {
+      // Loop back edge - curve around to the left and back up
+      const controlX = Math.min(startX, endX) - 100;
+      const controlY1 = startY + 50;
+      const controlY2 = endY - 50;
+      path = `M ${startX} ${startY} C ${controlX} ${controlY1}, ${controlX} ${controlY2}, ${endX} ${endY}`;
+    } else {
+      // Regular edge - bezier curve down
+      const midY = (startY + endY) / 2;
+      path = `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`;
+    }
 
     const sourceNode = nodes.get(edge.source);
     const color = sourceNode
       ? STATUS_COLORS[sourceNode.status].border
       : NODE_KIND_COLORS.run.border;
 
+    // Use a different color for loop edges
+    const strokeColor = edge.type === 'loop' ? '#ff6b6b' : color;
+
     return (
       <g key={edge.id}>
         <path
           d={path}
           fill="none"
-          stroke={color}
-          strokeWidth={2}
-          strokeDasharray={edge.type === 'conditional' ? '5,5' : undefined}
+          stroke={strokeColor}
+          strokeWidth={edge.type === 'loop' ? 3 : 2}
+          strokeDasharray={
+            edge.type === 'conditional' ? '5,5' : edge.type === 'loop' ? '8,4' : undefined
+          }
         />
         {edge.animated && (
-          <circle r="4" fill={color}>
+          <circle r="4" fill={strokeColor}>
             <animateMotion dur="1s" repeatCount="indefinite" path={path} />
           </circle>
+        )}
+        {/* Loop arrow marker */}
+        {edge.type === 'loop' && (
+          <>
+            <defs>
+              <marker
+                id={`arrow-${edge.id}`}
+                viewBox="0 0 10 10"
+                refX="5"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={strokeColor} />
+              </marker>
+            </defs>
+            <path
+              d={path}
+              fill="none"
+              stroke="transparent"
+              strokeWidth={10}
+              markerEnd={`url(#arrow-${edge.id})`}
+            />
+          </>
         )}
       </g>
     );

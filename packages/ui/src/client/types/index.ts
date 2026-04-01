@@ -173,6 +173,6 @@ export interface NodeEdge {
   id: string;
   source: string;
   target: string;
-  type: 'default' | 'conditional' | 'fork';
+  type: 'default' | 'conditional' | 'fork' | 'loop';
   animated?: boolean;
 }
