@@ -12,6 +12,7 @@ import type React from 'react';
 import { useCallback, useEffect } from 'react';
 import { formatStepPosition } from '../lib/time-travel';
 import { usePlaybackStore, useTimelineStore } from '../stores';
+import { useExecutionStore } from '../stores/execution';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { PlaybackSpeedControl } from './PlaybackSpeed';
 import { Timeline } from './Timeline';
@@ -20,17 +21,12 @@ import { TransportControls } from './TransportControls';
 interface PlaybackBarProps {
   /** Additional CSS class names */
   className?: string;
-  /** Execution nodes for timeline markers */
-  nodes?: Map<string, import('../types').ExecutionNode>;
   /** Callback when timeline position changes */
   onTimelineChange?: (stepIndex: number, nodeId: string) => void;
 }
 
-export const PlaybackBar: React.FC<PlaybackBarProps> = ({
-  className = '',
-  nodes = new Map(),
-  onTimelineChange,
-}) => {
+export const PlaybackBar: React.FC<PlaybackBarProps> = ({ className = '', onTimelineChange }) => {
+  const { nodes } = useExecutionStore();
   const { currentStepIndex, totalSteps, setTotalSteps, jumpToStep } = usePlaybackStore();
 
   const { markers, setPlayheadToMarker, selectMarker } = useTimelineStore();

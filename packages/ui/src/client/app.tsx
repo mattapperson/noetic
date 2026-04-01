@@ -193,7 +193,6 @@ const RightPanel: React.FC = () => {
 
 export const App: React.FC = () => {
   const { initTheme } = useThemeStore();
-  const { nodes } = useExecutionStore();
 
   // Resizable panel widths
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
@@ -228,7 +227,7 @@ export const App: React.FC = () => {
           <RightPanel />
         </ResizableSidebar>
       </div>
-      <PlaybackBar nodes={nodes} />
+      <PlaybackBar />
     </div>
   );
 };
