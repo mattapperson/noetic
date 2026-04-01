@@ -527,7 +527,25 @@ export class TraceStorage {
     try {
       const filePath = await this.getRunFilePath(agentId, runId);
       const content = await readFile(filePath, 'utf-8');
-      const parsed = JSON.parse(content, this.reviver);
+
+      // Check if file is empty
+      if (!content || content.trim().length === 0) {
+        console.error(`[Storage] Empty run file for ${agentId}/${runId}`);
+        return null;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content, this.reviver);
+      } catch (parseError) {
+        console.error(`[Storage] JSON parse error for ${agentId}/${runId}:`, parseError);
+        console.error(
+          '[Storage] File content preview (first 200 chars):',
+          content.substring(0, 200),
+        );
+        return null;
+      }
+
       if (!isValidRun(parsed)) {
         console.error(`[Storage] Invalid run data loaded for ${agentId}/${runId}`);
         return null;
@@ -868,8 +886,26 @@ export class TraceStorage {
 
   // JSON reviver for deserializing Maps
   private reviver(_key: string, value: unknown): unknown {
-    if (isSerializedMap(value)) {
-      return new Map(value.value);
+    // Fast path: check for Map serialization without Zod
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      'dataType' in value &&
+      value.dataType === 'Map' &&
+      'value' in value &&
+      Array.isArray(value.value)
+    ) {
+      return new Map(
+        (
+          value as {
+            value: [
+              string,
+              unknown,
+            ][];
+          }
+        ).value,
+      );
     }
     return value;
   }
