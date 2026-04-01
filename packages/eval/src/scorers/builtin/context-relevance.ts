@@ -20,7 +20,7 @@ export function contextRelevance(config?: JudgeConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'context-relevance-judge',
-      system: `You are an evaluation judge. Assess how relevant the retrieved context is to the objective.
+      instructions: `You are an evaluation judge. Assess how relevant the retrieved context is to the objective.
 Score 0.0 = context is completely irrelevant to the objective, 1.0 = context is highly relevant.
 Consider whether the context provides useful information for addressing the objective.
 Respond with a relevance score and brief reasoning.`,

@@ -20,7 +20,7 @@ export function answerRelevancy(config?: JudgeConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'answer-relevancy-judge',
-      system: `You are an evaluation judge. Rate how relevant the given output is to the stated objective.
+      instructions: `You are an evaluation judge. Rate how relevant the given output is to the stated objective.
 Score 0.0 = completely irrelevant, 1.0 = perfectly relevant.
 Respond with a relevance score and brief reasoning.`,
       input: `Objective: ${objective}\n\nOutput: ${String(execution.output)}`,

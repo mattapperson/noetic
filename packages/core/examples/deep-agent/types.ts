@@ -47,7 +47,7 @@ interface SkillsLayerState {
 
 interface DeepAgentConfig {
   model: string;
-  system: string;
+  instructions: string;
   rootDir: string;
   skills?: SkillDefinition[];
   instructionFiles?: string[];

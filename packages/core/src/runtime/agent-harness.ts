@@ -10,7 +10,10 @@ import {
   responseToNoeticItems,
 } from '../adapters/openrouter';
 import { NoeticConfigError } from '../errors/noetic-config-error';
+import { collectAllTools, deduplicateTools } from '../interpreter/collect-tools';
 import { execute } from '../interpreter/execute';
+import { frameworkCast } from '../interpreter/framework-cast';
+import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
   afterModelCallLayers,
@@ -24,7 +27,7 @@ import {
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
-import type { LLMResponse, LlmProviderConfig } from '../types/common';
+import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { HarnessResult } from '../types/harness-result';
@@ -191,7 +194,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       });
     }
 
-    const { instructions, remaining } = extractSystemInstruction(request.items);
+    const { instructions: extractedInstructions, remaining } = extractSystemInstruction(
+      request.items,
+    );
+    const instructions =
+      [
+        request.instructions,
+        extractedInstructions,
+      ]
+        .filter(Boolean)
+        .join('\n\n') || undefined;
     const broadcaster = getBroadcaster(request.ctx);
     const agentName = this.config.name;
 
@@ -225,6 +237,22 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const conversationInput = itemsToInput(remaining);
     const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
 
+    // Build toolChoice for per-step restriction when allowedToolNames is set.
+    // The allowed_tools type is not yet in the OpenRouter SDK types, so we
+    // construct it as unknown and spread it into the call.
+    const allowedNames = request.tools ? request.allowedToolNames : undefined;
+    const toolChoiceOverride: Record<string, unknown> | undefined = allowedNames
+      ? {
+          toolChoice: {
+            type: 'allowed_tools',
+            tools: allowedNames.map((n: string) => ({
+              type: 'function',
+              name: n,
+            })),
+          },
+        }
+      : undefined;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const callResult = this.client.callModel({
         model: request.model,
@@ -239,6 +267,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               text: textFormat,
             }
           : {}),
+        ...toolChoiceOverride,
       });
 
       // The OpenRouter SDK internally tees the HTTP stream, so
@@ -369,6 +398,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       );
     }
 
+    // Collect all tools from the step tree for unified tool set
+    const stepTools = collectAllTools(this.initialStep);
+
     const broadcaster = new EventBroadcaster();
 
     let executionPromise: Promise<string>;
@@ -379,6 +411,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         ...options,
         _broadcaster: broadcaster,
       });
+      // Resolve layer tools now that ctx exists, then build unified set
+      this.setUnifiedTools(ctx, stepTools);
       executionPromise = this.run(this.initialStep, input, ctx);
     } else {
       const items = Array.isArray(input)
@@ -391,6 +425,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         ...options,
         _broadcaster: broadcaster,
       });
+      this.setUnifiedTools(ctx, stepTools);
       executionPromise = this.run(this.initialStep, '', ctx);
     }
 
@@ -465,6 +500,24 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
     return this.channelStore.getHandle(channel, executionId);
+  }
+
+  /** Resolves layer-provided tools and merges with step tools into ctx.unifiedTools. */
+  private setUnifiedTools(ctx: Context, stepTools: Tool[]): void {
+    const layers = ctx.layers;
+    const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, this, ctx) : [];
+    const allTools = deduplicateTools([
+      ...stepTools,
+      ...layerTools,
+    ]);
+    if (allTools.length > 0) {
+      // Set unifiedTools after construction since resolveLayerTools requires a context reference.
+      // The Context interface is readonly but ContextImpl is mutable.
+      const impl = frameworkCast<{
+        unifiedTools: ReadonlyArray<Tool>;
+      }>(ctx);
+      impl.unifiedTools = allTools;
+    }
   }
 
   private toExecCtx(ctx: Context): ExecutionContext {

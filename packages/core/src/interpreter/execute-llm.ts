@@ -13,20 +13,70 @@ import { isMutableContext } from './typeguards';
 
 const MAX_STEERING_RETRIES = 3;
 
-function mergeTools(
-  stepTools: Tool[] | undefined,
+//#region Tool Resolution
+
+interface ResolvedTools {
+  tools: Tool[] | undefined;
+  allowedToolNames: string[] | undefined;
+}
+
+/**
+ * Resolves which tools to send and what restrictions to apply.
+ *
+ * When a unified tool set exists on the context (collected before execution),
+ * every LLM call sends the full set and step.tools narrows via allowedToolNames.
+ *
+ * Semantics:
+ *   step.tools = undefined → unrestricted (all tools, no allowedToolNames)
+ *   step.tools = []        → no tools at all
+ *   step.tools = [a, b]    → full set sent, restrict to a and b
+ *
+ * Fallback: when no unified set exists (e.g. harness.run() called directly),
+ * merge step tools with layer tools as before.
+ */
+function resolveToolsAndRestrictions(
+  step: StepLLM,
   layers: MemoryLayer[] | undefined,
   ctx: Context,
-): Tool[] | undefined {
-  const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
-  if (layerTools.length === 0) {
-    return stepTools;
+): ResolvedTools {
+  // step.tools = [] → explicit opt-out
+  if (step.tools && step.tools.length === 0) {
+    return {
+      tools: undefined,
+      allowedToolNames: undefined,
+    };
   }
-  return [
-    ...(stepTools ?? []),
+
+  const unified = ctx.unifiedTools;
+  if (unified && unified.length > 0) {
+    const allowedToolNames = step.tools ? step.tools.map((t) => t.name) : undefined;
+    return {
+      tools: [
+        ...unified,
+      ],
+      allowedToolNames,
+    };
+  }
+
+  // Fallback: no unified set (direct harness.run() path)
+  const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
+  if (layerTools.length === 0 && !step.tools) {
+    return {
+      tools: undefined,
+      allowedToolNames: undefined,
+    };
+  }
+  const merged = [
+    ...(step.tools ?? []),
     ...layerTools,
   ];
+  return {
+    tools: merged.length > 0 ? merged : undefined,
+    allowedToolNames: undefined,
+  };
 }
+
+//#endregion
 
 export async function executeLLM<TMemory, I, O>(
   step: StepLLM<TMemory, I, O>,
@@ -40,24 +90,31 @@ export async function executeLLM<TMemory, I, O>(
     baseCtx.itemLog.append(createMessage(input, 'user'));
   }
 
-  const allTools = mergeTools(step.tools, layers, baseCtx);
+  const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(
+    step,
+    layers,
+    baseCtx,
+  );
   let retries = 0;
 
   while (retries <= MAX_STEERING_RETRIES) {
-    const request = allTools
+    const request = resolvedTools
       ? {
           model: step.model,
           items: baseCtx.itemLog.items,
-          tools: allTools,
+          instructions: step.instructions,
+          tools: resolvedTools,
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,
           ctx: baseCtx,
           layers,
+          allowedToolNames,
         }
       : {
           model: step.model,
           items: baseCtx.itemLog.items,
+          instructions: step.instructions,
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,

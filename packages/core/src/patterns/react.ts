@@ -11,12 +11,12 @@ import { until } from '../until/predicates';
  * Creates a ReAct (Reason + Act) agent loop: an LLM step with tools iterated until no tool calls or limits are hit.
  *
  * @public
- * @param opts - Model, tools, optional system prompt, step/cost limits, and memory layers.
+ * @param opts - Model, tools, optional instructions, step/cost limits, and memory layers.
  * @returns A `StepLoop` (no memory) or `StepSpawn` wrapping a loop (with memory).
  */
 export function react(opts: {
   model: string;
-  system?: string;
+  instructions?: string;
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
@@ -25,7 +25,7 @@ export function react(opts: {
   const llmStep = step.llm<ContextMemory, string, string>({
     id: 'react-step',
     model: opts.model,
-    system: opts.system,
+    instructions: opts.instructions,
     tools: opts.tools,
   });
 

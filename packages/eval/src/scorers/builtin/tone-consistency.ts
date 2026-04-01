@@ -28,7 +28,7 @@ export function toneConsistency(config: ToneConsistencyConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'tone-consistency-judge',
-      system: `You are an evaluation judge. Assess whether the output maintains the target tone throughout.
+      instructions: `You are an evaluation judge. Assess whether the output maintains the target tone throughout.
 Target tone: "${config.target}"
 Score 0.0 = completely wrong tone, 1.0 = perfectly consistent with target tone.
 Respond with a consistency score and brief reasoning.`,

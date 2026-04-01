@@ -32,11 +32,11 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
 
   switch (step.kind) {
     case 'llm': {
-      const system = candidate[`${path}.system`] ?? step.system;
+      const instructions = candidate[`${path}.instructions`] ?? step.instructions;
       const tools = step.tools ? replaceToolListFields(step.tools, candidate, path) : undefined;
       return {
         ...step,
-        system,
+        instructions,
         tools,
       };
     }

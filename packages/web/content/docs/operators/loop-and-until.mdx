@@ -13,7 +13,7 @@ const agent = loop({
   steps: [step.llm({
     id: 'chat',
     model: 'gpt-4o',
-    system: 'You are a helpful assistant.',
+    instructions: 'You are a helpful assistant.',
     tools: [searchTool],
   })],
   until: until.noToolCalls(),
@@ -195,7 +195,7 @@ const refiner = loop({
   steps: [step.llm({
     id: 'refiner',
     model: 'gpt-4o',
-    system: 'Improve the draft based on feedback.',
+    instructions: 'Improve the draft based on feedback.',
   })],
   until: until.verified(async (output) => {
     const score = await evaluate(output);
@@ -289,7 +289,7 @@ import { react } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
-  system: 'You are a helpful assistant.',
+  instructions: 'You are a helpful assistant.',
   tools: [searchTool, calculatorTool],
   maxSteps: 10,
   maxCost: 1.00,
@@ -306,7 +306,7 @@ const agent = loop({
   steps: [step.llm({
     id: 'react-step',
     model: 'gpt-4o',
-    system: 'You are a helpful assistant.',
+    instructions: 'You are a helpful assistant.',
     tools: [searchTool, calculatorTool],
   })],
   until: any(

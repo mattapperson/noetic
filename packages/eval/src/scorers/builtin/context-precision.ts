@@ -20,7 +20,7 @@ export function contextPrecision(config?: JudgeConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'context-precision-judge',
-      system: `You are an evaluation judge. Assess the precision of context usage in the output.
+      instructions: `You are an evaluation judge. Assess the precision of context usage in the output.
 Precision measures how much of the context used was actually relevant to answering the objective.
 Score 0.0 = context was used imprecisely (irrelevant info included), 1.0 = only relevant context was used.
 Respond with a precision score and brief reasoning.`,

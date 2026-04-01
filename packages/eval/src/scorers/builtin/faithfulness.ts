@@ -28,7 +28,7 @@ export function faithfulness(config: FaithfulnessConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'faithfulness-judge',
-      system: `You are an evaluation judge. Evaluate whether the output is faithful to the provided context.
+      instructions: `You are an evaluation judge. Evaluate whether the output is faithful to the provided context.
 A faithful output only contains information supported by the context, without adding unsupported claims.
 Score 0.0 = completely unfaithful (fabricated), 1.0 = perfectly faithful to context.
 Respond with a faithfulness score and brief reasoning.`,

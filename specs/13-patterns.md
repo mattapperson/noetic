@@ -16,7 +16,7 @@ ReAct is: call the LLM with tools, repeat until no tool calls.
 ```typescript
 function react(opts: {
   model: string;
-  system?: string;
+  instructions?: string;
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
@@ -25,7 +25,7 @@ function react(opts: {
   const llmStep = step.llm({
     id: 'react-step',
     model: opts.model,
-    system: opts.system,
+    instructions: opts.instructions,
     tools: opts.tools,
   });
 
@@ -57,7 +57,7 @@ Wraps an inner pattern in an outer loop where each iteration gets a fresh ItemLo
 ```typescript
 function ralphWiggum(opts: {
   model: string;
-  system: string;
+  instructions: string;
   tools: Tool[];
   verify: (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
   maxIterations?: number;
@@ -65,7 +65,7 @@ function ralphWiggum(opts: {
 }) {
   const inner = react({
     model: opts.model,
-    system: opts.system,
+    instructions: opts.instructions,
     tools: opts.tools,
     maxSteps: opts.innerMaxSteps ?? 20,
   });
@@ -101,7 +101,7 @@ function ralphWiggum(opts: {
 ```typescript
 const migrator = ralphWiggum({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: fs.readFileSync('PROMPT.md', 'utf-8'),
+  instructions: fs.readFileSync('PROMPT.md', 'utf-8'),
   tools: [shellTool, fileWriteTool, fileReadTool, gitTool],
   verify: async (output) => {
     const result = await exec('npm test');
@@ -153,7 +153,7 @@ An agent that decomposes its task by spawning child instances of itself with foc
 ```typescript
 function recursiveLLM<I, O>(opts: {
   model: string;
-  system: string;
+  instructions: string;
   tools?: Tool[];
   decompose: (input: I, ctx: Context) => Promise<I[] | null>;
   merge: (results: O[], ctx: Context) => Promise<O>;
@@ -173,8 +173,8 @@ An orchestrator dispatches parallel worker threads. Workers run in fresh context
 
 ```typescript
 function threadWeave<O>(opts: {
-  orchestrator: { model: string; system: string };
-  workers: Record<string, { model: string; system: string; tools: Tool[] }>;
+  orchestrator: { model: string; instructions: string };
+  workers: Record<string, { model: string; instructions: string; tools: Tool[] }>;
   dispatch: Step<string, WorkerDispatch[]>;
   maxParallel?: number;
   maxRounds?: number;
@@ -261,8 +261,8 @@ A conversational agent paired with a background worker that processes tasks asyn
 
 ```typescript
 function dualAgent(opts: {
-  conversational: { model: string; system: string; tools: Tool[] };
-  worker: { model: string; system: string; tools: Tool[] };
+  conversational: { model: string; instructions: string; tools: Tool[] };
+  worker: { model: string; instructions: string; tools: Tool[] };
   userChannel: ExternalChannel<string>;
   maxWorkerSteps?: number;
 }): Step<string, string> {
@@ -284,7 +284,7 @@ function dualAgent(opts: {
           step.llm({
             id: 'respond',
             model: opts.conversational.model,
-            system: opts.conversational.system,
+            instructions: opts.conversational.instructions,
             tools: opts.conversational.tools,
           }),
           message,
@@ -303,7 +303,7 @@ function dualAgent(opts: {
       id: 'worker-iteration',
       child: react({
         model: opts.worker.model,
-        system: opts.worker.system,
+        instructions: opts.worker.instructions,
         tools: opts.worker.tools,
         maxSteps: opts.maxWorkerSteps ?? 20,
       }),

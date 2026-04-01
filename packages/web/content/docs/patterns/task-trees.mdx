@@ -64,17 +64,17 @@ import { compilePlan, react } from '@noetic/core';
 const agents = {
   researcher: (prompt: string) => react({
     model: 'gpt-4o',
-    system: prompt,
+    instructions: prompt,
     tools: [searchTool],
   }),
   writer: (prompt: string) => react({
     model: 'gpt-4o',
-    system: prompt,
+    instructions: prompt,
     tools: [writeTool],
   }),
   reviewer: (prompt: string) => react({
     model: 'gpt-4o',
-    system: prompt,
+    instructions: prompt,
     tools: [],
   }),
 };

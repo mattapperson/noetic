@@ -11,7 +11,7 @@ import { step } from '@noetic/core';
 const chat = step.llm({
   id: 'chat',
   model: 'gpt-4o',
-  system: 'You are a helpful assistant.',
+  instructions: 'You are a helpful assistant.',
 });
 ```
 
@@ -27,8 +27,8 @@ const chat = step.llm({
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `model` | `string` | Yes | Model identifier (e.g. `'gpt-4o'`, `'claude-sonnet-4-20250514'`) |
-| `system` | `string` | No | System prompt prepended to the conversation |
-| `tools` | `Tool[]` | No | Tools the model may call |
+| `instructions` | `string` | No | System prompt prepended to the conversation |
+| `tools` | `Tool[]` | No | Allowed tool subset (`undefined` = all, `[]` = none) |
 | `output` | `ZodType<O>` | No | Zod schema for structured output |
 | `params` | `ModelParams` | No | Generation parameters |
 
@@ -56,7 +56,7 @@ import { step } from '@noetic/core';
 const extract = step.llm({
   id: 'extract-entities',
   model: 'gpt-4o',
-  system: 'Extract named entities from the text.',
+  instructions: 'Extract named entities from the text.',
   output: z.object({
     people: z.array(z.string()),
     places: z.array(z.string()),
@@ -92,16 +92,24 @@ const searchTool = {
 const researcher = step.llm({
   id: 'research',
   model: 'gpt-4o',
-  system: 'Answer the question using the search tool.',
+  instructions: 'Answer the question using the search tool.',
   tools: [searchTool],
 });
 ```
 
 When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/operators/loop-and-until) with `until.noToolCalls()`.
 
+### Unified Tool Set
+
+Before execution, the harness collects all tools from every LLM step in the step tree plus layer-provided tools into a single unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` on each step narrows which tools the model may actually invoke.
+
+- **`tools: undefined`** (or omitted) -- the model may call any tool in the unified set.
+- **`tools: [searchTool]`** -- the model may only call `searchTool`.
+- **`tools: []`** -- no tools are available for this step.
+
 ### Auto-Injected Layer Tools
 
-In addition to explicitly provided tools, functions declared in a memory layer's `provides` field are automatically injected as tools for every `step.llm` call. These tools are namespaced as `layerId/fnName` (e.g., `working-memory/update`). You do not need to pass them in the `tools` array -- the runtime resolves them from the active memory layers.
+Functions declared in a memory layer's `provides` field are automatically included in the unified tool set. These tools are namespaced as `layerId/fnName` (e.g., `working-memory/update`). You do not need to pass them in the `tools` array -- the runtime resolves them from the active memory layers.
 
 ## Tuning Generation
 
@@ -111,7 +119,7 @@ import { step } from '@noetic/core';
 const creative = step.llm({
   id: 'brainstorm',
   model: 'gpt-4o',
-  system: 'Generate creative ideas.',
+  instructions: 'Generate creative ideas.',
   params: {
     temperature: 0.9,
     maxTokens: 2e3,

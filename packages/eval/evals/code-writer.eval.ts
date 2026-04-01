@@ -55,7 +55,8 @@ function createVerifier(requiredPatterns: string[]): (output: unknown) => Promis
 
 describe(ralphWiggum({
   model: 'anthropic/claude-sonnet-4',
-  system: 'You are a code writer. Write clean, working TypeScript code. Use the write_file tool.',
+  instructions:
+    'You are a code writer. Write clean, working TypeScript code. Use the write_file tool.',
   tools: [
     writeFileTool,
     readFileTool,
@@ -96,7 +97,7 @@ const feedbackCounter = {
 
 describe(ralphWiggum({
   model: 'anthropic/claude-sonnet-4',
-  system:
+  instructions:
     'You are a code writer. Follow feedback to improve your code. Use the write_file tool to write files.',
   tools: [
     writeFileTool,
@@ -148,7 +149,7 @@ describe(ralphWiggum({
 
 describe(ralphWiggum({
   model: 'anthropic/claude-sonnet-4',
-  system: 'You are a code writer. Always use write_file to produce output.',
+  instructions: 'You are a code writer. Always use write_file to produce output.',
   tools: [
     writeFileTool,
     readFileTool,

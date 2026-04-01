@@ -14,7 +14,7 @@ The name is a playful reference -- like Ralph Wiggum, it keeps trying until it g
 ```ts
 function ralphWiggum(opts: {
   model: string;
-  system: string;
+  instructions: string;
   tools: Tool[];
   verify: VerifyFn;
   maxIterations?: number;
@@ -25,7 +25,7 @@ function ralphWiggum(opts: {
 | Parameter | Type | Default | Purpose |
 |---|---|---|---|
 | `model` | `string` | -- | Model identifier |
-| `system` | `string` | -- | System prompt |
+| `instructions` | `string` | -- | System prompt |
 | `tools` | `Tool[]` | -- | Available tools |
 | `verify` | `VerifyFn` | -- | Function that checks if the output is acceptable |
 | `maxIterations` | `number` | `50` | Maximum outer loop iterations |
@@ -49,7 +49,7 @@ import { ralphWiggum } from '@noetic/core';
 
 const agent = ralphWiggum({
   model: 'gpt-4o',
-  system: 'Write a Python function that sorts a list using merge sort.',
+  instructions: 'Write a Python function that sorts a list using merge sort.',
   tools: [codeExecutionTool],
   verify: async (output) => {
     const code = String(output);
@@ -80,7 +80,7 @@ const agent = ralphWiggum({
 function ralphWiggum(opts) {
   const inner = react({
     model: opts.model,
-    system: opts.system,
+    instructions: opts.instructions,
     tools: opts.tools,
     maxSteps: opts.innerMaxSteps ?? 20,
   });

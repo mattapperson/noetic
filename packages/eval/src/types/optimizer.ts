@@ -3,7 +3,7 @@ import type { SourceLocation } from './source-location';
 //#region ESM Literal Enums
 
 const FieldKind = {
-  System: 'system',
+  Instructions: 'instructions',
   ToolDescription: 'tool-description',
   ToolName: 'tool-name',
 } as const;

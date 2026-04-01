@@ -15,3 +15,4 @@ packages/web/.typecheck-snippets/
 .DS_Store
 packages/ui/dist/
 packages/ui/dist-server/
+examples/skippy/.env

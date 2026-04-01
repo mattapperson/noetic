@@ -51,7 +51,7 @@ const billingHandler = step.run<string, string>({
 const technicalHandler = step.llm<string, string>({
   id: 'technical-handler',
   model: 'gpt-4o',
-  system: 'You are a technical support specialist. Analyze the issue and provide troubleshooting steps.',
+  instructions: 'You are a technical support specialist. Analyze the issue and provide troubleshooting steps.',
 });
 
 const fallbackHandler = step.run<string, string>({

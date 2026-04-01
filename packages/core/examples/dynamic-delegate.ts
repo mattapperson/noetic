@@ -51,7 +51,7 @@ export function buildDynamicDelegateAgent(opts: {
       step.llm({
         id: 'dynamic-delegate-llm',
         model: 'gpt-4o',
-        system: `You are an orchestrator with two delegation strategies:
+        instructions: `You are an orchestrator with two delegation strategies:
 - delegate: blocks and returns the result. Use for tasks you need answered before continuing.
 - launch_agent: runs in background. Use when you can keep working while it runs.
 Choose the right strategy based on each task.`,
