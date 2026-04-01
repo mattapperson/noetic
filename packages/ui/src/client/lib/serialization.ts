@@ -71,10 +71,56 @@ export function deserialize<T>(value: unknown): T {
     return map as T;
   }
 
-  // Regular object - deserialize all properties
+  // Regular object - deserialize all properties recursively
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(obj)) {
     result[key] = deserialize(obj[key]);
   }
   return result as T;
+}
+
+/**
+ * Type guard to check if a value is a Map
+ */
+export function isMap<K, V>(value: unknown): value is Map<K, V> {
+  return value instanceof Map;
+}
+
+/**
+ * Convert a serialized Map back to a Map instance
+ * Use this when you know a specific field should be a Map
+ */
+export function ensureMap<K, V>(value: unknown): Map<K, V> {
+  if (value instanceof Map) {
+    return value;
+  }
+
+  // Handle serialized Map format
+  if (
+    value &&
+    typeof value === 'object' &&
+    'dataType' in value &&
+    value.dataType === 'Map' &&
+    'value' in value &&
+    Array.isArray(value.value)
+  ) {
+    return new Map(
+      (
+        value.value as [
+          K,
+          V,
+        ][]
+      ).map(([k, v]) => [
+        k,
+        deserialize(v) as V,
+      ]),
+    );
+  }
+
+  // Fallback: if it's a plain object, convert entries to Map
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return new Map(Object.entries(value as Record<string, V>)) as Map<K, V>;
+  }
+
+  return new Map<K, V>();
 }

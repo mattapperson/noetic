@@ -7,6 +7,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { calculateHierarchicalLayout, fitToViewport } from '../lib/layout';
+import { ensureMap } from '../lib/serialization';
 import type { ExecutionNode, ExecutionTrace, NodeEdge, NodePosition } from '../types';
 import { BranchNode, ForkNode, LLMNode, LoopNode, RunNode, SpawnNode, ToolNode } from './nodes';
 import { NODE_KIND_COLORS, STATUS_COLORS } from './nodes/shared';
@@ -14,8 +15,7 @@ import { NODE_KIND_COLORS, STATUS_COLORS } from './nodes/shared';
 interface NodeGraphProps {
   trace: ExecutionTrace | null;
   selectedNodeId?: string | null;
-  onNodeSelect?: (nodeId: string) => void;
-  onNodeDeselect?: () => void;
+  onNodeSelect?: (nodeId: string | null) => void;
   fitToView?: boolean;
 }
 
@@ -40,12 +40,19 @@ const MAX_ZOOM = 3;
 
 export const NodeGraph: React.FC<NodeGraphProps> = ({
   trace,
-  selectedNodeId = null,
+  selectedNodeId: externalSelectedNodeId,
   onNodeSelect,
-  onNodeDeselect,
   fitToView = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Use internal state if no external control provided
+  const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
+  const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
+  const handleNodeSelect = (nodeId: string | null) => {
+    setInternalSelectedNodeId(nodeId);
+    onNodeSelect?.(nodeId);
+  };
+
   const [view, setView] = useState<ViewState>({
     x: 0,
     y: 0,
@@ -70,7 +77,20 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       };
     }
 
-    const { positions, edges } = calculateHierarchicalLayout(trace.nodes, trace.rootNodeId, {
+    // Ensure trace.nodes is a Map (handles both serialized and deserialized data)
+    const nodeMap = ensureMap<string, ExecutionNode>(trace.nodes);
+
+    console.log('[NodeGraph] Rendering with:', {
+      traceId: trace.traceId,
+      rootNodeId: trace.rootNodeId,
+      nodeMapSize: nodeMap.size,
+      hasRootNode: nodeMap.has(trace.rootNodeId),
+      traceNodesIsMap: trace.nodes instanceof Map,
+      traceNodesType: typeof trace.nodes,
+      sampleKeys: Array.from(nodeMap.keys()).slice(0, 3),
+    });
+
+    const { positions, edges } = calculateHierarchicalLayout(nodeMap, trace.rootNodeId, {
       nodeWidth: NODE_WIDTH,
       nodeHeight: NODE_HEIGHT,
       levelSpacing: 200,
@@ -80,7 +100,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     return {
       positions,
       edges,
-      nodes: trace.nodes,
+      nodes: nodeMap,
     };
   }, [
     trace,
@@ -189,15 +209,14 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
   const handleNodeClick = useCallback(
     (nodeId: string) => {
       if (selectedNodeId === nodeId) {
-        onNodeDeselect?.();
+        handleNodeSelect(null);
       } else {
-        onNodeSelect?.(nodeId);
+        handleNodeSelect(nodeId);
       }
     },
     [
       selectedNodeId,
-      onNodeSelect,
-      onNodeDeselect,
+      handleNodeSelect,
     ],
   );
 
@@ -306,9 +325,9 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       style={{
         width: '100%',
         height: '100%',
-        backgroundColor: '#0f172a',
+        backgroundColor: 'var(--noetic-bg)',
         backgroundImage: `
-          radial-gradient(circle, #334155 1px, transparent 1px)
+          radial-gradient(circle, var(--noetic-grid-color) 1px, transparent 1px)
         `,
         backgroundSize: '20px 20px',
         overflow: 'hidden',
@@ -337,10 +356,10 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
           onClick={handleFitToView}
           style={{
             padding: '8px 12px',
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
+            backgroundColor: 'var(--noetic-canvas-bg)',
+            border: '1px solid var(--noetic-border)',
             borderRadius: '4px',
-            color: '#f1f5f9',
+            color: 'var(--noetic-text)',
             cursor: 'pointer',
             fontSize: '12px',
           }}
@@ -350,10 +369,10 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
         <div
           style={{
             padding: '8px 12px',
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
+            backgroundColor: 'var(--noetic-canvas-bg)',
+            border: '1px solid var(--noetic-border)',
             borderRadius: '4px',
-            color: '#94a3b8',
+            color: 'var(--noetic-text-secondary)',
             fontSize: '12px',
           }}
         >
@@ -369,10 +388,10 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
             top: '16px',
             left: '16px',
             padding: '12px',
-            backgroundColor: 'rgba(15, 23, 42, 0.8)',
-            border: '1px solid #334155',
+            backgroundColor: 'var(--noetic-node-bg)',
+            border: '1px solid var(--noetic-border)',
             borderRadius: '4px',
-            color: '#f1f5f9',
+            color: 'var(--noetic-text)',
             fontSize: '12px',
             zIndex: 10,
           }}
@@ -393,14 +412,14 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
           left: 0,
         }}
       >
-        {/* SVG edges layer */}
+        {/* SVG edges layer - sized dynamically based on content */}
         <svg
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
-            width: '10000px',
-            height: '10000px',
+            width: '100%',
+            height: '100%',
             pointerEvents: 'none',
             overflow: 'visible',
           }}
@@ -465,7 +484,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
             left: '50%',
             transform: 'translate(-50%, -50%)',
             textAlign: 'center',
-            color: '#64748b',
+            color: 'var(--noetic-text-muted)',
           }}
         >
           <div

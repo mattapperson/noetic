@@ -1,13 +1,16 @@
+'use client';
+
 /**
  * Run list component
  * Displays run entries for a selected agent
  */
 
-import type React from 'react';
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import React, { useEffect, useRef, useState } from 'react';
+import { useScroll } from '../contexts/ScrollContext';
 import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
-import type { Run as ExecutionRun } from '../stores/execution';
 import { useExecutionStore } from '../stores/execution';
 import type { Run as AgentRun } from '../types/agent';
 import MemoryIndicator from './MemoryIndicator';
@@ -17,7 +20,6 @@ interface RunListProps {
 }
 
 const STATUS_ICONS: Record<AgentRun['status'], string> = {
-  pending: '⏳',
   running: '🟡',
   completed: '🟢',
   error: '🔴',
@@ -26,7 +28,6 @@ const STATUS_ICONS: Record<AgentRun['status'], string> = {
 };
 
 const STATUS_COLORS: Record<AgentRun['status'], string> = {
-  pending: '#6b7280', // gray-500
   running: '#f59e0b', // amber-500
   completed: '#10b981', // emerald-500
   error: '#ef4444', // red-500
@@ -80,37 +81,66 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export const RunList: React.FC<RunListProps> = ({ agentId }) => {
-  const { getSortedRuns } = useAgentStore();
-  const { selectRun, addRun, addTrace, currentRun } = useExecutionStore();
+  const router = useRouter();
+  const params = useParams();
+  const selectedRunId = params?.runId as string | undefined;
+  const { getSortedRuns, updateRun } = useAgentStore();
+  const { setTrace } = useExecutionStore();
   const runs = getSortedRuns(agentId);
 
   const handleRunClick = async (run: AgentRun) => {
+    // Navigate to the run URL
+    router.push(`/${agentId}/${run.id}`);
+
     // Fetch full run with trace from API using RESTful nested URL
     try {
       const response = await fetch(
         `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`,
       );
       if (response.ok) {
-        const data = await response.json();
+        const data: {
+          success: boolean;
+          data?: unknown;
+        } = await response.json();
         if (data.success && data.data) {
           // Deserialize the response to convert serialized Maps back to Map instances
-          const fullRun = deserialize(data.data) as ExecutionRun;
-          // Add run and its trace to execution store
-          addRun(fullRun);
+          const fullRun: AgentRun = deserialize<AgentRun>(data.data);
+          // Update the run in agent store with full trace data
+          updateRun(agentId, run.id, fullRun);
+          // Cache the trace in execution store
           if (fullRun.trace) {
-            addTrace(fullRun.trace);
+            setTrace(run.id, fullRun.trace);
           }
-          selectRun(run.id);
-          return;
         }
       }
     } catch (error) {
       console.error('[RunList] Failed to fetch run details:', error);
     }
+  };
 
-    // Fallback: add run without trace
-    addRun(run as ExecutionRun);
-    selectRun(run.id);
+  // Prefetch only fetches data without navigating
+  const prefetchRun = async (run: AgentRun) => {
+    try {
+      const response = await fetch(
+        `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`,
+      );
+      if (response.ok) {
+        const data: {
+          success: boolean;
+          data?: unknown;
+        } = await response.json();
+        if (data.success && data.data) {
+          const fullRun: AgentRun = deserialize<AgentRun>(data.data);
+          updateRun(agentId, run.id, fullRun);
+          if (fullRun.trace) {
+            setTrace(run.id, fullRun.trace);
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail on prefetch error
+      console.debug('[RunList] Prefetch failed:', error);
+    }
   };
 
   return (
@@ -136,9 +166,11 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
         runs.map((run) => (
           <RunEntry
             key={run.id}
+            agentId={agentId}
             run={run}
-            isSelected={currentRun?.id === run.id}
+            isSelected={selectedRunId === run.id}
             onClick={() => handleRunClick(run)}
+            onPrefetch={() => prefetchRun(run)}
           />
         ))
       )}
@@ -147,51 +179,49 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
 };
 
 interface RunEntryProps {
+  agentId: string;
   run: AgentRun;
   isSelected: boolean;
   onClick: () => void;
+  onPrefetch: () => void;
 }
 
-const RunEntry: React.FC<RunEntryProps> = ({ run, isSelected, onClick }) => {
+const RunEntry: React.FC<RunEntryProps> = ({ agentId, run, isSelected, onClick, onPrefetch }) => {
   const isLive = run.isLive || run.status === 'running';
   const [isClient, setIsClient] = useState(false);
+  const elementRef = useRef<HTMLAnchorElement>(null);
+  const { runIdToScroll, scrollToRun } = useScroll();
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  // Scroll this run into view when it matches the scroll target
+  useEffect(() => {
+    if (runIdToScroll === run.id && elementRef.current) {
+      elementRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      // Clear the scroll target after scrolling
+      scrollToRun(null);
+    }
+  }, [
+    runIdToScroll,
+    run.id,
+    scrollToRun,
+  ]);
+
+  const href = `/${agentId}/${run.id}`;
+
   return (
-    <button
-      type="button"
+    <RunLink
+      ref={elementRef}
+      href={href}
+      isSelected={isSelected}
+      isLive={isLive}
+      onMouseEnter={onPrefetch}
       onClick={onClick}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px',
-        padding: '8px',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        transition: 'background-color 0.15s, border-color 0.15s',
-        border: isSelected
-          ? '1px solid var(--noetic-selected-border)'
-          : isLive
-            ? '1px solid ' + STATUS_COLORS.running
-            : '1px solid transparent',
-        animation: isLive ? 'pulse 2s infinite' : undefined,
-        backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
-        textAlign: 'left',
-        width: '100%',
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'var(--noetic-hover)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'transparent';
-        }
-      }}
     >
       <div
         style={{
@@ -280,6 +310,7 @@ const RunEntry: React.FC<RunEntryProps> = ({ run, isSelected, onClick }) => {
         }}
       >
         <span>⏱ {formatDuration(run.durationMs)}</span>
+        <span>{run.totalSteps} steps</span>
         {run.totalCost > 0 && <span>${run.totalCost.toFixed(4)}</span>}
         <span>{run.totalTokens?.total?.toLocaleString() ?? '0'} tokens</span>
       </div>
@@ -290,8 +321,64 @@ const RunEntry: React.FC<RunEntryProps> = ({ run, isSelected, onClick }) => {
           50% { opacity: 0.7; }
         }
       `}</style>
-    </button>
+    </RunLink>
   );
 };
+
+// Wrapper component to isolate Link type issues
+interface RunLinkProps {
+  href: string;
+  isSelected: boolean;
+  isLive: boolean;
+  onMouseEnter: () => void;
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+const RunLink = React.forwardRef<HTMLAnchorElement, RunLinkProps>(
+  ({ href, isSelected, isLive, onMouseEnter, onClick, children }, ref) => {
+    return (
+      <Link
+        ref={ref}
+        href={href}
+        onMouseEnter={onMouseEnter}
+        onClick={onClick}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+          padding: '8px',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          transition: 'background-color 0.15s, border-color 0.15s',
+          border: isSelected
+            ? '1px solid var(--noetic-selected-border)'
+            : isLive
+              ? '1px solid ' + STATUS_COLORS.running
+              : '1px solid transparent',
+          animation: isLive ? 'pulse 2s infinite' : undefined,
+          backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
+          textAlign: 'left',
+          width: '100%',
+          textDecoration: 'none',
+        }}
+        onMouseOver={(e) => {
+          if (!isSelected) {
+            e.currentTarget.style.backgroundColor = 'var(--noetic-hover)';
+          }
+        }}
+        onMouseOut={(e) => {
+          if (!isSelected) {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }
+        }}
+      >
+        {children}
+      </Link>
+    );
+  },
+);
+
+RunLink.displayName = 'RunLink';
 
 export default RunList;

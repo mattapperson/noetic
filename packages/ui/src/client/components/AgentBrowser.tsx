@@ -4,7 +4,7 @@
  */
 
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { discoverAgents } from '../lib/discovery';
 import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
@@ -34,13 +34,17 @@ export const AgentBrowser: React.FC = () => {
   const { clearAllStorage } = useStorageStore();
   const [searchQuery, setSearchQuery] = useState(agentFilter.searchQuery);
 
-  // Fetch agents and their runs from server on mount
-  const [serverAgentsLoaded, setServerAgentsLoaded] = useState(false);
+  // Use ref to track fetch state - survives React StrictMode and prevents tight loops
+  const hasFetchedRef = useRef(false);
+  const isFetchingRef = useRef(false);
 
   useEffect(() => {
-    if (serverAgentsLoaded) {
+    // Prevent any fetch if already done or in progress
+    if (hasFetchedRef.current || isFetchingRef.current) {
       return;
     }
+
+    isFetchingRef.current = true;
 
     const fetchAgentsAndRuns = async () => {
       try {
@@ -53,8 +57,6 @@ export const AgentBrowser: React.FC = () => {
         console.log('[AgentBrowser] Server response:', data);
 
         if (data.success && Array.isArray(data.data)) {
-          // Add each agent from server if not already present
-          // Use getState() to avoid stale closure issues
           const { agents, addAgent } = useAgentStore.getState();
           const currentIds = new Set(agents.map((a) => a.id));
 
@@ -85,7 +87,6 @@ export const AgentBrowser: React.FC = () => {
                 if (runsData.success && Array.isArray(runsData.data) && runsData.data.length > 0) {
                   const { addRun } = useAgentStore.getState();
                   for (const run of runsData.data) {
-                    // Deserialize to convert any serialized Maps back to Map instances
                     addRun(id, deserialize(run));
                   }
                   console.log(`[AgentBrowser] Loaded ${runsData.data.length} runs for agent:`, id);
@@ -95,19 +96,18 @@ export const AgentBrowser: React.FC = () => {
               console.error(`[AgentBrowser] Failed to fetch runs for agent ${id}:`, runsError);
             }
           }
-
-          setServerAgentsLoaded(true);
         }
       } catch (error) {
         console.error('[AgentBrowser] Failed to fetch agents:', error);
+      } finally {
+        hasFetchedRef.current = true;
+        isFetchingRef.current = false;
       }
     };
 
     fetchAgentsAndRuns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    serverAgentsLoaded,
-  ]);
+  }, []); // Empty deps - only run once on mount
 
   const handleSearch = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -536,7 +536,40 @@ export const AgentBrowser: React.FC = () => {
           padding: '8px',
         }}
       >
-        <AgentList agents={sortedAgents} />
+        {isFetchingRef.current && agents.length === 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: 'var(--noetic-text-muted)',
+              fontSize: '12px',
+            }}
+          >
+            <span
+              style={{
+                marginRight: '8px',
+              }}
+            >
+              ⏳
+            </span>
+            Loading agents...
+          </div>
+        ) : sortedAgents.length === 0 ? (
+          <div
+            style={{
+              padding: '16px',
+              textAlign: 'center',
+              color: 'var(--noetic-text-muted)',
+              fontSize: '12px',
+            }}
+          >
+            No agents discovered
+          </div>
+        ) : (
+          <AgentList agents={sortedAgents} />
+        )}
       </div>
 
       {/* Storage bar */}

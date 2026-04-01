@@ -1,17 +1,14 @@
 'use client';
 
+import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AgentBrowser } from './components/AgentBrowser';
-import { ConnectionIndicator } from './components/ConnectionIndicator';
-import { NodeGraph } from './components/NodeGraph';
-import { NodeInspector } from './components/NodeInspector';
-import { NoeticLogo } from './components/NoeticLogo';
-import { PlaybackBar } from './components/PlaybackBar';
-import { useConnection, useConnectionStatus } from './hooks/useConnection';
-import { useExecutionMessages } from './hooks/useExecutionMessages';
-import { useExecutionStore } from './stores/execution';
-import { useThemeStore } from './stores/theme';
+import { useAgentStore } from '../stores/agent';
+import { AgentBrowser } from './AgentBrowser';
+import { NodeGraph } from './NodeGraph';
+import { NodeInspector } from './NodeInspector';
+import { NoeticLogo } from './NoeticLogo';
+import { PlaybackBar } from './PlaybackBar';
 
 // Minimum and maximum widths for resizable panels
 const MIN_SIDEBAR_WIDTH = 200;
@@ -19,40 +16,6 @@ const MAX_SIDEBAR_WIDTH = 500;
 const DEFAULT_LEFT_WIDTH = 280;
 const DEFAULT_RIGHT_WIDTH = 320;
 
-// Connection status banner shown when disconnected
-const ConnectionBanner: React.FC = () => {
-  const status = useConnectionStatus();
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  // Don't render during SSR to avoid hydration mismatch
-  if (!isClient) {
-    return null;
-  }
-
-  if (status === 'connected') {
-    return null;
-  }
-
-  return (
-    <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <ConnectionIndicator showLabel={false} dotSize={8} />
-        <span className="text-sm text-amber-400">
-          {status === 'connecting' ? 'Connecting to server...' : 'Server disconnected'}
-        </span>
-      </div>
-      <span className="text-xs text-amber-400/70">
-        Run: <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">npx @noetic/ui serve</code>
-      </span>
-    </div>
-  );
-};
-
-// Resizable sidebar wrapper with drag handle
 interface ResizableSidebarProps {
   children: React.ReactNode;
   width: number;
@@ -140,20 +103,27 @@ const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
 };
 
 // Center canvas shows node graph for selected run
-const CenterCanvas: React.FC = () => {
-  const { currentRun, traces, selectedNode, selectNode } = useExecutionStore();
+interface CenterCanvasProps {
+  selectedNodeId: string | null;
+  onNodeSelect: (nodeId: string | null) => void;
+}
 
-  // Get trace for current run
-  const currentTrace = currentRun ? (traces.get(currentRun.id) ?? null) : null;
+const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelect }) => {
+  const params = useParams();
+  const runId = params?.runId as string | undefined;
+  const { agents } = useAgentStore();
+
+  // Find the selected run and its trace across all agents
+  const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
+  const currentTrace = currentRun?.trace ?? null;
 
   return (
     <div className="flex-1 h-full bg-[var(--noetic-canvas-bg)] relative overflow-hidden">
       {currentTrace ? (
         <NodeGraph
           trace={currentTrace}
-          selectedNodeId={selectedNode?.stepId ?? null}
-          onNodeSelect={(nodeId) => selectNode(nodeId)}
-          onNodeDeselect={() => selectNode(null)}
+          selectedNodeId={selectedNodeId}
+          onNodeSelect={onNodeSelect}
           fitToView={true}
         />
       ) : (
@@ -163,7 +133,7 @@ const CenterCanvas: React.FC = () => {
               <NoeticLogo size={80} />
             </div>
             <p className="text-lg text-[var(--noetic-text-secondary)]">
-              {currentRun ? 'Loading execution trace...' : 'Select an agent to view execution'}
+              {runId ? 'Loading execution trace...' : 'Select an agent to view execution'}
             </p>
           </div>
         </div>
@@ -183,53 +153,51 @@ const CenterCanvas: React.FC = () => {
   );
 };
 
-const RightPanel: React.FC = () => {
+interface RightPanelProps {
+  selectedNodeId: string | null;
+  nodes: Map<string, import('../types').ExecutionNode>;
+}
+
+const RightPanel: React.FC<RightPanelProps> = ({ selectedNodeId, nodes }) => {
+  const selectedNode = selectedNodeId ? (nodes.get(selectedNodeId) ?? null) : null;
+
   return (
     <div className="h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
-      <NodeInspector />
+      <NodeInspector selectedNode={selectedNode} />
     </div>
   );
 };
 
-export const App: React.FC = () => {
-  const { initTheme } = useThemeStore();
+interface ResizablePanelsProps {
+  children?: React.ReactNode;
+}
 
-  // Resizable panel widths
+export const ResizablePanels: React.FC<ResizablePanelsProps> = ({ children }) => {
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-  // Establish single WebSocket connection to UI service
-  useConnection({
-    url: 'ws://localhost:3333',
-    autoConnect: true,
-  });
-
-  // Process WebSocket messages and update stores
-  useExecutionMessages();
-
-  useEffect(() => {
-    initTheme();
-  }, [
-    initTheme,
-  ]);
+  // Get current run and nodes
+  const params = useParams();
+  const runId = params?.runId as string | undefined;
+  const { agents } = useAgentStore();
+  const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
+  const nodes = currentRun?.trace?.nodes ?? new Map();
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-[var(--noetic-bg)]">
-      <ConnectionBanner />
+    <>
       <div className="flex-1 flex overflow-hidden">
         <ResizableSidebar width={leftWidth} onWidthChange={setLeftWidth} side="left">
           <AgentBrowser />
         </ResizableSidebar>
 
-        <CenterCanvas />
+        <CenterCanvas selectedNodeId={selectedNodeId} onNodeSelect={setSelectedNodeId} />
 
         <ResizableSidebar width={rightWidth} onWidthChange={setRightWidth} side="right">
-          <RightPanel />
+          <RightPanel selectedNodeId={selectedNodeId} nodes={nodes} />
         </ResizableSidebar>
       </div>
       <PlaybackBar />
-    </div>
+    </>
   );
 };
-
-export default App;

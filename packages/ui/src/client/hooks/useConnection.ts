@@ -28,7 +28,7 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
   useEffect(() => {
     if (!onServerMessage) return;
 
-    console.log('[useConnection] Registering message handler');
+    console.debug('[useConnection] Registering message handler');
     return registerMessageHandler(onServerMessage);
   }, [
     onServerMessage,
@@ -39,7 +39,7 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
     if (typeof window === 'undefined') return;
 
     if (autoConnect && status === 'disconnected') {
-      console.log('[useConnection] Auto-connecting...');
+      console.debug('[useConnection] Auto-connecting...');
       storeConnect(url);
     }
   }, [

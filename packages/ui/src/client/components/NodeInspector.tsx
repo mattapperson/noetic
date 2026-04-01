@@ -1,6 +1,5 @@
 import type React from 'react';
 import { useState } from 'react';
-import { useExecutionStore } from '../stores/execution';
 import type { ExecutionNode, LLMStepData, ToolStepData } from '../types';
 import { ContextState } from './inspector/ContextState';
 import { InputOutput } from './inspector/InputOutput';
@@ -27,8 +26,11 @@ const isToolNode = (
   return node.kind === 'tool' && 'toolName' in node.stepData;
 };
 
-export const NodeInspector: React.FC = () => {
-  const { selectedNode, traces } = useExecutionStore();
+interface NodeInspectorProps {
+  selectedNode: ExecutionNode | null;
+}
+
+export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) => {
   const [activeTab, setActiveTab] = useState<TabId>('session');
   const [detailMode, setDetailMode] = useState<'follow' | 'overview'>('follow');
 
@@ -46,8 +48,6 @@ export const NodeInspector: React.FC = () => {
       </div>
     );
   }
-
-  const trace = selectedNode ? traces.get(selectedNode.id) : undefined;
 
   return (
     <div className="w-full h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
@@ -96,7 +96,7 @@ export const NodeInspector: React.FC = () => {
 
           {activeTab === 'events' && (
             <div className="space-y-4">
-              <RawTrace node={selectedNode} trace={trace} />
+              <RawTrace node={selectedNode} trace={undefined} />
             </div>
           )}
         </div>
@@ -106,7 +106,7 @@ export const NodeInspector: React.FC = () => {
 };
 
 interface NodeHeaderProps {
-  node: ReturnType<typeof useExecutionStore.getState>['selectedNode'];
+  node: ExecutionNode;
   detailMode: 'follow' | 'overview';
   onModeChange: (mode: 'follow' | 'overview') => void;
 }
@@ -227,7 +227,7 @@ const SystemPrompt: React.FC<SystemPromptProps> = ({ stepData }) => {
 };
 
 interface AttemptDetailsProps {
-  node: ReturnType<typeof useExecutionStore.getState>['selectedNode'];
+  node: ExecutionNode;
 }
 
 const AttemptDetails: React.FC<AttemptDetailsProps> = ({ node }) => {

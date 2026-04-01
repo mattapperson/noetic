@@ -1,13 +1,13 @@
 'use client';
 
 /**
- * Hook to process WebSocket execution messages and update stores
+ * Hook to process WebSocket execution messages and update agent store
+ * Single source of truth: agent store for all persistent data
  */
 
 import { useEffect } from 'react';
 import type { ExecutionNode, ExecutionTrace, ServerMessage } from '../../shared/protocol';
 import { useAgentStore } from '../stores/agent';
-import { useExecutionStore } from '../stores/execution';
 import { registerMessageHandler } from '../stores/websocket';
 import type { Run } from '../types/agent';
 
@@ -16,21 +16,17 @@ export function useExecutionMessages(): void {
   const updateRun = useAgentStore((state) => state.updateRun);
   const addAgent = useAgentStore((state) => state.addAgent);
   const agents = useAgentStore((state) => state.agents);
-  const addTrace = useExecutionStore((state) => state.addTrace);
-  const addNode = useExecutionStore((state) => state.addNode);
-  const updateNode = useExecutionStore((state) => state.updateNode);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    console.log('[useExecutionMessages] Registering handler');
+    console.debug('[useExecutionMessages] Registering handler');
 
     const handler = (message: ServerMessage) => {
-      console.log('[useExecutionMessages] Processing message:', message.type);
+      console.debug('[useExecutionMessages] Processing message:', message.type);
 
-      // Type narrowing using discriminated union based on message.type
       switch (message.type) {
         case 'execution.start': {
           const trace: ExecutionTrace = message.trace;
@@ -39,7 +35,7 @@ export function useExecutionMessages(): void {
           // Ensure agent exists before adding run
           const agentExists = agents.some((a) => a.id === agentId);
           if (!agentExists) {
-            console.log('[useExecutionMessages] Creating agent for run:', agentId);
+            console.debug('[useExecutionMessages] Creating agent for run:', agentId);
             addAgent({
               id: agentId,
               name: agentId,
@@ -86,9 +82,8 @@ export function useExecutionMessages(): void {
             pauseHistory: [],
           };
 
-          console.log('[useExecutionMessages] Adding run:', run.id, 'for agent:', agentId);
+          console.debug('[useExecutionMessages] Adding run:', run.id, 'for agent:', agentId);
           addRun(agentId, run);
-          addTrace(trace);
           break;
         }
 
@@ -97,7 +92,7 @@ export function useExecutionMessages(): void {
           const traceId: string = message.traceId;
           const summary = message.summary;
 
-          console.log('[useExecutionMessages] Completing run:', traceId);
+          console.debug('[useExecutionMessages] Completing run:', traceId);
           updateRun(agentId, traceId, {
             status: 'completed',
             endTime: Date.now(),
@@ -114,7 +109,7 @@ export function useExecutionMessages(): void {
           const agentId: string = message.agentId;
           const traceId: string = message.traceId;
 
-          console.log('[useExecutionMessages] Error in run:', traceId);
+          console.error('[useExecutionMessages] Error in run:', traceId);
           updateRun(agentId, traceId, {
             status: 'error',
             endTime: Date.now(),
@@ -124,39 +119,17 @@ export function useExecutionMessages(): void {
         }
 
         case 'node.start': {
-          const node: ExecutionNode = message.node;
-          addNode(node);
+          // Node data is ephemeral, stored in execution store cache if needed
           break;
         }
 
-        case 'node.complete': {
-          const nodeId: string = message.nodeId;
-          const output: unknown = message.output;
-          const durationMs: number = message.durationMs;
-
-          updateNode(nodeId, {
-            output,
-            durationMs,
-            status: 'completed',
-            endTime: Date.now(),
-          });
-          break;
-        }
-
+        case 'node.complete':
         case 'node.error': {
-          const nodeId: string = message.nodeId;
-          const error = message.error;
-
-          updateNode(nodeId, {
-            error,
-            status: 'error',
-            endTime: Date.now(),
-          });
+          // Node updates are handled in execution store if cached
           break;
         }
 
         default:
-          // Ignore other message types (pong, node.pause, node.data, etc.)
           break;
       }
     };
@@ -167,8 +140,5 @@ export function useExecutionMessages(): void {
     updateRun,
     addAgent,
     agents,
-    addTrace,
-    addNode,
-    updateNode,
   ]);
 }

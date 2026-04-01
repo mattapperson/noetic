@@ -32,6 +32,7 @@ import type { ExecutionTrace, Run } from '../shared/protocol.js';
  * starting from the current working directory and walking up.
  */
 async function detectProjectRoot(): Promise<string | null> {
+  const startTime = Date.now();
   let currentDir = cwd();
   const maxIterations = 20; // Prevent infinite loop
 
@@ -47,6 +48,9 @@ async function detectProjectRoot(): Promise<string | null> {
 
       // Found a valid project root
       if (pkg.name) {
+        console.log(
+          `[Storage] detectProjectRoot: found at ${currentDir} in ${Date.now() - startTime}ms after ${i + 1} iterations`,
+        );
         return currentDir;
       }
     } catch {
@@ -60,6 +64,7 @@ async function detectProjectRoot(): Promise<string | null> {
     currentDir = parentDir;
   }
 
+  console.log(`[Storage] detectProjectRoot: not found after ${Date.now() - startTime}ms`);
   return null;
 }
 
@@ -68,19 +73,30 @@ async function detectProjectRoot(): Promise<string | null> {
  * Uses project directory if found, otherwise falls back to home directory.
  */
 async function getDefaultStoragePath(): Promise<string> {
+  const startTime = Date.now();
   // Check if explicit path is set via environment
   if (process.env.NOETIC_UI_STORAGE_PATH) {
+    console.log(`[Storage] getDefaultStoragePath: using env var in ${Date.now() - startTime}ms`);
     return process.env.NOETIC_UI_STORAGE_PATH;
   }
 
   // Try to detect project root
+  const detectStart = Date.now();
   const projectRoot = await detectProjectRoot();
+  console.log(`[Storage] detectProjectRoot took ${Date.now() - detectStart}ms`);
+
   if (projectRoot) {
-    return join(projectRoot, '.noetic', 'ui', 'traces');
+    const result = join(projectRoot, '.noetic', 'ui', 'traces');
+    console.log(
+      `[Storage] getDefaultStoragePath: project root found in ${Date.now() - startTime}ms`,
+    );
+    return result;
   }
 
   // Fall back to home directory
-  return join(homedir(), '.noetic-ui', 'traces');
+  const homeResult = join(homedir(), '.noetic-ui', 'traces');
+  console.log(`[Storage] getDefaultStoragePath: fallback to home in ${Date.now() - startTime}ms`);
+  return homeResult;
 }
 
 // ============================================================================
@@ -188,6 +204,7 @@ export class TraceStorage {
     }
   >();
   private agentsLoaded = false;
+  private agentsLoadingPromise: Promise<void> | null = null;
 
   constructor(storagePath?: string) {
     this.providedPath = storagePath;
@@ -228,9 +245,15 @@ export class TraceStorage {
    * Register an agent (called when agent connects via WebSocket)
    */
   async registerAgent(agentId: string, agentName: string): Promise<void> {
-    // Ensure agents are loaded before registering
+    // Ensure agents are loaded before registering (with race condition protection)
     if (!this.agentsLoaded) {
-      await this.loadRegisteredAgents();
+      if (this.agentsLoadingPromise) {
+        await this.agentsLoadingPromise;
+      } else {
+        this.agentsLoadingPromise = this.loadRegisteredAgents();
+        await this.agentsLoadingPromise;
+        this.agentsLoadingPromise = null;
+      }
     }
 
     this.registeredAgents.set(agentId, {
@@ -246,9 +269,15 @@ export class TraceStorage {
    * Unregister/delete an agent (removes from memory and disk)
    */
   async unregisterAgent(agentId: string): Promise<boolean> {
-    // Ensure agents are loaded
+    // Ensure agents are loaded (with race condition protection)
     if (!this.agentsLoaded) {
-      await this.loadRegisteredAgents();
+      if (this.agentsLoadingPromise) {
+        await this.agentsLoadingPromise;
+      } else {
+        this.agentsLoadingPromise = this.loadRegisteredAgents();
+        await this.agentsLoadingPromise;
+        this.agentsLoadingPromise = null;
+      }
     }
 
     const existed = this.registeredAgents.has(agentId);
@@ -264,6 +293,7 @@ export class TraceStorage {
    * Load registered agents from disk
    */
   private async loadRegisteredAgents(): Promise<void> {
+    const startTime = Date.now();
     try {
       const filePath = await this.getAgentsFilePath();
       const content = await readFile(filePath, 'utf-8');
@@ -291,12 +321,18 @@ export class TraceStorage {
       }
 
       this.agentsLoaded = true;
+      console.log(
+        `[Storage] loadRegisteredAgents: loaded ${this.registeredAgents.size} agents in ${Date.now() - startTime}ms`,
+      );
     } catch (error) {
       if (!isNodeError(error) || error.code !== 'ENOENT') {
         console.error('[Storage] Failed to load registered agents:', error);
       }
       // File doesn't exist yet - that's ok, start with empty map
       this.agentsLoaded = true;
+      console.log(
+        `[Storage] loadRegisteredAgents: no file found, loaded 0 agents in ${Date.now() - startTime}ms`,
+      );
     }
   }
 
@@ -337,9 +373,21 @@ export class TraceStorage {
    * Get list of registered agent IDs (ensures agents are loaded)
    */
   async getRegisteredAgents(): Promise<string[]> {
-    if (!this.agentsLoaded) {
-      await this.loadRegisteredAgents();
+    if (this.agentsLoaded) {
+      return Array.from(this.registeredAgents.keys());
     }
+
+    // Prevent race condition: if already loading, wait for that promise
+    if (this.agentsLoadingPromise) {
+      await this.agentsLoadingPromise;
+      return Array.from(this.registeredAgents.keys());
+    }
+
+    // Start loading and store the promise
+    this.agentsLoadingPromise = this.loadRegisteredAgents();
+    await this.agentsLoadingPromise;
+    this.agentsLoadingPromise = null;
+
     return Array.from(this.registeredAgents.keys());
   }
 
@@ -355,9 +403,21 @@ export class TraceStorage {
       }
     >
   > {
-    if (!this.agentsLoaded) {
-      await this.loadRegisteredAgents();
+    if (this.agentsLoaded) {
+      return new Map(this.registeredAgents);
     }
+
+    // Prevent race condition: if already loading, wait for that promise
+    if (this.agentsLoadingPromise) {
+      await this.agentsLoadingPromise;
+      return new Map(this.registeredAgents);
+    }
+
+    // Start loading and store the promise
+    this.agentsLoadingPromise = this.loadRegisteredAgents();
+    await this.agentsLoadingPromise;
+    this.agentsLoadingPromise = null;
+
     return new Map(this.registeredAgents);
   }
 
@@ -487,6 +547,53 @@ export class TraceStorage {
   }
 
   /**
+   * Load run metadata only (without full trace data)
+   * Much faster than loadRun() for listing operations
+   */
+  async loadRunMetadata(agentId: string, runId: string): Promise<Run | null> {
+    const startTime = Date.now();
+    try {
+      const filePath = await this.getRunFilePath(agentId, runId);
+      const content = await readFile(filePath, 'utf-8');
+
+      // Use a reviver that skips the trace field to avoid parsing massive trace data
+      const metadataReviver = (key: string, value: unknown): unknown => {
+        // Skip trace field entirely - don't parse it
+        if (key === 'trace') {
+          return undefined;
+        }
+        // Handle Maps for other fields
+        if (isSerializedMap(value)) {
+          return new Map(value.value);
+        }
+        return value;
+      };
+
+      const parsed = JSON.parse(content, metadataReviver);
+
+      // Validate required fields exist (lightweight check)
+      if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('agentId' in parsed)) {
+        console.error(`[Storage] Invalid run metadata for ${agentId}/${runId}`);
+        return null;
+      }
+
+      const duration = Date.now() - startTime;
+      console.log(`[Storage] loadRunMetadata(${agentId}/${runId}): ${duration}ms`);
+      return parsed as Run;
+    } catch (error) {
+      if (!isNodeError(error)) {
+        console.error(`[Storage] Failed to load run metadata ${agentId}/${runId}:`, error);
+        throw error;
+      }
+      if (error.code === 'ENOENT') {
+        return null;
+      }
+      console.error(`[Storage] Failed to load run metadata ${agentId}/${runId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Update an existing run (for live execution updates)
    */
   async updateRun(agentId: string, run: Run): Promise<void> {
@@ -552,8 +659,10 @@ export class TraceStorage {
 
   /**
    * List all runs for an agent
+   * Uses loadRunMetadata() for better performance on large traces
    */
   async listAgentRuns(agentId: string): Promise<Run[]> {
+    const startTime = Date.now();
     try {
       const storagePath = await this.getResolvedStoragePath();
       const agentDir = join(storagePath, agentId);
@@ -565,7 +674,8 @@ export class TraceStorage {
       for (const file of files) {
         if (file.endsWith('.json')) {
           const runId = file.replace('.json', '');
-          const run = await this.loadRun(agentId, runId);
+          // Use loadRunMetadata for faster loading (skips trace data)
+          const run = await this.loadRunMetadata(agentId, runId);
           if (run) {
             runs.push(run);
           }
@@ -573,7 +683,10 @@ export class TraceStorage {
       }
 
       // Sort by start time, newest first
-      return runs.sort((a, b) => b.startTime - a.startTime);
+      const result = runs.sort((a, b) => b.startTime - a.startTime);
+      const duration = Date.now() - startTime;
+      console.log(`[Storage] listAgentRuns(${agentId}): ${runs.length} runs in ${duration}ms`);
+      return result;
     } catch (error) {
       // Silently return empty array if directory doesn't exist (agent has no runs yet)
       if (isNodeError(error) && error.code === 'ENOENT') {
@@ -589,23 +702,42 @@ export class TraceStorage {
    * List all agent IDs with stored runs OR registered agents
    */
   async listAgents(): Promise<string[]> {
+    const startTime = Date.now();
     try {
       // Get agents with stored traces
+      const storagePathStart = Date.now();
       const storagePath = await this.getResolvedStoragePath();
+      console.log(
+        `[Storage] listAgents: storage path resolved in ${Date.now() - storagePathStart}ms`,
+      );
+
+      const readdirStart = Date.now();
       const entries = await readdir(storagePath, {
         withFileTypes: true,
       });
+      console.log(
+        `[Storage] listAgents: readdir took ${Date.now() - readdirStart}ms, found ${entries.length} entries`,
+      );
+
       const storedAgents = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      console.log(`[Storage] listAgents: ${storedAgents.length} stored agents`);
 
       // Get registered agents (from connected agents without traces yet)
+      const registeredStart = Date.now();
       const registeredAgents = await this.getRegisteredAgents();
+      console.log(
+        `[Storage] listAgents: getRegisteredAgents took ${Date.now() - registeredStart}ms, found ${registeredAgents.length} registered`,
+      );
 
       // Combine and deduplicate
       const allAgents = new Set([
         ...storedAgents,
         ...registeredAgents,
       ]);
-      return Array.from(allAgents);
+      const result = Array.from(allAgents);
+      const duration = Date.now() - startTime;
+      console.log(`[Storage] listAgents: TOTAL ${duration}ms, returning ${result.length} agents`);
+      return result;
     } catch (error) {
       console.error('[Storage] Failed to list agents:', error);
       // Return registered agents even if storage fails
@@ -615,6 +747,7 @@ export class TraceStorage {
 
   /**
    * Get storage metrics
+   * Optimized to use stat() instead of loading run data
    */
   async getMetrics(): Promise<StorageMetrics> {
     const now = Date.now();
@@ -633,23 +766,38 @@ export class TraceStorage {
     >();
 
     for (const agentId of agents) {
-      const runs = await this.listAgentRuns(agentId);
       let agentSize = 0;
+      let runCount = 0;
 
-      for (const run of runs) {
-        const filePath = await this.getRunFilePath(agentId, run.id);
-        try {
-          const stats = await stat(filePath);
-          agentSize += stats.size;
-        } catch (error) {
-          // File might be deleted or not accessible
-          console.debug(`[Storage] Could not stat file ${filePath}:`, error);
+      try {
+        const storagePath = await this.getResolvedStoragePath();
+        const agentDir = join(storagePath, agentId);
+
+        // Just count files and get sizes without parsing JSON
+        const files = await readdir(agentDir);
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const filePath = join(agentDir, file);
+            try {
+              const stats = await stat(filePath);
+              agentSize += stats.size;
+              runCount++;
+            } catch (error) {
+              // File might be deleted or not accessible
+              console.debug(`[Storage] Could not stat file ${filePath}:`, error);
+            }
+          }
+        }
+      } catch (error) {
+        // Agent directory might not exist
+        if (!isNodeError(error) || error.code !== 'ENOENT') {
+          console.debug(`[Storage] Could not read agent directory ${agentId}:`, error);
         }
       }
 
       totalSize += agentSize;
       byAgent.set(agentId, {
-        runCount: runs.length,
+        runCount,
         sizeBytes: agentSize,
       });
     }

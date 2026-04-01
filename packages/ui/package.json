@@ -23,6 +23,7 @@
   },
   "files": [
     "src/",
+    "dist/",
     "bin/",
     "scripts/",
     "README.md",
@@ -33,17 +34,17 @@
     "tailwind.config.js"
   ],
   "dependencies": {
-    "next": "^14.2.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "next": "16.2.2",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
     "ws": "^8.16.0",
     "zod": "^4.0.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
+    "@types/react": "19.1.6",
+    "@types/react-dom": "19.1.6",
     "@types/ws": "^8.5.10",
     "autoprefixer": "^10.4.16",
     "bun-types": "latest",
@@ -65,7 +66,7 @@
     "format:check": "bunx biome format .",
     "check": "bun run typecheck && bun run lint",
     "check:fix": "bun run typecheck && bun run lint:fix",
-    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev -p 3334",
+    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev -p 3000",
     "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
     "build:exe": "bun scripts/build-executables.js",
     "start": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next start -p 3334",

@@ -99,9 +99,9 @@ export class NoeticUIServerManager {
     await this.apiServer.start();
     this.isRunning = true;
 
-    console.log('Noetic UI servers started successfully');
-    console.log(`WebSocket: ws://${this.options.host}:${this.options.wsPort}`);
-    console.log(`API: http://${this.options.host}:${this.options.apiPort}`);
+    console.info('[Server] All servers started successfully');
+    console.info(`[Server] WebSocket: ws://${this.options.host}:${this.options.wsPort}`);
+    console.info(`[Server] API/Web: http://${this.options.host}:${this.options.apiPort}`);
   }
 
   /**
@@ -114,7 +114,7 @@ export class NoeticUIServerManager {
       return;
     }
 
-    console.log('🛑 Noetic UI: Starting graceful shutdown...');
+    console.info('[Server] Starting graceful shutdown...');
     const startTime = Date.now();
 
     // Stop API server first to stop accepting new HTTP requests
@@ -125,7 +125,7 @@ export class NoeticUIServerManager {
     await this.wsServer.stop(Math.max(1000, remainingTime));
 
     this.isRunning = false;
-    console.log('✅ Noetic UI servers stopped gracefully');
+    console.info('[Server] All servers stopped gracefully');
   }
 
   /**
@@ -201,8 +201,8 @@ if (import.meta.main) {
   const HOST = process.env.NOETIC_UI_HOST || '127.0.0.1';
   const SHUTDOWN_TIMEOUT = Number.parseInt(process.env.NOETIC_UI_SHUTDOWN_TIMEOUT || '10000', 10);
 
-  console.log('🔮 Noetic UI Server');
-  console.log('');
+  console.info('[CLI] 🔮 Noetic UI Server');
+  console.info('');
 
   const manager = new NoeticUIServerManager({
     wsPort: PORT_WS,
@@ -217,21 +217,21 @@ if (import.meta.main) {
    */
   async function gracefulShutdown(signal: string): Promise<void> {
     if (isShuttingDown) {
-      console.log('\n⚠️  Shutdown already in progress, forcing exit...');
+      console.warn('\n[CLI] Shutdown already in progress, forcing exit...');
       process.exit(1);
     }
 
     isShuttingDown = true;
-    console.log(`\n🛑 Received ${signal}, starting graceful shutdown...`);
-    console.log(`   Timeout: ${SHUTDOWN_TIMEOUT}ms`);
+    console.info(`\n[CLI] Received ${signal}, starting graceful shutdown...`);
+    console.info(`[CLI] Timeout: ${SHUTDOWN_TIMEOUT}ms`);
 
     try {
       await manager.stop(SHUTDOWN_TIMEOUT);
-      console.log('✅ Graceful shutdown completed');
+      console.info('[CLI] Graceful shutdown completed');
       process.exit(0);
     } catch (error) {
-      console.error('❌ Error during shutdown:', error);
-      console.log('⚠️  Forcing exit...');
+      console.error('[CLI] Error during shutdown:', error);
+      console.warn('[CLI] Forcing exit...');
       process.exit(1);
     }
   }
@@ -242,28 +242,28 @@ if (import.meta.main) {
 
   // Handle uncaught errors
   process.on('uncaughtException', (error) => {
-    console.error('❌ Uncaught Exception:', error);
+    console.error('[CLI] Uncaught Exception:', error);
     gracefulShutdown('uncaughtException');
   });
 
   process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+    console.error('[CLI] Unhandled Rejection at:', promise, 'reason:', reason);
     gracefulShutdown('unhandledRejection');
   });
 
   manager
     .start()
     .then(() => {
-      console.log('');
-      console.log('✅ Server is running');
-      console.log(`   WebSocket: ws://${HOST}:${PORT_WS}`);
-      console.log(`   Web UI: http://${HOST}:${PORT_API}`);
-      console.log(`   PID: ${process.pid}`);
-      console.log('');
-      console.log('Press Ctrl+C to stop');
+      console.info('');
+      console.info('[CLI] Server is running');
+      console.info(`[CLI] WebSocket: ws://${HOST}:${PORT_WS}`);
+      console.info(`[CLI] Web UI: http://${HOST}:${PORT_API}`);
+      console.info(`[CLI] PID: ${process.pid}`);
+      console.info('');
+      console.info('[CLI] Press Ctrl+C to stop');
     })
     .catch((error) => {
-      console.error('❌ Failed to start server:', error.message);
+      console.error('[CLI] Failed to start server:', error.message);
       process.exit(1);
     });
 }

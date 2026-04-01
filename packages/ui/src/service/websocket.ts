@@ -119,7 +119,9 @@ export class NoeticUIServer {
     await new Promise<void>((resolve, reject) => {
       this.httpServer!.listen(this.config.port, this.config.host, () => {
         this.isRunning = true;
-        console.log(`Noetic UI server listening on ws://${this.config.host}:${this.config.port}`);
+        console.info(
+          `[WebSocket] Server listening on ws://${this.config.host}:${this.config.port}`,
+        );
         resolve();
       });
       this.httpServer!.on('error', reject);
@@ -138,7 +140,7 @@ export class NoeticUIServer {
       return;
     }
 
-    console.log('[WebSocket] Starting graceful shutdown...');
+    console.info('[WebSocket] Starting graceful shutdown...');
 
     // Stop heartbeat
     if (this.heartbeatInterval) {
@@ -203,7 +205,7 @@ export class NoeticUIServer {
     }
 
     this.isRunning = false;
-    console.log('[WebSocket] Server stopped gracefully');
+    console.info('[WebSocket] Server stopped gracefully');
   }
 
   /**
@@ -447,12 +449,12 @@ export class NoeticUIServer {
     };
 
     this.clients.set(clientId, client);
-    console.log(`Client connected: ${clientId}`);
+    console.info(`[WebSocket] Client connected: ${clientId}`);
 
     // Handle messages
     ws.on('message', (data) => {
       this.handleMessage(client, data).catch((error) => {
-        console.error('Failed to handle message:', error);
+        console.error('[WebSocket] Failed to handle message:', error);
       });
     });
 
@@ -470,11 +472,11 @@ export class NoeticUIServer {
     // Handle close
     ws.on('close', () => {
       this.clients.delete(clientId);
-      console.log(`Client disconnected: ${clientId}`);
+      console.info(`[WebSocket] Client disconnected: ${clientId}`);
     });
 
     ws.on('error', (error) => {
-      console.error(`WebSocket error for client ${clientId}:`, error);
+      console.error(`[WebSocket] Error for client ${clientId}:`, error);
       this.clients.delete(clientId);
     });
 
@@ -534,14 +536,24 @@ export class NoeticUIServer {
       case 'node.stepInto':
       case 'node.stepOut':
       case 'node.resume':
-        // Control messages - forward to runtime (implementation in runtime module)
-        console.log(`Received control message: ${message.type}`);
+        // TODO: Implement debugging controls - currently disabled
+        // These would require bidirectional communication with the agent runtime
+        console.warn(`[WebSocket] Debugging control ${message.type} not yet implemented`);
+        this.sendToClient(client, {
+          type: 'execution.error',
+          agentId: 'system',
+          traceId: message.traceId,
+          error: {
+            message: `Debugging control ${message.type} is not yet implemented`,
+            code: 'NOT_IMPLEMENTED',
+          },
+        });
         break;
 
       case 'breakpoint.add':
       case 'breakpoint.remove':
-        // Breakpoint management - forward to runtime
-        console.log(`Received breakpoint message: ${message.type}`);
+        // TODO: Implement breakpoint management - currently disabled
+        console.warn(`[WebSocket] Breakpoint ${message.type} not yet implemented`);
         break;
 
       // Agent -> Server trace messages
@@ -742,7 +754,7 @@ export class NoeticUIServer {
       for (const client of this.clients.values()) {
         // Check if client hasn't sent ping in expected timeframe
         if (client.lastPingAt > 0 && now - client.lastPongAt > PONG_TIMEOUT_MS * 2) {
-          console.warn(`Client ${client.id} missed heartbeats, terminating`);
+          console.warn(`[WebSocket] Client ${client.id} missed heartbeats, terminating`);
           client.ws.terminate();
           this.clients.delete(client.id);
         }
@@ -768,7 +780,7 @@ export class NoeticUIServer {
   // ============================================================================
 
   private async handleAgentRegister(agentId: string, agentName: string): Promise<void> {
-    console.log(`[WebSocket] Agent registered: ${agentName} (${agentId})`);
+    console.info(`[WebSocket] Agent registered: ${agentName} (${agentId})`);
     // Track registered agent in memory
     this.registeredAgents.set(agentId, {
       name: agentName,
@@ -784,7 +796,7 @@ export class NoeticUIServer {
     input: unknown,
     startTime: number,
   ): void {
-    console.log(`[WebSocket] Trace started: ${traceId} for agent ${agentId}`);
+    console.info(`[WebSocket] Trace started: ${traceId} for agent ${agentId}`);
 
     // Create new trace
     const trace: ExecutionTrace = {
@@ -822,6 +834,16 @@ export class NoeticUIServer {
 
     // Add node to trace
     traceState.trace.nodes.set(node.id, node);
+
+    // Set rootNodeId if not already set and this node's parent doesn't exist in trace
+    // (meaning this is the top-most node being exported)
+    if (!traceState.trace.rootNodeId) {
+      const parentExists = node.parentId && traceState.trace.nodes.has(node.parentId);
+      if (!parentExists) {
+        traceState.trace.rootNodeId = node.id;
+        console.info(`[WebSocket] Set root node: ${node.id}`);
+      }
+    }
 
     // Broadcast to all clients
     this.broadcast({
@@ -906,6 +928,13 @@ export class NoeticUIServer {
 
     // Save to storage
     await this.saveTrace(traceState.trace, traceState.agentId);
+
+    // Clean up completed trace from memory after a delay
+    // (keep it briefly to allow clients to fetch final state)
+    setTimeout(() => {
+      this.traces.delete(traceId);
+      console.info(`[WebSocket] Cleaned up completed trace: ${traceId}`);
+    }, 30000); // Keep for 30 seconds after completion
   }
 
   private async handleTraceError(
@@ -931,8 +960,14 @@ export class NoeticUIServer {
       error,
     });
 
-    // Save to storage
+    // Save to storage (even errored traces are saved for debugging)
     await this.saveTrace(traceState.trace, traceState.agentId);
+
+    // Clean up errored trace from memory after a delay
+    setTimeout(() => {
+      this.traces.delete(traceId);
+      console.info(`[WebSocket] Cleaned up errored trace: ${traceId}`);
+    }, 30000);
   }
 
   private generateClientId(): string {

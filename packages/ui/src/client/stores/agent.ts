@@ -262,12 +262,14 @@ export const useAgentStore = create<AgentState>()(
             const existingIndex = agent.runs.findIndex((r) => r.id === run.id);
             let runs;
             if (existingIndex >= 0) {
-              // Update existing run instead of adding duplicate
+              // Update existing run, but preserve trace if new run doesn't have one
               runs = agent.runs.map((r, idx) =>
                 idx === existingIndex
                   ? {
                       ...r,
                       ...run,
+                      // Preserve trace data if new run doesn't have it
+                      trace: run.trace ?? r.trace,
                     }
                   : r,
               );
@@ -486,24 +488,9 @@ export const useAgentStore = create<AgentState>()(
     {
       name: 'noetic-ui-agents',
       partialize: (state) => {
-        // Deduplicate runs by ID before persisting
-        const dedupedAgents = state.agents.map((agent) => {
-          const seen = new Set<string>();
-          const uniqueRuns = agent.runs.filter((run) => {
-            if (seen.has(run.id)) {
-              return false;
-            }
-            seen.add(run.id);
-            return true;
-          });
-          return {
-            ...agent,
-            runs: uniqueRuns.slice(0, 50), // Persist only last 50 runs per agent
-            runCount: uniqueRuns.length,
-          };
-        });
+        // Don't persist agents - always fetch fresh from server
+        // Only persist preferences and registered agents
         return {
-          agents: dedupedAgents,
           registeredAgents: state.registeredAgents,
           agentSort: state.agentSort,
           runSort: state.runSort,

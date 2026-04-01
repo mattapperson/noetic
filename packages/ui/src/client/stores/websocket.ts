@@ -56,16 +56,16 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
 
     // Don't create multiple connections
     if (existingClient) {
-      console.log('[WebSocketStore] Connection already exists, skipping');
+      console.debug('[WebSocketStore] Connection already exists, skipping');
       return;
     }
 
-    console.log('[WebSocketStore] Creating new WebSocket connection to', url);
+    console.info('[WebSocketStore] Creating new WebSocket connection to', url);
 
     const client = createWebSocketClient(url, {
       onMessage: (message) => {
         if (isServerMessage(message)) {
-          console.log('[WebSocketStore] Message received:', message.type);
+          console.debug('[WebSocketStore] Message received:', message.type);
 
           // Deserialize the message to convert any serialized Maps back to Map instances
           const deserializedMessage = deserialize(message) as ServerMessage;
@@ -88,7 +88,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
         }
       },
       onStatusChange: (status) => {
-        console.log('[WebSocketStore] Status changed:', status);
+        console.info('[WebSocketStore] Status changed:', status);
         set({
           status: status as ConnectionStatus,
         });

@@ -3,6 +3,7 @@
  * Displays agents with expand/collapse functionality
  */
 
+import { useParams, useRouter } from 'next/navigation';
 import React from 'react';
 import { useHasHydrated } from '../hooks/useHasHydrated';
 import { useAgentStore } from '../stores/agent';
@@ -28,7 +29,7 @@ function formatRelativeTime(timestamp: number | null): string {
   const diff = now - timestamp;
 
   if (diff < 60000) {
-    return 'Just now';
+    return 'just now';
   }
   if (diff < 3600000) {
     const minutes = Math.floor(diff / 60000);
@@ -44,7 +45,6 @@ function formatRelativeTime(timestamp: number | null): string {
   }
 
   const date = new Date(timestamp);
-  // Use ISO date format to avoid hydration mismatches with locale-dependent toLocaleDateString
   return date.toISOString().split('T')[0];
 }
 
@@ -59,8 +59,10 @@ function getAgentStatus(agent: Agent): keyof typeof STATUS_ICONS {
 }
 
 export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
-  const { expandedAgentIds, selectedAgentId, toggleAgentExpanded, selectAgent, removeAgent } =
-    useAgentStore();
+  const router = useRouter();
+  const params = useParams();
+  const selectedAgentId = params?.agentSlug as string | undefined;
+  const { expandedAgentIds, toggleAgentExpanded, removeAgent } = useAgentStore();
   const hasHydrated = useHasHydrated();
 
   const handleDeleteAgent = React.useCallback(
@@ -69,6 +71,15 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
     },
     [
       removeAgent,
+    ],
+  );
+
+  const handleSelectAgent = React.useCallback(
+    (agentId: string) => {
+      router.push(`/${agentId}`);
+    },
+    [
+      router,
     ],
   );
 
@@ -113,7 +124,7 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
             isExpanded={safeExpandedIds.has(agent.id)}
             isSelected={safeSelectedId === agent.id}
             onToggleExpand={() => toggleAgentExpanded(agent.id)}
-            onSelect={() => selectAgent(agent.id)}
+            onSelect={() => handleSelectAgent(agent.id)}
             onDelete={handleDeleteAgent}
           />
         ))
@@ -195,8 +206,9 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
         transition: 'background-color 0.15s, border-color 0.15s',
       }}
     >
+      {/* Agent row - clicking anywhere expands/collapses, does NOT navigate */}
       <div
-        onClick={onSelect}
+        onClick={onToggleExpand}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -212,7 +224,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            onSelect();
+            onToggleExpand();
           }
         }}
       >
@@ -272,22 +284,8 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              cursor: 'pointer',
             }}
             title={agent.name}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleExpand();
-            }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggleExpand();
-              }
-            }}
           >
             {agent.name}
           </span>

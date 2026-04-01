@@ -3,7 +3,7 @@
  * Based on spec sections from 21-noetic-ui.md
  */
 
-import type { ExecutionStatus, ExecutionTrace, TimelineEvent } from './index';
+import type { ExecutionTrace, RunStatus, TimelineEvent } from '../../shared/protocol';
 
 // ============================================================================
 // Agent Types
@@ -65,7 +65,7 @@ export interface Run {
   durationMs: number | null;
 
   // Status
-  status: ExecutionStatus;
+  status: RunStatus;
 
   // Input
   input: unknown;
@@ -146,7 +146,7 @@ export interface AgentFilter {
 
 export interface RunFilter {
   searchQuery: string;
-  statuses?: ExecutionStatus[];
+  statuses?: RunStatus[];
   dateRange?: {
     start: number;
     end: number;

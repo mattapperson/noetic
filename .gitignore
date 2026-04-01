@@ -1,9 +1,14 @@
 node_modules/
 .next/
+.noetic/
 packages/web/.next/
 packages/web/.source/
 packages/web/next-env.d.ts
-*.lock
+packages/web/tsconfig.tsbuildinfo
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+pnpm-lock.yml
 .vercel
 .superpowers/
 packages/web/.typecheck-snippets/

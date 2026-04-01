@@ -15,7 +15,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔮</text></svg>"
         />
       </head>
-      <body className="bg-[var(--noetic-bg)] text-[var(--noetic-text)]">{children}</body>
+      <body className="bg-[var(--noetic-bg)] text-[var(--noetic-text)] h-screen w-screen overflow-hidden">
+        {children}
+      </body>
     </html>
   );
 }

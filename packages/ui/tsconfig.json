@@ -11,7 +11,7 @@
     "outDir": "dist",
     "rootDir": ".",
     "skipLibCheck": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "lib": [
       "ESNext",
       "DOM"
@@ -48,7 +48,8 @@
     "next-env.d.ts",
     "css.d.ts",
     ".next/types/**/*.ts",
-    "dist/types/**/*.ts"
+    "dist/types/**/*.ts",
+    "dist/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
