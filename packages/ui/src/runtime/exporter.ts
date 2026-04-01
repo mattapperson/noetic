@@ -256,17 +256,44 @@ export class NoeticUITraceExporter implements TraceExporter {
         // Send nodeStart for all new spans (even if already ended)
         // This ensures the server creates the node before nodeComplete updates it
         const stepKind = this.inferStepKind(span.name);
+        // Build context snapshot from span data and attributes
+        const spanAttrs = span.attributes || {};
+        const tokenInput =
+          typeof spanAttrs.tokenInput === 'number'
+            ? spanAttrs.tokenInput
+            : typeof spanAttrs.inputTokens === 'number'
+              ? spanAttrs.inputTokens
+              : 0;
+        const tokenOutput =
+          typeof spanAttrs.tokenOutput === 'number'
+            ? spanAttrs.tokenOutput
+            : typeof spanAttrs.outputTokens === 'number'
+              ? spanAttrs.outputTokens
+              : 0;
+        const tokenTotal =
+          tokenInput + tokenOutput ||
+          (typeof spanAttrs.totalTokens === 'number' ? spanAttrs.totalTokens : 0);
+
+        const cost =
+          typeof spanAttrs.cost === 'number'
+            ? spanAttrs.cost
+            : typeof spanAttrs.price === 'number'
+              ? spanAttrs.price
+              : 0;
+
+        const elapsedMs = span.duration || (span.endTime ? span.endTime - span.startTime : 0);
+
         const nodeStartMessage: ClientMessage = {
           type: 'trace.nodeStart',
           traceId,
           node: {
             id: span.spanId,
             stepId: span.name,
-            kind: stepKind,
-            parentId: span.parentSpanId,
+            kind: this.inferStepKind(span.name),
+            parentId: span.parentSpanId || null,
             depth: this.calculateDepth(span, spans),
             startTime: span.startTime,
-            endTime: span.endTime ?? null,
+            endTime: span.endTime || null,
             durationMs: span.endTime ? span.duration : null,
             status: span.endTime ? 'completed' : 'running',
             input: span.attributes.input ?? {},
@@ -275,16 +302,28 @@ export class NoeticUITraceExporter implements TraceExporter {
               depth: this.calculateDepth(span, spans),
               stepCount: spans.length,
               tokens: {
-                input: 0,
-                output: 0,
-                total: 0,
+                input: tokenInput,
+                output: tokenOutput,
+                total: tokenTotal,
               },
-              cost: 0,
-              elapsedMs: 0,
-              state: null,
-              itemLogLength: 0,
+              cost: cost,
+              elapsedMs: elapsedMs,
+              state: spanAttrs.state ?? spanAttrs.contextState ?? null,
+              itemLogLength: Array.isArray(spanAttrs.messages) ? spanAttrs.messages.length : 0,
             },
-            stepData: {},
+            stepData: spanAttrs.model
+              ? {
+                  model: spanAttrs.model,
+                  messages: spanAttrs.messages || [],
+                  toolCalls: spanAttrs.toolCalls || [],
+                  tokenUsage: {
+                    input: tokenInput,
+                    output: tokenOutput,
+                    total: tokenTotal,
+                  },
+                  cost: cost,
+                }
+              : {},
             children: [],
           },
         };

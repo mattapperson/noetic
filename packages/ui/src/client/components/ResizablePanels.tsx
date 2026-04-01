@@ -3,7 +3,10 @@
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
+import { useExecutionStore } from '../stores/execution';
+import type { Run } from '../types/agent';
 import { AgentBrowser } from './AgentBrowser';
 import { NodeGraph } from './NodeGraph';
 import { NodeInspector } from './NodeInspector';
@@ -176,13 +179,60 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({ children }) =>
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [isLoadingRun, setIsLoadingRun] = useState(false);
 
   // Get current run and nodes
   const params = useParams();
+  const agentSlug = params?.agentSlug as string | undefined;
   const runId = params?.runId as string | undefined;
-  const { agents } = useAgentStore();
+  const { agents, updateRun } = useAgentStore();
+  const { setTrace } = useExecutionStore();
   const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
   const nodes = currentRun?.trace?.nodes ?? new Map();
+
+  // Fetch run data when URL has runId but run isn't loaded yet
+  useEffect(() => {
+    if (!agentSlug || !runId || currentRun?.trace) {
+      return; // No need to fetch
+    }
+
+    // Check if we already have the run but without trace data
+    const runExists = agents.flatMap((a) => a.runs).find((r) => r.id === runId);
+
+    const fetchRun = async () => {
+      setIsLoadingRun(true);
+      try {
+        console.log(`[ResizablePanels] Fetching run ${runId} from API...`);
+        const response = await fetch(
+          `/api/agents/${encodeURIComponent(agentSlug)}/runs/${encodeURIComponent(runId)}`,
+        );
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data) {
+            const fullRun = deserialize<Run>(data.data);
+            updateRun(agentSlug, runId, fullRun);
+            if (fullRun.trace) {
+              setTrace(runId, fullRun.trace);
+            }
+            console.log(`[ResizablePanels] Loaded run ${runId}`);
+          }
+        }
+      } catch (error) {
+        console.error(`[ResizablePanels] Failed to fetch run ${runId}:`, error);
+      } finally {
+        setIsLoadingRun(false);
+      }
+    };
+
+    fetchRun();
+  }, [
+    agentSlug,
+    runId,
+    currentRun?.trace,
+    agents,
+    updateRun,
+    setTrace,
+  ]);
 
   return (
     <>
