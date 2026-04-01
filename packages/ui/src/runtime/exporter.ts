@@ -311,19 +311,7 @@ export class NoeticUITraceExporter implements TraceExporter {
               state: spanAttrs.state ?? spanAttrs.contextState ?? null,
               itemLogLength: Array.isArray(spanAttrs.messages) ? spanAttrs.messages.length : 0,
             },
-            stepData: spanAttrs.model
-              ? {
-                  model: spanAttrs.model,
-                  messages: spanAttrs.messages || [],
-                  toolCalls: spanAttrs.toolCalls || [],
-                  tokenUsage: {
-                    input: tokenInput,
-                    output: tokenOutput,
-                    total: tokenTotal,
-                  },
-                  cost: cost,
-                }
-              : {},
+            stepData: this.buildStepData(spanAttrs, tokenInput, tokenOutput, tokenTotal, cost),
             children: [],
           },
         };
@@ -474,5 +462,71 @@ export class NoeticUITraceExporter implements TraceExporter {
       return 'loop';
     }
     return 'run';
+  }
+
+  /**
+   * Build stepData object based on step type and span attributes
+   */
+  private buildStepData(
+    spanAttrs: Record<string, unknown>,
+    tokenInput: number,
+    tokenOutput: number,
+    tokenTotal: number,
+    cost: number,
+  ): Record<string, unknown> {
+    const stepKind = spanAttrs.stepKind as string;
+
+    switch (stepKind) {
+      case 'llm':
+        return {
+          model: spanAttrs.model || 'unknown',
+          messages: spanAttrs.messages || [],
+          toolCalls: spanAttrs.toolCalls || [],
+          systemPrompt: spanAttrs.systemPrompt,
+          tokenUsage: {
+            input: tokenInput,
+            output: tokenOutput,
+            total: tokenTotal,
+          },
+          cost: cost,
+        };
+
+      case 'tool':
+        return {
+          toolName: spanAttrs.toolName || 'unknown',
+          arguments: spanAttrs.toolArguments,
+          result: spanAttrs.toolResult,
+        };
+
+      case 'fork':
+        return {
+          mode: spanAttrs.forkMode || 'race',
+          pathCount: spanAttrs.forkPathCount || 0,
+        };
+
+      case 'loop':
+        return {
+          stepCount: spanAttrs.loopStepCount || 0,
+          currentIteration: spanAttrs.currentIteration,
+          maxIterations: spanAttrs.maxIterations,
+        };
+
+      case 'spawn':
+        return {
+          childId: spanAttrs.spawnChildId || 'unknown',
+          childKind: spanAttrs.spawnChildKind,
+        };
+
+      case 'branch':
+        return {
+          branchType: spanAttrs.branchType || 'dynamic',
+          selectedPath: spanAttrs.selectedPath,
+        };
+
+      default:
+        return {
+          description: spanAttrs.stepDescription,
+        };
+    }
   }
 }
