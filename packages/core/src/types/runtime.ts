@@ -41,6 +41,8 @@ interface CallModelRequestWithTools extends CallModelRequestBase {
   tools: Tool[];
   ctx: Context;
   layers?: MemoryLayer[];
+  /** When set, restricts which tools the model may invoke for this call. */
+  allowedToolNames?: string[];
 }
 
 /** @public Request shape when no tools are provided — ctx is only needed for tool

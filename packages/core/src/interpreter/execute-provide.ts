@@ -1,6 +1,9 @@
+import { resolveLayerTools } from '../memory/layer-api';
+import type { Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { ExecuteStepFn, StepProvide } from '../types/step';
+import { deduplicateTools } from './collect-tools';
 import { frameworkCast } from './framework-cast';
 
 //#region Helper Functions
@@ -52,20 +55,34 @@ export async function executeProvide<TMemory, I, O>(
   const baseCtx = frameworkCast<
     Context<ContextMemory> & {
       layers?: MemoryLayer[];
+      unifiedTools?: ReadonlyArray<Tool>;
     }
   >(ctx);
   const previousLayers = baseCtx.layers;
+  const previousUnifiedTools = baseCtx.unifiedTools;
   const newLayers = resolveLayers(step);
   const mergedLayers = mergeLayers(previousLayers, newLayers);
 
   // Attach layers to the current context (no isolation)
   baseCtx.layers = mergedLayers;
 
+  // Merge new layer-provided tools into the unified tool set
+  if (baseCtx.unifiedTools && newLayers.length > 0) {
+    const layerTools = resolveLayerTools(newLayers, baseCtx.harness, baseCtx);
+    if (layerTools.length > 0) {
+      baseCtx.unifiedTools = deduplicateTools([
+        ...baseCtx.unifiedTools,
+        ...layerTools,
+      ]);
+    }
+  }
+
   try {
     return await executeStep<TMemory, I, O>(step.child, input, ctx);
   } finally {
-    // Restore previous layers so siblings are not affected
+    // Restore previous layers and unified tools so siblings are not affected
     baseCtx.layers = previousLayers;
+    baseCtx.unifiedTools = previousUnifiedTools;
   }
 }
 

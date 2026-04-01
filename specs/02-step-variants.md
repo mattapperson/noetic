@@ -45,7 +45,7 @@ interface StepLLMOpts<O> {
   id: string;
   model: string;              // e.g. 'anthropic/claude-sonnet-4-20250514'
   instructions?: string;
-  tools?: Tool[];             // tools available for THIS call
+  tools?: Tool[];             // allowed tool subset (undefined = all, [] = none)
   output?: ZodType<O>;        // structured output schema
   params?: ModelParams;       // temperature, topP, etc.
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -93,15 +93,28 @@ const harness = new AgentHarness({
 });
 ```
 
+### Unified Tool Set
+
+Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on LLM steps, plus tools provided by memory layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
+
+Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `StepLLMOpts`:
+
+- `tools: undefined` (or omitted) — unrestricted, model may call any tool
+- `tools: [searchTool, readFileTool]` — model may only call these tools
+- `tools: []` — no tools available for this step
+
+The restriction is communicated to the provider via `tool_choice: { type: "allowed_tools", tools: [...] }` in the API call.
+
 ### OpenRouter Integration
 
 The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
 1. Merges `StepLLM.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
-3. Wraps Noetic `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
-4. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
-5. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
+3. Wraps the unified `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
+4. Passes `tool_choice` with allowed subset when the step restricts tools.
+5. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
+6. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
 
 ### Tool Call Execution
 
