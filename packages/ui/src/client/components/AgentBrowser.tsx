@@ -348,7 +348,9 @@ export const AgentBrowser: React.FC = () => {
     if (diff < 86400000) {
       return `${Math.floor(diff / 3600000)}h ago`;
     }
-    return new Date(lastDiscoveryTime).toLocaleDateString();
+    // Use ISO date format to avoid hydration mismatches with locale-dependent toLocaleDateString
+    const date = new Date(lastDiscoveryTime);
+    return date.toISOString().split('T')[0];
   };
 
   return (

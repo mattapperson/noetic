@@ -318,9 +318,6 @@ const formatDuration = (ms: number): string => {
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
-  return date.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  // Use ISO time format to avoid hydration mismatches with locale-dependent toLocaleTimeString
+  return date.toISOString().split('T')[1].slice(0, 8);
 };

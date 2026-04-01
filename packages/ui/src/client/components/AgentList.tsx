@@ -44,7 +44,8 @@ function formatRelativeTime(timestamp: number | null): string {
   }
 
   const date = new Date(timestamp);
-  return date.toLocaleDateString();
+  // Use ISO date format to avoid hydration mismatches with locale-dependent toLocaleDateString
+  return date.toISOString().split('T')[0];
 }
 
 function getAgentStatus(agent: Agent): keyof typeof STATUS_ICONS {
