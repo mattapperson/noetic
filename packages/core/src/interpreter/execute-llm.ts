@@ -92,11 +92,20 @@ export async function executeLLM<TMemory, I, O>(
       const storage = baseCtx.harness.config.storage;
       if (storage) {
         await baseCtx.harness.initLayers(layers, baseCtx, storage);
+        baseCtx.harness.setLayerState(baseCtx.id, LAYERS_INIT_SENTINEL, true);
       }
-      baseCtx.harness.setLayerState(baseCtx.id, LAYERS_INIT_SENTINEL, true);
     }
 
-    const systemTokenEstimate = step.system ? estimateTokens(step.system) : 0;
+    let systemTokenEstimate = step.system ? estimateTokens(step.system) : 0;
+    for (const item of baseCtx.itemLog.items) {
+      if (item.type === 'message' && item.role === 'system') {
+        for (const part of item.content) {
+          if (part.type === 'input_text') {
+            systemTokenEstimate += estimateTokens(part.text);
+          }
+        }
+      }
+    }
     const { allocations } = allocateBudgets({
       layers,
       totalBudget: policy.tokenBudget,

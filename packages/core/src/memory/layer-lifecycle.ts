@@ -134,6 +134,22 @@ export function createRecallCache(): RecallCache {
   };
 }
 
+export function clearRecallCache(cache: RecallCache, executionId: string): void {
+  const prefix = `${executionId}:`;
+  for (const key of cache.entries.keys()) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    cache.entries.delete(key);
+  }
+  for (const key of cache.stale) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    cache.stale.delete(key);
+  }
+}
+
 function _recallCacheKey(executionId: string, layerId: string): string {
   return `${executionId}:${layerId}`;
 }
@@ -310,7 +326,9 @@ export async function recallLayersEventual({
     tokenCount: number;
   }[]
 > {
-  const eventualLayers = params.layers.filter((l) => l.recallMode === 'eventual');
+  const eventualLayers = params.layers
+    .filter((l) => l.recallMode === 'eventual')
+    .sort((a, b) => a.slot - b.slot);
   if (eventualLayers.length === 0) {
     return [];
   }
@@ -326,19 +344,47 @@ export async function recallLayersEventual({
     const cached = cache.entries.get(key);
     const isStale = cache.stale.has(key);
 
-    // First call (no cache) or stale: recall and await
-    if (!cached || isStale) {
-      const recalled = await recallLayers({
+    // First call (no cache): fire background recall, return empty for this turn
+    if (!cached) {
+      void recallLayers({
         ...params,
         layers: [
           layer,
         ],
-      });
-      for (const entry of recalled) {
-        cache.entries.set(key, entry);
-        results.push(entry);
-      }
-      cache.stale.delete(key);
+      })
+        .then((recalled) => {
+          for (const entry of recalled) {
+            cache.entries.set(key, entry);
+          }
+        })
+        .catch((e) => {
+          params.store.diagnostic(layer.id, 'recall', e);
+        });
+      continue;
+    }
+
+    // Stale cache: return stale value immediately, refresh in background
+    if (isStale) {
+      results.push(cached);
+      void recallLayers({
+        ...params,
+        layers: [
+          layer,
+        ],
+      })
+        .then((recalled) => {
+          if (recalled.length === 0) {
+            cache.entries.delete(key);
+          } else {
+            for (const entry of recalled) {
+              cache.entries.set(key, entry);
+            }
+          }
+          cache.stale.delete(key);
+        })
+        .catch((e) => {
+          params.store.diagnostic(layer.id, 'recall', e);
+        });
       continue;
     }
 

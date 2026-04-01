@@ -15,6 +15,7 @@ import type { LayerStateStore, RecallCache } from '../memory/layer-lifecycle';
 import {
   afterModelCallLayers,
   beforeToolCallLayers,
+  clearRecallCache,
   createLayerStateStore,
   createRecallCache,
   disposeLayers,
@@ -548,11 +549,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void> {
+    const execCtx = this.toExecCtx(ctx);
     await disposeLayers({
       layers,
-      ctx: this.toExecCtx(ctx),
+      ctx: execCtx,
       store: this.layerStateStore,
     });
+    clearRecallCache(this.recallCache, execCtx.executionId);
   }
 
   async checkpoint(_ctx: Context): Promise<void> {
