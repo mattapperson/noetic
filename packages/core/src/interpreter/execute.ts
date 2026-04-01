@@ -127,6 +127,14 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
 
     // Success - end span and export
     span.setAttribute('output', JSON.stringify(result));
+    span.setAttribute('tokenInput', ctx.tokens.input);
+    span.setAttribute('tokenOutput', ctx.tokens.output);
+    span.setAttribute('totalTokens', ctx.tokens.input + ctx.tokens.output);
+    span.setAttribute('cost', ctx.cost);
+    span.setAttribute('state', JSON.stringify(ctx.state));
+    if (step.kind === 'llm') {
+      span.setAttribute('model', step.model);
+    }
     span.end();
     await ctx.harness.traceExporter.export([
       span,
