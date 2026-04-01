@@ -3,11 +3,16 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeLLM } from '../../src/interpreter/execute-llm';
-import type { ContextMemory } from '../../src/types/memory';
+import type { Item } from '../../src/types/items';
+import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
+import { Slot } from '../../src/types/memory';
 import type { CallModelRequest } from '../../src/types/runtime';
 import type { StepLLM } from '../../src/types/step';
 import {
+  createScriptedCallModel,
+  makeItemLog,
   makeLLMResponse,
+  makeMessage,
   makeMockContext,
   makeMockContextWithClient,
   makeMockHarness,
@@ -352,5 +357,230 @@ describe('executeLLM', () => {
     assert(capturedRequest !== undefined);
     expect(capturedRequest.instructions).toBeUndefined();
     expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  describe('memory layer integration', () => {
+    it('calls recallLayersAtomic and assembles view when layers present', async () => {
+      const recallCalls: string[] = [];
+      const layers: MemoryLayer[] = [
+        {
+          id: 'wm',
+          slot: Slot.WORKING_MEMORY,
+          scope: 'thread',
+          hooks: {},
+        },
+      ];
+
+      const harness = makeMockHarness();
+      harness.callModel = createScriptedCallModel([
+        makeLLMResponse('done'),
+      ]);
+      harness.recallLayersAtomic = async () => {
+        recallCalls.push('atomic');
+        return [
+          {
+            layerId: 'wm',
+            items: [
+              makeMessage('developer', '<working_memory>test</working_memory>', 'wm-1'),
+            ],
+            tokenCount: 10,
+          },
+        ];
+      };
+      harness.recallLayersEventual = async () => [];
+      const ctx = makeMockContext({
+        harness,
+        layers,
+      });
+
+      const step: StepLLM<ContextMemory, string, string> = {
+        kind: 'llm',
+        id: 'test',
+        model: 'gpt-4',
+      };
+
+      await executeLLM(step, 'hello', ctx, layers);
+      expect(recallCalls).toEqual([
+        'atomic',
+      ]);
+    });
+
+    it('calls storeLayers after model response', async () => {
+      let storeLayersCalled = false;
+      const layers: MemoryLayer[] = [
+        {
+          id: 'wm',
+          slot: Slot.WORKING_MEMORY,
+          scope: 'thread',
+          hooks: {},
+        },
+      ];
+
+      const harness = makeMockHarness();
+      harness.callModel = createScriptedCallModel([
+        makeLLMResponse('done'),
+      ]);
+      harness.recallLayersAtomic = async () => [];
+      harness.recallLayersEventual = async () => [];
+      harness.storeLayers = async () => {
+        storeLayersCalled = true;
+      };
+      const ctx = makeMockContext({
+        harness,
+        layers,
+      });
+
+      const step: StepLLM<ContextMemory, string, string> = {
+        kind: 'llm',
+        id: 'test',
+        model: 'gpt-4',
+      };
+
+      await executeLLM(step, 'hello', ctx, layers);
+      expect(storeLayersCalled).toBe(true);
+    });
+
+    it('skips memory pipeline when no layers provided', async () => {
+      const step: StepLLM<ContextMemory, string, string> = {
+        kind: 'llm',
+        id: 'test',
+        model: 'gpt-4',
+      };
+      const ctx = makeMockContextWithClient([
+        makeLLMResponse('hello'),
+      ]);
+
+      const result = await executeLLM(step, 'hi', ctx);
+      expect(result).toBe('hello');
+      // No layers = itemLog.items passed directly (existing behavior)
+      expect(ctx.itemLog.items.length).toBeGreaterThan(0);
+    });
+
+    it('passes assembled view (system + layers + history) to callModel', async () => {
+      const layers: MemoryLayer[] = [
+        {
+          id: 'wm',
+          slot: Slot.WORKING_MEMORY,
+          scope: 'thread',
+          hooks: {},
+        },
+      ];
+
+      const harness = makeMockHarness();
+
+      // Capture the request passed to callModel
+      let capturedItems: ReadonlyArray<Item> | undefined;
+      harness.callModel = async (request) => {
+        capturedItems = request.items;
+        return makeLLMResponse('done');
+      };
+
+      harness.recallLayersAtomic = async () => [
+        {
+          layerId: 'wm',
+          items: [
+            makeMessage('developer', '<working_memory>context</working_memory>', 'layer-recall-1'),
+          ],
+          tokenCount: 10,
+        },
+      ];
+      harness.recallLayersEventual = async () => [];
+
+      const systemItem: Item = {
+        id: 'sys-1',
+        status: 'completed',
+        type: 'message',
+        role: 'system',
+        content: [
+          {
+            type: 'input_text',
+            text: 'You are a helpful assistant.',
+          },
+        ],
+      };
+
+      const ctx = makeMockContext({
+        harness,
+        layers,
+        itemLog: makeItemLog([
+          systemItem,
+        ]),
+      });
+
+      const step: StepLLM<ContextMemory, string, string> = {
+        kind: 'llm',
+        id: 'test',
+        model: 'gpt-4',
+      };
+
+      await executeLLM(step, 'hello', ctx, layers);
+
+      assert(capturedItems !== undefined, 'callModel should have been called');
+
+      // Verify system items come first
+      const firstItem = capturedItems[0];
+      assert(firstItem.type === 'message' && firstItem.role === 'system');
+      expect(firstItem.id).toBe('sys-1');
+
+      // Verify the layer output item is present
+      const layerItem = capturedItems.find(
+        (i) => i.type === 'message' && i.role === 'developer' && i.id === 'layer-recall-1',
+      );
+      assert(layerItem !== undefined, 'layer recall item should be in request');
+      assert(layerItem.type === 'message');
+      expect(layerItem.content[0]).toEqual({
+        type: 'input_text',
+        text: '<working_memory>context</working_memory>',
+      });
+
+      // Verify history (user message from input) comes after layers
+      const userItem = capturedItems.find((i) => i.type === 'message' && i.role === 'user');
+      assert(userItem !== undefined, 'user message should be in request');
+
+      // Order check: system index < layer index < user index
+      const systemIdx = capturedItems.indexOf(firstItem);
+      const layerIdx = capturedItems.indexOf(layerItem);
+      const userIdx = capturedItems.indexOf(userItem);
+      expect(systemIdx).toBeLessThan(layerIdx);
+      expect(layerIdx).toBeLessThan(userIdx);
+    });
+
+    it('calls recallLayersEventual for eventual layers', async () => {
+      const eventualCalls: string[] = [];
+      const layers: MemoryLayer[] = [
+        {
+          id: 'obs',
+          slot: Slot.OBSERVATIONS,
+          scope: 'resource',
+          recallMode: 'eventual',
+          hooks: {},
+        },
+      ];
+
+      const harness = makeMockHarness();
+      harness.callModel = createScriptedCallModel([
+        makeLLMResponse('done'),
+      ]);
+      harness.recallLayersAtomic = async () => [];
+      harness.recallLayersEventual = async () => {
+        eventualCalls.push('eventual');
+        return [];
+      };
+      const ctx = makeMockContext({
+        harness,
+        layers,
+      });
+
+      const step: StepLLM<ContextMemory, string, string> = {
+        kind: 'llm',
+        id: 'test',
+        model: 'gpt-4',
+      };
+
+      await executeLLM(step, 'hello', ctx, layers);
+      expect(eventualCalls).toEqual([
+        'eventual',
+      ]);
+    });
   });
 });

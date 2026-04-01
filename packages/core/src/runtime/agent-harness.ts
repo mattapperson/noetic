@@ -11,14 +11,18 @@ import {
 } from '../adapters/openrouter';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { execute } from '../interpreter/execute';
-import type { LayerStateStore } from '../memory/layer-lifecycle';
+import type { LayerStateStore, RecallCache } from '../memory/layer-lifecycle';
 import {
   afterModelCallLayers,
   beforeToolCallLayers,
+  clearRecallCache,
   createLayerStateStore,
+  createRecallCache,
   disposeLayers,
   initLayers,
   recallLayers,
+  recallLayersAtomic,
+  recallLayersEventual,
   storeLayers,
 } from '../memory/layer-lifecycle';
 import { SpanImpl } from '../observability/span-impl';
@@ -29,7 +33,13 @@ import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { HarnessResult } from '../types/harness-result';
 import type { ExecuteInput, Item } from '../types/items';
-import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
+import type {
+  ContextMemory,
+  ExecutionContext,
+  MemoryLayer,
+  ProjectionPolicy,
+  StorageAdapter,
+} from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
 import type {
   AgentConfig,
@@ -62,6 +72,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   params: TParams;
   paramsSchema?: ZodType<TParams>;
   llm?: LlmProviderConfig;
+  /** Default projection policy for all LLM steps. Individual steps can override via `step.projection`. */
+  projection?: ProjectionPolicy;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
@@ -159,6 +171,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
+  readonly recallCache: RecallCache;
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
@@ -168,6 +181,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       storage: opts.storage,
       hooks: opts.hooks,
       params: validatedParams,
+      projection: opts.projection,
     };
     this.initialStep = opts.initialStep;
     this._memory = opts.memory;
@@ -176,6 +190,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
+    this.recallCache = createRecallCache();
   }
 
   async callModel(request: CallModelRequest): Promise<LLMResponse> {
@@ -498,6 +513,39 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
+  async recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]> {
+    return recallLayersAtomic({
+      layers,
+      query: input,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets,
+      store: this.layerStateStore,
+    });
+  }
+
+  async recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]> {
+    return recallLayersEventual({
+      layers,
+      query: input,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets,
+      store: this.layerStateStore,
+      cache: this.recallCache,
+    });
+  }
+
   async storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void> {
     await storeLayers({
       layers,
@@ -505,15 +553,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       ctx: this.toExecCtx(ctx),
       log: ctx.itemLog,
       store: this.layerStateStore,
+      recallCache: this.recallCache,
     });
   }
 
   async disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void> {
+    const execCtx = this.toExecCtx(ctx);
     await disposeLayers({
       layers,
-      ctx: this.toExecCtx(ctx),
+      ctx: execCtx,
       store: this.layerStateStore,
     });
+    clearRecallCache(this.recallCache, execCtx.executionId);
   }
 
   async checkpoint(_ctx: Context): Promise<void> {

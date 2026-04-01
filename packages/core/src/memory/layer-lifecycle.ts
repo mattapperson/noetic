@@ -40,6 +40,8 @@ interface StoreLayersParams {
   ctx: ExecutionContext;
   log: ItemLog;
   store: LayerStateStore;
+  /** When provided, layers whose store produces new state are marked stale for eventual recall refresh. */
+  recallCache?: RecallCache;
 }
 
 interface SpawnLayersParams {
@@ -112,6 +114,44 @@ export function createLayerStateStore(
     },
     diagnostic: diagnostic ?? (() => {}),
   };
+}
+
+export interface RecallCache {
+  entries: Map<string, RecallCacheEntry>;
+  stale: Set<string>;
+}
+
+interface RecallCacheEntry {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
+
+export function createRecallCache(): RecallCache {
+  return {
+    entries: new Map(),
+    stale: new Set(),
+  };
+}
+
+export function clearRecallCache(cache: RecallCache, executionId: string): void {
+  const prefix = `${executionId}:`;
+  for (const key of cache.entries.keys()) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    cache.entries.delete(key);
+  }
+  for (const key of cache.stale) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    cache.stale.delete(key);
+  }
+}
+
+function _recallCacheKey(executionId: string, layerId: string): string {
+  return `${executionId}:${layerId}`;
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -258,12 +298,110 @@ export async function recallLayers({
   return results;
 }
 
+interface RecallLayersWithCacheParams extends RecallLayersParams {
+  cache: RecallCache;
+}
+
+export async function recallLayersAtomic(params: RecallLayersParams): Promise<
+  {
+    layerId: string;
+    items: Item[];
+    tokenCount: number;
+  }[]
+> {
+  const atomicLayers = params.layers.filter((l) => l.recallMode !== 'eventual');
+  return recallLayers({
+    ...params,
+    layers: atomicLayers,
+  });
+}
+
+export async function recallLayersEventual({
+  cache,
+  ...params
+}: RecallLayersWithCacheParams): Promise<
+  {
+    layerId: string;
+    items: Item[];
+    tokenCount: number;
+  }[]
+> {
+  const eventualLayers = params.layers
+    .filter((l) => l.recallMode === 'eventual')
+    .sort((a, b) => a.slot - b.slot);
+  if (eventualLayers.length === 0) {
+    return [];
+  }
+
+  const results: {
+    layerId: string;
+    items: Item[];
+    tokenCount: number;
+  }[] = [];
+
+  for (const layer of eventualLayers) {
+    const key = _recallCacheKey(params.ctx.executionId, layer.id);
+    const cached = cache.entries.get(key);
+    const isStale = cache.stale.has(key);
+
+    // First call (no cache): fire background recall, return empty for this turn
+    if (!cached) {
+      void recallLayers({
+        ...params,
+        layers: [
+          layer,
+        ],
+      })
+        .then((recalled) => {
+          for (const entry of recalled) {
+            cache.entries.set(key, entry);
+          }
+        })
+        .catch((e) => {
+          params.store.diagnostic(layer.id, 'recall', e);
+        });
+      continue;
+    }
+
+    // Stale cache: return stale value immediately, refresh in background
+    if (isStale) {
+      results.push(cached);
+      void recallLayers({
+        ...params,
+        layers: [
+          layer,
+        ],
+      })
+        .then((recalled) => {
+          if (recalled.length === 0) {
+            cache.entries.delete(key);
+          } else {
+            for (const entry of recalled) {
+              cache.entries.set(key, entry);
+            }
+          }
+          cache.stale.delete(key);
+        })
+        .catch((e) => {
+          params.store.diagnostic(layer.id, 'recall', e);
+        });
+      continue;
+    }
+
+    // Cached and fresh: return cached
+    results.push(cached);
+  }
+
+  return results;
+}
+
 export async function storeLayers({
   layers,
   response,
   ctx,
   log,
   store,
+  recallCache,
 }: StoreLayersParams): Promise<void> {
   // Concurrent via Promise.allSettled — each layer gets its own state snapshot
   const snapshots: {
@@ -302,6 +440,9 @@ export async function storeLayers({
         );
         if (result?.state !== undefined) {
           store.set(ctx.executionId, layer.id, result.state);
+          if (recallCache && layer.recallMode === 'eventual') {
+            recallCache.stale.add(_recallCacheKey(ctx.executionId, layer.id));
+          }
         }
       } catch (e) {
         store.diagnostic(layer.id, 'store', e);

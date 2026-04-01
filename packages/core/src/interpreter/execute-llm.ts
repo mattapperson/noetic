@@ -1,17 +1,28 @@
 import { ZodError } from 'zod';
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import { allocateBudgets } from '../memory/budget';
 import { resolveLayerTools } from '../memory/layer-api';
+import { assembleView } from '../memory/projector';
 import type { StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
-import type { FunctionCallItem } from '../types/items';
-import type { ContextMemory, MemoryLayer } from '../types/memory';
+import type { FunctionCallItem, Item } from '../types/items';
+import type { ContextMemory, MemoryLayer, ProjectionPolicy } from '../types/memory';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
-import { createMessage, extractAssistantText, trackUsage } from './message-helpers';
+import { createMessage, estimateTokens, extractAssistantText, trackUsage } from './message-helpers';
 import { isMutableContext } from './typeguards';
 
 const MAX_STEERING_RETRIES = 3;
+const LAYERS_INIT_SENTINEL = '__layers_initialized';
+
+const DEFAULT_PROJECTION: ProjectionPolicy = {
+  tokenBudget: 128e3,
+  responseReserve: 4e3,
+  overflow: 'sliding_window',
+};
+
+//#region Helper Functions
 
 function mergeTools(
   stepTools: Tool[] | undefined,
@@ -28,6 +39,31 @@ function mergeTools(
   ];
 }
 
+function partitionItems(items: ReadonlyArray<Item>): {
+  systemItems: Item[];
+  historyItems: Item[];
+} {
+  const systemItems: Item[] = [];
+  const historyItems: Item[] = [];
+
+  for (const item of items) {
+    if (item.type === 'message' && item.role === 'system') {
+      systemItems.push(item);
+      continue;
+    }
+    historyItems.push(item);
+  }
+
+  return {
+    systemItems,
+    historyItems,
+  };
+}
+
+//#endregion
+
+//#region Public API
+
 export async function executeLLM<TMemory, I, O>(
   step: StepLLM<TMemory, I, O>,
   input: I,
@@ -41,13 +77,92 @@ export async function executeLLM<TMemory, I, O>(
   }
 
   const allTools = mergeTools(step.tools, layers, baseCtx);
+  const hasLayers = layers !== undefined && layers.length > 0;
+
+  // Memory pipeline setup (once, before retry loop)
+  let budgetMap = new Map<string, number>();
+
+  // Resolve projection policy once: step > harness > default
+  const policy: ProjectionPolicy =
+    step.projection ?? baseCtx.harness.config.projection ?? DEFAULT_PROJECTION;
+
+  if (hasLayers) {
+    // Init layers on first LLM call in this execution
+    if (!baseCtx.harness.getLayerState(baseCtx.id, LAYERS_INIT_SENTINEL)) {
+      const storage = baseCtx.harness.config.storage;
+      if (storage) {
+        await baseCtx.harness.initLayers(layers, baseCtx, storage);
+        baseCtx.harness.setLayerState(baseCtx.id, LAYERS_INIT_SENTINEL, true);
+      }
+    }
+
+    let systemTokenEstimate = step.instructions ? estimateTokens(step.instructions) : 0;
+    for (const item of baseCtx.itemLog.items) {
+      if (item.type === 'message' && item.role === 'system') {
+        for (const part of item.content) {
+          if (part.type === 'input_text') {
+            systemTokenEstimate += estimateTokens(part.text);
+          }
+        }
+      }
+    }
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: policy.tokenBudget,
+      systemPromptTokens: systemTokenEstimate,
+      responseReserve: policy.responseReserve,
+    });
+    budgetMap = new Map(
+      allocations.map((a) => [
+        a.layerId,
+        a.allocated,
+      ]),
+    );
+  }
+
   let retries = 0;
 
   while (retries <= MAX_STEERING_RETRIES) {
+    // Recall + Assemble
+    let requestItems: ReadonlyArray<Item>;
+
+    if (hasLayers) {
+      const query = typeof input === 'string' ? input : '';
+
+      const atomicResults = await baseCtx.harness.recallLayersAtomic(
+        layers,
+        query,
+        baseCtx,
+        budgetMap,
+      );
+      const eventualResults = await baseCtx.harness.recallLayersEventual(
+        layers,
+        query,
+        baseCtx,
+        budgetMap,
+      );
+
+      const layerOutputItems = [
+        ...atomicResults,
+        ...eventualResults,
+      ].flatMap((r) => r.items);
+
+      const { systemItems, historyItems } = partitionItems(baseCtx.itemLog.items);
+
+      requestItems = assembleView({
+        systemPromptItems: systemItems,
+        layerOutputItems,
+        historyItems,
+        policy,
+      });
+    } else {
+      requestItems = baseCtx.itemLog.items;
+    }
+
     const request = allTools
       ? {
           model: step.model,
-          items: baseCtx.itemLog.items,
+          items: requestItems,
           instructions: step.instructions,
           tools: allTools,
           params: step.params,
@@ -58,7 +173,7 @@ export async function executeLLM<TMemory, I, O>(
         }
       : {
           model: step.model,
-          items: baseCtx.itemLog.items,
+          items: requestItems,
           instructions: step.instructions,
           params: step.params,
           outputSchema: step.output,
@@ -67,7 +182,7 @@ export async function executeLLM<TMemory, I, O>(
         };
     const response = await baseCtx.harness.callModel(request);
 
-    if (layers && layers.length > 0) {
+    if (hasLayers) {
       const decision = await baseCtx.harness.afterModelCall(layers, response, baseCtx);
 
       if (decision.action === SteeringAction.Deny) {
@@ -92,6 +207,11 @@ export async function executeLLM<TMemory, I, O>(
       if (item.type === 'function_call') {
         toolCalls.push(item);
       }
+    }
+
+    // Store layers after response
+    if (hasLayers) {
+      await baseCtx.harness.storeLayers(layers, response, baseCtx);
     }
 
     const meta: StepMeta = {
@@ -139,8 +259,6 @@ export async function executeLLM<TMemory, I, O>(
   }
 
   // Safety net: the loop above always returns or throws within the body.
-  // This throw is unreachable but protects against future refactors that
-  // might break the loop invariant.
   throw new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
@@ -148,3 +266,5 @@ export async function executeLLM<TMemory, I, O>(
     retriesExhausted: true,
   });
 }
+
+//#endregion

@@ -295,6 +295,8 @@ export interface MemoryLayer<TState = unknown> {
   hooks: MemoryHooks<TState>;
   /** Per-hook timeout overrides in ms. */
   timeouts?: Partial<LayerTimeouts>;
+  /** Recall mode: `'atomic'` blocks callModel until recall completes (default); `'eventual'` uses cached results and never blocks. */
+  recallMode?: 'atomic' | 'eventual';
   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
   provides?: LayerProvides;
 }

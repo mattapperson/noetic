@@ -208,6 +208,26 @@ const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness))
 
 ## Memory Layers
 
+### MemoryLayer Interface
+
+```typescript
+interface MemoryLayer<TState = unknown> {
+  id: string;
+  name?: string;
+  slot: number;
+  scope: MemoryScope;
+  budget?: BudgetConfig;
+  recallMode?: 'atomic' | 'eventual';
+  hooks: MemoryHooks<TState>;
+  timeouts?: Partial<LayerTimeouts>;
+  provides?: LayerProvides;
+}
+```
+
+**`recallMode`** controls how the layer's `recall()` participates in View assembly:
+- `'atomic'` (default) -- recall blocks `callModel`. The agent harness waits for all atomic layers before assembling the View. Use for layers whose output the model needs immediately (working memory, static content, steering).
+- `'eventual'` -- recall uses cached results, never blocks `callModel`. The cache refreshes asynchronously when `store()` produces new state. Use for slow layers where slight staleness is acceptable (observational memory, RAG).
+
 ### workingMemory
 
 Thread/resource-scoped structured state, updated via `updateWorkingMemory` tool call.
@@ -394,6 +414,30 @@ Layer functions in `provides` are automatically exposed as tools to any `step.ll
 ## AgentHarness
 
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
+
+### ProjectionPolicy
+
+Controls how the runtime projects conversation items into the model's context window. Set at harness level (default for all steps) or per-step via `StepLLM.projection`.
+
+```typescript
+interface ProjectionPolicy {
+  tokenBudget: number;          // Total context window budget
+  responseReserve: number;      // Tokens reserved for the response
+  overflow: 'truncate' | 'summarize' | 'sliding_window';
+  overflowModel?: string;       // Model for summarize overflow
+  windowSize?: number;          // For sliding_window: max history items
+}
+
+// Harness-level default
+const harness = new AgentHarness({
+  name: 'agent',
+  params: {},
+  projection: { tokenBudget: 128e3, responseReserve: 4096, overflow: 'sliding_window' },
+});
+
+// Per-step override
+step.llm({ id: 'summarize', model: 'gpt-4', projection: { ... } })
+```
 
 ```typescript
 // High-level API: execute() returns HarnessResult with streaming accessors

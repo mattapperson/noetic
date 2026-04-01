@@ -3,7 +3,7 @@ import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
-import type { ContextMemory, MemoryConfig, MemoryLayer } from './memory';
+import type { ContextMemory, MemoryConfig, MemoryLayer, ProjectionPolicy } from './memory';
 
 /**
  * Cumulative execution snapshot passed to loop `until` predicates.
@@ -95,6 +95,8 @@ export interface StepLLM<_TMemory = ContextMemory, _I = unknown, O = unknown> {
   params?: ModelParams;
   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  /** Projection policy for this step. Overrides the harness-level default. */
+  projection?: ProjectionPolicy;
 }
 
 /** @public A step that invokes a single tool directly, bypassing the LLM. */

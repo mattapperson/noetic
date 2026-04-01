@@ -333,6 +333,8 @@ export function makeMockHarness(): AgentHarnessContract {
     },
     initLayers: async () => {},
     recallLayers: async () => [],
+    recallLayersAtomic: async () => [],
+    recallLayersEventual: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},
     checkpoint: async () => {},
