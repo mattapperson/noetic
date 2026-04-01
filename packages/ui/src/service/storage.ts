@@ -528,20 +528,23 @@ export class TraceStorage {
       const filePath = await this.getRunFilePath(agentId, runId);
       const content = await readFile(filePath, 'utf-8');
 
-      // Check if file is empty
-      if (!content || content.trim().length === 0) {
+      // Strip trailing null bytes (0x00) that can corrupt JSON files
+      const cleanContent = content.replace(/\x00+$/, '');
+
+      // Check if file is empty after cleaning
+      if (!cleanContent || cleanContent.trim().length === 0) {
         console.error(`[Storage] Empty run file for ${agentId}/${runId}`);
         return null;
       }
 
       let parsed: unknown;
       try {
-        parsed = JSON.parse(content, this.reviver);
+        parsed = JSON.parse(cleanContent, this.reviver);
       } catch (parseError) {
         console.error(`[Storage] JSON parse error for ${agentId}/${runId}:`, parseError);
         console.error(
           '[Storage] File content preview (first 200 chars):',
-          content.substring(0, 200),
+          cleanContent.substring(0, 200),
         );
         return null;
       }
@@ -574,6 +577,9 @@ export class TraceStorage {
       const filePath = await this.getRunFilePath(agentId, runId);
       const content = await readFile(filePath, 'utf-8');
 
+      // Strip trailing null bytes (0x00) that can corrupt JSON files
+      const cleanContent = content.replace(/\x00+$/, '');
+
       // Use a reviver that skips the trace field to avoid parsing massive trace data
       const metadataReviver = (key: string, value: unknown): unknown => {
         // Skip trace field entirely - don't parse it
@@ -587,7 +593,7 @@ export class TraceStorage {
         return value;
       };
 
-      const parsed = JSON.parse(content, metadataReviver);
+      const parsed = JSON.parse(cleanContent, metadataReviver);
 
       // Validate required fields exist (lightweight check)
       if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('agentId' in parsed)) {
