@@ -1,4 +1,5 @@
 import { frameworkCast } from '../interpreter/framework-cast';
+import { isFunctionCall } from '../interpreter/typeguards';
 import type { Item } from '../types/items';
 
 /**
@@ -10,7 +11,7 @@ export function findFunctionCall(
   name: string,
 ): Record<string, unknown> | null {
   for (const item of items) {
-    if (item.type !== 'function_call') {
+    if (!isFunctionCall(item)) {
       continue;
     }
     if (item.name !== name) {

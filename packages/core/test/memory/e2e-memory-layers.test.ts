@@ -8,6 +8,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
+import { frameworkCast } from '../../src/interpreter/framework-cast';
 import {
   createLayerStateStore,
   disposeLayers,
@@ -54,32 +55,24 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
 
     // Extract user message text from items
     const inputMessages = request.items
-      .filter(
-        (
-          i,
-        ): i is Extract<
-          typeof i,
-          {
-            type: 'message';
-          }
-        > => i.type === 'message',
-      )
-      .map((m) => ({
-        role: m.role,
-        content: m.content
-          .filter(
-            (
-              c,
-            ): c is Extract<
-              typeof c,
-              {
-                type: 'input_text' | 'output_text';
-              }
-            > => c.type === 'input_text' || c.type === 'output_text',
-          )
-          .map((c) => c.text)
-          .join(''),
-      }));
+      .filter((i) => i.type === 'message' && 'content' in i && 'role' in i)
+      .map((m) => {
+        const parts: Array<{
+          type: string;
+          text?: string;
+        }> = 'content' in m && Array.isArray(m.content) ? m.content : [];
+        const role = 'role' in m ? m.role : 'user';
+        return frameworkCast<{
+          role: 'user' | 'system' | 'developer';
+          content: string;
+        }>({
+          role,
+          content: parts
+            .filter((c) => (c.type === 'input_text' || c.type === 'output_text') && c.text)
+            .map((c) => c.text ?? '')
+            .join(''),
+        });
+      });
 
     const sdkResult = client.callModel({
       model: request.model,
@@ -89,28 +82,19 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
 
     // Extract text from output items (outputText is often undefined)
     const text = response.output
-      .filter(
-        (
-          o,
-        ): o is Extract<
-          typeof o,
-          {
-            type: 'message';
-          }
-        > => o.type === 'message',
-      )
-      .flatMap((m) => m.content)
-      .filter(
-        (
-          c,
-        ): c is Extract<
-          typeof c,
-          {
-            type: 'output_text';
-          }
-        > => c.type === 'output_text',
-      )
-      .map((c) => c.text)
+      .filter((o) => o.type === 'message' && 'content' in o)
+      .flatMap((m) => {
+        if (!('content' in m)) {
+          return [];
+        }
+        const parts: Array<{
+          type: string;
+          text?: string;
+        }> = Array.isArray(m.content) ? m.content : [];
+        return parts;
+      })
+      .filter((c) => c.type === 'output_text' && c.text)
+      .map((c) => c.text ?? '')
       .join('');
     return {
       items: [
@@ -329,28 +313,19 @@ describe('Observational Memory: real LLM observer', () => {
 
           // Extract text from response
           const text = response.items
-            .filter(
-              (
-                i,
-              ): i is Extract<
-                typeof i,
-                {
-                  type: 'message';
-                }
-              > => i.type === 'message',
-            )
-            .flatMap((m) => m.content)
-            .filter(
-              (
-                c,
-              ): c is Extract<
-                typeof c,
-                {
-                  type: 'output_text';
-                }
-              > => c.type === 'output_text',
-            )
-            .map((c) => c.text)
+            .filter((i) => i.type === 'message' && 'content' in i)
+            .flatMap((m) => {
+              if (!('content' in m)) {
+                return [];
+              }
+              const parts: Array<{
+                type: string;
+                text?: string;
+              }> = Array.isArray(m.content) ? m.content : [];
+              return parts;
+            })
+            .filter((c) => c.type === 'output_text' && c.text)
+            .map((c) => c.text ?? '')
             .join('');
 
           return text
@@ -495,28 +470,19 @@ describe('Working Memory: full lifecycle', () => {
 
     // Verify the content contains the plan
     const recalledContent = wmItems
-      .filter(
-        (
-          i,
-        ): i is Extract<
-          typeof i,
-          {
-            type: 'message';
-          }
-        > => i.type === 'message',
-      )
-      .flatMap((m) => m.content)
-      .filter(
-        (
-          c,
-        ): c is Extract<
-          typeof c,
-          {
-            type: 'input_text';
-          }
-        > => c.type === 'input_text',
-      )
-      .map((c) => c.text)
+      .filter((i) => i.type === 'message' && 'content' in i)
+      .flatMap((m) => {
+        if (!('content' in m)) {
+          return [];
+        }
+        const parts: Array<{
+          type: string;
+          text?: string;
+        }> = Array.isArray(m.content) ? m.content : [];
+        return parts;
+      })
+      .filter((c) => c.type === 'input_text' && c.text)
+      .map((c) => c.text ?? '')
       .join('');
     expect(recalledContent).toContain('Analyze auth system');
 
