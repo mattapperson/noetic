@@ -11,7 +11,7 @@ import { step } from '@noetic/core';
 const chat = step.llm({
   id: 'chat',
   model: 'gpt-4o',
-  system: 'You are a helpful assistant.',
+  instructions: 'You are a helpful assistant.',
 });
 ```
 
@@ -27,7 +27,7 @@ const chat = step.llm({
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `model` | `string` | Yes | Model identifier (e.g. `'gpt-4o'`, `'claude-sonnet-4-20250514'`) |
-| `system` | `string` | No | System prompt prepended to the conversation |
+| `instructions` | `string` | No | System prompt prepended to the conversation |
 | `tools` | `Tool[]` | No | Tools the model may call |
 | `output` | `ZodType<O>` | No | Zod schema for structured output |
 | `params` | `ModelParams` | No | Generation parameters |
@@ -56,7 +56,7 @@ import { step } from '@noetic/core';
 const extract = step.llm({
   id: 'extract-entities',
   model: 'gpt-4o',
-  system: 'Extract named entities from the text.',
+  instructions: 'Extract named entities from the text.',
   output: z.object({
     people: z.array(z.string()),
     places: z.array(z.string()),
@@ -92,7 +92,7 @@ const searchTool = {
 const researcher = step.llm({
   id: 'research',
   model: 'gpt-4o',
-  system: 'Answer the question using the search tool.',
+  instructions: 'Answer the question using the search tool.',
   tools: [searchTool],
 });
 ```
@@ -111,7 +111,7 @@ import { step } from '@noetic/core';
 const creative = step.llm({
   id: 'brainstorm',
   model: 'gpt-4o',
-  system: 'Generate creative ideas.',
+  instructions: 'Generate creative ideas.',
   params: {
     temperature: 0.9,
     maxTokens: 2e3,

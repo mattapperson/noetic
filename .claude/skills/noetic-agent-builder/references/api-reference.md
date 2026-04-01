@@ -22,7 +22,7 @@ Model call with optional tools and structured output.
 step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   model: string;
-  system?: string;
+  instructions?: string;
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
@@ -32,7 +32,7 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
-The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes a `MessageItem` with `role: system`.
 
 ### step.tool
 
@@ -156,7 +156,7 @@ ReAct loop: LLM with tools, repeat until no tool calls.
 ```typescript
 react({
   model: string;
-  system?: string;
+  instructions?: string;
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
@@ -173,7 +173,7 @@ Outer verify-and-retry loop wrapping inner ReAct. Each iteration gets a fresh co
 ```typescript
 ralphWiggum({
   model: string;
-  system: string;
+  instructions: string;
   tools: Tool[];
   verify: (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
   maxIterations?: number;

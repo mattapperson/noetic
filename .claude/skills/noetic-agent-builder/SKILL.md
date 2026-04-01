@@ -124,7 +124,7 @@ Select memory layers based on what context the agent needs:
 ```typescript
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'Your system prompt here.',
+  instructions: 'Your system prompt here.',
   tools: allTools,
   maxSteps: 25,
   memory: layers,  // auto-wraps in spawn when provided

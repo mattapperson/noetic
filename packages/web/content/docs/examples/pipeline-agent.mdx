@@ -38,7 +38,7 @@ const normalizeStage = step.run<string, string>({
 const analyzeStage = step.llm<string, string>({
   id: 'analyze-text',
   model: 'gpt-4o',
-  system: 'Analyze the text for sentiment, key themes, and patterns. Return labeled sections.',
+  instructions: 'Analyze the text for sentiment, key themes, and patterns. Return labeled sections.',
 });
 
 const formatStage = step.run<string, string>({

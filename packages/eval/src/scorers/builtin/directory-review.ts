@@ -82,7 +82,7 @@ export function directoryReview(config: DirectoryReviewConfig): ScorerFn {
 
     const result = await runJudge({
       id: 'directory-review-judge',
-      system: `You are a code/directory review judge. Review the directory structure and contents against the given instructions.
+      instructions: `You are a code/directory review judge. Review the directory structure and contents against the given instructions.
 Score 0.0 = completely fails instructions, 1.0 = perfectly follows all instructions.
 Respond with a compliance score and brief reasoning.`,
       input: `Objective: ${objective}\n\nInstructions: ${config.instructions}\n\nDirectory: ${config.path}\n\nFiles:\n${fileList}${contentsSection}`,

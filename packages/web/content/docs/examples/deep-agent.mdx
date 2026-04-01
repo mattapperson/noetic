@@ -147,7 +147,7 @@ export function buildDeepAgent(config): StepLoop | StepSpawn {
 
   return react({
     model: config.model,
-    system: config.system,
+    instructions: config.instructions,
     tools: allTools,
     memory: layers, // auto-wraps in spawn
   });

@@ -36,7 +36,7 @@ import { step } from '@noetic/core';
 const classify = step.llm({
   id: 'classify-intent',
   model: 'gpt-4o-mini',
-  system: 'Classify the user message as one of: question, command, chitchat.',
+  instructions: 'Classify the user message as one of: question, command, chitchat.',
   output: z.object({
     intent: z.enum([
       'question',

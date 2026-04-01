@@ -48,7 +48,7 @@ export const step = {
    * @public
    * @param opts.id - Unique step identifier used in traces and error messages.
    * @param opts.model - Model identifier string (e.g. `'anthropic/claude-sonnet-4-20250514'`).
-   * @param opts.system - Optional system prompt for the model.
+   * @param opts.instructions - Optional system prompt / instructions for the model.
    * @param opts.tools - Optional tools available to the model during this call.
    * @param opts.output - Optional Zod schema enabling structured output parsing.
    * @param opts.params - Optional model parameters (temperature, topP, maxTokens, stopSequences).
@@ -59,7 +59,7 @@ export const step = {
   llm<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
     id: string;
     model: string;
-    system?: string;
+    instructions?: string;
     tools?: Tool[];
     output?: ZodType<O>;
     params?: ModelParams;

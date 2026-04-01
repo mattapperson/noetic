@@ -84,7 +84,7 @@ function buildAnalyzeScorerFn<T, R>(
     const judgeStep = step.llm<string, unknown>({
       id: `${pipelineId}-judge`,
       model,
-      system: prompt,
+      instructions: prompt,
     });
 
     const harness = new AgentHarness({
@@ -173,7 +173,7 @@ function makePipelineStep4(
           const reasonStep = step.llm({
             id: `${pipelineId}-reason`,
             model,
-            system: reasonConfig.createPrompt(result.score),
+            instructions: reasonConfig.createPrompt(result.score),
           });
 
           const harness = new AgentHarness({
