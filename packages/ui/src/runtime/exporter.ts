@@ -7,6 +7,7 @@
 
 import type { Span, TraceExporter } from '@noetic/core';
 import WebSocket from 'ws';
+import { getStepDataExtractor } from './step-extractors';
 import type { ClientMessage, ExporterOptions, SerializableSpan, ServerMessage } from './types';
 
 /** Default exporter options */
@@ -466,6 +467,7 @@ export class NoeticUITraceExporter implements TraceExporter {
 
   /**
    * Build stepData object based on step type and span attributes
+   * Uses the step data extractor registry for extensibility
    */
   private buildStepData(
     spanAttrs: Record<string, unknown>,
@@ -474,59 +476,15 @@ export class NoeticUITraceExporter implements TraceExporter {
     tokenTotal: number,
     cost: number,
   ): Record<string, unknown> {
-    const stepKind = spanAttrs.stepKind as string;
+    const stepKind = String(spanAttrs.stepKind || 'run');
+    const extractor = getStepDataExtractor(stepKind);
 
-    switch (stepKind) {
-      case 'llm':
-        return {
-          model: spanAttrs.model || 'unknown',
-          messages: spanAttrs.messages || [],
-          toolCalls: spanAttrs.toolCalls || [],
-          systemPrompt: spanAttrs.systemPrompt,
-          tokenUsage: {
-            input: tokenInput,
-            output: tokenOutput,
-            total: tokenTotal,
-          },
-          cost: cost,
-        };
+    const tokenUsage = {
+      input: tokenInput,
+      output: tokenOutput,
+      total: tokenTotal,
+    };
 
-      case 'tool':
-        return {
-          toolName: spanAttrs.toolName || 'unknown',
-          arguments: spanAttrs.toolArguments,
-          result: spanAttrs.toolResult,
-        };
-
-      case 'fork':
-        return {
-          mode: spanAttrs.forkMode || 'race',
-          pathCount: spanAttrs.forkPathCount || 0,
-        };
-
-      case 'loop':
-        return {
-          stepCount: spanAttrs.loopStepCount || 0,
-          currentIteration: spanAttrs.currentIteration,
-          maxIterations: spanAttrs.maxIterations,
-        };
-
-      case 'spawn':
-        return {
-          childId: spanAttrs.spawnChildId || 'unknown',
-          childKind: spanAttrs.spawnChildKind,
-        };
-
-      case 'branch':
-        return {
-          branchType: spanAttrs.branchType || 'dynamic',
-          selectedPath: spanAttrs.selectedPath,
-        };
-
-      default:
-        return {
-          description: spanAttrs.stepDescription,
-        };
-    }
+    return extractor(spanAttrs, tokenUsage, cost);
   }
 }
