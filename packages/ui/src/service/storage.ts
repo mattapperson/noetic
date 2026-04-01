@@ -205,6 +205,8 @@ export class TraceStorage {
   >();
   private agentsLoaded = false;
   private agentsLoadingPromise: Promise<void> | null = null;
+  // Write queue to prevent concurrent file writes
+  private writeQueue = new Map<string, Promise<void>>();
 
   constructor(storagePath?: string) {
     this.providedPath = storagePath;
@@ -493,14 +495,20 @@ export class TraceStorage {
       };
 
       const filePath = await this.getRunFilePath(agentId, runId);
-      const storagePath = await this.getResolvedStoragePath();
-      const agentDir = join(storagePath, agentId);
-      await mkdir(agentDir, {
-        recursive: true,
+
+      // Queue the write to prevent concurrent file corruption
+      const writePromise = this.queueWrite(filePath, async () => {
+        const storagePath = await this.getResolvedStoragePath();
+        const agentDir = join(storagePath, agentId);
+        await mkdir(agentDir, {
+          recursive: true,
+        });
+
+        const serialized = JSON.stringify(run, this.replacer, 2);
+        await writeFile(filePath, serialized, 'utf-8');
       });
 
-      const serialized = JSON.stringify(run, this.replacer, 2);
-      await writeFile(filePath, serialized, 'utf-8');
+      await writePromise;
 
       // Invalidate metrics cache
       this.metricsCacheTime = 0;
@@ -518,6 +526,30 @@ export class TraceStorage {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * Queue a write operation for a specific file to prevent concurrent writes
+   */
+  private async queueWrite(filePath: string, writeFn: () => Promise<void>): Promise<void> {
+    // Wait for any existing write to complete
+    const existingWrite = this.writeQueue.get(filePath);
+    if (existingWrite) {
+      await existingWrite;
+    }
+
+    // Create new write promise
+    const writePromise = writeFn().finally(() => {
+      // Remove from queue when done
+      if (this.writeQueue.get(filePath) === writePromise) {
+        this.writeQueue.delete(filePath);
+      }
+    });
+
+    // Add to queue
+    this.writeQueue.set(filePath, writePromise);
+
+    return writePromise;
   }
 
   /**
@@ -622,8 +654,13 @@ export class TraceStorage {
    */
   async updateRun(agentId: string, run: Run): Promise<void> {
     const filePath = await this.getRunFilePath(agentId, run.id);
-    const serialized = JSON.stringify(run, this.replacer, 2);
-    await writeFile(filePath, serialized, 'utf-8');
+
+    // Queue the write to prevent concurrent file corruption
+    await this.queueWrite(filePath, async () => {
+      const serialized = JSON.stringify(run, this.replacer, 2);
+      await writeFile(filePath, serialized, 'utf-8');
+    });
+
     this.metricsCacheTime = 0;
   }
 
