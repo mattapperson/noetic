@@ -96,7 +96,7 @@ interface DetachedHandle<O> {
 
 ## HarnessResult
 
-`execute()` returns a `HarnessResult` synchronously. Execution starts eagerly in the background. The result provides six accessors for consuming output in different modes.
+`execute()` returns a `HarnessResult` synchronously. Before execution starts, the harness walks the step tree to collect all tools from all LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. Execution then starts eagerly in the background. The result provides six accessors for consuming output in different modes.
 
 ```typescript
 interface HarnessResult {

@@ -1,6 +1,6 @@
 import { buildContextMemory } from '../memory/layer-api';
 import type { Channel } from '../types/channel';
-import type { StepMeta, TokenUsage } from '../types/common';
+import type { StepMeta, TokenUsage, Tool } from '../types/common';
 import type { Context, ItemLog } from '../types/context';
 import type { Item } from '../types/items';
 import type { ContextMemory, MemoryLayer } from '../types/memory';
@@ -40,6 +40,7 @@ export class ContextImpl implements Context<ContextMemory> {
   lastStepMeta: StepMeta | null = null;
   readonly harness: AgentHarnessContract;
   readonly layers?: MemoryLayer[];
+  unifiedTools?: ReadonlyArray<Tool>;
 
   /** @internal Event broadcaster for streaming — not part of public Context interface. */
   readonly _broadcaster?: EventBroadcaster;
@@ -64,6 +65,7 @@ export class ContextImpl implements Context<ContextMemory> {
     channelStore?: ChannelStore;
     checkpointFn?: () => Promise<void>;
     layers?: MemoryLayer[];
+    unifiedTools?: ReadonlyArray<Tool>;
     _broadcaster?: EventBroadcaster;
   }) {
     this.id = crypto.randomUUID();
@@ -78,6 +80,7 @@ export class ContextImpl implements Context<ContextMemory> {
     this.channelStore = opts.channelStore;
     this._checkpointFn = opts.checkpointFn;
     this.layers = opts.layers;
+    this.unifiedTools = opts.unifiedTools;
     this._broadcaster = opts._broadcaster;
 
     const log = new ItemLogImpl();

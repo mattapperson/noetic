@@ -1,5 +1,5 @@
 import type { Channel } from './channel';
-import type { StepMeta, TokenUsage } from './common';
+import type { StepMeta, TokenUsage, Tool } from './common';
 import type { Item } from './items';
 import type { ContextMemory, MemoryLayer } from './memory';
 import type { Span } from './observability';
@@ -30,6 +30,8 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly layers?: MemoryLayer[];
   /** Layer provides keyed by layer ID. Access data/functions via `ctx.memory['layerId'].prop`. */
   readonly memory: TMemory;
+  /** Unified tool set collected from all LLM steps in the step tree before execution. */
+  readonly unifiedTools?: ReadonlyArray<Tool>;
   recv<T>(
     channel: Channel<T>,
     opts?: {
