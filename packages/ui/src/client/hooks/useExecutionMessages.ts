@@ -14,12 +14,16 @@ import type { Run } from '../types/agent';
 export function useExecutionMessages(): void {
   const addRun = useAgentStore((state) => state.addRun);
   const updateRun = useAgentStore((state) => state.updateRun);
+  const addAgent = useAgentStore((state) => state.addAgent);
+  const agents = useAgentStore((state) => state.agents);
   const addTrace = useExecutionStore((state) => state.addTrace);
   const addNode = useExecutionStore((state) => state.addNode);
   const updateNode = useExecutionStore((state) => state.updateNode);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') {
+      return;
+    }
 
     console.log('[useExecutionMessages] Registering handler');
 
@@ -32,6 +36,26 @@ export function useExecutionMessages(): void {
           const trace: ExecutionTrace = message.trace;
           const agentId: string = message.agentId;
 
+          // Ensure agent exists before adding run
+          const agentExists = agents.some((a) => a.id === agentId);
+          if (!agentExists) {
+            console.log('[useExecutionMessages] Creating agent for run:', agentId);
+            addAgent({
+              id: agentId,
+              name: agentId,
+              filePath: '',
+              exportName: '',
+              discoveredAt: Date.now(),
+              lastModified: Date.now(),
+              discoveryMethod: 'runtime',
+              runs: [],
+              runCount: 0,
+              lastRunAt: null,
+              description: 'Agent auto-discovered via WebSocket',
+              tags: [],
+            });
+          }
+
           // Create a run from the trace
           const run: Run = {
             id: trace.traceId,
@@ -41,7 +65,7 @@ export function useExecutionMessages(): void {
             durationMs: null,
             status: 'running',
             input: {},
-            inputPreview: '',
+            inputPreview: 'Execution started',
             trace,
             rootNodeId: trace.rootNodeId,
             timelineEvents: [],
@@ -141,6 +165,8 @@ export function useExecutionMessages(): void {
   }, [
     addRun,
     updateRun,
+    addAgent,
+    agents,
     addTrace,
     addNode,
     updateNode,

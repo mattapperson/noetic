@@ -71,6 +71,10 @@ export class NoeticUITraceExporter implements TraceExporter {
     // Convert spans to serializable format
     const serializableSpans = spans.map((span) => this.serializeSpan(span));
 
+    console.log(
+      `[NoeticUI] Exporting ${serializableSpans.length} spans, connected: ${this.isConnected()}, buffer size: ${this.spanBuffer.length}`,
+    );
+
     // Add to buffer
     this.spanBuffer.push(...serializableSpans);
 
@@ -154,8 +158,9 @@ export class NoeticUITraceExporter implements TraceExporter {
           });
         }
 
-        // Flush any queued messages
+        // Flush any queued messages and span buffer
         this.flushMessageQueue();
+        void this.flush();
       });
 
       this.ws.on('close', () => {
@@ -203,6 +208,8 @@ export class NoeticUITraceExporter implements TraceExporter {
     ];
     this.spanBuffer = [];
 
+    console.log(`[NoeticUI] Flushing ${spans.length} spans to WebSocket`);
+
     // Group spans by traceId
     const spansByTrace = new Map<string, SerializableSpan[]>();
     for (const span of spans) {
@@ -226,12 +233,16 @@ export class NoeticUITraceExporter implements TraceExporter {
     };
 
     if (isNewTrace) {
+      // Get input from the first span (root span) if available
+      const rootSpan = spans[0];
+      const input = rootSpan?.attributes?.input ?? {};
+
       // Send trace.start for new traces
       const startMessage: ClientMessage = {
         type: 'trace.start',
         traceId,
         agentId: this.options.agentName,
-        input: {},
+        input,
         startTime: traceInfo.startTime,
       };
       this.ws!.send(JSON.stringify(startMessage));
@@ -241,8 +252,9 @@ export class NoeticUITraceExporter implements TraceExporter {
     for (const span of spans) {
       const isNewSpan = !traceInfo.spanIds.has(span.spanId);
 
-      if (isNewSpan && !span.endTime) {
-        // New running span - send nodeStart
+      if (isNewSpan) {
+        // Send nodeStart for all new spans (even if already ended)
+        // This ensures the server creates the node before nodeComplete updates it
         const stepKind = this.inferStepKind(span.name);
         const nodeStartMessage: ClientMessage = {
           type: 'trace.nodeStart',
@@ -254,11 +266,11 @@ export class NoeticUITraceExporter implements TraceExporter {
             parentId: span.parentSpanId,
             depth: this.calculateDepth(span, spans),
             startTime: span.startTime,
-            endTime: null,
-            durationMs: null,
-            status: 'running',
+            endTime: span.endTime ?? null,
+            durationMs: span.endTime ? span.duration : null,
+            status: span.endTime ? 'completed' : 'running',
             input: span.attributes.input ?? {},
-            output: null,
+            output: span.endTime ? (span.attributes.output ?? null) : null,
             contextSnapshot: {
               depth: this.calculateDepth(span, spans),
               stepCount: spans.length,
@@ -279,7 +291,7 @@ export class NoeticUITraceExporter implements TraceExporter {
         this.ws!.send(JSON.stringify(nodeStartMessage));
         traceInfo.spanIds.add(span.spanId);
       } else if (span.endTime) {
-        // Completed span - send nodeComplete
+        // Previously seen span that just ended - send nodeComplete
         const nodeCompleteMessage: ClientMessage = {
           type: 'trace.nodeComplete',
           traceId,

@@ -57,6 +57,7 @@ interface TraceState {
   trace: ExecutionTrace;
   agentId: string;
   isLive: boolean;
+  input: unknown;
 }
 
 // ============================================================================
@@ -129,12 +130,15 @@ export class NoeticUIServer {
   }
 
   /**
-   * Stop the WebSocket server
+   * Stop the WebSocket server gracefully
+   * Notifies all clients and closes connections properly
    */
-  async stop(): Promise<void> {
+  async stop(timeoutMs = 5000): Promise<void> {
     if (!this.isRunning) {
       return;
     }
+
+    console.log('[WebSocket] Starting graceful shutdown...');
 
     // Stop heartbeat
     if (this.heartbeatInterval) {
@@ -142,28 +146,64 @@ export class NoeticUIServer {
       this.heartbeatInterval = null;
     }
 
-    // Close all client connections
+    // Notify all clients about shutdown
+    const shutdownMessage = JSON.stringify({
+      type: 'server.shutdown',
+      timestamp: Date.now(),
+      message: 'Server is shutting down',
+    });
+
     for (const client of this.clients.values()) {
-      client.ws.close(1000, 'Server shutting down');
+      if (client.ws.readyState === WebSocket.OPEN) {
+        try {
+          client.ws.send(shutdownMessage);
+          client.ws.close(1001, 'Server shutting down'); // 1001 = Going Away
+        } catch {
+          // Client may already be closing
+        }
+      }
     }
+
+    // Wait a moment for clients to receive the message
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Clear all clients
     this.clients.clear();
 
-    // Close WebSocket server
+    // Close WebSocket server with timeout
     if (this.wss) {
-      this.wss.close();
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          console.warn('[WebSocket] Server close timeout exceeded');
+          resolve();
+        }, timeoutMs);
+
+        this.wss!.close(() => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
       this.wss = null;
     }
 
-    // Close HTTP server
+    // Close HTTP server with timeout
     if (this.httpServer) {
       await new Promise<void>((resolve) => {
-        this.httpServer!.close(() => resolve());
+        const timeout = setTimeout(() => {
+          console.warn('[WebSocket] HTTP server close timeout exceeded');
+          resolve();
+        }, timeoutMs);
+
+        this.httpServer!.close(() => {
+          clearTimeout(timeout);
+          resolve();
+        });
       });
       this.httpServer = null;
     }
 
     this.isRunning = false;
-    console.log('Noetic UI server stopped');
+    console.log('[WebSocket] Server stopped gracefully');
   }
 
   /**
@@ -200,6 +240,7 @@ export class NoeticUIServer {
       trace,
       agentId,
       isLive: true,
+      input: {},
     });
 
     const message: ServerMessage = {
@@ -711,16 +752,12 @@ export class NoeticUIServer {
 
   private async saveTrace(trace: ExecutionTrace, agentId: string): Promise<void> {
     try {
-      // Get root node input for storage
+      // Get input from trace state, fallback to root node input
+      const traceState = this.traces.get(trace.traceId);
       const rootNode = trace.nodes.get(trace.rootNodeId);
-      const input = rootNode?.input || {};
+      const input = traceState?.input ?? rootNode?.input ?? {};
 
-      await this.storage.saveTrace(
-        trace,
-        agentId,
-        input,
-        this.traces.get(trace.traceId)?.isLive || false,
-      );
+      await this.storage.saveTrace(trace, agentId, input, traceState?.isLive ?? false);
     } catch (error) {
       console.error('Failed to save trace:', error);
     }
@@ -765,6 +802,7 @@ export class NoeticUIServer {
       trace,
       agentId,
       isLive: true,
+      input,
     });
 
     // Broadcast to all clients

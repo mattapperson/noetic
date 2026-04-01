@@ -20,12 +20,14 @@ interface WebSocketState {
   status: ConnectionStatus;
   client: WebSocketClient | null;
   lastMessage: ServerMessage | null;
+  reconnectAttempt: number;
 
   // Actions
   connect: (url?: string) => void;
   disconnect: () => void;
   send: (message: unknown) => void;
   setStatus: (status: ConnectionStatus) => void;
+  setReconnectAttempt: (attempt: number) => void;
   processMessage: (message: ServerMessage) => void;
 }
 
@@ -41,6 +43,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   status: 'disconnected',
   client: null,
   lastMessage: null,
+  reconnectAttempt: 0,
 
   connect: (url = 'ws://localhost:3333') => {
     // Only run on client
@@ -85,6 +88,12 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
         set({
           status: status as ConnectionStatus,
         });
+        // Reset reconnect attempt counter when connected
+        if (status === 'connected') {
+          set({
+            reconnectAttempt: 0,
+          });
+        }
       },
       onError: (error) => {
         console.error('[WebSocketStore] Connection error:', error);
@@ -109,6 +118,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
       set({
         client: null,
         status: 'disconnected',
+        reconnectAttempt: 0,
       });
     }
   },
@@ -134,6 +144,12 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   setStatus: (status: ConnectionStatus) => {
     set({
       status,
+    });
+  },
+
+  setReconnectAttempt: (attempt: number) => {
+    set({
+      reconnectAttempt: attempt,
     });
   },
 

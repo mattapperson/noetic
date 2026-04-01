@@ -66,3 +66,7 @@ export function useConnection(options: UseConnectionOptions = {}): UseConnection
 export function useConnectionStatus(): ConnectionStatus {
   return useWebSocketStore((state) => state.status);
 }
+
+export function useReconnectAttempt(): number {
+  return useWebSocketStore((state) => state.reconnectAttempt);
+}

@@ -4,7 +4,8 @@
  */
 
 import type React from 'react';
-import { useConnectionStatus, useConnectionStore } from '../stores';
+import { useEffect, useState } from 'react';
+import { useConnectionStatus, useReconnectAttempt } from '../hooks/useConnection';
 
 interface ConnectionIndicatorProps {
   /** Additional CSS class names */
@@ -21,7 +22,30 @@ export const ConnectionIndicator: React.FC<ConnectionIndicatorProps> = ({
   dotSize = 10,
 }) => {
   const status = useConnectionStatus();
-  const { reconnectAttempt } = useConnectionStore();
+  const reconnectAttempt = useReconnectAttempt();
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Don't render dynamic content during SSR to avoid hydration mismatch
+  if (!isClient) {
+    return (
+      <div className={`flex items-center gap-2 ${className}`}>
+        <span className="relative flex h-2.5 w-2.5">
+          <span
+            className="relative inline-flex rounded-full bg-slate-500"
+            style={{
+              width: dotSize,
+              height: dotSize,
+            }}
+          />
+        </span>
+        {showLabel && <span className="text-xs font-medium text-slate-400">Loading...</span>}
+      </div>
+    );
+  }
 
   const getStatusColor = () => {
     switch (status) {

@@ -1,0 +1,80 @@
+/**
+ * JSON deserialization utilities for handling serialized Maps
+ * Server serializes Maps as { dataType: 'Map', value: [...] }
+ * This module provides the client-side deserialization
+ */
+
+/**
+ * JSON reviver that converts serialized Maps back to actual Map instances
+ * @param _key - The key being revived (unused)
+ * @param value - The value being revived
+ * @returns The revived value, with Maps reconstructed
+ */
+export function deserializeValue(_key: string, value: unknown): unknown {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'dataType' in value &&
+    value.dataType === 'Map' &&
+    'value' in value &&
+    Array.isArray(value.value)
+  ) {
+    return new Map(
+      value.value as [
+        string,
+        unknown,
+      ][],
+    );
+  }
+  return value;
+}
+
+/**
+ * Parse JSON with Map support
+ * @param json - The JSON string to parse
+ * @returns The parsed value with Maps reconstructed
+ */
+export function parseJSON<T>(json: string): T {
+  return JSON.parse(json, deserializeValue) as T;
+}
+
+/**
+ * Deserialize a value that was serialized by the server
+ * Handles nested Maps within objects
+ * @param value - The value to deserialize
+ * @returns The deserialized value with all Maps reconstructed
+ */
+export function deserialize<T>(value: unknown): T {
+  // For already-parsed objects (from fetch().json()), we need to walk the object tree
+  if (value === null || typeof value !== 'object') {
+    return value as T;
+  }
+
+  if (value instanceof Map) {
+    return value as T;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => deserialize(item)) as unknown as T;
+  }
+
+  // Check if it's a serialized Map
+  const obj = value as Record<string, unknown>;
+  if (obj.dataType === 'Map' && Array.isArray(obj.value)) {
+    const map = new Map<string, unknown>();
+    for (const [key, val] of obj.value as [
+      string,
+      unknown,
+    ][]) {
+      map.set(key, deserialize(val));
+    }
+    return map as T;
+  }
+
+  // Regular object - deserialize all properties
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    result[key] = deserialize(obj[key]);
+  }
+  return result as T;
+}

@@ -37,6 +37,11 @@
   --noetic-warning: #f59e0b;
   --noetic-error: #ef4444;
   --noetic-info: #3b82f6;
+
+  /* Selection colors */
+  --noetic-selected-bg: rgba(59, 130, 246, 0.15);
+  --noetic-selected-border: #3b82f6;
+  --noetic-selected-text: #f1f5f9;
 }
 
 /* Light theme - from spec */
@@ -75,6 +80,11 @@ html.light {
   --noetic-warning: #d97706;
   --noetic-error: #dc2626;
   --noetic-info: #2563eb;
+
+  /* Selection colors */
+  --noetic-selected-bg: rgba(37, 99, 235, 0.12);
+  --noetic-selected-border: #2563eb;
+  --noetic-selected-text: #0f172a;
 }
 
 /* Base styles */

@@ -4,13 +4,15 @@
  */
 
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { discoverAgents } from '../lib/discovery';
+import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useStorageStore } from '../stores/storage';
 import type { Agent } from '../types/agent';
 import AgentList from './AgentList';
 import StorageBar from './StorageBar';
+import ThemeToggle from './ThemeToggle';
 
 export const AgentBrowser: React.FC = () => {
   const {
@@ -22,20 +24,25 @@ export const AgentBrowser: React.FC = () => {
     lastDiscoveryTime,
     agentFilter,
     setAgentFilter,
+    agentSort,
+    runSort,
+    setAgentSort,
+    setRunSort,
     getSortedAgents,
   } = useAgentStore();
 
   const { clearAllStorage } = useStorageStore();
   const [searchQuery, setSearchQuery] = useState(agentFilter.searchQuery);
 
-  // Fetch agents from server on mount
+  // Fetch agents and their runs from server on mount
   const [serverAgentsLoaded, setServerAgentsLoaded] = useState(false);
-  const { addAgent } = useAgentStore();
 
   useEffect(() => {
-    if (serverAgentsLoaded) return;
+    if (serverAgentsLoaded) {
+      return;
+    }
 
-    const fetchAgents = async () => {
+    const fetchAgentsAndRuns = async () => {
       try {
         console.log('[AgentBrowser] Fetching agents from server...');
         const response = await fetch('/api/agents');
@@ -45,11 +52,13 @@ export const AgentBrowser: React.FC = () => {
         const data = await response.json();
         console.log('[AgentBrowser] Server response:', data);
 
-        if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+        if (data.success && Array.isArray(data.data)) {
           // Add each agent from server if not already present
+          // Use getState() to avoid stale closure issues
+          const { agents, addAgent } = useAgentStore.getState();
           const currentIds = new Set(agents.map((a) => a.id));
 
-          data.data.forEach((id: string) => {
+          for (const id of data.data) {
             if (!currentIds.has(id)) {
               addAgent({
                 id,
@@ -67,7 +76,24 @@ export const AgentBrowser: React.FC = () => {
               });
               console.log('[AgentBrowser] Added agent:', id);
             }
-          });
+
+            // Fetch runs for this agent
+            try {
+              const runsResponse = await fetch(`/api/agents/${id}/runs`);
+              if (runsResponse.ok) {
+                const runsData = await runsResponse.json();
+                if (runsData.success && Array.isArray(runsData.data) && runsData.data.length > 0) {
+                  const { addRun } = useAgentStore.getState();
+                  for (const run of runsData.data) {
+                    addRun(id, run);
+                  }
+                  console.log(`[AgentBrowser] Loaded ${runsData.data.length} runs for agent:`, id);
+                }
+              }
+            } catch (runsError) {
+              console.error(`[AgentBrowser] Failed to fetch runs for agent ${id}:`, runsError);
+            }
+          }
 
           setServerAgentsLoaded(true);
         }
@@ -76,11 +102,10 @@ export const AgentBrowser: React.FC = () => {
       }
     };
 
-    fetchAgents();
+    fetchAgentsAndRuns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     serverAgentsLoaded,
-    agents,
-    addAgent,
   ]);
 
   const handleSearch = useCallback(
@@ -96,21 +121,108 @@ export const AgentBrowser: React.FC = () => {
     ],
   );
 
+  // Combined sort options with optgroups
+  const combinedSortOptions = [
+    {
+      type: 'optgroup',
+      label: 'Agents',
+    },
+    {
+      value: 'agent-recent',
+      label: 'Recent first',
+    },
+    {
+      value: 'agent-oldest',
+      label: 'Oldest first',
+    },
+    {
+      value: 'agent-name',
+      label: 'Name',
+    },
+    {
+      value: 'agent-runs',
+      label: 'Run count',
+    },
+    {
+      type: 'optgroup',
+      label: 'Runs',
+    },
+    {
+      value: 'run-recent',
+      label: 'Recent first',
+    },
+    {
+      value: 'run-oldest',
+      label: 'Oldest first',
+    },
+    {
+      value: 'run-duration',
+      label: 'Duration',
+    },
+    {
+      value: 'run-cost',
+      label: 'Cost',
+    },
+    {
+      value: 'run-memory',
+      label: 'Memory',
+    },
+  ];
+
+  const handleSortChange = useCallback(
+    (value: string) => {
+      if (value.startsWith('agent-')) {
+        const sortValue = value.replace('agent-', '');
+        if (
+          sortValue === 'recent' ||
+          sortValue === 'oldest' ||
+          sortValue === 'name' ||
+          sortValue === 'runs'
+        ) {
+          setAgentSort(sortValue);
+        }
+      } else if (value.startsWith('run-')) {
+        const sortValue = value.replace('run-', '');
+        if (
+          sortValue === 'recent' ||
+          sortValue === 'oldest' ||
+          sortValue === 'duration' ||
+          sortValue === 'cost' ||
+          sortValue === 'memory'
+        ) {
+          setRunSort(sortValue);
+        }
+      }
+    },
+    [
+      setAgentSort,
+      setRunSort,
+    ],
+  );
+
+  // Get current sort value for the dropdown
+  // If runSort is not the default, a run sort option is active
+  const currentSortValue =
+    agentSort === 'recent' && runSort !== 'recent' ? `run-${runSort}` : `agent-${agentSort}`;
+
   const handleRefreshDiscovery = useCallback(async () => {
     setDiscoveryStatus(true);
 
     try {
+      // Get current state from store to avoid stale closures
+      const { agents: currentAgents, addAgent: addAgentToStore } = useAgentStore.getState();
+
       // First, refresh agents from server API (includes runtime-registered agents)
       const response = await fetch('/api/agents');
       if (response.ok) {
         const data = await response.json();
         if (data.success && Array.isArray(data.data)) {
-          const currentIds = new Set(agents.map((a) => a.id));
+          const currentIds = new Set(currentAgents.map((a) => a.id));
 
-          // Add any new server agents
-          data.data.forEach((id: string) => {
+          // Add any new server agents and fetch their runs
+          for (const id of data.data) {
             if (!currentIds.has(id)) {
-              addAgent({
+              addAgentToStore({
                 id,
                 name: id,
                 filePath: '',
@@ -124,14 +236,41 @@ export const AgentBrowser: React.FC = () => {
                 description: 'Agent auto-discovered via WebSocket',
                 tags: [],
               });
+
+              // Fetch runs for this agent
+              try {
+                const runsResponse = await fetch(`/api/agents/${id}/runs`);
+                if (runsResponse.ok) {
+                  const runsData = await runsResponse.json();
+                  if (
+                    runsData.success &&
+                    Array.isArray(runsData.data) &&
+                    runsData.data.length > 0
+                  ) {
+                    const { addRun } = useAgentStore.getState();
+                    for (const run of runsData.data) {
+                      addRun(id, run);
+                    }
+                    console.log(
+                      `[AgentBrowser] Loaded ${runsData.data.length} runs for agent:`,
+                      id,
+                    );
+                  }
+                }
+              } catch (runsError) {
+                console.error(`[AgentBrowser] Failed to fetch runs for agent ${id}:`, runsError);
+              }
             }
-          });
+          }
         }
       }
 
       // Then discover agents from file system
       const discovered = await discoverAgents('/');
       setDiscoveredAgents(discovered);
+
+      // Get fresh state after adding server agents
+      const { agents: freshAgents } = useAgentStore.getState();
 
       // Convert discovered agents to full agents
       const newAgents = discovered.map((d) => ({
@@ -151,7 +290,7 @@ export const AgentBrowser: React.FC = () => {
 
       // Merge with existing agents, preserving runs
       const mergedAgents: Agent[] = newAgents.map((newAgent) => {
-        const existing = agents.find((a) => a.id === newAgent.id);
+        const existing = freshAgents.find((a) => a.id === newAgent.id);
         if (existing) {
           return {
             ...newAgent,
@@ -164,8 +303,8 @@ export const AgentBrowser: React.FC = () => {
       });
 
       // Add any existing agents that weren't in the file system discovery
-      // (preserves runtime-registered agents)
-      agents.forEach((existingAgent) => {
+      // (preserves runtime-registered agents and agents with runs)
+      freshAgents.forEach((existingAgent) => {
         const foundInNew = mergedAgents.find((a) => a.id === existingAgent.id);
         if (!foundInNew) {
           mergedAgents.push(existingAgent);
@@ -179,9 +318,7 @@ export const AgentBrowser: React.FC = () => {
       setDiscoveryStatus(false, Date.now());
     }
   }, [
-    agents,
     setAgents,
-    addAgent,
     setDiscoveredAgents,
     setDiscoveryStatus,
   ]);
@@ -218,7 +355,7 @@ export const AgentBrowser: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        width: '280px',
+        width: '100%',
         backgroundColor: 'var(--noetic-sidebar-bg)',
         borderRight: '1px solid var(--noetic-border)',
       }}
@@ -228,45 +365,63 @@ export const AgentBrowser: React.FC = () => {
         style={{
           padding: '16px',
           borderBottom: '1px solid var(--noetic-border)',
-        }}
-      >
-        <h1
-          style={{
-            margin: 0,
-            fontSize: '16px',
-            fontWeight: 600,
-            color: 'var(--noetic-text)',
-          }}
-        >
-          Noetic UI
-        </h1>
-        <p
-          style={{
-            margin: '4px 0 0 0',
-            fontSize: '12px',
-            color: 'var(--noetic-text-muted)',
-          }}
-        >
-          Agent Debugger
-        </p>
-      </div>
-
-      {/* Search */}
-      <div
-        style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--noetic-border)',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '12px',
         }}
       >
         <div
           style={{
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <h1
+            style={{
+              margin: 0,
+              fontSize: '16px',
+              fontWeight: 600,
+              color: 'var(--noetic-text)',
+            }}
+          >
+            Noetic UI
+          </h1>
+          <p
+            style={{
+              margin: '4px 0 0 0',
+              fontSize: '12px',
+              color: 'var(--noetic-text-muted)',
+            }}
+          >
+            Agent Debugger
+          </p>
+        </div>
+        <ThemeToggle />
+      </div>
+
+      {/* Combined Filter, Sort, and Refresh Row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 16px',
+          borderBottom: '1px solid var(--noetic-border)',
+        }}
+      >
+        {/* Filter Input */}
+        <div
+          style={{
             position: 'relative',
+            flex: 1,
+            minWidth: 0,
           }}
         >
           <span
             style={{
               position: 'absolute',
-              left: '10px',
+              left: '8px',
               top: '50%',
               transform: 'translateY(-50%)',
               fontSize: '12px',
@@ -277,12 +432,12 @@ export const AgentBrowser: React.FC = () => {
           </span>
           <input
             type="text"
-            placeholder="Search agents..."
+            placeholder="Filter agents"
             value={searchQuery}
             onChange={handleSearch}
             style={{
               width: '100%',
-              padding: '8px 8px 8px 32px',
+              padding: '6px 8px 6px 28px',
               fontSize: '12px',
               borderRadius: '4px',
               border: '1px solid var(--noetic-border)',
@@ -292,38 +447,81 @@ export const AgentBrowser: React.FC = () => {
             }}
           />
         </div>
-      </div>
 
-      {/* Discovery status */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 16px',
-          borderBottom: '1px solid var(--noetic-border)',
-          fontSize: '11px',
-          color: 'var(--noetic-text-muted)',
-        }}
-      >
-        <span>Last scan: {formatDiscoveryTime()}</span>
+        {/* Sort Select */}
+        <select
+          value={currentSortValue}
+          onChange={(e) => handleSortChange(e.target.value)}
+          style={{
+            fontSize: '11px',
+            padding: '6px 8px',
+            borderRadius: '4px',
+            border: '1px solid var(--noetic-border)',
+            backgroundColor: 'var(--noetic-input-bg)',
+            color: 'var(--noetic-text)',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {combinedSortOptions.map((opt, index) =>
+            opt.type === 'optgroup' ? (
+              <optgroup key={`group-${index}`} label={opt.label} />
+            ) : (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ),
+          )}
+        </select>
+
+        {/* Refresh Button */}
         <button
           type="button"
           onClick={handleRefreshDiscovery}
           disabled={isDiscovering}
+          title="Refresh agents"
           style={{
-            padding: '4px 8px',
-            fontSize: '10px',
+            width: '28px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             borderRadius: '4px',
             border: '1px solid var(--noetic-border)',
             backgroundColor: 'var(--noetic-button-bg)',
             color: 'var(--noetic-text)',
             cursor: isDiscovering ? 'not-allowed' : 'pointer',
             opacity: isDiscovering ? 0.6 : 1,
+            fontSize: '14px',
+            padding: 0,
+          }}
+          onMouseEnter={(e) => {
+            if (!isDiscovering) {
+              e.currentTarget.style.backgroundColor = 'var(--noetic-button-hover)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--noetic-button-bg)';
           }}
         >
-          {isDiscovering ? 'Scanning...' : '🔄 Refresh'}
+          {isDiscovering ? '⏳' : '🔄'}
         </button>
+      </div>
+
+      {/* Discovery status - simplified */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 16px',
+          fontSize: '10px',
+          color: 'var(--noetic-text-muted)',
+        }}
+      >
+        <span>
+          {agents.length} agent{agents.length !== 1 ? 's' : ''} • Last scan: {formatDiscoveryTime()}
+        </span>
       </div>
 
       {/* Agent list */}

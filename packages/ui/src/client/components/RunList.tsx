@@ -5,6 +5,7 @@
 
 import type React from 'react';
 import { useEffect, useState } from 'react';
+import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import type { Run as ExecutionRun } from '../stores/execution';
 import { useExecutionStore } from '../stores/execution';
@@ -91,7 +92,8 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.data) {
-          const fullRun = data.data as ExecutionRun;
+          // Deserialize the response to convert serialized Maps back to Map instances
+          const fullRun = deserialize(data.data) as ExecutionRun;
           // Add run and its trace to execution store
           addRun(fullRun);
           if (fullRun.trace) {

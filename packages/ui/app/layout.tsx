@@ -8,7 +8,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className="light">
       <head>
         <link
           rel="icon"
@@ -22,11 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 const theme = localStorage.getItem('noetic-ui-theme') || 'system';
                 const isDark = theme === 'dark' || 
                   (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-                if (isDark) {
-                  document.documentElement.classList.add('dark');
-                } else {
-                  document.documentElement.classList.add('light');
-                }
+                const html = document.documentElement;
+                html.classList.remove('light', 'dark');
+                html.classList.add(isDark ? 'dark' : 'light');
               })();
             `,
           }}

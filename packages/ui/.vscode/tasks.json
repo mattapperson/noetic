@@ -1,0 +1,55 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Check (typecheck + lint)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "check"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": ["$biome"]
+    },
+    {
+      "label": "Check and Fix",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "check:fix"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$biome"]
+    },
+    {
+      "label": "Start Dev Server",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "serve"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": ".*",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*Starting server.*",
+          "endsPattern": "^.*Server is running.*"
+        }
+      }
+    },
+    {
+      "label": "Build Executables",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "build:exe"],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

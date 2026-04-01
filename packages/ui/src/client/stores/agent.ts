@@ -16,6 +16,27 @@ import type {
   RunSortOption,
 } from '../types/agent';
 
+// Simple fuzzy match function
+function fuzzyMatch(text: string, pattern: string): boolean {
+  if (!pattern) return true;
+
+  const textLower = text.toLowerCase();
+  const patternLower = pattern.toLowerCase();
+
+  // Quick substring check first
+  if (textLower.includes(patternLower)) return true;
+
+  // Fuzzy match: check if all characters in pattern appear in text in order
+  let patternIndex = 0;
+  for (let i = 0; i < textLower.length && patternIndex < patternLower.length; i++) {
+    if (textLower[i] === patternLower[patternIndex]) {
+      patternIndex++;
+    }
+  }
+
+  return patternIndex === patternLower.length;
+}
+
 interface AgentState {
   // Agents
   agents: Agent[];
@@ -237,10 +258,26 @@ export const useAgentStore = create<AgentState>()(
             if (agent.id !== agentId) {
               return agent;
             }
-            const runs = [
-              run,
-              ...agent.runs,
-            ];
+            // Check if run already exists
+            const existingIndex = agent.runs.findIndex((r) => r.id === run.id);
+            let runs;
+            if (existingIndex >= 0) {
+              // Update existing run instead of adding duplicate
+              runs = agent.runs.map((r, idx) =>
+                idx === existingIndex
+                  ? {
+                      ...r,
+                      ...run,
+                    }
+                  : r,
+              );
+            } else {
+              // Add new run
+              runs = [
+                run,
+                ...agent.runs,
+              ];
+            }
             return {
               ...agent,
               runs,
@@ -338,12 +375,12 @@ export const useAgentStore = create<AgentState>()(
         let filtered = agents;
 
         if (agentFilter.searchQuery) {
-          const query = agentFilter.searchQuery.toLowerCase();
+          const query = agentFilter.searchQuery;
           filtered = filtered.filter(
             (agent) =>
-              agent.name.toLowerCase().includes(query) ||
-              agent.filePath.toLowerCase().includes(query) ||
-              agent.description?.toLowerCase().includes(query),
+              fuzzyMatch(agent.name, query) ||
+              fuzzyMatch(agent.filePath, query) ||
+              (agent.description && fuzzyMatch(agent.description, query)),
           );
         }
 
@@ -418,9 +455,17 @@ export const useAgentStore = create<AgentState>()(
         const { getFilteredRuns, runSort } = get();
         const filtered = getFilteredRuns(agentId);
 
-        return [
-          ...filtered,
-        ].sort((a, b) => {
+        // Deduplicate runs by ID to handle any persisted bad data
+        const seen = new Set<string>();
+        const unique = filtered.filter((run) => {
+          if (seen.has(run.id)) {
+            return false;
+          }
+          seen.add(run.id);
+          return true;
+        });
+
+        return unique.sort((a, b) => {
           switch (runSort) {
             case 'recent':
               return b.startTime - a.startTime;
@@ -440,15 +485,30 @@ export const useAgentStore = create<AgentState>()(
     }),
     {
       name: 'noetic-ui-agents',
-      partialize: (state) => ({
-        agents: state.agents.map((agent) => ({
-          ...agent,
-          runs: agent.runs.slice(0, 50), // Persist only last 50 runs per agent
-        })),
-        registeredAgents: state.registeredAgents,
-        agentSort: state.agentSort,
-        runSort: state.runSort,
-      }),
+      partialize: (state) => {
+        // Deduplicate runs by ID before persisting
+        const dedupedAgents = state.agents.map((agent) => {
+          const seen = new Set<string>();
+          const uniqueRuns = agent.runs.filter((run) => {
+            if (seen.has(run.id)) {
+              return false;
+            }
+            seen.add(run.id);
+            return true;
+          });
+          return {
+            ...agent,
+            runs: uniqueRuns.slice(0, 50), // Persist only last 50 runs per agent
+            runCount: uniqueRuns.length,
+          };
+        });
+        return {
+          agents: dedupedAgents,
+          registeredAgents: state.registeredAgents,
+          agentSort: state.agentSort,
+          runSort: state.runSort,
+        };
+      },
     },
   ),
 );

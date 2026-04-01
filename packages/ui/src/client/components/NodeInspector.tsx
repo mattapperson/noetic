@@ -34,7 +34,7 @@ export const NodeInspector: React.FC = () => {
 
   if (!selectedNode) {
     return (
-      <div className="w-80 h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
+      <div className="w-full h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
         <div className="p-4 border-b border-[var(--noetic-border)]">
           <h2 className="text-sm font-semibold text-[var(--noetic-text)]">Inspector</h2>
         </div>
@@ -50,7 +50,7 @@ export const NodeInspector: React.FC = () => {
   const trace = selectedNode ? traces.get(selectedNode.id) : undefined;
 
   return (
-    <div className="w-80 h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
+    <div className="w-full h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
       <InspectorTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
       <div className="flex-1 overflow-auto">

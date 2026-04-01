@@ -120,7 +120,10 @@
     </style>
     <script>
       // Prevent flash of incorrect theme
-      const theme = localStorage.getItem('noetic-ui-theme') || 'system';
+      // Only use stored theme if explicitly set to 'light' or 'dark'
+      // If 'system' or no preference stored, use system preference
+      const storedTheme = localStorage.getItem('noetic-ui-theme');
+      const theme = (storedTheme === 'light' || storedTheme === 'dark') ? storedTheme : 'system';
       const isDark = theme === 'dark' || 
         (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       if (isDark) {

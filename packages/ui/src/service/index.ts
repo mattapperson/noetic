@@ -105,29 +105,38 @@ export class NoeticUIServerManager {
   }
 
   /**
-   * Stop all servers
+   * Stop all servers gracefully
+   * Waits for pending requests and connections to close
+   * @param timeoutMs Maximum time to wait for graceful shutdown (default: 10000ms)
    */
-  async stop(): Promise<void> {
+  async stop(timeoutMs = 10000): Promise<void> {
     if (!this.isRunning) {
       return;
     }
 
-    await this.wsServer.stop();
-    await this.apiServer.stop();
-    this.isRunning = false;
+    console.log('🛑 Noetic UI: Starting graceful shutdown...');
+    const startTime = Date.now();
 
-    console.log('Noetic UI servers stopped');
+    // Stop API server first to stop accepting new HTTP requests
+    await this.apiServer.stop(timeoutMs);
+
+    // Stop WebSocket server (notifies clients and closes connections)
+    const remainingTime = timeoutMs - (Date.now() - startTime);
+    await this.wsServer.stop(Math.max(1000, remainingTime));
+
+    this.isRunning = false;
+    console.log('✅ Noetic UI servers stopped gracefully');
   }
 
   /**
    * Get server status
    */
-  getStatus(): ServerStatus {
+  async getStatus(): Promise<ServerStatus> {
     return {
       isRunning: this.isRunning,
       wsStatus: this.wsServer.getStatus(),
       apiStatus: this.apiServer.getStatus(),
-      storagePath: this.storage.getStoragePath(),
+      storagePath: await this.storage.getStoragePath(),
     };
   }
 
@@ -170,9 +179,14 @@ export async function startNoeticUI(
 
 /**
  * Stop all Noetic UI servers
+ * @param manager The server manager instance
+ * @param timeoutMs Maximum time to wait for graceful shutdown (default: 10000ms)
  */
-export async function stopNoeticUI(manager: NoeticUIServerManager): Promise<void> {
-  await manager.stop();
+export async function stopNoeticUI(
+  manager: NoeticUIServerManager,
+  timeoutMs = 10000,
+): Promise<void> {
+  await manager.stop(timeoutMs);
 }
 
 // ============================================================================
@@ -185,6 +199,7 @@ if (import.meta.main) {
   const PORT_WS = Number.parseInt(process.env.NOETIC_UI_WS_PORT || '3333', 10);
   const PORT_API = Number.parseInt(process.env.NOETIC_UI_API_PORT || '3334', 10);
   const HOST = process.env.NOETIC_UI_HOST || '127.0.0.1';
+  const SHUTDOWN_TIMEOUT = Number.parseInt(process.env.NOETIC_UI_SHUTDOWN_TIMEOUT || '10000', 10);
 
   console.log('🔮 Noetic UI Server');
   console.log('');
@@ -195,13 +210,55 @@ if (import.meta.main) {
     host: HOST,
   });
 
+  let isShuttingDown = false;
+
+  /**
+   * Graceful shutdown handler
+   */
+  async function gracefulShutdown(signal: string): Promise<void> {
+    if (isShuttingDown) {
+      console.log('\n⚠️  Shutdown already in progress, forcing exit...');
+      process.exit(1);
+    }
+
+    isShuttingDown = true;
+    console.log(`\n🛑 Received ${signal}, starting graceful shutdown...`);
+    console.log(`   Timeout: ${SHUTDOWN_TIMEOUT}ms`);
+
+    try {
+      await manager.stop(SHUTDOWN_TIMEOUT);
+      console.log('✅ Graceful shutdown completed');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error during shutdown:', error);
+      console.log('⚠️  Forcing exit...');
+      process.exit(1);
+    }
+  }
+
+  // Set up signal handlers
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+  // Handle uncaught errors
+  process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught Exception:', error);
+    gracefulShutdown('uncaughtException');
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+    gracefulShutdown('unhandledRejection');
+  });
+
   manager
     .start()
     .then(() => {
       console.log('');
       console.log('✅ Server is running');
-      console.log(`WebSocket: ws://${HOST}:${PORT_WS}`);
-      console.log(`Web UI: http://${HOST}:${PORT_API}`);
+      console.log(`   WebSocket: ws://${HOST}:${PORT_WS}`);
+      console.log(`   Web UI: http://${HOST}:${PORT_API}`);
+      console.log(`   PID: ${process.pid}`);
       console.log('');
       console.log('Press Ctrl+C to stop');
     })
@@ -209,16 +266,4 @@ if (import.meta.main) {
       console.error('❌ Failed to start server:', error.message);
       process.exit(1);
     });
-
-  // Graceful shutdown
-  process.on('SIGINT', async () => {
-    console.log('\n🛑 Shutting down...');
-    await manager.stop();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', async () => {
-    await manager.stop();
-    process.exit(0);
-  });
 }

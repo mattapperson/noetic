@@ -22,9 +22,9 @@
     }
   },
   "files": [
-    "dist/",
     "src/",
     "bin/",
+    "scripts/",
     "README.md",
     "next-env.d.ts",
     "css.d.ts",
@@ -63,10 +63,25 @@
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
+    "check": "bun run typecheck && bun run lint",
+    "check:fix": "bun run typecheck && bun run lint:fix",
     "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev -p 3334",
     "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
+    "build:exe": "bun scripts/build-executables.js",
     "start": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next start -p 3334",
     "serve": "bun src/service/index.ts",
     "prepublishOnly": "bun run build"
-  }
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
 }

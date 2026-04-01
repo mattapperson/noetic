@@ -135,6 +135,12 @@ export const useExecutionStore = create<ExecutionState>()(
         const newRuns = new Map(state.runs);
         newRuns.set(run.id, run);
 
+        // Add trace if present
+        const newTraces = new Map(state.traces);
+        if (run.trace) {
+          newTraces.set(run.id, run.trace);
+        }
+
         // Update agent's run list
         const newAgents = new Map(state.agents);
         const agent = newAgents.get(run.agentId);
@@ -151,6 +157,7 @@ export const useExecutionStore = create<ExecutionState>()(
         return {
           runs: newRuns,
           agents: newAgents,
+          traces: newTraces,
         };
       });
     },

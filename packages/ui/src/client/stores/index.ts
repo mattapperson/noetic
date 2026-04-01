@@ -2,12 +2,8 @@
  * Store exports for Noetic UI client
  */
 
-export {
-  type ConnectionStatus,
-  useConnectionStatus,
-  useConnectionStore,
-  useIsConnected,
-} from './connectionStore';
+// Re-export connection hooks from the hook file where they're actually implemented
+export { useConnectionStatus, useReconnectAttempt } from '../hooks/useConnection';
 export {
   type PlaybackSpeed,
   type PlaybackState,
@@ -30,3 +26,8 @@ export {
   useTimelineStore,
   useTimelineZoom,
 } from './timelineStore';
+export {
+  type ConnectionStatus,
+  registerMessageHandler,
+  useWebSocketStore,
+} from './websocket';

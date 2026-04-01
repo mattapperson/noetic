@@ -2,6 +2,9 @@
 /**
  * Noetic UI CLI
  *
+ * This script checks if Bun is available and either runs the server directly,
+ * or provides instructions to download the standalone executable.
+ *
  * Usage: npx @noetic/ui [command]
  *
  * Commands:
@@ -24,17 +27,73 @@ const HOST = process.env.NOETIC_UI_HOST || '127.0.0.1';
 console.log('🔮 Noetic UI');
 console.log('');
 
-if (command === 'serve' || command === 'start') {
-  console.log('Starting server...');
-  console.log(`WebSocket: ws://${HOST}:${PORT_WS}`);
-  console.log(`Web UI: http://${HOST}:${PORT_API}`);
-  console.log('');
+// Detect OS and architecture for executable download
+function getPlatformInfo() {
+  const os = process.platform;
+  const arch = process.arch;
 
+  const osMap = {
+    darwin: 'darwin',
+    linux: 'linux',
+    win32: 'windows',
+  };
+
+  const archMap = {
+    x64: 'x64',
+    arm64: 'arm64',
+  };
+
+  const mappedOs = osMap[os] || os;
+  const mappedArch = archMap[arch] || arch;
+  const ext = os === 'win32' ? '.exe' : '';
+
+  return {
+    os: mappedOs,
+    arch: mappedArch,
+    filename: `noetic-ui-${mappedOs}-${mappedArch}${ext}`,
+  };
+}
+
+if (command === 'serve' || command === 'start') {
   // Determine if we're running with Bun or Node
   const isBun = process.versions.bun !== undefined;
   const serverScript = join(__dirname, '..', 'src', 'service', 'index.ts');
 
-  console.log(`Using ${isBun ? 'Bun' : 'Node'} runtime`);
+  if (!isBun) {
+    // Not running with Bun - guide user to download executable
+    const platform = getPlatformInfo();
+
+    console.log('⚠️  Bun runtime not detected.');
+    console.log('');
+    console.log('Noetic UI is easiest to run as a standalone executable:');
+    console.log('');
+    console.log('📥 Quick Install (recommended):');
+    console.log(
+      '   curl -fsSL https://raw.githubusercontent.com/mattapperson/noetic/main/packages/ui/scripts/install.sh | bash',
+    );
+    console.log('');
+    console.log('📦 Or download manually:');
+    console.log(
+      `   https://github.com/mattapperson/noetic/releases/latest/download/${platform.filename}`,
+    );
+    console.log('');
+    console.log('🔧 Development setup (requires Bun):');
+    console.log('   1. Install Bun: https://bun.sh');
+    console.log('   2. Run: bunx @noetic/ui serve');
+    console.log('');
+    console.log('🐳 Or use Docker:');
+    console.log('   docker run -p 3333:3333 -p 3334:3334 noetic/ui');
+    console.log('');
+
+    process.exit(1);
+  }
+
+  // Bun is available - run the server
+  console.log('Starting server...');
+  console.log(`WebSocket: ws://${HOST}:${PORT_WS}`);
+  console.log(`Web UI: http://${HOST}:${PORT_API}`);
+  console.log('');
+  console.log('Using Bun runtime');
   console.log(`Server script: ${serverScript}`);
   console.log('');
 
@@ -46,31 +105,17 @@ if (command === 'serve' || command === 'start') {
     NOETIC_UI_HOST: HOST,
   };
 
-  let child;
-  if (isBun) {
-    // Bun can run TypeScript directly
-    child = spawn(
-      'bun',
-      [
-        'run',
-        serverScript,
-      ],
-      {
-        stdio: 'inherit',
-        env,
-      },
-    );
-  } else {
-    // Node needs ts-node or similar - for now, instruct user to use Bun
-    console.error('❌ This package requires Bun to run the server.');
-    console.log('');
-    console.log('Please install Bun: https://bun.sh');
-    console.log('Then run: bunx @noetic/ui serve');
-    console.log('');
-    console.log('Alternatively, run directly with Bun:');
-    console.log('  bun run src/service/index.ts');
-    process.exit(1);
-  }
+  const child = spawn(
+    'bun',
+    [
+      'run',
+      serverScript,
+    ],
+    {
+      stdio: 'inherit',
+      env,
+    },
+  );
 
   // Graceful shutdown
   process.on('SIGINT', () => {
@@ -97,8 +142,20 @@ if (command === 'serve' || command === 'start') {
   console.log('  NOETIC_UI_API_PORT   Web UI port (default: 3334)');
   console.log('  NOETIC_UI_HOST       Bind address (default: 127.0.0.1)');
   console.log('');
-  console.log('Note: This package requires Bun runtime.');
-  console.log('Install Bun from: https://bun.sh');
+  console.log('Installation options:');
+  console.log('');
+  console.log('  1. Standalone executable (recommended):');
+  console.log(
+    '     curl -fsSL https://raw.githubusercontent.com/mattapperson/noetic/main/packages/ui/scripts/install.sh | bash',
+  );
+  console.log('');
+  console.log('  2. npm/yarn/pnpm (requires Bun runtime):');
+  console.log('     npx @noetic/ui serve');
+  console.log('');
+  console.log('  3. Docker:');
+  console.log('     docker run -p 3333:3333 -p 3334:3334 noetic/ui');
+  console.log('');
+  console.log('Documentation: https://github.com/mattapperson/noetic/tree/main/packages/ui');
 } else {
   console.error(`Unknown command: ${command}`);
   console.log('Run `npx @noetic/ui help` for usage information');
