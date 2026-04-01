@@ -161,7 +161,7 @@ export class Debugger implements DebugController {
       input,
       output: null,
       contextSnapshot,
-      stepData: {},
+      stepData: this.extractStepData(step, input),
       children: [],
     };
 
