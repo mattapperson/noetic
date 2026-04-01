@@ -6,18 +6,16 @@ import type {
   OpenResponsesNonStreamingResponse,
   OpenResponsesUsage,
   ResponsesOutputItem,
-  ResponsesOutputItemFunctionCall,
-  ResponsesOutputMessage,
 } from '@openrouter/sdk/models';
 import { z } from 'zod';
 
 import { frameworkCast } from '../interpreter/framework-cast';
-import { isAssistantMessage, isOutputText } from '../interpreter/typeguards';
+import { isAssistantMessage } from '../interpreter/typeguards';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { LLMResponse, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
-import type { ContentPart, FunctionCallItem, Item, MessageItem } from '../types/items';
+import type { InputMessageItem, Item, MessageItem } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
@@ -37,30 +35,14 @@ export type SdkTool = SdkToolArray[number];
 
 //#endregion
 
-//#region Type Guards
-
-function isOutputMessage(entry: ResponsesOutputItem): entry is ResponsesOutputMessage & {
-  type: 'message';
-} {
-  return entry.type === 'message';
-}
-
-function isOutputFunctionCall(
-  entry: ResponsesOutputItem,
-): entry is ResponsesOutputItemFunctionCall & {
-  type: 'function_call';
-} {
-  return entry.type === 'function_call';
-}
-
-//#endregion
-
 //#region Types
 
+/** @internal Input items accepted by the OpenRouter SDK. */
 type OpenRouterInputItem =
   | OpenResponsesEasyInputMessage
   | OpenResponsesFunctionToolCall
-  | OpenResponsesFunctionCallOutput;
+  | OpenResponsesFunctionCallOutput
+  | ResponsesOutputItem;
 
 /** @internal */
 export interface ConvertToolsParams {
@@ -80,27 +62,21 @@ const EmbeddingsResponseSchema = z.object({
 
 //#region Helpers
 
-function isInputText(p: ContentPart): p is Extract<
-  ContentPart,
-  {
-    type: 'input_text';
-  }
-> {
-  return p.type === 'input_text';
+function isTextPart(p: { type: string }): p is {
+  type: string;
+  text: string;
+} {
+  return p.type === 'output_text' || p.type === 'input_text';
 }
 
-function contentPartToText(parts: ReadonlyArray<ContentPart>): string {
+function contentPartsToText(
+  parts: ReadonlyArray<{
+    type: string;
+    text?: string;
+  }>,
+): string {
   return parts
-    .filter(
-      (
-        p,
-      ): p is Extract<
-        ContentPart,
-        {
-          type: 'output_text' | 'input_text';
-        }
-      > => isOutputText(p) || isInputText(p),
-    )
+    .filter(isTextPart)
     .map((p) => p.text)
     .join('');
 }
@@ -109,41 +85,43 @@ function contentPartToText(parts: ReadonlyArray<ContentPart>): string {
 
 //#region Item → OpenRouter Input Conversion
 
-/** @internal */
+/** @internal Extracts system messages from items and returns them as a single instructions string. */
 export function extractSystemInstruction(items: ReadonlyArray<Item>): {
   instructions: string | undefined;
   remaining: Item[];
 } {
-  const systemItems: MessageItem[] = [];
+  const systemTexts: string[] = [];
   const remaining: Item[] = [];
 
   for (const item of items) {
-    if (item.type === 'message' && item.role === 'system') {
-      systemItems.push(item);
+    if (item.type === 'message' && 'role' in item && item.role === 'system') {
+      const msgItem = item satisfies InputMessageItem;
+      systemTexts.push(contentPartsToText(msgItem.content));
       continue;
     }
     remaining.push(item);
   }
 
-  if (systemItems.length === 0) {
+  if (systemTexts.length === 0) {
     return {
       instructions: undefined,
       remaining,
     };
   }
 
-  const instructions = systemItems.map((s) => contentPartToText(s.content)).join('\n\n');
   return {
-    instructions,
+    instructions: systemTexts.join('\n\n'),
     remaining,
   };
 }
 
 function itemToInputItem(item: Item): OpenRouterInputItem | null {
-  if (item.type === 'message') {
+  if (item.type === 'message' && 'content' in item && 'role' in item) {
+    // All message types (input and output) are converted to EasyInputMessage
+    // because the SDK's input union does not accept ResponsesOutputMessage directly.
     return {
       role: item.role,
-      content: contentPartToText(item.content),
+      content: contentPartsToText(item.content),
     } satisfies OpenResponsesEasyInputMessage;
   }
 
@@ -151,7 +129,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     return {
       type: 'function_call',
       callId: item.callId,
-      id: item.id,
+      id: item.id ?? crypto.randomUUID(),
       name: item.name,
       arguments: item.arguments,
     } satisfies OpenResponsesFunctionToolCall;
@@ -165,11 +143,12 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     } satisfies OpenResponsesFunctionCallOutput;
   }
 
-  // Skip reasoning and extension items — internal metadata
-  return null;
+  // Reasoning, web_search_call, file_search_call, image_generation_call,
+  // server tool outputs — pass through directly for round-tripping
+  return frameworkCast<ResponsesOutputItem>(item);
 }
 
-/** @internal */
+/** @internal Converts Noetic Items to OpenRouter SDK input format. */
 export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
   const result: OpenRouterInputItem[] = [];
   for (const item of items) {
@@ -184,78 +163,37 @@ export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] 
 
 //#endregion
 
-//#region OpenRouter Response → Noetic Item Conversion
+//#region OpenRouter Response → Noetic Item Passthrough
 
-function outputItemToNoeticItem(entry: ResponsesOutputItem): Item | null {
-  if (isOutputMessage(entry)) {
-    const text = contentPartToText(entry.content);
+/**
+ * @internal Extracts output items from an SDK response, passing them through directly
+ * as Open Responses compliant items. Falls back to creating a message from `outputText`
+ * when the output array contains no message items.
+ */
+export function extractOutputItems(response: OpenResponsesNonStreamingResponse): Item[] {
+  const items: Item[] = frameworkCast<Item[]>(response.output);
 
-    if (!text) {
-      return null;
-    }
-
-    return {
-      id: entry.id,
-      status: 'completed',
-      type: 'message',
-      role: 'assistant',
-      content: [
-        {
-          type: 'output_text',
-          text,
-        },
-      ],
-    } satisfies MessageItem;
+  const hasMessage = items.some(isAssistantMessage);
+  if (hasMessage || !response.outputText) {
+    return items;
   }
 
-  if (isOutputFunctionCall(entry)) {
-    return {
-      id: entry.id ?? crypto.randomUUID(),
-      status: 'completed',
-      type: 'function_call',
-      callId: entry.callId,
-      name: entry.name,
-      arguments: entry.arguments,
-    } satisfies FunctionCallItem;
-  }
-
-  // Skip web_search_call, file_search_call, image_generation_call, reasoning
-  return null;
-}
-
-/** @internal */
-export function responseToNoeticItems(response: OpenResponsesNonStreamingResponse): Item[] {
-  const items: Item[] = [];
-  let hasMessage = false;
-
-  for (const entry of response.output) {
-    const item = outputItemToNoeticItem(entry);
-    if (!item) {
-      continue;
-    }
-    if (!hasMessage && isAssistantMessage(item)) {
-      hasMessage = true;
-    }
-    items.push(item);
-  }
-
-  // If no message items but outputText exists, create an assistant message
-  if (!hasMessage && response.outputText) {
-    items.unshift({
+  // Fallback: no message items but outputText exists
+  return [
+    frameworkCast<MessageItem>({
       id: crypto.randomUUID(),
-      status: 'completed',
       type: 'message',
       role: 'assistant',
+      status: 'completed',
       content: [
         {
           type: 'output_text',
           text: response.outputText,
         },
       ],
-    } satisfies MessageItem);
-  }
-
-  return items;
+    }),
+    ...items,
+  ];
 }
 
 /** @internal */

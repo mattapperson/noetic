@@ -9,7 +9,7 @@ import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
 import { createMessage, extractAssistantText, trackUsage } from './message-helpers';
-import { isMutableContext } from './typeguards';
+import { isFunctionCall, isMutableContext } from './typeguards';
 
 const MAX_STEERING_RETRIES = 3;
 
@@ -143,7 +143,7 @@ export async function executeLLM<TMemory, I, O>(
     const toolCalls: FunctionCallItem[] = [];
     for (const item of response.items) {
       baseCtx.itemLog.append(item);
-      if (item.type === 'function_call') {
+      if (isFunctionCall(item)) {
         toolCalls.push(item);
       }
     }

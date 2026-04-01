@@ -34,7 +34,7 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
-The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes a `MessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
 ### step.tool
 

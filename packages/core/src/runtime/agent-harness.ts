@@ -4,15 +4,16 @@ import { z } from 'zod';
 import {
   convertTools,
   executeToolCall,
+  extractOutputItems,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
-  responseToNoeticItems,
 } from '../adapters/openrouter';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { collectAllTools, deduplicateTools } from '../interpreter/collect-tools';
 import { execute } from '../interpreter/execute';
 import { frameworkCast } from '../interpreter/framework-cast';
+import { isFunctionCall } from '../interpreter/typeguards';
 import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
@@ -282,7 +283,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
       const sdkResponse = await callResult.getResponse();
       await pipePromise;
-      const roundItems = responseToNoeticItems(sdkResponse);
+      const roundItems = extractOutputItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 
       totalUsage.inputTokens += roundUsage.inputTokens;
@@ -292,7 +293,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
       allItems.push(...roundItems);
 
-      const functionCalls = roundItems.filter((item) => item.type === 'function_call');
+      const functionCalls = roundItems.filter(isFunctionCall);
       if (functionCalls.length === 0 || !request.tools) {
         break;
       }
@@ -308,7 +309,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         conversationInput.push({
           type: 'function_call',
           callId: fc.callId,
-          id: fc.id,
+          id: fc.id ?? crypto.randomUUID(),
           name: fc.name,
           arguments: fc.arguments,
         });

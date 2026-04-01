@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'bun:test';
+import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { ItemLogImpl } from '../../src/runtime/item-log-impl';
 import type {
-  ExtensionItem,
   FunctionCallItem,
   FunctionCallOutputItem,
+  InputMessageItem,
+  Item,
   MessageItem,
   ReasoningItem,
+  ServerToolItem,
 } from '../../src/types/items';
 
-const makeMessage = (id: string, role: 'user' | 'assistant' = 'user'): MessageItem => ({
+const makeInputMessage = (
+  id: string,
+  role: 'user' | 'system' | 'developer' = 'user',
+): InputMessageItem => ({
   id,
   type: 'message',
   status: 'completed',
@@ -20,6 +26,20 @@ const makeMessage = (id: string, role: 'user' | 'assistant' = 'user'): MessageIt
     },
   ],
 });
+
+const makeAssistantMessage = (id: string): MessageItem =>
+  frameworkCast<MessageItem>({
+    id,
+    type: 'message',
+    status: 'completed',
+    role: 'assistant',
+    content: [
+      {
+        type: 'output_text',
+        text: `response ${id}`,
+      },
+    ],
+  });
 
 const makeFunctionCall = (id: string): FunctionCallItem => ({
   id,
@@ -47,7 +67,7 @@ describe('ItemLogImpl', () => {
 
   it('appends a MessageItem and it appears in items', () => {
     const log = new ItemLogImpl();
-    const msg = makeMessage('m1');
+    const msg = makeInputMessage('m1');
     log.append(msg);
     expect(log.items).toHaveLength(1);
     expect(log.items[0]).toBe(msg);
@@ -55,7 +75,7 @@ describe('ItemLogImpl', () => {
 
   it('appends multiple different item types', () => {
     const log = new ItemLogImpl();
-    const msg = makeMessage('m1');
+    const msg = makeInputMessage('m1');
     const call = makeFunctionCall('f1');
     const output = makeFunctionCallOutput('f1');
 
@@ -71,59 +91,55 @@ describe('ItemLogImpl', () => {
 
   it('items array is readonly — cannot push directly', () => {
     const log = new ItemLogImpl();
-    log.append(makeMessage('m1'));
+    log.append(makeInputMessage('m1'));
 
     // The returned array should be frozen or otherwise prevent mutation
     const items = log.items;
     expect(() => {
-      Array.prototype.push.call(items, makeMessage('m2'));
+      Array.prototype.push.call(items, makeInputMessage('m2'));
     }).toThrow();
   });
 
   it('multi-type coexistence — all types present and in order', () => {
     const log = new ItemLogImpl();
 
-    const msg = makeMessage('m1', 'assistant');
+    const msg = makeAssistantMessage('m1');
     const call = makeFunctionCall('f1');
     const output = makeFunctionCallOutput('f1');
-    const reasoning: ReasoningItem = {
+    const reasoning = frameworkCast<ReasoningItem>({
       id: 'r1',
       type: 'reasoning',
       status: 'completed',
-      content: [
+      summary: [
         {
-          type: 'output_text',
+          type: 'summary_text',
           text: 'thinking...',
         },
       ],
-    };
-    const ext: ExtensionItem = {
+    });
+    const ext = frameworkCast<ServerToolItem>({
+      type: 'openrouter:datetime',
       id: 'e1',
-      type: 'noetic:custom_type',
       status: 'completed',
-      data: {
-        foo: 'bar',
-      },
-    };
+    });
 
     log.append(msg);
     log.append(call);
     log.append(output);
     log.append(reasoning);
-    log.append(ext);
+    log.append(frameworkCast<Item>(ext));
 
     expect(log.items).toHaveLength(5);
     expect(log.items[0]).toBe(msg);
     expect(log.items[1]).toBe(call);
     expect(log.items[2]).toBe(output);
     expect(log.items[3]).toBe(reasoning);
-    expect(log.items[4]).toBe(ext);
 
     // Verify types
     expect(log.items[0].type).toBe('message');
     expect(log.items[1].type).toBe('function_call');
     expect(log.items[2].type).toBe('function_call_output');
     expect(log.items[3].type).toBe('reasoning');
-    expect(log.items[4].type).toBe('noetic:custom_type');
+    expect(log.items[4].type).toBe('openrouter:datetime');
   });
 });
