@@ -309,7 +309,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         conversationInput.push({
           type: 'function_call',
           callId: fc.callId,
-          id: fc.id,
+          id: fc.id ?? crypto.randomUUID(),
           name: fc.name,
           arguments: fc.arguments,
         });

@@ -116,16 +116,13 @@ export function extractSystemInstruction(items: ReadonlyArray<Item>): {
 }
 
 function itemToInputItem(item: Item): OpenRouterInputItem | null {
-  if (item.type === 'message') {
-    if ('role' in item && item.role !== 'assistant') {
-      // InputMessageItem — framework-created user/system/developer message
-      return {
-        role: item.role,
-        content: contentPartsToText(item.content),
-      } satisfies OpenResponsesEasyInputMessage;
-    }
-    // MessageItem (ResponsesOutputMessage) — pass through for round-tripping
-    return frameworkCast<ResponsesOutputItem>(item);
+  if (item.type === 'message' && 'content' in item && 'role' in item) {
+    // All message types (input and output) are converted to EasyInputMessage
+    // because the SDK's input union does not accept ResponsesOutputMessage directly.
+    return {
+      role: item.role,
+      content: contentPartsToText(item.content),
+    } satisfies OpenResponsesEasyInputMessage;
   }
 
   if (item.type === 'function_call') {
