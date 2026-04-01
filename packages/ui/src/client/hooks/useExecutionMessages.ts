@@ -8,6 +8,7 @@
 import { useEffect } from 'react';
 import type { ExecutionNode, ExecutionTrace, ServerMessage } from '../../shared/protocol';
 import { useAgentStore } from '../stores/agent';
+import { useExecutionStore } from '../stores/execution';
 import { registerMessageHandler } from '../stores/websocket';
 import type { Run } from '../types/agent';
 
@@ -16,6 +17,7 @@ export function useExecutionMessages(): void {
   const updateRun = useAgentStore((state) => state.updateRun);
   const addAgent = useAgentStore((state) => state.addAgent);
   const agents = useAgentStore((state) => state.agents);
+  const updateNode = useExecutionStore((state) => state.updateNode);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -125,7 +127,22 @@ export function useExecutionMessages(): void {
 
         case 'node.complete':
         case 'node.error': {
-          // Node updates are handled in execution store if cached
+          // Update node in execution store cache
+          const nodeId = message.nodeId;
+          if (message.type === 'node.complete') {
+            updateNode(nodeId, {
+              output: message.output,
+              durationMs: message.durationMs,
+              endTime: Date.now(),
+              status: 'completed',
+            });
+          } else {
+            updateNode(nodeId, {
+              error: message.error,
+              endTime: Date.now(),
+              status: 'error',
+            });
+          }
           break;
         }
 
@@ -140,5 +157,6 @@ export function useExecutionMessages(): void {
     updateRun,
     addAgent,
     agents,
+    updateNode,
   ]);
 }
