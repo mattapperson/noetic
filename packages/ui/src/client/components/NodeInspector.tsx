@@ -4,7 +4,7 @@ import type { ExecutionNode, LLMStepData, ToolStepData } from '../types';
 import { ContextState } from './inspector/ContextState';
 import { InputOutput } from './inspector/InputOutput';
 import { ItemLog } from './inspector/ItemLog';
-import { AlertCircle, Terminal } from './inspector/icons';
+import { AlertCircle, Layers, Terminal } from './inspector/icons';
 import { RawTrace } from './inspector/RawTrace';
 import type { TabId } from './inspector/Tabs';
 import { InspectorTabs } from './inspector/Tabs';
@@ -73,6 +73,11 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
 
               {/* Context State */}
               <ContextState snapshot={selectedNode.contextSnapshot} />
+
+              {/* Children */}
+              {selectedNode.children && selectedNode.children.length > 0 && (
+                <ChildrenSection children={selectedNode.children} />
+              )}
             </div>
           )}
 
@@ -314,6 +319,34 @@ const formatDuration = (ms: number): string => {
   const minutes = Math.floor(ms / 60000);
   const seconds = ((ms % 60000) / 1000).toFixed(0);
   return `${minutes}m ${seconds}s`;
+};
+
+interface ChildrenSectionProps {
+  children: string[];
+}
+
+const ChildrenSection: React.FC<ChildrenSectionProps> = ({ children }) => {
+  return (
+    <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-[var(--noetic-node-bg)] border-b border-[var(--noetic-border)]">
+        <Layers className="w-3.5 h-3.5 text-[var(--noetic-accent)]" />
+        <span className="text-xs font-medium text-[var(--noetic-text)]">
+          Children ({children.length})
+        </span>
+      </div>
+      <div className="p-3 space-y-1">
+        {children.map((childId) => (
+          <div
+            key={childId}
+            className="text-xs font-mono text-[var(--noetic-text-secondary)] bg-[var(--noetic-code-bg)] px-2 py-1 rounded truncate"
+            title={childId}
+          >
+            {childId.slice(0, 8)}...
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 const formatTimestamp = (timestamp: number): string => {
