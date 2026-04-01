@@ -56,6 +56,10 @@ export class GatewayDurable implements DurableObject {
     const discord = bot.getAdapter('discord');
 
     try {
+      // startGatewayListener returns immediately after enqueuing the
+      // WebSocket session via waitUntil. We schedule the next alarm for
+      // after GATEWAY_DURATION_MS so it doesn't overlap the running session,
+      // and clear the running flag on a timer matching the session lifetime.
       await discord.startGatewayListener(
         {
           waitUntil: (p) => this.state.waitUntil(p),
@@ -64,9 +68,12 @@ export class GatewayDurable implements DurableObject {
         undefined,
         webhookUrl,
       );
+      await this.state.storage.setAlarm(Date.now() + GATEWAY_DURATION_MS + ALARM_INTERVAL_MS);
+      setTimeout(() => {
+        this.running = false;
+      }, GATEWAY_DURATION_MS);
     } catch (err: unknown) {
       console.error('Gateway start failed:', err);
-    } finally {
       this.running = false;
       await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
     }

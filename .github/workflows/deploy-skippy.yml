@@ -33,3 +33,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Start gateway
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GATEWAY_SECRET" \
+            "$WORKER_URL/gateway/start"
+        env:
+          WORKER_URL: ${{ vars.SKIPPY_WORKER_URL }}
+          GATEWAY_SECRET: ${{ secrets.SKIPPY_GATEWAY_SECRET }}

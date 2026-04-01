@@ -13,11 +13,15 @@ function getGatewayStub(env: Env): DurableObjectStub {
 }
 
 function isGatewayAuthorized(request: Request, env: Env): boolean {
+  const secret = env.GATEWAY_SECRET;
+  if (!secret) {
+    return false;
+  }
   const header = request.headers.get('Authorization');
   if (!header) {
     return false;
   }
-  return header === `Bearer ${env.GATEWAY_SECRET}`;
+  return header === `Bearer ${secret}`;
 }
 
 //#endregion
