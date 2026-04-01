@@ -9,9 +9,7 @@
     "jsx": "react-jsx",
     "jsxImportSource": "chat",
     "noEmit": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "types": ["@cloudflare/workers-types", "node"]
   },
   "include": ["src"]
 }
