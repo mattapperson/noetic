@@ -6,6 +6,7 @@
  */
 
 import type { Context, Step } from '@noetic/core';
+import type { ExecutionSummary } from '../shared/protocol';
 
 /** Step kinds supported by the UI visualization */
 export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'provide';
@@ -222,10 +223,7 @@ export type ServerMessage =
   | {
       type: 'execution.complete';
       traceId: string;
-      summary: {
-        totalSteps: number;
-        durationMs: number;
-      };
+      summary: ExecutionSummary;
     }
   | {
       type: 'execution.error';

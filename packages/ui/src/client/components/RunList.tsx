@@ -4,16 +4,18 @@
  */
 
 import type React from 'react';
+import { useEffect, useState } from 'react';
 import { useAgentStore } from '../stores/agent';
+import type { Run as ExecutionRun } from '../stores/execution';
 import { useExecutionStore } from '../stores/execution';
-import type { Run, RunSortOption } from '../types/agent';
+import type { Run as AgentRun } from '../types/agent';
 import MemoryIndicator from './MemoryIndicator';
 
 interface RunListProps {
   agentId: string;
 }
 
-const STATUS_ICONS: Record<Run['status'], string> = {
+const STATUS_ICONS: Record<AgentRun['status'], string> = {
   pending: '⏳',
   running: '🟡',
   completed: '🟢',
@@ -22,7 +24,7 @@ const STATUS_ICONS: Record<Run['status'], string> = {
   cancelled: '⚪',
 };
 
-const STATUS_COLORS: Record<Run['status'], string> = {
+const STATUS_COLORS: Record<AgentRun['status'], string> = {
   pending: '#6b7280', // gray-500
   running: '#f59e0b', // amber-500
   completed: '#10b981', // emerald-500
@@ -76,35 +78,37 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export const RunList: React.FC<RunListProps> = ({ agentId }) => {
-  const { getSortedRuns, runSort, setRunSort } = useAgentStore();
-  const { selectRun } = useExecutionStore();
+  const { getSortedRuns } = useAgentStore();
+  const { selectRun, addRun, addTrace, currentRun } = useExecutionStore();
   const runs = getSortedRuns(agentId);
 
-  const sortOptions: {
-    value: RunSortOption;
-    label: string;
-  }[] = [
-    {
-      value: 'recent',
-      label: 'Recent first',
-    },
-    {
-      value: 'oldest',
-      label: 'Oldest first',
-    },
-    {
-      value: 'duration',
-      label: 'Duration',
-    },
-    {
-      value: 'cost',
-      label: 'Cost',
-    },
-    {
-      value: 'memory',
-      label: 'Memory',
-    },
-  ];
+  const handleRunClick = async (run: AgentRun) => {
+    // Fetch full run with trace from API using RESTful nested URL
+    try {
+      const response = await fetch(
+        `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`,
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          const fullRun = data.data as ExecutionRun;
+          // Add run and its trace to execution store
+          addRun(fullRun);
+          if (fullRun.trace) {
+            addTrace(fullRun.trace);
+          }
+          selectRun(run.id);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[RunList] Failed to fetch run details:', error);
+    }
+
+    // Fallback: add run without trace
+    addRun(run as ExecutionRun);
+    selectRun(run.id);
+  };
 
   return (
     <div
@@ -114,57 +118,6 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
         gap: '4px',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '4px 8px',
-          borderBottom: '1px solid var(--noetic-border)',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '10px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            color: 'var(--noetic-text-muted)',
-          }}
-        >
-          {runs.length} run{runs.length !== 1 ? 's' : ''}
-        </span>
-        <select
-          value={runSort}
-          onChange={(e) => {
-            const value = e.target.value;
-            if (
-              value === 'recent' ||
-              value === 'oldest' ||
-              value === 'duration' ||
-              value === 'cost' ||
-              value === 'memory'
-            ) {
-              setRunSort(value);
-            }
-          }}
-          style={{
-            fontSize: '10px',
-            padding: '2px 6px',
-            borderRadius: '4px',
-            border: '1px solid var(--noetic-border)',
-            backgroundColor: 'var(--noetic-input-bg)',
-            color: 'var(--noetic-text)',
-            cursor: 'pointer',
-          }}
-        >
-          {sortOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {runs.length === 0 ? (
         <div
           style={{
@@ -177,19 +130,32 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
           No runs yet
         </div>
       ) : (
-        runs.map((run) => <RunEntry key={run.id} run={run} onClick={() => selectRun(run.id)} />)
+        runs.map((run) => (
+          <RunEntry
+            key={run.id}
+            run={run}
+            isSelected={currentRun?.id === run.id}
+            onClick={() => handleRunClick(run)}
+          />
+        ))
       )}
     </div>
   );
 };
 
 interface RunEntryProps {
-  run: Run;
+  run: AgentRun;
+  isSelected: boolean;
   onClick: () => void;
 }
 
-const RunEntry: React.FC<RunEntryProps> = ({ run, onClick }) => {
+const RunEntry: React.FC<RunEntryProps> = ({ run, isSelected, onClick }) => {
   const isLive = run.isLive || run.status === 'running';
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   return (
     <button
@@ -202,18 +168,26 @@ const RunEntry: React.FC<RunEntryProps> = ({ run, onClick }) => {
         padding: '8px',
         borderRadius: '4px',
         cursor: 'pointer',
-        transition: 'background-color 0.15s',
-        border: isLive ? '1px solid ' + STATUS_COLORS.running : '1px solid transparent',
+        transition: 'background-color 0.15s, border-color 0.15s',
+        border: isSelected
+          ? '1px solid var(--noetic-selected-border)'
+          : isLive
+            ? '1px solid ' + STATUS_COLORS.running
+            : '1px solid transparent',
         animation: isLive ? 'pulse 2s infinite' : undefined,
-        backgroundColor: 'transparent',
+        backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
         textAlign: 'left',
         width: '100%',
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = 'var(--noetic-hover)';
+        if (!isSelected) {
+          e.currentTarget.style.backgroundColor = 'var(--noetic-hover)';
+        }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'transparent';
+        if (!isSelected) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }
       }}
     >
       <div
@@ -248,7 +222,7 @@ const RunEntry: React.FC<RunEntryProps> = ({ run, onClick }) => {
               flexShrink: 0,
             }}
           >
-            {formatRelativeTime(run.startTime)}
+            {isClient ? formatRelativeTime(run.startTime) : ''}
           </span>
           {isLive && (
             <span
@@ -304,7 +278,7 @@ const RunEntry: React.FC<RunEntryProps> = ({ run, onClick }) => {
       >
         <span>⏱ {formatDuration(run.durationMs)}</span>
         {run.totalCost > 0 && <span>${run.totalCost.toFixed(4)}</span>}
-        <span>{run.totalTokens.total.toLocaleString()} tokens</span>
+        <span>{run.totalTokens?.total?.toLocaleString() ?? '0'} tokens</span>
       </div>
 
       <style>{`

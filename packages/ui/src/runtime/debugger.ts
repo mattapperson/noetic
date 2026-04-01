@@ -333,11 +333,37 @@ export class Debugger implements DebugController {
 
     const endTime = Date.now();
 
+    // Aggregate stats from all nodes
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCost = 0;
+    let completedNodes = 0;
+    let errorNodes = 0;
+
+    for (const node of this.nodes.values()) {
+      if (node.contextSnapshot) {
+        totalInputTokens += node.contextSnapshot.tokens?.input ?? 0;
+        totalOutputTokens += node.contextSnapshot.tokens?.output ?? 0;
+        totalCost += node.contextSnapshot.cost ?? 0;
+      }
+      if (node.status === 'completed') {
+        completedNodes++;
+      } else if (node.status === 'error') {
+        errorNodes++;
+      }
+    }
+
     this.state.currentRun.status = finalStatus;
     this.state.currentRun.endTime = endTime;
     this.state.currentRun.durationMs = endTime - this.startTime;
     this.state.currentRun.isLive = false;
     this.state.currentRun.timelineEvents = this.timelineEvents;
+    this.state.currentRun.totalTokens = {
+      input: totalInputTokens,
+      output: totalOutputTokens,
+      total: totalInputTokens + totalOutputTokens,
+    };
+    this.state.currentRun.totalCost = totalCost;
 
     this.trace.status = finalStatus;
     this.trace.endTime = endTime;
@@ -347,8 +373,17 @@ export class Debugger implements DebugController {
         type: 'execution.complete',
         traceId: this.trace.traceId,
         summary: {
-          totalSteps: this.stepCounter,
+          traceId: this.trace.traceId,
+          totalNodes: this.nodes.size,
+          completedNodes,
+          errorNodes,
           durationMs: this.state.currentRun.durationMs ?? 0,
+          totalTokens: {
+            input: totalInputTokens,
+            output: totalOutputTokens,
+            total: totalInputTokens + totalOutputTokens,
+          },
+          totalCost,
         },
       };
       this.emit(message);

@@ -4,8 +4,9 @@
  */
 
 import React from 'react';
+import { useHasHydrated } from '../hooks/useHasHydrated';
 import { useAgentStore } from '../stores/agent';
-import type { Agent, AgentSortOption } from '../types/agent';
+import type { Agent } from '../types/agent';
 import RunList from './RunList';
 
 const STATUS_ICONS = {
@@ -57,15 +58,9 @@ function getAgentStatus(agent: Agent): keyof typeof STATUS_ICONS {
 }
 
 export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
-  const {
-    expandedAgentIds,
-    selectedAgentId,
-    toggleAgentExpanded,
-    selectAgent,
-    removeAgent,
-    agentSort,
-    setAgentSort,
-  } = useAgentStore();
+  const { expandedAgentIds, selectedAgentId, toggleAgentExpanded, selectAgent, removeAgent } =
+    useAgentStore();
+  const hasHydrated = useHasHydrated();
 
   const handleDeleteAgent = React.useCallback(
     (agentId: string) => {
@@ -76,27 +71,9 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
     ],
   );
 
-  const sortOptions: {
-    value: AgentSortOption;
-    label: string;
-  }[] = [
-    {
-      value: 'recent',
-      label: 'Recent first',
-    },
-    {
-      value: 'oldest',
-      label: 'Oldest first',
-    },
-    {
-      value: 'name',
-      label: 'Name',
-    },
-    {
-      value: 'runs',
-      label: 'Run count',
-    },
-  ];
+  // During SSR and initial hydration, don't use persisted state to avoid mismatches
+  const safeExpandedIds = hasHydrated ? expandedAgentIds : new Set<string>();
+  const safeSelectedId = hasHydrated ? selectedAgentId : null;
 
   return (
     <div
@@ -106,51 +83,6 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
         gap: '2px',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px',
-          borderBottom: '1px solid var(--noetic-border)',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '10px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            color: 'var(--noetic-text-muted)',
-          }}
-        >
-          {agents.length} agent{agents.length !== 1 ? 's' : ''}
-        </span>
-        <select
-          value={agentSort}
-          onChange={(e) => {
-            const value = e.target.value;
-            if (value === 'recent' || value === 'oldest' || value === 'name' || value === 'runs') {
-              setAgentSort(value);
-            }
-          }}
-          style={{
-            fontSize: '10px',
-            padding: '2px 6px',
-            borderRadius: '4px',
-            border: '1px solid var(--noetic-border)',
-            backgroundColor: 'var(--noetic-input-bg)',
-            color: 'var(--noetic-text)',
-            cursor: 'pointer',
-          }}
-        >
-          {sortOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {agents.length === 0 ? (
         <div
           style={{
@@ -177,8 +109,8 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
           <AgentEntry
             key={agent.id}
             agent={agent}
-            isExpanded={expandedAgentIds.has(agent.id)}
-            isSelected={selectedAgentId === agent.id}
+            isExpanded={safeExpandedIds.has(agent.id)}
+            isSelected={safeSelectedId === agent.id}
             onToggleExpand={() => toggleAgentExpanded(agent.id)}
             onSelect={() => selectAgent(agent.id)}
             onDelete={handleDeleteAgent}
@@ -209,15 +141,24 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
   const status = getAgentStatus(agent);
   const icon = STATUS_ICONS[status];
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [isClient, setIsClient] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isDeleting) return;
+    if (isDeleting) {
+      return;
+    }
 
     const confirmed = window.confirm(
       `Delete agent "${agent.name}" and all its runs? This cannot be undone.`,
     );
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
     setIsDeleting(true);
     try {
@@ -248,12 +189,12 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
       style={{
         borderRadius: '4px',
         overflow: 'hidden',
-        backgroundColor: isSelected ? 'var(--noetic-selected-bg, #1e293b)' : 'transparent',
-        border: isSelected ? '1px solid var(--noetic-accent)' : '1px solid transparent',
+        backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
+        border: isSelected ? '1px solid var(--noetic-selected-border)' : '1px solid transparent',
+        transition: 'background-color 0.15s, border-color 0.15s',
       }}
     >
-      <button
-        type="button"
+      <div
         onClick={onSelect}
         style={{
           display: 'flex',
@@ -264,15 +205,30 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
           backgroundColor: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          textAlign: 'left',
+        }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelect();
+          }
         }}
       >
-        <button
-          type="button"
+        <div
           onClick={(e) => {
             e.stopPropagation();
             onToggleExpand();
           }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleExpand();
+            }
+          }}
+          role="button"
+          tabIndex={0}
           style={{
             width: '16px',
             height: '16px',
@@ -289,7 +245,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
           aria-label={isExpanded ? 'Collapse' : 'Expand'}
         >
           {isExpanded ? '▼' : '▶'}
-        </button>
+        </div>
 
         <span
           style={{
@@ -315,8 +271,22 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              cursor: 'pointer',
             }}
             title={agent.name}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpand();
+            }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleExpand();
+              }
+            }}
           >
             {agent.name}
           </span>
@@ -358,14 +328,22 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
               color: 'var(--noetic-text-secondary)',
             }}
           >
-            {formatRelativeTime(agent.lastRunAt)}
+            {isClient ? formatRelativeTime(agent.lastRunAt) : ''}
           </span>
         </div>
 
-        <button
-          type="button"
+        <div
           onClick={handleDelete}
-          disabled={isDeleting}
+          role="button"
+          tabIndex={isDeleting ? -1 : 0}
+          aria-disabled={isDeleting}
+          onKeyDown={(e) => {
+            if (!isDeleting && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault();
+              e.stopPropagation();
+              void handleDelete(e as unknown as React.MouseEvent);
+            }
+          }}
           style={{
             width: '20px',
             height: '20px',
@@ -385,8 +363,8 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
           aria-label="Delete agent"
         >
           {isDeleting ? '...' : '×'}
-        </button>
-      </button>
+        </div>
+      </div>
 
       {isExpanded && (
         <div

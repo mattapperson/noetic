@@ -16,6 +16,13 @@ export const DEFAULT_AGENT_PATTERNS = [
 const PATTERNS_ENV_VAR = 'NOETIC_UI_AGENT_PATTERNS';
 
 /**
+ * Check if running in Node.js environment
+ */
+function isNodeEnvironment(): boolean {
+  return typeof process !== 'undefined' && process.versions?.node !== undefined;
+}
+
+/**
  * Get the file patterns to scan for agents
  */
 export function getAgentPatterns(): string[] {
@@ -97,37 +104,118 @@ export function containsAgentHarness(content: string): boolean {
 /**
  * Discover agents from file system (build-time)
  * This would be called during dev server start or build
+ *
+ * Note: This function uses Node.js fs module and only works server-side.
+ * In client-side environments, it returns an empty array.
  */
 export async function discoverAgents(
-  _projectRoot: string,
+  projectRoot: string,
   patterns?: string[],
 ): Promise<DiscoveredAgent[]> {
-  const _scanPatterns = patterns ?? getAgentPatterns();
+  // Only scan files in Node.js environment (server-side/build-time)
+  if (!isNodeEnvironment()) {
+    return [];
+  }
+
+  // Dynamic import of fs module (only evaluated server-side)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = await import(/* webpackIgnore: true */ 'node:fs/promises');
+
+  const scanPatterns = patterns ?? getAgentPatterns();
   const discovered: DiscoveredAgent[] = [];
 
-  // In a real implementation, this would use glob to find files
-  // and parse them with an AST parser
-  // For now, this is a placeholder that returns mock data
-
-  // Example implementation:
-  // const files = await glob(scanPatterns, { cwd: projectRoot });
-  // for (const file of files) {
-  //   const content = await fs.readFile(file, 'utf-8');
-  //   if (containsAgentHarness(content)) {
-  //     const jsdoc = parseJSDocComments(content);
-  //     discovered.push({
-  //       id: generateAgentId(file, 'default'),
-  //       filePath: file,
-  //       exportName: 'default',
-  //       name: extractAgentName(file, jsdoc.name),
-  //       description: jsdoc.description,
-  //       discoveredAt: Date.now(),
-  //       discoveryMethod: 'static',
-  //     });
-  //   }
-  // }
+  await scanDirectoryWithFs(projectRoot, scanPatterns, discovered, fs);
 
   return discovered;
+}
+
+/**
+ * Simple glob pattern matcher
+ * Supports * (any chars) and ** (any dirs)
+ */
+function matchGlobPattern(filePath: string, pattern: string): boolean {
+  // Convert glob pattern to regex
+  const regexPattern = pattern
+    .replace(/\*\*/g, '{{GLOBSTAR}}')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\{\{GLOBSTAR\}\}/g, '.*');
+
+  const regex = new RegExp(`^${regexPattern}$`);
+  return regex.test(filePath);
+}
+
+/**
+ * Recursively scan directory for files matching patterns
+ * Requires fs module passed as parameter
+ */
+async function scanDirectoryWithFs(
+  dir: string,
+  patterns: string[],
+  discovered: DiscoveredAgent[],
+  fs: typeof import('node:fs/promises'),
+): Promise<void> {
+  try {
+    const entries = await fs.readdir(dir, {
+      withFileTypes: true,
+      recursive: true,
+    });
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+
+      // Get relative path from project root
+      const relativePath = entry.parentPath
+        ? `${entry.parentPath}/${entry.name}`.replace(dir, '').replace(/^\//, '')
+        : entry.name;
+
+      // Check if file matches any pattern
+      const matchesPattern = patterns.some(
+        (pattern) =>
+          matchGlobPattern(relativePath, pattern) || matchGlobPattern(entry.name, pattern),
+      );
+
+      if (matchesPattern) {
+        const fullPath = entry.parentPath
+          ? `${entry.parentPath}/${entry.name}`
+          : `${dir}/${entry.name}`;
+
+        try {
+          const content = await fs.readFile(fullPath, 'utf-8');
+
+          // Check if file contains agent harness
+          if (containsAgentHarness(content)) {
+            const jsdoc = parseJSDocComments(content);
+
+            // Find export names (simple regex-based extraction)
+            const exportMatches = content.match(/export\s+(?:const|let|var|default)\s+(\w+)/g);
+            const exportNames = exportMatches?.map((m) => {
+              const match = m.match(/export\s+(?:const|let|var|default)\s+(\w+)/);
+              return match?.[1] || 'default';
+            }) || [
+              'default',
+            ];
+
+            for (const exportName of exportNames) {
+              discovered.push({
+                id: generateAgentId(fullPath, exportName),
+                filePath: fullPath,
+                exportName,
+                name: extractAgentName(fullPath, jsdoc.name),
+                description: jsdoc.description,
+                discoveredAt: Date.now(),
+                discoveryMethod: 'static',
+              });
+            }
+          }
+        } catch (error) {
+          // Skip files that can't be read
+          console.warn(`[Discovery] Failed to read file ${fullPath}:`, error);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Discovery] Failed to scan directory:', error);
+  }
 }
 
 /**

@@ -143,26 +143,48 @@ Debug actions:
 
 ```
 packages/ui/
+├── app/                    # Next.js app directory (built UI)
+│   ├── layout.tsx
+│   ├── page.tsx
+│   └── globals.css
 ├── src/
-│   ├── server/           # Dev server & WebSocket API
+│   ├── service/           # Server-side code (WebSocket + API)
 │   │   ├── index.ts      # Server entry point
 │   │   ├── websocket.ts  # WebSocket message protocol
 │   │   ├── storage.ts    # Execution trace persistence
 │   │   └── api.ts        # REST API for queries
-│   ├── client/           # Web UI (React/Vue/Svelte)
+│   ├── client/           # Web UI (React + Next.js)
 │   │   ├── components/   # Node graph, inspectors, controls
-│   │   ├── stores/       # State management
-│   │   ├── types/        # Client-side type definitions
-│   │   └── app.tsx       # Main application
+│   │   ├── stores/       # Zustand state management
+│   │   ├── hooks/        # React hooks (WebSocket, execution)
+│   │   └── lib/          # Client utilities
 │   ├── runtime/          # Runtime integration
-│   │   ├── hook.ts       # Execution hooks for capturing events
 │   │   ├── exporter.ts   # TraceExporter implementation
-│   │   └── debugger.ts   # Debug runtime with pause/resume
+│   │   ├── debugger.ts   # Debug runtime with pause/resume
+│   │   └── hook.ts       # Execution hooks for capturing events
 │   └── shared/           # Shared types & protocol
 │       ├── protocol.ts   # WebSocket message types
 │       └── types.ts      # Common interfaces
+├── bin/
+│   └── noetic-ui.js      # CLI entry point (runtime detection)
+├── scripts/
+│   ├── build-executables.js  # Cross-platform build automation
+│   └── install.sh           # User install script
+├── .github/workflows/
+│   └── build-executables.yml  # CI/CD for releases
 ├── package.json
 └── README.md
+```
+
+**Distribution Artifacts:**
+
+```
+dist-exe/                           # Built executables (not in repo)
+├── noetic-ui-darwin-arm64         # macOS Apple Silicon
+├── noetic-ui-darwin-x64           # macOS Intel
+├── noetic-ui-linux-arm64          # Linux ARM64
+├── noetic-ui-linux-x64            # Linux x64
+└── noetic-ui-win32-x64.exe        # Windows x64
 ```
 
 ### Integration Points
@@ -306,14 +328,116 @@ export function execute(step, input, ctx) {
 
 ### CLI Integration
 
-```bash
-# Start the UI server and run agent with debugging enabled
-npx @noetic/ui serve --port 3333 &
-npx my-agent --noetic-ui-port 3333
+**Distribution Strategy: Standalone Executables**
 
-# Or combined command
-npx @noetic/ui run -- npm start
+Noetic UI is distributed as **standalone executables** to provide zero-dependency installation across all platforms. This approach was chosen to eliminate runtime compatibility issues and provide the best user experience.
+
+**Installation Methods (in order of preference):**
+
+1. **Standalone Executable (Recommended)**
+   ```bash
+   # macOS/Linux - One-line install
+   curl -fsSL https://raw.githubusercontent.com/mattapperson/noetic/main/packages/ui/scripts/install.sh | bash
+   
+   # Or download manually from GitHub releases
+   # https://github.com/mattapperson/noetic/releases
+   ```
+   
+   **Benefits:**
+   - Zero dependencies (includes embedded runtime)
+   - Single binary (~50-110MB depending on platform)
+   - Works immediately after download
+   - No package manager required
+   - Consistent behavior across all systems
+
+2. **Docker**
+   ```bash
+   docker run -p 3333:3333 -p 3334:3334 noetic/ui
+   ```
+   
+   **Benefits:**
+   - Containerized, isolated environment
+   - Perfect for CI/CD pipelines
+   - No local installation needed
+
+3. **Bun/NPX (Development Only)**
+   ```bash
+   # Requires Bun: https://bun.sh
+   bunx @noetic/ui serve
+   ```
+   
+   **Benefits:**
+   - Access to programmatic API
+   - Development and debugging
+   - Integration with existing Bun projects
+   
+   **Limitations:**
+   - Requires Bun runtime
+   - TypeScript source execution
+   - Not recommended for end users
+
+**Why Not Universal Package Manager Support?**
+
+We evaluated supporting npm/yarn/pnpm universally but decided against it because:
+
+1. **Runtime Dependency Hell:** Supporting Node.js + Bun + Deno creates a 2x testing burden
+2. **Bun-Specific APIs:** The server uses Bun's native APIs for optimal performance
+3. **Compilation Complexity:** Transpiling TS→JS for Node introduces maintenance overhead
+4. **Size Trade-off:** Pre-compiled binaries (50-110MB) are actually smaller than node_modules (150-300MB)
+5. **UX Consistency:** A single binary works identically everywhere vs. "works on my machine" issues
+
+**Architecture Decision:**
+- Distribute as **standalone executables** for end users
+- Keep **npm package** for programmatic API access (requires Bun)
+- Provide **Docker image** for containerized environments
+- Build using **Bun's native compile feature** for optimal bundling
+
+**Executable Usage:**
+```bash
+# Start the UI server
+noetic-ui serve
+
+# With environment variables
+NOETIC_UI_WS_PORT=3333 NOETIC_UI_API_PORT=3334 noetic-ui serve
+
+# Check version
+noetic-ui --version
+
+# Show help
+noetic-ui --help
 ```
+
+**Graceful Shutdown:**
+```bash
+# The executable handles SIGINT/SIGTERM properly
+curl -fsSL ... | bash  # Install
+./noetic-ui serve &      # Start in background
+kill -INT %1             # Graceful shutdown
+```
+
+**Supported Platforms:**
+- macOS (Intel & Apple Silicon)
+- Linux (x64 & ARM64)
+- Windows (x64)
+
+**Build Process:**
+Executables are built using Bun's `--compile` feature in CI/CD:
+```bash
+bun build --compile --target bun-darwin-arm64 --outfile noetic-ui-darwin-arm64 src/service/index.ts
+```
+
+This creates a single binary containing:
+- WebSocket server
+- REST API server  
+- Pre-built Next.js UI
+- All dependencies
+- Embedded Bun runtime
+
+**Distribution via GitHub Releases:**
+- Automated builds on tag push via GitHub Actions
+- Cross-platform matrix builds (5 targets)
+- Checksums for integrity verification
+- Install script for one-line setup
 
 ---
 
@@ -575,8 +699,10 @@ interface StorageMetrics {
 - **Sort by size** - Find largest traces to delete first
 
 **Storage Location:**
-- **Default:** `~/.noetic-ui/traces/` (user home directory)
+- **Default:** `./.noetic/ui/traces/` (in project root)
+- **Detection:** Automatically finds project root by locating `package.json`
 - **Configurable** via `NOETIC_UI_STORAGE_PATH` env var
+- **Fallback:** `~/.noetic-ui/traces/` if no project root found
 - **Storage backend:** File system (memory/redis for future)
 
 ---
@@ -1288,27 +1414,98 @@ npx @noetic/ui replay <trace-file.json>
 
 See `src/shared/protocol.ts` for complete message types.
 
+### REST API
+
+The UI server exposes a REST API for querying agents and runs. All endpoints return JSON with a standard response wrapper:
+
+```typescript
+interface APIResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+```
+
+**Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/agents` | List all registered agents |
+| `DELETE` | `/api/agents/{agentId}` | Delete an agent and all its runs |
+| `GET` | `/api/agents/{agentId}/runs` | List all runs for an agent |
+| `GET` | `/api/agents/{agentId}/runs/{runId}` | Get a specific run with full trace |
+| `DELETE` | `/api/agents/{agentId}/runs/{runId}` | Delete a specific run |
+| `GET` | `/api/metrics` | Get storage metrics (total runs, size, per-agent stats) |
+| `GET` | `/health` | Health check endpoint |
+
+**Examples:**
+
+```bash
+# List all agents
+curl http://localhost:3334/api/agents
+
+# Get runs for an agent
+curl http://localhost:3334/api/agents/my-agent/runs
+
+# Get a specific run with trace
+curl http://localhost:3334/api/agents/my-agent/runs/run-uuid-123
+
+# Get storage metrics
+curl http://localhost:3334/api/metrics
+```
+
+**Note:** Runs are accessed as nested resources under agents (`/api/agents/{agentId}/runs/{runId}`) following REST best practices. The run ID alone is not sufficient to identify a run - it must be qualified by the agent ID.
+
 ---
 
 ## Dependencies
 
-### Production Dependencies
+### Runtime Dependencies (Server)
 
-- `ws` - WebSocket server/client
-- `express` - REST API server (optional, can use pure WS)
-- `zod` - Schema validation (shared with core)
+- `ws` (^8.16.0) - WebSocket server/client for real-time communication
+- `zod` (^4.0.0) - Schema validation (shared with core)
+- `next` (^14.2.0) - Next.js framework for web UI
+- `react` (^18.2.0) / `react-dom` (^18.2.0) - UI framework
+- `zustand` (^5.0.0) - State management
 
-### Dev Dependencies (Client)
+**Note:** These are all bundled into the standalone executable. End users don't need to install them.
 
-- `react` / `react-dom` - UI framework
-- `@tanstack/react-query` or `zustand` - State management
-- `reactflow` or `@xyflow/react` - Node graph (optional, can build custom)
-- `monaco-editor` - JSON/code editing (optional)
-- `tailwindcss` or `styled-components` - Styling
+### Development Dependencies
+
+- `bun-types` - Bun runtime types
+- `typescript` (^6.0.2) - TypeScript compiler
+- `@types/node`, `@types/react`, `@types/react-dom`, `@types/ws` - Type definitions
+- `tailwindcss`, `postcss`, `autoprefixer` - Styling
+
+### Build Tooling
+
+- **Bun** (>=1.0.0) - Required for:
+  - Development and testing
+  - Building standalone executables (`bun build --compile`)
+  - Running from source (`bun src/service/index.ts`)
+  - Cross-platform compilation
 
 ### Peer Dependencies
 
-- `@noetic/core` - The core framework being debugged
+- `@noetic/core` (workspace:*) - The core framework being debugged
+
+### Distribution Strategy
+
+**End Users (Standalone Executable):**
+- Zero dependencies required
+- Single binary (~50-110MB) includes everything
+- No package manager needed
+- No runtime installation required
+
+**Developers (Source):**
+- Bun 1.0+ required
+- `bun install` to fetch dependencies
+- `bun run build:exe` to create executables
+
+**Programmatic API Users:**
+- Bun 1.0+ required
+- `bun add -D @noetic/ui` to install
+- Import from `@noetic/ui/service` or `@noetic/ui/runtime`
 
 ---
 
@@ -1322,17 +1519,50 @@ Minimal configuration needed to get started:
 
 ```bash
 NOETIC_UI_ENABLED=true         # Enable UI integration (required)
-NOETIC_UI_PORT=3333            # WebSocket server port (optional, default: 3333)
+NOETIC_UI_WS_PORT=3333         # WebSocket server port (optional, default: 3333)
+NOETIC_UI_API_PORT=3334        # REST API/Web UI port (optional, default: 3334)
+NOETIC_UI_HOST=127.0.0.1       # Bind address (optional, default: 127.0.0.1)
 NOETIC_UI_THEME=system         # Theme: system, dark, light (optional, default: system)
 ```
+
+**Note on Port Configuration:**
+The UI uses two ports:
+- **WebSocket (3333):** Real-time communication with agents
+- **API/Web UI (3334):** REST API and browser interface
+
+This separation allows independent scaling and firewall configuration.
+
+#### Storage Location
+
+Traces are stored in the project directory by default:
+
+```
+.your-project-root/
+├── .noetic/
+│   └── ui/
+│       ├── traces/          # Execution trace files
+│       └── agents.json      # Agent registry
+├── src/
+└── package.json
+```
+
+**Storage Path Resolution:**
+1. Checks `NOETIC_UI_STORAGE_PATH` environment variable
+2. Detects project root (directory containing `package.json`)
+3. Creates `.noetic/ui/traces/` in project root
+4. Falls back to `~/.noetic-ui/traces/` if no project root found
+
+This ensures traces stay with the project they're debugging.
 
 #### Config File (noetic.ui.json) - Optional
 
 ```json
 {
-  "port": 3333,
+  "wsPort": 3333,
+  "apiPort": 3334,
+  "host": "127.0.0.1",
   "theme": "system",
-  "storagePath": "./.noetic-ui/traces"
+  "storagePath": "./.noetic/ui/traces"
 }
 ```
 
@@ -1340,30 +1570,71 @@ NOETIC_UI_THEME=system         # Theme: system, dark, light (optional, default: 
 
 ---
 
-### Extended Configuration (Future)
+### Extended Configuration
 
 Additional options for advanced use cases:
 
 #### All Environment Variables
 
 ```bash
+# Core
 NOETIC_UI_ENABLED=true         # Enable UI integration
-NOETIC_UI_PORT=3333            # WebSocket server port
-NOETIC_UI_HOST=localhost       # WebSocket server host
-NOETIC_UI_AUTO_OPEN=true       # Auto-open browser on start
-NOETIC_UI_STORAGE=memory       # Storage backend: memory, file, redis
-NOETIC_UI_STORAGE_PATH=./.noetic-ui  # For file storage
+NOETIC_UI_WS_PORT=3333         # WebSocket server port
+NOETIC_UI_API_PORT=3334        # REST API/Web UI port
+NOETIC_UI_HOST=127.0.0.1       # Bind address (use 0.0.0.0 for remote access)
+NOETIC_UI_SHUTDOWN_TIMEOUT=10000  # Graceful shutdown timeout in ms (default: 10000)
+
+# Storage
+NOETIC_UI_STORAGE_PATH=./.noetic/ui/traces  # Trace storage location
+
+# UI
 NOETIC_UI_THEME=system         # Theme: system, dark, light
+NOETIC_UI_AUTO_OPEN=true       # Auto-open browser on start (future)
+
+# Advanced (future)
+NOETIC_UI_STORAGE_BACKEND=file # Storage backend: file, memory, redis
+NOETIC_UI_BUFFER_SIZE=1000     # WebSocket buffer size
 ```
+
+#### Graceful Shutdown
+
+The UI server handles shutdown signals properly:
+
+```bash
+# SIGINT (Ctrl+C) - Graceful shutdown with timeout
+./noetic-ui serve
+Ctrl+C
+# → "Received SIGINT, starting graceful shutdown..."
+# → "Timeout: 10000ms"
+# → "Server stopped gracefully"
+
+# SIGTERM (Docker stop, process manager)
+kill -TERM <pid>
+# → Same graceful shutdown sequence
+
+# Force kill after timeout
+# → "Shutdown timeout exceeded, forcing exit"
+```
+
+**Shutdown Process:**
+1. Stop accepting new WebSocket connections
+2. Stop accepting new HTTP requests
+3. Wait for pending requests to complete (up to timeout)
+4. Close all client connections gracefully
+5. Persist any pending trace data
+6. Exit cleanly
 
 #### Full Config File
 
 ```json
 {
-  "port": 3333,
+  "wsPort": 3333,
+  "apiPort": 3334,
+  "host": "127.0.0.1",
+  "shutdownTimeout": 10000,
   "storage": {
     "type": "file",
-    "path": "./.noetic-ui/traces"
+    "path": "./.noetic/ui/traces"
   },
   "breakpoints": {
     "pauseOnError": true,

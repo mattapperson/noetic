@@ -2,93 +2,72 @@
 
 Visual debugging interface for Noetic agent workflows. Provides real-time execution visualization, time-travel debugging, and interactive node graphs.
 
-## Features
+## Installation
 
-- **Real-time Execution Tracing** - Watch agents execute step-by-step with live updates
-- **Interactive Node Graph** - Visualize agent execution flow with zoom, pan, and selection
-- **Time-travel Debugging** - Scrub through execution history with the timeline
-- **Step Inspector** - View detailed information about each step (LLM calls, tool invocations, state)
-- **Breakpoint Support** - Pause execution at specific steps for debugging
-- **Zero Production Impact** - Tree-shakeable, disabled by default, only connects when `NOETIC_UI_ENABLED=true`
+### Option 1: Standalone Executable (Recommended)
 
-## Architecture
+Download a pre-built binary for your platform - **zero dependencies required**:
 
-The UI consists of three components:
-
-1. **WebSocket Service** (port 3333) - Receives trace data from agents
-2. **Next.js Dev UI** (port 3334) - Visual debugger interface
-3. **Runtime Instrumentation** - TraceExporter that sends data to the service
-
+**macOS/Linux - One-line install:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/mattapperson/noetic/main/packages/ui/scripts/install.sh | bash
 ```
-┌─────────────┐      WebSocket       ┌──────────────┐      HTTP      ┌─────────────┐
-│   Agent     │ ───────────────────► │  UI Service  │ ◄───────────── │  Browser    │
-│  (runtime)  │   trace events       │   (3333)     │   (port 3334)  │  (Next.js)  │
-└─────────────┘                      └──────────────┘                └─────────────┘
+
+**Windows - Download manually:**
+Download `noetic-ui-windows-x64.exe` from [GitHub Releases](https://github.com/mattapperson/noetic/releases).
+
+**Manual download for all platforms:**
+Visit [GitHub Releases](https://github.com/mattapperson/noetic/releases) and download the appropriate binary for your platform:
+- `noetic-ui-darwin-arm64` (Apple Silicon Macs)
+- `noetic-ui-darwin-x64` (Intel Macs)
+- `noetic-ui-linux-arm64` (ARM64 Linux)
+- `noetic-ui-linux-x64` (x64 Linux)
+- `noetic-ui-windows-x64.exe` (Windows)
+
+Then run:
+```bash
+# macOS/Linux
+chmod +x noetic-ui-darwin-arm64
+./noetic-ui-darwin-arm64 serve
+
+# Windows
+noetic-ui-windows-x64.exe serve
 ```
+
+### Option 2: Docker
+
+```bash
+docker run -p 3333:3333 -p 3334:3334 noetic/ui
+```
+
+### Option 3: Bun/NPX (Development)
+
+For development or when you need the programmatic API:
+
+```bash
+# Requires Bun: https://bun.sh
+bunx @noetic/ui serve
+
+# Or install locally
+bun add -D @noetic/ui
+bunx noetic-ui serve
+```
+
+**Note:** The npm package requires Bun to run. If you don't have Bun installed, use the standalone executable (Option 1) instead.
 
 ## Quick Start
 
-### Option 1: Using from NPM (Recommended for Users)
-
-Install the package in your project:
+### Using Standalone Executable
 
 ```bash
-npm install @noetic/ui
-# or
-bun add @noetic/ui
+# Start the UI server
+noetic-ui serve
+
+# Or with custom ports
+NOETIC_UI_WS_PORT=3333 NOETIC_UI_API_PORT=3334 noetic-ui serve
 ```
 
-**Start the WebSocket service:**
-
-```bash
-# Use the installed CLI
-npx @noetic/ui serve
-
-# Or with Bun
-bunx @noetic/ui serve
-```
-
-The service will start on port 3333 and automatically serve the built UI from the package. Open http://localhost:3334 in your browser.
-
-**Note:** The npm package includes pre-built static files. If you're installing from Git/source, you must build first (see Option 2).
-
-### Option 2: Development from Source (For Contributors)
-
-Clone the repository and install dependencies:
-
-```bash
-cd packages/ui
-bun install
-```
-
-**Important: Build the static UI files first:**
-
-```bash
-bun run build
-```
-
-This creates the `dist/` folder with the compiled Next.js static files. The service requires these files to serve the web UI.
-
-**Start the WebSocket service:**
-
-```bash
-# From repo root
-bun run dev:ui
-
-# Or from packages/ui
-bun run serve
-```
-
-**Start the dev UI (for development with hot reload):**
-
-```bash
-cd packages/ui
-bun run dev
-```
-
-The UI will be available at http://localhost:3334
-
-### 3. Connect Your Agent
+### Connect Your Agent
 
 Add the UI instrumentation to your agent:
 
@@ -125,7 +104,7 @@ const harness = new AgentHarness({
 });
 ```
 
-### 4. Enable UI Connection
+### Enable UI Connection
 
 Run your agent with the environment variable:
 
@@ -133,9 +112,47 @@ Run your agent with the environment variable:
 NOETIC_UI_ENABLED=true bun run your-agent.ts
 ```
 
+Then open your browser to: **http://localhost:3334**
+
+## Features
+
+- **Real-time Execution Tracing** - Watch agents execute step-by-step with live updates
+- **Interactive Node Graph** - Visualize agent execution flow with zoom, pan, and selection
+- **Time-travel Debugging** - Scrub through execution history with the timeline
+- **Step Inspector** - View detailed information about each step (LLM calls, tool invocations, state)
+- **Breakpoint Support** - Pause execution at specific steps for debugging
+- **Zero Production Impact** - Tree-shakeable, disabled by default, only connects when `NOETIC_UI_ENABLED=true`
+
+## Architecture
+
+The UI consists of three components:
+
+1. **WebSocket Service** (port 3333) - Receives trace data from agents
+2. **Next.js Dev UI** (port 3334) - Visual debugger interface
+3. **Runtime Instrumentation** - TraceExporter that sends data to the service
+
+```
+┌─────────────┐      WebSocket       ┌──────────────┐      HTTP      ┌─────────────┐
+│   Agent     │ ───────────────────► │  UI Service  │ ◄───────────── │  Browser    │
+│  (runtime)  │   trace events       │   (3333)     │   (port 3334)  │  (Next.js)  │
+└─────────────┘                      └──────────────┘                └─────────────┘
+```
+
 ## Configuration
 
-### UI Service Options
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOETIC_UI_ENABLED` | `false` | Enable UI integration (required for connection) |
+| `NOETIC_UI_WS_PORT` | `3333` | WebSocket server port |
+| `NOETIC_UI_API_PORT` | `3334` | REST API/Web UI port |
+| `NOETIC_UI_HOST` | `127.0.0.1` | Bind address (use `0.0.0.0` for remote access) |
+| `NOETIC_UI_STORAGE_PATH` | `.noetic/ui/traces` | Trace storage directory (relative to project root) |
+| `NOETIC_UI_THEME` | `system` | UI theme: `system`, `dark`, `light` |
+| `NOETIC_UI_SHUTDOWN_TIMEOUT` | `10000` | Graceful shutdown timeout in ms |
+
+### Programmatic Configuration
 
 ```typescript
 import { NoeticUIServerManager } from '@noetic/ui/service';
@@ -144,7 +161,7 @@ const server = new NoeticUIServerManager({
   wsPort: 3333,        // WebSocket port
   apiPort: 3334,       // REST API port
   host: '127.0.0.1',   // Bind address
-  storagePath: './.noetic-ui-storage', // Trace storage location
+  storagePath: './.noetic/ui/traces', // Trace storage location
 });
 
 await server.start();
@@ -164,17 +181,33 @@ const exporter = new NoeticUITraceExporter({
 });
 ```
 
-## Development Scripts
+## Development
+
+### Prerequisites
+
+- Bun 1.0+ (https://bun.sh)
+
+### Setup
 
 ```bash
-# Start dev UI only (client)
+cd packages/ui
+bun install
+```
+
+### Development Scripts
+
+```bash
+# Start development server (with hot reload)
 bun run dev
 
 # Start WebSocket service only
 bun run serve
 
-# Build for static export
+# Build Next.js static files
 bun run build
+
+# Build standalone executables for all platforms
+bun run build:exe
 
 # Type check
 bun run typecheck
@@ -186,7 +219,26 @@ bun run lint
 bun run format
 ```
 
-## Project Structure
+### Building Executables
+
+The standalone executables are built using Bun's native `--compile` feature:
+
+```bash
+# Build for all platforms (requires cross-compilation support)
+bun run build:exe
+
+# Or manually for current platform
+bun build --compile --outfile noetic-ui src/service/index.ts
+```
+
+This creates a single binary (~50-110MB depending on platform) that includes:
+- The complete WebSocket server
+- REST API server
+- Pre-built Next.js UI files
+- All runtime dependencies
+- Embedded Bun runtime
+
+### Project Structure
 
 ```
 packages/ui/
@@ -209,93 +261,13 @@ packages/ui/
 │   │   └── hook.ts        # Execution hooks
 │   └── shared/            # Shared types
 │       └── protocol.ts    # WebSocket message types
-├── css.d.ts               # CSS type declarations
-└── next-env.d.ts          # Next.js types
-```
-
-## Using with Different Package Managers
-
-### With Bun (recommended)
-
-```bash
-cd packages/ui
-bun install
-bun run dev
-```
-
-### With npm/pnpm
-
-The UI works with npm and pnpm as well:
-
-```bash
-cd packages/ui
-npm install
-npm run dev
-```
-
-Note: You may see "Failed to patch lockfile" warnings in workspace environments. These are harmless - the SWC binary is already installed and the dev server works correctly.
-
-## Troubleshooting
-
-### Port Already in Use
-
-If ports 3333 or 3334 are in use:
-
-```bash
-# Find and kill processes
-lsof -ti:3333 | xargs kill
-lsof -ti:3334 | xargs kill
-```
-
-Or configure different ports:
-
-```typescript
-const server = new NoeticUIServerManager({
-  wsPort: 3335,
-  apiPort: 3336,
-});
-```
-
-### Connection Issues
-
-If the UI doesn't show agent executions:
-
-1. Verify the WebSocket service is running: `curl http://localhost:3333/health`
-2. Check `NOETIC_UI_ENABLED=true` is set
-3. Ensure the agent is using the TraceExporter
-4. Check browser console for WebSocket connection errors
-
-### "Could not find dist directory" Error
-
-If you see this error in the service console or get `{"success":false,"error":"Not found"}` in the browser:
-
-**Cause:** The static UI files haven't been built.
-
-**Solution:**
-
-```bash
-cd packages/ui
-bun run build
-```
-
-This creates the `dist/` folder with compiled Next.js static files that the service serves. 
-
-**For published package users:** This shouldn't happen with npm installs. If it does, the package may not have been built before publishing. Use the development setup above or report an issue.
-
-### Build Errors
-
-If you see CSS import errors:
-
-```
-Cannot find module './globals.css'
-```
-
-Make sure `css.d.ts` is included in your `tsconfig.json`:
-
-```json
-{
-  "include": ["css.d.ts", "next-env.d.ts"]
-}
+├── bin/
+│   └── noetic-ui.js      # CLI entry point
+├── scripts/
+│   ├── build-executables.js  # Cross-platform build script
+│   └── install.sh           # Install script for users
+└── .github/workflows/
+    └── build-executables.yml # CI/CD for releases
 ```
 
 ## API Reference
@@ -318,20 +290,111 @@ The UI uses a simple WebSocket protocol for real-time updates:
 
 ### REST API
 
-The service also exposes REST endpoints:
+The service exposes REST endpoints following RESTful best practices with nested resource URLs:
 
-- `GET /health` - Service health check
-- `GET /api/agents` - List registered agents
-- `GET /api/executions` - List executions
-- `GET /api/executions/:id` - Get execution details
-- `GET /api/executions/:id/traces` - Get trace data
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Service health check |
+| `GET` | `/api/agents` | List all registered agents |
+| `DELETE` | `/api/agents/:agentId` | Delete an agent and all its runs |
+| `GET` | `/api/agents/:agentId/runs` | List runs for an agent |
+| `GET` | `/api/agents/:agentId/runs/:runId` | Get a specific run with full trace data |
+| `DELETE` | `/api/agents/:agentId/runs/:runId` | Delete a specific run |
+| `GET` | `/api/metrics` | Get storage metrics (total runs, size, per-agent stats) |
+
+**Response Format:**
+All endpoints return JSON with a standard wrapper:
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+## Troubleshooting
+
+### Port Already in Use
+
+If ports 3333 or 3334 are in use:
+
+```bash
+# Find and kill processes
+lsof -ti:3333 | xargs kill
+lsof -ti:3334 | xargs kill
+```
+
+Or configure different ports:
+
+```bash
+NOETIC_UI_WS_PORT=3335 NOETIC_UI_API_PORT=3336 noetic-ui serve
+```
+
+### Connection Issues
+
+If the UI doesn't show agent executions:
+
+1. Verify the WebSocket service is running: `curl http://localhost:3334/api/agents`
+2. Check `NOETIC_UI_ENABLED=true` is set in your agent environment
+3. Ensure the agent is using the TraceExporter
+4. Check browser console for WebSocket connection errors
+5. Verify storage directory is writable: `.noetic/ui/traces/`
+
+### "Could not find dist directory" Error
+
+If you see this error in the service console:
+
+**Cause:** The static UI files haven't been built (development from source only).
+
+**Solution:**
+
+```bash
+cd packages/ui
+bun run build
+```
+
+**For standalone executable users:** This shouldn't happen. If it does, the binary may be corrupted. Re-download from GitHub releases.
+
+### Build Errors
+
+If you see CSS import errors:
+
+```
+Cannot find module './globals.css'
+```
+
+Make sure `css.d.ts` is included in your `tsconfig.json`:
+
+```json
+{
+  "include": ["css.d.ts", "next-env.d.ts"]
+}
+```
+
+## Programmatic API
+
+For library use within your applications:
+
+```typescript
+import { startNoeticUI, stopNoeticUI } from '@noetic/ui/service';
+
+const manager = await startNoeticUI({
+  wsPort: 3333,
+  apiPort: 3334,
+});
+
+// Later...
+await stopNoeticUI(manager);
+```
+
+**Note:** The programmatic API requires Bun or a TypeScript-compatible runtime.
 
 ## Security
 
 - **Localhost only** - Binds to 127.0.0.1 by default
 - **No production data** - Designed for local development only
-- **User-controlled storage** - Traces stored locally, no auto-cleanup
+- **User-controlled storage** - Traces stored locally in project directory, no auto-cleanup
 - **1000-step limit** - Warns on large traces to prevent memory issues
+- **Graceful shutdown** - Proper signal handling for clean exits
 
 ## Browser Support
 

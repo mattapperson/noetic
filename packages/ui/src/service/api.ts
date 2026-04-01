@@ -14,6 +14,31 @@ import type { Run } from '../shared/protocol.js';
 import type { TraceStorage } from './storage.js';
 
 // ============================================================================
+// JSON Serialization Helpers
+// ============================================================================
+
+/**
+ * JSON replacer for serializing Maps
+ * Matches the replacer used in TraceStorage
+ */
+function serializeValue(_key: string, value: unknown): unknown {
+  if (value instanceof Map) {
+    return {
+      dataType: 'Map',
+      value: Array.from(value.entries()),
+    };
+  }
+  return value;
+}
+
+/**
+ * Serialize API response with proper Map handling
+ */
+function serializeResponse<T>(response: APIResponse<T>): string {
+  return JSON.stringify(response, serializeValue);
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -154,22 +179,34 @@ export class NoeticUIAPI {
   }
 
   /**
-   * Stop the API server
+   * Stop the API server gracefully
+   * Waits for pending requests to complete
    */
-  async stop(): Promise<void> {
+  async stop(timeoutMs = 5000): Promise<void> {
     if (!this.isRunning) {
       return;
     }
 
+    console.log('[API] Starting graceful shutdown...');
+
     if (this.server) {
       await new Promise<void>((resolve) => {
-        this.server!.close(() => resolve());
+        const timeout = setTimeout(() => {
+          console.warn('[API] Server close timeout exceeded, forcing shutdown');
+          resolve();
+        }, timeoutMs);
+
+        // Stop accepting new connections
+        this.server!.close(() => {
+          clearTimeout(timeout);
+          console.log('[API] Server stopped gracefully');
+          resolve();
+        });
       });
       this.server = null;
     }
 
     this.isRunning = false;
-    console.log('Noetic UI API server stopped');
   }
 
   /**
@@ -210,26 +247,28 @@ export class NoeticUIAPI {
     try {
       let response: APIResponse;
 
-      // Route handling
+      // Route handling - RESTful nested resource pattern
+      // /api/agents - Agent collection
+      // /api/agents/:agentId - Specific agent
+      // /api/agents/:agentId/runs - Runs collection for agent
+      // /api/agents/:agentId/runs/:runId - Specific run
       if (pathname === '/api/agents' && method === 'GET') {
         response = await this.listAgents();
-      } else if (pathname.startsWith('/api/agents/') && method === 'DELETE') {
+      } else if (pathname.match(/^\/api\/agents\/[^/]+$/) && method === 'DELETE') {
         const agentId = pathname.split('/')[3];
         response = await this.deleteAgent(agentId);
-      } else if (
-        pathname.startsWith('/api/agents/') &&
-        pathname.endsWith('/runs') &&
-        method === 'GET'
-      ) {
+      } else if (pathname.match(/^\/api\/agents\/[^/]+\/runs$/) && method === 'GET') {
         const agentId = pathname.split('/')[3];
         response = await this.listAgentRuns(agentId);
-      } else if (pathname.startsWith('/api/runs/') && method === 'GET') {
-        const runId = pathname.split('/')[3];
-        const agentId = url.searchParams.get('agentId') || 'default';
+      } else if (pathname.match(/^\/api\/agents\/[^/]+\/runs\/[^/]+$/) && method === 'GET') {
+        const parts = pathname.split('/');
+        const agentId = parts[3];
+        const runId = parts[5];
         response = await this.getRun(agentId, runId);
-      } else if (pathname.startsWith('/api/runs/') && method === 'DELETE') {
-        const runId = pathname.split('/')[3];
-        const agentId = url.searchParams.get('agentId') || 'default';
+      } else if (pathname.match(/^\/api\/agents\/[^/]+\/runs\/[^/]+$/) && method === 'DELETE') {
+        const parts = pathname.split('/');
+        const agentId = parts[3];
+        const runId = parts[5];
         response = await this.deleteRun(agentId, runId);
       } else if (pathname === '/api/metrics' && method === 'GET') {
         response = await this.getMetrics();
@@ -240,6 +279,17 @@ export class NoeticUIAPI {
             status: 'ok',
           },
         };
+      } else if (pathname.startsWith('/api/')) {
+        // API route that didn't match any specific handler
+        response = {
+          success: false,
+          error: 'Not found',
+        };
+        res.writeHead(404, {
+          'Content-Type': 'application/json',
+        });
+        res.end(serializeResponse(response));
+        return;
       } else if (method === 'GET') {
         // Try to serve static files for non-API routes
         const served = await this.serveStaticFile(pathname, res);
@@ -254,7 +304,7 @@ export class NoeticUIAPI {
         res.writeHead(404, {
           'Content-Type': 'application/json',
         });
-        res.end(JSON.stringify(response));
+        res.end(serializeResponse(response));
         return;
       } else {
         response = {
@@ -264,14 +314,14 @@ export class NoeticUIAPI {
         res.writeHead(404, {
           'Content-Type': 'application/json',
         });
-        res.end(JSON.stringify(response));
+        res.end(serializeResponse(response));
         return;
       }
 
       res.writeHead(200, {
         'Content-Type': 'application/json',
       });
-      res.end(JSON.stringify(response));
+      res.end(serializeResponse(response));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('API error:', error);
@@ -279,7 +329,7 @@ export class NoeticUIAPI {
         'Content-Type': 'application/json',
       });
       res.end(
-        JSON.stringify({
+        serializeResponse({
           success: false,
           error: errorMessage,
         }),
@@ -303,6 +353,9 @@ export class NoeticUIAPI {
   > {
     // Delete all runs for the agent
     const runsDeleted = await this.config.storage.deleteAgentRuns(agentId);
+
+    // Delete the agent directory (will only succeed if empty)
+    await this.config.storage.deleteAgentDirectory(agentId);
 
     // Unregister the agent from persistence
     await this.config.storage.unregisterAgent(agentId);

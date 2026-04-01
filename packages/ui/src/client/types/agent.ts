@@ -72,7 +72,7 @@ export interface Run {
   inputPreview: string;
 
   // Execution data
-  trace: ExecutionTrace;
+  trace?: ExecutionTrace;
   rootNodeId: string;
 
   // Timeline data (for scrubbing)
