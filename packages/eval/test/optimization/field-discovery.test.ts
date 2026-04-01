@@ -35,20 +35,20 @@ function makeMockTool(name: string, description: string): Tool {
 }
 
 describe('discoverFields', () => {
-  test('finds system field in StepLLM', () => {
+  test('finds instructions field in StepLLM', () => {
     const llmStep = step.llm({
       id: 'my-llm',
       model: 'test-model',
-      system: 'You are a helpful assistant.',
+      instructions: 'You are a helpful assistant.',
     });
 
     const fields = discoverFields(llmStep);
 
     expect(fields).toHaveLength(1);
-    expect(fields[0].path).toBe('my-llm.system');
+    expect(fields[0].path).toBe('my-llm.instructions');
     expect(fields[0].value).toBe('You are a helpful assistant.');
     expect(fields[0].stepId).toBe('my-llm');
-    expect(fields[0].fieldKind).toBe(FieldKind.System);
+    expect(fields[0].fieldKind).toBe(FieldKind.Instructions);
   });
 
   test('finds tool name and description in StepLLM with tools', () => {
@@ -56,7 +56,7 @@ describe('discoverFields', () => {
       kind: 'llm',
       id: 'llm-with-tools',
       model: 'test-model',
-      system: 'Be helpful',
+      instructions: 'Be helpful',
       tools: [
         makeMockTool('search', 'Search the web'),
       ],
@@ -65,7 +65,7 @@ describe('discoverFields', () => {
     const fields = discoverFields(llmStep);
 
     expect(fields).toHaveLength(3);
-    expect(fields[0].fieldKind).toBe(FieldKind.System);
+    expect(fields[0].fieldKind).toBe(FieldKind.Instructions);
     expect(fields[1].fieldKind).toBe(FieldKind.ToolDescription);
     expect(fields[1].value).toBe('Search the web');
     expect(fields[2].fieldKind).toBe(FieldKind.ToolName);
@@ -94,7 +94,7 @@ describe('discoverFields', () => {
     const llmStep = step.llm({
       id: 'inner-llm',
       model: 'test-model',
-      system: 'Inner system prompt',
+      instructions: 'Inner system prompt',
     });
 
     const spawnStep = spawn({
@@ -105,7 +105,7 @@ describe('discoverFields', () => {
     const fields = discoverFields(spawnStep);
 
     expect(fields).toHaveLength(1);
-    expect(fields[0].path).toBe('outer-spawn.inner-llm.system');
+    expect(fields[0].path).toBe('outer-spawn.inner-llm.instructions');
     expect(fields[0].value).toBe('Inner system prompt');
   });
 
@@ -113,7 +113,7 @@ describe('discoverFields', () => {
     const llmStep = step.llm({
       id: 'branch-llm',
       model: 'test-model',
-      system: 'Branch system',
+      instructions: 'Branch system',
     });
 
     const branchStep = branch({
@@ -127,7 +127,7 @@ describe('discoverFields', () => {
     const fields = discoverFields(branchStep);
 
     expect(fields).toHaveLength(1);
-    expect(fields[0].path).toBe('my-branch.branch-llm.system');
+    expect(fields[0].path).toBe('my-branch.branch-llm.instructions');
     expect(fields[0].value).toBe('Branch system');
   });
 
@@ -142,7 +142,7 @@ describe('discoverFields', () => {
     expect(fields).toHaveLength(0);
   });
 
-  test('returns empty array for StepLLM without system or tools', () => {
+  test('returns empty array for StepLLM without instructions or tools', () => {
     const llmStep = step.llm({
       id: 'bare-llm',
       model: 'test-model',
@@ -164,14 +164,14 @@ describe('enrichWithSourceLocations', () => {
     const runtimeFields = [
       makeMockField({
         stepId: 'llm-1',
-        fieldKind: FieldKind.System,
+        fieldKind: FieldKind.Instructions,
         value: 'Be helpful',
       }),
     ];
     const astFields = [
       makeMockField({
         stepId: 'llm-1',
-        fieldKind: FieldKind.System,
+        fieldKind: FieldKind.Instructions,
         value: 'Be helpful',
         sourceLocation: location,
       }),
@@ -187,14 +187,14 @@ describe('enrichWithSourceLocations', () => {
     const runtimeFields = [
       makeMockField({
         stepId: 'llm-1',
-        fieldKind: FieldKind.System,
+        fieldKind: FieldKind.Instructions,
         value: 'Be helpful',
       }),
     ];
     const astFields = [
       makeMockField({
         stepId: 'llm-2',
-        fieldKind: FieldKind.System,
+        fieldKind: FieldKind.Instructions,
         value: 'Different',
         sourceLocation: {
           filePath: 'other.ts',
@@ -254,7 +254,7 @@ describe('discoverFields scope filtering', () => {
     kind: 'llm',
     id: 'scoped-llm',
     model: 'test-model',
-    system: 'You are helpful',
+    instructions: 'You are helpful',
     tools: [
       makeMockTool('search', 'Search the web'),
     ],
@@ -262,7 +262,7 @@ describe('discoverFields scope filtering', () => {
 
   function expectAllThreeKinds(fields: OptimizableField[]): void {
     const kinds = fields.map((f) => f.fieldKind);
-    expect(kinds).toContain(FieldKind.System);
+    expect(kinds).toContain(FieldKind.Instructions);
     expect(kinds).toContain(FieldKind.ToolDescription);
     expect(kinds).toContain(FieldKind.ToolName);
     expect(fields).toHaveLength(3);
@@ -272,7 +272,7 @@ describe('discoverFields scope filtering', () => {
     const fields = discoverFields(llmStep, undefined, OptimizeScope.PromptsOnly);
 
     const kinds = fields.map((f) => f.fieldKind);
-    expect(kinds).toContain(FieldKind.System);
+    expect(kinds).toContain(FieldKind.Instructions);
     expect(kinds).toContain(FieldKind.ToolDescription);
     expect(kinds).not.toContain(FieldKind.ToolName);
     expect(fields).toHaveLength(2);

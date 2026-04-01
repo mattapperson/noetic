@@ -30,7 +30,7 @@ export function hallucination(config?: HallucinationConfig): ScorerFn {
 
     const result = await runJudge({
       id: 'hallucination-judge',
-      system: `You are an evaluation judge. Detect hallucinated content in the output.
+      instructions: `You are an evaluation judge. Detect hallucinated content in the output.
 Hallucination means the output contains fabricated facts, unsupported claims, or invented details.
 Rate the hallucination level: 0.0 = fully hallucinated, 1.0 = no hallucination detected.
 If reference context is provided, check claims against it. Otherwise, assess general factual plausibility.

@@ -18,17 +18,17 @@ const weavedAnalysis = fork({
   paths: (input) => [
     react({
       model: 'gpt-4o',
-      system: 'Analyze from a technical perspective.',
+      instructions: 'Analyze from a technical perspective.',
       tools: [codeTool],
     }),
     react({
       model: 'gpt-4o',
-      system: 'Analyze from a business perspective.',
+      instructions: 'Analyze from a business perspective.',
       tools: [marketTool],
     }),
     react({
       model: 'gpt-4o',
-      system: 'Analyze from a user experience perspective.',
+      instructions: 'Analyze from a user experience perspective.',
       tools: [uxTool],
     }),
   ],
@@ -58,9 +58,9 @@ const multiSourceResearch = fork({
   id: 'multi-source',
   mode: 'all',
   paths: () => [
-    react({ model: 'gpt-4o', system: 'Search academic papers.', tools: [scholarTool] }),
-    react({ model: 'gpt-4o', system: 'Search news articles.', tools: [newsTool] }),
-    react({ model: 'gpt-4o', system: 'Search code repositories.', tools: [githubTool] }),
+    react({ model: 'gpt-4o', instructions: 'Search academic papers.', tools: [scholarTool] }),
+    react({ model: 'gpt-4o', instructions: 'Search news articles.', tools: [newsTool] }),
+    react({ model: 'gpt-4o', instructions: 'Search code repositories.', tools: [githubTool] }),
   ],
   merge: (results, ctx) => {
     return results.map((r, i) => `Source ${i + 1}:\n${r}`).join('\n\n');

@@ -48,6 +48,7 @@ export async function executeLLM<TMemory, I, O>(
       ? {
           model: step.model,
           items: baseCtx.itemLog.items,
+          instructions: step.instructions,
           tools: allTools,
           params: step.params,
           outputSchema: step.output,
@@ -58,6 +59,7 @@ export async function executeLLM<TMemory, I, O>(
       : {
           model: step.model,
           items: baseCtx.itemLog.items,
+          instructions: step.instructions,
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,

@@ -12,7 +12,7 @@ ReAct (Reason + Act) is the foundational agent pattern. The agent loops over an 
 ```ts
 function react(opts: {
   model: string;
-  system?: string;
+  instructions?: string;
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
@@ -22,7 +22,7 @@ function react(opts: {
 | Parameter | Type | Default | Purpose |
 |---|---|---|---|
 | `model` | `string` | -- | Model identifier (e.g., `'gpt-4o'`) |
-| `system` | `string` | -- | System prompt |
+| `instructions` | `string` | -- | System prompt |
 | `tools` | `Tool[]` | -- | Available tools for the agent |
 | `maxSteps` | `number` | `10` | Maximum loop iterations |
 | `maxCost` | `number` | -- | Optional USD cost cap |
@@ -47,7 +47,7 @@ const searchTool = {
 
 const agent = react({
   model: 'gpt-4o',
-  system: 'You are a research assistant.',
+  instructions: 'You are a research assistant.',
   tools: [searchTool],
   maxSteps: 5,
   maxCost: 0.50,
@@ -70,7 +70,7 @@ function react(opts) {
   const llmStep = step.llm({
     id: 'react-step',
     model: opts.model,
-    system: opts.system,
+    instructions: opts.instructions,
     tools: opts.tools,
   });
 

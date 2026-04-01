@@ -13,7 +13,7 @@ const isolated = spawn({
   child: step.llm({
     id: 'researcher',
     model: 'gpt-4o',
-    system: 'Research the topic thoroughly.',
+    instructions: 'Research the topic thoroughly.',
   }),
 });
 ```
@@ -52,7 +52,7 @@ const withMemory = spawn({
   child: step.llm({
     id: 'researcher',
     model: 'gpt-4o',
-    system: 'Research the topic thoroughly.',
+    instructions: 'Research the topic thoroughly.',
   }),
   memory: [
     {
@@ -111,7 +111,7 @@ const researchAgent = spawn({
     steps: [step.llm({
       id: 'researcher-llm',
       model: 'gpt-4o',
-      system: 'You are a research assistant. Use tools to find information.',
+      instructions: 'You are a research assistant. Use tools to find information.',
       tools: [searchTool, fetchTool],
     })],
     until: until.noToolCalls(),
@@ -226,7 +226,7 @@ const delegateTool = tool({
   input: z.object({ task: z.string() }),
   output: z.string(),
   execute: async (args: { task: string }, parentCtx: Context) => {
-    const child = step.llm({ id: 'sync-sub', model: 'gpt-4o', system: 'Answer concisely.' });
+    const child = step.llm({ id: 'sync-sub', model: 'gpt-4o', instructions: 'Answer concisely.' });
     return harness.run(spawn({ id: 'sync-spawn', child }), args.task, parentCtx);
   },
 });
@@ -239,7 +239,7 @@ const launchTool = tool({
   output: z.object({ agentId: z.string() }),
   execute: async (args: { task: string }, parentCtx: Context) => {
     const child = step.llm<string, string>({
-      id: 'async-sub', model: 'gpt-4o', system: 'Answer concisely.',
+      id: 'async-sub', model: 'gpt-4o', instructions: 'Answer concisely.',
     });
     const handle = harness.detachedSpawn(child, args.task, parentCtx);
     // Notify the parent loop when the sub-agent finishes
@@ -258,7 +258,7 @@ const agent = {
   steps: [step.llm({
     id: 'orchestrator',
     model: 'gpt-4o',
-    system: `You are an orchestrator. You have two delegation tools:
+    instructions: `You are an orchestrator. You have two delegation tools:
 - delegate: blocks and returns the result. Use for tasks you need answered before continuing.
 - launch_agent: runs in background. Use when you can keep working while it runs.`,
     tools: [delegateTool, launchTool],

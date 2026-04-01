@@ -3,11 +3,11 @@ import type { Step } from '@noetic/core';
 import { spawn, step } from '@noetic/core';
 import { applyCandidate } from '../../src/optimization/mutator';
 
-function getLlmSystem(s: Step): string | undefined {
+function getLlmInstructions(s: Step): string | undefined {
   if (s.kind !== 'llm') {
     throw new Error(`Expected llm step, got ${s.kind}`);
   }
-  return s.system;
+  return s.instructions;
 }
 
 function getLlmModel(s: Step): string {
@@ -25,40 +25,40 @@ function getSpawnChild(s: Step): Step {
 }
 
 describe('applyCandidate', () => {
-  test('replaces system prompt in StepLLM', () => {
+  test('replaces instructions in StepLLM', () => {
     const llmStep = step.llm({
       id: 'my-llm',
       model: 'test-model',
-      system: 'Original prompt',
+      instructions: 'Original prompt',
     });
 
     const result = applyCandidate(llmStep, {
-      'my-llm.system': 'Optimized prompt',
+      'my-llm.instructions': 'Optimized prompt',
     });
 
     expect(result.kind).toBe('llm');
-    expect(getLlmSystem(result)).toBe('Optimized prompt');
+    expect(getLlmInstructions(result)).toBe('Optimized prompt');
   });
 
   test('does not mutate the original step', () => {
     const llmStep = step.llm({
       id: 'my-llm',
       model: 'test-model',
-      system: 'Original prompt',
+      instructions: 'Original prompt',
     });
 
     applyCandidate(llmStep, {
-      'my-llm.system': 'Optimized prompt',
+      'my-llm.instructions': 'Optimized prompt',
     });
 
-    expect(llmStep.system).toBe('Original prompt');
+    expect(llmStep.instructions).toBe('Original prompt');
   });
 
-  test('replaces system prompt in nested StepSpawn > StepLLM', () => {
+  test('replaces instructions in nested StepSpawn > StepLLM', () => {
     const llmStep = step.llm({
       id: 'inner-llm',
       model: 'test-model',
-      system: 'Inner original',
+      instructions: 'Inner original',
     });
 
     const spawnStep = spawn({
@@ -67,25 +67,25 @@ describe('applyCandidate', () => {
     });
 
     const result = applyCandidate(spawnStep, {
-      'outer-spawn.inner-llm.system': 'Inner optimized',
+      'outer-spawn.inner-llm.instructions': 'Inner optimized',
     });
 
     expect(result.kind).toBe('spawn');
     const child = getSpawnChild(result);
-    expect(getLlmSystem(child)).toBe('Inner optimized');
+    expect(getLlmInstructions(child)).toBe('Inner optimized');
   });
 
   test('preserves fields not in the candidate map', () => {
     const llmStep = step.llm({
       id: 'my-llm',
       model: 'test-model',
-      system: 'Keep this',
+      instructions: 'Keep this',
     });
 
     const result = applyCandidate(llmStep, {});
 
     expect(result.kind).toBe('llm');
-    expect(getLlmSystem(result)).toBe('Keep this');
+    expect(getLlmInstructions(result)).toBe('Keep this');
     expect(getLlmModel(result)).toBe('test-model');
   });
 

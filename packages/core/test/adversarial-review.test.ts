@@ -97,7 +97,7 @@ function buildSimpleAnalysisStep(): Step<ContextMemory, string, string> {
   return step.llm<ContextMemory, string, string>({
     id: 'simple-analysis',
     model: 'test-model',
-    system: 'Analyze the given code snippet briefly.',
+    instructions: 'Analyze the given code snippet briefly.',
   });
 }
 
@@ -109,17 +109,17 @@ function buildParallelAnalysisFork(): Step<ContextMemory, string, string> {
       step.llm<ContextMemory, string, string>({
         id: 'security-analysis',
         model: 'test-model',
-        system: 'Analyze for security issues',
+        instructions: 'Analyze for security issues',
       }),
       step.llm<ContextMemory, string, string>({
         id: 'performance-analysis',
         model: 'test-model',
-        system: 'Analyze for performance issues',
+        instructions: 'Analyze for performance issues',
       }),
       step.llm<ContextMemory, string, string>({
         id: 'maintainability-analysis',
         model: 'test-model',
-        system: 'Analyze for maintainability',
+        instructions: 'Analyze for maintainability',
       }),
     ],
     merge: (results: string[], _ctx: Context): string => {
@@ -466,7 +466,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     const analysisStep = step.llm<ContextMemory, string, string>({
       id: 'compliance-analysis',
       model: 'test-model',
-      system: 'Analyze the code.',
+      instructions: 'Analyze the code.',
     });
 
     const harness = new AgentHarness({
@@ -500,7 +500,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     const simpleStep = step.llm<ContextMemory, string, string>({
       id: 'live-llm',
       model: 'openai/gpt-4o-mini',
-      system: 'You are a helpful assistant. Reply in one sentence.',
+      instructions: 'You are a helpful assistant. Reply in one sentence.',
     });
 
     const harness = new AgentHarness({

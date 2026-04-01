@@ -19,7 +19,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const llmStep = step.llm<ContextMemory, string, string>({
       id: 'live-simple',
       model: 'openai/gpt-4o-mini',
-      system: 'You are a helpful assistant. Reply in exactly one sentence.',
+      instructions: 'You are a helpful assistant. Reply in exactly one sentence.',
     });
 
     const harness = new AgentHarness({
@@ -61,7 +61,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     >({
       id: 'live-structured',
       model: 'openai/gpt-4o-mini',
-      system: 'You are a math assistant. Respond with JSON.',
+      instructions: 'You are a math assistant. Respond with JSON.',
       output: AnswerSchema,
     });
 
@@ -107,7 +107,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const llmStep = step.llm<ContextMemory, string, string>({
       id: 'live-tool',
       model: 'openai/gpt-4o-mini',
-      system:
+      instructions:
         'You are a math assistant. Use the calculator tool for all computations. After getting the result, state it clearly.',
       tools: [
         calculatorTool,
@@ -168,7 +168,8 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
         step.llm<ContextMemory, string, string>({
           id: 'live-loop-llm',
           model: 'openai/gpt-4o-mini',
-          system: 'You are a fun facts assistant. Use get_fact tool once, then provide a summary.',
+          instructions:
+            'You are a fun facts assistant. Use get_fact tool once, then provide a summary.',
           tools: [
             factTool,
           ],
@@ -220,7 +221,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const llmStep = step.llm<ContextMemory, string, string>({
       id: 'respond',
       model: 'openai/gpt-4o-mini',
-      system: 'You are a concise assistant. Reply in one sentence.',
+      instructions: 'You are a concise assistant. Reply in one sentence.',
     });
 
     const pipeline = step.run<ContextMemory, string, string>({

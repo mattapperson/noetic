@@ -12,7 +12,7 @@
 ```typescript
 type Step<I, O> =
   | { kind: 'run';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy }
-  | { kind: 'llm';     id: string; model: string; system?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
+  | { kind: 'llm';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
   | { kind: 'tool';    id: string; tool: Tool; args?: unknown }
   | { kind: 'branch';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }

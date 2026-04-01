@@ -20,7 +20,7 @@ export function promptAlignment(config?: JudgeConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'prompt-alignment-judge',
-      system: `You are an evaluation judge. Assess whether the output follows the system prompt's instructions and constraints.
+      instructions: `You are an evaluation judge. Assess whether the output follows the system prompt's instructions and constraints.
 Score 0.0 = completely ignores instructions, 1.0 = perfectly follows all instructions.
 Check for adherence to format, tone, constraints, and any specific requirements in the objective.
 Respond with an alignment score and brief reasoning.`,
