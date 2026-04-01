@@ -5,7 +5,7 @@ import type { Context } from './context';
 import type { DetachedHandle } from './detached';
 import type { HarnessResult } from './harness-result';
 import type { ExecuteInput, Item } from './items';
-import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
+import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
@@ -22,6 +22,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
+  /** Default projection policy for all LLM steps. Individual steps can override via `step.projection`. */
+  projection?: ProjectionPolicy;
 }
 
 /** @public Base fields shared by all callModel requests. */
@@ -95,6 +97,18 @@ export interface AgentHarnessContract<
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]>;
+  recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;

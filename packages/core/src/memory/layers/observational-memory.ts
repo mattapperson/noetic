@@ -40,6 +40,7 @@ export function observationalMemory(config?: ObservationalMemoryConfig) {
     name: 'Observational Memory',
     slot: Slot.OBSERVATIONS,
     scope: config?.scope ?? 'resource',
+    recallMode: 'eventual',
     budget: {
       min: 500,
       max: 2_500,

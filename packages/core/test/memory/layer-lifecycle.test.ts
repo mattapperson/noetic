@@ -3,14 +3,212 @@ import assert from 'node:assert';
 import {
   completeLayers,
   createLayerStateStore,
+  createRecallCache,
   disposeLayers,
   initLayers,
   recallLayers,
+  recallLayersAtomic,
+  recallLayersEventual,
   storeLayers,
 } from '../../src/memory/layer-lifecycle';
 import type { LLMResponse } from '../../src/types/common';
 import type { MemoryLayer } from '../../src/types/memory';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
+
+describe('recallLayersAtomic', () => {
+  it('filters to atomic layers only', async () => {
+    const store = createLayerStateStore();
+    const ctx = makeCtx();
+    const layers: MemoryLayer[] = [
+      {
+        id: 'atomic-layer',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          async recall() {
+            return 'atomic-data';
+          },
+        },
+      },
+      {
+        id: 'eventual-layer',
+        slot: 200,
+        scope: 'thread',
+        recallMode: 'eventual',
+        hooks: {
+          async recall() {
+            return 'eventual-data';
+          },
+        },
+      },
+    ];
+
+    const results = await recallLayersAtomic({
+      layers,
+      query: 'test',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map(),
+      store,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].layerId).toBe('atomic-layer');
+  });
+
+  it('includes layers with no explicit recallMode (default atomic)', async () => {
+    const store = createLayerStateStore();
+    const ctx = makeCtx();
+    const layers: MemoryLayer[] = [
+      {
+        id: 'default-layer',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          async recall() {
+            return 'data';
+          },
+        },
+      },
+    ];
+
+    const results = await recallLayersAtomic({
+      layers,
+      query: 'test',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map(),
+      store,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].layerId).toBe('default-layer');
+  });
+});
+
+describe('recallLayersEventual', () => {
+  it('filters to eventual layers only', async () => {
+    const store = createLayerStateStore();
+    const ctx = makeCtx();
+    const cache = createRecallCache();
+    const layers: MemoryLayer[] = [
+      {
+        id: 'atomic-layer',
+        slot: 100,
+        scope: 'thread',
+        hooks: {
+          async recall() {
+            return 'atomic-data';
+          },
+        },
+      },
+      {
+        id: 'eventual-layer',
+        slot: 200,
+        scope: 'thread',
+        recallMode: 'eventual',
+        hooks: {
+          async recall() {
+            return 'eventual-data';
+          },
+        },
+      },
+    ];
+
+    const results = await recallLayersEventual({
+      layers,
+      query: 'test',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map(),
+      store,
+      cache,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].layerId).toBe('eventual-layer');
+  });
+
+  it('returns cached results on second call without stale mark', async () => {
+    const store = createLayerStateStore();
+    const ctx = makeCtx();
+    const cache = createRecallCache();
+    let callCount = 0;
+    const layers: MemoryLayer[] = [
+      {
+        id: 'obs',
+        slot: 200,
+        scope: 'thread',
+        recallMode: 'eventual',
+        hooks: {
+          async recall() {
+            callCount++;
+            return `call-${callCount}`;
+          },
+        },
+      },
+    ];
+
+    const params = {
+      layers,
+      query: 'test',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map<string, number>(),
+      store,
+      cache,
+    };
+
+    const first = await recallLayersEventual(params);
+    expect(first).toHaveLength(1);
+    expect(callCount).toBe(1);
+
+    const second = await recallLayersEventual(params);
+    expect(second).toHaveLength(1);
+    // Should NOT have re-called recall — used cache
+    expect(callCount).toBe(1);
+  });
+
+  it('re-recalls when cache is marked stale', async () => {
+    const store = createLayerStateStore();
+    const ctx = makeCtx();
+    const cache = createRecallCache();
+    let callCount = 0;
+    const layers: MemoryLayer[] = [
+      {
+        id: 'obs',
+        slot: 200,
+        scope: 'thread',
+        recallMode: 'eventual',
+        hooks: {
+          async recall() {
+            callCount++;
+            return `call-${callCount}`;
+          },
+        },
+      },
+    ];
+
+    const params = {
+      layers,
+      query: 'test',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map<string, number>(),
+      store,
+      cache,
+    };
+
+    await recallLayersEventual(params);
+    expect(callCount).toBe(1);
+
+    // Mark stale
+    cache.stale.add(`${ctx.executionId}:obs`);
+
+    await recallLayersEventual(params);
+    expect(callCount).toBe(2);
+  });
+});
 
 describe('layer-lifecycle', () => {
   it('init sequential, sets state', async () => {
