@@ -36,11 +36,39 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   // Create span for this step execution
   const span = ctx.harness.createSpan(step.id, ctx.span);
   span.setAttribute('stepKind', step.kind);
+  span.setAttribute('stepId', step.id);
   span.setAttribute('input', JSON.stringify(input));
+  span.setAttribute('depth', ctx.depth);
+
+  // Set step-specific configuration for detailed node rendering
+  switch (step.kind) {
+    case 'llm':
+      span.setAttribute('model', step.model);
+      if (step.system) span.setAttribute('systemPrompt', step.system);
+      break;
+    case 'tool':
+      span.setAttribute('toolName', step.tool.name);
+      break;
+    case 'fork':
+      span.setAttribute('forkMode', step.mode);
+      span.setAttribute('forkPathCount', step.paths.length);
+      break;
+    case 'loop':
+      span.setAttribute('loopStepCount', step.steps.length);
+      break;
+    case 'spawn':
+      span.setAttribute('spawnChildId', step.child.id);
+      break;
+    case 'branch':
+      span.setAttribute('branchType', 'dynamic');
+      break;
+  }
 
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
+    span.setAttribute('error', 'max_depth_exceeded');
+    span.setAttribute('errorMessage', `Maximum spawn depth ${MAX_DEPTH} exceeded`);
     span.end();
     await ctx.harness.traceExporter.export([
       span,
@@ -55,6 +83,8 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
 
   // Abort check
   if (ctx.aborted) {
+    span.setAttribute('error', 'aborted');
+    span.setAttribute('abortReason', ctx.abortReason ?? 'context aborted');
     span.end();
     await ctx.harness.traceExporter.export([
       span,
@@ -156,6 +186,15 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
 
     return result;
   } catch (error) {
+    // Error - set detailed attributes before ending span
+    span.setAttribute('error', 'true');
+    span.setAttribute('errorMessage', error instanceof Error ? error.message : String(error));
+    span.setAttribute('tokenInput', ctx.tokens.input);
+    span.setAttribute('tokenOutput', ctx.tokens.output);
+    span.setAttribute('totalTokens', ctx.tokens.input + ctx.tokens.output);
+    span.setAttribute('cost', ctx.cost);
+    span.setAttribute('state', JSON.stringify(ctx.state));
+
     // Error - end span and export
     span.end();
     await ctx.harness.traceExporter.export([
