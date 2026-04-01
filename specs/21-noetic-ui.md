@@ -50,34 +50,44 @@ Noetic UI design principles:
 
 - **System theme** as default (auto-switches between light/dark based on OS preference)
 - **Card-based nodes** with subtle borders and status-colored accents
-- **Top-down hierarchical layout** for execution flow
+- **Sequential vertical layout** for execution flow (nodes arranged top-to-bottom in execution order)
 - **Three-panel layout:** left navigation, center canvas, right inspector
 - **Playback timeline** at bottom with transport controls
 - **Status badges** prominently displayed on each node
 
 ### 1. Execution Visualization
 
-The UI renders the execution tree as an interactive node graph:
+The UI renders execution as a **sequential flow diagram** showing the exact order of step execution:
 
-- **Nodes** represent steps (run, llm, tool, branch, fork, spawn, loop)
-- **Node cards** display:
-  - Step kind badge (icon + text: LLM, TOOL, FORK, etc.)
-  - Branch/fork indicator (e.g., "BRANCH 3")
-  - Step title
-  - Status badge (DONE, QUEUED, RUNNING, ERROR, PAUSED)
-  - Duration (e.g., "25.5 s", "17m 43s")
-  - Attempt count
-  - Tool/pattern tags as pills
-  - Connection ports (input left, output right)
-- **Edges** show data flow between steps with animated progress indicators
-- **Nested graphs** for spawn/loop children (collapsible)
-- **Parallel lanes** for fork paths with visual grouping
-- **Color coding:**
-  - **Green** - completed/success
-  - **Blue** - active/running/focus
-  - **Yellow/Orange** - warning/paused
-  - **Red** - error
-  - **Gray** - pending/not visited
+- **Sequential Layout:** Nodes arranged vertically top-to-bottom in execution order
+  - Each step gets its own node card
+  - Flow moves downward from start to completion
+  - Clear visual hierarchy showing execution sequence
+
+- **Loop Visualization:**
+  - Loop nodes serve as **container nodes** with visual grouping
+  - Steps inside loops are **indented** to show nesting
+  - Loop-back edges (curved dashed lines in red) connect iteration end back to loop start
+  - Multiple iterations create multiple loop-back connections
+  
+- **Node Cards** display:
+  - Step kind badge with icon (LLM 💬, TOOL 🔧, FORK ⫚, etc.)
+  - Step title and ID
+  - Status badge with color coding
+  - Duration and execution metrics
+  - Connection edges flowing to next step
+
+- **Edges:**
+  - **Sequential flow:** Solid lines from bottom of one node to top of next
+  - **Loop iterations:** Dashed curved red lines looping back upward
+  - **Active execution:** Animated dots traveling along edges
+
+- **Color coding by status:**
+  - **Green** (#10b981) - completed/success
+  - **Blue** (#3b82f6) - active/running/focus
+  - **Yellow/Orange** (#f59e0b) - warning/paused
+  - **Red** (#ef4444) - error
+  - **Gray** (#6b7280) - pending/not visited
 
 ### 2. Data Inspection
 
@@ -147,24 +157,25 @@ packages/ui/
 │   ├── layout.tsx
 │   ├── page.tsx
 │   └── globals.css
-├── src/
-│   ├── service/           # Server-side code (WebSocket + API)
-│   │   ├── index.ts      # Server entry point
-│   │   ├── websocket.ts  # WebSocket message protocol
-│   │   ├── storage.ts    # Execution trace persistence
-│   │   └── api.ts        # REST API for queries
-│   ├── client/           # Web UI (React + Next.js)
-│   │   ├── components/   # Node graph, inspectors, controls
-│   │   ├── stores/       # Zustand state management
-│   │   ├── hooks/        # React hooks (WebSocket, execution)
-│   │   └── lib/          # Client utilities
-│   ├── runtime/          # Runtime integration
-│   │   ├── exporter.ts   # TraceExporter implementation
-│   │   ├── debugger.ts   # Debug runtime with pause/resume
-│   │   └── hook.ts       # Execution hooks for capturing events
-│   └── shared/           # Shared types & protocol
-│       ├── protocol.ts   # WebSocket message types
-│       └── types.ts      # Common interfaces
+  ├── src/
+  │   ├── service/           # Server-side code (WebSocket + API)
+  │   │   ├── index.ts      # Server entry point
+  │   │   ├── websocket.ts  # WebSocket message protocol
+  │   │   ├── storage.ts    # Execution trace persistence
+  │   │   └── api.ts        # REST API for queries
+  │   ├── client/           # Web UI (React + Next.js)
+  │   │   ├── components/   # Node graph, inspectors, controls
+  │   │   ├── stores/       # Zustand state management
+  │   │   ├── hooks/        # React hooks (WebSocket, execution)
+  │   │   └── lib/          # Client utilities
+  │   ├── runtime/          # Runtime integration
+  │   │   ├── exporter.ts   # TraceExporter implementation
+  │   │   ├── debugger.ts   # Debug runtime with pause/resume
+  │   │   ├── hook.ts       # Execution hooks for capturing events
+  │   │   └── step-extractors.ts  # Step data extraction plugins
+  │   └── shared/           # Shared types & protocol
+  │       ├── protocol.ts   # WebSocket message types
+  │       └── types.ts      # Common interfaces
 ├── bin/
 │   └── noetic-ui.js      # CLI entry point (runtime detection)
 ├── scripts/
@@ -228,6 +239,77 @@ const harness = createDebugHarness({
 ```
 
 The debug harness wraps execution and allows external control.
+
+#### 3. Step Data Extractor Plugins (Extensible Data Transformation)
+
+The exporter uses a **plugin-based architecture** for transforming span attributes into step-specific data for UI rendering. This allows new step kinds to be added without modifying the exporter.
+
+**Plugin Registration:**
+
+```typescript
+import { registerStepDataExtractor } from '@noetic/ui/runtime';
+
+// Register a custom step extractor
+registerStepDataExtractor('myStep', (spanAttrs, tokenUsage, cost) => {
+  return {
+    customField: spanAttrs.customField,
+    tokenUsage,
+    cost,
+  };
+});
+```
+
+**Built-in Extractors:**
+
+The following step kinds have built-in extractors registered by default:
+
+| Step Kind | Data Fields |
+|-----------|-------------|
+| `llm` | model, messages, toolCalls, systemPrompt, tokenUsage, cost |
+| `tool` | toolName, arguments, result |
+| `fork` | mode, pathCount, winnerPath |
+| `loop` | stepCount, currentIteration, maxIterations |
+| `spawn` | childId, childKind |
+| `branch` | branchType, selectedPath, condition |
+| `run` | description |
+| `provide` | providerId, provides |
+
+**Plugin API:**
+
+```typescript
+// Check if extractor exists
+hasStepDataExtractor('llm'); // true
+
+// Get extractor for a step kind
+const extractor = getStepDataExtractor('llm');
+const data = extractor(spanAttrs, tokenUsage, cost);
+
+// List all registered kinds
+const kinds = getRegisteredStepKinds(); 
+// ['llm', 'tool', 'fork', 'loop', 'spawn', 'branch', 'run', 'provide']
+
+// Unregister (mainly for testing)
+unregisterStepDataExtractor('myStep');
+
+// Clear all extractors (testing only)
+clearStepDataExtractors();
+```
+
+**How it Works:**
+
+1. The exporter receives span data from the core
+2. It looks up the extractor for the step's `kind` attribute
+3. Falls back to generic extractor if none registered
+4. Calls the extractor with span attributes, token usage, and cost
+5. Result becomes the `stepData` field in the ExecutionNode
+6. UI components render based on stepData contents
+
+**Benefits:**
+
+- **Open/Closed Principle:** New step kinds added without core changes
+- **Single Responsibility:** Each step type owns its data transformation
+- **Testability:** Extractors can be tested in isolation
+- **Extensibility:** Users can add custom extractors for domain-specific steps
 
 ### Debug Mode vs Production Mode
 
@@ -441,6 +523,126 @@ This creates a single binary containing:
 
 ---
 
+## Layout Algorithms
+
+### Sequential Layout
+
+The UI uses a **sequential layout algorithm** that arranges execution nodes in the exact order they execute, with special handling for loops and nested structures.
+
+**Algorithm Overview:**
+
+```typescript
+function calculateSequentialLayout(
+  nodes: Map<string, ExecutionNode>,
+  rootNodeId: string
+): { positions: NodePosition[], edges: NodeEdge[] }
+```
+
+**Key Features:**
+
+1. **Execution Order Traversal:**
+   - Performs depth-first traversal starting from root node
+   - Visits nodes in the order they actually execute
+   - Builds a linear sequence of execution steps
+
+2. **Sequential Positioning:**
+   - Nodes placed vertically (top-to-bottom) with consistent spacing
+   - Each node gets position: `{ x, y, width, height }`
+   - Default: `y = startY + (index * verticalSpacing)`
+   - Default: `x = startX + (loopDepth * loopIndent)`
+
+3. **Loop Visualization:**
+   - **Loop containers:** Loop nodes group their child steps
+   - **Visual indentation:** Steps inside loops are offset right by `loopIndent` (60px)
+   - **Loop depth tracking:** Increments when entering loop, decrements when exiting
+   - **Loop-back edges:** When a loop iteration ends, a curved dashed edge connects back to the loop start node
+
+4. **Edge Generation:**
+   - **Sequential edges:** Solid lines from node N to node N+1
+   - **Loop edges:** Dashed curved lines (red #ff6b6b) from iteration end back to loop start
+   - **Fork edges:** Solid lines to parallel execution paths
+   - All edges animated when node status is 'running'
+
+**Layout Options:**
+
+```typescript
+interface SequentialLayoutOptions {
+  nodeWidth: 280;           // Width of node cards
+  nodeHeight: 140;          // Height of node cards  
+  verticalSpacing: 200;     // Vertical distance between nodes
+  horizontalSpacing: 400;   // Horizontal space for forks
+  loopIndent: 60;           // Indentation for loop children
+  startX: 50;               // Initial X position
+  startY: 50;               // Initial Y position
+}
+```
+
+**Loop Edge Rendering:**
+
+```typescript
+// Loop-back edges curve around to the left
+const controlX = Math.min(startX, endX) - 100;
+const controlY1 = startY + 50;
+const controlY2 = endY - 50;
+const path = `M ${startX} ${startY} 
+              C ${controlX} ${controlY1}, 
+                ${controlX} ${controlY2}, 
+                ${endX} ${endY}`;
+```
+
+**Loop Detection:**
+
+- Checks if next node is a loop that was already visited
+- Or if we're going from a loop child back to the loop parent
+- Creates a `type: 'loop'` edge with:
+  - Red color (#ff6b6b)
+  - Dashed stroke (8px dash, 4px gap)
+  - Arrow marker at end
+  - Animated dot for active loops
+
+**Edge Types:**
+
+| Type | Visual Style | Use Case |
+|------|--------------|----------|
+| `default` | Solid line, 2px | Normal sequential flow |
+| `loop` | Dashed red curve, 3px | Loop iterations |
+| `conditional` | Dashed line, 5px gap | Branch conditions |
+| `fork` | Solid line | Parallel execution paths |
+
+**Usage:**
+
+```typescript
+import { calculateSequentialLayout } from '@noetic/ui/client/lib/sequential-layout';
+
+const { positions, edges } = calculateSequentialLayout(
+  trace.nodes,
+  trace.rootNodeId,
+  {
+    nodeWidth: 280,
+    nodeHeight: 140,
+    verticalSpacing: 200,
+    loopIndent: 60,
+  }
+);
+```
+
+**Comparison to Hierarchical Layout:**
+
+| Feature | Sequential | Hierarchical |
+|---------|--------------|--------------|
+| Direction | Vertical (top-down) | Vertical (top-down) |
+| Loop Display | Container with loop-back edges | Tree with nested children |
+| Fork Display | Sequential then parallel | Parallel lanes |
+| Node Spacing | Consistent vertical | Variable by level |
+| Use Case | Linear execution view | Tree structure view |
+
+**Future Enhancements:**
+
+- Horizontal layout option (left-to-right)
+- Swimlane view for parallel executions
+- Minimap for navigation in large traces
+- Zoom and pan with coordinate transformation
+
 ## Data Model
 
 ### Agent
@@ -602,29 +804,158 @@ type StepData =
   | SpawnStepData
   | LoopStepData;
 
+interface RunStepData {
+  description?: string;          // Optional step description
+}
+
 interface LLMStepData {
-  model: string;
-  messages: MessageItem[];
-  toolCalls: FunctionCallItem[];
-  tokenUsage: TokenUsage;
-  cost: number;
+  model: string;                 // LLM model identifier (e.g., 'gpt-4', 'claude-3-opus')
+  messages: MessageItem[];         // Conversation history
+  toolCalls: FunctionCallItem[];   // Tool/function calls made by LLM
+  systemPrompt?: string;         // System prompt sent to LLM
+  tokenUsage: TokenUsage;        // Token consumption statistics
+  cost: number;                   // Cost in USD for this LLM call
 }
 
 interface ToolStepData {
-  toolName: string;
-  arguments: unknown;
-  result: unknown;
+  toolName: string;              // Name of the tool being invoked
+  arguments?: unknown;            // Arguments passed to the tool
+  result?: unknown;               // Tool execution result
+}
+
+interface BranchStepData {
+  branchType: 'dynamic';          // Type of branching (currently only dynamic)
+  selectedPath?: number;          // Which branch path was selected (0-indexed)
+  condition?: string;            // Condition evaluated for branching
 }
 
 interface ForkStepData {
-  mode: 'race' | 'all' | 'settle';
-  pathCount: number;
-  winnerPath?: number;  // For race mode
+  mode: 'race' | 'all' | 'settle';  // Fork execution mode
+  pathCount: number;              // Number of parallel paths
+  winnerPath?: number;             // For race mode: which path won
+}
+
+interface SpawnStepData {
+  childId: string;               // ID of the spawned child step
+  childKind?: string;             // Kind of the child step
+}
+
+interface LoopStepData {
+  stepCount: number;             // Number of steps inside the loop body
+  currentIteration?: number;      // Current iteration number (0-indexed)
+  maxIterations?: number;         // Maximum iterations configured
+}
+
+interface ProvideStepData {
+  providerId?: string;            // Provider identifier
+  provides?: unknown;             // Value being provided
+  description?: string;           // Optional description
 }
 
 // ... other step data types
 ```
 
+### Step Detail Requirements
+
+Each step rendered in the sequential layout requires comprehensive data for proper visualization. The following span attributes must be set by the core runtime:
+
+**Common Attributes (All Step Types):**
+
+```typescript
+// Required for all steps
+span.setAttribute('stepKind', step.kind);     // Step type identifier
+span.setAttribute('stepId', step.id);        // Unique step ID
+span.setAttribute('input', JSON.stringify(input));  // Input data
+span.setAttribute('depth', ctx.depth);       // Execution depth
+
+// Set at completion
+span.setAttribute('output', JSON.stringify(result));     // Output data
+span.setAttribute('tokenInput', ctx.tokens.input);         // Input tokens
+span.setAttribute('tokenOutput', ctx.tokens.output);     // Output tokens
+span.setAttribute('totalTokens', totalTokens);           // Total tokens
+span.setAttribute('cost', ctx.cost);                     // Cost in USD
+span.setAttribute('state', JSON.stringify(ctx.state));   // Context state
+```
+
+**Step-Specific Attributes:**
+
+| Step Kind | Required Attributes | Optional Attributes |
+|-------------|---------------------|---------------------|
+| **llm** | `model` | `systemPrompt`, `messages`, `toolCalls` |
+| **tool** | `toolName` | `toolArguments`, `toolResult` |
+| **fork** | `forkMode`, `forkPathCount` | `winnerPath` |
+| **loop** | `loopStepCount` | `currentIteration`, `maxIterations` |
+| **spawn** | `spawnChildId` | `spawnChildKind` |
+| **branch** | `branchType` | `selectedPath`, `condition` |
+| **run** | - | `stepDescription` |
+| **provide** | - | `providerId`, `provides`, `stepDescription` |
+
+**Error Handling:**
+
+When steps fail, additional error attributes should be set:
+
+```typescript
+span.setAttribute('error', 'true');
+span.setAttribute('errorMessage', error.message);
+span.setAttribute('errorCode', error.code);  // If available
+```
+
+**Example: LLM Step Setup:**
+
+```typescript
+// At step start
+span.setAttribute('stepKind', 'llm');
+span.setAttribute('stepId', step.id);
+span.setAttribute('input', JSON.stringify(input));
+span.setAttribute('depth', ctx.depth);
+span.setAttribute('model', step.model);
+if (step.system) {
+  span.setAttribute('systemPrompt', step.system);
+}
+
+// At step completion  
+span.setAttribute('output', JSON.stringify(result));
+span.setAttribute('tokenInput', ctx.tokens.input);
+span.setAttribute('tokenOutput', ctx.tokens.output);
+span.setAttribute('cost', ctx.cost);
+```
+
+**Validation:**
+
+The UI exporter validates step data completeness. Missing required fields will result in:
+- Default values (e.g., 'unknown' for model names)
+- Empty arrays (e.g., `messages: []`)
+- Zero values (e.g., `cost: 0`)
+- Warnings in console during development mode
+
+**Extending Step Types:**
+
+To add a new step kind with full UI support:
+
+1. **In Core:** Set all required span attributes during execution
+2. **In UI:** Register a step data extractor:
+   ```typescript
+   import { registerStepDataExtractor } from '@noetic/ui/runtime';
+   
+   registerStepDataExtractor('newStep', (spanAttrs, tokenUsage, cost) => ({
+     customField: spanAttrs.customField,
+     tokenUsage,
+     cost,
+   }));
+   ```
+3. **In UI:** Add a node component for rendering (optional)
+
+**Node Rendering:**
+
+The UI uses the step's `kind` field to determine:
+- Which node component to render
+- Color scheme and icon
+- Inspector tabs and content
+- Timeline marker appearance
+
+Default rendering falls back to `RunNode` for unknown step kinds.
+
+---
 ### Context Snapshot
 
 ```typescript
