@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand';
+import { deserialize } from '../lib/serialization';
 import type { AgentStorageInfo, StorageMetrics, StorageWarningLevel } from '../types/agent';
 
 interface StorageState {
@@ -38,7 +39,8 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
   // Actions
   setMetrics: (metrics) =>
     set({
-      metrics,
+      // Deserialize to convert any serialized Maps back to Map instances
+      metrics: deserialize(metrics),
     }),
 
   updateMetrics: (updates) =>

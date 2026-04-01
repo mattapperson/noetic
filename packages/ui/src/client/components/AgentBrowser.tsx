@@ -85,7 +85,8 @@ export const AgentBrowser: React.FC = () => {
                 if (runsData.success && Array.isArray(runsData.data) && runsData.data.length > 0) {
                   const { addRun } = useAgentStore.getState();
                   for (const run of runsData.data) {
-                    addRun(id, run);
+                    // Deserialize to convert any serialized Maps back to Map instances
+                    addRun(id, deserialize(run));
                   }
                   console.log(`[AgentBrowser] Loaded ${runsData.data.length} runs for agent:`, id);
                 }
@@ -249,7 +250,8 @@ export const AgentBrowser: React.FC = () => {
                   ) {
                     const { addRun } = useAgentStore.getState();
                     for (const run of runsData.data) {
-                      addRun(id, run);
+                      // Deserialize to convert any serialized Maps back to Map instances
+                      addRun(id, deserialize(run));
                     }
                     console.log(
                       `[AgentBrowser] Loaded ${runsData.data.length} runs for agent:`,

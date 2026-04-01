@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import type { ServerMessage } from '../../shared/protocol';
 import { isServerMessage } from '../../shared/protocol';
+import { deserialize } from '../lib/serialization';
 import type { WebSocketClient } from '../lib/websocket-client';
 import { createWebSocketClient } from '../lib/websocket-client';
 
@@ -66,15 +67,18 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
         if (isServerMessage(message)) {
           console.log('[WebSocketStore] Message received:', message.type);
 
+          // Deserialize the message to convert any serialized Maps back to Map instances
+          const deserializedMessage = deserialize(message) as ServerMessage;
+
           // Update last message
           set({
-            lastMessage: message,
+            lastMessage: deserializedMessage,
           });
 
           // Notify all registered handlers immediately
           messageHandlers.forEach((handler) => {
             try {
-              handler(message);
+              handler(deserializedMessage);
             } catch (error) {
               console.error('[WebSocketStore] Handler error:', error);
             }
