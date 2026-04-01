@@ -44,7 +44,7 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   switch (step.kind) {
     case 'llm':
       span.setAttribute('model', step.model);
-      if (step.system) span.setAttribute('systemPrompt', step.system);
+      if (step.instructions) span.setAttribute('systemPrompt', step.instructions);
       break;
     case 'tool':
       span.setAttribute('toolName', step.tool.name);
