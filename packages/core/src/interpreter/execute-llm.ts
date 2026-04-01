@@ -96,7 +96,7 @@ export async function executeLLM<TMemory, I, O>(
       }
     }
 
-    let systemTokenEstimate = step.system ? estimateTokens(step.system) : 0;
+    let systemTokenEstimate = step.instructions ? estimateTokens(step.instructions) : 0;
     for (const item of baseCtx.itemLog.items) {
       if (item.type === 'message' && item.role === 'system') {
         for (const part of item.content) {
@@ -163,6 +163,7 @@ export async function executeLLM<TMemory, I, O>(
       ? {
           model: step.model,
           items: requestItems,
+          instructions: step.instructions,
           tools: allTools,
           params: step.params,
           outputSchema: step.output,
@@ -173,6 +174,7 @@ export async function executeLLM<TMemory, I, O>(
       : {
           model: step.model,
           items: requestItems,
+          instructions: step.instructions,
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,

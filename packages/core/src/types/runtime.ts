@@ -30,6 +30,7 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
 interface CallModelRequestBase {
   model: string;
   items: ReadonlyArray<Item>;
+  instructions?: string;
   params?: ModelParams;
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
   outputSchema?: ZodType;
@@ -44,11 +45,11 @@ interface CallModelRequestWithTools extends CallModelRequestBase {
   layers?: MemoryLayer[];
 }
 
-/** @public Request shape when no tools are provided — ctx is only needed for tool
- *  execution callbacks in convertTools, so it is omitted here. */
+/** @public Request shape when no tools are provided — ctx is optional since it is
+ *  primarily needed for tool execution callbacks. */
 interface CallModelRequestWithoutTools extends CallModelRequestBase {
   tools?: undefined;
-  ctx?: undefined;
+  ctx?: Context;
   layers?: undefined;
 }
 

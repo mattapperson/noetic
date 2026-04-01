@@ -6,6 +6,7 @@ import { executeLLM } from '../../src/interpreter/execute-llm';
 import type { Item } from '../../src/types/items';
 import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
+import type { CallModelRequest } from '../../src/types/runtime';
 import type { StepLLM } from '../../src/types/step';
 import {
   createScriptedCallModel,
@@ -310,6 +311,51 @@ describe('executeLLM', () => {
     ]);
     await executeLLM(step, 'hi', ctx);
     // No error means empty tools were handled gracefully
+    expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  it('passes step.instructions through in the callModel request', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+      instructions: 'You are Skippy',
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('ok');
+    };
+    const ctx = makeMockContext({
+      harness,
+    });
+
+    await executeLLM(step, 'hi', ctx);
+    assert(capturedRequest !== undefined);
+    expect(capturedRequest.instructions).toBe('You are Skippy');
+    expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  it('passes undefined instructions when step has no instructions', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('ok');
+    };
+    const ctx = makeMockContext({
+      harness,
+    });
+
+    await executeLLM(step, 'hi', ctx);
+    assert(capturedRequest !== undefined);
+    expect(capturedRequest.instructions).toBeUndefined();
     expect(ctx.lastStepMeta).not.toBeNull();
   });
 

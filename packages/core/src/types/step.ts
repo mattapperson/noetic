@@ -89,7 +89,7 @@ export interface StepLLM<_TMemory = ContextMemory, _I = unknown, O = unknown> {
   kind: 'llm';
   id: string;
   model: string;
-  system?: string;
+  instructions?: string;
   tools?: Tool[];
   output?: ZodType<O>;
   params?: ModelParams;
