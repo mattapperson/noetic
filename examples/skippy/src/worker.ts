@@ -12,6 +12,14 @@ function getGatewayStub(env: Env): DurableObjectStub {
   return env.GATEWAY_DURABLE.get(id);
 }
 
+function isGatewayAuthorized(request: Request, env: Env): boolean {
+  const header = request.headers.get('Authorization');
+  if (!header) {
+    return false;
+  }
+  return header === `Bearer ${env.GATEWAY_SECRET}`;
+}
+
 //#endregion
 
 //#region Route Handlers
@@ -45,6 +53,12 @@ export default {
 
     if (request.method === 'POST' && url.pathname === DISCORD_WEBHOOK_PATH) {
       return handleWebhook(request, env, ctx);
+    }
+
+    if (url.pathname.startsWith('/gateway/') && !isGatewayAuthorized(request, env)) {
+      return new Response('Unauthorized', {
+        status: 401,
+      });
     }
 
     if (request.method === 'POST' && url.pathname === '/gateway/start') {

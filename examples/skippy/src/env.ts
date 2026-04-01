@@ -6,5 +6,6 @@ export interface Env {
   DISCORD_APPLICATION_ID: string;
   OPENROUTER_API_KEY: string;
   WORKER_URL: string;
+  GATEWAY_SECRET: string;
   GATEWAY_DURABLE: DurableObjectNamespace;
 }

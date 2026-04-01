@@ -12,6 +12,7 @@ const GATEWAY_DURATION_MS = 10 * 60 * 1e3;
 export class GatewayDurable implements DurableObject {
   private readonly state: DurableObjectState;
   private readonly env: Env;
+  private running = false;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -45,6 +46,11 @@ export class GatewayDurable implements DurableObject {
   }
 
   private async startGateway(): Promise<void> {
+    if (this.running) {
+      return;
+    }
+
+    this.running = true;
     const bot = await getInitializedBot(this.env);
     const webhookUrl = `${this.env.WORKER_URL}${DISCORD_WEBHOOK_PATH}`;
     const discord = bot.getAdapter('discord');
@@ -61,6 +67,7 @@ export class GatewayDurable implements DurableObject {
     } catch (err: unknown) {
       console.error('Gateway start failed:', err);
     } finally {
+      this.running = false;
       await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
     }
   }

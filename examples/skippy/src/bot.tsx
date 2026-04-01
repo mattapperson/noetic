@@ -16,7 +16,17 @@ type SkippyAdapters = {
 
 //#region Bot Factory
 
-let initPromise: Promise<NoeticChat<SkippyAdapters>> | undefined;
+const botCache = new Map<string, Promise<NoeticChat<SkippyAdapters>>>();
+
+function envCacheKey(env: Env): string {
+  return [
+    env.DISCORD_BOT_TOKEN,
+    env.DISCORD_PUBLIC_KEY,
+    env.DISCORD_APPLICATION_ID,
+    env.OPENROUTER_API_KEY,
+    env.WORKER_URL,
+  ].join(':');
+}
 
 function createBot(env: Env): NoeticChat<SkippyAdapters> {
   const harness = new AgentHarness({
@@ -68,11 +78,21 @@ function createBot(env: Env): NoeticChat<SkippyAdapters> {
 }
 
 export function getInitializedBot(env: Env): Promise<NoeticChat<SkippyAdapters>> {
-  if (!initPromise) {
-    const instance = createBot(env);
-    initPromise = instance.initialize().then(() => instance);
+  const key = envCacheKey(env);
+  const cached = botCache.get(key);
+  if (cached) {
+    return cached;
   }
-  return initPromise;
+  const instance = createBot(env);
+  const promise = instance
+    .initialize()
+    .then(() => instance)
+    .catch((err: unknown) => {
+      botCache.delete(key);
+      throw err;
+    });
+  botCache.set(key, promise);
+  return promise;
 }
 
 //#endregion
