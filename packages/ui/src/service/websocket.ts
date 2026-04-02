@@ -11,8 +11,6 @@
 import type { IncomingMessage } from 'node:http';
 import { createServer } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
-import { getAllDebuggers, getDebugger } from '../runtime/debugger-registry.js';
-import type { DebugController } from '../runtime/types.js';
 import type {
   AgentInfo,
   ClientMessage,
@@ -434,23 +432,6 @@ export class NoeticUIServer {
     await this.saveTrace(traceState.trace, traceState.agentId);
   }
 
-  // ============================================================================
-  // Private Methods
-  // ============================================================================
-
-  private getActiveDebugger(traceId?: string): DebugController | null {
-    if (traceId) {
-      const specific = getDebugger(traceId);
-      if (specific) {
-        return specific;
-      }
-    }
-    // Fall back to any active debugger
-    const debuggers = getAllDebuggers();
-    const first = debuggers.values().next();
-    return first.done ? null : first.value;
-  }
-
   private handleConnection(ws: WebSocket, _req: IncomingMessage): void {
     const clientId = this.generateClientId();
     const now = Date.now();
@@ -553,54 +534,26 @@ export class NoeticUIServer {
       case 'node.stepInto':
       case 'node.stepOut':
       case 'node.resume': {
-        const activeDebugger = this.getActiveDebugger(message.traceId);
-        if (!activeDebugger) {
-          this.sendToClient(client, {
-            type: 'execution.error',
-            agentId: 'system',
-            traceId: message.traceId,
-            error: {
-              message: 'No active debugger attached',
-              code: 'NO_DEBUGGER',
-            },
-          });
-          break;
-        }
-        switch (message.type) {
-          case 'node.resume':
-            activeDebugger.resume();
-            break;
-          case 'node.stepOver':
-            activeDebugger.stepOver();
-            break;
-          case 'node.stepInto':
-            activeDebugger.stepInto();
-            break;
-          case 'node.stepOut':
-            activeDebugger.stepOut();
-            break;
-        }
+        // Debug control deferred to future enhancement
+        this.sendToClient(client, {
+          type: 'execution.error',
+          agentId: 'system',
+          traceId: message.traceId,
+          error: {
+            message: 'No active debugger attached',
+            code: 'NO_DEBUGGER',
+          },
+        });
         break;
       }
 
       case 'breakpoint.add': {
         this.breakpointRegistry.set(message.stepId, message.condition ?? null);
-        const activeDebugger = this.getActiveDebugger();
-        if (activeDebugger) {
-          activeDebugger.addBreakpoint({
-            stepId: message.stepId,
-            condition: message.condition,
-          });
-        }
         break;
       }
 
       case 'breakpoint.remove': {
         this.breakpointRegistry.delete(message.stepId);
-        const activeDebugger = this.getActiveDebugger();
-        if (activeDebugger) {
-          activeDebugger.removeBreakpoint(message.stepId);
-        }
         break;
       }
 
@@ -880,17 +833,6 @@ export class NoeticUIServer {
       isLive: true,
       input,
     });
-
-    // Apply any pending breakpoints to the new debugger
-    const activeDebugger = this.getActiveDebugger(traceId);
-    if (activeDebugger) {
-      for (const [stepId, condition] of this.breakpointRegistry) {
-        activeDebugger.addBreakpoint({
-          stepId,
-          condition: condition ?? undefined,
-        });
-      }
-    }
 
     // Broadcast to all clients
     this.broadcast({
