@@ -12,6 +12,65 @@ function makePos(id: string, x: number, y: number): NodePosition {
   };
 }
 
+describe('routeEdge — A* obstacle avoidance', () => {
+  it('routes around an obstacle between source and target', () => {
+    // Source bottom-center: (240, 240), Target top-center: (240, 500)
+    // Direct vertical route passes through x=240, y in [240, 500]
+    // Obstacle at (80, 280) spans x=[80,360] (includes 240) and y=[280,420]
+    const source = makePos('a', 100, 100);
+    const target = makePos('b', 100, 500);
+    const obstacle = makePos('blocker', 80, 280);
+    const result = routeEdge(source, target, [
+      obstacle,
+    ]);
+
+    // All segments should be axis-aligned
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const a = result.waypoints[i];
+      const b = result.waypoints[i + 1];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+
+    // Route should not pass through the obstacle (with margin)
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const a = result.waypoints[i];
+      const b = result.waypoints[i + 1];
+      // For vertical segments that overlap obstacle's X range
+      if (a.x === b.x && a.x > obstacle.x - 10 && a.x < obstacle.x + obstacle.width + 10) {
+        const minY = Math.min(a.y, b.y);
+        const maxY = Math.max(a.y, b.y);
+        const obstacleTop = obstacle.y - 10;
+        const obstacleBottom = obstacle.y + obstacle.height + 10;
+        const overlaps = maxY > obstacleTop && minY < obstacleBottom;
+        expect(overlaps).toBe(false);
+      }
+    }
+  });
+
+  it('routes around multiple obstacles', () => {
+    // Source bottom-center: (240, 240), Target top-center: (240, 700)
+    // obs1 at (80, 280) spans y=[280,420], obs2 at (80, 480) spans y=[480,620]
+    const source = makePos('a', 100, 100);
+    const target = makePos('b', 100, 700);
+    const obs1 = makePos('obs1', 80, 280);
+    const obs2 = makePos('obs2', 80, 480);
+    const result = routeEdge(source, target, [
+      obs1,
+      obs2,
+    ]);
+
+    // All segments axis-aligned
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const a = result.waypoints[i];
+      const b = result.waypoints[i + 1];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+
+    // Route should have more than 2 waypoints (forced to go around)
+    expect(result.waypoints.length).toBeGreaterThan(2);
+  });
+});
+
 describe('routeEdge — simple rules', () => {
   it('routes straight down when source is directly above target', () => {
     const source = makePos('a', 100, 100);
