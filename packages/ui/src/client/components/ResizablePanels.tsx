@@ -28,6 +28,7 @@ interface ResizableSidebarProps {
   onWidthChange: (width: number) => void;
   side: 'left' | 'right';
   className?: string;
+  isHydrated?: boolean;
 }
 
 const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
@@ -36,6 +37,7 @@ const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
   onWidthChange,
   side,
   className = '',
+  isHydrated = true,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const startXRef = useRef(0);
@@ -90,6 +92,9 @@ const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
       className={`relative flex-shrink-0 ${className}`}
       style={{
         width,
+        // Smooth transition when loading persisted width after hydration
+        // Disable during drag for responsive resizing
+        transition: isDragging || !isHydrated ? undefined : 'width 300ms ease-out',
       }}
     >
       {children}
@@ -212,7 +217,7 @@ interface ResizablePanelsProps {
 
 export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   // Use persisted column widths from localStorage
-  const { leftWidth, rightWidth, setLeftWidth, setRightWidth } = useColumnWidths({
+  const { leftWidth, rightWidth, setLeftWidth, setRightWidth, hasHydrated } = useColumnWidths({
     defaultLeftWidth: DEFAULT_LEFT_WIDTH,
     defaultRightWidth: DEFAULT_RIGHT_WIDTH,
     minWidth: MIN_SIDEBAR_WIDTH,
@@ -281,13 +286,23 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   return (
     <>
       <div className="flex-1 flex overflow-hidden">
-        <ResizableSidebar width={leftWidth} onWidthChange={setLeftWidth} side="left">
+        <ResizableSidebar
+          width={leftWidth}
+          onWidthChange={setLeftWidth}
+          side="left"
+          isHydrated={hasHydrated}
+        >
           <AgentBrowser />
         </ResizableSidebar>
 
         <CenterCanvas selectedNodeId={selectedNodeId} onNodeSelect={setSelectedNodeId} />
 
-        <ResizableSidebar width={rightWidth} onWidthChange={setRightWidth} side="right">
+        <ResizableSidebar
+          width={rightWidth}
+          onWidthChange={setRightWidth}
+          side="right"
+          isHydrated={hasHydrated}
+        >
           <RightPanel selectedNodeId={selectedNodeId} nodes={nodes} />
         </ResizableSidebar>
       </div>
