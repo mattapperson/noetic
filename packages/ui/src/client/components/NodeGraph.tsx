@@ -43,6 +43,12 @@ interface DragState {
   initialY: number;
 }
 
+interface ZoomEntry {
+  containerId: string;
+  label: string;
+  previousView: ViewState;
+}
+
 const NODE_WIDTH = 280;
 const NODE_HEIGHT = 140;
 const MIN_ZOOM = 0.1;
@@ -131,6 +137,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     initialY: 0,
   });
   const [isPanning, setIsPanning] = useState(false);
+  const [zoomStack, setZoomStack] = useState<ZoomEntry[]>([]);
 
   // Calculate layout whenever trace changes
   const { positions, edges, nodes } = useMemo(() => {
@@ -299,6 +306,68 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     positions,
   ]);
 
+  // Build position lookup map
+  const positionMap = useMemo(() => {
+    const map = new Map<string, NodePosition>();
+    for (const pos of positions) {
+      map.set(pos.id, pos);
+    }
+    return map;
+  }, [
+    positions,
+  ]);
+
+  const handleContainerZoom = useCallback(
+    (containerId: string) => {
+      const pos = positionMap.get(containerId);
+      const node = nodes.get(containerId);
+      if (!pos || !node || !containerRef.current) {
+        return;
+      }
+
+      const { width: vw, height: vh } = containerRef.current.getBoundingClientRect();
+      const scale = pos.scale ?? 1;
+      const targetZoom = Math.min(1 / scale, MAX_ZOOM);
+
+      const centerX = pos.x + pos.width / 2;
+      const centerY = pos.y + pos.height / 2;
+
+      const newView: ViewState = {
+        x: vw / 2 - centerX * targetZoom,
+        y: vh / 2 - centerY * targetZoom,
+        zoom: targetZoom,
+      };
+
+      setZoomStack((prev) => [
+        ...prev,
+        {
+          containerId,
+          label: `${STEP_KIND_LABELS[node.kind]} ${node.stepId}`,
+          previousView: {
+            ...view,
+          },
+        },
+      ]);
+      setView(newView);
+    },
+    [
+      positionMap,
+      nodes,
+      view,
+    ],
+  );
+
+  const handleZoomBack = useCallback(() => {
+    setZoomStack((prev) => {
+      if (prev.length === 0) {
+        return prev;
+      }
+      const last = prev[prev.length - 1];
+      setView(last.previousView);
+      return prev.slice(0, -1);
+    });
+  }, []);
+
   // Render node component based on kind
   const renderNode = (node: ExecutionNode) => {
     const isGhosted = executedNodeIds !== undefined && !executedNodeIds.has(node.id);
@@ -394,17 +463,6 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     );
   };
 
-  // Build position lookup map
-  const positionMap = useMemo(() => {
-    const map = new Map<string, NodePosition>();
-    for (const pos of positions) {
-      map.set(pos.id, pos);
-    }
-    return map;
-  }, [
-    positions,
-  ]);
-
   return (
     <div
       ref={containerRef}
@@ -490,11 +548,88 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
         </div>
       )}
 
+      {/* Breadcrumb navigation */}
+      {zoomStack.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '56px',
+            right: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 10,
+            padding: '6px 12px',
+            backgroundColor: 'var(--noetic-canvas-bg)',
+            border: '1px solid var(--noetic-border)',
+            borderRadius: '4px',
+            fontSize: '12px',
+            color: 'var(--noetic-text)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleZoomBack}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--noetic-text)',
+              cursor: 'pointer',
+              padding: '2px 6px',
+              fontSize: '12px',
+            }}
+          >
+            Root
+          </button>
+          {zoomStack.map((entry, i) => (
+            <span
+              key={entry.containerId}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <span
+                style={{
+                  opacity: 0.5,
+                }}
+              >
+                /
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = zoomStack[i];
+                  setView(target.previousView);
+                  setZoomStack((prev) => prev.slice(0, i));
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color:
+                    i === zoomStack.length - 1
+                      ? 'var(--noetic-text)'
+                      : 'var(--noetic-text-secondary)',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  fontSize: '12px',
+                  fontWeight: i === zoomStack.length - 1 ? 600 : 400,
+                }}
+              >
+                {entry.label}
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Graph canvas */}
       <div
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
           transformOrigin: '0 0',
+          transition: 'transform 0.3s ease-out',
           position: 'absolute',
           top: 0,
           left: 0,
@@ -536,8 +671,9 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
             const icon = STEP_KIND_ICONS[node.kind] ?? '';
             const label = STEP_KIND_LABELS[node.kind] ?? node.kind;
             return (
-              <div
+              <button
                 key={`container-${pos.id}`}
+                type="button"
                 style={{
                   position: 'absolute',
                   left: pos.x,
@@ -547,9 +683,12 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                   borderRadius: '12px',
                   border: `2px dashed ${kindColors.border}`,
                   backgroundColor: `${kindColors.bg}`,
-                  pointerEvents: 'none',
+                  pointerEvents: 'auto',
+                  cursor: 'pointer',
                   transformOrigin: 'top left',
+                  padding: 0,
                 }}
+                onClick={() => handleContainerZoom(pos.id)}
               >
                 {/* Container header */}
                 <div
@@ -591,7 +730,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                     {statusColors.text ? node.status : ''}
                   </span>
                 </div>
-              </div>
+              </button>
             );
           })}
 
