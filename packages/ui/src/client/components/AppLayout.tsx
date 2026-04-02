@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { ScrollProvider } from '../contexts/ScrollContext';
 import { useConnection } from '../hooks/useConnection';
 import { useExecutionMessages } from '../hooks/useExecutionMessages';
+import { useHistoricalRuns } from '../hooks/useHistoricalRuns';
 import { useThemeStore } from '../stores/theme';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ResizablePanels } from './ResizablePanels';
@@ -24,6 +25,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
   // Process WebSocket messages and update stores
   useExecutionMessages();
+
+  // Load historical runs from REST API on startup
+  useHistoricalRuns();
 
   // Initialize theme
   useEffect(() => {

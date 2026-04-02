@@ -18,13 +18,17 @@ import type {
 
 // Simple fuzzy match function
 function fuzzyMatch(text: string, pattern: string): boolean {
-  if (!pattern) return true;
+  if (!pattern) {
+    return true;
+  }
 
   const textLower = text.toLowerCase();
   const patternLower = pattern.toLowerCase();
 
   // Quick substring check first
-  if (textLower.includes(patternLower)) return true;
+  if (textLower.includes(patternLower)) {
+    return true;
+  }
 
   // Fuzzy match: check if all characters in pattern appear in text in order
   let patternIndex = 0;
@@ -48,6 +52,7 @@ interface AgentState {
   registeredAgents: RegisteredAgent[];
   lastDiscoveryTime: number | null;
   isDiscovering: boolean;
+  isLoadingHistory: boolean;
 
   // Filtering and sorting
   agentFilter: AgentFilter;
@@ -73,6 +78,7 @@ interface AgentState {
   registerAgent: (agent: RegisteredAgent) => void;
   unregisterAgent: (id: string) => void;
   setDiscoveryStatus: (isDiscovering: boolean, lastTime?: number) => void;
+  setLoadingHistory: (loading: boolean) => void;
 
   addRun: (agentId: string, run: Run) => void;
   updateRun: (agentId: string, runId: string, updates: Partial<Run>) => void;
@@ -104,6 +110,7 @@ export const useAgentStore = create<AgentState>()(
       registeredAgents: [],
       lastDiscoveryTime: null,
       isDiscovering: false,
+      isLoadingHistory: false,
       agentFilter: {
         searchQuery: '',
       },
@@ -252,6 +259,11 @@ export const useAgentStore = create<AgentState>()(
           lastDiscoveryTime: lastTime ?? state.lastDiscoveryTime,
         })),
 
+      setLoadingHistory: (loading) =>
+        set({
+          isLoadingHistory: loading,
+        }),
+
       addRun: (agentId, run) =>
         set((state) => ({
           agents: state.agents.map((agent) => {
@@ -260,7 +272,7 @@ export const useAgentStore = create<AgentState>()(
             }
             // Check if run already exists
             const existingIndex = agent.runs.findIndex((r) => r.id === run.id);
-            let runs;
+            let runs: Run[];
             if (existingIndex >= 0) {
               // Update existing run, but preserve trace if new run doesn't have one
               runs = agent.runs.map((r, idx) =>
