@@ -17,6 +17,8 @@ interface NodeGraphProps {
   selectedNodeId?: string | null;
   onNodeSelect?: (nodeId: string | null) => void;
   fitToView?: boolean;
+  /** Node IDs that have been "executed" up to the current timeline position */
+  executedNodeIds?: Set<string>;
 }
 
 interface ViewState {
@@ -43,15 +45,21 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
   selectedNodeId: externalSelectedNodeId,
   onNodeSelect,
   fitToView = true,
+  executedNodeIds,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   // Use internal state if no external control provided
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
   const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
-  const handleNodeSelect = (nodeId: string | null) => {
-    setInternalSelectedNodeId(nodeId);
-    onNodeSelect?.(nodeId);
-  };
+  const handleNodeSelect = useCallback(
+    (nodeId: string | null) => {
+      setInternalSelectedNodeId(nodeId);
+      onNodeSelect?.(nodeId);
+    },
+    [
+      onNodeSelect,
+    ],
+  );
 
   const [view, setView] = useState<ViewState>({
     x: 0,
@@ -239,8 +247,15 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
 
   // Render node component based on kind
   const renderNode = (node: ExecutionNode) => {
+    const isGhosted = executedNodeIds !== undefined && !executedNodeIds.has(node.id);
+    const displayNode = isGhosted
+      ? {
+          ...node,
+          status: 'pending' as const,
+        }
+      : node;
     const commonProps = {
-      node,
+      node: displayNode,
       selected: selectedNodeId === node.id,
       onClick: () => handleNodeClick(node.id),
     };
@@ -295,12 +310,16 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     }
 
     const sourceNode = nodes.get(edge.source);
-    const color = sourceNode
-      ? STATUS_COLORS[sourceNode.status].border
+    const isEdgeGhosted =
+      executedNodeIds !== undefined &&
+      (!executedNodeIds.has(edge.source) || !executedNodeIds.has(edge.target));
+    const effectiveStatus = isEdgeGhosted ? 'pending' : sourceNode?.status;
+    const color = effectiveStatus
+      ? STATUS_COLORS[effectiveStatus].border
       : NODE_KIND_COLORS.run.border;
 
-    // Use a different color for loop edges
-    const strokeColor = edge.type === 'loop' ? '#ff6b6b' : color;
+    // Use a different color for loop edges (unless ghosted)
+    const strokeColor = isEdgeGhosted ? color : edge.type === 'loop' ? '#ff6b6b' : color;
 
     return (
       <g key={edge.id}>

@@ -1,11 +1,13 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
+import { usePlaybackStore } from '../stores/playbackStore';
+import { useTimelineStore } from '../stores/timelineStore';
 import type { Run } from '../types/agent';
 import { AgentBrowser } from './AgentBrowser';
 import { NodeGraph } from './NodeGraph';
@@ -111,10 +113,39 @@ interface CenterCanvasProps {
   onNodeSelect: (nodeId: string | null) => void;
 }
 
+function extractParamString(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+
 const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelect }) => {
   const params = useParams();
-  const runId = params?.runId as string | undefined;
+  const runId = extractParamString(params?.runId);
   const { agents } = useAgentStore();
+
+  // Timeline / playback state for time-travel rendering
+  const currentStepIndex = usePlaybackStore((s) => s.currentStepIndex);
+  const playbackState = usePlaybackStore((s) => s.state);
+  const markers = useTimelineStore((s) => s.markers);
+
+  // Compute the set of node IDs that have been executed up to the current timeline position.
+  // When playback is idle or live, all nodes are shown with their real status.
+  const executedNodeIds = useMemo(() => {
+    if (playbackState === 'idle' || playbackState === 'live' || markers.length === 0) {
+      return undefined;
+    }
+    const ids = new Set<string>();
+    for (let i = 0; i <= currentStepIndex && i < markers.length; i++) {
+      ids.add(markers[i].nodeId);
+    }
+    return ids;
+  }, [
+    currentStepIndex,
+    playbackState,
+    markers,
+  ]);
 
   // Find the selected run and its trace across all agents
   const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
@@ -128,6 +159,7 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelec
           selectedNodeId={selectedNodeId}
           onNodeSelect={onNodeSelect}
           fitToView={true}
+          executedNodeIds={executedNodeIds}
         />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -175,16 +207,16 @@ interface ResizablePanelsProps {
   children?: React.ReactNode;
 }
 
-export const ResizablePanels: React.FC<ResizablePanelsProps> = ({ children }) => {
+export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [isLoadingRun, setIsLoadingRun] = useState(false);
+  const [_isLoadingRun, setIsLoadingRun] = useState(false);
 
   // Get current run and nodes
   const params = useParams();
-  const agentSlug = params?.agentSlug as string | undefined;
-  const runId = params?.runId as string | undefined;
+  const agentSlug = extractParamString(params?.agentSlug);
+  const runId = extractParamString(params?.runId);
   const { agents, updateRun } = useAgentStore();
   const { setTrace } = useExecutionStore();
   const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
@@ -197,7 +229,7 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({ children }) =>
     }
 
     // Check if we already have the run but without trace data
-    const runExists = agents.flatMap((a) => a.runs).find((r) => r.id === runId);
+    const _runExists = agents.flatMap((a) => a.runs).find((r) => r.id === runId);
 
     const fetchRun = async () => {
       setIsLoadingRun(true);
