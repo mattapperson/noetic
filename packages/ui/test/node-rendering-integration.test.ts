@@ -92,8 +92,10 @@ describe('node rendering integration', () => {
     const step2 = positions.find((p) => p.id === 'step-2');
     expect(step1).toBeDefined();
     expect(step2).toBeDefined();
-    // Second node should be below the first
-    expect(step2!.y).toBeGreaterThan(step1!.y);
+    // Branch now lays out children horizontally
+    expect(step2!.x).toBeGreaterThan(step1!.x);
+    // Same y (side by side)
+    expect(step1!.y).toBe(step2!.y);
   });
 
   it('renders loop as container with children inside', () => {
@@ -343,6 +345,46 @@ describe('node rendering integration', () => {
     expect(branchPos!.scale).toBe(1);
     expect(loopPos!.scale).toBe(0.5);
     expect(stepPos!.scale).toBe(0.25);
+  });
+
+  it('renders branch children side by side (horizontal)', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'branch',
+      makeNode('branch', {
+        kind: 'branch',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'path-a',
+      makeNode('path-a', {
+        parentId: 'branch',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'path-b',
+      makeNode('path-b', {
+        parentId: 'branch',
+        kind: 'run',
+        depth: 1,
+        startTime: 2001,
+      }),
+    );
+
+    const { positions } = calculateSequentialLayout(nodes, 'branch');
+
+    const pathAPos = positions.find((p) => p.id === 'path-a');
+    const pathBPos = positions.find((p) => p.id === 'path-b');
+
+    // Same y (side by side)
+    expect(pathAPos!.y).toBe(pathBPos!.y);
+    // Different x
+    expect(pathBPos!.x).toBeGreaterThan(pathAPos!.x);
   });
 
   it('recovers when rootNodeId points to non-existent node', () => {

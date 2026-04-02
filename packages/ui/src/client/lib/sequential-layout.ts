@@ -156,7 +156,7 @@ function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResul
     };
   }
 
-  if (node.kind === 'fork') {
+  if (node.kind === 'fork' || node.kind === 'branch') {
     return layoutForkContainer(
       {
         nodeId,
