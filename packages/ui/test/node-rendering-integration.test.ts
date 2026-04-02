@@ -518,6 +518,42 @@ describe('node rendering integration', () => {
     expect(spawnEdge!.type).toBe('spawn');
   });
 
+  it('generates conditional-type edges from branch container to its children', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'branch',
+      makeNode('branch', {
+        kind: 'branch',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'path-a',
+      makeNode('path-a', {
+        parentId: 'branch',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'path-b',
+      makeNode('path-b', {
+        parentId: 'branch',
+        kind: 'run',
+        depth: 1,
+        startTime: 2001,
+      }),
+    );
+
+    const { edges } = calculateSequentialLayout(nodes, 'branch');
+
+    // Branch uses fork layout (horizontal), so there should be conditional-type edges from branch to each child
+    const conditionalEdges = edges.filter((e) => e.type === 'conditional');
+    expect(conditionalEdges.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('recovers when rootNodeId points to non-existent node', () => {
     const nodes = new Map<string, ExecutionNode>();
     nodes.set(

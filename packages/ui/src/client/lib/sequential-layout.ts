@@ -312,6 +312,30 @@ function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): Layou
     innerX += result.width + opts.horizontalSpacing;
   }
 
+  // Add edges from container to each child path
+  const parentNode = ctx.nodes.get(nodeId);
+  if (parentNode?.kind === 'branch') {
+    for (const childId of children) {
+      ctx.edges.push({
+        id: `${nodeId}-${childId}-conditional`,
+        source: nodeId,
+        target: childId,
+        type: 'conditional',
+        animated: ctx.nodes.get(childId)?.status === 'running',
+      });
+    }
+  } else if (parentNode?.kind === 'fork') {
+    for (const childId of children) {
+      ctx.edges.push({
+        id: `${nodeId}-${childId}-fork`,
+        source: nodeId,
+        target: childId,
+        type: 'fork',
+        animated: ctx.nodes.get(childId)?.status === 'running',
+      });
+    }
+  }
+
   const containerWidth = snapToGrid(innerX - snappedX - opts.horizontalSpacing + padSide);
   const containerHeight = snapToGrid(maxChildHeight + padTop + padBottom);
   const finalWidth = Math.max(containerWidth, snapToGrid(opts.nodeWidth * scale));
