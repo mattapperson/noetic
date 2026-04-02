@@ -6,7 +6,8 @@
  */
 
 import { useEffect } from 'react';
-import type { ExecutionTrace, ServerMessage } from '../../shared/protocol';
+import type { ExecutionNode, ExecutionTrace, ServerMessage } from '../../shared/protocol';
+import { ensureMap } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
 import { registerMessageHandler } from '../stores/websocket';
@@ -132,7 +133,7 @@ export function useExecutionMessages(): void {
             if (!existingTrace) {
               continue;
             }
-            const nodeMap = new Map(existingTrace.nodes);
+            const nodeMap = ensureMap<string, ExecutionNode>(existingTrace.nodes);
             nodeMap.set(node.id, node);
 
             // Set root if not set

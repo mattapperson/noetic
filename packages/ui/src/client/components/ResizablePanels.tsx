@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useColumnWidths } from '../hooks/useColumnWidths';
-import { deserialize } from '../lib/serialization';
+import { deserialize, ensureMap } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
 import { usePlaybackStore } from '../stores/playbackStore';
@@ -191,11 +191,13 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelec
 
 interface RightPanelProps {
   selectedNodeId: string | null;
-  nodes: Map<string, import('../types').ExecutionNode>;
+  nodes: unknown; // Can be Map or serialized object
 }
 
 const RightPanel: React.FC<RightPanelProps> = ({ selectedNodeId, nodes }) => {
-  const selectedNode = selectedNodeId ? (nodes.get(selectedNodeId) ?? null) : null;
+  // Ensure nodes is a Map using ensureMap
+  const nodeMap = ensureMap<string, import('../types').ExecutionNode>(nodes);
+  const selectedNode = selectedNodeId ? (nodeMap.get(selectedNodeId) ?? null) : null;
 
   return (
     <div className="h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
@@ -227,7 +229,10 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   const { agents, updateRun } = useAgentStore();
   const { setTrace } = useExecutionStore();
   const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
-  const nodes = currentRun?.trace?.nodes ?? new Map();
+  // Ensure nodes is a Map using ensureMap
+  const nodes = ensureMap<string, import('../types').ExecutionNode>(
+    currentRun?.trace?.nodes ?? new Map(),
+  );
 
   // Fetch run data when URL has runId but run isn't loaded yet
   useEffect(() => {
