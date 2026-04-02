@@ -19,7 +19,7 @@ const FirstIcon: React.FC<{
 }> = ({ size }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
     <title>First step</title>
-    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+    <path d="M18 18l-8.5-6 8.5-6v12zM8 18V6H6v12h2z" />
   </svg>
 );
 
@@ -28,8 +28,7 @@ const StepBackIcon: React.FC<{
 }> = ({ size }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
     <title>Step back</title>
-    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" transform="rotate(180 12 12)" />
-    <rect x="18" y="6" width="2" height="12" />
+    <path d="M17 18l-9-6 9-6v12z" />
   </svg>
 );
 
@@ -56,8 +55,7 @@ const StepForwardIcon: React.FC<{
 }> = ({ size }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
     <title>Step forward</title>
-    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-    <rect x="18" y="6" width="2" height="12" />
+    <path d="M7 6l9 6-9 6V6z" />
   </svg>
 );
 
@@ -66,7 +64,7 @@ const LastIcon: React.FC<{
 }> = ({ size }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
     <title>Last step</title>
-    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" transform="rotate(180 12 12)" />
+    <path d="M6 6l8.5 6L6 18V6zm10 0v12h2V6h-2z" />
   </svg>
 );
 
