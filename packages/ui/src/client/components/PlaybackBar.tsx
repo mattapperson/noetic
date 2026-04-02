@@ -27,19 +27,22 @@ interface PlaybackBarProps {
 
 export const PlaybackBar: React.FC<PlaybackBarProps> = ({ className = '', onTimelineChange }) => {
   const { nodes } = useExecutionStore();
-  const { currentStepIndex, totalSteps, setTotalSteps, jumpToStep } = usePlaybackStore();
+  const { currentStepIndex, totalSteps, setTotalSteps, jumpToStep, jumpToFirst } =
+    usePlaybackStore();
 
   const { markers, setPlayheadToMarker, selectMarker } = useTimelineStore();
 
   // Update total steps when nodes change
   useEffect(() => {
     setTotalSteps(nodes.size);
-    // Initialize timeline markers
     const nodeArray = Array.from(nodes.values());
     useTimelineStore.getState().setMarkers(nodeArray);
+    // Reset playback to start when trace changes
+    jumpToFirst();
   }, [
     nodes,
     setTotalSteps,
+    jumpToFirst,
   ]);
 
   // Sync playback step index with timeline
@@ -57,26 +60,10 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({ className = '', onTime
   ]);
 
   // Handle timeline position change during drag
-  const handleTimelineChange = useCallback(
-    (position: number) => {
-      // Find nearest marker to position
-      const { getNearestMarker } = useTimelineStore.getState();
-      const nearest = getNearestMarker(position);
-      if (nearest) {
-        const index = markers.findIndex((m) => m.id === nearest.id);
-        if (index !== -1 && index !== currentStepIndex) {
-          jumpToStep(index);
-          onTimelineChange?.(index, nearest.nodeId);
-        }
-      }
-    },
-    [
-      markers,
-      currentStepIndex,
-      jumpToStep,
-      onTimelineChange,
-    ],
-  );
+  const handleTimelineChange = useCallback((position: number) => {
+    // During drag, only update the visual playhead — no heavy logic
+    useTimelineStore.getState().setPlayheadPosition(position);
+  }, []);
 
   // Handle timeline drag end
   const handleTimelineDragEnd = useCallback(
