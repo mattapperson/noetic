@@ -6,11 +6,19 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { routeEdge } from '../lib/edge-router';
 import { calculateSequentialLayout, fitToViewport } from '../lib/sequential-layout';
 import { ensureMap } from '../lib/serialization';
-import type { ExecutionNode, ExecutionTrace, NodeEdge, NodePosition } from '../types';
+import type { ExecutionNode, ExecutionTrace, NodeEdge, NodePosition, Waypoint } from '../types';
 import { BranchNode, ForkNode, LLMNode, LoopNode, RunNode, SpawnNode, ToolNode } from './nodes';
-import { NODE_KIND_COLORS, STATUS_COLORS, STEP_KIND_ICONS, STEP_KIND_LABELS } from './nodes/shared';
+import {
+  EDGE_CORNER_RADIUS,
+  EDGE_STYLES,
+  NODE_KIND_COLORS,
+  STATUS_COLORS,
+  STEP_KIND_ICONS,
+  STEP_KIND_LABELS,
+} from './nodes/shared';
 
 interface NodeGraphProps {
   trace: ExecutionTrace | null;
@@ -39,6 +47,55 @@ const NODE_WIDTH = 280;
 const NODE_HEIGHT = 140;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
+
+/** Build SVG path from orthogonal waypoints with rounded corners */
+const buildPolylinePath = (waypoints: Waypoint[], radius: number): string => {
+  if (waypoints.length < 2) {
+    return '';
+  }
+  if (waypoints.length === 2) {
+    return `M ${waypoints[0].x} ${waypoints[0].y} L ${waypoints[1].x} ${waypoints[1].y}`;
+  }
+
+  const parts: string[] = [
+    `M ${waypoints[0].x} ${waypoints[0].y}`,
+  ];
+
+  for (let i = 1; i < waypoints.length - 1; i++) {
+    const prev = waypoints[i - 1];
+    const curr = waypoints[i];
+    const next = waypoints[i + 1];
+
+    // Distance to prev and next points
+    const dPrev = Math.max(Math.abs(curr.x - prev.x), Math.abs(curr.y - prev.y));
+    const dNext = Math.max(Math.abs(next.x - curr.x), Math.abs(next.y - curr.y));
+    const r = Math.min(radius, dPrev / 2, dNext / 2);
+
+    // Direction vectors
+    const fromX = Math.sign(curr.x - prev.x);
+    const fromY = Math.sign(curr.y - prev.y);
+    const toX = Math.sign(next.x - curr.x);
+    const toY = Math.sign(next.y - curr.y);
+
+    // Arc start and end
+    const arcStartX = curr.x - fromX * r;
+    const arcStartY = curr.y - fromY * r;
+    const arcEndX = curr.x + toX * r;
+    const arcEndY = curr.y + toY * r;
+
+    // Determine sweep direction
+    const cross = fromX * toY - fromY * toX;
+    const sweep = cross > 0 ? 1 : 0;
+
+    parts.push(`L ${arcStartX} ${arcStartY}`);
+    parts.push(`A ${r} ${r} 0 0 ${sweep} ${arcEndX} ${arcEndY}`);
+  }
+
+  const last = waypoints[waypoints.length - 1];
+  parts.push(`L ${last.x} ${last.y}`);
+
+  return parts.join(' ');
+};
 
 export const NodeGraph: React.FC<NodeGraphProps> = ({
   trace,
@@ -287,77 +344,51 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
 
   // Render edge
   const renderEdge = (edge: NodeEdge, sourcePos: NodePosition, targetPos: NodePosition) => {
-    const startX = sourcePos.x + sourcePos.width / 2;
-    const startY = sourcePos.y + sourcePos.height;
-    const endX = targetPos.x + targetPos.width / 2;
-    const endY = targetPos.y;
+    const obstaclePositions = positions.filter((p) => p.id !== edge.source && p.id !== edge.target);
+    const routed = routeEdge(sourcePos, targetPos, obstaclePositions);
+    const path = buildPolylinePath(routed.waypoints, EDGE_CORNER_RADIUS);
 
-    let path: string;
+    const edgeStyle = EDGE_STYLES[edge.type] ?? EDGE_STYLES.default;
 
-    if (edge.type === 'loop') {
-      // Loop back edge - curve around to the left and back up
-      const controlX = Math.min(startX, endX) - 100;
-      const controlY1 = startY + 50;
-      const controlY2 = endY - 50;
-      path = `M ${startX} ${startY} C ${controlX} ${controlY1}, ${controlX} ${controlY2}, ${endX} ${endY}`;
-    } else {
-      // Regular edge - bezier curve down
-      const midY = (startY + endY) / 2;
-      path = `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`;
+    // For default edges, use source node status color
+    let strokeColor = edgeStyle.color;
+    if (edge.type === 'default') {
+      const sourceNode = nodes.get(edge.source);
+      const isEdgeGhosted =
+        executedNodeIds !== undefined &&
+        (!executedNodeIds.has(edge.source) || !executedNodeIds.has(edge.target));
+      const effectiveStatus = isEdgeGhosted ? 'pending' : sourceNode?.status;
+      strokeColor = effectiveStatus ? STATUS_COLORS[effectiveStatus].border : edgeStyle.color;
     }
-
-    const sourceNode = nodes.get(edge.source);
-    const isEdgeGhosted =
-      executedNodeIds !== undefined &&
-      (!executedNodeIds.has(edge.source) || !executedNodeIds.has(edge.target));
-    const effectiveStatus = isEdgeGhosted ? 'pending' : sourceNode?.status;
-    const color = effectiveStatus
-      ? STATUS_COLORS[effectiveStatus].border
-      : NODE_KIND_COLORS.run.border;
-
-    // Use a different color for loop edges (unless ghosted)
-    const strokeColor = isEdgeGhosted ? color : edge.type === 'loop' ? '#ff6b6b' : color;
 
     return (
       <g key={edge.id}>
+        {/* Arrow marker definition */}
+        <defs>
+          <marker
+            id={`arrow-${edge.id}`}
+            viewBox="0 0 10 8"
+            refX="10"
+            refY="4"
+            markerWidth="8"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <polyline points="0,0 10,4 0,8" fill="none" stroke={strokeColor} strokeWidth="1.5" />
+          </marker>
+        </defs>
         <path
           d={path}
           fill="none"
           stroke={strokeColor}
-          strokeWidth={edge.type === 'loop' ? 3 : 2}
-          strokeDasharray={
-            edge.type === 'conditional' ? '5,5' : edge.type === 'loop' ? '8,4' : undefined
-          }
+          strokeWidth={edgeStyle.strokeWidth}
+          strokeDasharray={edgeStyle.strokeDasharray}
+          markerEnd={`url(#arrow-${edge.id})`}
         />
         {edge.animated && (
-          <circle r="4" fill={strokeColor}>
+          <circle r="3" fill={strokeColor}>
             <animateMotion dur="1s" repeatCount="indefinite" path={path} />
           </circle>
-        )}
-        {/* Loop arrow marker */}
-        {edge.type === 'loop' && (
-          <>
-            <defs>
-              <marker
-                id={`arrow-${edge.id}`}
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill={strokeColor} />
-              </marker>
-            </defs>
-            <path
-              d={path}
-              fill="none"
-              stroke="transparent"
-              strokeWidth={10}
-              markerEnd={`url(#arrow-${edge.id})`}
-            />
-          </>
         )}
       </g>
     );
