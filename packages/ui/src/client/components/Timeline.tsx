@@ -266,7 +266,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
         {/* Progress bar (from start to playhead) */}
         <div
-          className="absolute top-1/2 left-0 h-0.5 bg-blue-500 -translate-y-1/2 transition-all duration-75"
+          className={`absolute top-1/2 left-0 h-0.5 bg-blue-500 -translate-y-1/2 ${isDragging ? '' : 'transition-all duration-75'}`}
           style={{
             width: `${playheadPosition * 100}%`,
           }}
@@ -321,8 +321,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           className={`
             absolute top-0 bottom-0 w-0.5
             bg-blue-500
-            transition-all duration-75
-            ${isDragging ? 'scale-125 bg-blue-400' : ''}
+            ${isDragging ? 'scale-125 bg-blue-400' : 'transition-all duration-75'}
           `}
           style={{
             left: `${playheadPosition * 100}%`,
