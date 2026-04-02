@@ -387,6 +387,101 @@ describe('node rendering integration', () => {
     expect(pathBPos!.x).toBeGreaterThan(pathAPos!.x);
   });
 
+  it('prevents sibling overlap in horizontal layout', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    // Fork with 2 children — one of which is a wide container
+    nodes.set(
+      'fork',
+      makeNode('fork', {
+        kind: 'fork',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'path-1',
+      makeNode('path-1', {
+        parentId: 'fork',
+        kind: 'loop',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'inner-1',
+      makeNode('inner-1', {
+        parentId: 'path-1',
+        kind: 'run',
+        depth: 2,
+        startTime: 2001,
+      }),
+    );
+    nodes.set(
+      'inner-2',
+      makeNode('inner-2', {
+        parentId: 'path-1',
+        kind: 'run',
+        depth: 2,
+        startTime: 2002,
+      }),
+    );
+    nodes.set(
+      'path-2',
+      makeNode('path-2', {
+        parentId: 'fork',
+        kind: 'run',
+        depth: 1,
+        startTime: 3000,
+      }),
+    );
+
+    const { positions } = calculateSequentialLayout(nodes, 'fork');
+
+    const path1Pos = positions.find((p) => p.id === 'path-1');
+    const path2Pos = positions.find((p) => p.id === 'path-2');
+
+    // path-2 should not overlap path-1's bounding box
+    expect(path2Pos!.x).toBeGreaterThanOrEqual(path1Pos!.x + path1Pos!.width);
+  });
+
+  it('prevents sibling overlap in vertical layout', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'loop',
+      makeNode('loop', {
+        kind: 'loop',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'step-1',
+      makeNode('step-1', {
+        parentId: 'loop',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'step-2',
+      makeNode('step-2', {
+        parentId: 'loop',
+        kind: 'run',
+        depth: 1,
+        startTime: 3000,
+      }),
+    );
+
+    const { positions } = calculateSequentialLayout(nodes, 'loop');
+
+    const step1Pos = positions.find((p) => p.id === 'step-1');
+    const step2Pos = positions.find((p) => p.id === 'step-2');
+
+    // step-2 should not overlap step-1's bounding box
+    expect(step2Pos!.y).toBeGreaterThanOrEqual(step1Pos!.y + step1Pos!.height);
+  });
+
   it('recovers when rootNodeId points to non-existent node', () => {
     const nodes = new Map<string, ExecutionNode>();
     nodes.set(
