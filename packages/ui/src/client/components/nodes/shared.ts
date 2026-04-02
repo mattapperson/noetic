@@ -232,3 +232,41 @@ export function getSelectedStyles(): React.CSSProperties {
     boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.5), 0 4px 6px -1px rgba(0, 0, 0, 0.1)',
   };
 }
+
+export const EDGE_STYLES: Record<
+  'default' | 'conditional' | 'fork' | 'loop' | 'spawn',
+  {
+    color: string;
+    strokeDasharray: string | undefined;
+    strokeWidth: number;
+  }
+> = {
+  default: {
+    color: '#6b7280', // gray — overridden by source node status color at render time
+    strokeDasharray: undefined,
+    strokeWidth: 1.5,
+  },
+  conditional: {
+    color: '#eab308', // yellow (branch kind)
+    strokeDasharray: '5,5',
+    strokeWidth: 1.5,
+  },
+  fork: {
+    color: '#ec4899', // pink (fork kind)
+    strokeDasharray: undefined,
+    strokeWidth: 1.5,
+  },
+  loop: {
+    color: '#14b8a6', // teal (loop kind)
+    strokeDasharray: '3,3',
+    strokeWidth: 1.5,
+  },
+  spawn: {
+    color: '#6366f1', // indigo (spawn kind)
+    strokeDasharray: '8,3,3,3',
+    strokeWidth: 1.5,
+  },
+};
+
+/** Corner radius for orthogonal edge turns */
+export const EDGE_CORNER_RADIUS = 6;
