@@ -24,6 +24,7 @@ import {
   recallLayers,
   storeLayers,
 } from '../memory/layer-lifecycle';
+import { getRegisteredExporter } from '../observability/exporter-registry';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
@@ -161,7 +162,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   readonly layerStateStore: LayerStateStore;
-  readonly traceExporter: TraceExporter;
+  private _traceExporter: TraceExporter | null;
+
+  get traceExporter(): TraceExporter {
+    if (!this._traceExporter) {
+      this._traceExporter = getRegisteredExporter() ?? new NoopExporter();
+    }
+    return this._traceExporter;
+  }
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
@@ -177,7 +185,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm);
     this.channelStore = new ChannelStore();
-    this.traceExporter = opts.traceExporter ?? new NoopExporter();
+    this._traceExporter = opts.traceExporter ?? null;
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
   }
 
@@ -431,8 +439,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     // Complete broadcaster when execution finishes
     executionPromise.then(
-      () => broadcaster.complete(),
-      (err: unknown) => broadcaster.error(err instanceof Error ? err : new Error(String(err))),
+      () => {
+        this.traceExporter.completeTrace?.(ctx.span.traceId);
+        broadcaster.complete();
+      },
+      (err: unknown) => {
+        this.traceExporter.completeTrace?.(ctx.span.traceId);
+        broadcaster.error(err instanceof Error ? err : new Error(String(err)));
+      },
     );
 
     return new HarnessResultImpl(broadcaster, executionPromise, ctx);
