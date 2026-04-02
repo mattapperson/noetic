@@ -32,6 +32,7 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   ctx: Context<TMemory>,
 ): Promise<O> {
   const baseCtx = frameworkCast<Context>(ctx);
+  const parentSpan = ctx.span; // Store parent for restoration after execution
 
   // Create span for this step execution
   const span = ctx.harness.createSpan(step.id, ctx.span);
@@ -39,6 +40,11 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   span.setAttribute('stepId', step.id);
   span.setAttribute('input', JSON.stringify(input));
   span.setAttribute('depth', ctx.depth);
+
+  // Update context span so child steps get correct parent
+  if (isMutableContext(baseCtx)) {
+    baseCtx.span = span;
+  }
 
   // Set step-specific configuration for detailed node rendering
   switch (step.kind) {
@@ -184,6 +190,11 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       });
     }
 
+    // Restore parent span for siblings
+    if (isMutableContext(baseCtx)) {
+      baseCtx.span = parentSpan;
+    }
+
     return result;
   } catch (error) {
     // Error - set detailed attributes before ending span
@@ -200,6 +211,11 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     await ctx.harness.traceExporter.export([
       span,
     ]);
+
+    // Restore parent span for siblings even on error
+    if (isMutableContext(baseCtx)) {
+      baseCtx.span = parentSpan;
+    }
 
     // Emit step_failed framework event (always emitted for errors)
     const failedData = {
