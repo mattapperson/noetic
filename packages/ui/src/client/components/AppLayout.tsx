@@ -6,6 +6,7 @@ import { ScrollProvider } from '../contexts/ScrollContext';
 import { useConnection } from '../hooks/useConnection';
 import { useExecutionMessages } from '../hooks/useExecutionMessages';
 import { useHistoricalRuns } from '../hooks/useHistoricalRuns';
+import { useAgentStore } from '../stores/agent';
 import { useThemeStore } from '../stores/theme';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ResizablePanels } from './ResizablePanels';
@@ -32,6 +33,24 @@ function getWebSocketUrl(): string {
 
 export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { initTheme } = useThemeStore();
+  const selectRun = useAgentStore((s) => s.selectRun);
+
+  // Hydrate selected agent/run from URL on initial load
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const parts = window.location.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      selectRun(decodeURIComponent(parts[0]), decodeURIComponent(parts[1]));
+    } else if (parts.length === 1) {
+      selectRun(decodeURIComponent(parts[0]), null);
+    }
+    // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectRun,
+  ]);
 
   // Establish single WebSocket connection to UI service
   useConnection({

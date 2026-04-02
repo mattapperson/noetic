@@ -45,6 +45,7 @@ interface AgentState {
   // Agents
   agents: Agent[];
   selectedAgentId: string | null;
+  selectedRunId: string | null;
   expandedAgentIds: Set<string>;
 
   // Discovery
@@ -67,6 +68,7 @@ interface AgentState {
   removeAgent: (id: string) => void;
 
   selectAgent: (id: string | null) => void;
+  selectRun: (agentId: string | null, runId: string | null) => void;
   toggleAgentExpanded: (id: string) => void;
   expandAgent: (id: string) => void;
   collapseAgent: (id: string) => void;
@@ -105,6 +107,7 @@ export const useAgentStore = create<AgentState>()(
       // Initial state
       agents: [],
       selectedAgentId: null,
+      selectedRunId: null,
       expandedAgentIds: new Set(),
       discoveredAgents: [],
       registeredAgents: [],
@@ -185,6 +188,18 @@ export const useAgentStore = create<AgentState>()(
         set({
           selectedAgentId: id,
         }),
+
+      selectRun: (agentId, runId) => {
+        set({
+          selectedAgentId: agentId,
+          selectedRunId: runId,
+        });
+        // Sync URL without triggering Next.js navigation
+        if (typeof window !== 'undefined') {
+          const url = agentId && runId ? `/${agentId}/${runId}` : agentId ? `/${agentId}` : '/';
+          window.history.replaceState(null, '', url);
+        }
+      },
 
       toggleAgentExpanded: (id) =>
         set((state) => {

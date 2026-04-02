@@ -5,8 +5,6 @@
  * Displays run entries for a selected agent
  */
 
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
 import React, { useEffect, useRef, useState } from 'react';
 import { useScroll } from '../contexts/ScrollContext';
 import { deserialize } from '../lib/serialization';
@@ -81,16 +79,15 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export const RunList: React.FC<RunListProps> = ({ agentId }) => {
-  const router = useRouter();
-  const params = useParams();
-  const selectedRunId = params?.runId as string | undefined;
+  const selectedRunId = useAgentStore((state) => state.selectedRunId);
+  const selectRun = useAgentStore((state) => state.selectRun);
   const { getSortedRuns, updateRun } = useAgentStore();
   const { setTrace } = useExecutionStore();
   const runs = getSortedRuns(agentId);
 
   const handleRunClick = async (run: AgentRun) => {
-    // Navigate to the run URL
-    router.push(`/${agentId}/${run.id}`);
+    // Select the run in the store (updates URL via replaceState, no full navigation)
+    selectRun(agentId, run.id);
 
     // Fetch full run with trace from API using RESTful nested URL
     try {
@@ -189,7 +186,7 @@ interface RunEntryProps {
 const RunEntry: React.FC<RunEntryProps> = ({ agentId, run, isSelected, onClick, onPrefetch }) => {
   const isLive = run.isLive || run.status === 'running';
   const [isClient, setIsClient] = useState(false);
-  const elementRef = useRef<HTMLAnchorElement>(null);
+  const elementRef = useRef<HTMLButtonElement>(null);
   const { runIdToScroll, scrollToRun } = useScroll();
 
   useEffect(() => {
@@ -212,12 +209,9 @@ const RunEntry: React.FC<RunEntryProps> = ({ agentId, run, isSelected, onClick, 
     scrollToRun,
   ]);
 
-  const href = `/${agentId}/${run.id}`;
-
   return (
     <RunLink
       ref={elementRef}
-      href={href}
       isSelected={isSelected}
       isLive={isLive}
       onMouseEnter={onPrefetch}
@@ -325,9 +319,8 @@ const RunEntry: React.FC<RunEntryProps> = ({ agentId, run, isSelected, onClick, 
   );
 };
 
-// Wrapper component to isolate Link type issues
+// Wrapper component for run entry — uses div instead of Link to avoid full page navigation
 interface RunLinkProps {
-  href: string;
   isSelected: boolean;
   isLive: boolean;
   onMouseEnter: () => void;
@@ -335,14 +328,16 @@ interface RunLinkProps {
   children: React.ReactNode;
 }
 
-const RunLink = React.forwardRef<HTMLAnchorElement, RunLinkProps>(
-  ({ href, isSelected, isLive, onMouseEnter, onClick, children }, ref) => {
+const RunLink = React.forwardRef<HTMLButtonElement, RunLinkProps>(
+  ({ isSelected, isLive, onMouseEnter, onClick, children }, ref) => {
     return (
-      <Link
+      <button
         ref={ref}
-        href={href}
+        type="button"
         onMouseEnter={onMouseEnter}
         onClick={onClick}
+        onFocus={() => {}}
+        onBlur={() => {}}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -354,13 +349,14 @@ const RunLink = React.forwardRef<HTMLAnchorElement, RunLinkProps>(
           border: isSelected
             ? '1px solid var(--noetic-selected-border)'
             : isLive
-              ? '1px solid ' + STATUS_COLORS.running
+              ? `1px solid ${STATUS_COLORS.running}`
               : '1px solid transparent',
           animation: isLive ? 'pulse 2s infinite' : undefined,
           backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
           textAlign: 'left',
           width: '100%',
-          textDecoration: 'none',
+          font: 'inherit',
+          color: 'inherit',
         }}
         onMouseOver={(e) => {
           if (!isSelected) {
@@ -374,7 +370,7 @@ const RunLink = React.forwardRef<HTMLAnchorElement, RunLinkProps>(
         }}
       >
         {children}
-      </Link>
+      </button>
     );
   },
 );

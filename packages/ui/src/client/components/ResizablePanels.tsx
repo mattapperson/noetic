@@ -1,6 +1,5 @@
 'use client';
 
-import { useParams } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -119,16 +118,8 @@ interface CenterCanvasProps {
   onNodeSelect: (nodeId: string | null) => void;
 }
 
-function extractParamString(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return value;
-}
-
 const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelect }) => {
-  const params = useParams();
-  const runId = extractParamString(params?.runId);
+  const runId = useAgentStore((s) => s.selectedRunId);
   const { agents } = useAgentStore();
 
   // Timeline / playback state for time-travel rendering
@@ -228,9 +219,8 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   const [_isLoadingRun, setIsLoadingRun] = useState(false);
 
   // Get current run and nodes
-  const params = useParams();
-  const agentSlug = extractParamString(params?.agentSlug);
-  const runId = extractParamString(params?.runId);
+  const agentSlug = useAgentStore((s) => s.selectedAgentId);
+  const runId = useAgentStore((s) => s.selectedRunId);
   const { agents, updateRun } = useAgentStore();
   const { setTrace } = useExecutionStore();
   const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
