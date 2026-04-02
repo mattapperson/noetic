@@ -482,6 +482,42 @@ describe('node rendering integration', () => {
     expect(step2Pos!.y).toBeGreaterThanOrEqual(step1Pos!.y + step1Pos!.height);
   });
 
+  it('generates spawn-type edges for spawn container children', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'spawn-1',
+      makeNode('spawn-1', {
+        kind: 'spawn',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'child-1',
+      makeNode('child-1', {
+        parentId: 'spawn-1',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'child-2',
+      makeNode('child-2', {
+        parentId: 'spawn-1',
+        kind: 'llm',
+        depth: 1,
+        startTime: 3000,
+      }),
+    );
+
+    const { edges } = calculateSequentialLayout(nodes, 'spawn-1');
+
+    const spawnEdge = edges.find((e) => e.source === 'child-1' && e.target === 'child-2');
+    expect(spawnEdge).toBeDefined();
+    expect(spawnEdge!.type).toBe('spawn');
+  });
+
   it('recovers when rootNodeId points to non-existent node', () => {
     const nodes = new Map<string, ExecutionNode>();
     nodes.set(

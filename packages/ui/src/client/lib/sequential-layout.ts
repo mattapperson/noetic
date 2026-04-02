@@ -230,11 +230,12 @@ function layoutSequentialContainer(
 
     // Edge from this child to the next
     if (i < children.length - 1) {
+      const edgeType = node.kind === 'spawn' ? ('spawn' as const) : ('default' as const);
       ctx.edges.push({
         id: `${childId}-${children[i + 1]}`,
         source: childId,
         target: children[i + 1],
-        type: 'default',
+        type: edgeType,
         animated: ctx.nodes.get(childId)?.status === 'running',
       });
     }
