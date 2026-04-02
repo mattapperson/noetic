@@ -11,7 +11,11 @@ import type { ExecutionNode } from '../src/client/types';
 const ZERO_SNAPSHOT = {
   depth: 0,
   stepCount: 0,
-  tokens: { input: 0, output: 0, total: 0 },
+  tokens: {
+    input: 0,
+    output: 0,
+    total: 0,
+  },
   cost: 0,
   elapsedMs: 0,
   state: null,
@@ -20,7 +24,12 @@ const ZERO_SNAPSHOT = {
 
 function makeNode(
   id: string,
-  opts: { parentId?: string | null; kind?: ExecutionNode['kind']; depth?: number; startTime?: number } = {},
+  opts: {
+    parentId?: string | null;
+    kind?: ExecutionNode['kind'];
+    depth?: number;
+    startTime?: number;
+  } = {},
 ): ExecutionNode {
   return {
     id,
@@ -34,8 +43,13 @@ function makeNode(
     status: 'completed',
     input: {},
     output: null,
-    contextSnapshot: { ...ZERO_SNAPSHOT, depth: opts.depth ?? 0 },
-    stepData: { description: '' } as ExecutionNode['stepData'],
+    contextSnapshot: {
+      ...ZERO_SNAPSHOT,
+      depth: opts.depth ?? 0,
+    },
+    stepData: {
+      description: '',
+    } satisfies ExecutionNode['stepData'],
     children: [],
   };
 }
@@ -43,9 +57,32 @@ function makeNode(
 describe('node rendering integration', () => {
   it('renders leaf nodes sequentially when siblings of a container', () => {
     const nodes = new Map<string, ExecutionNode>();
-    nodes.set('branch', makeNode('branch', { kind: 'branch', depth: 0, startTime: 1000 }));
-    nodes.set('step-1', makeNode('step-1', { parentId: 'branch', kind: 'run', depth: 1, startTime: 2000 }));
-    nodes.set('step-2', makeNode('step-2', { parentId: 'branch', kind: 'llm', depth: 1, startTime: 3000 }));
+    nodes.set(
+      'branch',
+      makeNode('branch', {
+        kind: 'branch',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'step-1',
+      makeNode('step-1', {
+        parentId: 'branch',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'step-2',
+      makeNode('step-2', {
+        parentId: 'branch',
+        kind: 'llm',
+        depth: 1,
+        startTime: 3000,
+      }),
+    );
 
     const { positions } = calculateSequentialLayout(nodes, 'branch');
 
@@ -61,9 +98,32 @@ describe('node rendering integration', () => {
 
   it('renders loop as container with children inside', () => {
     const nodes = new Map<string, ExecutionNode>();
-    nodes.set('loop-1', makeNode('loop-1', { kind: 'loop', depth: 0, startTime: 1000 }));
-    nodes.set('handler-a', makeNode('handler-a', { parentId: 'loop-1', kind: 'run', depth: 1, startTime: 2000 }));
-    nodes.set('handler-b', makeNode('handler-b', { parentId: 'loop-1', kind: 'llm', depth: 1, startTime: 3000 }));
+    nodes.set(
+      'loop-1',
+      makeNode('loop-1', {
+        kind: 'loop',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'handler-a',
+      makeNode('handler-a', {
+        parentId: 'loop-1',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'handler-b',
+      makeNode('handler-b', {
+        parentId: 'loop-1',
+        kind: 'llm',
+        depth: 1,
+        startTime: 3000,
+      }),
+    );
 
     const { positions, edges } = calculateSequentialLayout(nodes, 'loop-1');
 
@@ -102,9 +162,32 @@ describe('node rendering integration', () => {
 
   it('renders fork as container with children side by side', () => {
     const nodes = new Map<string, ExecutionNode>();
-    nodes.set('fork-1', makeNode('fork-1', { kind: 'fork', depth: 0, startTime: 1000 }));
-    nodes.set('path-1', makeNode('path-1', { parentId: 'fork-1', kind: 'run', depth: 1, startTime: 2000 }));
-    nodes.set('path-2', makeNode('path-2', { parentId: 'fork-1', kind: 'run', depth: 1, startTime: 2000 }));
+    nodes.set(
+      'fork-1',
+      makeNode('fork-1', {
+        kind: 'fork',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'path-1',
+      makeNode('path-1', {
+        parentId: 'fork-1',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'path-2',
+      makeNode('path-2', {
+        parentId: 'fork-1',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
 
     const { positions } = calculateSequentialLayout(nodes, 'fork-1');
 
@@ -124,9 +207,32 @@ describe('node rendering integration', () => {
 
   it('renders nested containers (loop inside branch)', () => {
     const nodes = new Map<string, ExecutionNode>();
-    nodes.set('branch', makeNode('branch', { kind: 'branch', depth: 0, startTime: 1000 }));
-    nodes.set('loop', makeNode('loop', { parentId: 'branch', kind: 'loop', depth: 1, startTime: 2000 }));
-    nodes.set('step', makeNode('step', { parentId: 'loop', kind: 'run', depth: 2, startTime: 3000 }));
+    nodes.set(
+      'branch',
+      makeNode('branch', {
+        kind: 'branch',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'loop',
+      makeNode('loop', {
+        parentId: 'branch',
+        kind: 'loop',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'step',
+      makeNode('step', {
+        parentId: 'loop',
+        kind: 'run',
+        depth: 2,
+        startTime: 3000,
+      }),
+    );
 
     const { positions } = calculateSequentialLayout(nodes, 'branch');
 
@@ -146,10 +252,115 @@ describe('node rendering integration', () => {
     expect(loopPos!.x).toBeGreaterThan(branchPos!.x);
   });
 
+  it('snaps all node positions to 20px grid', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'root',
+      makeNode('root', {
+        kind: 'run',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+
+    const { positions } = calculateSequentialLayout(nodes, 'root');
+
+    for (const pos of positions) {
+      expect(pos.x % 20).toBe(0);
+      expect(pos.y % 20).toBe(0);
+      expect(pos.width % 20).toBe(0);
+      expect(pos.height % 20).toBe(0);
+    }
+  });
+
+  it('applies 0.5 scale to children of a container', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'loop',
+      makeNode('loop', {
+        kind: 'loop',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'child',
+      makeNode('child', {
+        parentId: 'loop',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+
+    const { positions } = calculateSequentialLayout(nodes, 'loop');
+
+    const loopPos = positions.find((p) => p.id === 'loop');
+    const childPos = positions.find((p) => p.id === 'child');
+
+    expect(loopPos!.scale).toBe(1);
+    expect(childPos!.scale).toBe(0.5);
+    // Child dimensions should be half of base size
+    expect(childPos!.width).toBe(140);
+    expect(childPos!.height).toBe(80); // snapped: 70 → 80
+  });
+
+  it('compounds scale recursively (0.25 at depth 2)', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'branch',
+      makeNode('branch', {
+        kind: 'branch',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'loop',
+      makeNode('loop', {
+        parentId: 'branch',
+        kind: 'loop',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'step',
+      makeNode('step', {
+        parentId: 'loop',
+        kind: 'run',
+        depth: 2,
+        startTime: 3000,
+      }),
+    );
+
+    const { positions } = calculateSequentialLayout(nodes, 'branch');
+
+    const branchPos = positions.find((p) => p.id === 'branch');
+    const loopPos = positions.find((p) => p.id === 'loop');
+    const stepPos = positions.find((p) => p.id === 'step');
+
+    expect(branchPos!.scale).toBe(1);
+    expect(loopPos!.scale).toBe(0.5);
+    expect(stepPos!.scale).toBe(0.25);
+  });
+
   it('recovers when rootNodeId points to non-existent node', () => {
     const nodes = new Map<string, ExecutionNode>();
-    nodes.set('orphan-1', makeNode('orphan-1', { depth: 0, startTime: 1000 }));
-    nodes.set('orphan-2', makeNode('orphan-2', { depth: 0, startTime: 2000 }));
+    nodes.set(
+      'orphan-1',
+      makeNode('orphan-1', {
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'orphan-2',
+      makeNode('orphan-2', {
+        depth: 0,
+        startTime: 2000,
+      }),
+    );
 
     const { positions } = calculateSequentialLayout(nodes, 'non-existent-root');
 

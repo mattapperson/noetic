@@ -8,6 +8,7 @@
  */
 
 import type { ExecutionNode, NodeEdge, NodePosition } from '../types';
+import { snapToGrid } from './grid';
 
 //#region Types
 
@@ -21,6 +22,8 @@ interface SequentialLayoutOptions {
   containerPadBottom: number;
   startX: number;
   startY: number;
+  gridCellSize: number;
+  nestingScale: number;
 }
 
 const DEFAULT_OPTIONS: SequentialLayoutOptions = {
@@ -31,8 +34,10 @@ const DEFAULT_OPTIONS: SequentialLayoutOptions = {
   containerPadTop: 50,
   containerPadSide: 30,
   containerPadBottom: 30,
-  startX: 50,
-  startY: 50,
+  startX: 60,
+  startY: 60,
+  gridCellSize: 20,
+  nestingScale: 0.5,
 };
 
 const CONTAINER_KINDS = new Set([
@@ -62,6 +67,7 @@ interface LayoutPlacement {
   nodeId: string;
   x: number;
   y: number;
+  scale: number;
 }
 
 //#endregion
@@ -99,6 +105,7 @@ export function calculateSequentialLayout(
         nodeId: id,
         x: opts.startX,
         y: cursorY,
+        scale: 1,
       },
       ctx,
     );
@@ -116,7 +123,7 @@ export function calculateSequentialLayout(
 //#region Layout Engine
 
 function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResult {
-  const { nodeId, x, y } = placement;
+  const { nodeId, x, y, scale } = placement;
   const node = ctx.nodes.get(nodeId);
   if (!node) {
     return {
@@ -130,17 +137,22 @@ function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResul
   const isContainer = CONTAINER_KINDS.has(node.kind) && children.length > 0;
 
   if (!isContainer) {
+    const width = snapToGrid(ctx.opts.nodeWidth * scale);
+    const height = snapToGrid(ctx.opts.nodeHeight * scale);
+    const snappedX = snapToGrid(x);
+    const snappedY = snapToGrid(y);
     ctx.positions.push({
       id: nodeId,
-      x,
-      y,
-      width: ctx.opts.nodeWidth,
-      height: ctx.opts.nodeHeight,
+      x: snappedX,
+      y: snappedY,
+      width,
+      height,
+      scale,
     });
     return {
-      width: ctx.opts.nodeWidth,
-      height: ctx.opts.nodeHeight,
-      bottom: y + ctx.opts.nodeHeight,
+      width,
+      height,
+      bottom: snappedY + height,
     };
   }
 
@@ -151,6 +163,7 @@ function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResul
         children,
         x,
         y,
+        scale,
       },
       ctx,
     );
@@ -163,6 +176,7 @@ function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResul
       children,
       x,
       y,
+      scale,
     },
     ctx,
   );
@@ -175,6 +189,7 @@ interface SequentialContainerArgs {
   children: string[];
   x: number;
   y: number;
+  scale: number;
 }
 
 /**
@@ -185,12 +200,18 @@ function layoutSequentialContainer(
   args: SequentialContainerArgs,
   ctx: LayoutContext,
 ): LayoutResult {
-  const { nodeId, node, children, x, y } = args;
+  const { nodeId, node, children, x, y, scale } = args;
   const { opts } = ctx;
-  const innerX = x + opts.containerPadSide;
-  let innerY = y + opts.containerPadTop;
-  let maxChildWidth = opts.nodeWidth;
-  let lastBottom = y + opts.containerPadTop;
+  const childScale = scale * opts.nestingScale;
+  const padTop = snapToGrid(opts.containerPadTop * scale);
+  const padSide = snapToGrid(opts.containerPadSide * scale);
+  const padBottom = snapToGrid(opts.containerPadBottom * scale);
+  const snappedX = snapToGrid(x);
+  const snappedY = snapToGrid(y);
+  const innerX = snappedX + padSide;
+  let innerY = snappedY + padTop;
+  let maxChildWidth = snapToGrid(opts.nodeWidth * childScale);
+  let lastBottom = snappedY + padTop;
 
   for (let i = 0; i < children.length; i++) {
     const childId = children[i];
@@ -199,6 +220,7 @@ function layoutSequentialContainer(
         nodeId: childId,
         x: innerX,
         y: innerY,
+        scale: childScale,
       },
       ctx,
     );
@@ -229,22 +251,23 @@ function layoutSequentialContainer(
     });
   }
 
-  const containerWidth = maxChildWidth + opts.containerPadSide * 2;
-  const containerHeight = lastBottom - y + opts.containerPadBottom;
+  const containerWidth = snapToGrid(maxChildWidth + padSide * 2);
+  const containerHeight = snapToGrid(lastBottom - snappedY + padBottom);
 
   ctx.positions.push({
     id: nodeId,
-    x,
-    y,
+    x: snappedX,
+    y: snappedY,
     width: containerWidth,
     height: containerHeight,
     isContainer: true,
+    scale,
   });
 
   return {
     width: containerWidth,
     height: containerHeight,
-    bottom: y + containerHeight,
+    bottom: snappedY + containerHeight,
   };
 }
 
@@ -254,6 +277,7 @@ interface ForkContainerArgs {
   children: string[];
   x: number;
   y: number;
+  scale: number;
 }
 
 /**
@@ -261,11 +285,17 @@ interface ForkContainerArgs {
  * Children are placed side by side horizontally (parallel paths).
  */
 function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): LayoutResult {
-  const { nodeId, children, x, y } = args;
+  const { nodeId, children, x, y, scale } = args;
   const { opts } = ctx;
-  const innerY = y + opts.containerPadTop;
-  let innerX = x + opts.containerPadSide;
-  let maxChildHeight = opts.nodeHeight;
+  const childScale = scale * opts.nestingScale;
+  const padTop = snapToGrid(opts.containerPadTop * scale);
+  const padSide = snapToGrid(opts.containerPadSide * scale);
+  const padBottom = snapToGrid(opts.containerPadBottom * scale);
+  const snappedX = snapToGrid(x);
+  const snappedY = snapToGrid(y);
+  const innerY = snappedY + padTop;
+  let innerX = snappedX + padSide;
+  let maxChildHeight = snapToGrid(opts.nodeHeight * childScale);
 
   for (const childId of children) {
     const result = layoutNode(
@@ -273,6 +303,7 @@ function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): Layou
         nodeId: childId,
         x: innerX,
         y: innerY,
+        scale: childScale,
       },
       ctx,
     );
@@ -280,23 +311,24 @@ function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): Layou
     innerX += result.width + opts.horizontalSpacing;
   }
 
-  const containerWidth = innerX - x - opts.horizontalSpacing + opts.containerPadSide;
-  const containerHeight = maxChildHeight + opts.containerPadTop + opts.containerPadBottom;
-  const finalWidth = Math.max(containerWidth, opts.nodeWidth);
+  const containerWidth = snapToGrid(innerX - snappedX - opts.horizontalSpacing + padSide);
+  const containerHeight = snapToGrid(maxChildHeight + padTop + padBottom);
+  const finalWidth = Math.max(containerWidth, snapToGrid(opts.nodeWidth * scale));
 
   ctx.positions.push({
     id: nodeId,
-    x,
-    y,
+    x: snappedX,
+    y: snappedY,
     width: finalWidth,
     height: containerHeight,
     isContainer: true,
+    scale,
   });
 
   return {
     width: finalWidth,
     height: containerHeight,
-    bottom: y + containerHeight,
+    bottom: snappedY + containerHeight,
   };
 }
 
