@@ -48,7 +48,7 @@ async function detectProjectRoot(): Promise<string | null> {
 
       // Found a valid project root
       if (pkg.name) {
-        console.log(
+        console.debug(
           `[Storage] detectProjectRoot: found at ${currentDir} in ${Date.now() - startTime}ms after ${i + 1} iterations`,
         );
         return currentDir;
@@ -64,7 +64,7 @@ async function detectProjectRoot(): Promise<string | null> {
     currentDir = parentDir;
   }
 
-  console.log(`[Storage] detectProjectRoot: not found after ${Date.now() - startTime}ms`);
+  console.debug(`[Storage] detectProjectRoot: not found after ${Date.now() - startTime}ms`);
   return null;
 }
 
@@ -76,18 +76,18 @@ async function getDefaultStoragePath(): Promise<string> {
   const startTime = Date.now();
   // Check if explicit path is set via environment
   if (process.env.NOETIC_UI_STORAGE_PATH) {
-    console.log(`[Storage] getDefaultStoragePath: using env var in ${Date.now() - startTime}ms`);
+    console.debug(`[Storage] getDefaultStoragePath: using env var in ${Date.now() - startTime}ms`);
     return process.env.NOETIC_UI_STORAGE_PATH;
   }
 
   // Try to detect project root
   const detectStart = Date.now();
   const projectRoot = await detectProjectRoot();
-  console.log(`[Storage] detectProjectRoot took ${Date.now() - detectStart}ms`);
+  console.debug(`[Storage] detectProjectRoot took ${Date.now() - detectStart}ms`);
 
   if (projectRoot) {
     const result = join(projectRoot, '.noetic', 'ui', 'traces');
-    console.log(
+    console.debug(
       `[Storage] getDefaultStoragePath: project root found in ${Date.now() - startTime}ms`,
     );
     return result;
@@ -95,7 +95,7 @@ async function getDefaultStoragePath(): Promise<string> {
 
   // Fall back to home directory
   const homeResult = join(homedir(), '.noetic-ui', 'traces');
-  console.log(`[Storage] getDefaultStoragePath: fallback to home in ${Date.now() - startTime}ms`);
+  console.debug(`[Storage] getDefaultStoragePath: fallback to home in ${Date.now() - startTime}ms`);
   return homeResult;
 }
 
@@ -323,7 +323,7 @@ export class TraceStorage {
       }
 
       this.agentsLoaded = true;
-      console.log(
+      console.debug(
         `[Storage] loadRegisteredAgents: loaded ${this.registeredAgents.size} agents in ${Date.now() - startTime}ms`,
       );
     } catch (error) {
@@ -332,7 +332,7 @@ export class TraceStorage {
       }
       // File doesn't exist yet - that's ok, start with empty map
       this.agentsLoaded = true;
-      console.log(
+      console.debug(
         `[Storage] loadRegisteredAgents: no file found, loaded 0 agents in ${Date.now() - startTime}ms`,
       );
     }
@@ -634,7 +634,7 @@ export class TraceStorage {
       }
 
       const duration = Date.now() - startTime;
-      console.log(`[Storage] loadRunMetadata(${agentId}/${runId}): ${duration}ms`);
+      console.debug(`[Storage] loadRunMetadata(${agentId}/${runId}): ${duration}ms`);
       return parsed as Run;
     } catch (error) {
       if (!isNodeError(error)) {
@@ -712,7 +712,7 @@ export class TraceStorage {
       const agentDir = join(storagePath, agentId);
       await rmdir(agentDir);
       return true;
-    } catch (error) {
+    } catch (_error) {
       // Directory might not exist or might not be empty
       return false;
     }
@@ -746,7 +746,7 @@ export class TraceStorage {
       // Sort by start time, newest first
       const result = runs.sort((a, b) => b.startTime - a.startTime);
       const duration = Date.now() - startTime;
-      console.log(`[Storage] listAgentRuns(${agentId}): ${runs.length} runs in ${duration}ms`);
+      console.debug(`[Storage] listAgentRuns(${agentId}): ${runs.length} runs in ${duration}ms`);
       return result;
     } catch (error) {
       // Silently return empty array if directory doesn't exist (agent has no runs yet)
@@ -768,7 +768,7 @@ export class TraceStorage {
       // Get agents with stored traces
       const storagePathStart = Date.now();
       const storagePath = await this.getResolvedStoragePath();
-      console.log(
+      console.debug(
         `[Storage] listAgents: storage path resolved in ${Date.now() - storagePathStart}ms`,
       );
 
@@ -776,17 +776,17 @@ export class TraceStorage {
       const entries = await readdir(storagePath, {
         withFileTypes: true,
       });
-      console.log(
+      console.debug(
         `[Storage] listAgents: readdir took ${Date.now() - readdirStart}ms, found ${entries.length} entries`,
       );
 
       const storedAgents = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-      console.log(`[Storage] listAgents: ${storedAgents.length} stored agents`);
+      console.debug(`[Storage] listAgents: ${storedAgents.length} stored agents`);
 
       // Get registered agents (from connected agents without traces yet)
       const registeredStart = Date.now();
       const registeredAgents = await this.getRegisteredAgents();
-      console.log(
+      console.debug(
         `[Storage] listAgents: getRegisteredAgents took ${Date.now() - registeredStart}ms, found ${registeredAgents.length} registered`,
       );
 
@@ -797,7 +797,7 @@ export class TraceStorage {
       ]);
       const result = Array.from(allAgents);
       const duration = Date.now() - startTime;
-      console.log(`[Storage] listAgents: TOTAL ${duration}ms, returning ${result.length} agents`);
+      console.debug(`[Storage] listAgents: TOTAL ${duration}ms, returning ${result.length} agents`);
       return result;
     } catch (error) {
       console.error('[Storage] Failed to list agents:', error);

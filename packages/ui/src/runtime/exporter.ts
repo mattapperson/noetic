@@ -72,10 +72,6 @@ export class NoeticUITraceExporter implements TraceExporter {
     // Convert spans to serializable format
     const serializableSpans = spans.map((span) => this.serializeSpan(span));
 
-    console.debug(
-      `[NoeticUI] Exporting ${serializableSpans.length} spans, connected: ${this.isConnected()}, buffer size: ${this.spanBuffer.length}`,
-    );
-
     // Add to buffer
     this.spanBuffer.push(...serializableSpans);
 
@@ -208,8 +204,6 @@ export class NoeticUITraceExporter implements TraceExporter {
       ...this.spanBuffer,
     ];
     this.spanBuffer = [];
-
-    console.debug(`[NoeticUI] Flushing ${spans.length} spans to WebSocket`);
 
     // Group spans by traceId
     const spansByTrace = new Map<string, SerializableSpan[]>();
