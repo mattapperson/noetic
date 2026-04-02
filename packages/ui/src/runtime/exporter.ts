@@ -349,11 +349,30 @@ export class NoeticUITraceExporter implements TraceExporter {
 
   /**
    * Check if a trace is complete.
-   * A trace is complete when we've received a root span (no parentSpanId)
-   * and that root span has an endTime.
+   *
+   * The interpreter sets a `depth` attribute on each span (0 for the top-level
+   * step, incrementing for children). Spans are exported depth-first, so a
+   * depth-0 span only arrives after all its children have completed.
+   * The trace is complete when a depth-0 span with endTime is present.
+   *
+   * Falls back to checking if the span's parent is not among exported spans
+   * (handles cases where depth attribute is missing).
    */
   private checkTraceComplete(traceId: string, traceInfo: TraceInfo): void {
-    const rootSpan = traceInfo.allSpans.find((s) => !s.parentSpanId && s.endTime);
+    // Primary: check for depth-0 span (set by the core interpreter)
+    let rootSpan = traceInfo.allSpans.find((s) => {
+      const depth = s.attributes?.depth;
+      return s.endTime && typeof depth === 'number' && depth === 0;
+    });
+
+    // Fallback: find span whose parent is not among exported spans
+    if (!rootSpan) {
+      const exportedIds = new Set(traceInfo.allSpans.map((s) => s.spanId));
+      rootSpan = traceInfo.allSpans.find(
+        (s) => s.endTime && !s.parentSpanId && !exportedIds.has(s.parentSpanId ?? ''),
+      );
+    }
+
     if (!rootSpan) {
       return;
     }

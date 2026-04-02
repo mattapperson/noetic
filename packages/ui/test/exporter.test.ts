@@ -30,14 +30,17 @@ interface TestSpan {
   attributes: Map<string, string | number | boolean>;
 }
 
-function createSpan(name: string, parent: TestSpan | null, traceId?: string): TestSpan {
+function createSpan(name: string, parent: TestSpan | null, depth?: number): TestSpan {
+  const attrs = new Map<string, string | number | boolean>();
+  // Simulate what the core interpreter does: set depth attribute
+  attrs.set('depth', depth ?? 0);
   return {
-    traceId: traceId ?? parent?.traceId ?? crypto.randomUUID(),
+    traceId: parent?.traceId ?? crypto.randomUUID(),
     spanId: crypto.randomUUID(),
     parentSpanId: parent?.spanId ?? null,
     name,
     startTime: Date.now(),
-    attributes: new Map(),
+    attributes: attrs,
   };
 }
 
@@ -55,12 +58,15 @@ function createTestExporter(): {
   getMessages: () => CapturedMessage[];
 } {
   const messages: CapturedMessage[] = [];
-  const activeTraces = new Map<string, {
-    startTime: number;
-    spanIds: Set<string>;
-    allSpans: TestSpan[];
-    started: boolean;
-  }>();
+  const activeTraces = new Map<
+    string,
+    {
+      startTime: number;
+      spanIds: Set<string>;
+      allSpans: TestSpan[];
+      started: boolean;
+    }
+  >();
 
   function exportSpan(span: TestSpan): void {
     const traceId = span.traceId;
@@ -72,7 +78,10 @@ function createTestExporter(): {
     };
 
     if (!traceInfo.started) {
-      messages.push({ type: 'trace.start', traceId });
+      messages.push({
+        type: 'trace.start',
+        traceId,
+      });
       traceInfo.started = true;
     }
 
@@ -92,9 +101,12 @@ function createTestExporter(): {
 
     activeTraces.set(traceId, traceInfo);
 
-    // Check completion: root span (no parent) with endTime
-    const rootSpan = traceInfo.allSpans.find((s) => !s.parentSpanId && s.endTime);
-    if (rootSpan) {
+    // Check completion: depth-0 span with endTime (matches real exporter logic)
+    const rootByDepth = traceInfo.allSpans.find((s) => {
+      const depth = s.attributes.get('depth');
+      return s.endTime && typeof depth === 'number' && depth === 0;
+    });
+    if (rootByDepth) {
       messages.push({
         type: 'trace.complete',
         traceId,
@@ -104,7 +116,10 @@ function createTestExporter(): {
     }
   }
 
-  return { exportSpan, getMessages: () => messages };
+  return {
+    exportSpan,
+    getMessages: () => messages,
+  };
 }
 
 describe('exporter span processing', () => {
@@ -112,14 +127,14 @@ describe('exporter span processing', () => {
     const { exportSpan, getMessages } = createTestExporter();
 
     // Simulate: loop → branch → step.run (depth-first completion order)
-    const rootSpan = createSpan('my-loop', null);
+    const rootSpan = createSpan('my-loop', null, 0);
     rootSpan.attributes.set('stepKind', 'loop');
     const traceId = rootSpan.traceId;
 
-    const branchSpan = createSpan('router', rootSpan);
+    const branchSpan = createSpan('router', rootSpan, 1);
     branchSpan.attributes.set('stepKind', 'branch');
 
-    const handlerSpan = createSpan('billing-handler', branchSpan);
+    const handlerSpan = createSpan('billing-handler', branchSpan, 2);
     handlerSpan.attributes.set('stepKind', 'run');
 
     // Innermost step completes first (depth-first)
@@ -164,8 +179,8 @@ describe('exporter span processing', () => {
   it('does not send trace.complete until root span ends', () => {
     const { exportSpan, getMessages } = createTestExporter();
 
-    const rootSpan = createSpan('pipeline', null);
-    const childSpan = createSpan('step-1', rootSpan);
+    const rootSpan = createSpan('pipeline', null, 0);
+    const childSpan = createSpan('step-1', rootSpan, 1);
 
     // Child completes
     endSpan(childSpan);
@@ -188,9 +203,9 @@ describe('exporter span processing', () => {
   it('sends trace.start only once even when spans arrive in separate flushes', () => {
     const { exportSpan, getMessages } = createTestExporter();
 
-    const rootSpan = createSpan('agent', null);
-    const step1 = createSpan('step-1', rootSpan);
-    const step2 = createSpan('step-2', rootSpan);
+    const rootSpan = createSpan('agent', null, 0);
+    const step1 = createSpan('step-1', rootSpan, 1);
+    const step2 = createSpan('step-2', rootSpan, 1);
 
     // Flush 1: step-1
     endSpan(step1);
@@ -211,10 +226,10 @@ describe('exporter span processing', () => {
   it('handles deeply nested steps correctly', () => {
     const { exportSpan, getMessages } = createTestExporter();
 
-    const root = createSpan('root', null);
-    const loop = createSpan('loop-1', root);
-    const branch = createSpan('branch-1', loop);
-    const llm = createSpan('llm-call', branch);
+    const root = createSpan('root', null, 0);
+    const loop = createSpan('loop-1', root, 1);
+    const branch = createSpan('branch-1', loop, 2);
+    const llm = createSpan('llm-call', branch, 3);
 
     // Complete depth-first
     endSpan(llm);
@@ -251,16 +266,16 @@ describe('exporter span processing', () => {
   it('handles loop iterations (same step executed multiple times)', () => {
     const { exportSpan, getMessages } = createTestExporter();
 
-    const root = createSpan('loop', null);
+    const root = createSpan('loop', null, 0);
     root.attributes.set('stepKind', 'loop');
 
     // Iteration 1
-    const iter1 = createSpan('handler', root);
+    const iter1 = createSpan('handler', root, 1);
     endSpan(iter1);
     exportSpan(iter1);
 
     // Iteration 2 — same step name, different span
-    const iter2 = createSpan('handler', root);
+    const iter2 = createSpan('handler', root, 1);
     endSpan(iter2);
     exportSpan(iter2);
 
@@ -280,5 +295,36 @@ describe('exporter span processing', () => {
     for (const node of handlerNodes) {
       expect(node.parentId).toBe(root.spanId);
     }
+  });
+
+  it('completes trace when top-level step has unexported harness root parent', () => {
+    const { exportSpan, getMessages } = createTestExporter();
+
+    // Simulate the real harness: an implicit root span is created by the harness
+    // but never exported. All exported steps have this as parent.
+    const harnessRoot = createSpan('root', null, 0);
+    // harnessRoot is NEVER exported — this is the harness behavior
+
+    // The actual step has harnessRoot as parent, but depth 0 in the interpreter
+    // (because ctx.depth starts at 0 for the top-level execute() call)
+    const topStep = createSpan('my-agent-step', harnessRoot, 0);
+    const childStep = createSpan('child-step', topStep, 1);
+
+    // Depth-first: child first, then top step
+    endSpan(childStep);
+    exportSpan(childStep);
+
+    // At this point no trace.complete — topStep hasn't ended
+    let msgs = getMessages();
+    expect(msgs.filter((m) => m.type === 'trace.complete')).toHaveLength(0);
+
+    endSpan(topStep);
+    exportSpan(topStep);
+
+    // Now trace.complete should fire because topStep's parentSpanId
+    // points to harnessRoot which was never exported
+    msgs = getMessages();
+    expect(msgs.filter((m) => m.type === 'trace.complete')).toHaveLength(1);
+    expect(msgs.find((m) => m.type === 'trace.complete')?.totalSteps).toBe(2);
   });
 });
