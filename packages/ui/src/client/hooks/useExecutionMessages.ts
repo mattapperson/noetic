@@ -120,7 +120,40 @@ export function useExecutionMessages(): void {
         }
 
         case 'node.start': {
-          // Node data is ephemeral, stored in execution store cache if needed
+          const { node } = message;
+          // Find the live run for this node and update it
+          const agentState = useAgentStore.getState();
+          for (const agent of agentState.agents) {
+            const liveRun = agent.runs.find((r) => r.isLive);
+            if (!liveRun) {
+              continue;
+            }
+            const existingTrace = liveRun.trace;
+            if (!existingTrace) {
+              continue;
+            }
+            const nodeMap = new Map(existingTrace.nodes);
+            nodeMap.set(node.id, node);
+
+            // Set root if not set
+            if (!existingTrace.rootNodeId && !node.parentId) {
+              agentState.updateRun(agent.id, liveRun.id, {
+                trace: {
+                  ...existingTrace,
+                  nodes: nodeMap,
+                  rootNodeId: node.id,
+                },
+              });
+            } else {
+              agentState.updateRun(agent.id, liveRun.id, {
+                trace: {
+                  ...existingTrace,
+                  nodes: nodeMap,
+                },
+              });
+            }
+            break;
+          }
           break;
         }
 

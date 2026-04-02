@@ -256,7 +256,6 @@ export class NoeticUITraceExporter implements TraceExporter {
       if (isNewSpan) {
         // Send nodeStart for all new spans (even if already ended)
         // This ensures the server creates the node before nodeComplete updates it
-        const stepKind = this.inferStepKind(span.name);
         // Build context snapshot from span data and attributes
         const spanAttrs = span.attributes || {};
         const tokenInput =
@@ -290,7 +289,7 @@ export class NoeticUITraceExporter implements TraceExporter {
           node: {
             id: span.spanId,
             stepId: span.name,
-            kind: this.inferStepKind(span.name),
+            kind: this.inferStepKind(span.name, spanAttrs),
             parentId: span.parentSpanId || null,
             depth: this.calculateDepth(span, spans),
             startTime: span.startTime,
@@ -363,7 +362,9 @@ export class NoeticUITraceExporter implements TraceExporter {
     while (currentSpan.parentSpanId) {
       depth++;
       const parent = allSpans.find((s) => s.spanId === currentSpan.parentSpanId);
-      if (!parent) break;
+      if (!parent) {
+        break;
+      }
       currentSpan = parent;
     }
     return depth;
@@ -442,7 +443,23 @@ export class NoeticUITraceExporter implements TraceExporter {
 
   private inferStepKind(
     spanName: string,
+    spanAttrs?: Record<string, unknown>,
   ): 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' {
+    // Prefer explicit attribute — check each valid value so TypeScript narrows the type
+    const attrKind = spanAttrs?.kind ?? spanAttrs?.stepKind;
+    if (
+      attrKind === 'run' ||
+      attrKind === 'llm' ||
+      attrKind === 'tool' ||
+      attrKind === 'branch' ||
+      attrKind === 'fork' ||
+      attrKind === 'spawn' ||
+      attrKind === 'loop'
+    ) {
+      return attrKind;
+    }
+
+    // Fall back to name-based inference
     const name = spanName.toLowerCase();
     if (name.includes('llm') || name.includes('model')) {
       return 'llm';
