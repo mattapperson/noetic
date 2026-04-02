@@ -439,6 +439,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+    // Explicitly start the trace before execution
+    // This ensures trace.start is sent exactly once at agent start
+    if (this.traceExporter.startTrace) {
+      this.traceExporter.startTrace(ctx.span.traceId, input);
+    }
     return execute(s, input, ctx);
   }
 

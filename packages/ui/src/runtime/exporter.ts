@@ -80,6 +80,42 @@ export class NoeticUITraceExporter implements TraceExporter {
   }
 
   /**
+   * Explicitly start a trace.
+   * Called once at the beginning of agent execution.
+   * This ensures trace.start is sent before any spans are exported.
+   */
+  startTrace(traceId: string, input: unknown): void {
+    // Get or create trace info
+    const traceInfo = this.activeTraces.get(traceId) ?? {
+      startTime: Date.now(),
+      spanIds: new Set<string>(),
+      allSpans: [],
+      started: false,
+    };
+
+    // Only send trace.start if not already started
+    if (!traceInfo.started) {
+      traceInfo.started = true;
+      this.activeTraces.set(traceId, traceInfo);
+
+      // Send trace.start immediately if connected, or queue for later
+      const message: ClientMessage = {
+        type: 'trace.start',
+        traceId,
+        agentId: this.options.agentName,
+        input,
+        startTime: traceInfo.startTime,
+      };
+
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(message));
+      } else {
+        this.messageQueue.push(message);
+      }
+    }
+  }
+
+  /**
    * Send an execution event to the UI server
    * Used by the debug harness for real-time updates
    */

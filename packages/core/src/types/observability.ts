@@ -10,6 +10,11 @@ export interface Span {
 
 /** @public Backend that receives and persists completed trace spans. */
 export interface TraceExporter {
+  /**
+   * Explicitly start a trace.
+   * Called once at the beginning of agent execution.
+   */
+  startTrace?(traceId: string, input: unknown): void;
   export(spans: Span[]): Promise<void>;
 }
 
