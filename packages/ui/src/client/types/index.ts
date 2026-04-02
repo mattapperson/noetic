@@ -169,12 +169,26 @@ export interface NodePosition {
   height: number;
   /** If true, this node is a container (loop/fork/branch/spawn) rendered as a bounding box */
   isContainer?: boolean;
+  /** Scale factor relative to base size (1 = full, 0.5 = half, etc). Defaults to 1. */
+  scale?: number;
 }
 
 export interface NodeEdge {
   id: string;
   source: string;
   target: string;
-  type: 'default' | 'conditional' | 'fork' | 'loop';
+  type: 'default' | 'conditional' | 'fork' | 'loop' | 'spawn';
   animated?: boolean;
+}
+
+export interface Waypoint {
+  x: number;
+  y: number;
+}
+
+export interface OrthogonalEdge {
+  /** Ordered waypoints forming the polyline (all grid-snapped) */
+  waypoints: Waypoint[];
+  /** The edge metadata this route was computed for */
+  edgeId: string;
 }
