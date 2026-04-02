@@ -904,6 +904,14 @@ export class NoeticUIServer {
     // Add node to trace
     traceState.trace.nodes.set(node.id, node);
 
+    // Update parent's children array
+    if (node.parentId) {
+      const parent = traceState.trace.nodes.get(node.parentId);
+      if (parent && !parent.children.includes(node.id)) {
+        parent.children.push(node.id);
+      }
+    }
+
     // Set rootNodeId if not already set and this node's parent doesn't exist in trace
     // (meaning this is the top-most node being exported)
     if (!traceState.trace.rootNodeId) {

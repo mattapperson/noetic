@@ -60,6 +60,9 @@ export function calculateSequentialLayout(
     loopStartNodes: new Map(),
   };
 
+  // Build children lookup from parentId
+  const childrenOf = buildChildrenMap(nodes);
+
   // Build execution order by traversing the tree
   const executionOrder = buildExecutionOrder(nodes, rootNodeId);
 
@@ -67,11 +70,11 @@ export function calculateSequentialLayout(
   for (let i = 0; i < executionOrder.length; i++) {
     const nodeId = executionOrder[i];
     const node = nodes.get(nodeId);
-    if (!node) continue;
+    if (!node) {
+      continue;
+    }
 
-    // Check if this is the end of a loop iteration
     const nextNodeId = executionOrder[i + 1];
-    const isLoopEnd = nextNodeId && isLoopIterationEnd(node, nextNodeId, nodes);
 
     // Position the node
     const position: NodePosition = {
@@ -97,12 +100,13 @@ export function calculateSequentialLayout(
     }
 
     // Handle loop nodes specially
-    if (node.kind === 'loop' && node.children.length > 0) {
+    const loopChildren = childrenOf.get(nodeId) ?? node.children;
+    if (node.kind === 'loop' && loopChildren.length > 0) {
       // Enter loop scope - indent subsequent nodes
       ctx.loopDepth++;
 
       // Track loop start for loop-back edges
-      for (const childId of node.children) {
+      for (const childId of loopChildren) {
         ctx.loopStartNodes.set(childId, nodeId);
       }
     }
@@ -114,7 +118,8 @@ export function calculateSequentialLayout(
     if (node.parentId) {
       const parent = nodes.get(node.parentId);
       if (parent?.kind === 'loop') {
-        const isLastChild = parent.children[parent.children.length - 1] === nodeId;
+        const parentChildren = childrenOf.get(node.parentId) ?? parent.children;
+        const isLastChild = parentChildren[parentChildren.length - 1] === nodeId;
         if (isLastChild) {
           ctx.loopDepth = Math.max(0, ctx.loopDepth - 1);
         }
@@ -128,36 +133,74 @@ export function calculateSequentialLayout(
   };
 }
 
+/** Build children lookup from parentId, sorted by startTime */
+function buildChildrenMap(nodes: Map<string, ExecutionNode>): Map<string, string[]> {
+  const childrenOf = new Map<string, string[]>();
+  for (const [id, node] of nodes) {
+    if (node.parentId) {
+      const siblings = childrenOf.get(node.parentId) ?? [];
+      siblings.push(id);
+      childrenOf.set(node.parentId, siblings);
+    }
+  }
+  // Sort each children list by startTime
+  for (const [, children] of childrenOf) {
+    children.sort((a, b) => {
+      const nodeA = nodes.get(a);
+      const nodeB = nodes.get(b);
+      return (nodeA?.startTime ?? 0) - (nodeB?.startTime ?? 0);
+    });
+  }
+  return childrenOf;
+}
+
 /**
  * Build execution order by doing a depth-first traversal
+ * Derives parent-child relationships from parentId since children arrays may be empty
  */
 function buildExecutionOrder(nodes: Map<string, ExecutionNode>, rootNodeId: string): string[] {
   const order: string[] = [];
   const visited = new Set<string>();
 
-  function traverse(nodeId: string) {
-    if (visited.has(nodeId)) return;
+  const childrenOf = buildChildrenMap(nodes);
+
+  function traverse(nodeId: string): void {
+    if (visited.has(nodeId)) {
+      return;
+    }
     visited.add(nodeId);
 
     const node = nodes.get(nodeId);
-    if (!node) return;
+    if (!node) {
+      return;
+    }
 
     order.push(nodeId);
 
-    // For loops, traverse children (steps inside the loop)
-    if (node.kind === 'loop') {
-      for (const childId of node.children) {
-        traverse(childId);
-      }
-    } else {
-      // For other nodes, just traverse children sequentially
-      for (const childId of node.children) {
-        traverse(childId);
-      }
+    // Use derived children from parentId (already sorted by startTime), fall back to node.children
+    const children = childrenOf.get(nodeId) ?? node.children;
+
+    for (const childId of children) {
+      traverse(childId);
     }
   }
 
+  // Start from root
   traverse(rootNodeId);
+
+  // If root traversal missed nodes (e.g., rootNodeId is wrong or missing),
+  // add remaining nodes sorted by startTime
+  if (order.length < nodes.size) {
+    const remaining = [
+      ...nodes.entries(),
+    ]
+      .filter(([id]) => !visited.has(id))
+      .sort(([, a], [, b]) => a.startTime - b.startTime);
+    for (const [id] of remaining) {
+      traverse(id);
+    }
+  }
+
   return order;
 }
 
@@ -171,7 +214,9 @@ function isLoopIterationEnd(
 ): boolean {
   // Check if we're jumping back to a loop start
   const nextNode = nodes.get(nextNodeId);
-  if (!nextNode) return false;
+  if (!nextNode) {
+    return false;
+  }
 
   // If next node is a loop and it's already been visited, this is a loop back
   // Or if we're going from a loop child back to the loop parent

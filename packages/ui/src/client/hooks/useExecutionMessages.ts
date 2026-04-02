@@ -136,6 +136,18 @@ export function useExecutionMessages(): void {
             const nodeMap = ensureMap<string, ExecutionNode>(existingTrace.nodes);
             nodeMap.set(node.id, node);
 
+            // Wire parent-child relationship
+            if (node.parentId) {
+              const parent = nodeMap.get(node.parentId);
+              if (parent && !parent.children.includes(node.id)) {
+                parent.children = [
+                  ...parent.children,
+                  node.id,
+                ];
+                nodeMap.set(parent.id, parent);
+              }
+            }
+
             // Set root if not set
             if (!existingTrace.rootNodeId && !node.parentId) {
               agentState.updateRun(agent.id, liveRun.id, {
