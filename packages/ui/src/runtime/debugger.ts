@@ -58,6 +58,9 @@ export class Debugger implements DebugController {
       breakpoints: this.normalizeBreakpoints(this.config.breakpoints),
       breakpointsHit: [],
       pauseHistory: [],
+      stepMode: 'none',
+      stepTargetDepth: 0,
+      stepTargetNodeId: null,
     };
 
     this.onEvent = onEvent ?? null;
@@ -190,9 +193,18 @@ export class Debugger implements DebugController {
     });
 
     // Check for breakpoints
-    const shouldPause = await this.checkBreakpoint(step, input, nodeId);
+    let shouldPause = await this.checkBreakpoint(step, input, nodeId);
     if (shouldPause) {
       await this.pauseAtNode(nodeId, 'breakpoint');
+    }
+
+    // Check step mode (step-over / step-into / step-out)
+    if (this.state.stepMode !== 'none' && !shouldPause) {
+      shouldPause = this.shouldPauseForStepMode(nodeId, depth);
+      if (shouldPause) {
+        this.state.stepMode = 'none';
+        await this.pauseAtNode(nodeId, 'step');
+      }
     }
 
     // Check for spawn pause
@@ -444,17 +456,33 @@ export class Debugger implements DebugController {
   }
 
   stepOver(): void {
-    // Implementation: mark to pause at next sibling
+    if (!this.state.isPaused) {
+      return;
+    }
+    const pausedNode = this.state.pausedNodeId ? this.nodes.get(this.state.pausedNodeId) : null;
+    this.state.stepMode = 'over';
+    this.state.stepTargetDepth = pausedNode?.depth ?? 0;
+    this.state.stepTargetNodeId = pausedNode?.parentId ?? null;
     this.resume();
   }
 
   stepInto(): void {
-    // Implementation: allow entering child steps
+    if (!this.state.isPaused) {
+      return;
+    }
+    this.state.stepMode = 'into';
     this.resume();
   }
 
   stepOut(): void {
-    // Implementation: run until current context completes
+    if (!this.state.isPaused) {
+      return;
+    }
+    const pausedNode = this.state.pausedNodeId ? this.nodes.get(this.state.pausedNodeId) : null;
+    const parentDepth = (pausedNode?.depth ?? 1) - 1;
+    this.state.stepMode = 'out';
+    this.state.stepTargetDepth = Math.max(0, parentDepth);
+    this.state.stepTargetNodeId = pausedNode?.parentId ?? null;
     this.resume();
   }
 
@@ -604,6 +632,19 @@ export class Debugger implements DebugController {
     } catch (error) {
       console.error('[Debugger] Failed to evaluate breakpoint condition:', condition, error);
       return false;
+    }
+  }
+
+  private shouldPauseForStepMode(_nodeId: string, depth: number): boolean {
+    switch (this.state.stepMode) {
+      case 'into':
+        return true;
+      case 'over':
+        return depth <= this.state.stepTargetDepth;
+      case 'out':
+        return depth <= this.state.stepTargetDepth;
+      default:
+        return false;
     }
   }
 

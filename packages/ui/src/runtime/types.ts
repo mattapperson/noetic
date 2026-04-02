@@ -11,6 +11,9 @@ import type { ExecutionSummary } from '../shared/protocol';
 /** Step kinds supported by the UI visualization */
 export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'provide';
 
+/** Step mode for step-over / step-into / step-out semantics */
+export type StepMode = 'none' | 'over' | 'into' | 'out';
+
 /** Execution status for nodes in the debug UI */
 export type ExecutionStatus =
   | 'pending'
@@ -382,6 +385,12 @@ export interface DebuggerState {
   breakpointsHit: string[];
   /** Pause history */
   pauseHistory: PausePoint[];
+  /** Current step mode for step-over/into/out */
+  stepMode: StepMode;
+  /** Target depth for step-over/out */
+  stepTargetDepth: number;
+  /** Target node ID for step-over/out */
+  stepTargetNodeId: string | null;
 }
 
 /** Debug controller interface for external control */
