@@ -6,6 +6,7 @@
  */
 
 import type { Context, Step } from '@noetic/core';
+import { registerDebugger, unregisterDebugger } from './debugger-registry';
 import type {
   Breakpoint,
   DebugController,
@@ -37,7 +38,6 @@ export class Debugger implements DebugController {
   private pauseResolvers = new Map<string, () => void>();
   private onEvent: ((message: ServerMessage) => void) | null = null;
   private startTime = 0;
-  private agentId = "";
   private stepCounter = 0;
   private parentStack: string[] = [];
 
@@ -68,7 +68,6 @@ export class Debugger implements DebugController {
    */
   startRun(agentId: string, runId: string, input: unknown): void {
     this.startTime = Date.now();
-    this.agentId = agentId;
     this.stepCounter = 0;
     this.parentStack = [];
     this.timelineEvents = [];
@@ -114,6 +113,7 @@ export class Debugger implements DebugController {
     };
 
     this.state.currentRun = run;
+    registerDebugger(runId, this);
 
     // Wait for auto-start signal if configured
     if (!this.config.autoStart) {
@@ -401,6 +401,10 @@ export class Debugger implements DebugController {
     }
 
     this.state.isAttached = false;
+
+    if (this.trace) {
+      unregisterDebugger(this.trace.traceId);
+    }
   }
 
   // DebugController implementation
