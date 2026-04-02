@@ -2,17 +2,13 @@
  * @noetic/ui Runtime Types
  *
  * Type definitions for the Noetic UI runtime integration.
- * These types support the debug harness and trace export functionality.
+ * These types support the trace export functionality.
  */
 
-import type { Context, Step } from '@noetic/core';
 import type { ExecutionSummary } from '../shared/protocol';
 
 /** Step kinds supported by the UI visualization */
 export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'provide';
-
-/** Step mode for step-over / step-into / step-out semantics */
-export type StepMode = 'none' | 'over' | 'into' | 'out';
 
 /** Execution status for nodes in the debug UI */
 export type ExecutionStatus =
@@ -114,14 +110,6 @@ export interface TimelineEvent {
   type: 'start' | 'complete' | 'error' | 'pause' | 'resume';
 }
 
-/** Pause/resume history entry */
-export interface PausePoint {
-  timestamp: number;
-  nodeId: string;
-  reason: 'breakpoint' | 'step' | 'error' | 'manual';
-  resumedAt?: number;
-}
-
 /** Complete run record */
 export interface Run {
   id: string;
@@ -160,10 +148,6 @@ export interface Run {
   // Metadata
   recordingVersion: string;
   isLive: boolean;
-
-  // Debugging
-  breakpointsHit: string[];
-  pauseHistory: PausePoint[];
 }
 
 /** Breakpoint configuration */
@@ -172,16 +156,22 @@ export interface Breakpoint {
   condition?: string;
 }
 
-/** Debugger configuration options */
-export interface DebuggerConfig {
-  /** Breakpoints to pause at */
-  breakpoints?: (Breakpoint | string)[];
-  /** Whether to pause when an error occurs */
-  pauseOnError?: boolean;
-  /** Whether to pause on spawn steps */
-  pauseOnSpawn?: boolean;
-  /** Auto-start execution (if false, waits for UI signal) */
-  autoStart?: boolean;
+/** Debug controller interface for external control */
+export interface DebugController {
+  /** Pause execution at current step */
+  pause(): void;
+  /** Resume execution */
+  resume(): void;
+  /** Step over current step */
+  stepOver(): void;
+  /** Step into child steps */
+  stepInto(): void;
+  /** Step out of current context */
+  stepOut(): void;
+  /** Add a breakpoint */
+  addBreakpoint(breakpoint: Breakpoint): void;
+  /** Remove a breakpoint */
+  removeBreakpoint(stepId: string): void;
 }
 
 /** WebSocket message types from server to client */
@@ -357,58 +347,6 @@ export interface ExporterOptions {
   autoReconnect?: boolean;
   /** Agent name to register with the UI */
   agentName?: string;
-}
-
-/** Hook registration for step events */
-export interface HookRegistration {
-  /** Called when a step starts executing */
-  onStepStart: (step: Step, input: unknown, ctx: Context) => Promise<void>;
-  /** Called when a step completes */
-  onStepComplete: (step: Step, result: unknown, ctx: Context) => Promise<void>;
-  /** Called when a step errors */
-  onStepError: (step: Step, error: Error, ctx: Context) => Promise<void>;
-}
-
-/** Debugger state and control interface */
-export interface DebuggerState {
-  /** Whether debugger is attached and active */
-  isAttached: boolean;
-  /** Currently executing run */
-  currentRun: Run | null;
-  /** Whether execution is paused */
-  isPaused: boolean;
-  /** Currently paused node */
-  pausedNodeId: string | null;
-  /** Breakpoints set for this run */
-  breakpoints: Breakpoint[];
-  /** IDs of breakpoints that have been hit during this run */
-  breakpointsHit: string[];
-  /** Pause history */
-  pauseHistory: PausePoint[];
-  /** Current step mode for step-over/into/out */
-  stepMode: StepMode;
-  /** Target depth for step-over/out */
-  stepTargetDepth: number;
-  /** Target node ID for step-over/out */
-  stepTargetNodeId: string | null;
-}
-
-/** Debug controller interface for external control */
-export interface DebugController {
-  /** Pause execution at current step */
-  pause(): void;
-  /** Resume execution */
-  resume(): void;
-  /** Step over current step */
-  stepOver(): void;
-  /** Step into child steps */
-  stepInto(): void;
-  /** Step out of current context */
-  stepOut(): void;
-  /** Add a breakpoint */
-  addBreakpoint(breakpoint: Breakpoint): void;
-  /** Remove a breakpoint */
-  removeBreakpoint(stepId: string): void;
 }
 
 /** Serializable span data for export */

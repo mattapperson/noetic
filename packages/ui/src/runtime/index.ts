@@ -1,10 +1,7 @@
 // Runtime module exports for @noetic/ui
 import './register';
 
-export { createDebugHarness, DebugAgentHarness } from './debug-harness';
-export { Debugger as NoeticDebugger } from './debugger';
 export { NoeticUITraceExporter } from './exporter';
-export { globalHookManager } from './hook';
 
 // Step data extractor plugin system
 export {
@@ -17,9 +14,4 @@ export {
   unregisterStepDataExtractor,
 } from './step-extractors';
 
-export type {
-  Breakpoint,
-  DebugController,
-  DebuggerConfig,
-  ExporterOptions,
-} from './types';
+export type { ExporterOptions } from './types';
