@@ -3,6 +3,11 @@
  *
  * Implements the TraceExporter interface to forward trace spans
  * to the Noetic UI WebSocket server for real-time visualization.
+ *
+ * The core interpreter exports spans one at a time, depth-first
+ * (innermost step completes first). This exporter accumulates all
+ * spans per trace and only sends trace.complete when the root span
+ * (no parentSpanId) has been received and ended.
  */
 
 import type { Span, TraceExporter } from '@noetic/core';
@@ -20,23 +25,22 @@ const DEFAULT_OPTIONS: Required<ExporterOptions> = {
   agentName: 'unnamed-agent',
 };
 
-/**
- * Noetic UI Trace Exporter
- *
- * Receives completed trace spans from the Noetic core runtime and forwards
- * them to the UI WebSocket server for real-time visualization and recording.
- *
- * @example
- * ```typescript
- * import { setTraceExporter } from '@noetic/core';
- * import { NoeticUITraceExporter } from '@noetic/ui/runtime';
- *
- * if (process.env.NOETIC_UI_ENABLED) {
- *   const exporter = new NoeticUITraceExporter({ port: 3333 });
- *   setTraceExporter(exporter);
- * }
- * ```
- */
+//#region Types
+
+interface TraceInfo {
+  startTime: number;
+  /** All span IDs seen for this trace (prevents duplicate nodeStart messages) */
+  spanIds: Set<string>;
+  /** All spans accumulated for this trace (used for depth calculation) */
+  allSpans: SerializableSpan[];
+  /** Whether trace.start has been sent to the server */
+  started: boolean;
+}
+
+//#endregion
+
+//#region NoeticUITraceExporter
+
 export class NoeticUITraceExporter implements TraceExporter {
   private options: Required<ExporterOptions>;
   private ws: WebSocket | null = null;
@@ -47,13 +51,7 @@ export class NoeticUITraceExporter implements TraceExporter {
   private reconnectDelay = 1000;
   private isConnecting = false;
   private messageQueue: (ClientMessage | ServerMessage)[] = [];
-  private activeTraces = new Map<
-    string,
-    {
-      startTime: number;
-      spanIds: Set<string>;
-    }
-  >();
+  private activeTraces = new Map<string, TraceInfo>();
 
   constructor(options: ExporterOptions = {}) {
     this.options = {
@@ -69,18 +67,13 @@ export class NoeticUITraceExporter implements TraceExporter {
    * Implements TraceExporter interface
    */
   async export(spans: Span[]): Promise<void> {
-    // Convert spans to serializable format
     const serializableSpans = spans.map((span) => this.serializeSpan(span));
-
-    // Add to buffer
     this.spanBuffer.push(...serializableSpans);
 
-    // Trim buffer if needed
     if (this.spanBuffer.length > this.options.bufferSize) {
       this.spanBuffer = this.spanBuffer.slice(-this.options.bufferSize);
     }
 
-    // If connected, flush immediately
     if (this.ws?.readyState === WebSocket.OPEN) {
       await this.flush();
     }
@@ -94,40 +87,34 @@ export class NoeticUITraceExporter implements TraceExporter {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
-      // Queue messages for later if disconnected
       this.messageQueue.push(message);
-
-      // Trim queue if needed
       if (this.messageQueue.length > this.options.bufferSize) {
         this.messageQueue = this.messageQueue.slice(-this.options.bufferSize);
       }
     }
   }
 
-  /**
-   * Close the WebSocket connection and cleanup
-   */
   close(): void {
     this.stopFlushTimer();
-
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
-
     this.spanBuffer = [];
     this.messageQueue = [];
   }
 
-  /** Get current connection state */
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
-  /** Get buffered span count */
   getBufferedSpanCount(): number {
     return this.spanBuffer.length;
   }
+
+  //#endregion
+
+  //#region Connection Management
 
   private connect(): void {
     if (this.isConnecting || this.ws?.readyState === WebSocket.OPEN) {
@@ -145,7 +132,6 @@ export class NoeticUITraceExporter implements TraceExporter {
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000;
 
-        // Register agent if agentName is provided
         if (this.options.agentName) {
           this.sendEvent({
             type: 'agent.register',
@@ -155,7 +141,6 @@ export class NoeticUITraceExporter implements TraceExporter {
           });
         }
 
-        // Flush any queued messages and span buffer
         this.flushMessageQueue();
         void this.flush();
       });
@@ -167,7 +152,6 @@ export class NoeticUITraceExporter implements TraceExporter {
 
       this.ws.on('error', (error: Error) => {
         this.isConnecting = false;
-        // Silently handle errors - UI is optional
         console.debug('[Noetic UI] WebSocket error:', error.message);
       });
     } catch (error) {
@@ -181,19 +165,21 @@ export class NoeticUITraceExporter implements TraceExporter {
     if (!this.options.autoReconnect) {
       return;
     }
-
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.debug('[Noetic UI] Max reconnection attempts reached');
       return;
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(this.reconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
+    const delay = Math.min(this.reconnectDelay * 2 ** (this.reconnectAttempts - 1), 3e4);
 
     setTimeout(() => {
       this.connect();
     }, delay);
   }
+
+  //#endregion
+
+  //#region Flush and Trace Processing
 
   private async flush(): Promise<void> {
     if (this.spanBuffer.length === 0 || this.ws?.readyState !== WebSocket.OPEN) {
@@ -213,144 +199,165 @@ export class NoeticUITraceExporter implements TraceExporter {
       spansByTrace.set(span.traceId, traceSpans);
     }
 
-    // Process each trace
     for (const [traceId, traceSpans] of spansByTrace) {
-      await this.flushTrace(traceId, traceSpans);
+      this.flushTrace(traceId, traceSpans);
     }
   }
 
-  private async flushTrace(traceId: string, spans: SerializableSpan[]): Promise<void> {
-    // Check if this is a new trace
-    const isNewTrace = !this.activeTraces.has(traceId);
+  private flushTrace(traceId: string, batchSpans: SerializableSpan[]): void {
+    // Get or create trace info — accumulates ALL spans across flushes
     const traceInfo = this.activeTraces.get(traceId) ?? {
       startTime: Date.now(),
-      spanIds: new Set(),
+      spanIds: new Set<string>(),
+      allSpans: [],
+      started: false,
     };
 
-    if (isNewTrace) {
-      // Get input from the first span (root span) if available
-      const rootSpan = spans[0];
+    // Send trace.start once
+    if (!traceInfo.started) {
+      const rootSpan = batchSpans[0];
       const input = rootSpan?.attributes?.input ?? {};
 
-      // Send trace.start for new traces
-      const startMessage: ClientMessage = {
-        type: 'trace.start',
-        traceId,
-        agentId: this.options.agentName,
-        input,
-        startTime: traceInfo.startTime,
-      };
-      this.ws!.send(JSON.stringify(startMessage));
+      this.ws!.send(
+        JSON.stringify({
+          type: 'trace.start',
+          traceId,
+          agentId: this.options.agentName,
+          input,
+          startTime: traceInfo.startTime,
+        } satisfies ClientMessage),
+      );
+      traceInfo.started = true;
     }
 
-    // Process each span
-    for (const span of spans) {
-      const isNewSpan = !traceInfo.spanIds.has(span.spanId);
+    // Accumulate spans in trace history
+    traceInfo.allSpans.push(...batchSpans);
 
-      if (isNewSpan) {
-        // Send nodeStart for all new spans (even if already ended)
-        // This ensures the server creates the node before nodeComplete updates it
-        // Build context snapshot from span data and attributes
-        const spanAttrs = span.attributes || {};
-        const tokenInput =
-          typeof spanAttrs.tokenInput === 'number'
-            ? spanAttrs.tokenInput
-            : typeof spanAttrs.inputTokens === 'number'
-              ? spanAttrs.inputTokens
-              : 0;
-        const tokenOutput =
-          typeof spanAttrs.tokenOutput === 'number'
-            ? spanAttrs.tokenOutput
-            : typeof spanAttrs.outputTokens === 'number'
-              ? spanAttrs.outputTokens
-              : 0;
-        const tokenTotal =
-          tokenInput + tokenOutput ||
-          (typeof spanAttrs.totalTokens === 'number' ? spanAttrs.totalTokens : 0);
-
-        const cost =
-          typeof spanAttrs.cost === 'number'
-            ? spanAttrs.cost
-            : typeof spanAttrs.price === 'number'
-              ? spanAttrs.price
-              : 0;
-
-        const elapsedMs = span.duration || (span.endTime ? span.endTime - span.startTime : 0);
-
-        const nodeStartMessage: ClientMessage = {
-          type: 'trace.nodeStart',
-          traceId,
-          node: {
-            id: span.spanId,
-            stepId: span.name,
-            kind: this.inferStepKind(span.name, spanAttrs),
-            parentId: span.parentSpanId || null,
-            depth: this.calculateDepth(span, spans),
-            startTime: span.startTime,
-            endTime: span.endTime || null,
-            durationMs: span.endTime ? span.duration : null,
-            status: span.endTime ? 'completed' : 'running',
-            input: span.attributes.input ?? {},
-            output: span.endTime ? (span.attributes.output ?? null) : null,
-            contextSnapshot: {
-              depth: this.calculateDepth(span, spans),
-              stepCount: spans.length,
-              tokens: {
-                input: tokenInput,
-                output: tokenOutput,
-                total: tokenTotal,
-              },
-              cost: cost,
-              elapsedMs: elapsedMs,
-              state: spanAttrs.state ?? spanAttrs.contextState ?? null,
-              itemLogLength: Array.isArray(spanAttrs.messages) ? spanAttrs.messages.length : 0,
-            },
-            stepData: this.buildStepData(spanAttrs, tokenInput, tokenOutput, tokenTotal, cost),
-            children: [],
-          },
-        };
-        this.ws!.send(JSON.stringify(nodeStartMessage));
-        traceInfo.spanIds.add(span.spanId);
-      } else if (span.endTime) {
-        // Previously seen span that just ended - send nodeComplete
-        const nodeCompleteMessage: ClientMessage = {
-          type: 'trace.nodeComplete',
-          traceId,
-          nodeId: span.spanId,
-          output: span.attributes.output ?? null,
-          durationMs: span.duration,
-        };
-        this.ws!.send(JSON.stringify(nodeCompleteMessage));
+    // Process each span in this batch
+    for (const span of batchSpans) {
+      if (traceInfo.spanIds.has(span.spanId)) {
+        // Already sent nodeStart — send nodeComplete if now ended
+        if (span.endTime) {
+          this.ws!.send(
+            JSON.stringify({
+              type: 'trace.nodeComplete',
+              traceId,
+              nodeId: span.spanId,
+              output: span.attributes.output ?? null,
+              durationMs: span.duration,
+            } satisfies ClientMessage),
+          );
+        }
+        continue;
       }
+
+      // New span — send trace.nodeStart
+      traceInfo.spanIds.add(span.spanId);
+      this.sendNodeStart(traceId, span, traceInfo.allSpans);
     }
 
-    // Update trace info
+    // Persist trace info
     this.activeTraces.set(traceId, traceInfo);
 
-    // Check if all spans in this trace are complete
-    const allComplete = spans.every((s) => s.endTime);
-    if (allComplete && spans.length > 0) {
-      // Send trace.complete
-      const completedSpans = spans.filter((s) => s.endTime);
-      const totalDuration = completedSpans.reduce((sum, s) => sum + s.duration, 0);
+    // Check if the trace is complete: root span (no parent) must have ended
+    this.checkTraceComplete(traceId, traceInfo);
+  }
 
-      const completeMessage: ClientMessage = {
+  private sendNodeStart(
+    traceId: string,
+    span: SerializableSpan,
+    allSpans: SerializableSpan[],
+  ): void {
+    const spanAttrs = span.attributes || {};
+    const tokenInput = this.getNumericAttr(spanAttrs, 'tokenInput', 'inputTokens');
+    const tokenOutput = this.getNumericAttr(spanAttrs, 'tokenOutput', 'outputTokens');
+    const tokenTotal = tokenInput + tokenOutput || this.getNumericAttr(spanAttrs, 'totalTokens');
+    const cost = this.getNumericAttr(spanAttrs, 'cost', 'price');
+    const elapsedMs = span.duration || (span.endTime ? span.endTime - span.startTime : 0);
+    const depth = this.calculateDepth(span, allSpans);
+
+    const nodeStartMessage: ClientMessage = {
+      type: 'trace.nodeStart',
+      traceId,
+      node: {
+        id: span.spanId,
+        stepId: span.name,
+        kind: this.inferStepKind(span.name, spanAttrs),
+        parentId: span.parentSpanId || null,
+        depth,
+        startTime: span.startTime,
+        endTime: span.endTime || null,
+        durationMs: span.endTime ? span.duration : null,
+        status: span.endTime ? 'completed' : 'running',
+        input: span.attributes.input ?? {},
+        output: span.endTime ? (span.attributes.output ?? null) : null,
+        contextSnapshot: {
+          depth,
+          stepCount: 1,
+          tokens: {
+            input: tokenInput,
+            output: tokenOutput,
+            total: tokenTotal,
+          },
+          cost,
+          elapsedMs,
+          state: spanAttrs.state ?? spanAttrs.contextState ?? null,
+          itemLogLength: Array.isArray(spanAttrs.messages) ? spanAttrs.messages.length : 0,
+        },
+        stepData: this.buildStepData(spanAttrs, tokenInput, tokenOutput, tokenTotal, cost),
+        children: [],
+      },
+    };
+    this.ws!.send(JSON.stringify(nodeStartMessage));
+  }
+
+  /**
+   * Check if a trace is complete.
+   * A trace is complete when we've received a root span (no parentSpanId)
+   * and that root span has an endTime.
+   */
+  private checkTraceComplete(traceId: string, traceInfo: TraceInfo): void {
+    const rootSpan = traceInfo.allSpans.find((s) => !s.parentSpanId && s.endTime);
+    if (!rootSpan) {
+      return;
+    }
+
+    // Root span has ended — the full execution is complete
+    const totalDuration = traceInfo.allSpans
+      .filter((s) => s.endTime)
+      .reduce((sum, s) => sum + s.duration, 0);
+
+    this.ws!.send(
+      JSON.stringify({
         type: 'trace.complete',
         traceId,
         summary: {
-          totalSteps: spans.length,
+          totalSteps: traceInfo.allSpans.length,
           durationMs: totalDuration,
         },
         endTime: Date.now(),
-      };
-      this.ws!.send(JSON.stringify(completeMessage));
+      } satisfies ClientMessage),
+    );
 
-      // Clean up trace tracking
-      this.activeTraces.delete(traceId);
-    }
+    this.activeTraces.delete(traceId);
   }
 
+  //#endregion
+
+  //#region Depth and Attribute Helpers
+
+  /**
+   * Calculate depth using ALL accumulated spans for the trace,
+   * not just the current flush batch.
+   */
   private calculateDepth(span: SerializableSpan, allSpans: SerializableSpan[]): number {
+    // Use the depth attribute set by the interpreter if available
+    const depthAttr = span.attributes?.depth;
+    if (typeof depthAttr === 'number') {
+      return depthAttr;
+    }
+
+    // Fall back to walking the parent chain
     let depth = 0;
     let currentSpan = span;
     while (currentSpan.parentSpanId) {
@@ -364,11 +371,24 @@ export class NoeticUITraceExporter implements TraceExporter {
     return depth;
   }
 
+  private getNumericAttr(attrs: Record<string, unknown>, ...keys: string[]): number {
+    for (const key of keys) {
+      const val = attrs[key];
+      if (typeof val === 'number') {
+        return val;
+      }
+    }
+    return 0;
+  }
+
+  //#endregion
+
+  //#region Message Queue and Timer
+
   private flushMessageQueue(): void {
     if (this.ws?.readyState !== WebSocket.OPEN) {
       return;
     }
-
     while (this.messageQueue.length > 0) {
       const message = this.messageQueue.shift();
       if (message) {
@@ -392,8 +412,11 @@ export class NoeticUITraceExporter implements TraceExporter {
     }
   }
 
+  //#endregion
+
+  //#region Span Serialization
+
   private serializeSpan(span: Span): SerializableSpan {
-    // Type guard function to check if span has SpanImpl properties
     const hasSpanImplProperties = (
       s: Span,
     ): s is Span & {
@@ -421,7 +444,6 @@ export class NoeticUITraceExporter implements TraceExporter {
       };
     }
 
-    // Fallback for spans that don't have SpanImpl properties
     return {
       traceId: span.traceId,
       spanId: span.spanId,
@@ -439,7 +461,6 @@ export class NoeticUITraceExporter implements TraceExporter {
     spanName: string,
     spanAttrs?: Record<string, unknown>,
   ): 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' {
-    // Prefer explicit attribute — check each valid value so TypeScript narrows the type
     const attrKind = spanAttrs?.kind ?? spanAttrs?.stepKind;
     if (
       attrKind === 'run' ||
@@ -453,7 +474,6 @@ export class NoeticUITraceExporter implements TraceExporter {
       return attrKind;
     }
 
-    // Fall back to name-based inference
     const name = spanName.toLowerCase();
     if (name.includes('llm') || name.includes('model')) {
       return 'llm';
@@ -476,10 +496,6 @@ export class NoeticUITraceExporter implements TraceExporter {
     return 'run';
   }
 
-  /**
-   * Build stepData object based on step type and span attributes
-   * Uses the step data extractor registry for extensibility
-   */
   private buildStepData(
     spanAttrs: Record<string, unknown>,
     tokenInput: number,
@@ -489,13 +505,13 @@ export class NoeticUITraceExporter implements TraceExporter {
   ): Record<string, unknown> {
     const stepKind = String(spanAttrs.stepKind || 'run');
     const extractor = getStepDataExtractor(stepKind);
-
     const tokenUsage = {
       input: tokenInput,
       output: tokenOutput,
       total: tokenTotal,
     };
-
     return extractor(spanAttrs, tokenUsage, cost);
   }
+
+  //#endregion
 }

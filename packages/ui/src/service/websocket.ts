@@ -854,9 +854,16 @@ export class NoeticUIServer {
     input: unknown,
     startTime: number,
   ): void {
+    // Don't overwrite an existing trace — the exporter may re-send trace.start
+    // if it reconnects, but nodes already accumulated must be preserved
+    const existing = this.traces.get(traceId);
+    if (existing) {
+      console.debug(`[WebSocket] Trace already exists: ${traceId}, skipping re-creation`);
+      return;
+    }
+
     console.info(`[WebSocket] Trace started: ${traceId} for agent ${agentId}`);
 
-    // Create new trace
     const trace: ExecutionTrace = {
       traceId,
       rootStepId: 'root',
@@ -867,7 +874,6 @@ export class NoeticUIServer {
       rootNodeId: '',
     };
 
-    // Store trace state
     this.traces.set(traceId, {
       trace,
       agentId,
