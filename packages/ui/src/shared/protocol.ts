@@ -21,6 +21,7 @@ const serverMessageTypes = z.enum([
   'node.complete',
   'node.error',
   'node.pause',
+  'node.resume',
   'node.data',
   'execution.complete',
   'execution.error',
@@ -264,6 +265,12 @@ export interface NodePauseMessage {
   reason: 'breakpoint' | 'step' | 'error';
 }
 
+export interface NodeResumeServerMessage {
+  type: 'node.resume';
+  traceId: string;
+  nodeId: string;
+}
+
 export interface NodeDataMessage {
   type: 'node.data';
   nodeId: string;
@@ -349,6 +356,7 @@ export type ServerMessage =
   | NodeCompleteMessage
   | NodeErrorMessage
   | NodePauseMessage
+  | NodeResumeServerMessage
   | NodeDataMessage
   | ExecutionCompleteMessage
   | ExecutionErrorMessage

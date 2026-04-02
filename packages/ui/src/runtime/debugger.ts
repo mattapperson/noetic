@@ -8,7 +8,6 @@
 import type { Context, Step } from '@noetic/core';
 import type {
   Breakpoint,
-  ClientMessage,
   DebugController,
   DebuggerConfig,
   DebuggerState,
@@ -38,6 +37,7 @@ export class Debugger implements DebugController {
   private pauseResolvers = new Map<string, () => void>();
   private onEvent: ((message: ServerMessage) => void) | null = null;
   private startTime = 0;
+  private agentId = "";
   private stepCounter = 0;
   private parentStack: string[] = [];
 
@@ -68,6 +68,7 @@ export class Debugger implements DebugController {
    */
   startRun(agentId: string, runId: string, input: unknown): void {
     this.startTime = Date.now();
+    this.agentId = agentId;
     this.stepCounter = 0;
     this.parentStack = [];
     this.timelineEvents = [];
@@ -121,6 +122,7 @@ export class Debugger implements DebugController {
 
     this.emit({
       type: 'execution.start',
+      agentId,
       trace: this.trace,
     });
   }

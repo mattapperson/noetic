@@ -185,6 +185,7 @@ export interface DebuggerConfig {
 export type ServerMessage =
   | {
       type: 'execution.start';
+      agentId: string;
       trace: ExecutionTrace;
     }
   | {
