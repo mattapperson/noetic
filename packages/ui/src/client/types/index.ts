@@ -167,6 +167,8 @@ export interface NodePosition {
   y: number;
   width: number;
   height: number;
+  /** If true, this node is a container (loop/fork/branch/spawn) rendered as a bounding box */
+  isContainer?: boolean;
 }
 
 export interface NodeEdge {

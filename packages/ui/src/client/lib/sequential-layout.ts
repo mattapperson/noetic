@@ -1,16 +1,24 @@
 /**
  * Sequential layout algorithm for node graph visualization
- * Shows execution flow as a linear sequence with loop containers
+ *
+ * Container nodes (loop, fork, branch, spawn) are rendered as bounding
+ * boxes that visually enclose their child steps. The layout is computed
+ * recursively: children are laid out first, then the container is sized
+ * to fit around them.
  */
 
 import type { ExecutionNode, NodeEdge, NodePosition } from '../types';
+
+//#region Types
 
 interface SequentialLayoutOptions {
   nodeWidth: number;
   nodeHeight: number;
   verticalSpacing: number;
   horizontalSpacing: number;
-  loopIndent: number;
+  containerPadTop: number;
+  containerPadSide: number;
+  containerPadBottom: number;
   startX: number;
   startY: number;
 }
@@ -18,26 +26,48 @@ interface SequentialLayoutOptions {
 const DEFAULT_OPTIONS: SequentialLayoutOptions = {
   nodeWidth: 280,
   nodeHeight: 140,
-  verticalSpacing: 200,
-  horizontalSpacing: 400,
-  loopIndent: 60,
+  verticalSpacing: 60,
+  horizontalSpacing: 80,
+  containerPadTop: 50,
+  containerPadSide: 30,
+  containerPadBottom: 30,
   startX: 50,
   startY: 50,
 };
 
-interface LayoutContext {
-  positions: NodePosition[];
-  edges: NodeEdge[];
-  currentY: number;
-  currentX: number;
-  loopDepth: number;
-  loopStartNodes: Map<string, string>; // Maps iteration end node -> loop start node
+const CONTAINER_KINDS = new Set([
+  'loop',
+  'fork',
+  'branch',
+  'spawn',
+]);
+
+interface LayoutResult {
+  width: number;
+  height: number;
+  bottom: number;
 }
 
-/**
- * Calculate sequential layout for execution nodes
- * Shows execution as a linear flow with loop containers and loop-back edges
- */
+/** Shared context threaded through the recursive layout */
+interface LayoutContext {
+  nodes: Map<string, ExecutionNode>;
+  childrenOf: Map<string, string[]>;
+  opts: SequentialLayoutOptions;
+  positions: NodePosition[];
+  edges: NodeEdge[];
+}
+
+/** Position input for layout functions */
+interface LayoutPlacement {
+  nodeId: string;
+  x: number;
+  y: number;
+}
+
+//#endregion
+
+//#region Public API
+
 export function calculateSequentialLayout(
   nodes: Map<string, ExecutionNode>,
   rootNodeId: string,
@@ -50,88 +80,229 @@ export function calculateSequentialLayout(
     ...DEFAULT_OPTIONS,
     ...options,
   };
-
+  const positions: NodePosition[] = [];
+  const edges: NodeEdge[] = [];
   const ctx: LayoutContext = {
-    positions: [],
-    edges: [],
-    currentY: opts.startY,
-    currentX: opts.startX,
-    loopDepth: 0,
-    loopStartNodes: new Map(),
+    nodes,
+    childrenOf: buildChildrenMap(nodes),
+    opts,
+    positions,
+    edges,
   };
 
-  // Build children lookup from parentId
-  const childrenOf = buildChildrenMap(nodes);
+  const roots = findRoots(nodes, rootNodeId);
 
-  // Build execution order by traversing the tree
-  const executionOrder = buildExecutionOrder(nodes, rootNodeId);
-
-  // Assign positions in execution order
-  for (let i = 0; i < executionOrder.length; i++) {
-    const nodeId = executionOrder[i];
-    const node = nodes.get(nodeId);
-    if (!node) {
-      continue;
-    }
-
-    const nextNodeId = executionOrder[i + 1];
-
-    // Position the node
-    const position: NodePosition = {
-      id: nodeId,
-      x: ctx.currentX + ctx.loopDepth * opts.loopIndent,
-      y: ctx.currentY,
-      width: opts.nodeWidth,
-      height: opts.nodeHeight,
-    };
-    ctx.positions.push(position);
-
-    // Create edge to next node
-    if (nextNodeId) {
-      const isLoopBack = isLoopIterationEnd(node, nextNodeId, nodes);
-
-      ctx.edges.push({
-        id: `${nodeId}-${nextNodeId}`,
-        source: nodeId,
-        target: nextNodeId,
-        type: isLoopBack ? 'loop' : 'default',
-        animated: node.status === 'running' || isLoopBack,
-      });
-    }
-
-    // Handle loop nodes specially
-    const loopChildren = childrenOf.get(nodeId) ?? node.children;
-    if (node.kind === 'loop' && loopChildren.length > 0) {
-      // Enter loop scope - indent subsequent nodes
-      ctx.loopDepth++;
-
-      // Track loop start for loop-back edges
-      for (const childId of loopChildren) {
-        ctx.loopStartNodes.set(childId, nodeId);
-      }
-    }
-
-    // Move to next position
-    ctx.currentY += opts.verticalSpacing;
-
-    // Exit loop scope if this was the last child of a loop
-    if (node.parentId) {
-      const parent = nodes.get(node.parentId);
-      if (parent?.kind === 'loop') {
-        const parentChildren = childrenOf.get(node.parentId) ?? parent.children;
-        const isLastChild = parentChildren[parentChildren.length - 1] === nodeId;
-        if (isLastChild) {
-          ctx.loopDepth = Math.max(0, ctx.loopDepth - 1);
-        }
-      }
-    }
+  let cursorY = opts.startY;
+  for (const id of roots) {
+    const result = layoutNode(
+      {
+        nodeId: id,
+        x: opts.startX,
+        y: cursorY,
+      },
+      ctx,
+    );
+    cursorY = result.bottom + opts.verticalSpacing;
   }
 
   return {
-    positions: ctx.positions,
-    edges: ctx.edges,
+    positions,
+    edges,
   };
 }
+
+//#endregion
+
+//#region Layout Engine
+
+function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResult {
+  const { nodeId, x, y } = placement;
+  const node = ctx.nodes.get(nodeId);
+  if (!node) {
+    return {
+      width: 0,
+      height: 0,
+      bottom: y,
+    };
+  }
+
+  const children = ctx.childrenOf.get(nodeId) ?? node.children;
+  const isContainer = CONTAINER_KINDS.has(node.kind) && children.length > 0;
+
+  if (!isContainer) {
+    ctx.positions.push({
+      id: nodeId,
+      x,
+      y,
+      width: ctx.opts.nodeWidth,
+      height: ctx.opts.nodeHeight,
+    });
+    return {
+      width: ctx.opts.nodeWidth,
+      height: ctx.opts.nodeHeight,
+      bottom: y + ctx.opts.nodeHeight,
+    };
+  }
+
+  if (node.kind === 'fork') {
+    return layoutForkContainer(
+      {
+        nodeId,
+        children,
+        x,
+        y,
+      },
+      ctx,
+    );
+  }
+
+  return layoutSequentialContainer(
+    {
+      nodeId,
+      node,
+      children,
+      x,
+      y,
+    },
+    ctx,
+  );
+}
+
+/** Args for sequential container layout */
+interface SequentialContainerArgs {
+  nodeId: string;
+  node: ExecutionNode;
+  children: string[];
+  x: number;
+  y: number;
+}
+
+/**
+ * Layout a sequential container (loop, branch, spawn).
+ * Children are stacked vertically inside the container.
+ */
+function layoutSequentialContainer(
+  args: SequentialContainerArgs,
+  ctx: LayoutContext,
+): LayoutResult {
+  const { nodeId, node, children, x, y } = args;
+  const { opts } = ctx;
+  const innerX = x + opts.containerPadSide;
+  let innerY = y + opts.containerPadTop;
+  let maxChildWidth = opts.nodeWidth;
+  let lastBottom = y + opts.containerPadTop;
+
+  for (let i = 0; i < children.length; i++) {
+    const childId = children[i];
+    const result = layoutNode(
+      {
+        nodeId: childId,
+        x: innerX,
+        y: innerY,
+      },
+      ctx,
+    );
+    maxChildWidth = Math.max(maxChildWidth, result.width);
+    lastBottom = result.bottom;
+    innerY = result.bottom + opts.verticalSpacing;
+
+    // Edge from this child to the next
+    if (i < children.length - 1) {
+      ctx.edges.push({
+        id: `${childId}-${children[i + 1]}`,
+        source: childId,
+        target: children[i + 1],
+        type: 'default',
+        animated: ctx.nodes.get(childId)?.status === 'running',
+      });
+    }
+  }
+
+  // For loops, add a loop-back edge from last child to first child
+  if (node.kind === 'loop' && children.length > 1) {
+    ctx.edges.push({
+      id: `${children[children.length - 1]}-${children[0]}-loop`,
+      source: children[children.length - 1],
+      target: children[0],
+      type: 'loop',
+      animated: true,
+    });
+  }
+
+  const containerWidth = maxChildWidth + opts.containerPadSide * 2;
+  const containerHeight = lastBottom - y + opts.containerPadBottom;
+
+  ctx.positions.push({
+    id: nodeId,
+    x,
+    y,
+    width: containerWidth,
+    height: containerHeight,
+    isContainer: true,
+  });
+
+  return {
+    width: containerWidth,
+    height: containerHeight,
+    bottom: y + containerHeight,
+  };
+}
+
+/** Args for fork container layout */
+interface ForkContainerArgs {
+  nodeId: string;
+  children: string[];
+  x: number;
+  y: number;
+}
+
+/**
+ * Layout a fork container.
+ * Children are placed side by side horizontally (parallel paths).
+ */
+function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): LayoutResult {
+  const { nodeId, children, x, y } = args;
+  const { opts } = ctx;
+  const innerY = y + opts.containerPadTop;
+  let innerX = x + opts.containerPadSide;
+  let maxChildHeight = opts.nodeHeight;
+
+  for (const childId of children) {
+    const result = layoutNode(
+      {
+        nodeId: childId,
+        x: innerX,
+        y: innerY,
+      },
+      ctx,
+    );
+    maxChildHeight = Math.max(maxChildHeight, result.height);
+    innerX += result.width + opts.horizontalSpacing;
+  }
+
+  const containerWidth = innerX - x - opts.horizontalSpacing + opts.containerPadSide;
+  const containerHeight = maxChildHeight + opts.containerPadTop + opts.containerPadBottom;
+  const finalWidth = Math.max(containerWidth, opts.nodeWidth);
+
+  ctx.positions.push({
+    id: nodeId,
+    x,
+    y,
+    width: finalWidth,
+    height: containerHeight,
+    isContainer: true,
+  });
+
+  return {
+    width: finalWidth,
+    height: containerHeight,
+    bottom: y + containerHeight,
+  };
+}
+
+//#endregion
+
+//#region Helpers
 
 /** Build children lookup from parentId, sorted by startTime */
 function buildChildrenMap(nodes: Map<string, ExecutionNode>): Map<string, string[]> {
@@ -143,7 +314,6 @@ function buildChildrenMap(nodes: Map<string, ExecutionNode>): Map<string, string
       childrenOf.set(node.parentId, siblings);
     }
   }
-  // Sort each children list by startTime
   for (const [, children] of childrenOf) {
     children.sort((a, b) => {
       const nodeA = nodes.get(a);
@@ -154,85 +324,38 @@ function buildChildrenMap(nodes: Map<string, ExecutionNode>): Map<string, string
   return childrenOf;
 }
 
-/**
- * Build execution order by doing a depth-first traversal
- * Derives parent-child relationships from parentId since children arrays may be empty
- */
-function buildExecutionOrder(nodes: Map<string, ExecutionNode>, rootNodeId: string): string[] {
-  const order: string[] = [];
-  const visited = new Set<string>();
+/** Find root node IDs — nodes whose parent is not in the map */
+function findRoots(nodes: Map<string, ExecutionNode>, preferredRootId: string): string[] {
+  if (nodes.has(preferredRootId)) {
+    return [
+      preferredRootId,
+    ];
+  }
 
-  const childrenOf = buildChildrenMap(nodes);
-
-  function traverse(nodeId: string): void {
-    if (visited.has(nodeId)) {
-      return;
-    }
-    visited.add(nodeId);
-
-    const node = nodes.get(nodeId);
-    if (!node) {
-      return;
-    }
-
-    order.push(nodeId);
-
-    // Use derived children from parentId (already sorted by startTime), fall back to node.children
-    const children = childrenOf.get(nodeId) ?? node.children;
-
-    for (const childId of children) {
-      traverse(childId);
+  const roots: string[] = [];
+  for (const [id, node] of nodes) {
+    if (!node.parentId || !nodes.has(node.parentId)) {
+      roots.push(id);
     }
   }
 
-  // Start from root
-  traverse(rootNodeId);
+  roots.sort((a, b) => {
+    const nodeA = nodes.get(a);
+    const nodeB = nodes.get(b);
+    return (nodeA?.startTime ?? 0) - (nodeB?.startTime ?? 0);
+  });
 
-  // If root traversal missed nodes (e.g., rootNodeId is wrong or missing),
-  // add remaining nodes sorted by startTime
-  if (order.length < nodes.size) {
-    const remaining = [
-      ...nodes.entries(),
-    ]
-      .filter(([id]) => !visited.has(id))
-      .sort(([, a], [, b]) => a.startTime - b.startTime);
-    for (const [id] of remaining) {
-      traverse(id);
-    }
-  }
-
-  return order;
+  return roots.length > 0
+    ? roots
+    : [
+        ...nodes.keys(),
+      ].slice(0, 1);
 }
 
-/**
- * Check if this node is the end of a loop iteration (should loop back)
- */
-function isLoopIterationEnd(
-  node: ExecutionNode,
-  nextNodeId: string,
-  nodes: Map<string, ExecutionNode>,
-): boolean {
-  // Check if we're jumping back to a loop start
-  const nextNode = nodes.get(nextNodeId);
-  if (!nextNode) {
-    return false;
-  }
+//#endregion
 
-  // If next node is a loop and it's already been visited, this is a loop back
-  // Or if we're going from a loop child back to the loop parent
-  if (node.parentId) {
-    const parent = nodes.get(node.parentId);
-    if (parent?.kind === 'loop' && nextNodeId === node.parentId) {
-      return true;
-    }
-  }
+//#region Bounding Box Utilities
 
-  return false;
-}
-
-/**
- * Calculate bounding box for a set of positions
- */
 export function calculateBoundingBox(positions: NodePosition[]): {
   minX: number;
   minY: number;
@@ -280,9 +403,6 @@ export function calculateBoundingBox(positions: NodePosition[]): {
   };
 }
 
-/**
- * Fit graph to viewport
- */
 export function fitToViewport(options: {
   positions: NodePosition[];
   viewportWidth: number;
@@ -304,16 +424,11 @@ export function fitToViewport(options: {
   }
 
   const bbox = calculateBoundingBox(positions);
-
-  // Calculate zoom to fit
   const availableWidth = viewportWidth - padding * 2;
   const availableHeight = viewportHeight - padding * 2;
-
   const zoomX = availableWidth / bbox.width;
   const zoomY = availableHeight / bbox.height;
-  const zoom = Math.min(zoomX, zoomY, 1); // Don't zoom in more than 100%
-
-  // Center the graph
+  const zoom = Math.min(zoomX, zoomY, 1);
   const x = viewportWidth / 2 - bbox.centerX * zoom;
   const y = padding + (bbox.minY < 0 ? -bbox.minY * zoom : 0);
 
@@ -323,3 +438,5 @@ export function fitToViewport(options: {
     zoom,
   };
 }
+
+//#endregion

@@ -1,9 +1,7 @@
 /**
- * Integration test: verifies that traces with parentId-only nodes
- * (no children arrays) render correctly through the layout pipeline.
- *
- * This is the exact scenario that occurs when the exporter creates nodes
- * with children: [] and the server stores them as-is.
+ * Integration test: verifies that the layout algorithm correctly handles
+ * container nodes (loop, fork, branch, spawn) that contain child steps,
+ * and leaf nodes that stand alone.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -38,96 +36,114 @@ function makeNode(
     output: null,
     contextSnapshot: { ...ZERO_SNAPSHOT, depth: opts.depth ?? 0 },
     stepData: { description: '' } as ExecutionNode['stepData'],
-    children: [], // Intentionally empty — this is what the exporter produces
+    children: [],
   };
 }
 
 describe('node rendering integration', () => {
-  it('renders all nodes even when children arrays are empty (parentId-only)', () => {
-    // Simulate what the exporter produces: nodes with parentId set but children: []
+  it('renders leaf nodes sequentially when siblings of a container', () => {
     const nodes = new Map<string, ExecutionNode>();
-    const root = makeNode('root', { kind: 'run', depth: 0, startTime: 1000 });
-    const step1 = makeNode('step-1', { parentId: 'root', kind: 'llm', depth: 1, startTime: 2000 });
-    const step2 = makeNode('step-2', { parentId: 'root', kind: 'tool', depth: 1, startTime: 3000 });
-    const step3 = makeNode('step-3', { parentId: 'root', kind: 'run', depth: 1, startTime: 4000 });
+    nodes.set('branch', makeNode('branch', { kind: 'branch', depth: 0, startTime: 1000 }));
+    nodes.set('step-1', makeNode('step-1', { parentId: 'branch', kind: 'run', depth: 1, startTime: 2000 }));
+    nodes.set('step-2', makeNode('step-2', { parentId: 'branch', kind: 'llm', depth: 1, startTime: 3000 }));
 
-    nodes.set('root', root);
-    nodes.set('step-1', step1);
-    nodes.set('step-2', step2);
-    nodes.set('step-3', step3);
+    const { positions } = calculateSequentialLayout(nodes, 'branch');
 
-    const { positions, edges } = calculateSequentialLayout(nodes, 'root');
-
-    // All 4 nodes should have positions
-    expect(positions).toHaveLength(4);
-    expect(positions.map((p) => p.id)).toEqual(['root', 'step-1', 'step-2', 'step-3']);
-
-    // Edges connect them sequentially
-    expect(edges).toHaveLength(3);
-    expect(edges[0].source).toBe('root');
-    expect(edges[0].target).toBe('step-1');
-    expect(edges[1].source).toBe('step-1');
-    expect(edges[1].target).toBe('step-2');
-    expect(edges[2].source).toBe('step-2');
-    expect(edges[2].target).toBe('step-3');
+    // branch (container) + 2 leaf children
+    expect(positions).toHaveLength(3);
+    const step1 = positions.find((p) => p.id === 'step-1');
+    const step2 = positions.find((p) => p.id === 'step-2');
+    expect(step1).toBeDefined();
+    expect(step2).toBeDefined();
+    // Second node should be below the first
+    expect(step2!.y).toBeGreaterThan(step1!.y);
   });
 
-  it('renders nested steps with multiple levels of depth', () => {
+  it('renders loop as container with children inside', () => {
     const nodes = new Map<string, ExecutionNode>();
-    nodes.set('root', makeNode('root', { depth: 0, startTime: 1000 }));
-    nodes.set('branch', makeNode('branch', { parentId: 'root', kind: 'branch', depth: 1, startTime: 2000 }));
-    nodes.set('llm-1', makeNode('llm-1', { parentId: 'branch', kind: 'llm', depth: 2, startTime: 3000 }));
-    nodes.set('tool-1', makeNode('tool-1', { parentId: 'branch', kind: 'tool', depth: 2, startTime: 4000 }));
-    nodes.set('final', makeNode('final', { parentId: 'root', kind: 'run', depth: 1, startTime: 5000 }));
+    nodes.set('loop-1', makeNode('loop-1', { kind: 'loop', depth: 0, startTime: 1000 }));
+    nodes.set('handler-a', makeNode('handler-a', { parentId: 'loop-1', kind: 'run', depth: 1, startTime: 2000 }));
+    nodes.set('handler-b', makeNode('handler-b', { parentId: 'loop-1', kind: 'llm', depth: 1, startTime: 3000 }));
 
-    const { positions } = calculateSequentialLayout(nodes, 'root');
+    const { positions, edges } = calculateSequentialLayout(nodes, 'loop-1');
 
-    // All 5 nodes should render
-    expect(positions).toHaveLength(5);
-    const ids = positions.map((p) => p.id);
-    expect(ids).toContain('root');
-    expect(ids).toContain('branch');
-    expect(ids).toContain('llm-1');
-    expect(ids).toContain('tool-1');
-    expect(ids).toContain('final');
-  });
+    // 3 positions: 1 container + 2 leaf nodes
+    expect(positions).toHaveLength(3);
 
-  it('sorts children by startTime for correct execution order', () => {
-    const nodes = new Map<string, ExecutionNode>();
-    nodes.set('root', makeNode('root', { depth: 0, startTime: 1000 }));
-    // Add children in wrong order
-    nodes.set('c', makeNode('c', { parentId: 'root', depth: 1, startTime: 4000 }));
-    nodes.set('a', makeNode('a', { parentId: 'root', depth: 1, startTime: 2000 }));
-    nodes.set('b', makeNode('b', { parentId: 'root', depth: 1, startTime: 3000 }));
-
-    const { positions } = calculateSequentialLayout(nodes, 'root');
-
-    expect(positions).toHaveLength(4);
-    // Should be sorted: root, a, b, c (by startTime)
-    expect(positions[0].id).toBe('root');
-    expect(positions[1].id).toBe('a');
-    expect(positions[2].id).toBe('b');
-    expect(positions[3].id).toBe('c');
-  });
-
-  it('handles loop nodes with parentId-derived children', () => {
-    const nodes = new Map<string, ExecutionNode>();
-    nodes.set('root', makeNode('root', { depth: 0, startTime: 1000 }));
-    nodes.set('loop-1', makeNode('loop-1', { parentId: 'root', kind: 'loop', depth: 1, startTime: 2000 }));
-    nodes.set('iter-1', makeNode('iter-1', { parentId: 'loop-1', kind: 'run', depth: 2, startTime: 3000 }));
-    nodes.set('iter-2', makeNode('iter-2', { parentId: 'loop-1', kind: 'run', depth: 2, startTime: 4000 }));
-
-    const { positions } = calculateSequentialLayout(nodes, 'root');
-
-    // All 4 nodes should render
-    expect(positions).toHaveLength(4);
-    // Loop children should be indented
     const loopPos = positions.find((p) => p.id === 'loop-1');
-    const iter1Pos = positions.find((p) => p.id === 'iter-1');
+    const handlerAPos = positions.find((p) => p.id === 'handler-a');
+    const handlerBPos = positions.find((p) => p.id === 'handler-b');
+
     expect(loopPos).toBeDefined();
-    expect(iter1Pos).toBeDefined();
-    // Iteration nodes should be indented relative to loop
-    expect(iter1Pos!.x).toBeGreaterThan(loopPos!.x);
+    expect(handlerAPos).toBeDefined();
+    expect(handlerBPos).toBeDefined();
+
+    // Loop position should be a container
+    expect(loopPos!.isContainer).toBe(true);
+
+    // Children should be inside the container bounds
+    expect(handlerAPos!.x).toBeGreaterThan(loopPos!.x);
+    expect(handlerAPos!.y).toBeGreaterThan(loopPos!.y);
+    expect(handlerBPos!.x).toBeGreaterThan(loopPos!.x);
+
+    // Children should be stacked vertically
+    expect(handlerBPos!.y).toBeGreaterThan(handlerAPos!.y);
+
+    // Should have edge from handler-a to handler-b
+    const sequentialEdge = edges.find((e) => e.source === 'handler-a' && e.target === 'handler-b');
+    expect(sequentialEdge).toBeDefined();
+
+    // Should have loop-back edge from handler-b to handler-a
+    const loopEdge = edges.find((e) => e.type === 'loop');
+    expect(loopEdge).toBeDefined();
+    expect(loopEdge!.source).toBe('handler-b');
+    expect(loopEdge!.target).toBe('handler-a');
+  });
+
+  it('renders fork as container with children side by side', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set('fork-1', makeNode('fork-1', { kind: 'fork', depth: 0, startTime: 1000 }));
+    nodes.set('path-1', makeNode('path-1', { parentId: 'fork-1', kind: 'run', depth: 1, startTime: 2000 }));
+    nodes.set('path-2', makeNode('path-2', { parentId: 'fork-1', kind: 'run', depth: 1, startTime: 2000 }));
+
+    const { positions } = calculateSequentialLayout(nodes, 'fork-1');
+
+    expect(positions).toHaveLength(3);
+
+    const forkPos = positions.find((p) => p.id === 'fork-1');
+    const path1Pos = positions.find((p) => p.id === 'path-1');
+    const path2Pos = positions.find((p) => p.id === 'path-2');
+
+    expect(forkPos!.isContainer).toBe(true);
+
+    // Paths should be at the same y (side by side)
+    expect(path1Pos!.y).toBe(path2Pos!.y);
+    // But different x
+    expect(path2Pos!.x).toBeGreaterThan(path1Pos!.x);
+  });
+
+  it('renders nested containers (loop inside branch)', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set('branch', makeNode('branch', { kind: 'branch', depth: 0, startTime: 1000 }));
+    nodes.set('loop', makeNode('loop', { parentId: 'branch', kind: 'loop', depth: 1, startTime: 2000 }));
+    nodes.set('step', makeNode('step', { parentId: 'loop', kind: 'run', depth: 2, startTime: 3000 }));
+
+    const { positions } = calculateSequentialLayout(nodes, 'branch');
+
+    // branch (container) > loop (container) > step (leaf)
+    expect(positions).toHaveLength(3);
+
+    const branchPos = positions.find((p) => p.id === 'branch');
+    const loopPos = positions.find((p) => p.id === 'loop');
+    const stepPos = positions.find((p) => p.id === 'step');
+
+    expect(branchPos!.isContainer).toBe(true);
+    expect(loopPos!.isContainer).toBe(true);
+    expect(stepPos!.isContainer).toBeUndefined();
+
+    // step inside loop inside branch
+    expect(stepPos!.x).toBeGreaterThan(loopPos!.x);
+    expect(loopPos!.x).toBeGreaterThan(branchPos!.x);
   });
 
   it('recovers when rootNodeId points to non-existent node', () => {

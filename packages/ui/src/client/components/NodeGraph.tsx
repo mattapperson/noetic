@@ -10,7 +10,7 @@ import { calculateSequentialLayout, fitToViewport } from '../lib/sequential-layo
 import { ensureMap } from '../lib/serialization';
 import type { ExecutionNode, ExecutionTrace, NodeEdge, NodePosition } from '../types';
 import { BranchNode, ForkNode, LLMNode, LoopNode, RunNode, SpawnNode, ToolNode } from './nodes';
-import { NODE_KIND_COLORS, STATUS_COLORS } from './nodes/shared';
+import { NODE_KIND_COLORS, STATUS_COLORS, STEP_KIND_ICONS, STEP_KIND_LABELS } from './nodes/shared';
 
 interface NodeGraphProps {
   trace: ExecutionTrace | null;
@@ -101,9 +101,6 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     const { positions, edges } = calculateSequentialLayout(nodeMap, trace.rootNodeId, {
       nodeWidth: NODE_WIDTH,
       nodeHeight: NODE_HEIGHT,
-      verticalSpacing: 200,
-      horizontalSpacing: 400,
-      loopIndent: 60,
     });
 
     return {
@@ -495,27 +492,99 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
           })}
         </svg>
 
-        {/* Node layer */}
-        {positions.map((pos) => {
-          const node = nodes.get(pos.id);
-          if (!node) {
-            return null;
-          }
+        {/* Container layer — rendered behind child nodes */}
+        {positions
+          .filter((pos) => pos.isContainer)
+          .map((pos) => {
+            const node = nodes.get(pos.id);
+            if (!node) {
+              return null;
+            }
+            const kindColors = NODE_KIND_COLORS[node.kind] ?? NODE_KIND_COLORS.run;
+            const statusColors = STATUS_COLORS[node.status] ?? STATUS_COLORS.pending;
+            const icon = STEP_KIND_ICONS[node.kind] ?? '';
+            const label = STEP_KIND_LABELS[node.kind] ?? node.kind;
+            return (
+              <div
+                key={`container-${pos.id}`}
+                style={{
+                  position: 'absolute',
+                  left: pos.x,
+                  top: pos.y,
+                  width: pos.width,
+                  height: pos.height,
+                  borderRadius: '12px',
+                  border: `2px dashed ${kindColors.border}`,
+                  backgroundColor: `${kindColors.bg}`,
+                  pointerEvents: 'none',
+                }}
+              >
+                {/* Container header */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '36px',
+                    borderRadius: '10px 10px 0 0',
+                    backgroundColor: kindColors.border,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '0 12px',
+                    color: '#fff',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                  }}
+                >
+                  <span>{icon}</span>
+                  <span>{label}</span>
+                  <span
+                    style={{
+                      opacity: 0.7,
+                      fontWeight: 400,
+                    }}
+                  >
+                    {node.stepId}
+                  </span>
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      opacity: 0.8,
+                      fontSize: '11px',
+                    }}
+                  >
+                    {statusColors.text ? node.status : ''}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
 
-          return (
-            <div
-              key={pos.id}
-              style={{
-                position: 'absolute',
-                left: pos.x,
-                top: pos.y,
-                pointerEvents: 'auto',
-              }}
-            >
-              {renderNode(node)}
-            </div>
-          );
-        })}
+        {/* Node layer — leaf nodes rendered on top of containers */}
+        {positions
+          .filter((pos) => !pos.isContainer)
+          .map((pos) => {
+            const node = nodes.get(pos.id);
+            if (!node) {
+              return null;
+            }
+            return (
+              <div
+                key={pos.id}
+                style={{
+                  position: 'absolute',
+                  left: pos.x,
+                  top: pos.y,
+                  pointerEvents: 'auto',
+                }}
+              >
+                {renderNode(node)}
+              </div>
+            );
+          })}
       </div>
 
       {/* Empty state */}
