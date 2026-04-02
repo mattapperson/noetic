@@ -1,4 +1,6 @@
 // Runtime module exports for @noetic/ui
+import './register';
+
 export { createDebugHarness, DebugAgentHarness } from './debug-harness';
 export { Debugger as NoeticDebugger } from './debugger';
 export { NoeticUITraceExporter } from './exporter';
