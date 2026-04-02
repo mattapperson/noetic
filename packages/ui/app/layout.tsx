@@ -1,4 +1,5 @@
 import type React from 'react';
+import { ConfirmDialogProvider } from '../src/client/components/ConfirmDialog';
 import './globals.css';
 
 export const metadata = {
@@ -16,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="bg-[var(--noetic-bg)] text-[var(--noetic-text)] h-screen w-screen overflow-hidden">
-        {children}
+        <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
       </body>
     </html>
   );

@@ -3,6 +3,7 @@
 import { useParams } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useColumnWidths } from '../hooks/useColumnWidths';
 import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
@@ -208,8 +209,14 @@ interface ResizablePanelsProps {
 }
 
 export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
-  const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
-  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
+  // Use persisted column widths from localStorage
+  const { leftWidth, rightWidth, setLeftWidth, setRightWidth } = useColumnWidths({
+    defaultLeftWidth: DEFAULT_LEFT_WIDTH,
+    defaultRightWidth: DEFAULT_RIGHT_WIDTH,
+    minWidth: MIN_SIDEBAR_WIDTH,
+    maxWidth: MAX_SIDEBAR_WIDTH,
+  });
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [_isLoadingRun, setIsLoadingRun] = useState(false);
 

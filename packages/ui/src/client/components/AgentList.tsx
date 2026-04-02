@@ -8,6 +8,7 @@ import React from 'react';
 import { useHasHydrated } from '../hooks/useHasHydrated';
 import { useAgentStore } from '../stores/agent';
 import type { Agent } from '../types/agent';
+import { useConfirmDialog } from './ConfirmDialog';
 import RunList from './RunList';
 
 const STATUS_ICONS = {
@@ -154,6 +155,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
   const icon = STATUS_ICONS[status];
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isClient, setIsClient] = React.useState(false);
+  const { showConfirm } = useConfirmDialog();
 
   React.useEffect(() => {
     setIsClient(true);
@@ -165,9 +167,15 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete agent "${agent.name}" and all its runs? This cannot be undone.`,
-    );
+    const confirmed = await showConfirm({
+      title: 'Delete Agent',
+      description: `Delete agent "${agent.name}" and all its runs? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+      onConfirm: () => {},
+      onCancel: () => {},
+    });
+
     if (!confirmed) {
       return;
     }

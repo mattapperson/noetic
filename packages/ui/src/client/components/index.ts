@@ -2,6 +2,7 @@
  * Component exports
  */
 
+export { ConfirmDialogProvider, useConfirmDialog } from './ConfirmDialog';
 export { ConnectionIndicator } from './ConnectionIndicator';
 export { NodeGraph } from './NodeGraph';
 export * from './nodes';
