@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useHasHydrated } from './useHasHydrated';
 
 interface ColumnWidths {
   left: number;
@@ -26,37 +27,47 @@ export function useColumnWidths(options: UseColumnWidthsOptions) {
     storageKey = STORAGE_KEY,
   } = options;
 
-  // Initialize from localStorage or defaults
-  const [widths, setWidths] = useState<ColumnWidths>(() => {
-    if (typeof window === 'undefined') {
-      return {
-        left: defaultLeftWidth,
-        right: defaultRightWidth,
-      };
+  const hasHydrated = useHasHydrated();
+
+  // Always start with defaults for SSR/hydration consistency
+  const [widths, setWidths] = useState<ColumnWidths>({
+    left: defaultLeftWidth,
+    right: defaultRightWidth,
+  });
+
+  // Load from localStorage after hydration
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
     }
 
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
-        const parsed = JSON.parse(stored) as Partial<ColumnWidths>;
-        return {
-          left: Math.max(minWidth, Math.min(maxWidth, parsed.left ?? defaultLeftWidth)),
-          right: Math.max(minWidth, Math.min(maxWidth, parsed.right ?? defaultRightWidth)),
-        };
+        const parsed: unknown = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && ('left' in parsed || 'right' in parsed)) {
+          const partial = parsed as Partial<ColumnWidths>;
+          setWidths({
+            left: Math.max(minWidth, Math.min(maxWidth, partial.left ?? defaultLeftWidth)),
+            right: Math.max(minWidth, Math.min(maxWidth, partial.right ?? defaultRightWidth)),
+          });
+        }
       }
     } catch {
-      // Ignore parse errors and fall back to defaults
+      // Ignore parse errors - keep defaults
     }
-
-    return {
-      left: defaultLeftWidth,
-      right: defaultRightWidth,
-    };
-  });
+  }, [
+    hasHydrated,
+    storageKey,
+    minWidth,
+    maxWidth,
+    defaultLeftWidth,
+    defaultRightWidth,
+  ]);
 
   // Persist to localStorage whenever widths change
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!hasHydrated || typeof window === 'undefined') {
       return;
     }
 
@@ -68,6 +79,7 @@ export function useColumnWidths(options: UseColumnWidthsOptions) {
   }, [
     widths,
     storageKey,
+    hasHydrated,
   ]);
 
   const setLeftWidth = useCallback(
@@ -114,5 +126,6 @@ export function useColumnWidths(options: UseColumnWidthsOptions) {
     setLeftWidth,
     setRightWidth,
     resetWidths,
+    hasHydrated,
   };
 }
