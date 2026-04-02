@@ -49,7 +49,7 @@ export const useExecutionStore = create<ExecutionState>()(
         newTraces.set(traceId, trace);
 
         // Also populate nodes from the trace so timeline and inspector work
-        const newNodes = new Map(state.nodes);
+        const newNodes = new Map<string, ExecutionNode>();
         for (const [nodeId, node] of trace.nodes) {
           newNodes.set(nodeId, node);
         }
@@ -74,7 +74,9 @@ export const useExecutionStore = create<ExecutionState>()(
     updateNode: (nodeId, updates) => {
       set((state) => {
         const node = state.nodes.get(nodeId);
-        if (!node) return state;
+        if (!node) {
+          return state;
+        }
 
         const newNodes = new Map(state.nodes);
         const updatedNode = {
