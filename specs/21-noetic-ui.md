@@ -50,26 +50,40 @@ Noetic UI design principles:
 
 - **System theme** as default (auto-switches between light/dark based on OS preference)
 - **Card-based nodes** with subtle borders and status-colored accents
-- **Sequential vertical layout** for execution flow (nodes arranged top-to-bottom in execution order)
+- **Grid-snapped vertical layout** for execution flow (nodes snapped to a virtual grid, arranged top-to-bottom with parallel paths side-by-side)
 - **Three-panel layout:** left navigation, center canvas, right inspector
 - **Playback timeline** at bottom with transport controls
 - **Status badges** prominently displayed on each node
 
 ### 1. Execution Visualization
 
-The UI renders execution as a **sequential flow diagram** showing the exact order of step execution:
+The UI renders execution as a **grid-snapped flow diagram** with orthogonal edge routing and recursive nesting:
+
+- **Grid System:** All node positions snap to a virtual grid (20px cells). This ensures consistent alignment between nodes and edge routing regardless of which routing strategy produces the path.
 
 - **Sequential Layout:** Nodes arranged vertically top-to-bottom in execution order
   - Each step gets its own node card
   - Flow moves downward from start to completion
   - Clear visual hierarchy showing execution sequence
 
+- **Parallel Layout:** Fork and branch children are positioned **horizontally** side-by-side
+  - Fork paths show parallel execution lanes
+  - Branch paths show alternative conditional routes; the selected/active path renders at full opacity while unselected paths are slightly dimmed
+  - Sibling nodes never overlap (collision detection pushes apart horizontally for parallel, vertically for sequential)
+
+- **Nested Container Scaling:**
+  - Container nodes (loop, fork, branch, spawn) render as bounding boxes enclosing their children
+  - Children are scaled to **50%** of parent size at each nesting level (recursively: 50% → 25% → 12.5%)
+  - Container padding scales proportionally with the scale factor
+  - Clicking a container node triggers an animated zoom transition centering the container so children appear at 100% base size
+  - A breadcrumb trail tracks zoom depth; clicking background or back button animates to the previous zoom level
+  - Nested zoom stacks (click into a loop, then into a fork inside it)
+
 - **Loop Visualization:**
   - Loop nodes serve as **container nodes** with visual grouping
-  - Steps inside loops are **indented** to show nesting
-  - Loop-back edges (curved dashed lines in red) connect iteration end back to loop start
-  - Multiple iterations create multiple loop-back connections
-  
+  - Steps inside loops are scaled and contained within the loop bounding box
+  - Loop-back edges route orthogonally around child nodes from last child back to first child
+
 - **Node Cards** display:
   - Step kind badge with icon (LLM 💬, TOOL 🔧, FORK ⫚, etc.)
   - Step title and ID
@@ -78,9 +92,22 @@ The UI renders execution as a **sequential flow diagram** showing the exact orde
   - Connection edges flowing to next step
 
 - **Edges:**
-  - **Sequential flow:** Solid lines from bottom of one node to top of next
-  - **Loop iterations:** Dashed curved red lines looping back upward
+  - **Orthogonal routing:** All edges travel in horizontal/vertical segments only (90° increments) with a consistent corner radius at turns
+  - **Connection points:** Edges connect from/to the center point of the top, right, bottom, or left edge of a node (whichever maintains perpendicular exit/entry)
+  - **Obstacle avoidance:** Edges route around nodes, never through them
+  - **Edge spacing:** Parallel edges are offset by several grid cells so they remain easy to follow
+  - **Thin lines:** 1.5px stroke width with unfilled arrowheads at the terminus
   - **Active execution:** Animated dots traveling along edges
+
+- **Edge Visual Language** (color encodes the structural pattern, not the node status):
+
+  | Type | Style | Color | Use Case |
+  |------|-------|-------|----------|
+  | `default` | Solid line | Source node status color | Normal sequential flow |
+  | `conditional` | Dashed line | Yellow (#eab308, branch kind) | Branch condition paths |
+  | `fork` | Solid line | Pink (#ec4899, fork kind) | Parallel execution paths |
+  | `loop` | Dotted line | Teal (#14b8a6, loop kind) | Loop-back iterations |
+  | `spawn` | Dash-dot line | Indigo (#6366f1, spawn kind) | Spawn child connections |
 
 - **Color coding by status:**
   - **Green** (#10b981) - completed/success
@@ -525,9 +552,9 @@ This creates a single binary containing:
 
 ## Layout Algorithms
 
-### Sequential Layout
+### Grid-Snapped Sequential Layout
 
-The UI uses a **sequential layout algorithm** that arranges execution nodes in the exact order they execute, with special handling for loops and nested structures.
+The UI uses a **grid-snapped sequential layout algorithm** that arranges execution nodes in execution order, with container nesting, recursive scaling, and orthogonal edge routing.
 
 **Algorithm Overview:**
 
@@ -538,76 +565,125 @@ function calculateSequentialLayout(
 ): { positions: NodePosition[], edges: NodeEdge[] }
 ```
 
+**Grid System:**
+
+All node positions are quantized to a virtual grid with a configurable cell size (default 20px). This ensures:
+- Consistent alignment between nodes regardless of nesting depth
+- Uniform edge routing — both the simple rule-based router and the A* fallback produce visually identical segment alignment
+- Clean visual rhythm across the entire graph
+
+```typescript
+function snapToGrid(value: number, cellSize: number): number {
+  return Math.round(value / cellSize) * cellSize;
+}
+```
+
 **Key Features:**
 
 1. **Execution Order Traversal:**
-   - Performs depth-first traversal starting from root node
-   - Visits nodes in the order they actually execute
+   - Depth-first traversal starting from root node
+   - Visits nodes in actual execution order
    - Builds a linear sequence of execution steps
 
 2. **Sequential Positioning:**
    - Nodes placed vertically (top-to-bottom) with consistent spacing
-   - Each node gets position: `{ x, y, width, height }`
-   - Default: `y = startY + (index * verticalSpacing)`
-   - Default: `x = startX + (loopDepth * loopIndent)`
+   - Each node gets position: `{ x, y, width, height, scale }`
+   - All coordinates snapped to the virtual grid
 
-3. **Loop Visualization:**
-   - **Loop containers:** Loop nodes group their child steps
-   - **Visual indentation:** Steps inside loops are offset right by `loopIndent` (60px)
-   - **Loop depth tracking:** Increments when entering loop, decrements when exiting
-   - **Loop-back edges:** When a loop iteration ends, a curved dashed edge connects back to the loop start node
+3. **Parallel Positioning (Fork & Branch):**
+   - Fork and branch children are laid out **horizontally** (side-by-side)
+   - All parallel paths start at the same Y coordinate
+   - Horizontal spacing between paths prevents overlap
+   - Branch: selected/active path at full opacity, unselected paths dimmed
 
-4. **Edge Generation:**
-   - **Sequential edges:** Solid lines from node N to node N+1
-   - **Loop edges:** Dashed curved lines (red #ff6b6b) from iteration end back to loop start
-   - **Fork edges:** Solid lines to parallel execution paths
-   - All edges animated when node status is 'running'
+4. **Recursive Container Scaling:**
+   - Container nodes (loop, fork, branch, spawn) render as bounding boxes
+   - Children are scaled to **50%** of parent size at each nesting level
+   - Scale compounds recursively: depth 1 = 50%, depth 2 = 25%, depth 3 = 12.5%
+   - Container padding scales proportionally with the scale factor
+   - `NodePosition` includes a `scale` field for rendering
+
+5. **Sibling Overlap Prevention:**
+   - After positioning children, a collision pass checks sibling bounding boxes
+   - Overlapping siblings are pushed apart (horizontally for parallel, vertically for sequential)
+   - Applied recursively at every nesting level
+
+6. **Edge Generation:**
+   - Sequential edges: solid lines from node N to node N+1
+   - Loop edges: dotted teal lines from last child back to first child
+   - Fork edges: solid pink lines to parallel execution paths
+   - Branch edges: dashed yellow lines to conditional paths
+   - Spawn edges: dash-dot indigo lines to child context
+   - All edges animated when source node status is 'running'
 
 **Layout Options:**
 
 ```typescript
 interface SequentialLayoutOptions {
-  nodeWidth: 280;           // Width of node cards
-  nodeHeight: 140;          // Height of node cards  
-  verticalSpacing: 200;     // Vertical distance between nodes
-  horizontalSpacing: 400;   // Horizontal space for forks
-  loopIndent: 60;           // Indentation for loop children
+  nodeWidth: 280;           // Base width of node cards
+  nodeHeight: 140;          // Base height of node cards
+  verticalSpacing: 60;      // Vertical distance between nodes
+  horizontalSpacing: 80;    // Horizontal space for parallel paths
+  containerPadTop: 50;      // Top padding inside containers (header room)
+  containerPadSide: 30;     // Side padding inside containers
+  containerPadBottom: 30;   // Bottom padding inside containers
+  gridCellSize: 20;         // Virtual grid cell size for snapping
+  nestingScale: 0.5;        // Scale factor per nesting level
   startX: 50;               // Initial X position
   startY: 50;               // Initial Y position
 }
 ```
 
-**Loop Edge Rendering:**
+### Orthogonal Edge Router
+
+Edges are rendered as **polylines of horizontal and vertical segments** (90° increments only) with a consistent corner radius at each turn.
+
+**Hybrid Routing Strategy:**
+
+1. **Simple rule-based router** (fast path): Used for the common case of sequential top-to-bottom flow.
+   - Determines which side of source/target to connect (closest center-edge points maintaining perpendicular exit/entry)
+   - For downward flow: bottom-center of source → top-center of target, with one horizontal jog if nodes are misaligned
+   - Connection points are always the center of a node's top, right, bottom, or left edge
+
+2. **A* grid pathfinder** (fallback): Used when a simple path would cross a node bounding box.
+   - Overlays the snap grid with node bounding boxes marked as blocked (with margin)
+   - Finds shortest orthogonal path avoiding all obstacles
+   - Used for loop-back edges, cross-container edges, and any path that would intersect a node
+
+**Edge Rendering:**
 
 ```typescript
-// Loop-back edges curve around to the left
-const controlX = Math.min(startX, endX) - 100;
-const controlY1 = startY + 50;
-const controlY2 = endY - 50;
-const path = `M ${startX} ${startY} 
-              C ${controlX} ${controlY1}, 
-                ${controlX} ${controlY2}, 
-                ${endX} ${endY}`;
+interface OrthogonalEdge {
+  /** Ordered waypoints forming the polyline (all grid-snapped) */
+  waypoints: Array<{ x: number; y: number }>;
+  /** Corner radius applied at each turn */
+  cornerRadius: number;
+}
 ```
 
-**Loop Detection:**
-
-- Checks if next node is a loop that was already visited
-- Or if we're going from a loop child back to the loop parent
-- Creates a `type: 'loop'` edge with:
-  - Red color (#ff6b6b)
-  - Dashed stroke (8px dash, 4px gap)
-  - Arrow marker at end
-  - Animated dot for active loops
+- Corner radius: consistent value (default 6px) applied at every 90° turn via SVG arc commands
+- Parallel edges running along the same corridor are offset by several grid cells
+- Arrowheads: unfilled chevron marker (thin lines matching edge stroke) at the terminus
+- Stroke width: 1.5px for all edge types
 
 **Edge Types:**
 
-| Type | Visual Style | Use Case |
-|------|--------------|----------|
-| `default` | Solid line, 2px | Normal sequential flow |
-| `loop` | Dashed red curve, 3px | Loop iterations |
-| `conditional` | Dashed line, 5px gap | Branch conditions |
-| `fork` | Solid line | Parallel execution paths |
+| Type | Style | Color | Use Case |
+|------|-------|-------|----------|
+| `default` | Solid line | Source node status color | Normal sequential flow |
+| `conditional` | Dashed (5,5) | Yellow #eab308 | Branch condition paths |
+| `fork` | Solid line | Pink #ec4899 | Parallel execution paths |
+| `loop` | Dotted (3,3) | Teal #14b8a6 | Loop-back iterations |
+| `spawn` | Dash-dot (8,3,3,3) | Indigo #6366f1 | Spawn child connections |
+
+### Click-to-Zoom Navigation
+
+Clicking a container node with children triggers an animated zoom transition:
+
+1. **Zoom in:** Smooth CSS transition (300ms ease-out) centers the container and scales so children appear at 100% base size (`zoom = 1 / scaleAtDepth`)
+2. **Breadcrumb trail:** A breadcrumb bar appears in the controls area showing the zoom path (e.g., "Root > Loop > Fork")
+3. **Zoom out:** Click background or the breadcrumb back button to animate to the previous zoom level
+4. **Nested stacking:** Zoom state is a stack — clicking into a loop, then a fork inside it, pushes two entries. Back pops one at a time.
 
 **Usage:**
 
@@ -620,28 +696,11 @@ const { positions, edges } = calculateSequentialLayout(
   {
     nodeWidth: 280,
     nodeHeight: 140,
-    verticalSpacing: 200,
-    loopIndent: 60,
+    gridCellSize: 20,
+    nestingScale: 0.5,
   }
 );
 ```
-
-**Comparison to Hierarchical Layout:**
-
-| Feature | Sequential | Hierarchical |
-|---------|--------------|--------------|
-| Direction | Vertical (top-down) | Vertical (top-down) |
-| Loop Display | Container with loop-back edges | Tree with nested children |
-| Fork Display | Sequential then parallel | Parallel lanes |
-| Node Spacing | Consistent vertical | Variable by level |
-| Use Case | Linear execution view | Tree structure view |
-
-**Future Enhancements:**
-
-- Horizontal layout option (left-to-right)
-- Swimlane view for parallel executions
-- Minimap for navigation in large traces
-- Zoom and pan with coordinate transformation
 
 ## Data Model
 
@@ -1369,17 +1428,19 @@ registerAgent({
   - **PAUSED** (yellow accent): #f59e0b border, #92400e background
 
 - **Connection edges:**
-  - Solid lines for normal flow
-  - Dashed lines for conditional/branches
+  - Orthogonal routing (90° segments only) with consistent corner radius
+  - Connect from/to center of top, right, bottom, or left edge of nodes
+  - Thin 1.5px stroke with unfilled arrowheads
+  - Color encodes connection type (kind color), not node status
+  - Edges route around nodes, never through them
+  - Parallel edges offset by grid cells for readability
   - Animated pulse for active execution
-  - Arrowheads showing direction
-  - Color matches source node status
 
 - **Canvas features:**
   - **Pan/Zoom** - Infinite canvas with mouse drag and scroll wheel
   - **Auto-fit** - Fit graph to viewport button
-  - **Mini-map** - Small overview in corner for navigation
-  - **Grid background** - Subtle dot grid pattern
+  - **Click-to-zoom** - Click container nodes to zoom in so children appear at 100% size; breadcrumb trail for navigation back
+  - **Grid background** - Subtle dot grid pattern (also used as snap grid for layout)
 
 ### 3. Right Inspector Panel
 
@@ -2025,6 +2086,5 @@ For multi-developer or shared environments, consider:
 ## Open Questions
 
 1. Should the UI be a separate process (current plan) or embeddable in the host app?
-2. React Flow vs custom D3 for the node graph? React Flow is easier but less flexible.
-3. Real-time collaboration support needed for v1?
-4. Should traces persist across UI server restarts?
+2. Real-time collaboration support needed for v1?
+3. Should traces persist across UI server restarts?
