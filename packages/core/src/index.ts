@@ -94,6 +94,12 @@ export { workingMemory } from './memory/layers/working-memory';
 //#region Observability
 
 /** @public */
+export {
+  clearExporterFactory,
+  getRegisteredExporter,
+  registerExporterFactory,
+} from './observability/exporter-registry';
+/** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 
 //#endregion
