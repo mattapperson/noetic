@@ -6,8 +6,16 @@
  * in production environments.
  */
 
-import type { Context, Step } from '@noetic/core';
+import type { Context } from '@noetic/core';
 import type { Debugger } from './debugger';
+
+import type { StepKind } from './types';
+
+/** Minimal step metadata needed by hooks — avoids variance issues with full Step<M,I,O> */
+export interface StepMeta {
+  id: string;
+  kind: StepKind;
+}
 
 /**
  * Hook manager for registering and executing debug hooks
@@ -56,7 +64,7 @@ export class HookManager {
    * Called before a step starts executing
    * Zero overhead when debugging is disabled
    */
-  async onStepStart(step: Step, input: unknown, ctx: Context): Promise<void> {
+  async onStepStart(step: StepMeta, input: unknown, ctx: Context): Promise<void> {
     // Fast path: check if debugging is enabled
     if (!this.hooksEnabled || !this.debugger) {
       return;
@@ -74,7 +82,7 @@ export class HookManager {
    * Called after a step completes successfully
    * Zero overhead when debugging is disabled
    */
-  async onStepComplete(step: Step, result: unknown, ctx: Context): Promise<void> {
+  async onStepComplete(step: StepMeta, result: unknown, ctx: Context): Promise<void> {
     // Fast path: check if debugging is enabled
     if (!this.hooksEnabled || !this.debugger) {
       return;
@@ -92,7 +100,7 @@ export class HookManager {
    * Called when a step errors
    * Zero overhead when debugging is disabled
    */
-  async onStepError(step: Step, error: Error, ctx: Context): Promise<void> {
+  async onStepError(step: StepMeta, error: Error, ctx: Context): Promise<void> {
     // Fast path: check if debugging is enabled
     if (!this.hooksEnabled || !this.debugger) {
       return;
@@ -141,7 +149,7 @@ export const globalHookManager = new HookManager();
  * Convenience hook function for step start
  * Checks for debugger presence before executing
  */
-export async function onStepStart(step: Step, input: unknown, ctx: Context): Promise<void> {
+export async function onStepStart(step: StepMeta, input: unknown, ctx: Context): Promise<void> {
   return globalHookManager.onStepStart(step, input, ctx);
 }
 
@@ -149,7 +157,7 @@ export async function onStepStart(step: Step, input: unknown, ctx: Context): Pro
  * Convenience hook function for step completion
  * Checks for debugger presence before executing
  */
-export async function onStepComplete(step: Step, result: unknown, ctx: Context): Promise<void> {
+export async function onStepComplete(step: StepMeta, result: unknown, ctx: Context): Promise<void> {
   return globalHookManager.onStepComplete(step, result, ctx);
 }
 
@@ -157,7 +165,7 @@ export async function onStepComplete(step: Step, result: unknown, ctx: Context):
  * Convenience hook function for step errors
  * Checks for debugger presence before executing
  */
-export async function onStepError(step: Step, error: Error, ctx: Context): Promise<void> {
+export async function onStepError(step: StepMeta, error: Error, ctx: Context): Promise<void> {
   return globalHookManager.onStepError(step, error, ctx);
 }
 

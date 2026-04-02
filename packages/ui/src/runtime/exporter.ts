@@ -130,6 +130,54 @@ export class NoeticUITraceExporter implements TraceExporter {
     }
   }
 
+  /**
+   * Explicitly signal that a trace is complete.
+   * Called by the harness after execution finishes (success or error).
+   * This is the ONLY way a trace.complete message is sent — auto-detection
+   * was removed because the interpreter reuses context for loop/branch/fork
+   * children, making depth-based heuristics unreliable.
+   */
+  completeTrace(traceId: string): void {
+    const traceInfo = this.activeTraces.get(traceId);
+    if (!traceInfo) {
+      return;
+    }
+
+    const totalDuration = traceInfo.allSpans
+      .filter((s) => s.endTime)
+      .reduce((sum, s) => sum + s.duration, 0);
+
+    const message: ClientMessage = {
+      type: 'trace.complete',
+      traceId,
+      summary: {
+        totalSteps: traceInfo.allSpans.length,
+        durationMs: totalDuration,
+      },
+      endTime: Date.now(),
+    };
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      this.messageQueue.push(message);
+    }
+
+    this.activeTraces.delete(traceId);
+  }
+
+  /**
+   * Complete all active traces.
+   * Called by the harness when execution finishes but the traceId is unknown.
+   */
+  completeAllTraces(): void {
+    for (const traceId of [
+      ...this.activeTraces.keys(),
+    ]) {
+      this.completeTrace(traceId);
+    }
+  }
+
   close(): void {
     this.stopFlushTimer();
     if (this.ws) {
@@ -294,9 +342,9 @@ export class NoeticUITraceExporter implements TraceExporter {
 
     // Persist trace info
     this.activeTraces.set(traceId, traceInfo);
-
-    // Check if the trace is complete: root span (no parent) must have ended
-    this.checkTraceComplete(traceId, traceInfo);
+    // Note: completion is signaled explicitly via completeTrace(), NOT auto-detected.
+    // Auto-detection is unreliable because the core interpreter reuses context objects
+    // for loop/branch/fork children, so all steps have the same depth.
   }
 
   private sendNodeStart(
@@ -345,56 +393,6 @@ export class NoeticUITraceExporter implements TraceExporter {
       },
     };
     this.ws!.send(JSON.stringify(nodeStartMessage));
-  }
-
-  /**
-   * Check if a trace is complete.
-   *
-   * The interpreter sets a `depth` attribute on each span (0 for the top-level
-   * step, incrementing for children). Spans are exported depth-first, so a
-   * depth-0 span only arrives after all its children have completed.
-   * The trace is complete when a depth-0 span with endTime is present.
-   *
-   * Falls back to checking if the span's parent is not among exported spans
-   * (handles cases where depth attribute is missing).
-   */
-  private checkTraceComplete(traceId: string, traceInfo: TraceInfo): void {
-    // Primary: check for depth-0 span (set by the core interpreter)
-    let rootSpan = traceInfo.allSpans.find((s) => {
-      const depth = s.attributes?.depth;
-      return s.endTime && typeof depth === 'number' && depth === 0;
-    });
-
-    // Fallback: find span whose parent is not among exported spans
-    if (!rootSpan) {
-      const exportedIds = new Set(traceInfo.allSpans.map((s) => s.spanId));
-      rootSpan = traceInfo.allSpans.find(
-        (s) => s.endTime && !s.parentSpanId && !exportedIds.has(s.parentSpanId ?? ''),
-      );
-    }
-
-    if (!rootSpan) {
-      return;
-    }
-
-    // Root span has ended — the full execution is complete
-    const totalDuration = traceInfo.allSpans
-      .filter((s) => s.endTime)
-      .reduce((sum, s) => sum + s.duration, 0);
-
-    this.ws!.send(
-      JSON.stringify({
-        type: 'trace.complete',
-        traceId,
-        summary: {
-          totalSteps: traceInfo.allSpans.length,
-          durationMs: totalDuration,
-        },
-        endTime: Date.now(),
-      } satisfies ClientMessage),
-    );
-
-    this.activeTraces.delete(traceId);
   }
 
   //#endregion

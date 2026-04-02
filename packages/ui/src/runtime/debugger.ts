@@ -5,8 +5,9 @@
  * Provides external control over agent execution for debugging purposes.
  */
 
-import type { Context, Step } from '@noetic/core';
+import type { Context } from '@noetic/core';
 import { registerDebugger, unregisterDebugger } from './debugger-registry';
+import type { StepMeta } from './hook';
 import type {
   Breakpoint,
   DebugController,
@@ -134,7 +135,7 @@ export class Debugger implements DebugController {
    * Called when a step starts executing
    * Checks for breakpoints and pauses if needed
    */
-  async onStepStart(step: Step, input: unknown, ctx: Context): Promise<void> {
+  async onStepStart(step: StepMeta, input: unknown, ctx: Context): Promise<void> {
     if (!this.state.isAttached || !this.trace) {
       return;
     }
@@ -227,7 +228,7 @@ export class Debugger implements DebugController {
   /**
    * Called when a step completes
    */
-  async onStepComplete(step: Step, result: unknown, ctx: Context): Promise<void> {
+  async onStepComplete(step: StepMeta, result: unknown, ctx: Context): Promise<void> {
     if (!this.state.isAttached) {
       return;
     }
@@ -275,7 +276,7 @@ export class Debugger implements DebugController {
   /**
    * Called when a step errors
    */
-  async onStepError(step: Step, error: Error, ctx: Context): Promise<void> {
+  async onStepError(step: StepMeta, error: Error, ctx: Context): Promise<void> {
     if (!this.state.isAttached) {
       return;
     }
@@ -561,7 +562,7 @@ export class Debugger implements DebugController {
     return null;
   }
 
-  private async checkBreakpoint(step: Step, input: unknown, nodeId: string): Promise<boolean> {
+  private async checkBreakpoint(step: StepMeta, input: unknown, nodeId: string): Promise<boolean> {
     for (const breakpoint of this.state.breakpoints) {
       if (breakpoint.stepId === step.id) {
         // Check condition if present
@@ -707,22 +708,10 @@ export class Debugger implements DebugController {
     };
   }
 
-  private extractStepData(step: Step, _result: unknown): Record<string, unknown> {
-    const stepData: Record<string, unknown> = {};
-
-    if (step.kind === 'llm') {
-      stepData.model = step.model;
-    } else if (step.kind === 'tool') {
-      stepData.toolName = step.tool.name;
-    } else if (step.kind === 'fork') {
-      stepData.mode = step.mode;
-    } else if (step.kind === 'spawn') {
-      stepData.childId = step.child.id;
-    } else if (step.kind === 'loop') {
-      stepData.stepCount = step.steps.length;
-    }
-
-    return stepData;
+  private extractStepData(step: StepMeta, _result: unknown): Record<string, unknown> {
+    // Step-specific data (model, tool name, etc.) is extracted from span
+    // attributes by the exporter. The debugger only records the kind.
+    return { kind: step.kind };
   }
 
   private truncatePreview(input: unknown): string {
