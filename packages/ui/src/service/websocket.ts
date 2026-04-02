@@ -12,6 +12,7 @@ import type { IncomingMessage } from 'node:http';
 import { createServer } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import type {
+  AgentInfo,
   ClientMessage,
   ExecutionNode,
   ExecutionSummary,
@@ -519,7 +520,7 @@ export class NoeticUIServer {
 
       case 'execution.list':
         // List active/completed executions
-        this.handleExecutionList(client);
+        await this.handleExecutionList(client);
         break;
 
       case 'execution.get':
@@ -637,33 +638,43 @@ export class NoeticUIServer {
     }
   }
 
-  private handleExecutionList(client: ClientConnection): void {
-    // Send list of traces
-    const traceList = Array.from(this.traces.values()).map((ts) => ({
-      traceId: ts.trace.traceId,
-      agentId: ts.agentId,
-      status: ts.trace.status,
-      startTime: ts.trace.startTime,
-      isLive: ts.isLive,
-    }));
+  private async handleExecutionList(client: ClientConnection): Promise<void> {
+    const agents: AgentInfo[] = [];
+
+    // Include in-memory live traces
+    const seenAgents = new Set<string>();
+    for (const [, ts] of this.traces) {
+      if (!seenAgents.has(ts.agentId)) {
+        seenAgents.add(ts.agentId);
+        agents.push({
+          agentId: ts.agentId,
+          name: ts.agentId,
+          runCount: 1,
+        });
+      }
+    }
+
+    // Include persisted agents from storage
+    try {
+      const storedAgents = await this.storage.listAgents();
+      for (const agentId of storedAgents) {
+        if (!seenAgents.has(agentId)) {
+          seenAgents.add(agentId);
+          const runs = await this.storage.listAgentRuns(agentId);
+          agents.push({
+            agentId,
+            name: agentId,
+            runCount: runs.length,
+          });
+        }
+      }
+    } catch {
+      // Storage may not be available
+    }
 
     this.sendToClient(client, {
-      type: 'execution.complete',
-      agentId: 'system',
-      traceId: 'list',
-      summary: {
-        traceId: 'list',
-        totalNodes: traceList.length,
-        completedNodes: 0,
-        errorNodes: 0,
-        durationMs: 0,
-        totalTokens: {
-          input: 0,
-          output: 0,
-          total: 0,
-        },
-        totalCost: 0,
-      },
+      type: 'execution.list.response',
+      agents,
     });
   }
 

@@ -6,7 +6,7 @@
  */
 
 import { useEffect } from 'react';
-import type { ExecutionNode, ExecutionTrace, ServerMessage } from '../../shared/protocol';
+import type { ExecutionTrace, ServerMessage } from '../../shared/protocol';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
 import { registerMessageHandler } from '../stores/websocket';
@@ -16,7 +16,6 @@ export function useExecutionMessages(): void {
   const addRun = useAgentStore((state) => state.addRun);
   const updateRun = useAgentStore((state) => state.updateRun);
   const addAgent = useAgentStore((state) => state.addAgent);
-  const agents = useAgentStore((state) => state.agents);
   const updateNode = useExecutionStore((state) => state.updateNode);
 
   useEffect(() => {
@@ -35,7 +34,7 @@ export function useExecutionMessages(): void {
           const agentId: string = message.agentId;
 
           // Ensure agent exists before adding run
-          const agentExists = agents.some((a) => a.id === agentId);
+          const agentExists = useAgentStore.getState().agents.some((a) => a.id === agentId);
           if (!agentExists) {
             console.debug('[useExecutionMessages] Creating agent for run:', agentId);
             addAgent({
@@ -146,6 +145,27 @@ export function useExecutionMessages(): void {
           break;
         }
 
+        case 'execution.list.response': {
+          for (const agent of message.agents) {
+            const exists = useAgentStore.getState().agents.some((a) => a.id === agent.agentId);
+            if (!exists) {
+              addAgent({
+                id: agent.agentId,
+                name: agent.name,
+                filePath: '',
+                exportName: '',
+                discoveredAt: Date.now(),
+                lastModified: Date.now(),
+                discoveryMethod: 'runtime',
+                runs: [],
+                runCount: agent.runCount,
+                lastRunAt: null,
+              });
+            }
+          }
+          break;
+        }
+
         default:
           break;
       }
@@ -156,7 +176,6 @@ export function useExecutionMessages(): void {
     addRun,
     updateRun,
     addAgent,
-    agents,
     updateNode,
   ]);
 }

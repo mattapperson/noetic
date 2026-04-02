@@ -25,6 +25,7 @@ const serverMessageTypes = z.enum([
   'node.data',
   'execution.complete',
   'execution.error',
+  'execution.list.response',
   'pong',
 ]);
 
@@ -296,6 +297,17 @@ export interface PongMessage {
   timestamp: number;
 }
 
+export interface AgentInfo {
+  agentId: string;
+  name: string;
+  runCount: number;
+}
+
+export interface ExecutionListResponseMessage {
+  type: 'execution.list.response';
+  agents: AgentInfo[];
+}
+
 // ============================================================================
 // Agent -> Server Messages (for TraceExporter)
 // ============================================================================
@@ -360,6 +372,7 @@ export type ServerMessage =
   | NodeDataMessage
   | ExecutionCompleteMessage
   | ExecutionErrorMessage
+  | ExecutionListResponseMessage
   | PongMessage;
 
 // ============================================================================
