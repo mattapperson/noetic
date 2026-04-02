@@ -548,6 +548,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                   border: `2px dashed ${kindColors.border}`,
                   backgroundColor: `${kindColors.bg}`,
                   pointerEvents: 'none',
+                  transformOrigin: 'top left',
                 }}
               >
                 {/* Container header */}
@@ -557,15 +558,15 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                     top: 0,
                     left: 0,
                     right: 0,
-                    height: '36px',
+                    height: `${36 * (pos.scale ?? 1)}px`,
                     borderRadius: '10px 10px 0 0',
                     backgroundColor: kindColors.border,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
-                    padding: '0 12px',
+                    gap: `${6 * (pos.scale ?? 1)}px`,
+                    padding: `0 ${12 * (pos.scale ?? 1)}px`,
                     color: '#fff',
-                    fontSize: '12px',
+                    fontSize: `${12 * (pos.scale ?? 1)}px`,
                     fontWeight: 600,
                     fontFamily: 'system-ui, -apple-system, sans-serif',
                   }}
@@ -609,7 +610,11 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                   position: 'absolute',
                   left: pos.x,
                   top: pos.y,
+                  width: pos.width,
+                  height: pos.height,
                   pointerEvents: 'auto',
+                  transform: pos.scale && pos.scale !== 1 ? `scale(${pos.scale})` : undefined,
+                  transformOrigin: 'top left',
                 }}
               >
                 {renderNode(node)}
