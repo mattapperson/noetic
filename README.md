@@ -120,7 +120,6 @@ Open http://localhost:3334 in your browser to view the three-panel interface:
 - Real-time execution visualization
 - Time-travel debugging (scrub to any point in execution)
 - Data inspection at each step (input, output, context)
-- Breakpoint support with pause/resume
 - Zero production impact (only enabled via env var)
 
 See [packages/ui/README.md](packages/ui/README.md) for detailed documentation.

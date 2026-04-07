@@ -69,39 +69,26 @@ NOETIC_UI_WS_PORT=3333 NOETIC_UI_API_PORT=3334 noetic-ui serve
 
 ### Connect Your Agent
 
-Add the UI instrumentation to your agent:
+Add the trace exporter to your agent code:
 
 ```typescript
-import { createDebugHarness } from '@noetic/ui/runtime';
+import { NoeticUITraceExporter } from '@noetic/ui/runtime';
+import { setTraceExporter } from '@noetic/core';
 
-const harness = createDebugHarness({
-  name: 'my-agent',
-  initialStep: myStep,
-  // Optional: configure debugging
-  debugger: {
-    breakpoints: ['step-id'],     // Pause at specific steps
-    pauseOnError: true,           // Auto-pause on errors
-    autoStart: false,             // Wait for debugger to attach
-  }
-});
-
-// Run with UI enabled
-const result = await harness.execute('user input');
+// Enable UI tracing
+setTraceExporter(new NoeticUITraceExporter({
+  agentName: 'my-agent',
+  port: 3333,
+}));
 ```
 
-Or use the standard harness with trace export:
-
+Or with dynamic import for conditional loading:
 ```typescript
-import { AgentHarness } from '@noetic/core';
-import { NoeticUITraceExporter } from '@noetic/ui/runtime';
-
-const exporter = new NoeticUITraceExporter({ port: 3333 });
-
-const harness = new AgentHarness({
-  name: 'my-agent',
-  initialStep: myStep,
-  traceExporter: exporter,
-});
+if (process.env.NOETIC_UI_ENABLED) {
+  const { NoeticUITraceExporter } = await import('@noetic/ui/runtime');
+  const { setTraceExporter } = await import('@noetic/core');
+  setTraceExporter(new NoeticUITraceExporter());
+}
 ```
 
 ### Enable UI Connection
@@ -120,8 +107,7 @@ Then open your browser to: **http://localhost:3334**
 - **Interactive Node Graph** - Visualize agent execution flow with zoom, pan, and selection
 - **Time-travel Debugging** - Scrub through execution history with the timeline
 - **Step Inspector** - View detailed information about each step (LLM calls, tool invocations, state)
-- **Breakpoint Support** - Pause execution at specific steps for debugging
-- **Zero Production Impact** - Tree-shakeable, disabled by default, only connects when `NOETIC_UI_ENABLED=true`
+- **Zero Production Impact** - Tree-shakeable, disabled by default, only connects when explicitly configured
 
 ## Architecture
 
@@ -144,28 +130,13 @@ The UI consists of three components:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NOETIC_UI_ENABLED` | `false` | Enable UI integration (required for connection) |
+| `NOETIC_UI_ENABLED` | `false` | Enable UI integration (used by agents to decide whether to load exporter) |
 | `NOETIC_UI_WS_PORT` | `3333` | WebSocket server port |
 | `NOETIC_UI_API_PORT` | `3334` | REST API/Web UI port |
 | `NOETIC_UI_HOST` | `127.0.0.1` | Bind address (use `0.0.0.0` for remote access) |
 | `NOETIC_UI_STORAGE_PATH` | `.noetic/ui/traces` | Trace storage directory (relative to project root) |
 | `NOETIC_UI_THEME` | `system` | UI theme: `system`, `dark`, `light` |
 | `NOETIC_UI_SHUTDOWN_TIMEOUT` | `10000` | Graceful shutdown timeout in ms |
-
-### Programmatic Configuration
-
-```typescript
-import { NoeticUIServerManager } from '@noetic/ui/service';
-
-const server = new NoeticUIServerManager({
-  wsPort: 3333,        // WebSocket port
-  apiPort: 3334,       // REST API port
-  host: '127.0.0.1',   // Bind address
-  storagePath: './.noetic/ui/traces', // Trace storage location
-});
-
-await server.start();
-```
 
 ### Trace Exporter Options
 
@@ -175,9 +146,10 @@ import { NoeticUITraceExporter } from '@noetic/ui/runtime';
 const exporter = new NoeticUITraceExporter({
   port: 3333,              // WebSocket service port
   host: 'localhost',        // WebSocket service host
-  autoReconnect: true,      // Auto-reconnect on disconnect
-  reconnectInterval: 1000,  // Reconnect interval in ms
-  bufferSize: 1000,         // Max events to buffer when disconnected
+  agentName: 'my-agent',   // Agent identifier
+  autoReconnect: true,     // Auto-reconnect on disconnect
+  bufferSize: 100,         // Max events to buffer when disconnected
+  flushIntervalMs: 100,    // Flush interval in ms
 });
 ```
 
@@ -248,17 +220,18 @@ packages/ui/
 │   └── globals.css        # CSS variables & Tailwind
 ├── src/
 │   ├── client/            # Client-side code
-│   │   ├── components/    # React components
+│   │   ├── components/    # React components (AgentBrowser, NodeGraph, etc.)
 │   │   ├── stores/        # Zustand state stores
-│   │   └── lib/           # Client utilities
-│   ├── service/           # Service-side code
+│   │   ├── lib/           # Client utilities (discovery, layout, serialization)
+│   │   └── hooks/         # React hooks
+│   ├── service/           # Server-side code
 │   │   ├── websocket.ts   # WebSocket service
 │   │   ├── storage.ts     # Trace persistence
 │   │   └── api.ts         # REST API
 │   ├── runtime/           # Agent instrumentation
 │   │   ├── exporter.ts    # TraceExporter implementation
-│   │   ├── debugger.ts    # Debug harness
-│   │   └── hook.ts        # Execution hooks
+│   │   ├── step-extractors.ts  # Step data extraction plugins
+│   │   └── types.ts       # Runtime type definitions
 │   └── shared/            # Shared types
 │       └── protocol.ts    # WebSocket message types
 ├── bin/
@@ -266,8 +239,7 @@ packages/ui/
 ├── scripts/
 │   ├── build-executables.js  # Cross-platform build script
 │   └── install.sh           # Install script for users
-└── .github/workflows/
-    └── build-executables.yml # CI/CD for releases
+└── test/                  # Unit tests
 ```
 
 ## API Reference
@@ -278,19 +250,19 @@ The UI uses a simple WebSocket protocol for real-time updates:
 
 **Client → Server:**
 - `ping` - Health check
-- `execution.list` - List traces
-- `execution.subscribe` - Subscribe to trace updates
-- `node.stepOver`, `node.stepInto`, `node.stepOut` - Debug control
+- `agent.discover` - Register agent discovery
+- `execution.start` - Start new execution
+- `execution.complete` - Execution finished
+- `node.start` / `node.complete` - Step lifecycle events
 
 **Server → Client:**
 - `pong` - Health response
-- `execution.started` - New execution began
 - `execution.updated` - Execution state changed
-- `execution.completed` - Execution finished
+- `agent.updated` - Agent list changed
 
 ### REST API
 
-The service exposes REST endpoints following RESTful best practices with nested resource URLs:
+The service exposes REST endpoints:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -335,7 +307,7 @@ If the UI doesn't show agent executions:
 
 1. Verify the WebSocket service is running: `curl http://localhost:3334/api/agents`
 2. Check `NOETIC_UI_ENABLED=true` is set in your agent environment
-3. Ensure the agent is using the TraceExporter
+3. Ensure the agent is using the NoeticUITraceExporter
 4. Check browser console for WebSocket connection errors
 5. Verify storage directory is writable: `.noetic/ui/traces/`
 
@@ -369,24 +341,6 @@ Make sure `css.d.ts` is included in your `tsconfig.json`:
   "include": ["css.d.ts", "next-env.d.ts"]
 }
 ```
-
-## Programmatic API
-
-For library use within your applications:
-
-```typescript
-import { startNoeticUI, stopNoeticUI } from '@noetic/ui/service';
-
-const manager = await startNoeticUI({
-  wsPort: 3333,
-  apiPort: 3334,
-});
-
-// Later...
-await stopNoeticUI(manager);
-```
-
-**Note:** The programmatic API requires Bun or a TypeScript-compatible runtime.
 
 ## Security
 
