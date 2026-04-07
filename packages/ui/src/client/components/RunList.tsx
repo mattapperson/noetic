@@ -183,7 +183,7 @@ interface RunEntryProps {
   onPrefetch: () => void;
 }
 
-const RunEntry: React.FC<RunEntryProps> = ({ agentId, run, isSelected, onClick, onPrefetch }) => {
+const RunEntry: React.FC<RunEntryProps> = ({ _agentId, run, isSelected, onClick, onPrefetch }) => {
   const isLive = run.isLive || run.status === 'running';
   const [isClient, setIsClient] = useState(false);
   const elementRef = useRef<HTMLButtonElement>(null);

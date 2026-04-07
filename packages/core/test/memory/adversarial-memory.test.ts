@@ -17,13 +17,13 @@ import {
   recallLayers,
   storeLayers,
 } from '../../src/memory/layer-lifecycle';
-import { durableTaskState } from '../../src/memory/layers/durable-task-state';
 import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
-import { observationalMemory } from '../../src/memory/layers/observational-memory';
+import { durableTaskState } from '../../src/memory/layers/durable-task-state';
 import type { ObservationalState } from '../../src/memory/layers/observational-memory';
+import { observationalMemory } from '../../src/memory/layers/observational-memory';
 import { steering } from '../../src/memory/layers/steering';
-import { workingMemory } from '../../src/memory/layers/working-memory';
 import type { WorkingMemoryState } from '../../src/memory/layers/working-memory';
+import { workingMemory } from '../../src/memory/layers/working-memory';
 import type { LLMResponse } from '../../src/types/common';
 import type { Item } from '../../src/types/items';
 import type { ExecutionContext, MemoryLayer } from '../../src/types/memory';
@@ -76,7 +76,9 @@ function getState<T>(
 
 /** Helper for tests that intentionally pass invalid state to document bug behavior */
 function invalidState<T>(state: unknown): T {
-  return state as T;
+  // Use JSON parse/stringify to create a new reference with different typing
+  // This allows tests to intentionally pass wrong types for edge case testing
+  return JSON.parse(JSON.stringify(state));
 }
 
 /** Creates an ExecutionContext whose callModel always returns a fixed text response. */
@@ -704,9 +706,12 @@ describe('Observational Memory: empty buffer at threshold', () => {
     });
 
     // The observer should have been called since totalBufferTokens >= 100
-    const captured: unknown = observerCalledWith;
-    expect(captured).not.toBeNull();
-    expect(Array.isArray(captured) && captured.length > 0).toBe(true);
+    expect(observerCalledWith).not.toBeNull();
+    expect(
+      observerCalledWith !== null &&
+        Array.isArray(observerCalledWith) &&
+        observerCalledWith.length > 0,
+    ).toBe(true);
   });
 
   it('default observer produces misleading "Processed 0 items" on empty buffer', async () => {
@@ -738,14 +743,6 @@ describe('Observational Memory: empty buffer at threshold', () => {
         arguments: '{}',
       },
     ];
-
-    const response: LLMResponse = {
-      items,
-      usage: {
-        inputTokens: 10,
-        outputTokens: 5,
-      },
-    };
 
     const result = await layer.hooks.store!({
       newItems: items,

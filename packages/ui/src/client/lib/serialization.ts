@@ -5,26 +5,45 @@
  */
 
 /**
+ * Type guard for Map entries
+ */
+function isMapEntry(item: unknown): item is [
+  string,
+  unknown,
+] {
+  return Array.isArray(item) && item.length === 2 && typeof item[0] === 'string';
+}
+
+/**
+ * Type guard for serialized Map
+ */
+function isSerializedMap(value: unknown): value is {
+  dataType: 'Map';
+  value: [
+    string,
+    unknown,
+  ][];
+} {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'dataType' in value &&
+    value.dataType === 'Map' &&
+    'value' in value &&
+    Array.isArray(value.value) &&
+    value.value.every(isMapEntry)
+  );
+}
+
+/**
  * JSON reviver that converts serialized Maps back to actual Map instances
  * @param _key - The key being revived (unused)
  * @param value - The value being revived
  * @returns The revived value, with Maps reconstructed
  */
 export function deserializeValue(_key: string, value: unknown): unknown {
-  if (
-    value &&
-    typeof value === 'object' &&
-    'dataType' in value &&
-    value.dataType === 'Map' &&
-    'value' in value &&
-    Array.isArray(value.value)
-  ) {
-    return new Map(
-      value.value as [
-        string,
-        unknown,
-      ][],
-    );
+  if (isSerializedMap(value)) {
+    return new Map(value.value);
   }
   return value;
 }
@@ -34,6 +53,7 @@ export function deserializeValue(_key: string, value: unknown): unknown {
  * @param json - The JSON string to parse
  * @returns The parsed value with Maps reconstructed
  */
+// biome-ignore lint/suspicious/noExplicitAny: Generic JSON parsing requires type assertion
 export function parseJSON<T>(json: string): T {
   return JSON.parse(json, deserializeValue) as T;
 }
@@ -44,6 +64,7 @@ export function parseJSON<T>(json: string): T {
  * @param value - The value to deserialize
  * @returns The deserialized value with all Maps reconstructed
  */
+// biome-ignore lint/suspicious/noExplicitAny: Generic deserialization requires type assertion
 export function deserialize<T>(value: unknown): T {
   // For already-parsed objects (from fetch().json()), we need to walk the object tree
   if (value === null || typeof value !== 'object') {
@@ -55,18 +76,20 @@ export function deserialize<T>(value: unknown): T {
   }
 
   if (Array.isArray(value)) {
+    // biome-ignore lint/suspicious/noExplicitAny: Array deserialization requires type assertion
     return value.map((item) => deserialize(item)) as unknown as T;
   }
 
   // Check if it's a serialized Map
-  const obj = value as Record<string, unknown>;
+  const obj: Record<string, unknown> = value;
   if (obj.dataType === 'Map' && Array.isArray(obj.value)) {
     const map = new Map<string, unknown>();
-    for (const [key, val] of obj.value as [
-      string,
-      unknown,
-    ][]) {
-      map.set(key, deserialize(val));
+    const entries = obj.value;
+    for (const entry of entries) {
+      if (isMapEntry(entry)) {
+        const [key, val] = entry;
+        map.set(key, deserialize(val));
+      }
     }
     return map as T;
   }
@@ -104,13 +127,13 @@ export function ensureMap<K, V>(value: unknown): Map<K, V> {
     'value' in value &&
     Array.isArray(value.value)
   ) {
+    // biome-ignore lint/suspicious/noExplicitAny: Map conversion requires type assertion for entries
+    const entries = value.value as [
+      K,
+      V,
+    ][];
     return new Map(
-      (
-        value.value as [
-          K,
-          V,
-        ][]
-      ).map(([k, v]) => [
+      entries.map(([k, v]) => [
         k,
         deserialize(v) as V,
       ]),
@@ -119,6 +142,7 @@ export function ensureMap<K, V>(value: unknown): Map<K, V> {
 
   // Fallback: if it's a plain object, convert entries to Map
   if (value && typeof value === 'object' && !Array.isArray(value)) {
+    // biome-ignore lint/suspicious/noExplicitAny: Object.entries conversion requires type assertion
     return new Map(Object.entries(value as Record<string, V>)) as Map<K, V>;
   }
 

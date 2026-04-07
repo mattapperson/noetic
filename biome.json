@@ -24,6 +24,8 @@
       "!packages/web/.source",
       "!packages/web/.next",
       "!packages/ui/.next",
+      "!packages/ui/dist",
+      "!packages/ui/dist-server",
       "!packages/web/next-env.d.ts",
       "!.worktrees",
       "!packages/web/.typecheck-snippets"
@@ -106,8 +108,18 @@
         ".grit/no-iife.grit",
         ".grit/use-named-arguments.grit",
         ".grit/prefer-nullish-over-optional-nullable.grit",
-        ".grit/prefer-esm-url-over-dirname.grit",
-        ".grit/no-explicit-unknown.grit"
+        ".grit/prefer-esm-url-over-dirname.grit"
+      ]
+    },
+    {
+      "includes": [
+        "packages/ui/**"
+      ],
+      "plugins": [
+        ".grit/no-iife.grit",
+        ".grit/use-named-arguments.grit",
+        ".grit/prefer-nullish-over-optional-nullable.grit",
+        ".grit/prefer-esm-url-over-dirname.grit"
       ]
     }
   ],

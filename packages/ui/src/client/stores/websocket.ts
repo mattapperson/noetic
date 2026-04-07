@@ -11,7 +11,7 @@ import { create } from 'zustand';
 import type { ServerMessage } from '../../shared/protocol';
 import { isServerMessage } from '../../shared/protocol';
 import { deserialize } from '../lib/serialization';
-import type { WebSocketClient } from '../lib/websocket-client';
+import type { WebSocketClient, WebSocketMessage } from '../lib/websocket-client';
 import { createWebSocketClient } from '../lib/websocket-client';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
@@ -68,7 +68,8 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
           console.debug('[WebSocketStore] Message received:', message.type);
 
           // Deserialize the message to convert any serialized Maps back to Map instances
-          const deserializedMessage = deserialize(message) as ServerMessage;
+          // deserialize returns T and message is already validated as ServerMessage
+          const deserializedMessage: ServerMessage = deserialize(message);
 
           // Update last message
           set({
@@ -87,10 +88,11 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
           console.warn('[WebSocketStore] Invalid message format:', message);
         }
       },
-      onStatusChange: (status) => {
-        console.info('[WebSocketStore] Status changed:', status);
+      onStatusChange: (statusValue) => {
+        console.info('[WebSocketStore] Status changed:', statusValue);
+        const status: ConnectionStatus = statusValue;
         set({
-          status: status as ConnectionStatus,
+          status,
         });
         // Reset reconnect attempt counter when connected
         if (status === 'connected') {
@@ -135,11 +137,17 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
 
     const { client } = get();
     if (client) {
-      client.send(
-        message as {
-          type: string;
-        },
-      );
+      // Type guard to validate message has required type field
+      if (
+        message !== null &&
+        typeof message === 'object' &&
+        'type' in message &&
+        typeof (message as Record<string, unknown>).type === 'string'
+      ) {
+        client.send(message as WebSocketMessage);
+      } else {
+        console.warn('[WebSocketStore] Cannot send, message missing type field:', message);
+      }
     } else {
       console.warn('[WebSocketStore] Cannot send, not connected');
     }

@@ -467,9 +467,9 @@ export const AgentBrowser: React.FC = () => {
             whiteSpace: 'nowrap',
           }}
         >
-          {combinedSortOptions.map((opt, index) =>
+          {combinedSortOptions.map((opt) =>
             opt.type === 'optgroup' ? (
-              <optgroup key={`group-${index}`} label={opt.label} />
+              <optgroup key={`group-${opt.label}`} label={opt.label} />
             ) : (
               <option key={opt.value} value={opt.value}>
                 {opt.label}

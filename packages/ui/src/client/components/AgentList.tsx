@@ -148,7 +148,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
   isExpanded,
   isSelected,
   onToggleExpand,
-  onSelect,
+  _onSelect,
   onDelete,
 }) => {
   const status = getAgentStatus(agent);

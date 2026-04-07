@@ -253,8 +253,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     (e: React.MouseEvent) => {
       const wasDrag =
         dragState.isDragging &&
-        (Math.abs(e.clientX - dragState.startX) > 3 ||
-          Math.abs(e.clientY - dragState.startY) > 3);
+        (Math.abs(e.clientX - dragState.startX) > 3 || Math.abs(e.clientY - dragState.startY) > 3);
       setDragState((prev) => ({
         ...prev,
         isDragging: false,
@@ -333,7 +332,9 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
         zoom: targetZoom,
       });
     },
-    [view],
+    [
+      view,
+    ],
   );
 
   // Push a container onto the breadcrumb stack (if not already there)
@@ -352,11 +353,17 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
         {
           containerId,
           label: `${STEP_KIND_LABELS[node.kind]} ${node.stepId}`,
-          previousView: { ...view },
+          previousView: {
+            ...view,
+          },
         },
       ]);
     },
-    [nodes, view, zoomStack],
+    [
+      nodes,
+      view,
+      zoomStack,
+    ],
   );
 
   // Node selection + zoom to make the node full size
@@ -393,7 +400,14 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       const graphCenterY = pos.y + pos.height / 2;
       zoomTo(graphCenterX, graphCenterY, targetZoom);
     },
-    [handleNodeSelect, positionMap, nodes, view, zoomTo, pushBreadcrumb],
+    [
+      handleNodeSelect,
+      positionMap,
+      nodes,
+      view,
+      zoomTo,
+      pushBreadcrumb,
+    ],
   );
 
   // Fit to view button handler
@@ -461,8 +475,6 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
         return;
       }
 
-      const { width: vw, height: vh } = containerRef.current.getBoundingClientRect();
-
       // Zoom so children render at full size: invert the nesting scale
       const containerScale = pos.scale ?? 1;
       const targetZoom = Math.min(1 / containerScale, MAX_ZOOM);
@@ -487,7 +499,6 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       pushBreadcrumb,
     ],
   );
-
 
   // Render node component based on kind
   const renderNode = (node: ExecutionNode) => {
