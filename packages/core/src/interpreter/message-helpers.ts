@@ -1,9 +1,9 @@
 import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
-import type { Item, MessageItem } from '../types/items';
+import type { InputMessageItem, Item } from '../types/items';
 import { isAssistantMessage, isMutableContext, isOutputText } from './typeguards';
 
-export function createMessage(text: string, role: 'user' | 'developer'): MessageItem {
+export function createMessage(text: string, role: 'user' | 'developer'): InputMessageItem {
   return {
     id: crypto.randomUUID(),
     status: 'completed',

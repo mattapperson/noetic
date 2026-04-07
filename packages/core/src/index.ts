@@ -183,13 +183,22 @@ export type { NoeticError } from './types/error';
 export type {
   ContentPart,
   ExecuteInput,
-  ExtensionItem,
+  FileSearchItem,
   FunctionCallItem,
   FunctionCallOutputItem,
+  ImageGenerationItem,
+  InputMessageItem,
+  InputTextPart,
   Item,
-  ItemBase,
   MessageItem,
+  OutputItem,
+  OutputTextPart,
   ReasoningItem,
+  ReasoningTextPart,
+  RefusalPart,
+  ServerToolItem,
+  SummaryTextPart,
+  WebSearchItem,
 } from './types/items';
 
 //#endregion
