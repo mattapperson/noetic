@@ -329,3 +329,24 @@ export type { ConvergeConfig, VerifyFn } from './until/predicates';
 export { until } from './until/predicates';
 
 //#endregion
+
+//#region Utilities
+
+/** @public */
+export type {
+  ProjectRootOptions,
+  ProjectRootResult,
+} from './util/project-root';
+/** @public */
+export {
+  detectProjectRoot,
+  detectProjectRootSync,
+  getDefaultBaselinePath,
+  getDefaultBaselinePathSync,
+  getDefaultStoragePath,
+  getNoeticSubdir,
+  getProjectRoot,
+  getProjectRootSync,
+} from './util/project-root';
+
+//#endregion

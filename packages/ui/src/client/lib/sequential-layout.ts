@@ -29,8 +29,8 @@ interface SequentialLayoutOptions {
 const DEFAULT_OPTIONS: SequentialLayoutOptions = {
   nodeWidth: 280,
   nodeHeight: 140,
-  verticalSpacing: 60,
-  horizontalSpacing: 80,
+  verticalSpacing: 120,
+  horizontalSpacing: 120,
   containerPadTop: 50,
   containerPadSide: 30,
   containerPadBottom: 30,
@@ -39,13 +39,6 @@ const DEFAULT_OPTIONS: SequentialLayoutOptions = {
   gridCellSize: 20,
   nestingScale: 0.5,
 };
-
-const CONTAINER_KINDS = new Set([
-  'loop',
-  'fork',
-  'branch',
-  'spawn',
-]);
 
 interface LayoutResult {
   width: number;
@@ -99,7 +92,8 @@ export function calculateSequentialLayout(
   const roots = findRoots(nodes, rootNodeId);
 
   let cursorY = opts.startY;
-  for (const id of roots) {
+  for (let i = 0; i < roots.length; i++) {
+    const id = roots[i];
     const result = layoutNode(
       {
         nodeId: id,
@@ -110,11 +104,43 @@ export function calculateSequentialLayout(
       ctx,
     );
     cursorY = result.bottom + opts.verticalSpacing;
+
+    // Edge from this root to the next root
+    if (i < roots.length - 1) {
+      ctx.edges.push({
+        id: `${id}-${roots[i + 1]}`,
+        source: id,
+        target: roots[i + 1],
+        type: 'default',
+        animated: ctx.nodes.get(id)?.status === 'running',
+      });
+    }
   }
 
+  // Deduplicate positions and edges by ID to prevent React key warnings.
+  // This guards against nodes being visited more than once if the trace
+  // contains inconsistent parent/child references.
+  const seenPositionIds = new Set<string>();
+  const uniquePositions = positions.filter((p) => {
+    if (seenPositionIds.has(p.id)) {
+      return false;
+    }
+    seenPositionIds.add(p.id);
+    return true;
+  });
+
+  const seenEdgeIds = new Set<string>();
+  const uniqueEdges = edges.filter((e) => {
+    if (seenEdgeIds.has(e.id)) {
+      return false;
+    }
+    seenEdgeIds.add(e.id);
+    return true;
+  });
+
   return {
-    positions,
-    edges,
+    positions: uniquePositions,
+    edges: uniqueEdges,
   };
 }
 
@@ -134,7 +160,10 @@ function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResul
   }
 
   const children = ctx.childrenOf.get(nodeId) ?? node.children;
-  const isContainer = CONTAINER_KINDS.has(node.kind) && children.length > 0;
+  // Any node with children is a container — not limited to specific kinds.
+  // A 'run' node wrapping child steps (e.g. the harness root) must recurse
+  // into its children just like loop/fork/branch/spawn.
+  const isContainer = children.length > 0;
 
   if (!isContainer) {
     const width = snapToGrid(ctx.opts.nodeWidth * scale);

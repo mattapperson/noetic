@@ -137,25 +137,38 @@ export class NoeticUITraceExporter implements TraceExporter {
    * was removed because the interpreter reuses context for loop/branch/fork
    * children, making depth-based heuristics unreliable.
    */
-  completeTrace(traceId: string): void {
+  completeTrace(traceId: string, error?: Error): void {
     const traceInfo = this.activeTraces.get(traceId);
     if (!traceInfo) {
       return;
     }
 
-    const totalDuration = traceInfo.allSpans
-      .filter((s) => s.endTime)
-      .reduce((sum, s) => sum + s.duration, 0);
+    let message: ClientMessage;
+    if (error) {
+      message = {
+        type: 'trace.error',
+        traceId,
+        error: {
+          message: error.message,
+          stack: error.stack,
+        },
+        endTime: Date.now(),
+      };
+    } else {
+      const totalDuration = traceInfo.allSpans
+        .filter((s) => s.endTime)
+        .reduce((sum, s) => sum + s.duration, 0);
 
-    const message: ClientMessage = {
-      type: 'trace.complete',
-      traceId,
-      summary: {
-        totalSteps: traceInfo.allSpans.length,
-        durationMs: totalDuration,
-      },
-      endTime: Date.now(),
-    };
+      message = {
+        type: 'trace.complete',
+        traceId,
+        summary: {
+          totalSteps: traceInfo.allSpans.length,
+          durationMs: totalDuration,
+        },
+        endTime: Date.now(),
+      };
+    }
 
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
@@ -194,6 +207,47 @@ export class NoeticUITraceExporter implements TraceExporter {
 
   getBufferedSpanCount(): number {
     return this.spanBuffer.length;
+  }
+
+  /**
+   * Flush all pending traces and messages to the server.
+   * Returns a promise that resolves when all data has been sent.
+   * Use this before process exit to ensure traces are saved.
+   */
+  async flushTraces(): Promise<void> {
+    // Flush any buffered spans first
+    if (this.spanBuffer.length > 0) {
+      await this.flush();
+    }
+
+    // Flush message queue
+    this.flushMessageQueue();
+
+    // Wait for WebSocket to finish sending (give it a moment to drain)
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      // Use a small delay to allow the WebSocket to send buffered data
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  /**
+   * Complete all traces and flush them to the server.
+   * Use this before process exit to ensure all traces are saved.
+   */
+  async completeAllAndFlush(): Promise<void> {
+    // Complete all active traces
+    const traceIds = [
+      ...this.activeTraces.keys(),
+    ];
+    for (const traceId of traceIds) {
+      this.completeTrace(traceId);
+    }
+
+    // Flush everything
+    await this.flushTraces();
+
+    // Give extra time for the server to process and save
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   //#endregion

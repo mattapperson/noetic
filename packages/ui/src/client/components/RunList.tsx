@@ -345,12 +345,8 @@ const RunLink = React.forwardRef<HTMLButtonElement, RunLinkProps>(
           padding: '8px',
           borderRadius: '4px',
           cursor: 'pointer',
-          transition: 'background-color 0.15s, border-color 0.15s',
-          border: isSelected
-            ? '1px solid var(--noetic-selected-border)'
-            : isLive
-              ? `1px solid ${STATUS_COLORS.running}`
-              : '1px solid transparent',
+          transition: 'background-color 0.15s',
+          border: 'none',
           animation: isLive ? 'pulse 2s infinite' : undefined,
           backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
           textAlign: 'left',

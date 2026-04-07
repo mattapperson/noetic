@@ -16,8 +16,8 @@ export interface TraceExporter {
    */
   startTrace?(traceId: string, input: unknown): void;
   export(spans: Span[]): Promise<void>;
-  /** Called when a trace completes (agent execution finished). */
-  completeTrace?(traceId: string): void;
+  /** Called when a trace completes (agent execution finished, with optional error). */
+  completeTrace?(traceId: string, error?: Error): void;
 }
 
 /** @public Diagnostic span recording a single memory layer hook invocation and its outcome. */

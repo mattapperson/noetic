@@ -137,6 +137,8 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     initialY: 0,
   });
   const [isPanning, setIsPanning] = useState(false);
+  const nodeClickedRef = useRef(false);
+  const wasDragRef = useRef(false);
   const [zoomStack, setZoomStack] = useState<ZoomEntry[]>([]);
 
   // Calculate layout whenever trace changes
@@ -193,11 +195,23 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     fitToView,
   ]);
 
+  const handleZoomBack = useCallback(() => {
+    setZoomStack((prev) => {
+      if (prev.length === 0) {
+        return prev;
+      }
+      const last = prev[prev.length - 1];
+      setView(last.previousView);
+      return prev.slice(0, -1);
+    });
+  }, []);
+
   // Pan handlers
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button === 0 || e.button === 1) {
-        // Left or middle mouse button
+        nodeClickedRef.current = false;
+        wasDragRef.current = false;
         setDragState({
           isDragging: true,
           startX: e.clientX,
@@ -217,8 +231,11 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (dragState.isDragging) {
-        const dx = (e.clientX - dragState.startX) / view.zoom;
-        const dy = (e.clientY - dragState.startY) / view.zoom;
+        const dx = e.clientX - dragState.startX;
+        const dy = e.clientY - dragState.startY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          wasDragRef.current = true;
+        }
         setView((prev) => ({
           ...prev,
           x: dragState.initialX + dx,
@@ -232,13 +249,32 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     ],
   );
 
-  const handleMouseUp = useCallback(() => {
-    setDragState((prev) => ({
-      ...prev,
-      isDragging: false,
-    }));
-    setIsPanning(false);
-  }, []);
+  const handleMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      const wasDrag =
+        dragState.isDragging &&
+        (Math.abs(e.clientX - dragState.startX) > 3 ||
+          Math.abs(e.clientY - dragState.startY) > 3);
+      setDragState((prev) => ({
+        ...prev,
+        isDragging: false,
+      }));
+      setIsPanning(false);
+
+      // Click on background (no drag, no node clicked)
+      if (!wasDrag && !nodeClickedRef.current) {
+        handleNodeSelect(null);
+        if (zoomStack.length > 0) {
+          handleZoomBack();
+        }
+      }
+    },
+    [
+      dragState,
+      zoomStack,
+      handleZoomBack,
+    ],
+  );
 
   // Zoom handler
   const handleWheel = useCallback(
@@ -275,19 +311,89 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     ],
   );
 
-  // Node selection
+  // Build position lookup map
+  const positionMap = useMemo(() => {
+    const map = new Map<string, NodePosition>();
+    for (const pos of positions) {
+      map.set(pos.id, pos);
+    }
+    return map;
+  }, [
+    positions,
+  ]);
+
+  // Shared helper: zoom to a target, anchored on a graph-space point
+  const zoomTo = useCallback(
+    (graphX: number, graphY: number, targetZoom: number) => {
+      const screenX = graphX * view.zoom + view.x;
+      const screenY = graphY * view.zoom + view.y;
+      setView({
+        x: screenX - graphX * targetZoom,
+        y: screenY - graphY * targetZoom,
+        zoom: targetZoom,
+      });
+    },
+    [view],
+  );
+
+  // Push a container onto the breadcrumb stack (if not already there)
+  const pushBreadcrumb = useCallback(
+    (containerId: string) => {
+      const node = nodes.get(containerId);
+      if (!node) {
+        return;
+      }
+      // Already the current breadcrumb
+      if (zoomStack.length > 0 && zoomStack[zoomStack.length - 1].containerId === containerId) {
+        return;
+      }
+      setZoomStack((prev) => [
+        ...prev,
+        {
+          containerId,
+          label: `${STEP_KIND_LABELS[node.kind]} ${node.stepId}`,
+          previousView: { ...view },
+        },
+      ]);
+    },
+    [nodes, view, zoomStack],
+  );
+
+  // Node selection + zoom to make the node full size
   const handleNodeClick = useCallback(
     (nodeId: string) => {
-      if (selectedNodeId === nodeId) {
-        handleNodeSelect(null);
-      } else {
-        handleNodeSelect(nodeId);
+      // Ignore clicks that are the end of a pan gesture
+      if (wasDragRef.current) {
+        return;
       }
+      nodeClickedRef.current = true;
+      handleNodeSelect(nodeId);
+
+      // If the node is scaled down (nested), zoom so it renders at 100%
+      const pos = positionMap.get(nodeId);
+      if (!pos) {
+        return;
+      }
+      const nodeScale = pos.scale ?? 1;
+      if (nodeScale >= 1) {
+        return;
+      }
+      const targetZoom = Math.min(1 / nodeScale, MAX_ZOOM);
+      if (Math.abs(targetZoom - view.zoom) < 0.05) {
+        return;
+      }
+
+      // Push parent container to breadcrumb so background click zooms back
+      const node = nodes.get(nodeId);
+      if (node?.parentId) {
+        pushBreadcrumb(node.parentId);
+      }
+
+      const graphCenterX = pos.x + pos.width / 2;
+      const graphCenterY = pos.y + pos.height / 2;
+      zoomTo(graphCenterX, graphCenterY, targetZoom);
     },
-    [
-      selectedNodeId,
-      handleNodeSelect,
-    ],
+    [handleNodeSelect, positionMap, nodes, view, zoomTo, pushBreadcrumb],
   );
 
   // Fit to view button handler
@@ -306,67 +412,82 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     positions,
   ]);
 
-  // Build position lookup map
-  const positionMap = useMemo(() => {
-    const map = new Map<string, NodePosition>();
-    for (const pos of positions) {
-      map.set(pos.id, pos);
+  // Compute SVG canvas size from node positions so edges render correctly
+  const svgBounds = useMemo(() => {
+    if (positions.length === 0) {
+      return {
+        width: 0,
+        height: 0,
+      };
     }
-    return map;
+    let maxX = 0;
+    let maxY = 0;
+    for (const pos of positions) {
+      maxX = Math.max(maxX, pos.x + pos.width);
+      maxY = Math.max(maxY, pos.y + pos.height);
+    }
+    // Add margin for edge routing and arrow markers
+    return {
+      width: maxX + 200,
+      height: maxY + 200,
+    };
   }, [
     positions,
   ]);
 
   const handleContainerZoom = useCallback(
     (containerId: string) => {
+      if (wasDragRef.current) {
+        return;
+      }
+      nodeClickedRef.current = true;
       const pos = positionMap.get(containerId);
       const node = nodes.get(containerId);
       if (!pos || !node || !containerRef.current) {
         return;
       }
 
+      // If this container is already in the breadcrumb stack, zoom back to it
+      const existingIndex = zoomStack.findIndex((e) => e.containerId === containerId);
+      if (existingIndex !== -1) {
+        const target = zoomStack[existingIndex];
+        setView(target.previousView);
+        setZoomStack((prev) => prev.slice(0, existingIndex));
+        return;
+      }
+
+      // Don't re-zoom into the container we're already looking at
+      if (zoomStack.length > 0 && zoomStack[zoomStack.length - 1].containerId === containerId) {
+        return;
+      }
+
       const { width: vw, height: vh } = containerRef.current.getBoundingClientRect();
-      const scale = pos.scale ?? 1;
-      const targetZoom = Math.min(1 / scale, MAX_ZOOM);
 
-      const centerX = pos.x + pos.width / 2;
-      const centerY = pos.y + pos.height / 2;
+      // Zoom so children render at full size: invert the nesting scale
+      const containerScale = pos.scale ?? 1;
+      const targetZoom = Math.min(1 / containerScale, MAX_ZOOM);
 
-      const newView: ViewState = {
-        x: vw / 2 - centerX * targetZoom,
-        y: vh / 2 - centerY * targetZoom,
-        zoom: targetZoom,
-      };
+      // Skip if zoom wouldn't meaningfully change (e.g. root container at depth 0)
+      if (Math.abs(targetZoom - view.zoom) < 0.05) {
+        return;
+      }
 
-      setZoomStack((prev) => [
-        ...prev,
-        {
-          containerId,
-          label: `${STEP_KIND_LABELS[node.kind]} ${node.stepId}`,
-          previousView: {
-            ...view,
-          },
-        },
-      ]);
-      setView(newView);
+      pushBreadcrumb(containerId);
+
+      const graphCenterX = pos.x + pos.width / 2;
+      const graphCenterY = pos.y + pos.height / 2;
+      zoomTo(graphCenterX, graphCenterY, targetZoom);
     },
     [
       positionMap,
       nodes,
       view,
+      zoomStack,
+      zoomTo,
+      pushBreadcrumb,
     ],
   );
 
-  const handleZoomBack = useCallback(() => {
-    setZoomStack((prev) => {
-      if (prev.length === 0) {
-        return prev;
-      }
-      const last = prev[prev.length - 1];
-      setView(last.previousView);
-      return prev.slice(0, -1);
-    });
-  }, []);
 
   // Render node component based on kind
   const renderNode = (node: ExecutionNode) => {
@@ -629,20 +750,20 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
           transformOrigin: '0 0',
-          transition: 'transform 0.3s ease-out',
+          transition: isPanning ? 'none' : 'transform 0.3s ease-out',
           position: 'absolute',
           top: 0,
           left: 0,
         }}
       >
-        {/* SVG edges layer - sized dynamically based on content */}
+        {/* SVG edges layer - sized to cover all nodes so paths render */}
         <svg
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
-            width: '100%',
-            height: '100%',
+            width: `${svgBounds.width}px`,
+            height: `${svgBounds.height}px`,
             pointerEvents: 'none',
             overflow: 'visible',
           }}

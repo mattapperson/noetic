@@ -1,12 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { getDefaultBaselinePathSync } from '@noetic/core';
 import { z } from 'zod';
 import type { SuiteResult } from '../types/eval';
 import type { Baseline } from '../types/regression';
 
 //#region Constants
 
-const BASELINE_DIR = '.noetic/baselines';
 const VERSION = '1.0.0';
 
 //#endregion
@@ -47,17 +47,21 @@ const BaselineSchema = z.object({
 
 //#region Helper Functions
 
-function getBaselinePath(suiteName: string): string {
+function getBaselinePath(suiteName: string, explicitBasePath?: string): string {
   const sanitized = suiteName.replace(/[^a-zA-Z0-9-_]/g, '_');
-  return path.join(process.cwd(), BASELINE_DIR, `${sanitized}.json`);
+  const basePath = getDefaultBaselinePathSync(explicitBasePath);
+  return path.join(basePath, `${sanitized}.json`);
 }
 
 //#endregion
 
 //#region Public API
 
-export async function saveBaseline(suiteResult: SuiteResult): Promise<string> {
-  const filePath = getBaselinePath(suiteResult.suiteName);
+export async function saveBaseline(
+  suiteResult: SuiteResult,
+  explicitBasePath?: string,
+): Promise<string> {
+  const filePath = getBaselinePath(suiteResult.suiteName, explicitBasePath);
   const dir = path.dirname(filePath);
 
   fs.mkdirSync(dir, {
@@ -74,8 +78,11 @@ export async function saveBaseline(suiteResult: SuiteResult): Promise<string> {
   return filePath;
 }
 
-export async function loadBaseline(suiteName: string): Promise<Baseline | null> {
-  const filePath = getBaselinePath(suiteName);
+export async function loadBaseline(
+  suiteName: string,
+  explicitBasePath?: string,
+): Promise<Baseline | null> {
+  const filePath = getBaselinePath(suiteName, explicitBasePath);
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     return BaselineSchema.parse(JSON.parse(content));

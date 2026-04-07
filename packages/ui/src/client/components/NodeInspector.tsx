@@ -335,7 +335,9 @@ const ChildrenSection: React.FC<ChildrenSectionProps> = ({ children }) => {
         </span>
       </div>
       <div className="p-3 space-y-1">
-        {children.map((childId) => (
+        {[
+          ...new Set(children),
+        ].map((childId) => (
           <div
             key={childId}
             className="text-xs font-mono text-[var(--noetic-text-secondary)] bg-[var(--noetic-code-bg)] px-2 py-1 rounded truncate"

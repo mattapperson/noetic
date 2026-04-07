@@ -210,8 +210,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
         borderRadius: '4px',
         overflow: 'hidden',
         backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
-        border: isSelected ? '1px solid var(--noetic-selected-border)' : '1px solid transparent',
-        transition: 'background-color 0.15s, border-color 0.15s',
+        transition: 'background-color 0.15s',
       }}
     >
       {/* Agent row - clicking anywhere expands/collapses, does NOT navigate */}

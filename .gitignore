@@ -11,6 +11,7 @@ pnpm-lock.yaml
 pnpm-lock.yml
 .vercel
 .superpowers/
+docs/superpowers/
 packages/web/.typecheck-snippets/
 .DS_Store
 packages/ui/dist/

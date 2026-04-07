@@ -21,6 +21,7 @@
   --noetic-button-bg: #334155;
   --noetic-button-hover: #475569;
   --noetic-hover: rgba(255, 255, 255, 0.05);
+  --noetic-selected-bg: rgba(255, 255, 255, 0.08);
   --noetic-grid-color: #334155;
 
   /* Step kind colors - from spec */
@@ -59,6 +60,7 @@ html.light {
   --noetic-button-bg: #e2e8f0;
   --noetic-button-hover: #cbd5e1;
   --noetic-hover: rgba(0, 0, 0, 0.03);
+  --noetic-selected-bg: rgba(0, 0, 0, 0.06);
   --noetic-grid-color: #e2e8f0;
 
   /* Step kind colors - light theme */

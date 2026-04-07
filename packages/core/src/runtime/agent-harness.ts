@@ -444,8 +444,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         broadcaster.complete();
       },
       (err: unknown) => {
-        this.traceExporter.completeTrace?.(ctx.span.traceId);
-        broadcaster.error(err instanceof Error ? err : new Error(String(err)));
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.traceExporter.completeTrace?.(ctx.span.traceId, error);
+        broadcaster.error(error);
       },
     );
 
@@ -458,7 +459,34 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     if (this.traceExporter.startTrace) {
       this.traceExporter.startTrace(ctx.span.traceId, input);
     }
-    return execute(s, input, ctx);
+
+    // Export the harness root span so the UI shows a parent "run" node
+    // wrapping the step tree. Without this, single-step agents (e.g. a
+    // plain LLM call) produce traces with only one leaf node, and
+    // composite agents lose the outermost container.
+    const rootSpan = ctx.span;
+    rootSpan.setAttribute('stepKind', 'run');
+    rootSpan.setAttribute('stepId', this.config.name);
+    rootSpan.setAttribute('input', typeof input === 'string' ? input : JSON.stringify(input));
+    rootSpan.setAttribute('depth', 0);
+
+    try {
+      const result = await execute(s, input, ctx);
+      rootSpan.setAttribute('output', JSON.stringify(result));
+      rootSpan.end();
+      await this.traceExporter.export([
+        rootSpan,
+      ]);
+      return result;
+    } catch (error) {
+      rootSpan.setAttribute('error', 'true');
+      rootSpan.setAttribute('errorMessage', error instanceof Error ? error.message : String(error));
+      rootSpan.end();
+      await this.traceExporter.export([
+        rootSpan,
+      ]);
+      throw error;
+    }
   }
 
   detachedSpawn<I, O>(

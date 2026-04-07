@@ -218,6 +218,30 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [_isLoadingRun, setIsLoadingRun] = useState(false);
 
+  // Handle timeline marker click → select node in graph + inspector
+  const handleTimelineChange = useCallback((_stepIndex: number, nodeId: string) => {
+    setSelectedNodeId(nodeId);
+  }, []);
+
+  // Handle node click in graph → update timeline marker
+  const handleNodeSelect = useCallback((nodeId: string | null) => {
+    setSelectedNodeId(nodeId);
+    if (!nodeId) {
+      return;
+    }
+    const { markers, selectMarker, setPlayheadPosition } = useTimelineStore.getState();
+    const markerId = `marker-${nodeId}`;
+    const marker = markers.find((m) => m.id === markerId);
+    if (marker) {
+      selectMarker(markerId);
+      setPlayheadPosition(marker.position);
+      const index = markers.indexOf(marker);
+      if (index !== -1) {
+        usePlaybackStore.getState().jumpToStep(index);
+      }
+    }
+  }, []);
+
   // Get current run and nodes
   const agentSlug = useAgentStore((s) => s.selectedAgentId);
   const runId = useAgentStore((s) => s.selectedRunId);
@@ -285,7 +309,7 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
           <AgentBrowser />
         </ResizableSidebar>
 
-        <CenterCanvas selectedNodeId={selectedNodeId} onNodeSelect={setSelectedNodeId} />
+        <CenterCanvas selectedNodeId={selectedNodeId} onNodeSelect={handleNodeSelect} />
 
         <ResizableSidebar
           width={rightWidth}
@@ -296,7 +320,7 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
           <RightPanel selectedNodeId={selectedNodeId} nodes={nodes} />
         </ResizableSidebar>
       </div>
-      <PlaybackBar />
+      <PlaybackBar onTimelineChange={handleTimelineChange} />
     </>
   );
 };

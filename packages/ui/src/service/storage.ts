@@ -3,101 +3,17 @@
  *
  * Handles file-based persistence of execution traces.
  * By default, stores data in the project's .noetic/ui/ directory.
- * Falls back to ~/.noetic-ui/traces/ if no project root is found.
+ * Falls back to ~/.noetic/ if no project root is found.
  */
 
-import {
-  access,
-  constants,
-  mkdir,
-  readdir,
-  readFile,
-  rmdir,
-  stat,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { access, mkdir, readdir, readFile, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { cwd } from 'node:process';
+import { getDefaultStoragePath } from '@noetic/core';
 import { z } from 'zod';
 import type { ExecutionTrace, Run } from '../shared/protocol.js';
 
-// ============================================================================
-// Project Root Detection
-// ============================================================================
-
-/**
- * Detect the project root directory by looking for package.json
- * starting from the current working directory and walking up.
- */
-async function detectProjectRoot(): Promise<string | null> {
-  const startTime = Date.now();
-  let currentDir = cwd();
-  const maxIterations = 20; // Prevent infinite loop
-
-  for (let i = 0; i < maxIterations; i++) {
-    try {
-      // Check if package.json exists in current directory
-      const packageJsonPath = join(currentDir, 'package.json');
-      await access(packageJsonPath, constants.R_OK);
-
-      // Verify it's a valid package.json
-      const content = await readFile(packageJsonPath, 'utf-8');
-      const pkg = JSON.parse(content);
-
-      // Found a valid project root
-      if (pkg.name) {
-        console.debug(
-          `[Storage] detectProjectRoot: found at ${currentDir} in ${Date.now() - startTime}ms after ${i + 1} iterations`,
-        );
-        return currentDir;
-      }
-    } catch {
-      // package.json not found or not readable, try parent
-    }
-
-    const parentDir = dirname(currentDir);
-    if (parentDir === currentDir) {
-      break; // Reached filesystem root
-    }
-    currentDir = parentDir;
-  }
-
-  console.debug(`[Storage] detectProjectRoot: not found after ${Date.now() - startTime}ms`);
-  return null;
-}
-
-/**
- * Get the default storage path.
- * Uses project directory if found, otherwise falls back to home directory.
- */
-async function getDefaultStoragePath(): Promise<string> {
-  const startTime = Date.now();
-  // Check if explicit path is set via environment
-  if (process.env.NOETIC_UI_STORAGE_PATH) {
-    console.debug(`[Storage] getDefaultStoragePath: using env var in ${Date.now() - startTime}ms`);
-    return process.env.NOETIC_UI_STORAGE_PATH;
-  }
-
-  // Try to detect project root
-  const detectStart = Date.now();
-  const projectRoot = await detectProjectRoot();
-  console.debug(`[Storage] detectProjectRoot took ${Date.now() - detectStart}ms`);
-
-  if (projectRoot) {
-    const result = join(projectRoot, '.noetic', 'ui', 'traces');
-    console.debug(
-      `[Storage] getDefaultStoragePath: project root found in ${Date.now() - startTime}ms`,
-    );
-    return result;
-  }
-
-  // Fall back to home directory
-  const homeResult = join(homedir(), '.noetic-ui', 'traces');
-  console.debug(`[Storage] getDefaultStoragePath: fallback to home in ${Date.now() - startTime}ms`);
-  return homeResult;
-}
+// Re-export for consumers who need direct access
+export { getDefaultStoragePath } from '@noetic/core';
 
 // ============================================================================
 // Zod Schemas for Runtime Validation
@@ -434,6 +350,10 @@ export class TraceStorage {
   ): Promise<SaveResult> {
     const runId = trace.traceId;
     const nodeCount = trace.nodes.size;
+
+    console.debug(
+      `[Storage] saveTrace called: agentId=${agentId}, runId=${runId}, nodes=${nodeCount}, isLive=${isLive}`,
+    );
 
     // Check for step limits
     let warning: StorageWarning | undefined;

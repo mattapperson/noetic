@@ -38,24 +38,57 @@ interface MarkerTooltipProps {
   x: number;
   y: number;
   visible: boolean;
+  containerWidth: number;
 }
 
-const MarkerTooltip: React.FC<MarkerTooltipProps> = ({ marker, x, y, visible }) => {
+const TOOLTIP_WIDTH_ESTIMATE = 120;
+const CARET_SIZE = 6;
+
+const MarkerTooltip: React.FC<MarkerTooltipProps> = ({ marker, x, y, visible, containerWidth }) => {
   if (!visible) {
     return null;
   }
 
+  // Position tooltip above the marker with edge-aware adjustment
+  const tooltipY = y - 8;
+  const halfTooltip = TOOLTIP_WIDTH_ESTIMATE / 2;
+
+  // Clamp left so the tooltip stays within the container
+  let tooltipLeft = x;
+  let caretOffset = 0;
+  if (x - halfTooltip < 8) {
+    tooltipLeft = halfTooltip + 8;
+    caretOffset = x - tooltipLeft;
+  } else if (containerWidth > 0 && x + halfTooltip > containerWidth - 8) {
+    tooltipLeft = containerWidth - halfTooltip - 8;
+    caretOffset = x - tooltipLeft;
+  }
+
   return (
     <div
-      className="absolute z-50 px-2 py-1 text-xs bg-slate-800 text-slate-200 rounded shadow-lg border border-slate-700 pointer-events-none whitespace-nowrap"
+      className="absolute z-50 pointer-events-none"
       style={{
-        left: x,
-        top: y - 30,
+        left: tooltipLeft,
+        bottom: `calc(100% - ${tooltipY}px)`,
         transform: 'translateX(-50%)',
       }}
     >
-      <div className="font-medium">{marker.stepKind.toUpperCase()}</div>
-      <div className="text-slate-400">{marker.duration}ms</div>
+      <div className="px-2.5 py-1.5 text-xs bg-slate-800 text-slate-200 rounded shadow-lg border border-slate-700 whitespace-nowrap">
+        <div className="font-medium">{marker.stepKind.toUpperCase()}</div>
+        <div className="text-slate-400">{marker.duration}ms</div>
+      </div>
+      {/* Caret pointing down toward the marker */}
+      <div
+        className="mx-auto"
+        style={{
+          width: 0,
+          height: 0,
+          borderLeft: `${CARET_SIZE}px solid transparent`,
+          borderRight: `${CARET_SIZE}px solid transparent`,
+          borderTop: `${CARET_SIZE}px solid #1e293b`,
+          marginLeft: `calc(50% + ${caretOffset}px - ${CARET_SIZE}px)`,
+        }}
+      />
     </div>
   );
 };
@@ -281,7 +314,9 @@ export const Timeline: React.FC<TimelineProps> = ({
 
           // Height based on depth (taller for deeper nesting)
           const markerHeight = Math.min(32, 12 + marker.depth * 4);
-          const markerWidth = isSelected ? 4 : 3;
+          const markerVisualWidth = isSelected ? 4 : 3;
+          // Wider invisible hit area for easier clicking
+          const hitAreaWidth = 16;
 
           return (
             <button
@@ -289,18 +324,16 @@ export const Timeline: React.FC<TimelineProps> = ({
               type="button"
               className={`
                 absolute top-1/2 -translate-x-1/2 -translate-y-1/2
-                rounded-sm cursor-pointer
+                cursor-pointer
                 transition-all duration-150
-                hover:scale-110
-                focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1 focus:ring-offset-slate-800
-                ${isSelected ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-800' : ''}
+                focus:outline-none
+                group
               `}
               style={{
                 left: `${marker.position * 100}%`,
-                width: markerWidth,
-                height: markerHeight,
-                backgroundColor: isPast ? color : isFuture ? `${color}60` : color,
-                opacity: isFuture ? 0.5 : 1,
+                width: hitAreaWidth,
+                height: markerHeight + 8,
+                background: 'transparent',
               }}
               onMouseEnter={(e) => handleMarkerMouseEnter(marker, e)}
               onMouseLeave={handleMarkerMouseLeave}
@@ -312,7 +345,24 @@ export const Timeline: React.FC<TimelineProps> = ({
               }}
               onKeyDown={(e) => handleMarkerKeyDown(marker, e)}
               aria-label={`${marker.stepKind} step at position ${Math.round(marker.position * 100)}%`}
-            />
+            >
+              {/* Visual marker (narrow) */}
+              <div
+                className={`
+                  mx-auto rounded-sm
+                  transition-all duration-150
+                  group-hover:scale-x-150
+                  ${isSelected ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-800' : ''}
+                  ${isSelected ? '' : 'group-focus-visible:ring-2 group-focus-visible:ring-blue-400 group-focus-visible:ring-offset-1 group-focus-visible:ring-offset-slate-800'}
+                `}
+                style={{
+                  width: markerVisualWidth,
+                  height: markerHeight,
+                  backgroundColor: isPast ? color : isFuture ? `${color}60` : color,
+                  opacity: isFuture ? 0.5 : 1,
+                }}
+              />
+            </button>
           );
         })}
 
@@ -357,6 +407,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           x={tooltip.x}
           y={tooltip.y}
           visible={tooltip.visible}
+          containerWidth={containerRef.current?.getBoundingClientRect().width ?? 0}
         />
       )}
     </div>

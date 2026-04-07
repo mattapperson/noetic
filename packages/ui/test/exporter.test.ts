@@ -5,6 +5,7 @@
  * - Each step produces a trace.nodeStart message
  * - trace.start is sent exactly once per trace
  * - trace.complete is only sent via explicit completeTrace() (not auto-detected)
+ * - trace.error is sent when completeTrace receives an error
  * - Parent-child relationships are preserved via parentSpanId
  * - Loop iterations produce distinct nodes
  */
@@ -52,7 +53,7 @@ function endSpan(span: TestSpan): void {
  */
 function createTestExporter(): {
   exportSpan: (span: TestSpan) => void;
-  completeTrace: (traceId: string) => void;
+  completeTrace: (traceId: string, error?: Error) => void;
   getMessages: () => CapturedMessage[];
 } {
   const messages: CapturedMessage[] = [];
@@ -98,16 +99,24 @@ function createTestExporter(): {
     activeTraces.set(traceId, traceInfo);
   }
 
-  function completeTrace(traceId: string): void {
+  function completeTrace(traceId: string, error?: Error): void {
     const traceInfo = activeTraces.get(traceId);
     if (!traceInfo) {
       return;
     }
-    messages.push({
-      type: 'trace.complete',
-      traceId,
-      totalSteps: traceInfo.allSpans.length,
-    });
+    if (error) {
+      messages.push({
+        type: 'trace.error',
+        traceId,
+        error: { message: error.message, stack: error.stack },
+      });
+    } else {
+      messages.push({
+        type: 'trace.complete',
+        traceId,
+        totalSteps: traceInfo.allSpans.length,
+      });
+    }
     activeTraces.delete(traceId);
   }
 
@@ -265,6 +274,32 @@ describe('exporter span processing', () => {
     for (const node of nodes.filter((n) => n.stepId === 'handler')) {
       expect(node.parentId).toBe(root.spanId);
     }
+  });
+
+  it('sends trace.error instead of trace.complete when error is provided', () => {
+    const { exportSpan, completeTrace, getMessages } = createTestExporter();
+
+    const root = createSpan('agent', null, 0);
+    const step = createSpan('llm-call', root, 1);
+
+    endSpan(step);
+    exportSpan(step);
+    endSpan(root);
+    exportSpan(root);
+
+    const error = new Error('TooManyRequestsResponseError: Provider returned error');
+    completeTrace(root.traceId, error);
+
+    const msgs = getMessages();
+    expect(msgs.filter((m) => m.type === 'trace.complete')).toHaveLength(0);
+    expect(msgs.filter((m) => m.type === 'trace.error')).toHaveLength(1);
+
+    const errorMsg = msgs.find((m) => m.type === 'trace.error');
+    expect(errorMsg?.traceId).toBe(root.traceId);
+
+    const errorData = errorMsg?.error as { message: string; stack?: string };
+    expect(errorData.message).toBe('TooManyRequestsResponseError: Provider returned error');
+    expect(errorData.stack).toBeDefined();
   });
 
   it('handles harness root parent (unexported parent span)', () => {

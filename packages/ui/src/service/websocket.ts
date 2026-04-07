@@ -584,11 +584,11 @@ export class NoeticUIServer {
         break;
 
       case 'trace.complete':
-        this.handleTraceComplete(message.traceId, message.summary, message.endTime);
+        await this.handleTraceComplete(message.traceId, message.summary, message.endTime);
         break;
 
       case 'trace.error':
-        this.handleTraceError(message.traceId, message.error, message.endTime);
+        await this.handleTraceError(message.traceId, message.error, message.endTime);
         break;
 
       // Handle ServerMessage types from agent runtime (forwarded by exporter)
@@ -775,14 +775,13 @@ export class NoeticUIServer {
 
   private async saveTrace(trace: ExecutionTrace, agentId: string): Promise<void> {
     try {
-      // Get input from trace state, fallback to root node input
       const traceState = this.traces.get(trace.traceId);
       const rootNode = trace.nodes.get(trace.rootNodeId);
       const input = traceState?.input ?? rootNode?.input ?? {};
 
       await this.storage.saveTrace(trace, agentId, input, traceState?.isLive ?? false);
     } catch (error) {
-      console.error('Failed to save trace:', error);
+      console.error('[WebSocket] Failed to save trace:', error);
     }
   }
 
@@ -860,14 +859,14 @@ export class NoeticUIServer {
       }
     }
 
-    // Set rootNodeId if not already set and this node's parent doesn't exist in trace
-    // (meaning this is the top-most node being exported)
-    if (!traceState.trace.rootNodeId) {
-      const parentExists = node.parentId && traceState.trace.nodes.has(node.parentId);
-      if (!parentExists) {
-        traceState.trace.rootNodeId = node.id;
-        console.info(`[WebSocket] Set root node: ${node.id}`);
-      }
+    // Set rootNodeId when a true root node arrives (parentId is null).
+    // The exporter sends spans depth-first (innermost first), so earlier nodes
+    // are children whose parents haven't arrived yet — we must NOT latch onto
+    // them. The correct rootNodeId is recomputed at save time (see
+    // computeRootNodeId), but setting it here keeps the live broadcast accurate.
+    if (!node.parentId && !traceState.trace.rootNodeId) {
+      traceState.trace.rootNodeId = node.id;
+      console.info(`[WebSocket] Set root node: ${node.id}`);
     }
 
     // Broadcast to all clients
@@ -943,6 +942,12 @@ export class NoeticUIServer {
     traceState.trace.endTime = endTime;
     traceState.isLive = false;
 
+    // Recompute rootNodeId from the final node set.
+    // During streaming, rootNodeId may have been set to the wrong node because
+    // the exporter sends spans depth-first (innermost first), so the first node
+    // received is the deepest child, not the root.
+    traceState.trace.rootNodeId = this.computeRootNodeId(traceState.trace.nodes);
+
     // Broadcast to all clients
     this.broadcast({
       type: 'execution.complete',
@@ -977,6 +982,9 @@ export class NoeticUIServer {
     traceState.trace.endTime = endTime;
     traceState.isLive = false;
 
+    // Recompute rootNodeId from the final node set (see handleTraceComplete)
+    traceState.trace.rootNodeId = this.computeRootNodeId(traceState.trace.nodes);
+
     // Broadcast to all clients
     this.broadcast({
       type: 'execution.error',
@@ -993,6 +1001,34 @@ export class NoeticUIServer {
       this.traces.delete(traceId);
       console.info(`[WebSocket] Cleaned up errored trace: ${traceId}`);
     }, 30000);
+  }
+
+  /**
+   * Compute the correct rootNodeId from the final node set.
+   *
+   * The exporter sends spans depth-first (innermost first), so during streaming
+   * the heuristic in handleTraceNodeStart may latch onto the deepest child.
+   * This method runs over the completed node map and picks:
+   *   1. A node with parentId === null (true root)
+   *   2. A node whose parentId is not present in the map (top-level user step
+   *      below an unexported harness wrapper)
+   *   3. Falls back to the first node in insertion order
+   */
+  private computeRootNodeId(nodes: Map<string, ExecutionNode>): string {
+    // Prefer a node with no parent (true root)
+    for (const [id, node] of nodes) {
+      if (!node.parentId) {
+        return id;
+      }
+    }
+    // Fallback: node whose parent is not in the map
+    for (const [id, node] of nodes) {
+      if (node.parentId && !nodes.has(node.parentId)) {
+        return id;
+      }
+    }
+    // Last resort: first node
+    return nodes.keys().next().value ?? '';
   }
 
   private generateClientId(): string {

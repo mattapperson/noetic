@@ -176,10 +176,17 @@ export const useTimelineStore = create<TimelineState>()(
     addMarker: (node: ExecutionNode) => {
       const { startTime, totalDuration, markers } = get();
 
+      const markerId = `marker-${node.id}`;
+
+      // Skip if marker for this node already exists
+      if (markers.some((m) => m.id === markerId)) {
+        return;
+      }
+
       const position = calculateMarkerPosition(node.startTime, startTime, totalDuration);
 
       const newMarker: TimelineMarker = {
-        id: `marker-${node.id}`,
+        id: markerId,
         nodeId: node.id,
         stepKind: node.kind,
         timestamp: node.startTime,
