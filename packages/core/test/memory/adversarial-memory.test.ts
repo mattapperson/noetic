@@ -18,9 +18,12 @@ import {
   storeLayers,
 } from '../../src/memory/layer-lifecycle';
 import { durableTaskState } from '../../src/memory/layers/durable-task-state';
+import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
 import { observationalMemory } from '../../src/memory/layers/observational-memory';
+import type { ObservationalState } from '../../src/memory/layers/observational-memory';
 import { steering } from '../../src/memory/layers/steering';
 import { workingMemory } from '../../src/memory/layers/working-memory';
+import type { WorkingMemoryState } from '../../src/memory/layers/working-memory';
 import type { LLMResponse } from '../../src/types/common';
 import type { Item } from '../../src/types/items';
 import type { ExecutionContext, MemoryLayer } from '../../src/types/memory';
@@ -56,6 +59,24 @@ function isObservationalState(val: unknown): val is {
     return false;
   }
   return Array.isArray(val.observations);
+}
+
+/** Helper to safely get state from store, asserting it exists */
+function getState<T>(
+  store: ReturnType<typeof createLayerStateStore>,
+  executionId: string,
+  layerId: string,
+): T {
+  const state = store.get<T>(executionId, layerId);
+  if (state === undefined) {
+    throw new Error(`State not found for layer ${layerId} in execution ${executionId}`);
+  }
+  return state;
+}
+
+/** Helper for tests that intentionally pass invalid state to document bug behavior */
+function invalidState<T>(state: unknown): T {
+  return state as T;
 }
 
 /** Creates an ExecutionContext whose callModel always returns a fixed text response. */
@@ -441,14 +462,14 @@ describe('Working Memory: falsy state edge cases', () => {
     });
 
     // State should default to '' (empty string)
-    const state = store.get(ctx.executionId, layer.id);
+    const state = store.get<WorkingMemoryState>(ctx.executionId, layer.id);
     expect(state).toBe('');
 
     const result = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
       ctx,
-      state,
+      state: getState<WorkingMemoryState>(store, ctx.executionId, layer.id),
       budget: 1e3,
     });
 
@@ -462,13 +483,13 @@ describe('Working Memory: falsy state edge cases', () => {
     const ctx = makeCtx();
 
     // Simulate storage corruption: state is numeric 0
-    store.set(ctx.executionId, layer.id, 0);
+    store.set(ctx.executionId, layer.id, invalidState<WorkingMemoryState>(0));
 
     const result = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
       ctx,
-      state: 0,
+      state: invalidState<WorkingMemoryState>(0),
       budget: 1e3,
     });
 
@@ -481,13 +502,13 @@ describe('Working Memory: falsy state edge cases', () => {
     const store = createLayerStateStore();
     const ctx = makeCtx();
 
-    store.set(ctx.executionId, layer.id, false);
+    store.set(ctx.executionId, layer.id, invalidState<WorkingMemoryState>(false));
 
     const result = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
       ctx,
-      state: false,
+      state: invalidState<WorkingMemoryState>(false),
       budget: 1e3,
     });
 
@@ -530,7 +551,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: getState<WorkingMemoryState>(store, ctx.executionId, layer.id),
     });
 
     expect(result).toBeDefined();
@@ -572,7 +593,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: getState<WorkingMemoryState>(store, ctx.executionId, layer.id),
     });
 
     assert(result !== undefined);
@@ -617,7 +638,7 @@ describe('Working Memory: store with string state', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: getState<WorkingMemoryState>(store, ctx.executionId, layer.id),
     });
 
     // When state is a string, typeof !== 'object', so the else branch runs:
@@ -679,13 +700,13 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: getState<ObservationalState>(store, ctx.executionId, layer.id),
     });
 
     // The observer should have been called since totalBufferTokens >= 100
-    expect(observerCalledWith).not.toBeNull();
-    assert(observerCalledWith !== null);
-    expect(observerCalledWith.length).toBeGreaterThan(0);
+    const captured: unknown = observerCalledWith;
+    expect(captured).not.toBeNull();
+    expect(Array.isArray(captured) && captured.length > 0).toBe(true);
   });
 
   it('default observer produces misleading "Processed 0 items" on empty buffer', async () => {
@@ -712,7 +733,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
         id: 'fc-1',
         type: 'function_call',
         status: 'completed',
-        call_id: 'call_1',
+        callId: 'call_1',
         name: 'test',
         arguments: '{}',
       },
@@ -729,9 +750,9 @@ describe('Observational Memory: empty buffer at threshold', () => {
     const result = await layer.hooks.store!({
       newItems: items,
       log: makeItemLog(),
-      response,
+      response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: getState<ObservationalState>(store, ctx.executionId, layer.id),
     });
 
     // bufferTokens is 0, threshold is 0, so 0 >= 0 triggers compression
@@ -804,7 +825,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
       store,
     });
 
-    const state = store.get(ctx.executionId, layer.id);
+    const state = getState<DurableTaskState>(store, ctx.executionId, layer.id);
     const result = await layer.hooks.onComplete!({
       log: makeItemLog(),
       ctx,
@@ -844,7 +865,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: getState<DurableTaskState>(store, ctx.executionId, layer.id),
     });
 
     expect(result).toBeDefined();

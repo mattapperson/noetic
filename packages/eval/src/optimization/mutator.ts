@@ -72,10 +72,19 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         _optimizable: cloneOptimizableChildren(step._optimizable, candidate, path),
       };
+    case 'provide':
+      // Provide steps don't have optimizable fields in their direct structure
+      return {
+        ...step,
+      };
     case 'run':
       return {
         ...step,
       };
+    default: {
+      // Exhaustiveness check - this ensures all Step kinds are handled
+      throw new Error('Unhandled step kind in mutator');
+    }
   }
 }
 

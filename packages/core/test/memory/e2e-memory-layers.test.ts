@@ -413,7 +413,7 @@ describe('Working Memory: full lifecycle', () => {
       storage,
       store,
     });
-    expect(store.get(ctx.executionId, wm.id)).toBe('');
+    expect(store.get<string>(ctx.executionId, wm.id)).toBe('');
 
     // 2. Recall (empty) → null
     const budgets = new Map([
