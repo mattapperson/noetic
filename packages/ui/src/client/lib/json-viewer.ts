@@ -40,7 +40,6 @@ export function formatJsonValue(value: unknown, key = '', depth = 0): FormattedN
       break;
     case 'object':
       if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        // biome-ignore lint: Type assertion necessary after type narrowing - object is confirmed to be a plain object
         nodeValue = value as Record<string, unknown>;
       } else {
         nodeValue = {};

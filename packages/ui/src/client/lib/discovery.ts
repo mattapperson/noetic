@@ -161,7 +161,9 @@ async function scanDirectoryWithFs(
     });
 
     for (const entry of entries) {
-      if (!entry.isFile()) continue;
+      if (!entry.isFile()) {
+        continue;
+      }
 
       // Get relative path from project root
       const relativePath = entry.parentPath

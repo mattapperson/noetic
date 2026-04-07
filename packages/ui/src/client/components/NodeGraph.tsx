@@ -245,7 +245,6 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     },
     [
       dragState,
-      view.zoom,
     ],
   );
 
@@ -272,6 +271,7 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       dragState,
       zoomStack,
       handleZoomBack,
+      handleNodeSelect,
     ],
   );
 

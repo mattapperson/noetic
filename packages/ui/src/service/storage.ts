@@ -481,6 +481,7 @@ export class TraceStorage {
       const content = await readFile(filePath, 'utf-8');
 
       // Strip trailing null bytes (0x00) that can corrupt JSON files
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally stripping null bytes
       const cleanContent = content.replace(/\x00+$/, '');
 
       // Check if file is empty after cleaning
@@ -530,6 +531,7 @@ export class TraceStorage {
       const content = await readFile(filePath, 'utf-8');
 
       // Strip trailing null bytes (0x00) that can corrupt JSON files
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally stripping null bytes
       const cleanContent = content.replace(/\x00+$/, '');
 
       // Use a reviver that skips the trace field to avoid parsing massive trace data

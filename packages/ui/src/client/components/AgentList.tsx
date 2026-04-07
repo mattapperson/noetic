@@ -214,7 +214,8 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
       }}
     >
       {/* Agent row - clicking anywhere expands/collapses, does NOT navigate */}
-      <div
+      <button
+        type="button"
         onClick={onToggleExpand}
         style={{
           display: 'flex',
@@ -225,30 +226,13 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
           backgroundColor: 'transparent',
           border: 'none',
           cursor: 'pointer',
-        }}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onToggleExpand();
-          }
+          textAlign: 'left',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+          color: 'inherit',
         }}
       >
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleExpand();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.stopPropagation();
-              onToggleExpand();
-            }
-          }}
-          role="button"
-          tabIndex={0}
+        <span
           style={{
             width: '16px',
             height: '16px',
@@ -257,15 +241,13 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
             justifyContent: 'center',
             backgroundColor: 'transparent',
             border: 'none',
-            cursor: 'pointer',
             color: 'var(--noetic-text-muted)',
             fontSize: '10px',
             padding: 0,
           }}
-          aria-label={isExpanded ? 'Collapse' : 'Expand'}
         >
           {isExpanded ? '▼' : '▶'}
-        </div>
+        </span>
 
         <span
           style={{
@@ -338,18 +320,10 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
           </span>
         </div>
 
-        <div
+        <button
+          type="button"
           onClick={handleDelete}
-          role="button"
-          tabIndex={isDeleting ? -1 : 0}
-          aria-disabled={isDeleting}
-          onKeyDown={(e) => {
-            if (!isDeleting && (e.key === 'Enter' || e.key === ' ')) {
-              e.preventDefault();
-              e.stopPropagation();
-              void handleDelete(e as unknown as React.MouseEvent);
-            }
-          }}
+          disabled={isDeleting}
           style={{
             width: '20px',
             height: '20px',
@@ -369,8 +343,8 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
           aria-label="Delete agent"
         >
           {isDeleting ? '...' : '×'}
-        </div>
-      </div>
+        </button>
+      </button>
 
       {isExpanded && (
         <div

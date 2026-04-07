@@ -76,7 +76,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
 
               {/* Children */}
               {selectedNode.children && selectedNode.children.length > 0 && (
-                <ChildrenSection children={selectedNode.children} />
+                <ChildrenSection childIds={selectedNode.children} />
               )}
             </div>
           )}
@@ -322,21 +322,21 @@ const formatDuration = (ms: number): string => {
 };
 
 interface ChildrenSectionProps {
-  children: string[];
+  childIds: string[];
 }
 
-const ChildrenSection: React.FC<ChildrenSectionProps> = ({ children }) => {
+const ChildrenSection: React.FC<ChildrenSectionProps> = ({ childIds }) => {
   return (
     <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--noetic-node-bg)] border-b border-[var(--noetic-border)]">
         <Layers className="w-3.5 h-3.5 text-[var(--noetic-accent)]" />
         <span className="text-xs font-medium text-[var(--noetic-text)]">
-          Children ({children.length})
+          Children ({childIds.length})
         </span>
       </div>
       <div className="p-3 space-y-1">
         {[
-          ...new Set(children),
+          ...new Set(childIds),
         ].map((childId) => (
           <div
             key={childId}

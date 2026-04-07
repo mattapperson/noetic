@@ -78,6 +78,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             {this.state.error?.message || 'An unexpected error occurred'}
           </p>
           <button
+            type="button"
             onClick={() =>
               this.setState({
                 hasError: false,

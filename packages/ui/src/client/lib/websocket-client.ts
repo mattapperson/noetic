@@ -16,7 +16,6 @@ function isWebSocketMessage(value: unknown): value is WebSocketMessage {
   }
   // Type guard requires casting from unknown to check properties
   // This is the only way to validate object structure at runtime in TypeScript
-  // biome-ignore lint: Type guard implementation requires property access on unknown
   const obj = value as {
     type: unknown;
   };

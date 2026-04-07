@@ -89,13 +89,19 @@ export const ConfirmDialogProvider: React.FC<ConfirmDialogProviderProps> = ({ ch
           }}
         >
           {/* Backdrop */}
-          <div
+          <button
+            type="button"
             style={{
               position: 'absolute',
               inset: 0,
               backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              border: 'none',
+              cursor: 'default',
+              padding: 0,
+              margin: 0,
             }}
             onClick={state.onCancel}
+            aria-label="Cancel"
           />
 
           {/* Dialog */}

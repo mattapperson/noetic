@@ -18,7 +18,10 @@ export const NoeticLogo: React.FC<LogoProps> = ({ size = 64, className = '' }) =
       width={size}
       height={size}
       className={className}
+      role="img"
+      aria-label="Noetic logo"
     >
+      <title>Noetic Logo</title>
       <rect width="100" height="100" rx="12" fill="#050505" />
       <text
         x="50"

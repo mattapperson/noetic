@@ -108,7 +108,10 @@ function createTestExporter(): {
       messages.push({
         type: 'trace.error',
         traceId,
-        error: { message: error.message, stack: error.stack },
+        error: {
+          message: error.message,
+          stack: error.stack,
+        },
       });
     } else {
       messages.push({
@@ -297,7 +300,10 @@ describe('exporter span processing', () => {
     const errorMsg = msgs.find((m) => m.type === 'trace.error');
     expect(errorMsg?.traceId).toBe(root.traceId);
 
-    const errorData = errorMsg?.error as { message: string; stack?: string };
+    const errorData = errorMsg?.error as {
+      message: string;
+      stack?: string;
+    };
     expect(errorData.message).toBe('TooManyRequestsResponseError: Provider returned error');
     expect(errorData.stack).toBeDefined();
   });
