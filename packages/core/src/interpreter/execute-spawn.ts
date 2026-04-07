@@ -157,6 +157,7 @@ export async function executeSpawn<TMemory, I, O>(
     state: cloneWithGuard(baseCtx.state, `Spawn '${step.id}'`),
     threadId: baseCtx.threadId,
     resourceId: baseCtx.resourceId,
+    span: baseCtx.span,
     layers: layers.length > 0 ? layers : undefined,
     unifiedTools: childUnifiedTools.length > 0 ? childUnifiedTools : undefined,
   });

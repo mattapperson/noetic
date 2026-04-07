@@ -34,6 +34,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         state: cloneWithGuard(ctx.state, `Fork '${stepId}'`),
         threadId,
         resourceId,
+        span: ctx.span,
       }),
   );
 }
