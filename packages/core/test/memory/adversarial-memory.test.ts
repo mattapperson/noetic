@@ -707,11 +707,8 @@ describe('Observational Memory: empty buffer at threshold', () => {
 
     // The observer should have been called since totalBufferTokens >= 100
     expect(observerCalledWith).not.toBeNull();
-    expect(
-      observerCalledWith !== null &&
-        Array.isArray(observerCalledWith) &&
-        observerCalledWith.length > 0,
-    ).toBe(true);
+    const calledWith = observerCalledWith!;
+    expect(calledWith.length > 0).toBe(true);
   });
 
   it('default observer produces misleading "Processed 0 items" on empty buffer', async () => {

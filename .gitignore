@@ -17,3 +17,4 @@ packages/web/.typecheck-snippets/
 packages/ui/dist/
 packages/ui/dist-server/
 examples/skippy/.env
+coverage/
