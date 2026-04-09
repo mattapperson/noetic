@@ -17,6 +17,7 @@ import {
   nodeFooterStyles,
   nodeHeaderStyles,
   STATUS_COLORS,
+  STATUS_ICONS,
   STATUS_LABELS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
@@ -70,7 +71,7 @@ export const ToolNode: React.FC<ToolNodeProps> = ({ node, selected = false, onCl
           <span>{STEP_KIND_ICONS.tool}</span>
           <span>{STEP_KIND_LABELS.tool}</span>
         </div>
-        <div style={statusBadgeStyles}>{STATUS_LABELS[node.status]}</div>
+        <div style={statusBadgeStyles}>{STATUS_ICONS[node.status]}</div>
       </div>
 
       {/* Content */}

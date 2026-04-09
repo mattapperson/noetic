@@ -99,6 +99,15 @@ export const STATUS_LABELS: Record<ExecutionStatus, string> = {
   cancelled: 'CANCELLED',
 };
 
+export const STATUS_ICONS: Record<ExecutionStatus, string> = {
+  completed: '✓',
+  running: '▶',
+  paused: '⏸',
+  error: '✗',
+  pending: '○',
+  cancelled: '⊘',
+};
+
 export const STEP_KIND_ICONS: Record<StepKind, string> = {
   run: '⚡',
   llm: '💬',
@@ -141,13 +150,14 @@ export function getNodeBaseStyles(kind: StepKind, status: ExecutionStatus): Reac
   const kindColors = NODE_KIND_COLORS[kind];
   const statusColors = STATUS_COLORS[status];
 
+  const borderColor = status === 'pending' ? kindColors.border : statusColors.border;
   return {
     width: '280px',
     minHeight: '120px',
-    borderRadius: '8px',
-    border: `2px solid ${status === 'pending' ? kindColors.border : statusColors.border}`,
+    borderRadius: '4px',
+    border: `calc(2px * var(--line-scale, 1)) solid ${borderColor}`,
     backgroundColor: status === 'pending' ? 'rgba(30, 41, 59, 0.8)' : statusColors.bg,
-    boxShadow: `0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 0 0 1px ${status === 'pending' ? kindColors.border : statusColors.border}40`,
+    boxShadow: `0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 0 0 calc(1px * var(--line-scale, 1)) ${borderColor}40`,
     fontFamily: 'system-ui, -apple-system, sans-serif',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
@@ -161,7 +171,7 @@ export const nodeHeaderStyles: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '12px 16px',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+  borderBottom: 'calc(1px * var(--line-scale, 1)) solid rgba(255, 255, 255, 0.1)',
 };
 
 export const nodeContentStyles: React.CSSProperties = {
@@ -173,7 +183,7 @@ export const nodeFooterStyles: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '8px 16px',
-  borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+  borderTop: 'calc(1px * var(--line-scale, 1)) solid rgba(255, 255, 255, 0.1)',
   fontSize: '12px',
   color: '#94a3b8',
 };
@@ -229,7 +239,8 @@ export function getRunningAnimationStyles(): React.CSSProperties {
 
 export function getSelectedStyles(): React.CSSProperties {
   return {
-    boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.5), 0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+    boxShadow:
+      '0 0 0 calc(3px * var(--line-scale, 1)) rgba(59, 130, 246, 0.5), 0 4px 6px -1px rgba(0, 0, 0, 0.1)',
   };
 }
 

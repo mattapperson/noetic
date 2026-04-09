@@ -2,7 +2,7 @@
  * Orthogonal edge router
  *
  * Hybrid strategy:
- * 1. Simple rules for common top-to-bottom flow
+ * 1. Simple rules for common flow (supports all 4 anchor sides)
  * 2. A* grid pathfinder for edges that would cross a node
  */
 
@@ -51,11 +51,20 @@ interface NeighborContext {
 
 //#endregion
 
+//#region Constants
+
+const CELL_SIZE = 20;
+const OBSTACLE_MARGIN = 20;
+const MAX_ASTAR_ITERATIONS = 5000;
+
+//#endregion
+
 //#region Public API
 
 /**
  * Route an edge between two nodes using orthogonal segments.
- * Returns grid-snapped waypoints forming horizontal/vertical polyline.
+ * Anchors attach to the top/right/bottom/left center of each node.
+ * Returns waypoints forming a horizontal/vertical polyline that avoids obstacles.
  */
 export function routeEdge(
   source: NodePosition,
@@ -119,87 +128,165 @@ export function routeAllEdges(
 
 //#region Anchor Points
 
-/** Get the anchor point on a node facing toward the target node */
+/** Check if outer fully contains inner */
+function containsNode(outer: NodePosition, inner: NodePosition): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+/**
+ * Pick the anchor side of `node` that faces toward `toward`.
+ *
+ * Special case: when one node contains the other (container↔child edges),
+ * use vertical anchors aligned to the inner node's center-x so the line
+ * drops straight down from the container top to the child top.
+ *
+ * Normal case: uses edge-to-edge gaps — the side with the most clearance
+ * toward the target wins, giving the route the most room.
+ */
 function getAnchor(node: NodePosition, toward: NodePosition): AnchorPoint {
+  const towardCx = toward.x + toward.width / 2;
+  const nodeCx = node.x + node.width / 2;
+
+  // Container → child: anchor at top of container, aligned to child's center-x
+  if (containsNode(node, toward)) {
+    return { x: towardCx, y: node.y, side: 'top' };
+  }
+
+  // Child → container: anchor at top of child (line goes up toward container header)
+  if (containsNode(toward, node)) {
+    return { x: nodeCx, y: node.y, side: 'top' };
+  }
+
   const cx = node.x + node.width / 2;
   const cy = node.y + node.height / 2;
-  const ty = toward.y + toward.height / 2;
 
-  const dy = ty - cy;
-
-  // Always prefer top/bottom anchors for vertical flow
-  if (dy >= 0) {
-    return {
-      x: snapToGrid(cx),
-      y: snapToGrid(node.y + node.height),
-      side: 'bottom',
-    };
+  interface Candidate {
+    side: Side;
+    gap: number;
+    x: number;
+    y: number;
   }
-  return {
-    x: snapToGrid(cx),
-    y: snapToGrid(node.y),
-    side: 'top',
-  };
+
+  const candidates: Candidate[] = [
+    { side: 'bottom', gap: toward.y - (node.y + node.height), x: cx, y: node.y + node.height },
+    { side: 'top', gap: node.y - (toward.y + toward.height), x: cx, y: node.y },
+    { side: 'right', gap: toward.x - (node.x + node.width), x: node.x + node.width, y: cy },
+    { side: 'left', gap: node.x - (toward.x + toward.width), x: node.x, y: cy },
+  ];
+
+  // Only consider sides with positive gap (target is on that side with clearance)
+  const valid = candidates.filter((c) => c.gap > 0);
+
+  if (valid.length === 0) {
+    // Nodes overlap — pick the side with the least negative gap
+    candidates.sort((a, b) => b.gap - a.gap);
+    return { x: candidates[0].x, y: candidates[0].y, side: candidates[0].side };
+  }
+
+  // Pick the side with the largest gap (most room for routing)
+  valid.sort((a, b) => b.gap - a.gap);
+  return { x: valid[0].x, y: valid[0].y, side: valid[0].side };
+}
+
+//#endregion
+
+//#region Helpers
+
+function isVerticalSide(side: Side): boolean {
+  return side === 'top' || side === 'bottom';
+}
+
+/** Remove duplicate consecutive points and collinear intermediate points */
+function simplifyWaypoints(points: Waypoint[]): Waypoint[] {
+  if (points.length <= 2) {
+    return points;
+  }
+
+  const result: Waypoint[] = [points[0]];
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = result[result.length - 1];
+    const curr = points[i];
+
+    // Skip duplicate points
+    if (prev.x === curr.x && prev.y === curr.y) {
+      continue;
+    }
+
+    // Check if collinear with the previous result point and the next input point
+    if (i < points.length - 1) {
+      const next = points[i + 1];
+      const collinearX = prev.x === curr.x && curr.x === next.x;
+      const collinearY = prev.y === curr.y && curr.y === next.y;
+      if (collinearX || collinearY) {
+        continue;
+      }
+    }
+
+    result.push(curr);
+  }
+
+  return result;
 }
 
 //#endregion
 
 //#region Simple Route
 
-/** Compute a simple orthogonal route using L-shaped or Z-shaped path */
+/**
+ * Compute an orthogonal route between two anchors using Z-shaped or L-shaped
+ * paths. The anchor sides determine the shape:
+ *   both vertical  → Z (vertical–horizontal–vertical)
+ *   both horizontal → Z (horizontal–vertical–horizontal)
+ *   mixed          → L (one turn)
+ */
 function computeSimpleRoute(source: AnchorPoint, target: AnchorPoint): Waypoint[] {
-  const sx = snapToGrid(source.x);
-  const sy = snapToGrid(source.y);
-  const tx = snapToGrid(target.x);
-  const ty = snapToGrid(target.y);
+  const start: Waypoint = { x: source.x, y: source.y };
+  const end: Waypoint = { x: target.x, y: target.y };
 
-  if (sx === tx) {
-    return [
-      {
-        x: sx,
-        y: sy,
-      },
-      {
-        x: tx,
-        y: ty,
-      },
-    ];
+  // Direct line (aligned anchors)
+  if (start.x === end.x || start.y === end.y) {
+    return [start, end];
   }
 
-  if (sy === ty) {
-    return [
-      {
-        x: sx,
-        y: sy,
-      },
-      {
-        x: tx,
-        y: ty,
-      },
-    ];
+  const srcVert = isVerticalSide(source.side);
+  const tgtVert = isVerticalSide(target.side);
+
+  // Both vertical: Z-shape vertical → horizontal → vertical
+  if (srcVert && tgtVert) {
+    const midY = snapToGrid((start.y + end.y) / 2);
+    return simplifyWaypoints([
+      start,
+      { x: start.x, y: midY },
+      { x: end.x, y: midY },
+      end,
+    ]);
   }
 
-  // Z-shaped route: vertical → horizontal → vertical
-  const midY = snapToGrid((sy + ty) / 2);
+  // Both horizontal: Z-shape horizontal → vertical → horizontal
+  if (!srcVert && !tgtVert) {
+    const midX = snapToGrid((start.x + end.x) / 2);
+    return simplifyWaypoints([
+      start,
+      { x: midX, y: start.y },
+      { x: midX, y: end.y },
+      end,
+    ]);
+  }
 
-  return [
-    {
-      x: sx,
-      y: sy,
-    },
-    {
-      x: sx,
-      y: midY,
-    },
-    {
-      x: tx,
-      y: midY,
-    },
-    {
-      x: tx,
-      y: ty,
-    },
-  ];
+  // Mixed: L-shape (one turn)
+  if (srcVert) {
+    // Vertical exit → horizontal entry: corner at (source.x, target.y)
+    return simplifyWaypoints([start, { x: start.x, y: end.y }, end]);
+  }
+
+  // Horizontal exit → vertical entry: corner at (target.x, source.y)
+  return simplifyWaypoints([start, { x: end.x, y: start.y }, end]);
 }
 
 //#endregion
@@ -268,10 +355,6 @@ function segmentIntersectsRect({
 
 //#region A* Pathfinder
 
-const CELL_SIZE = 20;
-const OBSTACLE_MARGIN = 20;
-const MAX_ASTAR_ITERATIONS = 5000;
-
 /** Compute an orthogonal route using A* on the snap grid */
 function computeAstarRoute({
   source,
@@ -305,22 +388,10 @@ function computeAstarRoute({
   const closedSet = new Set<string>();
 
   const directions: GridCell[] = [
-    {
-      x: CELL_SIZE,
-      y: 0,
-    },
-    {
-      x: -CELL_SIZE,
-      y: 0,
-    },
-    {
-      x: 0,
-      y: CELL_SIZE,
-    },
-    {
-      x: 0,
-      y: -CELL_SIZE,
-    },
+    { x: CELL_SIZE, y: 0 },
+    { x: -CELL_SIZE, y: 0 },
+    { x: 0, y: CELL_SIZE },
+    { x: 0, y: -CELL_SIZE },
   ];
 
   let iterations = 0;
@@ -332,7 +403,12 @@ function computeAstarRoute({
     const key = cellKey(current.cell);
 
     if (current.cell.x === endCell.x && current.cell.y === endCell.y) {
-      return reconstructPath(current);
+      const path = reconstructPath(current);
+      // Replace snapped first/last waypoints with exact anchor coordinates
+      // so the path meets the node edges precisely.
+      path[0] = { x: source.x, y: source.y };
+      path[path.length - 1] = { x: target.x, y: target.y };
+      return path;
     }
 
     closedSet.add(key);
@@ -350,10 +426,7 @@ function computeAstarRoute({
   }
 
   // Fallback: simple route if A* exhausts iterations
-  return computeSimpleRoute(source, {
-    ...target,
-    side: 'top',
-  });
+  return computeSimpleRoute(source, target);
 }
 
 function buildBlockedSet(

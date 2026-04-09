@@ -301,10 +301,10 @@ describe('node rendering integration', () => {
     const childPos = positions.find((p) => p.id === 'child');
 
     expect(loopPos!.scale).toBe(1);
-    expect(childPos!.scale).toBe(0.5);
-    // Child dimensions should be half of base size
-    expect(childPos!.width).toBe(140);
-    expect(childPos!.height).toBe(80); // snapped: 70 → 80
+    // Root container's children skip nesting scale (root is not rendered)
+    expect(childPos!.scale).toBe(1);
+    expect(childPos!.width).toBe(280);
+    expect(childPos!.height).toBe(140);
   });
 
   it('compounds scale recursively (0.25 at depth 2)', () => {
@@ -343,8 +343,9 @@ describe('node rendering integration', () => {
     const stepPos = positions.find((p) => p.id === 'step');
 
     expect(branchPos!.scale).toBe(1);
-    expect(loopPos!.scale).toBe(0.5);
-    expect(stepPos!.scale).toBe(0.25);
+    // Root's children skip nesting scale; grandchildren get 0.5
+    expect(loopPos!.scale).toBe(1);
+    expect(stepPos!.scale).toBe(0.5);
   });
 
   it('renders branch children side by side (horizontal)', () => {

@@ -53,7 +53,7 @@ Noetic UI design principles:
 - **Grid-snapped vertical layout** for execution flow (nodes snapped to a virtual grid, arranged top-to-bottom with parallel paths side-by-side)
 - **Three-panel layout:** left navigation, center canvas, right inspector
 - **Playback timeline** at bottom with transport controls
-- **Status badges** prominently displayed on each node
+- **Status icons** prominently displayed on each node (✓ ▶ ⏸ ✗ ○ ⊘)
 
 ### 1. Execution Visualization
 
@@ -73,7 +73,8 @@ The UI renders execution as a **grid-snapped flow diagram** with orthogonal edge
 
 - **Nested Container Scaling:**
   - Container nodes (loop, fork, branch, spawn) render as bounding boxes enclosing their children
-  - Children are scaled to **50%** of parent size at each nesting level (recursively: 50% → 25% → 12.5%)
+  - The root container is invisible — its children (top-level steps) render at **100%** size
+  - Below the root, children scale to **50%** of parent size at each nesting level (50% → 25% → 12.5%)
   - Container padding scales proportionally with the scale factor
   - Clicking a container node triggers an animated zoom transition centering the container so children appear at 100% base size
   - A breadcrumb trail tracks zoom depth; clicking background or back button animates to the previous zoom level
@@ -87,17 +88,16 @@ The UI renders execution as a **grid-snapped flow diagram** with orthogonal edge
 - **Node Cards** display:
   - Step kind badge with icon (LLM 💬, TOOL 🔧, FORK ⫚, etc.)
   - Step title and ID
-  - Status badge with color coding
+  - Status icon with color coding (✓ completed, ▶ running, ✗ error, etc.)
   - Duration and execution metrics
   - Connection edges flowing to next step
 
 - **Edges:**
   - **Orthogonal routing:** All edges travel in horizontal/vertical segments only (90° increments) with a consistent corner radius at turns
-  - **Connection points:** Edges connect from/to the center point of the top, right, bottom, or left edge of a node (whichever maintains perpendicular exit/entry)
-  - **Obstacle avoidance:** Edges route around nodes, never through them
+  - **Connection points:** Edges connect from/to the center point of the top, right, bottom, or left edge of a node. The side with the largest edge-to-edge gap toward the target is preferred. For container→child edges (where one node contains another), vertical anchors aligned to the child's center-x produce clean straight-down connections.
+  - **Obstacle avoidance:** Edges route around nodes, never through them. Simple routes use Z-shaped or L-shaped paths; when these would cross a node, A* pathfinding finds an obstacle-free route.
   - **Edge spacing:** Parallel edges are offset by several grid cells so they remain easy to follow
   - **Thin lines:** 1.5px stroke width with unfilled arrowheads at the terminus
-  - **Active execution:** Animated dots traveling along edges
 
 - **Edge Visual Language** (color encodes the structural pattern, not the node status):
 
@@ -598,8 +598,9 @@ function snapToGrid(value: number, cellSize: number): number {
 
 4. **Recursive Container Scaling:**
    - Container nodes (loop, fork, branch, spawn) render as bounding boxes
-   - Children are scaled to **50%** of parent size at each nesting level
-   - Scale compounds recursively: depth 1 = 50%, depth 2 = 25%, depth 3 = 12.5%
+   - The root container is invisible; its children render at 100% size
+   - Below the root, children scale to **50%** of parent size at each nesting level
+   - Scale compounds recursively from the first visible container: 50% → 25% → 12.5%
    - Container padding scales proportionally with the scale factor
    - `NodePosition` includes a `scale` field for rendering
 
@@ -640,14 +641,16 @@ Edges are rendered as **polylines of horizontal and vertical segments** (90° in
 
 **Hybrid Routing Strategy:**
 
-1. **Simple rule-based router** (fast path): Used for the common case of sequential top-to-bottom flow.
-   - Determines which side of source/target to connect (closest center-edge points maintaining perpendicular exit/entry)
-   - For downward flow: bottom-center of source → top-center of target, with one horizontal jog if nodes are misaligned
+1. **Simple rule-based router** (fast path): Used for the common case where a direct path doesn't cross any node.
+   - Picks the anchor side with the largest edge-to-edge gap toward the target
+   - For container→child edges (containment), uses vertical anchors aligned to the child's center-x
+   - Produces Z-shaped (two turns) or L-shaped (one turn) orthogonal paths depending on anchor sides
    - Connection points are always the center of a node's top, right, bottom, or left edge
 
-2. **A* grid pathfinder** (fallback): Used when a simple path would cross a node bounding box.
+2. **A* grid pathfinder** (fallback): Used when the simple path would cross a node bounding box.
    - Overlays the snap grid with node bounding boxes marked as blocked (with margin)
    - Finds shortest orthogonal path avoiding all obstacles
+   - First/last waypoints are pinned to exact anchor coordinates for clean node attachment
    - Used for loop-back edges, cross-container edges, and any path that would intersect a node
 
 **Edge Rendering:**
@@ -1235,15 +1238,10 @@ The left sidebar serves as an agent and execution history browser:
 When an agent is expanded, show its execution runs:
 - **Run entries** showing:
   - Run timestamp (relative: "2 min ago", absolute on hover)
-  - Status badge (RUNNING, COMPLETED, ERROR, PAUSED)
+  - Status icon (🟡 running, 🟢 completed, 🔴 error, 🟠 paused)
   - Duration (e.g., "25.5 s", "17m 43s")
   - Input preview (truncated first 50 chars)
-  - Token count and cost
-  - **Memory indicator** - color-coded chip showing trace size:
-    - 🟢 Green: < 50 MB (healthy)
-    - 🟡 Yellow: 50-200 MB (warning)
-    - 🟠 Orange: 200-500 MB (caution)
-    - 🔴 Red: > 500 MB (high memory usage)
+  - Token counts (input↑ output↓) and cost
 - **Live runs** animate with pulsing border
 - **Click to load** the run's trace into the center canvas
 - **Context menu** (right-click) for actions:
@@ -1403,15 +1401,14 @@ registerAgent({
 ```
 
 - **Card styling:**
-  - Rounded corners (8px radius)
+  - Rounded corners (4px radius)
   - Subtle border with color-coded accent
   - Semi-transparent dark background
   - Shadow for depth
   
 - **Header row:**
-  - Step kind icon + label (e.g., "ACP", "ACTION")
-  - Branch/fork identifier (e.g., "BRANCH 2", "BRANCH 3")
-  - Status badge (DONE, QUEUED, FOCUS, ERROR)
+  - Step kind icon + label (e.g., "LLM", "TOOL")
+  - Status icon (✓ ▶ ⏸ ✗ ○ ⊘) with color coding
   
 - **Content:**
   - Bold step title
@@ -1669,8 +1666,7 @@ Each step kind has a distinct visual treatment:
 
 **Node Running:**
 - Animated border (pulsing)
-- Status badge shows "RUNNING"
-- Edge animates with traveling dot
+- Status icon shows ▶
 - Duration counter increments live
 
 **Node Paused (Breakpoint):**

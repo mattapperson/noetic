@@ -3,7 +3,7 @@
  * Displays agents with expand/collapse functionality
  */
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import React from 'react';
 import { useHasHydrated } from '../hooks/useHasHydrated';
 import { useAgentStore } from '../stores/agent';
@@ -60,10 +60,9 @@ function getAgentStatus(agent: Agent): keyof typeof STATUS_ICONS {
 }
 
 export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
-  const router = useRouter();
   const params = useParams();
   const selectedAgentId = params?.agentSlug as string | undefined;
-  const { expandedAgentIds, toggleAgentExpanded, removeAgent } = useAgentStore();
+  const { expandedAgentIds, toggleAgentExpanded, expandAgent, removeAgent } = useAgentStore();
   const hasHydrated = useHasHydrated();
 
   const handleDeleteAgent = React.useCallback(
@@ -75,18 +74,24 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
     ],
   );
 
-  const handleSelectAgent = React.useCallback(
-    (agentId: string) => {
-      router.push(`/${agentId}`);
-    },
-    [
-      router,
-    ],
-  );
+  // Auto-expand the agent that owns the currently selected run (from URL).
+  // Use getState() to read expandedAgentIds inside the effect — avoids
+  // depending on the Set reference which changes on every expand/collapse.
+  React.useEffect(() => {
+    if (hasHydrated && selectedAgentId) {
+      const { expandedAgentIds: current } = useAgentStore.getState();
+      if (!current.has(selectedAgentId)) {
+        expandAgent(selectedAgentId);
+      }
+    }
+  }, [
+    hasHydrated,
+    selectedAgentId,
+    expandAgent,
+  ]);
 
   // During SSR and initial hydration, don't use persisted state to avoid mismatches
   const safeExpandedIds = hasHydrated ? expandedAgentIds : new Set<string>();
-  const safeSelectedId = hasHydrated ? selectedAgentId : null;
 
   return (
     <div
@@ -123,9 +128,7 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
             key={agent.id}
             agent={agent}
             isExpanded={safeExpandedIds.has(agent.id)}
-            isSelected={safeSelectedId === agent.id}
             onToggleExpand={() => toggleAgentExpanded(agent.id)}
-            onSelect={() => handleSelectAgent(agent.id)}
             onDelete={handleDeleteAgent}
           />
         ))
@@ -137,18 +140,14 @@ export const AgentList: React.FC<AgentListProps> = ({ agents }) => {
 interface AgentEntryProps {
   agent: Agent;
   isExpanded: boolean;
-  isSelected: boolean;
   onToggleExpand: () => void;
-  onSelect: () => void;
   onDelete?: (agentId: string) => void;
 }
 
 const AgentEntry: React.FC<AgentEntryProps> = ({
   agent,
   isExpanded,
-  isSelected,
   onToggleExpand,
-  _onSelect,
   onDelete,
 }) => {
   const status = getAgentStatus(agent);
@@ -209,8 +208,6 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
       style={{
         borderRadius: '4px',
         overflow: 'hidden',
-        backgroundColor: isSelected ? 'var(--noetic-selected-bg)' : 'transparent',
-        transition: 'background-color 0.15s',
       }}
     >
       {/* Agent row - clicking anywhere expands/collapses, does NOT navigate */}

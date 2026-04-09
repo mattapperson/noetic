@@ -11,6 +11,7 @@ import { useAgentStore } from '../stores/agent';
 import { useStorageStore } from '../stores/storage';
 import type { Agent } from '../types/agent';
 import AgentList from './AgentList';
+import GettingStartedGuide from './GettingStartedGuide';
 import StorageBar from './StorageBar';
 import ThemeToggle from './ThemeToggle';
 
@@ -33,6 +34,7 @@ export const AgentBrowser: React.FC = () => {
 
   const { clearAllStorage } = useStorageStore();
   const [searchQuery, setSearchQuery] = useState(agentFilter.searchQuery);
+  const [_isLoading, _setIsLoading] = useState(true);
 
   // Use ref to track fetch state - survives React StrictMode and prevents tight loops
   const hasFetchedRef = useRef(false);
@@ -102,6 +104,7 @@ export const AgentBrowser: React.FC = () => {
       } finally {
         hasFetchedRef.current = true;
         isFetchingRef.current = false;
+        _setIsLoading(false);
       }
     };
 
@@ -536,7 +539,7 @@ export const AgentBrowser: React.FC = () => {
           padding: '8px',
         }}
       >
-        {isFetchingRef.current && agents.length === 0 ? (
+        {_isLoading && agents.length === 0 ? (
           <div
             style={{
               display: 'flex',
@@ -557,16 +560,7 @@ export const AgentBrowser: React.FC = () => {
             Loading agents...
           </div>
         ) : sortedAgents.length === 0 ? (
-          <div
-            style={{
-              padding: '16px',
-              textAlign: 'center',
-              color: 'var(--noetic-text-muted)',
-              fontSize: '12px',
-            }}
-          >
-            No agents discovered
-          </div>
+          <GettingStartedGuide />
         ) : (
           <AgentList agents={sortedAgents} />
         )}

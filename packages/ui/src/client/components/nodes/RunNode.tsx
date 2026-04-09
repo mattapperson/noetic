@@ -16,6 +16,7 @@ import {
   nodeFooterStyles,
   nodeHeaderStyles,
   STATUS_COLORS,
+  STATUS_ICONS,
   STATUS_LABELS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
@@ -69,7 +70,7 @@ export const RunNode: React.FC<RunNodeProps> = ({ node, selected = false, onClic
           <span>{STEP_KIND_ICONS.run}</span>
           <span>{STEP_KIND_LABELS.run}</span>
         </div>
-        <div style={statusBadgeStyles}>{STATUS_LABELS[node.status]}</div>
+        <div style={statusBadgeStyles}>{STATUS_ICONS[node.status]}</div>
       </div>
 
       {/* Content */}

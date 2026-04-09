@@ -8,7 +8,7 @@
  */
 
 import type { ExecutionNode, NodeEdge, NodePosition } from '../types';
-import { snapToGrid } from './grid';
+import { snapToGrid, snapToGridCeil } from './grid';
 
 //#region Types
 
@@ -31,9 +31,9 @@ const DEFAULT_OPTIONS: SequentialLayoutOptions = {
   nodeHeight: 140,
   verticalSpacing: 120,
   horizontalSpacing: 120,
-  containerPadTop: 50,
-  containerPadSide: 30,
-  containerPadBottom: 30,
+  containerPadTop: 60,
+  containerPadSide: 50,
+  containerPadBottom: 40,
   startX: 60,
   startY: 60,
   gridCellSize: 20,
@@ -53,6 +53,9 @@ interface LayoutContext {
   opts: SequentialLayoutOptions;
   positions: NodePosition[];
   edges: NodeEdge[];
+  /** The root node ID — its children skip the nesting scale since the root
+   *  container is not rendered, so top-level nodes should appear at 100%. */
+  rootNodeId: string;
 }
 
 /** Position input for layout functions */
@@ -87,6 +90,7 @@ export function calculateSequentialLayout(
     opts,
     positions,
     edges,
+    rootNodeId,
   };
 
   const roots = findRoots(nodes, rootNodeId);
@@ -166,10 +170,11 @@ function layoutNode(placement: LayoutPlacement, ctx: LayoutContext): LayoutResul
   const isContainer = children.length > 0;
 
   if (!isContainer) {
-    const width = snapToGrid(ctx.opts.nodeWidth * scale);
-    const height = snapToGrid(ctx.opts.nodeHeight * scale);
-    const snappedX = snapToGrid(x);
-    const snappedY = snapToGrid(y);
+    const gridSize = ctx.opts.gridCellSize * scale;
+    const width = snapToGrid(ctx.opts.nodeWidth * scale, gridSize);
+    const height = snapToGrid(ctx.opts.nodeHeight * scale, gridSize);
+    const snappedX = snapToGrid(x, gridSize);
+    const snappedY = snapToGrid(y, gridSize);
     ctx.positions.push({
       id: nodeId,
       x: snappedX,
@@ -231,15 +236,17 @@ function layoutSequentialContainer(
 ): LayoutResult {
   const { nodeId, node, children, x, y, scale } = args;
   const { opts } = ctx;
-  const childScale = scale * opts.nestingScale;
-  const padTop = snapToGrid(opts.containerPadTop * scale);
-  const padSide = snapToGrid(opts.containerPadSide * scale);
-  const padBottom = snapToGrid(opts.containerPadBottom * scale);
-  const snappedX = snapToGrid(x);
-  const snappedY = snapToGrid(y);
+  const isRoot = nodeId === ctx.rootNodeId;
+  const childScale = isRoot ? scale : scale * opts.nestingScale;
+  const gridSize = opts.gridCellSize * scale;
+  const padTop = snapToGrid(opts.containerPadTop * scale, gridSize);
+  const padSide = snapToGrid(opts.containerPadSide * scale, gridSize);
+  const padBottom = snapToGrid(opts.containerPadBottom * scale, gridSize);
+  const snappedX = snapToGrid(x, gridSize);
+  const snappedY = snapToGrid(y, gridSize);
   const innerX = snappedX + padSide;
   let innerY = snappedY + padTop;
-  let maxChildWidth = snapToGrid(opts.nodeWidth * childScale);
+  let maxChildWidth = snapToGrid(opts.nodeWidth * childScale, gridSize);
   let lastBottom = snappedY + padTop;
 
   for (let i = 0; i < children.length; i++) {
@@ -255,7 +262,7 @@ function layoutSequentialContainer(
     );
     maxChildWidth = Math.max(maxChildWidth, result.width);
     lastBottom = result.bottom;
-    innerY = result.bottom + opts.verticalSpacing;
+    innerY = result.bottom + snapToGrid(opts.verticalSpacing * scale, gridSize);
 
     // Edge from this child to the next
     if (i < children.length - 1) {
@@ -281,8 +288,8 @@ function layoutSequentialContainer(
     });
   }
 
-  const containerWidth = snapToGrid(maxChildWidth + padSide * 2);
-  const containerHeight = snapToGrid(lastBottom - snappedY + padBottom);
+  const containerWidth = snapToGrid(maxChildWidth + padSide * 2, gridSize);
+  const containerHeight = snapToGridCeil(lastBottom - snappedY + padBottom, gridSize);
 
   ctx.positions.push({
     id: nodeId,
@@ -317,15 +324,17 @@ interface ForkContainerArgs {
 function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): LayoutResult {
   const { nodeId, children, x, y, scale } = args;
   const { opts } = ctx;
-  const childScale = scale * opts.nestingScale;
-  const padTop = snapToGrid(opts.containerPadTop * scale);
-  const padSide = snapToGrid(opts.containerPadSide * scale);
-  const padBottom = snapToGrid(opts.containerPadBottom * scale);
-  const snappedX = snapToGrid(x);
-  const snappedY = snapToGrid(y);
+  const isRoot = nodeId === ctx.rootNodeId;
+  const childScale = isRoot ? scale : scale * opts.nestingScale;
+  const gridSize = opts.gridCellSize * scale;
+  const padTop = snapToGrid(opts.containerPadTop * scale, gridSize);
+  const padSide = snapToGrid(opts.containerPadSide * scale, gridSize);
+  const padBottom = snapToGrid(opts.containerPadBottom * scale, gridSize);
+  const snappedX = snapToGrid(x, gridSize);
+  const snappedY = snapToGrid(y, gridSize);
   const innerY = snappedY + padTop;
   let innerX = snappedX + padSide;
-  let maxChildHeight = snapToGrid(opts.nodeHeight * childScale);
+  let maxChildHeight = snapToGrid(opts.nodeHeight * childScale, gridSize);
 
   for (const childId of children) {
     const result = layoutNode(
@@ -338,7 +347,7 @@ function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): Layou
       ctx,
     );
     maxChildHeight = Math.max(maxChildHeight, result.height);
-    innerX += result.width + opts.horizontalSpacing;
+    innerX += result.width + snapToGrid(opts.horizontalSpacing * scale, gridSize);
   }
 
   // Add edges from container to each child path
@@ -365,9 +374,10 @@ function layoutForkContainer(args: ForkContainerArgs, ctx: LayoutContext): Layou
     }
   }
 
-  const containerWidth = snapToGrid(innerX - snappedX - opts.horizontalSpacing + padSide);
-  const containerHeight = snapToGrid(maxChildHeight + padTop + padBottom);
-  const finalWidth = Math.max(containerWidth, snapToGrid(opts.nodeWidth * scale));
+  const scaledHSpacing = snapToGrid(opts.horizontalSpacing * scale, gridSize);
+  const containerWidth = snapToGrid(innerX - snappedX - scaledHSpacing + padSide, gridSize);
+  const containerHeight = snapToGridCeil(maxChildHeight + padTop + padBottom, gridSize);
+  const finalWidth = Math.max(containerWidth, snapToGrid(opts.nodeWidth * scale, gridSize));
 
   ctx.positions.push({
     id: nodeId,

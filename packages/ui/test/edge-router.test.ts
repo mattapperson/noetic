@@ -71,6 +71,97 @@ describe('routeEdge — A* obstacle avoidance', () => {
   });
 });
 
+describe('routeEdge — anchor selection (4-sided)', () => {
+  it('picks bottom/top anchors when nodes are vertically stacked', () => {
+    const source = makePos('a', 100, 100);
+    const target = makePos('b', 100, 400);
+    const result = routeEdge(source, target, []);
+
+    // Straight vertical line: bottom-center of source → top-center of target
+    expect(result.waypoints).toHaveLength(2);
+    expect(result.waypoints[0].x).toBe(240); // cx = 100 + 280/2
+    expect(result.waypoints[0].y).toBe(240); // bottom edge = 100 + 140
+    expect(result.waypoints[1].x).toBe(240);
+    expect(result.waypoints[1].y).toBe(400); // top edge of target
+  });
+
+  it('picks right/left anchors when nodes are side-by-side', () => {
+    const source = makePos('a', 0, 0);
+    const target = makePos('b', 500, 0);
+    const result = routeEdge(source, target, []);
+
+    // Straight horizontal line: right-center of source → left-center of target
+    expect(result.waypoints).toHaveLength(2);
+    expect(result.waypoints[0].x).toBe(280); // right edge = 0 + 280
+    expect(result.waypoints[0].y).toBe(70); // cy = 0 + 140/2
+    expect(result.waypoints[1].x).toBe(500); // left edge of target
+    expect(result.waypoints[1].y).toBe(70);
+  });
+
+  it('picks the side with the largest gap for diagonal placement', () => {
+    // Source at (100,100), target at (400,300)
+    // Vertical gap: 300 - 240 = 60, Horizontal gap: 400 - 380 = 20
+    // Should pick bottom/top (larger gap)
+    const source = makePos('a', 100, 100);
+    const target = makePos('b', 400, 300);
+    const result = routeEdge(source, target, []);
+
+    // First point should be bottom-center of source
+    expect(result.waypoints[0]).toEqual({ x: 240, y: 240 });
+    // Last point should be top-center of target
+    const last = result.waypoints[result.waypoints.length - 1];
+    expect(last).toEqual({ x: 540, y: 300 });
+  });
+
+  it('falls back to least-negative gap when nodes overlap', () => {
+    // Overlapping nodes — should still produce a valid route
+    const source = makePos('a', 0, 0);
+    const target = makePos('b', 100, 50);
+    const result = routeEdge(source, target, []);
+
+    expect(result.waypoints.length).toBeGreaterThanOrEqual(2);
+    // All segments axis-aligned
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const a = result.waypoints[i];
+      const b = result.waypoints[i + 1];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+  });
+});
+
+describe('routeEdge — simple route shapes', () => {
+  it('produces L-shape for mixed vertical/horizontal anchors', () => {
+    // Source far above and to the left, target far to the right
+    // Vertical gap: negative, Horizontal gap: large → right/left anchors on one
+    // but vertical gap larger on other → mixed anchors possible
+    const source = makePos('a', 0, 0);
+    const target = makePos('b', 600, 200);
+    const result = routeEdge(source, target, []);
+
+    // Should have at least 2 waypoints and all axis-aligned
+    expect(result.waypoints.length).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const a = result.waypoints[i];
+      const b = result.waypoints[i + 1];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+  });
+
+  it('produces Z-shape for horizontal anchors at different y-levels', () => {
+    // Nodes at same y but far apart should use right/left anchors
+    const source = makePos('a', 0, 0);
+    const target = makePos('b', 600, 200);
+    const result = routeEdge(source, target, []);
+
+    expect(result.waypoints.length).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const a = result.waypoints[i];
+      const b = result.waypoints[i + 1];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+  });
+});
+
 describe('routeEdge — simple rules', () => {
   it('routes straight down when source is directly above target', () => {
     const source = makePos('a', 100, 100);

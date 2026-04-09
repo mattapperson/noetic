@@ -7,9 +7,26 @@ import { deserialize, ensureMap } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
 import { usePlaybackStore } from '../stores/playbackStore';
-import { useTimelineStore } from '../stores/timelineStore';
+import { markerIdForNode, useTimelineStore } from '../stores/timelineStore';
 import type { Run } from '../types/agent';
+import type { ExecutionTrace } from '../types';
 import { AgentBrowser } from './AgentBrowser';
+
+/** Shared selector: returns the trace for the currently selected run, or null.
+ *  Referentially stable as long as the trace object on the run doesn't change. */
+const selectCurrentTrace = (s: { selectedRunId: string | null; agents: Array<{ runs: Array<{ id: string; trace?: ExecutionTrace }> }> }): ExecutionTrace | null => {
+  if (!s.selectedRunId) {
+    return null;
+  }
+  for (const agent of s.agents) {
+    for (const run of agent.runs) {
+      if (run.id === s.selectedRunId) {
+        return run.trace ?? null;
+      }
+    }
+  }
+  return null;
+};
 import { NodeGraph } from './NodeGraph';
 import { NodeInspector } from './NodeInspector';
 import { NoeticLogo } from './NoeticLogo';
@@ -119,8 +136,8 @@ interface CenterCanvasProps {
 }
 
 const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelect }) => {
+  const currentTrace = useAgentStore(selectCurrentTrace);
   const runId = useAgentStore((s) => s.selectedRunId);
-  const { agents } = useAgentStore();
 
   // Timeline / playback state for time-travel rendering
   const currentStepIndex = usePlaybackStore((s) => s.currentStepIndex);
@@ -128,9 +145,10 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelec
   const markers = useTimelineStore((s) => s.markers);
 
   // Compute the set of node IDs that have been executed up to the current timeline position.
-  // When playback is idle or live, all nodes are shown with their real status.
+  // In live mode, all nodes are shown with their real status.
+  // In all other states (idle, playing, paused), only nodes up to currentStepIndex are visible.
   const executedNodeIds = useMemo(() => {
-    if (playbackState === 'idle' || playbackState === 'live' || markers.length === 0) {
+    if (playbackState === 'live' || markers.length === 0) {
       return undefined;
     }
     const ids = new Set<string>();
@@ -143,10 +161,6 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelec
     playbackState,
     markers,
   ]);
-
-  // Find the selected run and its trace across all agents
-  const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
-  const currentTrace = currentRun?.trace ?? null;
 
   return (
     <div className="flex-1 h-full bg-[var(--noetic-canvas-bg)] relative overflow-hidden">
@@ -218,9 +232,17 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [_isLoadingRun, setIsLoadingRun] = useState(false);
 
-  // Handle timeline marker click → select node in graph + inspector
+  // Handle timeline marker click → select + focus node in graph + inspector
   const handleTimelineChange = useCallback((_stepIndex: number, nodeId: string) => {
     setSelectedNodeId(nodeId);
+    // Also sync the timeline marker so playhead and step index stay consistent
+    const { markers, selectMarker, setPlayheadPosition } = useTimelineStore.getState();
+    const markerId = markerIdForNode(nodeId);
+    const marker = markers.find((m) => m.id === markerId);
+    if (marker) {
+      selectMarker(markerId);
+      setPlayheadPosition(marker.position);
+    }
   }, []);
 
   // Handle node click in graph → update timeline marker
@@ -230,7 +252,7 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
       return;
     }
     const { markers, selectMarker, setPlayheadPosition } = useTimelineStore.getState();
-    const markerId = `marker-${nodeId}`;
+    const markerId = markerIdForNode(nodeId);
     const marker = markers.find((m) => m.id === markerId);
     if (marker) {
       selectMarker(markerId);
@@ -242,30 +264,49 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
     }
   }, []);
 
-  // Get current run and nodes
+  // Sync selected node when transport controls change the step index
+  const currentStepIndex = usePlaybackStore((s) => s.currentStepIndex);
+  const markers = useTimelineStore((s) => s.markers);
+  useEffect(() => {
+    const marker = markers[currentStepIndex];
+    if (marker) {
+      setSelectedNodeId(marker.nodeId);
+    }
+  }, [
+    currentStepIndex,
+    markers,
+  ]);
+
+  // Use selectors to derive only the data we need — avoids re-rendering when
+  // unrelated agent store fields change (e.g. hover prefetch on a different run).
   const agentSlug = useAgentStore((s) => s.selectedAgentId);
   const runId = useAgentStore((s) => s.selectedRunId);
-  const { agents, updateRun } = useAgentStore();
-  const { setTrace } = useExecutionStore();
-  const currentRun = runId ? agents.flatMap((a) => a.runs).find((r) => r.id === runId) : null;
+  const currentTrace = useAgentStore(selectCurrentTrace);
+  // Track whether the selected agent exists in the store (needed to re-run
+  // the fetch effect after AgentBrowser populates the store on hard refresh).
+  const agentLoaded = useAgentStore((s) =>
+    s.selectedAgentId ? s.agents.some((a) => a.id === s.selectedAgentId) : false,
+  );
   // Ensure nodes is a Map using ensureMap
-  const nodes = ensureMap<string, import('../types').ExecutionNode>(
-    currentRun?.trace?.nodes ?? new Map(),
+  const nodes = useMemo(
+    () =>
+      ensureMap<string, import('../types').ExecutionNode>(
+        currentTrace?.nodes ?? new Map(),
+      ),
+    [currentTrace],
   );
 
-  // Fetch run data when URL has runId but run isn't loaded yet
+  // Fetch run data when URL has runId but run isn't loaded yet.
+  // Depends on `agentLoaded` so it re-runs after AgentBrowser populates the
+  // store on hard refresh (updateRun no-ops if the agent doesn't exist yet).
   useEffect(() => {
-    if (!agentSlug || !runId || currentRun?.trace) {
-      return; // No need to fetch
+    if (!agentSlug || !runId || currentTrace || !agentLoaded) {
+      return;
     }
-
-    // Check if we already have the run but without trace data
-    const _runExists = agents.flatMap((a) => a.runs).find((r) => r.id === runId);
 
     const fetchRun = async () => {
       setIsLoadingRun(true);
       try {
-        console.log(`[ResizablePanels] Fetching run ${runId} from API...`);
         const response = await fetch(
           `/api/agents/${encodeURIComponent(agentSlug)}/runs/${encodeURIComponent(runId)}`,
         );
@@ -273,11 +314,10 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
           const data = await response.json();
           if (data.success && data.data) {
             const fullRun = deserialize<Run>(data.data);
-            updateRun(agentSlug, runId, fullRun);
+            useAgentStore.getState().updateRun(agentSlug, runId, fullRun);
             if (fullRun.trace) {
-              setTrace(runId, fullRun.trace);
+              useExecutionStore.getState().setTrace(runId, fullRun.trace);
             }
-            console.log(`[ResizablePanels] Loaded run ${runId}`);
           }
         }
       } catch (error) {
@@ -291,10 +331,8 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   }, [
     agentSlug,
     runId,
-    currentRun?.trace,
-    agents,
-    updateRun,
-    setTrace,
+    currentTrace,
+    agentLoaded,
   ]);
 
   return (

@@ -7,6 +7,11 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { ExecutionNode, StepKind } from '../types';
 
+/** Canonical marker ID for a given node — keeps the convention in one place */
+export function markerIdForNode(nodeId: string): string {
+  return `marker-${nodeId}`;
+}
+
 export interface TimelineMarker {
   id: string;
   nodeId: string;
@@ -135,7 +140,7 @@ export const useTimelineStore = create<TimelineState>()(
       const totalDuration = endTime - startTime;
 
       const markers: TimelineMarker[] = sortedNodes.map((node) => ({
-        id: `marker-${node.id}`,
+        id: markerIdForNode(node.id),
         nodeId: node.id,
         stepKind: node.kind,
         timestamp: node.startTime,
@@ -176,7 +181,7 @@ export const useTimelineStore = create<TimelineState>()(
     addMarker: (node: ExecutionNode) => {
       const { startTime, totalDuration, markers } = get();
 
-      const markerId = `marker-${node.id}`;
+      const markerId = markerIdForNode(node.id);
 
       // Skip if marker for this node already exists
       if (markers.some((m) => m.id === markerId)) {

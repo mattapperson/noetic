@@ -11,7 +11,6 @@ import { deserialize } from '../lib/serialization';
 import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
 import type { Run as AgentRun } from '../types/agent';
-import MemoryIndicator from './MemoryIndicator';
 
 interface RunListProps {
   agentId: string;
@@ -115,29 +114,13 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
     }
   };
 
-  // Prefetch only fetches data without navigating
-  const prefetchRun = async (run: AgentRun) => {
-    try {
-      const response = await fetch(
-        `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`,
-      );
-      if (response.ok) {
-        const data: {
-          success: boolean;
-          data?: unknown;
-        } = await response.json();
-        if (data.success && data.data) {
-          const fullRun: AgentRun = deserialize<AgentRun>(data.data);
-          updateRun(agentId, run.id, fullRun);
-          if (fullRun.trace) {
-            setTrace(run.id, fullRun.trace);
-          }
-        }
-      }
-    } catch (error) {
-      // Silently fail on prefetch error
-      console.debug('[RunList] Prefetch failed:', error);
-    }
+  // Warm the HTTP cache so clicking a run loads instantly, but do NOT
+  // touch any store — updating agents/execution state on hover causes
+  // the graph to re-layout and reset zoom/selection.
+  const prefetchRun = (run: AgentRun): void => {
+    fetch(
+      `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`,
+    ).catch(() => {});
   };
 
   return (
@@ -163,7 +146,6 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
         runs.map((run) => (
           <RunEntry
             key={run.id}
-            agentId={agentId}
             run={run}
             isSelected={selectedRunId === run.id}
             onClick={() => handleRunClick(run)}
@@ -176,14 +158,13 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
 };
 
 interface RunEntryProps {
-  agentId: string;
   run: AgentRun;
   isSelected: boolean;
   onClick: () => void;
   onPrefetch: () => void;
 }
 
-const RunEntry: React.FC<RunEntryProps> = ({ _agentId, run, isSelected, onClick, onPrefetch }) => {
+const RunEntry: React.FC<RunEntryProps> = ({ run, isSelected, onClick, onPrefetch }) => {
   const isLive = run.isLive || run.status === 'running';
   const [isClient, setIsClient] = useState(false);
   const elementRef = useRef<HTMLButtonElement>(null);
@@ -266,7 +247,16 @@ const RunEntry: React.FC<RunEntryProps> = ({ _agentId, run, isSelected, onClick,
             </span>
           )}
         </div>
-        <MemoryIndicator bytes={run.memoryBytes} size="sm" />
+        <span
+          style={{
+            fontSize: '10px',
+            color: 'var(--noetic-text-muted)',
+            fontFamily: 'monospace',
+            flexShrink: 0,
+          }}
+        >
+          {(run.totalTokens?.input ?? 0).toLocaleString()}↑ {(run.totalTokens?.output ?? 0).toLocaleString()}↓
+        </span>
       </div>
 
       <div

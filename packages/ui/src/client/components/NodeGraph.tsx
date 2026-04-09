@@ -16,6 +16,7 @@ import {
   EDGE_STYLES,
   NODE_KIND_COLORS,
   STATUS_COLORS,
+  STATUS_ICONS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
 } from './nodes/shared';
@@ -52,7 +53,7 @@ interface ZoomEntry {
 const NODE_WIDTH = 280;
 const NODE_HEIGHT = 140;
 const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 3;
+const MAX_ZOOM = 10;
 
 /** Build SVG path from orthogonal waypoints with rounded corners */
 const buildPolylinePath = (waypoints: Waypoint[], radius: number): string => {
@@ -111,6 +112,9 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
   executedNodeIds,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Tracks the last node ID we panned to — avoids re-centering when only the
+   *  layout changes (e.g. live trace updates) but the selection hasn't. */
+  const lastPannedToRef = useRef<string | null>(null);
   // Use internal state if no external control provided
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
   const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
@@ -319,6 +323,34 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     return map;
   }, [
     positions,
+  ]);
+
+  // Pan to center the externally selected node (e.g. from timeline click).
+  // Skips if we already panned to this node — prevents re-centering when the
+  // layout recalculates (live updates) but the selection hasn't changed.
+  useEffect(() => {
+    if (!externalSelectedNodeId || !containerRef.current) {
+      return;
+    }
+    if (externalSelectedNodeId === lastPannedToRef.current) {
+      return;
+    }
+    const pos = positionMap.get(externalSelectedNodeId);
+    if (!pos) {
+      return;
+    }
+    lastPannedToRef.current = externalSelectedNodeId;
+    const { width, height } = containerRef.current.getBoundingClientRect();
+    const graphCenterX = pos.x + pos.width / 2;
+    const graphCenterY = pos.y + pos.height / 2;
+    setView((prev) => ({
+      ...prev,
+      x: width / 2 - graphCenterX * prev.zoom,
+      y: height / 2 - graphCenterY * prev.zoom,
+    }));
+  }, [
+    externalSelectedNodeId,
+    positionMap,
   ]);
 
   // Shared helper: zoom to a target, anchored on a graph-space point
@@ -562,35 +594,37 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       strokeColor = effectiveStatus ? STATUS_COLORS[effectiveStatus].border : edgeStyle.color;
     }
 
+    // Counter-scale stroke widths so lines stay thin at any zoom level
+    const counterScale = 1 / view.zoom;
+    const scaledStrokeWidth = edgeStyle.strokeWidth * counterScale;
+    // Arrow size in graph-space pixels (userSpaceOnUse keeps it zoom-independent)
+    const arrowSize = 8 * counterScale;
+
     return (
       <g key={edge.id}>
-        {/* Arrow marker definition */}
+        {/* Arrow marker — 45-degree chevron, zoom-independent size */}
         <defs>
           <marker
             id={`arrow-${edge.id}`}
-            viewBox="0 0 10 8"
-            refX="10"
+            viewBox="0 0 8 8"
+            refX="8"
             refY="4"
-            markerWidth="8"
-            markerHeight="6"
+            markerUnits="userSpaceOnUse"
+            markerWidth={arrowSize}
+            markerHeight={arrowSize}
             orient="auto-start-reverse"
           >
-            <polyline points="0,0 10,4 0,8" fill="none" stroke={strokeColor} strokeWidth="1.5" />
+            <polyline points="0,0 8,4 0,8" fill="none" stroke={strokeColor} strokeWidth="1.5" />
           </marker>
         </defs>
         <path
           d={path}
           fill="none"
           stroke={strokeColor}
-          strokeWidth={edgeStyle.strokeWidth}
+          strokeWidth={scaledStrokeWidth}
           strokeDasharray={edgeStyle.strokeDasharray}
           markerEnd={`url(#arrow-${edge.id})`}
         />
-        {edge.animated && (
-          <circle r="3" fill={strokeColor}>
-            <animateMotion dur="1s" repeatCount="indefinite" path={path} />
-          </circle>
-        )}
       </g>
     );
   };
@@ -615,7 +649,14 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={() => {
+        // Only stop an active pan — do NOT deselect the node or zoom back
+        if (dragState.isDragging) {
+          setDragState((prev) => ({ ...prev, isDragging: false }));
+          setIsPanning(false);
+          wasDragRef.current = false;
+        }
+      }}
       onWheel={handleWheel}
     >
       {/* Controls */}
@@ -758,14 +799,18 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
 
       {/* Graph canvas */}
       <div
-        style={{
-          transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
-          transformOrigin: '0 0',
-          transition: isPanning ? 'none' : 'transform 0.3s ease-out',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-        }}
+        style={
+          {
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
+            transformOrigin: '0 0',
+            transition: isPanning ? 'none' : 'transform 0.3s ease-out',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            // Expose counter-scale factor so descendant nodes can keep borders thin
+            '--line-scale': 1 / view.zoom,
+          } as React.CSSProperties
+        }
       >
         {/* SVG edges layer - sized to cover all nodes so paths render */}
         <svg
@@ -790,9 +835,9 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
           })}
         </svg>
 
-        {/* Container layer — rendered behind child nodes */}
+        {/* Container layer — rendered behind child nodes (skip root, it wraps everything) */}
         {positions
-          .filter((pos) => pos.isContainer)
+          .filter((pos) => pos.isContainer && pos.id !== trace?.rootNodeId)
           .map((pos) => {
             const node = nodes.get(pos.id);
             if (!node) {
@@ -802,6 +847,8 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
             const statusColors = STATUS_COLORS[node.status] ?? STATUS_COLORS.pending;
             const icon = STEP_KIND_ICONS[node.kind] ?? '';
             const label = STEP_KIND_LABELS[node.kind] ?? node.kind;
+            // Counter-scale border so it stays thin at any zoom level
+            const borderWidth = 1 / view.zoom;
             return (
               <button
                 key={`container-${pos.id}`}
@@ -812,8 +859,8 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                   top: pos.y,
                   width: pos.width,
                   height: pos.height,
-                  borderRadius: '12px',
-                  border: `2px dashed ${kindColors.border}`,
+                  borderRadius: '4px',
+                  border: `${borderWidth}px dashed ${kindColors.border}`,
                   backgroundColor: `${kindColors.bg}`,
                   pointerEvents: 'auto',
                   cursor: 'pointer',
@@ -829,38 +876,50 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
                     top: 0,
                     left: 0,
                     right: 0,
-                    height: `${36 * (pos.scale ?? 1)}px`,
-                    borderRadius: '10px 10px 0 0',
-                    backgroundColor: kindColors.border,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: `${6 * (pos.scale ?? 1)}px`,
-                    padding: `0 ${12 * (pos.scale ?? 1)}px`,
-                    color: '#fff',
-                    fontSize: `${12 * (pos.scale ?? 1)}px`,
-                    fontWeight: 600,
+                    borderRadius: '3px 3px 0 0',
+                    overflow: 'hidden',
                     fontFamily: 'system-ui, -apple-system, sans-serif',
                   }}
                 >
-                  <span>{icon}</span>
-                  <span>{label}</span>
-                  <span
+                  {/* Row 1: type + status icon */}
+                  <div
                     style={{
-                      opacity: 0.7,
+                      backgroundColor: `${kindColors.border}99`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: `${6 * (pos.scale ?? 1)}px`,
+                      padding: `${6 * (pos.scale ?? 1)}px ${12 * (pos.scale ?? 1)}px`,
+                      color: '#fff',
+                      fontSize: `${12 * (pos.scale ?? 1)}px`,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>{icon}</span>
+                    <span>{label}</span>
+                    <span
+                      style={{
+                        marginLeft: 'auto',
+                        color: statusColors.text,
+                      }}
+                    >
+                      {STATUS_ICONS[node.status]}
+                    </span>
+                  </div>
+                  {/* Row 2: name */}
+                  <div
+                    style={{
+                      backgroundColor: `${kindColors.border}4D`,
+                      padding: `${4 * (pos.scale ?? 1)}px ${12 * (pos.scale ?? 1)}px`,
+                      color: '#ffffffcc',
+                      fontSize: `${10 * (pos.scale ?? 1)}px`,
                       fontWeight: 400,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {node.stepId}
-                  </span>
-                  <span
-                    style={{
-                      marginLeft: 'auto',
-                      opacity: 0.8,
-                      fontSize: '11px',
-                    }}
-                  >
-                    {statusColors.text ? node.status : ''}
-                  </span>
+                  </div>
                 </div>
               </button>
             );

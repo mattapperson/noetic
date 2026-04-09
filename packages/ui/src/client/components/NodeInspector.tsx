@@ -64,6 +64,11 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
               {/* System Prompt (for LLM steps) */}
               {isLLMNode(selectedNode) && <SystemPrompt stepData={selectedNode.stepData} />}
 
+              {/* Tool Calls (for LLM steps) */}
+              {isLLMNode(selectedNode) && selectedNode.stepData.toolCalls.length > 0 && (
+                <ToolCalls toolCalls={selectedNode.stepData.toolCalls} />
+              )}
+
               {/* Input/Output */}
               <InputOutput
                 input={selectedNode.input}
@@ -344,6 +349,40 @@ const ChildrenSection: React.FC<ChildrenSectionProps> = ({ childIds }) => {
             title={childId}
           >
             {childId.slice(0, 8)}...
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+interface ToolCallsProps {
+  toolCalls: LLMStepData['toolCalls'];
+}
+
+const ToolCalls: React.FC<ToolCallsProps> = ({ toolCalls }) => {
+  return (
+    <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-orange-500/10 border-b border-[var(--noetic-border)]">
+        <Terminal className="w-3.5 h-3.5 text-orange-500" />
+        <span className="text-xs font-medium text-orange-500">
+          Tool Calls ({toolCalls.length})
+        </span>
+      </div>
+      <div className="p-3 space-y-2">
+        {toolCalls.map((call, i) => (
+          <div
+            key={`${call.name}-${i}`}
+            className="border border-[var(--noetic-border)] rounded overflow-hidden"
+          >
+            <div className="px-2 py-1.5 bg-[var(--noetic-node-bg)] border-b border-[var(--noetic-border)]">
+              <span className="text-xs font-medium font-mono text-[var(--noetic-text)]">
+                {call.name}
+              </span>
+            </div>
+            <pre className="text-xs font-mono text-[var(--noetic-text-secondary)] bg-[var(--noetic-code-bg)] p-2 max-h-32 overflow-auto whitespace-pre-wrap break-words">
+              {JSON.stringify(call.arguments, null, 2)}
+            </pre>
           </div>
         ))}
       </div>

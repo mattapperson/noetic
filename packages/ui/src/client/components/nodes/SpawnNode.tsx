@@ -17,6 +17,7 @@ import {
   nodeFooterStyles,
   nodeHeaderStyles,
   STATUS_COLORS,
+  STATUS_ICONS,
   STATUS_LABELS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
@@ -78,7 +79,7 @@ export const SpawnNode: React.FC<SpawnNodeProps> = ({
           <span>{STEP_KIND_ICONS.spawn}</span>
           <span>{STEP_KIND_LABELS.spawn}</span>
         </div>
-        <div style={statusBadgeStyles}>{STATUS_LABELS[node.status]}</div>
+        <div style={statusBadgeStyles}>{STATUS_ICONS[node.status]}</div>
       </div>
 
       {/* Content */}

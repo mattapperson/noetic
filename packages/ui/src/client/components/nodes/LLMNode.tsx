@@ -17,6 +17,7 @@ import {
   nodeFooterStyles,
   nodeHeaderStyles,
   STATUS_COLORS,
+  STATUS_ICONS,
   STATUS_LABELS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
@@ -72,7 +73,7 @@ export const LLMNode: React.FC<LLMNodeProps> = ({ node, selected = false, onClic
           <span>{STEP_KIND_ICONS.llm}</span>
           <span>{STEP_KIND_LABELS.llm}</span>
         </div>
-        <div style={statusBadgeStyles}>{STATUS_LABELS[node.status]}</div>
+        <div style={statusBadgeStyles}>{STATUS_ICONS[node.status]}</div>
       </div>
 
       {/* Content */}
@@ -98,8 +99,8 @@ export const LLMNode: React.FC<LLMNodeProps> = ({ node, selected = false, onClic
       {/* Footer */}
       <div style={nodeFooterStyles}>
         <div>
-          {stepData?.toolCalls && stepData.toolCalls.length > 0 && (
-            <span>{stepData.toolCalls.length} tool call(s)</span>
+          {tokenCount > 0 && (
+            <span>{(stepData?.tokenUsage?.input ?? 0).toLocaleString()}↑ {(stepData?.tokenUsage?.output ?? 0).toLocaleString()}↓</span>
           )}
         </div>
         <div>{node.durationMs !== null && formatDuration(node.durationMs)}</div>

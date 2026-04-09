@@ -27,7 +27,7 @@ interface PlaybackBarProps {
 
 export const PlaybackBar: React.FC<PlaybackBarProps> = ({ className = '', onTimelineChange }) => {
   const { nodes } = useExecutionStore();
-  const { currentStepIndex, totalSteps, setTotalSteps, jumpToStep, jumpToFirst } =
+  const { currentStepIndex, totalSteps, setTotalSteps, jumpToStep, jumpToLast } =
     usePlaybackStore();
 
   const { markers, setPlayheadToMarker, selectMarker } = useTimelineStore();
@@ -37,12 +37,12 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({ className = '', onTime
     setTotalSteps(nodes.size);
     const nodeArray = Array.from(nodes.values());
     useTimelineStore.getState().setMarkers(nodeArray);
-    // Reset playback to start when trace changes
-    jumpToFirst();
+    // Start at the end of the timeline so all nodes are visible initially
+    jumpToLast();
   }, [
     nodes,
     setTotalSteps,
-    jumpToFirst,
+    jumpToLast,
   ]);
 
   // Sync playback step index with timeline
