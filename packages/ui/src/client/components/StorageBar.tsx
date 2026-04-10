@@ -42,10 +42,15 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
   }
 
   const totalRuns = agents.reduce((sum, a) => sum + a.runs.length, 0);
-  const totalTokens = agents.reduce(
-    (sum, a) => sum + a.runs.reduce((rs, r) => rs + (r.totalTokens?.total ?? 0), 0),
+  const totalInputTokens = agents.reduce(
+    (sum, a) => sum + a.runs.reduce((rs, r) => rs + (r.totalTokens?.input ?? 0), 0),
     0,
   );
+  const totalOutputTokens = agents.reduce(
+    (sum, a) => sum + a.runs.reduce((rs, r) => rs + (r.totalTokens?.output ?? 0), 0),
+    0,
+  );
+  const totalTokens = totalInputTokens + totalOutputTokens;
   const totalCost = agents.reduce(
     (sum, a) => sum + a.runs.reduce((rs, r) => rs + (r.totalCost ?? 0), 0),
     0,
@@ -107,7 +112,8 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
         ) : (
           <span>
             {totalRuns} run{totalRuns !== 1 ? 's' : ''}
-            {totalTokens > 0 && ` · ${formatTokens(totalTokens)} tokens`}
+            {totalTokens > 0 &&
+              ` · ${formatTokens(totalInputTokens)}↓ ${formatTokens(totalOutputTokens)}↑`}
             {totalCost > 0 && ` · $${totalCost.toFixed(4)}`}
           </span>
         )}

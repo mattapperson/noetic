@@ -142,10 +142,15 @@ const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
 // Center canvas shows node graph for selected run
 interface CenterCanvasProps {
   selectedNodeId: string | null;
+  selectionKey: number;
   onNodeSelect: (nodeId: string | null) => void;
 }
 
-const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelect }) => {
+const CenterCanvas: React.FC<CenterCanvasProps> = ({
+  selectedNodeId,
+  selectionKey,
+  onNodeSelect,
+}) => {
   const currentTrace = useAgentStore(selectCurrentTrace);
   const runId = useAgentStore((s) => s.selectedRunId);
 
@@ -178,6 +183,7 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelec
         <NodeGraph
           trace={currentTrace}
           selectedNodeId={selectedNodeId}
+          selectionKey={selectionKey}
           onNodeSelect={onNodeSelect}
           fitToView={true}
           executedNodeIds={executedNodeIds}
@@ -394,11 +400,13 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   });
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectionKey, setSelectionKey] = useState(0);
   const [_isLoadingRun, setIsLoadingRun] = useState(false);
 
   // Handle timeline marker click → select + focus node in graph + inspector
   const handleTimelineChange = useCallback((_stepIndex: number, nodeId: string) => {
     setSelectedNodeId(nodeId);
+    setSelectionKey((k) => k + 1);
     // Also sync the timeline marker so playhead and step index stay consistent
     const { markers, selectMarker, setPlayheadPosition } = useTimelineStore.getState();
     const markerId = markerIdForNode(nodeId);
@@ -517,7 +525,11 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
           <AgentBrowser />
         </ResizableSidebar>
 
-        <CenterCanvas selectedNodeId={selectedNodeId} onNodeSelect={handleNodeSelect} />
+        <CenterCanvas
+          selectedNodeId={selectedNodeId}
+          selectionKey={selectionKey}
+          onNodeSelect={handleNodeSelect}
+        />
 
         {currentTrace && (
           <ResizableSidebar

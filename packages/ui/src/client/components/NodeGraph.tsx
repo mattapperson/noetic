@@ -24,6 +24,9 @@ import {
 interface NodeGraphProps {
   trace: ExecutionTrace | null;
   selectedNodeId?: string | null;
+  /** Monotonically increasing counter — bump on every external selection
+   *  (e.g. timeline click) so re-clicking the same node still triggers zoom. */
+  selectionKey?: number;
   onNodeSelect?: (nodeId: string | null) => void;
   fitToView?: boolean;
   /** Node IDs that have been "executed" up to the current timeline position */
@@ -107,14 +110,15 @@ const buildPolylinePath = (waypoints: Waypoint[], radius: number): string => {
 export const NodeGraph: React.FC<NodeGraphProps> = ({
   trace,
   selectedNodeId: externalSelectedNodeId,
+  selectionKey = 0,
   onNodeSelect,
   fitToView = true,
   executedNodeIds,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  /** Tracks the last node ID we panned to — avoids re-centering when only the
-   *  layout changes (e.g. live trace updates) but the selection hasn't. */
-  const lastPannedToRef = useRef<string | null>(null);
+  /** Tracks the last selectionKey we zoomed for — prevents re-zoom when only
+   *  positionMap/nodes change (live updates) but the selection hasn't. */
+  const lastZoomedKeyRef = useRef<number>(-1);
   // Use internal state if no external control provided
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
   const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
@@ -339,34 +343,6 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     positions,
   ]);
 
-  // Pan to center the externally selected node (e.g. from timeline click).
-  // Skips if we already panned to this node — prevents re-centering when the
-  // layout recalculates (live updates) but the selection hasn't changed.
-  useEffect(() => {
-    if (!externalSelectedNodeId || !containerRef.current) {
-      return;
-    }
-    if (externalSelectedNodeId === lastPannedToRef.current) {
-      return;
-    }
-    const pos = positionMap.get(externalSelectedNodeId);
-    if (!pos) {
-      return;
-    }
-    lastPannedToRef.current = externalSelectedNodeId;
-    const { width, height } = containerRef.current.getBoundingClientRect();
-    const graphCenterX = pos.x + pos.width / 2;
-    const graphCenterY = pos.y + pos.height / 2;
-    setView((prev) => ({
-      ...prev,
-      x: width / 2 - graphCenterX * prev.zoom,
-      y: height / 2 - graphCenterY * prev.zoom,
-    }));
-  }, [
-    externalSelectedNodeId,
-    positionMap,
-  ]);
-
   // Shared helper: zoom to a target, anchored on a graph-space point
   const zoomTo = useCallback(
     (graphX: number, graphY: number, targetZoom: number) => {
@@ -411,6 +387,97 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       zoomStack,
     ],
   );
+
+  // Pan + zoom to the externally selected node (e.g. from timeline click).
+  // Mirrors handleNodeClick: if the node is scaled down, zoom so it renders
+  // at 100%; otherwise just center it.
+  // Uses `selectionKey` (bumped on every timeline click) so re-clicking the
+  // same event always triggers zoom. Uses `nodeClickedRef` to skip when the
+  // graph's own handleNodeClick already applied the zoom.
+  useEffect(() => {
+    if (!externalSelectedNodeId || !containerRef.current) {
+      return;
+    }
+    // Guard against re-running when only positionMap/nodes change (live updates)
+    if (selectionKey === lastZoomedKeyRef.current) {
+      return;
+    }
+    // If the graph's handleNodeClick already zoomed, skip but record the key
+    if (nodeClickedRef.current) {
+      nodeClickedRef.current = false;
+      lastZoomedKeyRef.current = selectionKey;
+      return;
+    }
+    const pos = positionMap.get(externalSelectedNodeId);
+    if (!pos) {
+      return;
+    }
+    lastZoomedKeyRef.current = selectionKey;
+    const { width, height } = containerRef.current.getBoundingClientRect();
+    const graphCenterX = pos.x + pos.width / 2;
+    const graphCenterY = pos.y + pos.height / 2;
+
+    const nodeScale = pos.scale ?? 1;
+    if (nodeScale < 1) {
+      const targetZoom = Math.min(1 / nodeScale, MAX_ZOOM);
+
+      // Build the full ancestor chain for breadcrumbs so the user can
+      // navigate back through each parent level, not just the immediate one.
+      const chain: ZoomEntry[] = [];
+      let cursor = nodes.get(externalSelectedNodeId);
+      while (cursor?.parentId) {
+        const parent = nodes.get(cursor.parentId);
+        if (!parent) {
+          break;
+        }
+        chain.unshift({
+          containerId: parent.id,
+          label: `${STEP_KIND_LABELS[parent.kind]} ${parent.stepId}`,
+          previousView: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+        });
+        cursor = parent;
+      }
+      // Store the current (pre-zoom) view on the first breadcrumb so "Root"
+      // restores the viewport the user was looking at before the jump.
+      if (chain.length > 0) {
+        setView((prev) => {
+          chain[0].previousView = {
+            ...prev,
+          };
+          setZoomStack(chain);
+          return {
+            x: width / 2 - graphCenterX * targetZoom,
+            y: height / 2 - graphCenterY * targetZoom,
+            zoom: targetZoom,
+          };
+        });
+        return;
+      }
+
+      setView({
+        x: width / 2 - graphCenterX * targetZoom,
+        y: height / 2 - graphCenterY * targetZoom,
+        zoom: targetZoom,
+      });
+      return;
+    }
+
+    // Top-level node: just center, keep current zoom
+    setView((prev) => ({
+      ...prev,
+      x: width / 2 - graphCenterX * prev.zoom,
+      y: height / 2 - graphCenterY * prev.zoom,
+    }));
+  }, [
+    externalSelectedNodeId,
+    selectionKey,
+    positionMap,
+    nodes,
+  ]);
 
   // Node selection + zoom to make the node full size
   const handleNodeClick = useCallback(
