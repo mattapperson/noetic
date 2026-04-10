@@ -1,5 +1,7 @@
 import type React from 'react';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import Markdown from 'react-markdown';
+import { detectContentType } from '../../lib/content-detect';
 import type { FormattedNode } from '../../lib/json-viewer';
 import { formatJsonValue, formatValue } from '../../lib/json-viewer';
 import { ChevronDown, ChevronRight, Copy } from './icons';
@@ -54,22 +56,60 @@ interface ValueDisplayProps {
 }
 
 /**
- * Renders a FormattedNode as either plain text (for strings) or a JSON tree.
- * Plain strings are shown without quotes and with real line breaks.
+ * Renders a FormattedNode as markdown, plain text, or a JSON tree
+ * depending on content detection.
  */
 const ValueDisplay: React.FC<ValueDisplayProps> = ({ node }) => {
-  // Plain string: render as readable text, not as a quoted JSON string
-  if (node.type === 'string' && !node.isExpandable) {
+  // Structured data (object/array): render as collapsible JSON tree
+  if (node.isExpandable) {
+    return <JsonTree node={node} />;
+  }
+
+  // Leaf string: detect content type and render accordingly
+  if (node.type === 'string') {
     const text = String(node.value);
+    return <StringDisplay value={text} />;
+  }
+
+  // Primitives (number, boolean, null): render inline
+  return (
+    <span className="text-xs font-mono text-[var(--noetic-text)]">
+      {formatValue(node.value, node.type)}
+    </span>
+  );
+};
+
+interface StringDisplayProps {
+  value: string;
+}
+
+const StringDisplay: React.FC<StringDisplayProps> = ({ value }) => {
+  const contentType = useMemo(
+    () => detectContentType(value),
+    [
+      value,
+    ],
+  );
+
+  if (contentType === 'json') {
+    const jsonNode = formatJsonValue(JSON.parse(value.trim()), 'root');
+    return <JsonTree node={jsonNode} />;
+  }
+
+  if (contentType === 'markdown') {
     return (
-      <pre className="text-xs font-mono text-[var(--noetic-text)] whitespace-pre-wrap break-words">
-        {text}
-      </pre>
+      <div className="text-xs text-[var(--noetic-text)] prose prose-xs prose-invert max-w-none prose-pre:bg-[var(--noetic-code-bg)] prose-pre:text-[var(--noetic-text)] prose-code:text-[var(--noetic-accent)] prose-headings:text-[var(--noetic-text)] prose-a:text-[var(--noetic-accent)]">
+        <Markdown>{value}</Markdown>
+      </div>
     );
   }
 
-  // Structured data: render as collapsible JSON tree
-  return <JsonTree node={node} />;
+  // Plain text
+  return (
+    <pre className="text-xs font-mono text-[var(--noetic-text)] whitespace-pre-wrap break-words">
+      {value}
+    </pre>
+  );
 };
 
 //#endregion
