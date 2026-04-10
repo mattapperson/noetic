@@ -15,35 +15,44 @@ export interface FormattedNode {
 }
 
 /**
- * Try to parse a string as JSON. Returns the parsed value if it looks like
- * a JSON object or array, otherwise returns null.
+ * Try to parse a JSON-encoded string. Handles all JSON types, not just
+ * objects/arrays — this unwraps double-encoded strings like `"\"hello\""`
+ * back to `"hello"`. Returns null if the string is not valid JSON.
  */
-function tryParseJsonString(value: string): unknown | null {
+function tryParseJsonString(value: string): {
+  parsed: unknown;
+} | null {
   const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-    (trimmed.startsWith('[') && trimmed.endsWith(']'))
-  ) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
+  // Quick check: only attempt parse if it looks like JSON
+  // (starts with {, [, ", digit, true, false, or null)
+  if (!/^[[{"\d\-tfn]/.test(trimmed)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    // Avoid infinite recursion: if the result is the identical string, stop
+    if (typeof parsed === 'string' && parsed === value) {
       return null;
     }
+    return {
+      parsed,
+    };
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
  * Format a JSON value into a displayable structure
  */
 export function formatJsonValue(value: unknown, key = '', depth = 0): FormattedNode {
-  // If the value is a JSON-encoded string, parse it so we render a tree
-  // instead of a flat quoted string. This is common for input/output fields
-  // that pass through span.setAttribute(key, JSON.stringify(value)).
+  // If the value is a JSON-encoded string, parse it so we render structured
+  // data instead of a flat quoted string. This is common for input/output
+  // fields that pass through span.setAttribute(key, JSON.stringify(value)).
   if (typeof value === 'string') {
-    const parsed = tryParseJsonString(value);
-    if (parsed !== null) {
-      return formatJsonValue(parsed, key, depth);
+    const result = tryParseJsonString(value);
+    if (result !== null) {
+      return formatJsonValue(result.parsed, key, depth);
     }
   }
 
