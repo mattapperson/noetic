@@ -34,10 +34,13 @@
     "tailwind.config.js"
   ],
   "dependencies": {
+    "katex": "0.16.45",
     "next": "16.2.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-markdown": "10.1.0",
+    "rehype-katex": "7.0.1",
+    "remark-math": "6.0.0",
     "ws": "^8.16.0",
     "zod": "^4.0.0",
     "zustand": "^5.0.0"

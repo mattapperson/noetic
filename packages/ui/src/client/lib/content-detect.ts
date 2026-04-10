@@ -15,6 +15,10 @@ const MD_PATTERNS = [
   /`.+?`/, // inline code
   /\[.+?\]\(.+?\)/, // links
   /^>\s/m, // blockquote
+  /\\\(.+?\\\)/, // LaTeX inline math \( ... \)
+  /\\\[[\s\S]+?\\\]/, // LaTeX display math \[ ... \]
+  /\$\$.+?\$\$/, // display math $$ ... $$
+  /(?<!\$)\$(?!\$).+?(?<!\$)\$(?!\$)/, // inline math $ ... $
 ] as const;
 
 const MD_THRESHOLD = 2;

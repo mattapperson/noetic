@@ -1,6 +1,10 @@
+import 'katex/dist/katex.min.css';
+
 import type React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
+import remarkMath from 'remark-math';
 import { detectContentType } from '../../lib/content-detect';
 import type { FormattedNode } from '../../lib/json-viewer';
 import { formatJsonValue, formatValue } from '../../lib/json-viewer';
@@ -97,9 +101,25 @@ const StringDisplay: React.FC<StringDisplayProps> = ({ value }) => {
   }
 
   if (contentType === 'markdown') {
+    // Convert LaTeX delimiters to dollar-sign syntax for remark-math:
+    // \( ... \) → $ ... $   (inline)
+    // \[ ... \] → $$ ... $$ (display)
+    const normalized = value
+      .replace(/\\\((.+?)\\\)/g, (_match, expr: string) => `$${expr}$`)
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_match, expr: string) => `$$${expr}$$`);
+
     return (
-      <div className="text-xs text-[var(--noetic-text)] prose prose-xs prose-invert max-w-none prose-pre:bg-[var(--noetic-code-bg)] prose-pre:text-[var(--noetic-text)] prose-code:text-[var(--noetic-accent)] prose-headings:text-[var(--noetic-text)] prose-a:text-[var(--noetic-accent)]">
-        <Markdown>{value}</Markdown>
+      <div className="text-xs text-[var(--noetic-text)] max-w-none [&>*+*]:mt-3 [&_p]:leading-relaxed [&_pre]:bg-[var(--noetic-code-bg)] [&_pre]:text-[var(--noetic-text)] [&_pre]:p-2 [&_pre]:rounded [&_pre]:text-xs [&_code]:text-[var(--noetic-accent)] [&_code]:text-xs [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-bold [&_h3]:text-xs [&_h3]:font-bold [&_a]:text-[var(--noetic-accent)] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mt-1 [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--noetic-border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--noetic-text-muted)]">
+        <Markdown
+          remarkPlugins={[
+            remarkMath,
+          ]}
+          rehypePlugins={[
+            rehypeKatex,
+          ]}
+        >
+          {normalized}
+        </Markdown>
       </div>
     );
   }
