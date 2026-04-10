@@ -173,41 +173,39 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 
   return (
     <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden bg-[var(--noetic-node-bg)]">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-[var(--noetic-text)] hover:bg-[var(--noetic-hover)] transition-colors"
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-3 py-2 text-sm font-medium text-[var(--noetic-text)] hover:bg-[var(--noetic-hover)] transition-colors">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-2 flex-1 text-left"
+        >
           {isExpanded ? (
             <ChevronDown className="w-4 h-4 text-[var(--noetic-text-muted)]" />
           ) : (
             <ChevronRight className="w-4 h-4 text-[var(--noetic-text-muted)]" />
           )}
           <span>{title}</span>
-        </div>
-        <div className="flex items-center gap-2">
           {isEmpty && (
             <span className="text-xs text-[var(--noetic-text-muted)] px-2 py-0.5 rounded-full bg-[var(--noetic-border)]">
               Empty
             </span>
           )}
-          {rawValue !== undefined && rawValue !== null && (
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="p-1 rounded hover:bg-[var(--noetic-border)] transition-colors"
-              title="Copy to clipboard"
-            >
-              {copied ? (
-                <span className="text-xs text-green-500">Copied</span>
-              ) : (
-                <Copy className="w-3.5 h-3.5 text-[var(--noetic-text-muted)]" />
-              )}
-            </button>
-          )}
-        </div>
-      </button>
+        </button>
+        {rawValue !== undefined && rawValue !== null && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="p-1 rounded hover:bg-[var(--noetic-border)] transition-colors"
+            title="Copy to clipboard"
+          >
+            {copied ? (
+              <span className="text-xs text-green-500">Copied</span>
+            ) : (
+              <Copy className="w-3.5 h-3.5 text-[var(--noetic-text-muted)]" />
+            )}
+          </button>
+        )}
+      </div>
       {isExpanded && <div className="p-3 border-t border-[var(--noetic-border)]">{children}</div>}
     </div>
   );
