@@ -123,12 +123,17 @@ Each node can be selected to show details in the right panel:
 - **Tabs:** session | attempt | events
 - **Content areas:**
   - **System prompts** (for LLM steps)
-  - **Input/output data** with syntax highlighting
+  - **Input/output data** with auto-detected content rendering (see below)
   - **Context state** (memory, tokens, cost, depth)
   - **Step metadata** (execution time, retry count, LLM usage)
   - **Item log** (conversation history for LLM steps)
   - **Raw traces** (OpenTelemetry span data)
-- **Text display** with monospace fonts for code/JSON
+- **Content type auto-detection** for input/output values:
+  - **JSON** — Parsed and displayed as a collapsible syntax-highlighted tree
+  - **Markdown** — Rendered with react-markdown (headings, bold, lists, code blocks, links)
+  - **LaTeX math** — Rendered via KaTeX (remark-math + rehype-katex); supports `\(...\)` inline and `\[...\]` display delimiters
+  - **Plain text** — Displayed as preformatted text with word wrap
+- **Copy-to-clipboard button** on both Input and Output sections
 - **Follow/Overview toggle** for different detail levels
 
 ### 3. Debugging Controls
@@ -153,6 +158,8 @@ Debug actions:
 - **Automatic recording** - Every execution is captured in full
 - **Runs are first-class** - Each execution creates a run entry
 - **Persistent storage** - Runs stored locally with configurable retention
+- **Debounced live persistence** - The WebSocket server debounce-saves live trace progress to disk every 500ms, coalescing rapid node events into a single write. Page reload during a live run restores execution state from disk
+- **Disk fallback** - `handleExecutionGet` and `handleExecutionReplay` fall back to disk storage when traces are not in memory (e.g., after a server restart)
 - **Real-time streaming** - Live runs stream to UI as they execute
 - **Retroactive inspection** - Access any historical run from the agent browser
 
@@ -1051,6 +1058,7 @@ interface ExecutionTrace {
 **Storage Model:**
 - **User-controlled deletion** - No automatic cleanup of traces
 - **Raw storage** - Traces stored uncompressed for fast access
+- **Live trace persistence** - Running traces are debounce-saved to disk every 500ms, surviving page reloads and server restarts
 - **Compression** - Future enhancement (marked for v2)
 - **Visual indicators** - Storage usage displayed in UI
 
@@ -1447,7 +1455,12 @@ registerAgent({
 
 **Content Display:**
 - **Monospace text** for code/system prompts
-- **JSON tree** for structured data with syntax highlighting
+- **Auto-detected rendering** for input/output values:
+  - **JSON** — Collapsible syntax-highlighted tree
+  - **Markdown** — Rendered via react-markdown (headings, bold, lists, code blocks, links)
+  - **LaTeX math** — Rendered via KaTeX (remark-math + rehype-katex); `\(...\)` inline, `\[...\]` display
+  - **Plain text** — Preformatted with word wrap
+- **Copy-to-clipboard button** on Input and Output sections
 - **Scrollable areas** with custom dark scrollbar
 - **Collapsible sections** for nested data
 
@@ -2083,4 +2096,3 @@ For multi-developer or shared environments, consider:
 
 1. Should the UI be a separate process (current plan) or embeddable in the host app?
 2. Real-time collaboration support needed for v1?
-3. Should traces persist across UI server restarts?
