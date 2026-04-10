@@ -4,7 +4,7 @@
  */
 
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAgentStore } from '../stores/agent';
 
 interface StorageBarProps {
@@ -25,6 +25,18 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
   const { agents, removeAgent } = useAgentStore();
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
 
+  // Dismiss confirmation when clicking anywhere outside the trash button
+  useEffect(() => {
+    if (!isConfirmingClear) {
+      return;
+    }
+    const dismiss = () => setIsConfirmingClear(false);
+    window.addEventListener('click', dismiss);
+    return () => window.removeEventListener('click', dismiss);
+  }, [
+    isConfirmingClear,
+  ]);
+
   if (agents.length === 0) {
     return null;
   }
@@ -39,7 +51,9 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
     0,
   );
 
-  const handleClearAll = async () => {
+  const handleClearAll = async (e: React.MouseEvent) => {
+    // Prevent the window click listener from immediately dismissing
+    e.stopPropagation();
     if (!isConfirmingClear) {
       setIsConfirmingClear(true);
       setTimeout(() => {
