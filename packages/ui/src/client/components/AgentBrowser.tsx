@@ -125,89 +125,29 @@ export const AgentBrowser: React.FC = () => {
     ],
   );
 
-  // Combined sort options with optgroups
-  const combinedSortOptions = [
-    {
-      type: 'optgroup',
-      label: 'Agents',
-    },
-    {
-      value: 'agent-recent',
-      label: 'Recent first',
-    },
-    {
-      value: 'agent-oldest',
-      label: 'Oldest first',
-    },
-    {
-      value: 'agent-name',
-      label: 'Name',
-    },
-    {
-      value: 'agent-runs',
-      label: 'Run count',
-    },
-    {
-      type: 'optgroup',
-      label: 'Runs',
-    },
-    {
-      value: 'run-recent',
-      label: 'Recent first',
-    },
-    {
-      value: 'run-oldest',
-      label: 'Oldest first',
-    },
-    {
-      value: 'run-duration',
-      label: 'Duration',
-    },
-    {
-      value: 'run-cost',
-      label: 'Cost',
-    },
-    {
-      value: 'run-memory',
-      label: 'Memory',
-    },
-  ];
-
-  const handleSortChange = useCallback(
-    (value: string) => {
-      if (value.startsWith('agent-')) {
-        const sortValue = value.replace('agent-', '');
-        if (
-          sortValue === 'recent' ||
-          sortValue === 'oldest' ||
-          sortValue === 'name' ||
-          sortValue === 'runs'
-        ) {
-          setAgentSort(sortValue);
-        }
-      } else if (value.startsWith('run-')) {
-        const sortValue = value.replace('run-', '');
-        if (
-          sortValue === 'recent' ||
-          sortValue === 'oldest' ||
-          sortValue === 'duration' ||
-          sortValue === 'cost' ||
-          sortValue === 'memory'
-        ) {
-          setRunSort(sortValue);
-        }
+  const handleAgentSortChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const v = e.target.value;
+      if (v === 'recent' || v === 'oldest' || v === 'name' || v === 'runs') {
+        setAgentSort(v);
       }
     },
     [
       setAgentSort,
-      setRunSort,
     ],
   );
 
-  // Get current sort value for the dropdown
-  // If runSort is not the default, a run sort option is active
-  const currentSortValue =
-    agentSort === 'recent' && runSort !== 'recent' ? `run-${runSort}` : `agent-${agentSort}`;
+  const handleRunSortChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const v = e.target.value;
+      if (v === 'recent' || v === 'oldest' || v === 'duration' || v === 'cost' || v === 'memory') {
+        setRunSort(v);
+      }
+    },
+    [
+      setRunSort,
+    ],
+  );
 
   const handleRefreshDiscovery = useCallback(async () => {
     setDiscoveryStatus(true);
@@ -334,8 +274,6 @@ export const AgentBrowser: React.FC = () => {
     clearAllStorage,
   ]);
 
-  const sortedAgents = getSortedAgents();
-
   // Format last discovery time
   const formatDiscoveryTime = () => {
     if (!lastDiscoveryTime) {
@@ -355,6 +293,9 @@ export const AgentBrowser: React.FC = () => {
     const date = new Date(lastDiscoveryTime);
     return date.toISOString().split('T')[0];
   };
+
+  const sortedAgents = getSortedAgents();
+  const hasAgents = agents.length > 0;
 
   return (
     <div
@@ -407,129 +348,169 @@ export const AgentBrowser: React.FC = () => {
         <ThemeToggle />
       </div>
 
-      {/* Combined Filter, Sort, and Refresh Row */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '8px 16px',
-          borderBottom: '1px solid var(--noetic-border)',
-        }}
-      >
-        {/* Filter Input */}
-        <div
-          style={{
-            position: 'relative',
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          <span
+      {/* Filter, Sort, Refresh, and Status — hidden when no agents */}
+      {hasAgents && (
+        <>
+          <div
             style={{
-              position: 'absolute',
-              left: '8px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 16px',
+              borderBottom: '1px solid var(--noetic-border)',
+            }}
+          >
+            {/* Filter Input */}
+            <div
+              style={{
+                position: 'relative',
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  left: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: '12px',
+                  color: 'var(--noetic-text-muted)',
+                }}
+              >
+                🔍
+              </span>
+              <input
+                type="text"
+                placeholder="Filter agents"
+                value={searchQuery}
+                onChange={handleSearch}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px 6px 28px',
+                  fontSize: '12px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--noetic-border)',
+                  backgroundColor: 'var(--noetic-input-bg)',
+                  color: 'var(--noetic-text)',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {/* Agent Sort */}
+            <select
+              value={agentSort}
+              onChange={handleAgentSortChange}
+              title="Sort agents"
+              style={{
+                fontSize: '11px',
+                padding: '6px 4px',
+                borderRadius: '4px',
+                border: '1px solid var(--noetic-border)',
+                backgroundColor: 'var(--noetic-input-bg)',
+                color: 'var(--noetic-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="recent">Agents: Recent</option>
+              <option value="oldest">Agents: Oldest</option>
+              <option value="name">Agents: Name</option>
+              <option value="runs">Agents: Runs</option>
+            </select>
+
+            {/* Run Sort */}
+            <select
+              value={runSort}
+              onChange={handleRunSortChange}
+              title="Sort runs"
+              style={{
+                fontSize: '11px',
+                padding: '6px 4px',
+                borderRadius: '4px',
+                border: '1px solid var(--noetic-border)',
+                backgroundColor: 'var(--noetic-input-bg)',
+                color: 'var(--noetic-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="recent">Runs: Recent</option>
+              <option value="oldest">Runs: Oldest</option>
+              <option value="duration">Runs: Duration</option>
+              <option value="cost">Runs: Cost</option>
+              <option value="memory">Runs: Memory</option>
+            </select>
+
+            {/* Refresh Button */}
+            <button
+              type="button"
+              onClick={handleRefreshDiscovery}
+              disabled={isDiscovering}
+              title="Refresh agents"
+              style={{
+                width: '28px',
+                height: '28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '4px',
+                border: '1px solid var(--noetic-border)',
+                backgroundColor: 'var(--noetic-button-bg)',
+                color: 'var(--noetic-text)',
+                cursor: isDiscovering ? 'not-allowed' : 'pointer',
+                opacity: isDiscovering ? 0.6 : 1,
+                fontSize: '14px',
+                padding: 0,
+              }}
+              onMouseEnter={(e) => {
+                if (!isDiscovering) {
+                  e.currentTarget.style.backgroundColor = 'var(--noetic-button-hover)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--noetic-button-bg)';
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                role="img"
+                aria-label="Refresh"
+                style={{
+                  animation: isDiscovering ? 'spin 1s linear infinite' : undefined,
+                }}
+              >
+                <path d="M13 8a5 5 0 1 1-1.2-3.25" />
+                <polyline points="13 3 13 6 10 6" />
+              </svg>
+              <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
+            </button>
+          </div>
+
+          {/* Discovery status */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '4px 16px',
+              fontSize: '10px',
               color: 'var(--noetic-text-muted)',
             }}
           >
-            🔍
-          </span>
-          <input
-            type="text"
-            placeholder="Filter agents"
-            value={searchQuery}
-            onChange={handleSearch}
-            style={{
-              width: '100%',
-              padding: '6px 8px 6px 28px',
-              fontSize: '12px',
-              borderRadius: '4px',
-              border: '1px solid var(--noetic-border)',
-              backgroundColor: 'var(--noetic-input-bg)',
-              color: 'var(--noetic-text)',
-              outline: 'none',
-            }}
-          />
-        </div>
-
-        {/* Sort Select */}
-        <select
-          value={currentSortValue}
-          onChange={(e) => handleSortChange(e.target.value)}
-          style={{
-            fontSize: '11px',
-            padding: '6px 8px',
-            borderRadius: '4px',
-            border: '1px solid var(--noetic-border)',
-            backgroundColor: 'var(--noetic-input-bg)',
-            color: 'var(--noetic-text)',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {combinedSortOptions.map((opt) =>
-            opt.type === 'optgroup' ? (
-              <optgroup key={`group-${opt.label}`} label={opt.label} />
-            ) : (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ),
-          )}
-        </select>
-
-        {/* Refresh Button */}
-        <button
-          type="button"
-          onClick={handleRefreshDiscovery}
-          disabled={isDiscovering}
-          title="Refresh agents"
-          style={{
-            width: '28px',
-            height: '28px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: '4px',
-            border: '1px solid var(--noetic-border)',
-            backgroundColor: 'var(--noetic-button-bg)',
-            color: 'var(--noetic-text)',
-            cursor: isDiscovering ? 'not-allowed' : 'pointer',
-            opacity: isDiscovering ? 0.6 : 1,
-            fontSize: '14px',
-            padding: 0,
-          }}
-          onMouseEnter={(e) => {
-            if (!isDiscovering) {
-              e.currentTarget.style.backgroundColor = 'var(--noetic-button-hover)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'var(--noetic-button-bg)';
-          }}
-        >
-          {isDiscovering ? '⏳' : '🔄'}
-        </button>
-      </div>
-
-      {/* Discovery status - simplified */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '4px 16px',
-          fontSize: '10px',
-          color: 'var(--noetic-text-muted)',
-        }}
-      >
-        <span>
-          {agents.length} agent{agents.length !== 1 ? 's' : ''} • Last scan: {formatDiscoveryTime()}
-        </span>
-      </div>
+            <span>
+              {agents.length} agent{agents.length !== 1 ? 's' : ''} • Last scan:{' '}
+              {formatDiscoveryTime()}
+            </span>
+          </div>
+        </>
+      )}
 
       {/* Agent list */}
       <div

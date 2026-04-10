@@ -144,12 +144,7 @@ interface AgentEntryProps {
   onDelete?: (agentId: string) => void;
 }
 
-const AgentEntry: React.FC<AgentEntryProps> = ({
-  agent,
-  isExpanded,
-  onToggleExpand,
-  onDelete,
-}) => {
+const AgentEntry: React.FC<AgentEntryProps> = ({ agent, isExpanded, onToggleExpand, onDelete }) => {
   const status = getAgentStatus(agent);
   const icon = STATUS_ICONS[status];
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -210,112 +205,125 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
         overflow: 'hidden',
       }}
     >
-      {/* Agent row - clicking anywhere expands/collapses, does NOT navigate */}
-      <button
-        type="button"
-        onClick={onToggleExpand}
+      {/* Agent row — flex container with toggle button + separate delete button.
+           Hover highlight applied via CSS class to avoid a11y lint issues with inline handlers. */}
+      <div
+        className="noetic-agent-row"
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          padding: '8px',
           width: '100%',
-          backgroundColor: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-          fontFamily: 'inherit',
-          fontSize: 'inherit',
-          color: 'inherit',
+          borderRadius: '4px',
         }}
       >
-        <span
+        <style>{'.noetic-agent-row:hover { background-color: var(--noetic-hover); }'}</style>
+        <button
+          type="button"
+          onClick={onToggleExpand}
           style={{
-            width: '16px',
-            height: '16px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'transparent',
-            border: 'none',
-            color: 'var(--noetic-text-muted)',
-            fontSize: '10px',
-            padding: 0,
-          }}
-        >
-          {isExpanded ? '▼' : '▶'}
-        </span>
-
-        <span
-          style={{
-            fontSize: '12px',
-          }}
-        >
-          {icon}
-        </span>
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
+            gap: '8px',
+            padding: '8px',
             flex: 1,
             minWidth: 0,
+            backgroundColor: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            textAlign: 'left',
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+            color: 'inherit',
           }}
         >
+          <span
+            style={{
+              width: '16px',
+              height: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: 'var(--noetic-text-muted)',
+              fontSize: '10px',
+              padding: 0,
+            }}
+          >
+            {isExpanded ? '▼' : '▶'}
+          </span>
+
           <span
             style={{
               fontSize: '12px',
-              fontWeight: 500,
-              color: 'var(--noetic-text)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
             }}
-            title={agent.name}
           >
-            {agent.name}
+            {icon}
           </span>
-          <span
-            style={{
-              fontSize: '10px',
-              color: 'var(--noetic-text-muted)',
-              fontFamily: 'monospace',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={agent.filePath}
-          >
-            {agent.filePath}
-          </span>
-        </div>
 
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: '2px',
-            flexShrink: 0,
-          }}
-        >
-          <span
+          <div
             style={{
-              fontSize: '10px',
-              color: 'var(--noetic-text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              flex: 1,
+              minWidth: 0,
             }}
           >
-            {agent.runCount} run{agent.runCount !== 1 ? 's' : ''}
-          </span>
-          <span
+            <span
+              style={{
+                fontSize: '12px',
+                fontWeight: 500,
+                color: 'var(--noetic-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={agent.name}
+            >
+              {agent.name}
+            </span>
+            <span
+              style={{
+                fontSize: '10px',
+                color: 'var(--noetic-text-muted)',
+                fontFamily: 'monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={agent.filePath}
+            >
+              {agent.filePath}
+            </span>
+          </div>
+
+          <div
             style={{
-              fontSize: '9px',
-              color: 'var(--noetic-text-secondary)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              gap: '2px',
+              flexShrink: 0,
             }}
           >
-            {isClient ? formatRelativeTime(agent.lastRunAt) : ''}
-          </span>
-        </div>
+            <span
+              style={{
+                fontSize: '10px',
+                color: 'var(--noetic-text-muted)',
+              }}
+            >
+              {agent.runCount} run{agent.runCount !== 1 ? 's' : ''}
+            </span>
+            <span
+              style={{
+                fontSize: '9px',
+                color: 'var(--noetic-text-secondary)',
+              }}
+            >
+              {isClient ? formatRelativeTime(agent.lastRunAt) : ''}
+            </span>
+          </div>
+        </button>
 
         <button
           type="button"
@@ -333,7 +341,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
             color: 'var(--noetic-text-muted)',
             fontSize: '12px',
             padding: 0,
-            marginLeft: '4px',
+            marginRight: '4px',
             opacity: isDeleting ? 0.5 : 1,
           }}
           title="Delete agent"
@@ -341,7 +349,7 @@ const AgentEntry: React.FC<AgentEntryProps> = ({
         >
           {isDeleting ? '...' : '×'}
         </button>
-      </button>
+      </div>
 
       {isExpanded && (
         <div

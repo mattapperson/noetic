@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -8,13 +9,21 @@ import { useAgentStore } from '../stores/agent';
 import { useExecutionStore } from '../stores/execution';
 import { usePlaybackStore } from '../stores/playbackStore';
 import { markerIdForNode, useTimelineStore } from '../stores/timelineStore';
-import type { Run } from '../types/agent';
 import type { ExecutionTrace } from '../types';
+import type { Run } from '../types/agent';
 import { AgentBrowser } from './AgentBrowser';
 
 /** Shared selector: returns the trace for the currently selected run, or null.
  *  Referentially stable as long as the trace object on the run doesn't change. */
-const selectCurrentTrace = (s: { selectedRunId: string | null; agents: Array<{ runs: Array<{ id: string; trace?: ExecutionTrace }> }> }): ExecutionTrace | null => {
+const selectCurrentTrace = (s: {
+  selectedRunId: string | null;
+  agents: Array<{
+    runs: Array<{
+      id: string;
+      trace?: ExecutionTrace;
+    }>;
+  }>;
+}): ExecutionTrace | null => {
   if (!s.selectedRunId) {
     return null;
   }
@@ -27,6 +36,7 @@ const selectCurrentTrace = (s: { selectedRunId: string | null; agents: Array<{ r
   }
   return null;
 };
+
 import { NodeGraph } from './NodeGraph';
 import { NodeInspector } from './NodeInspector';
 import { NoeticLogo } from './NoeticLogo';
@@ -172,17 +182,19 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({ selectedNodeId, onNodeSelec
           fitToView={true}
           executedNodeIds={executedNodeIds}
         />
-      ) : (
+      ) : runId ? (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
             <div className="mb-4 flex justify-center">
               <NoeticLogo size={80} />
             </div>
             <p className="text-lg text-[var(--noetic-text-secondary)]">
-              {runId ? 'Loading execution trace...' : 'Select an agent to view execution'}
+              Loading execution trace...
             </p>
           </div>
         </div>
+      ) : (
+        <WelcomeScreen />
       )}
 
       {/* Grid pattern overlay */}
@@ -216,11 +228,163 @@ const RightPanel: React.FC<RightPanelProps> = ({ selectedNodeId, nodes }) => {
   );
 };
 
+const WelcomeScreen: React.FC = () => {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center p-8">
+      <div
+        style={{
+          maxWidth: '520px',
+          width: '100%',
+        }}
+      >
+        <div className="flex justify-center mb-6">
+          <NoeticLogo size={64} />
+        </div>
+        <h1
+          style={{
+            fontSize: '24px',
+            fontWeight: 600,
+            color: 'var(--noetic-text)',
+            textAlign: 'center',
+            margin: '0 0 8px 0',
+          }}
+        >
+          Noetic Debugger
+        </h1>
+        <p
+          style={{
+            fontSize: '14px',
+            color: 'var(--noetic-text-muted)',
+            textAlign: 'center',
+            margin: '0 0 32px 0',
+          }}
+        >
+          Visual debugger for Noetic agent workflows
+        </p>
+
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+          }}
+        >
+          <WelcomeCard
+            title="Select a run"
+            description="Expand an agent in the left sidebar and click a run to load its execution trace."
+            icon="1"
+          />
+          <WelcomeCard
+            title="Explore the graph"
+            description="Pan and zoom the node graph to follow execution flow. Click a node to inspect its data in the right panel."
+            icon="2"
+          />
+          <WelcomeCard
+            title="Time-travel debugging"
+            description="Use the playback bar at the bottom to scrub through execution history and see the state at any point in time."
+            icon="3"
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: '24px',
+            padding: '12px 16px',
+            borderRadius: '6px',
+            backgroundColor: 'var(--noetic-node-bg)',
+            border: '1px solid var(--noetic-border)',
+            fontSize: '12px',
+            color: 'var(--noetic-text-muted)',
+            textAlign: 'center',
+          }}
+        >
+          Enable debug mode with{' '}
+          <code
+            style={{
+              padding: '2px 6px',
+              borderRadius: '3px',
+              backgroundColor: 'var(--noetic-code-bg, rgba(0,0,0,0.2))',
+              color: 'var(--noetic-text-secondary)',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+            }}
+          >
+            NOETIC_UI_ENABLED=true
+          </code>{' '}
+          to record agent runs automatically.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+interface WelcomeCardProps {
+  title: string;
+  description: string;
+  icon: string;
+}
+
+const WelcomeCard: React.FC<WelcomeCardProps> = ({ title, description, icon }) => {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: '14px',
+        alignItems: 'flex-start',
+        padding: '14px 16px',
+        borderRadius: '6px',
+        border: '1px solid var(--noetic-border)',
+        backgroundColor: 'var(--noetic-node-bg)',
+      }}
+    >
+      <span
+        style={{
+          width: '24px',
+          height: '24px',
+          borderRadius: '50%',
+          backgroundColor: 'var(--noetic-accent, #3b82f6)',
+          color: '#fff',
+          fontSize: '12px',
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
+      <div>
+        <div
+          style={{
+            fontSize: '13px',
+            fontWeight: 600,
+            color: 'var(--noetic-text)',
+            marginBottom: '4px',
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontSize: '12px',
+            color: 'var(--noetic-text-muted)',
+            lineHeight: '1.5',
+          }}
+        >
+          {description}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface ResizablePanelsProps {
   children?: React.ReactNode;
 }
 
 export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
+  const router = useRouter();
   // Use persisted column widths from localStorage
   const { leftWidth, rightWidth, setLeftWidth, setRightWidth, hasHydrated } = useColumnWidths({
     defaultLeftWidth: DEFAULT_LEFT_WIDTH,
@@ -289,11 +453,10 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
   );
   // Ensure nodes is a Map using ensureMap
   const nodes = useMemo(
-    () =>
-      ensureMap<string, import('../types').ExecutionNode>(
-        currentTrace?.nodes ?? new Map(),
-      ),
-    [currentTrace],
+    () => ensureMap<string, import('../types').ExecutionNode>(currentTrace?.nodes ?? new Map()),
+    [
+      currentTrace,
+    ],
   );
 
   // Fetch run data when URL has runId but run isn't loaded yet.
@@ -310,18 +473,24 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
         const response = await fetch(
           `/api/agents/${encodeURIComponent(agentSlug)}/runs/${encodeURIComponent(runId)}`,
         );
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            const fullRun = deserialize<Run>(data.data);
-            useAgentStore.getState().updateRun(agentSlug, runId, fullRun);
-            if (fullRun.trace) {
-              useExecutionStore.getState().setTrace(runId, fullRun.trace);
-            }
-          }
+        if (!response.ok) {
+          // Run doesn't exist — redirect to index
+          router.replace('/');
+          return;
+        }
+        const data = await response.json();
+        if (!data.success || !data.data) {
+          router.replace('/');
+          return;
+        }
+        const fullRun = deserialize<Run>(data.data);
+        useAgentStore.getState().updateRun(agentSlug, runId, fullRun);
+        if (fullRun.trace) {
+          useExecutionStore.getState().setTrace(runId, fullRun.trace);
         }
       } catch (error) {
         console.error(`[ResizablePanels] Failed to fetch run ${runId}:`, error);
+        window.location.replace('/');
       } finally {
         setIsLoadingRun(false);
       }
@@ -333,6 +502,7 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
     runId,
     currentTrace,
     agentLoaded,
+    router.replace,
   ]);
 
   return (
@@ -349,16 +519,26 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
 
         <CenterCanvas selectedNodeId={selectedNodeId} onNodeSelect={handleNodeSelect} />
 
-        <ResizableSidebar
-          width={rightWidth}
-          onWidthChange={setRightWidth}
-          side="right"
-          isHydrated={hasHydrated}
-        >
-          <RightPanel selectedNodeId={selectedNodeId} nodes={nodes} />
-        </ResizableSidebar>
+        {currentTrace && (
+          <ResizableSidebar
+            width={rightWidth}
+            onWidthChange={setRightWidth}
+            side="right"
+            isHydrated={hasHydrated}
+          >
+            <RightPanel selectedNodeId={selectedNodeId} nodes={nodes} />
+          </ResizableSidebar>
+        )}
       </div>
-      <PlaybackBar onTimelineChange={handleTimelineChange} />
+      <div
+        style={{
+          overflow: 'hidden',
+          maxHeight: currentTrace ? '200px' : '0px',
+          transition: 'max-height 0.3s ease-in-out',
+        }}
+      >
+        <PlaybackBar onTimelineChange={handleTimelineChange} />
+      </div>
     </>
   );
 };

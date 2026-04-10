@@ -1,63 +1,38 @@
 /**
  * Theme toggle component
- * Allows switching between system, light, and dark themes
+ * Select between system, light, and dark themes
  */
 
 import type React from 'react';
+import type { ThemeMode } from '../stores/theme';
 import { useThemeStore } from '../stores/theme';
 
 export const ThemeToggle: React.FC = () => {
-  const { mode, toggleTheme } = useThemeStore();
+  const { mode, setMode } = useThemeStore();
 
-  const getIcon = () => {
-    switch (mode) {
-      case 'light':
-        return '☀️';
-      case 'dark':
-        return '🌙';
-      case 'system':
-        return '🖥️';
-    }
-  };
-
-  const getLabel = () => {
-    switch (mode) {
-      case 'light':
-        return 'Light';
-      case 'dark':
-        return 'Dark';
-      case 'system':
-        return 'System';
-    }
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setMode(e.target.value as ThemeMode);
   };
 
   return (
-    <button
-      type="button"
-      onClick={toggleTheme}
-      title={`Theme: ${getLabel()} (click to toggle)`}
+    <select
+      value={mode}
+      onChange={handleChange}
+      title="Theme"
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
         padding: '4px 8px',
         fontSize: '12px',
         borderRadius: '4px',
         border: '1px solid var(--noetic-border)',
-        backgroundColor: 'var(--noetic-button-bg)',
+        backgroundColor: 'var(--noetic-input-bg)',
         color: 'var(--noetic-text)',
         cursor: 'pointer',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = 'var(--noetic-button-hover)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'var(--noetic-button-bg)';
-      }}
     >
-      <span>{getIcon()}</span>
-      <span>{getLabel()}</span>
-    </button>
+      <option value="system">System</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
   );
 };
 
