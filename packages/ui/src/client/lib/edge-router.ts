@@ -154,12 +154,20 @@ function getAnchor(node: NodePosition, toward: NodePosition): AnchorPoint {
 
   // Container → child: anchor at top of container, aligned to child's center-x
   if (containsNode(node, toward)) {
-    return { x: towardCx, y: node.y, side: 'top' };
+    return {
+      x: towardCx,
+      y: node.y,
+      side: 'top',
+    };
   }
 
   // Child → container: anchor at top of child (line goes up toward container header)
   if (containsNode(toward, node)) {
-    return { x: nodeCx, y: node.y, side: 'top' };
+    return {
+      x: nodeCx,
+      y: node.y,
+      side: 'top',
+    };
   }
 
   const cx = node.x + node.width / 2;
@@ -173,10 +181,30 @@ function getAnchor(node: NodePosition, toward: NodePosition): AnchorPoint {
   }
 
   const candidates: Candidate[] = [
-    { side: 'bottom', gap: toward.y - (node.y + node.height), x: cx, y: node.y + node.height },
-    { side: 'top', gap: node.y - (toward.y + toward.height), x: cx, y: node.y },
-    { side: 'right', gap: toward.x - (node.x + node.width), x: node.x + node.width, y: cy },
-    { side: 'left', gap: node.x - (toward.x + toward.width), x: node.x, y: cy },
+    {
+      side: 'bottom',
+      gap: toward.y - (node.y + node.height),
+      x: cx,
+      y: node.y + node.height,
+    },
+    {
+      side: 'top',
+      gap: node.y - (toward.y + toward.height),
+      x: cx,
+      y: node.y,
+    },
+    {
+      side: 'right',
+      gap: toward.x - (node.x + node.width),
+      x: node.x + node.width,
+      y: cy,
+    },
+    {
+      side: 'left',
+      gap: node.x - (toward.x + toward.width),
+      x: node.x,
+      y: cy,
+    },
   ];
 
   // Only consider sides with positive gap (target is on that side with clearance)
@@ -185,12 +213,20 @@ function getAnchor(node: NodePosition, toward: NodePosition): AnchorPoint {
   if (valid.length === 0) {
     // Nodes overlap — pick the side with the least negative gap
     candidates.sort((a, b) => b.gap - a.gap);
-    return { x: candidates[0].x, y: candidates[0].y, side: candidates[0].side };
+    return {
+      x: candidates[0].x,
+      y: candidates[0].y,
+      side: candidates[0].side,
+    };
   }
 
   // Pick the side with the largest gap (most room for routing)
   valid.sort((a, b) => b.gap - a.gap);
-  return { x: valid[0].x, y: valid[0].y, side: valid[0].side };
+  return {
+    x: valid[0].x,
+    y: valid[0].y,
+    side: valid[0].side,
+  };
 }
 
 //#endregion
@@ -207,7 +243,9 @@ function simplifyWaypoints(points: Waypoint[]): Waypoint[] {
     return points;
   }
 
-  const result: Waypoint[] = [points[0]];
+  const result: Waypoint[] = [
+    points[0],
+  ];
 
   for (let i = 1; i < points.length; i++) {
     const prev = result[result.length - 1];
@@ -246,12 +284,21 @@ function simplifyWaypoints(points: Waypoint[]): Waypoint[] {
  *   mixed          → L (one turn)
  */
 function computeSimpleRoute(source: AnchorPoint, target: AnchorPoint): Waypoint[] {
-  const start: Waypoint = { x: source.x, y: source.y };
-  const end: Waypoint = { x: target.x, y: target.y };
+  const start: Waypoint = {
+    x: source.x,
+    y: source.y,
+  };
+  const end: Waypoint = {
+    x: target.x,
+    y: target.y,
+  };
 
   // Direct line (aligned anchors)
   if (start.x === end.x || start.y === end.y) {
-    return [start, end];
+    return [
+      start,
+      end,
+    ];
   }
 
   const srcVert = isVerticalSide(source.side);
@@ -262,8 +309,14 @@ function computeSimpleRoute(source: AnchorPoint, target: AnchorPoint): Waypoint[
     const midY = snapToGrid((start.y + end.y) / 2);
     return simplifyWaypoints([
       start,
-      { x: start.x, y: midY },
-      { x: end.x, y: midY },
+      {
+        x: start.x,
+        y: midY,
+      },
+      {
+        x: end.x,
+        y: midY,
+      },
       end,
     ]);
   }
@@ -273,8 +326,14 @@ function computeSimpleRoute(source: AnchorPoint, target: AnchorPoint): Waypoint[
     const midX = snapToGrid((start.x + end.x) / 2);
     return simplifyWaypoints([
       start,
-      { x: midX, y: start.y },
-      { x: midX, y: end.y },
+      {
+        x: midX,
+        y: start.y,
+      },
+      {
+        x: midX,
+        y: end.y,
+      },
       end,
     ]);
   }
@@ -282,11 +341,25 @@ function computeSimpleRoute(source: AnchorPoint, target: AnchorPoint): Waypoint[
   // Mixed: L-shape (one turn)
   if (srcVert) {
     // Vertical exit → horizontal entry: corner at (source.x, target.y)
-    return simplifyWaypoints([start, { x: start.x, y: end.y }, end]);
+    return simplifyWaypoints([
+      start,
+      {
+        x: start.x,
+        y: end.y,
+      },
+      end,
+    ]);
   }
 
   // Horizontal exit → vertical entry: corner at (target.x, source.y)
-  return simplifyWaypoints([start, { x: end.x, y: start.y }, end]);
+  return simplifyWaypoints([
+    start,
+    {
+      x: end.x,
+      y: start.y,
+    },
+    end,
+  ]);
 }
 
 //#endregion
@@ -388,10 +461,22 @@ function computeAstarRoute({
   const closedSet = new Set<string>();
 
   const directions: GridCell[] = [
-    { x: CELL_SIZE, y: 0 },
-    { x: -CELL_SIZE, y: 0 },
-    { x: 0, y: CELL_SIZE },
-    { x: 0, y: -CELL_SIZE },
+    {
+      x: CELL_SIZE,
+      y: 0,
+    },
+    {
+      x: -CELL_SIZE,
+      y: 0,
+    },
+    {
+      x: 0,
+      y: CELL_SIZE,
+    },
+    {
+      x: 0,
+      y: -CELL_SIZE,
+    },
   ];
 
   let iterations = 0;
@@ -406,8 +491,14 @@ function computeAstarRoute({
       const path = reconstructPath(current);
       // Replace snapped first/last waypoints with exact anchor coordinates
       // so the path meets the node edges precisely.
-      path[0] = { x: source.x, y: source.y };
-      path[path.length - 1] = { x: target.x, y: target.y };
+      path[0] = {
+        x: source.x,
+        y: source.y,
+      };
+      path[path.length - 1] = {
+        x: target.x,
+        y: target.y,
+      };
       return path;
     }
 

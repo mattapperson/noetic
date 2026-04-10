@@ -107,10 +107,16 @@ describe('routeEdge — anchor selection (4-sided)', () => {
     const result = routeEdge(source, target, []);
 
     // First point should be bottom-center of source
-    expect(result.waypoints[0]).toEqual({ x: 240, y: 240 });
+    expect(result.waypoints[0]).toEqual({
+      x: 240,
+      y: 240,
+    });
     // Last point should be top-center of target
     const last = result.waypoints[result.waypoints.length - 1];
-    expect(last).toEqual({ x: 540, y: 300 });
+    expect(last).toEqual({
+      x: 540,
+      y: 300,
+    });
   });
 
   it('falls back to least-negative gap when nodes overlap', () => {

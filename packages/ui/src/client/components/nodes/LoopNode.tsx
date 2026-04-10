@@ -18,7 +18,6 @@ import {
   nodeHeaderStyles,
   STATUS_COLORS,
   STATUS_ICONS,
-  STATUS_LABELS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
   tagStyles,

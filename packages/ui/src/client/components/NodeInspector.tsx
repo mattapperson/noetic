@@ -365,14 +365,12 @@ const ToolCalls: React.FC<ToolCallsProps> = ({ toolCalls }) => {
     <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 bg-orange-500/10 border-b border-[var(--noetic-border)]">
         <Terminal className="w-3.5 h-3.5 text-orange-500" />
-        <span className="text-xs font-medium text-orange-500">
-          Tool Calls ({toolCalls.length})
-        </span>
+        <span className="text-xs font-medium text-orange-500">Tool Calls ({toolCalls.length})</span>
       </div>
       <div className="p-3 space-y-2">
-        {toolCalls.map((call, i) => (
+        {toolCalls.map((call) => (
           <div
-            key={`${call.name}-${i}`}
+            key={`${call.name}-${JSON.stringify(call.arguments)}`}
             className="border border-[var(--noetic-border)] rounded overflow-hidden"
           >
             <div className="px-2 py-1.5 bg-[var(--noetic-node-bg)] border-b border-[var(--noetic-border)]">

@@ -118,9 +118,9 @@ export const RunList: React.FC<RunListProps> = ({ agentId }) => {
   // touch any store — updating agents/execution state on hover causes
   // the graph to re-layout and reset zoom/selection.
   const prefetchRun = (run: AgentRun): void => {
-    fetch(
-      `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`,
-    ).catch(() => {});
+    fetch(`/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(run.id)}`).catch(
+      () => {},
+    );
   };
 
   return (
@@ -255,7 +255,8 @@ const RunEntry: React.FC<RunEntryProps> = ({ run, isSelected, onClick, onPrefetc
             flexShrink: 0,
           }}
         >
-          {(run.totalTokens?.input ?? 0).toLocaleString()}↑ {(run.totalTokens?.output ?? 0).toLocaleString()}↓
+          {(run.totalTokens?.input ?? 0).toLocaleString()}↑{' '}
+          {(run.totalTokens?.output ?? 0).toLocaleString()}↓
         </span>
       </div>
 

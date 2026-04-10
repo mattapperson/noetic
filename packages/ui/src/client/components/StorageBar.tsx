@@ -22,7 +22,7 @@ function formatTokens(n: number): string {
 }
 
 export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
-  const { agents, removeAllRuns, removeAgent } = useAgentStore();
+  const { agents, removeAgent } = useAgentStore();
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
 
   if (agents.length === 0) {

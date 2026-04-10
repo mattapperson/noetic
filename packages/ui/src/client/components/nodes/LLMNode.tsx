@@ -18,7 +18,6 @@ import {
   nodeHeaderStyles,
   STATUS_COLORS,
   STATUS_ICONS,
-  STATUS_LABELS,
   STEP_KIND_ICONS,
   STEP_KIND_LABELS,
   tagStyles,
@@ -100,7 +99,10 @@ export const LLMNode: React.FC<LLMNodeProps> = ({ node, selected = false, onClic
       <div style={nodeFooterStyles}>
         <div>
           {tokenCount > 0 && (
-            <span>{(stepData?.tokenUsage?.input ?? 0).toLocaleString()}↑ {(stepData?.tokenUsage?.output ?? 0).toLocaleString()}↓</span>
+            <span>
+              {(stepData?.tokenUsage?.input ?? 0).toLocaleString()}↑{' '}
+              {(stepData?.tokenUsage?.output ?? 0).toLocaleString()}↓
+            </span>
           )}
         </div>
         <div>{node.durationMs !== null && formatDuration(node.durationMs)}</div>
