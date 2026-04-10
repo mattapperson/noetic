@@ -81,11 +81,22 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
           color: 'var(--noetic-text-secondary)',
         }}
       >
-        <span>
-          {totalRuns} run{totalRuns !== 1 ? 's' : ''}
-          {totalTokens > 0 && ` · ${formatTokens(totalTokens)} tokens`}
-          {totalCost > 0 && ` · $${totalCost.toFixed(4)}`}
-        </span>
+        {isConfirmingClear ? (
+          <span
+            style={{
+              color: '#ef4444',
+              fontSize: '12px',
+            }}
+          >
+            Click again to delete all agents and runs
+          </span>
+        ) : (
+          <span>
+            {totalRuns} run{totalRuns !== 1 ? 's' : ''}
+            {totalTokens > 0 && ` · ${formatTokens(totalTokens)} tokens`}
+            {totalCost > 0 && ` · $${totalCost.toFixed(4)}`}
+          </span>
+        )}
         <button
           type="button"
           onClick={handleClearAll}
