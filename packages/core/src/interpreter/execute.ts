@@ -108,6 +108,12 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     baseCtx.stepCount = (baseCtx.stepCount || 0) + 1;
   }
 
+  // Export span immediately so the UI shows this node as "running"
+  // Fire-and-forget: UI feedback only, completion export is awaited below
+  void ctx.harness.traceExporter.export([
+    span,
+  ]);
+
   // Emit step_started framework event (respects step.emit option)
   const broadcaster = getBroadcaster(baseCtx);
   const agentName = baseCtx.harness.config.name;

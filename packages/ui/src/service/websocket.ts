@@ -33,6 +33,7 @@ const DEFAULT_HOST = '127.0.0.1'; // Bind to localhost only for security
 const HEARTBEAT_INTERVAL_MS = 30000; // Client ping every 30s
 const PONG_TIMEOUT_MS = 5000; // Server must respond within 5s
 const MAX_BUFFER_SIZE = 1000; // Max messages to buffer
+const SAVE_DEBOUNCE_MS = 500; // Debounce disk writes for live traces
 
 // ============================================================================
 // Types
@@ -78,6 +79,7 @@ export class NoeticUIServer {
     }
   >();
   private breakpointRegistry = new Map<string, string | null>();
+  private saveTimers = new Map<string, NodeJS.Timeout>();
   private storage: TraceStorage;
   private config: ServerConfig;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -143,6 +145,16 @@ export class NoeticUIServer {
     }
 
     console.info('[WebSocket] Starting graceful shutdown...');
+
+    // Flush all pending debounced saves before shutting down
+    for (const [traceId, timer] of this.saveTimers) {
+      clearTimeout(timer);
+      const traceState = this.traces.get(traceId);
+      if (traceState) {
+        await this.saveTrace(traceState.trace, traceState.agentId);
+      }
+    }
+    this.saveTimers.clear();
 
     // Stop heartbeat
     if (this.heartbeatInterval) {
@@ -678,7 +690,8 @@ export class NoeticUIServer {
     });
   }
 
-  private handleExecutionGet(client: ClientConnection, traceId: string): void {
+  private async handleExecutionGet(client: ClientConnection, traceId: string): Promise<void> {
+    // Check in-memory traces first (live runs)
     const traceState = this.traces.get(traceId);
     if (traceState) {
       this.sendToClient(client, {
@@ -686,15 +699,80 @@ export class NoeticUIServer {
         agentId: traceState.agentId,
         trace: traceState.trace,
       });
+      return;
     }
+
+    // Fall back to disk storage (handles page reload during/after runs)
+    try {
+      const agents = await this.storage.listAgents();
+      for (const agentId of agents) {
+        const run = await this.storage.loadRun(agentId, traceId);
+        if (run?.trace) {
+          this.sendToClient(client, {
+            type: 'execution.start',
+            agentId,
+            trace: run.trace,
+          });
+
+          // If the run was live when persisted, restore it to memory
+          if (run.isLive) {
+            this.traces.set(traceId, {
+              trace: run.trace,
+              agentId,
+              isLive: true,
+              input: run.input,
+            });
+          }
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[WebSocket] Failed to load trace from storage:', error);
+    }
+
+    // Trace not found in memory or on disk
+    this.sendToClient(client, {
+      type: 'execution.error',
+      agentId: 'system',
+      traceId,
+      error: {
+        message: 'Trace not found',
+        code: 'NOT_FOUND',
+      },
+    });
   }
 
-  private handleExecutionReplay(
+  private async handleExecutionReplay(
     client: ClientConnection,
     traceId: string,
     fromNodeId?: string,
-  ): void {
-    const traceState = this.traces.get(traceId);
+  ): Promise<void> {
+    // Check in-memory first, fall back to disk
+    let traceState = this.traces.get(traceId);
+    if (!traceState) {
+      try {
+        const agents = await this.storage.listAgents();
+        for (const agentId of agents) {
+          const run = await this.storage.loadRun(agentId, traceId);
+          if (run?.trace) {
+            traceState = {
+              trace: run.trace,
+              agentId,
+              isLive: run.isLive,
+              input: run.input,
+            };
+            // Restore live runs to memory
+            if (run.isLive) {
+              this.traces.set(traceId, traceState);
+            }
+            break;
+          }
+        }
+      } catch (error) {
+        console.error('[WebSocket] Failed to load trace for replay:', error);
+      }
+    }
+
     if (!traceState) {
       return;
     }
@@ -774,6 +852,13 @@ export class NoeticUIServer {
   }
 
   private async saveTrace(trace: ExecutionTrace, agentId: string): Promise<void> {
+    // Clear any pending debounced save for this trace
+    const timer = this.saveTimers.get(trace.traceId);
+    if (timer) {
+      clearTimeout(timer);
+      this.saveTimers.delete(trace.traceId);
+    }
+
     try {
       const traceState = this.traces.get(trace.traceId);
       const rootNode = trace.nodes.get(trace.rootNodeId);
@@ -783,6 +868,29 @@ export class NoeticUIServer {
     } catch (error) {
       console.error('[WebSocket] Failed to save trace:', error);
     }
+  }
+
+  /**
+   * Schedule a debounced save for a live trace.
+   * Coalesces rapid node events into a single disk write.
+   */
+  private debouncedSaveTrace(traceId: string): void {
+    const existing = this.saveTimers.get(traceId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+      this.saveTimers.delete(traceId);
+      const traceState = this.traces.get(traceId);
+      if (traceState) {
+        this.saveTrace(traceState.trace, traceState.agentId).catch((err) => {
+          console.error('[WebSocket] Debounced save failed:', err);
+        });
+      }
+    }, SAVE_DEBOUNCE_MS);
+
+    this.saveTimers.set(traceId, timer);
   }
 
   // ============================================================================
@@ -839,6 +947,9 @@ export class NoeticUIServer {
       agentId,
       trace,
     });
+
+    // Persist initial trace to disk
+    this.debouncedSaveTrace(traceId);
   }
 
   private handleTraceNodeStart(traceId: string, node: ExecutionNode): void {
@@ -874,6 +985,9 @@ export class NoeticUIServer {
       type: 'node.start',
       node,
     });
+
+    // Persist progress to disk (debounced)
+    this.debouncedSaveTrace(traceId);
   }
 
   private handleTraceNodeComplete(
@@ -905,6 +1019,9 @@ export class NoeticUIServer {
       output,
       durationMs,
     });
+
+    // Persist progress to disk (debounced)
+    this.debouncedSaveTrace(traceId);
   }
 
   private handleTraceNodeError(traceId: string, nodeId: string, error: NoeticError): void {
@@ -925,6 +1042,9 @@ export class NoeticUIServer {
       nodeId,
       error,
     });
+
+    // Persist progress to disk (debounced)
+    this.debouncedSaveTrace(traceId);
   }
 
   private async handleTraceComplete(
@@ -960,7 +1080,8 @@ export class NoeticUIServer {
     await this.saveTrace(traceState.trace, traceState.agentId);
 
     // Clean up completed trace from memory after a delay
-    // (keep it briefly to allow clients to fetch final state)
+    // (keep it briefly to allow clients to fetch final state;
+    //  disk copy is authoritative after this point)
     setTimeout(() => {
       this.traces.delete(traceId);
       console.info(`[WebSocket] Cleaned up completed trace: ${traceId}`);

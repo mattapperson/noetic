@@ -471,6 +471,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     rootSpan.setAttribute('input', typeof input === 'string' ? input : JSON.stringify(input));
     rootSpan.setAttribute('depth', 0);
 
+    // Export root span immediately so the UI shows it as "running"
+    // Fire-and-forget: UI feedback only, completion export is awaited below
+    void this.traceExporter.export([
+      rootSpan,
+    ]);
+
     try {
       const result = await execute(s, input, ctx);
       rootSpan.setAttribute('output', JSON.stringify(result));
