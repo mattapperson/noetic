@@ -261,7 +261,23 @@ const escapeRegExp = (string: string): string => {
 const sanitizeForDisplay = (obj: unknown): unknown => {
   const seen = new WeakSet<object>();
 
-  const sanitize = (value: unknown): unknown => {
+  const sanitize = (value: unknown, key?: string): unknown => {
+    // Parse JSON-encoded strings in input/output/state fields so the raw
+    // trace view shows structured data instead of escaped string literals
+    if (typeof value === 'string' && (key === 'input' || key === 'output' || key === 'state')) {
+      const trimmed = value.trim();
+      if (
+        (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+        (trimmed.startsWith('[') && trimmed.endsWith(']'))
+      ) {
+        try {
+          return sanitize(JSON.parse(trimmed));
+        } catch {
+          // Not valid JSON, return as string
+        }
+      }
+    }
+
     if (value === null || typeof value !== 'object') {
       return value;
     }
@@ -277,14 +293,14 @@ const sanitizeForDisplay = (obj: unknown): unknown => {
       seen.add(objValue);
       const result: Record<string, unknown> = {};
       for (const [k, v] of objValue.entries()) {
-        result[String(k)] = sanitize(v);
+        result[String(k)] = sanitize(v, String(k));
       }
       return result;
     }
 
     if (objValue instanceof Set) {
       seen.add(objValue);
-      return Array.from(objValue).map(sanitize);
+      return Array.from(objValue).map((item) => sanitize(item));
     }
 
     if (objValue instanceof Date) {
@@ -301,14 +317,14 @@ const sanitizeForDisplay = (obj: unknown): unknown => {
 
     if (Array.isArray(objValue)) {
       seen.add(objValue);
-      return objValue.map(sanitize);
+      return objValue.map((item) => sanitize(item));
     }
 
     // Handle plain objects
     seen.add(objValue);
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(objValue)) {
-      result[k] = sanitize(v);
+      result[k] = sanitize(v, k);
     }
     return result;
   };
