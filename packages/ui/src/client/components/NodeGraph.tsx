@@ -279,9 +279,10 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
     ],
   );
 
-  // Zoom handler
+  // Zoom handler ��� attached as a non-passive native listener so
+  // preventDefault works (React onWheel is passive by default).
   const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelEvent) => {
       e.preventDefault();
       if (!containerRef.current) {
         return;
@@ -313,6 +314,19 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       view,
     ],
   );
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) {
+      return;
+    }
+    el.addEventListener('wheel', handleWheel, {
+      passive: false,
+    });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [
+    handleWheel,
+  ]);
 
   // Build position lookup map
   const positionMap = useMemo(() => {
@@ -652,12 +666,14 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       onMouseLeave={() => {
         // Only stop an active pan — do NOT deselect the node or zoom back
         if (dragState.isDragging) {
-          setDragState((prev) => ({ ...prev, isDragging: false }));
+          setDragState((prev) => ({
+            ...prev,
+            isDragging: false,
+          }));
           setIsPanning(false);
           wasDragRef.current = false;
         }
       }}
-      onWheel={handleWheel}
     >
       {/* Controls */}
       <div
