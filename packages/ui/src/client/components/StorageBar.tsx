@@ -92,19 +92,34 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
           disabled={totalRuns === 0}
           title={isConfirmingClear ? 'Click again to confirm' : 'Clear all runs'}
           style={{
-            padding: '4px',
+            width: '28px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             borderRadius: '4px',
-            border: 'none',
-            backgroundColor: 'transparent',
-            color: isConfirmingClear ? '#ef4444' : 'var(--noetic-text-muted)',
+            border: isConfirmingClear ? '1px solid #ef4444' : '1px solid var(--noetic-border)',
+            backgroundColor: isConfirmingClear ? '#ef444420' : 'var(--noetic-button-bg)',
+            color: isConfirmingClear ? '#ef4444' : 'var(--noetic-text)',
             cursor: totalRuns === 0 ? 'not-allowed' : 'pointer',
-            opacity: totalRuns === 0 ? 0.5 : 1,
-            transition: 'color 0.15s',
+            opacity: totalRuns === 0 ? 0.6 : 1,
+            fontSize: '14px',
+            padding: 0,
+          }}
+          onMouseEnter={(e) => {
+            if (totalRuns > 0 && !isConfirmingClear) {
+              e.currentTarget.style.backgroundColor = 'var(--noetic-button-hover)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = isConfirmingClear
+              ? '#ef444420'
+              : 'var(--noetic-button-bg)';
           }}
         >
           <svg
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
