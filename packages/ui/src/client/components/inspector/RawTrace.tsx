@@ -143,19 +143,6 @@ interface SyntaxHighlightedJsonProps {
   content: string;
 }
 
-/**
- * Simple hash function for generating unique keys from line content
- */
-const hashLine = (str: string): string => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(36);
-};
-
 interface HighlightedSegment {
   text: string;
   className?: string;
@@ -214,24 +201,26 @@ const SyntaxHighlightedJson: React.FC<SyntaxHighlightedJsonProps> = ({ content }
 
   return (
     <div className="p-4">
-      {lines.map((line) => (
-        <div key={hashLine(line)} className="flex">
-          <span className="w-8 text-right pr-3 text-[var(--noetic-text-muted)] select-none flex-shrink-0">
-            {hashLine(line).slice(0, 4)}
-          </span>
-          <span className="flex-1 whitespace-pre">
-            {parseLineToSegments(line).map((segment) =>
-              segment.className ? (
-                <span key={hashLine(segment.text)} className={segment.className}>
-                  {segment.text}
-                </span>
-              ) : (
-                <span key={hashLine(segment.text)}>{segment.text}</span>
-              ),
-            )}
-          </span>
-        </div>
-      ))}
+      {lines.map((line, lineIdx) => {
+        const lineKey = `L${lineIdx}-${line.length}`;
+        return (
+          <div key={lineKey} className="flex">
+            <span className="w-8 text-right pr-3 text-[var(--noetic-text-muted)] select-none flex-shrink-0">
+              {lineIdx + 1}
+            </span>
+            <span className="flex-1 whitespace-pre">
+              {parseLineToSegments(line).map((segment, segIdx) => {
+                const segKey = `${lineKey}-S${segIdx}-${segment.text.length}`;
+                return (
+                  <span key={segKey} className={segment.className}>
+                    {segment.text}
+                  </span>
+                );
+              })}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 };
