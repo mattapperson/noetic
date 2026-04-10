@@ -77,8 +77,7 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: '8px',
-          fontSize: '11px',
+          fontSize: '13px',
           color: 'var(--noetic-text-secondary)',
         }}
       >
@@ -87,27 +86,39 @@ export const StorageBar: React.FC<StorageBarProps> = ({ onClearAll }) => {
           {totalTokens > 0 && ` · ${formatTokens(totalTokens)} tokens`}
           {totalCost > 0 && ` · $${totalCost.toFixed(4)}`}
         </span>
+        <button
+          type="button"
+          onClick={handleClearAll}
+          disabled={totalRuns === 0}
+          title={isConfirmingClear ? 'Click again to confirm' : 'Clear all runs'}
+          style={{
+            padding: '4px',
+            borderRadius: '4px',
+            border: 'none',
+            backgroundColor: 'transparent',
+            color: isConfirmingClear ? '#ef4444' : 'var(--noetic-text-muted)',
+            cursor: totalRuns === 0 ? 'not-allowed' : 'pointer',
+            opacity: totalRuns === 0 ? 0.5 : 1,
+            transition: 'color 0.15s',
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            role="img"
+            aria-label="Clear all runs"
+          >
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
       </div>
-
-      <button
-        type="button"
-        onClick={handleClearAll}
-        disabled={totalRuns === 0}
-        style={{
-          width: '100%',
-          padding: '6px 10px',
-          fontSize: '11px',
-          borderRadius: '4px',
-          border: isConfirmingClear ? '1px solid #ef4444' : '1px solid var(--noetic-border)',
-          backgroundColor: isConfirmingClear ? '#ef444420' : 'var(--noetic-button-bg)',
-          color: isConfirmingClear ? '#ef4444' : 'var(--noetic-text)',
-          cursor: totalRuns === 0 ? 'not-allowed' : 'pointer',
-          opacity: totalRuns === 0 ? 0.5 : 1,
-          transition: 'all 0.15s',
-        }}
-      >
-        {isConfirmingClear ? 'Click again to confirm' : 'Clear all runs'}
-      </button>
     </div>
   );
 };
