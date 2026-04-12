@@ -12,9 +12,9 @@
     "@openrouter/agent": "0.3.0",
     "diff": "7.0.0",
     "glob": "11.0.3",
-    "ink": "^5.0.0",
+    "ink": "^7.0.0",
     "ink-text-input": "^6.0.0",
-    "react": "19.1.0",
+    "react": "^19.2.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -28,8 +28,8 @@
     "test": "bun test --preload ./test/setup.ts test/*.test.ts",
     "test:coverage": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=text --coverage-reporter=json",
     "test:ci": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=json",
-    "test:e2e": "bunx tui-test 'test/e2e/**/*.test.ts'",
-    "test:e2e:live": "bunx tui-test 'test/e2e/live.test.ts'",
+    "test:e2e": "bunx tui-test 'e2e'",
+    "test:e2e:live": "bunx tui-test 'live\\.test\\.ts$'",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",

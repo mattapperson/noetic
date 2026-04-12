@@ -6,10 +6,10 @@
  */
 
 import type { Item } from '@noetic/core';
-import { Box } from 'ink';
+import { Box, Static } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-import type { ConversationEntry, ErrorEntry } from '../item-utils.js';
+import type { ConversationEntry } from '../item-utils.js';
 import {
   extractReasoning,
   extractTextContent,
@@ -47,9 +47,6 @@ const USER_ROLE = {
 };
 const ASSISTANT_ROLE = {
   role: 'assistant' as const,
-};
-const SYSTEM_ROLE = {
-  role: 'system' as const,
 };
 
 function mapItemStatus(status: string | undefined): ToolCallState {
@@ -151,16 +148,6 @@ function renderReasoningItem(
   );
 }
 
-function renderErrorEntry(entry: ErrorEntry, key: string): ReactNode {
-  return (
-    <Message key={key} {...SYSTEM_ROLE}>
-      <Message.Content>
-        <Message.Text>{entry.content}</Message.Text>
-      </Message.Content>
-    </Message>
-  );
-}
-
 //#endregion
 
 //#region Entry Dispatch
@@ -171,7 +158,13 @@ function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext
   }
 
   if (isErrorEntry(entry)) {
-    return renderErrorEntry(entry, `error-${index}`);
+    return (
+      <Message key={`error-${index}`} {...ASSISTANT_ROLE}>
+        <Message.Content>
+          <Message.Text>{entry.content}</Message.Text>
+        </Message.Content>
+      </Message>
+    );
   }
 
   const key = getItemId(entry);
@@ -258,10 +251,46 @@ export function ResponsesChat({
     entryCount: entries.length,
   };
 
+  // Split entries into completed (for Static) and streaming (for live updates).
+  // Static renders items once and never updates them, so streaming content
+  // must be rendered outside Static.
+  //
+  // Only treat the last entry as "streaming" if:
+  // 1. We're in streaming status
+  // 2. The last entry is NOT a user entry (user entries don't stream)
+  // 3. There's at least one entry
+  const lastEntry = entries[entries.length - 1];
+  const hasStreamingEntry =
+    status === 'streaming' && lastEntry !== undefined && !isUserEntry(lastEntry);
+  const completedEntries = hasStreamingEntry ? entries.slice(0, -1) : entries;
+  const streamingEntry = hasStreamingEntry ? lastEntry : null;
+
+  // Wrap completed entries for Static component
+  const staticItems = useMemo(
+    () =>
+      completedEntries.map((entry, i) => ({
+        key: isUserEntry(entry)
+          ? `user-${i}`
+          : isErrorEntry(entry)
+            ? `error-${i}`
+            : getItemId(entry),
+        entry,
+        index: i,
+      })),
+    [
+      completedEntries,
+    ],
+  );
+
   return (
     <Box flexDirection="column" height="100%">
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {entries.map((entry, i) => renderEntry(entry, i, ctx))}
+      <Box flexDirection="column" flexGrow={1}>
+        <Static items={staticItems}>
+          {(item: { key: string; entry: ConversationEntry; index: number }) => (
+            <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
+          )}
+        </Static>
+        {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
       </Box>
       <PromptInput status={status} onSubmit={handleSubmit} onStop={onStop} model={model} />
     </Box>

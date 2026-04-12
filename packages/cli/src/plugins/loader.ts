@@ -1,20 +1,59 @@
 import { isAbsolute, resolve } from 'node:path';
-
 import { z } from 'zod';
 
 import type { AgentConfig, PluginSpec } from '../types/config.js';
 import type { NoeticPlugin } from './types.js';
 
-//#region Schema
+//#region Schemas
 
-const NoeticPluginSchema = z.object({
-  name: z.string().min(1, 'Plugin name is required'),
-  version: z.string().min(1, 'Plugin version is required'),
-  tools: z.function().optional(),
-  memoryLayers: z.function().optional(),
-  initialize: z.function().optional(),
-  dispose: z.function().optional(),
-});
+/**
+ * Zod schema for validating plugin shape at runtime.
+ * Uses z.unknown() for function fields since Zod's z.function() doesn't
+ * preserve the specific function signatures from NoeticPlugin.
+ */
+const NoeticPluginSchema = z
+  .object({
+    name: z.string(),
+    version: z.string(),
+    tools: z.unknown().optional(),
+    memoryLayers: z.unknown().optional(),
+    initialize: z.unknown().optional(),
+    dispose: z.unknown().optional(),
+  })
+  .refine(
+    (obj) => {
+      // Additional runtime checks for function fields
+      if (obj.tools !== undefined && typeof obj.tools !== 'function') {
+        return false;
+      }
+      if (obj.memoryLayers !== undefined && typeof obj.memoryLayers !== 'function') {
+        return false;
+      }
+      if (obj.initialize !== undefined && typeof obj.initialize !== 'function') {
+        return false;
+      }
+      if (obj.dispose !== undefined && typeof obj.dispose !== 'function') {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        'Optional fields (tools, memoryLayers, initialize, dispose) must be functions if provided',
+    },
+  );
+
+//#endregion
+
+//#region Type Guards
+
+/**
+ * Type guard that validates and narrows unknown to NoeticPlugin.
+ * Uses Zod for structural validation.
+ */
+function isNoeticPlugin(value: unknown): value is NoeticPlugin {
+  return NoeticPluginSchema.safeParse(value).success;
+}
 
 //#endregion
 
@@ -38,40 +77,23 @@ function resolvePluginPath(spec: PluginSpec, baseDir: string): string {
   return spec.name;
 }
 
-function isNoeticPlugin(value: unknown): value is NoeticPlugin {
-  return NoeticPluginSchema.safeParse(value).success;
-}
-
-function validatePlugin(candidate: unknown, modulePath: string): NoeticPlugin {
-  const result = NoeticPluginSchema.safeParse(candidate);
-
-  if (!result.success) {
-    const issues = result.error.issues
-      .map((issue) => `  - ${issue.path.join('.') || 'root'}: ${issue.message}`)
-      .join('\n');
-    throw new Error(`Invalid plugin at ${modulePath}:\n${issues}`);
+function extractDefault(module: object): unknown {
+  if ('default' in module) {
+    return module.default;
   }
-
-  if (!isNoeticPlugin(candidate)) {
-    throw new Error(`Invalid plugin at ${modulePath}: validation passed but type guard failed`);
-  }
-
-  return candidate;
-}
-
-function hasDefaultExport(module: object): module is object & {
-  default: unknown;
-} {
-  return 'default' in module;
+  return module;
 }
 
 async function importPlugin(spec: PluginSpec, baseDir: string): Promise<NoeticPlugin> {
   const modulePath = resolvePluginPath(spec, baseDir);
   const module = await import(modulePath);
-
-  const candidate = hasDefaultExport(module) ? module.default : module;
-
-  return validatePlugin(candidate, modulePath);
+  const candidate = extractDefault(module);
+  if (!isNoeticPlugin(candidate)) {
+    const parseResult = NoeticPluginSchema.safeParse(candidate);
+    const errorMsg = parseResult.success ? 'Unknown validation error' : parseResult.error.message;
+    throw new Error(`Invalid plugin at ${modulePath}: ${errorMsg}`);
+  }
+  return candidate;
 }
 
 //#endregion
@@ -80,25 +102,15 @@ async function importPlugin(spec: PluginSpec, baseDir: string): Promise<NoeticPl
 
 export async function loadPlugins(config: AgentConfig, baseDir: string): Promise<NoeticPlugin[]> {
   const plugins: NoeticPlugin[] = [];
-  const initializedPlugins: NoeticPlugin[] = [];
   const seenNames = new Set<string>();
 
   for (const spec of config.plugins ?? []) {
     const plugin = await importPlugin(spec, baseDir);
     if (seenNames.has(plugin.name)) {
-      await disposePlugins(initializedPlugins);
       throw new Error(`Duplicate plugin name: ${plugin.name}`);
     }
     seenNames.add(plugin.name);
-
-    try {
-      await plugin.initialize?.(config);
-      initializedPlugins.push(plugin);
-    } catch (error) {
-      await disposePlugins(initializedPlugins);
-      throw error;
-    }
-
+    await plugin.initialize?.(config);
     plugins.push(plugin);
   }
 

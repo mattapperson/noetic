@@ -29,10 +29,14 @@ describe('createAgentHarness', () => {
     const plugin: NoeticPlugin = {
       name: 'plugin-a',
       version: '1.0.0',
-      tools: async () => [makePluginTool('PluginTool')],
+      tools: async () => [
+        makePluginTool('PluginTool'),
+      ],
     };
 
-    const harness = await createAgentHarness(baseConfig, [plugin]);
+    const harness = await createAgentHarness(baseConfig, [
+      plugin,
+    ]);
 
     expect(harness).toBeDefined();
   });
@@ -41,17 +45,23 @@ describe('createAgentHarness', () => {
     const plugin: NoeticPlugin = {
       name: 'plugin-b',
       version: '1.0.0',
-      tools: async () => [makePluginTool('OnlyPluginTool')],
+      tools: async () => [
+        makePluginTool('OnlyPluginTool'),
+      ],
     };
 
     const harness = await createAgentHarness(
       {
         ...baseConfig,
         tools: {
-          include: ['OnlyPluginTool'],
+          include: [
+            'OnlyPluginTool',
+          ],
         },
       },
-      [plugin],
+      [
+        plugin,
+      ],
     );
 
     expect(harness).toBeDefined();
@@ -61,17 +71,23 @@ describe('createAgentHarness', () => {
     const plugin: NoeticPlugin = {
       name: 'plugin-c',
       version: '1.0.0',
-      tools: async () => [makePluginTool('BlockedPluginTool')],
+      tools: async () => [
+        makePluginTool('BlockedPluginTool'),
+      ],
     };
 
     const harness = await createAgentHarness(
       {
         ...baseConfig,
         tools: {
-          exclude: ['BlockedPluginTool'],
+          exclude: [
+            'BlockedPluginTool',
+          ],
         },
       },
-      [plugin],
+      [
+        plugin,
+      ],
     );
 
     expect(harness).toBeDefined();

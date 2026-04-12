@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
@@ -269,12 +269,14 @@ function resolveStatusHintText(options: StatusHintTextOptions): string {
 /** Horizontal divider line. */
 function PromptInputDivider() {
   const { dividerColor, dividerDashed, theme } = usePromptInput();
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 80;
   const color = dividerColor ?? theme.muted;
   const char = dividerDashed ? '\u254C' : '\u2500';
   return (
     <Box marginLeft={-1} marginRight={-1}>
       <Text color={color} dimColor={!dividerColor}>
-        {char.repeat(200)}
+        {char.repeat(width)}
       </Text>
     </Box>
   );
@@ -738,29 +740,58 @@ export function PromptInput({
 
   // ── Build context for subcomponents ────────────────────────────────────
 
-  const visibleSuggestions = suggestions.slice(0, maxSuggestions);
+  const visibleSuggestions = useMemo(
+    () => suggestions.slice(0, maxSuggestions),
+    [
+      suggestions,
+      maxSuggestions,
+    ],
+  );
 
-  const ctxValue: PromptInputContextValue = {
-    value,
-    isFocused,
-    disabled,
-    status,
-    onStop,
-    statusHintText,
-    placeholder,
-    prompt,
-    promptColor: resolvedPromptColor,
-    suggestions: visibleSuggestions,
-    sugIdx,
-    maxSuggestions,
-    errorText,
-    model,
-    dividerColor,
-    dividerDashed,
-    theme,
-    handleInput: updateValue,
-    handleInputSubmit,
-  };
+  const ctxValue: PromptInputContextValue = useMemo(
+    () => ({
+      value,
+      isFocused,
+      disabled,
+      status,
+      onStop,
+      statusHintText,
+      placeholder,
+      prompt,
+      promptColor: resolvedPromptColor,
+      suggestions: visibleSuggestions,
+      sugIdx,
+      maxSuggestions,
+      errorText,
+      model,
+      dividerColor,
+      dividerDashed,
+      theme,
+      handleInput: updateValue,
+      handleInputSubmit,
+    }),
+    [
+      value,
+      isFocused,
+      disabled,
+      status,
+      onStop,
+      statusHintText,
+      placeholder,
+      prompt,
+      resolvedPromptColor,
+      visibleSuggestions,
+      sugIdx,
+      maxSuggestions,
+      errorText,
+      model,
+      dividerColor,
+      dividerDashed,
+      theme,
+      updateValue,
+      handleInputSubmit,
+    ],
+  );
 
   // ── Render ─────────────────────────────────────────────────────────────
 

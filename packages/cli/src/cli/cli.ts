@@ -5,7 +5,7 @@
  */
 
 import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
-import { disposePlugins, loadPlugins } from '../plugins/loader.js';
+import { loadPlugins } from '../plugins/loader.js';
 import { runAgent } from '../tui/app.js';
 import { parseArgs } from './args.js';
 
@@ -15,8 +15,4 @@ const config = discovered?.config ?? argsConfig;
 const pluginBaseDir = discovered ? resolvePluginBaseDir(discovered.sourcePath) : config.cwd;
 const plugins = await loadPlugins(config, pluginBaseDir);
 
-try {
-  await runAgent(plugins, config);
-} finally {
-  await disposePlugins(plugins);
-}
+await runAgent(plugins, config);

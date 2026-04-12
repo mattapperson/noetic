@@ -220,10 +220,21 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
     };
 
+    // Filter tools to allowed names when per-step restriction is set.
+    // The OpenRouter API doesn't support an 'allowed_tools' toolChoice type,
+    // so we filter the tools array instead to achieve the same restriction.
+    const allowedNamesSet =
+      request.tools && 'allowedToolNames' in request && request.allowedToolNames
+        ? new Set(request.allowedToolNames)
+        : undefined;
+    const filteredTools = allowedNamesSet
+      ? request.tools?.filter((t) => allowedNamesSet.has(t.name))
+      : request.tools;
+
     let sdkTools: ReturnType<typeof convertTools> | undefined;
-    if (request.tools && request.tools.length > 0) {
+    if (filteredTools && filteredTools.length > 0) {
       sdkTools = convertTools({
-        tools: request.tools,
+        tools: filteredTools,
       });
     }
 
@@ -237,22 +248,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     const conversationInput = itemsToInput(remaining);
     const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
-
-    // Build toolChoice for per-step restriction when allowedToolNames is set.
-    // The allowed_tools type is not yet in the OpenRouter SDK types, so we
-    // construct it as unknown and spread it into the call.
-    const allowedNames = request.tools ? request.allowedToolNames : undefined;
-    const toolChoiceOverride: Record<string, unknown> | undefined = allowedNames
-      ? {
-          toolChoice: {
-            type: 'allowed_tools',
-            tools: allowedNames.map((n: string) => ({
-              type: 'function',
-              name: n,
-            })),
-          },
-        }
-      : undefined;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const callResult = this.client.callModel({
@@ -268,7 +263,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               text: textFormat,
             }
           : {}),
-        ...toolChoiceOverride,
       });
 
       // The OpenRouter SDK internally tees the HTTP stream, so

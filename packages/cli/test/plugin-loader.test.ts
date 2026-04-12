@@ -32,7 +32,9 @@ describe('plugin loader', () => {
     const plugins = await loadPlugins(
       {
         ...baseConfig,
-        plugins: ['./test-plugin.ts'],
+        plugins: [
+          './test-plugin.ts',
+        ],
       },
       dir,
     );
@@ -58,7 +60,10 @@ describe('plugin loader', () => {
       loadPlugins(
         {
           ...baseConfig,
-          plugins: ['./a.ts', './b.ts'],
+          plugins: [
+            './a.ts',
+            './b.ts',
+          ],
         },
         dir,
       ),
@@ -84,6 +89,9 @@ describe('plugin loader', () => {
       },
     ]);
 
-    expect(calls).toEqual(['second', 'first']);
+    expect(calls).toEqual([
+      'second',
+      'first',
+    ]);
   });
 });

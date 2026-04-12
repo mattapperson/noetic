@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { appendOrUpdateEntry, extractReasoning, extractTextContent, getItemId } from '../src/tui/item-utils.js';
+import {
+  appendOrUpdateEntry,
+  extractReasoning,
+  extractTextContent,
+  getItemId,
+} from '../src/tui/item-utils.js';
 
 const assistantMessage = {
   id: 'msg-1',
