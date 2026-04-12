@@ -1,3 +1,8 @@
+/**
+ * Theme system for the TUI. This is pure React context code that works with Ink.
+ * No framework-specific dependencies - just React context patterns.
+ */
+
 export interface Theme {
   /** Whether this is a dark theme */
   isDark: boolean;

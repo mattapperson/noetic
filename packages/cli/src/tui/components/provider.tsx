@@ -1,39 +1,28 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext } from 'react';
 import type { Theme } from './theme';
 import { ThemeProvider } from './theme';
 
-type KeyboardHandler = (event: unknown) => void;
-type UseKeyboardHook = (handler: KeyboardHandler) => void;
-
-const KeyboardContext = createContext<UseKeyboardHook | null>(null);
-
-export interface GridlandProviderProps {
+export interface InkProviderProps {
   /** Theme object. Defaults to darkTheme. */
   theme?: Theme;
-  /** Keyboard hook from @opentui/react. Provided once here so components don't need it as a prop. */
-  useKeyboard?: UseKeyboardHook;
   children: ReactNode;
 }
 
-export function GridlandProvider({ theme, useKeyboard, children }: GridlandProviderProps) {
-  const inner = (
-    <KeyboardContext.Provider value={useKeyboard ?? null}>{children}</KeyboardContext.Provider>
-  );
-
-  // Only wrap with ThemeProvider if a theme is explicitly provided
-  if (theme) {
-    return <ThemeProvider theme={theme}>{inner}</ThemeProvider>;
-  }
-
-  return inner;
-}
-
 /**
- * Returns the useKeyboard hook from context, or the prop override if provided.
- * Components should call this instead of using the prop directly.
+ * Root provider for Ink-based TUI components.
+ *
+ * In Ink, keyboard handling is done via the `useInput()` hook from the `ink` package
+ * directly in components, so no keyboard context is needed here.
  */
-export function useKeyboardContext(propOverride?: UseKeyboardHook): UseKeyboardHook | undefined {
-  const fromContext = useContext(KeyboardContext);
-  return propOverride ?? fromContext ?? undefined;
+export function InkProvider({ theme, children }: InkProviderProps) {
+  if (theme) {
+    return <ThemeProvider theme={theme}>{children}</ThemeProvider>;
+  }
+  return <>{children}</>;
 }
+
+/** @deprecated Use InkProvider instead. Will be removed in a future version. */
+export const GridlandProvider = InkProvider;
+
+/** @deprecated Props type alias for GridlandProvider. Use InkProviderProps instead. */
+export type GridlandProviderProps = InkProviderProps;
