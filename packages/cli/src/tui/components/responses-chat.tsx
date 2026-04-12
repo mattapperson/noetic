@@ -2,10 +2,11 @@
  * OpenResponses-native chat component.
  *
  * Accepts StreamableOutputItem directly from callModel — no adapter types.
- * Composes Gridland Message + PromptInput primitives.
+ * Composes Ink Message + PromptInput primitives.
  */
 
 import type { StreamableOutputItem } from '@openrouter/sdk';
+import { Box } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import type { ConversationEntry } from '../item-utils.js';
@@ -235,10 +236,12 @@ export function ResponsesChat({
   };
 
   return (
-    <box flexDirection="column" height="100%">
-      <scrollbox flex={1}>{entries.map((entry, i) => renderEntry(entry, i, ctx))}</scrollbox>
+    <Box flexDirection="column" height="100%">
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        {entries.map((entry, i) => renderEntry(entry, i, ctx))}
+      </Box>
       <PromptInput status={status} onSubmit={handleSubmit} onStop={onStop} model={model} />
-    </box>
+    </Box>
   );
 }
 

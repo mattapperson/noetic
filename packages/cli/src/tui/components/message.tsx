@@ -1,5 +1,4 @@
-// @ts-nocheck — Gridland registry component; uses custom intrinsic elements
-
+import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { createContext, useContext } from 'react';
 import type { Step } from './chain-of-thought';
@@ -9,7 +8,6 @@ import {
   ChainOfThoughtHeader,
   ChainOfThoughtStep,
 } from './chain-of-thought';
-import { textStyle } from './text-style';
 import type { Theme } from './theme';
 import { useTheme } from './theme';
 
@@ -17,7 +15,7 @@ export type { Step } from './chain-of-thought';
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const _MAX_RESULT_PREVIEW_CHARS = 120;
+const MAX_RESULT_PREVIEW_CHARS = 120;
 
 // ── Part types (optional helpers — not coupled to sub-components) ──
 
@@ -116,56 +114,24 @@ function getToolStateColor(state: ToolCallState, theme: Theme): string {
 
 // ── Sub-components ──────────────────────────────────────────────────
 
-/** Bubble wrapper with background color. Reads bg from Message context. */
+/** Bubble wrapper. Ink Box doesn't support backgroundColor. */
 function MessageContent({ children }: { children: ReactNode }) {
-  const { role, backgroundColor } = useMessage();
-  const isUser = role === 'user';
-
   return (
-    <box
-      flexDirection="column"
-      backgroundColor={backgroundColor}
-      paddingX={2}
-      paddingY={1}
-      {...(isUser
-        ? {
-            maxWidth: '85%',
-          }
-        : {
-            width: '85%',
-          })}
-    >
+    <Box flexDirection="column" paddingX={2} paddingY={1} width="85%">
       {children}
-    </box>
+    </Box>
   );
 }
 
 /** Renders text with word wrap. Pass `isLast` to show the streaming cursor. */
 function MessageText({ children, isLast = false }: { children: string; isLast?: boolean }) {
-  const { isStreaming, streamingCursor, backgroundColor, textColor } = useMessage();
+  const { isStreaming, streamingCursor, textColor } = useMessage();
 
   return (
-    <text wrapMode="word">
-      <span
-        style={textStyle({
-          fg: textColor,
-          bg: backgroundColor,
-        })}
-      >
-        {children}
-      </span>
-      {isLast && isStreaming && (
-        <span
-          style={textStyle({
-            fg: textColor,
-            dim: true,
-            bg: backgroundColor,
-          })}
-        >
-          {streamingCursor}
-        </span>
-      )}
-    </text>
+    <Text wrap="wrap" color={textColor}>
+      {children}
+      {isLast && isStreaming && <Text dimColor>{streamingCursor}</Text>}
+    </Text>
   );
 }
 
@@ -223,96 +189,46 @@ function MessageToolCall({
   color?: string;
 }) {
   const theme = useTheme();
-  const { backgroundColor, textColor } = useMessage();
+  const { textColor } = useMessage();
   const icon = TOOL_STATE_ICONS[state];
   const stateColor = color ?? getToolStateColor(state, theme);
   const isActive = state === 'pending' || state === 'running';
 
   return (
-    <box flexDirection="column">
-      <text>
-        <span
-          style={textStyle({
-            fg: stateColor,
-            bg: backgroundColor,
-          })}
-        >
-          {icon}
-        </span>
-        <span
-          style={textStyle({
-            fg: textColor,
-            bg: backgroundColor,
-          })}
-        >
-          {''}
-        </span>
-        <span
-          style={textStyle({
-            fg: stateColor,
-            bold: isActive,
-            bg: backgroundColor,
-          })}
-        >
+    <Box flexDirection="column">
+      <Text>
+        <Text color={stateColor}>{icon}</Text>
+        <Text color={textColor}> </Text>
+        <Text color={stateColor} bold={isActive}>
           {name}
-        </span>
+        </Text>
         {isActive && (
-          <span
-            style={textStyle({
-              fg: textColor,
-              dim: true,
-              bg: backgroundColor,
-            })}
-          >
+          <Text color={textColor} dimColor>
             {'...'}
-          </span>
+          </Text>
         )}
-      </text>
+      </Text>
       {state === 'completed' && result !== undefined && (
-        <text>
-          <span
-            style={textStyle({
-              fg: textColor,
-              dim: true,
-              bg: backgroundColor,
-            })}
-          >
+        <Text>
+          <Text color={textColor} dimColor>
             {'└─'}
-          </span>
-          <span
-            style={textStyle({
-              fg: textColor,
-              dim: true,
-              bg: backgroundColor,
-            })}
-          >
-            {String(result).slice(0, 120)}
-          </span>
-        </text>
+          </Text>
+          <Text color={textColor} dimColor>
+            {String(result).slice(0, MAX_RESULT_PREVIEW_CHARS)}
+          </Text>
+        </Text>
       )}
       {state === 'error' && result !== undefined && (
-        <text>
-          <span
-            style={textStyle({
-              fg: theme.error,
-              dim: true,
-              bg: backgroundColor,
-            })}
-          >
+        <Text>
+          <Text color={theme.error} dimColor>
             {'└─'}
-          </span>
-          <span
-            style={textStyle({
-              fg: theme.error,
-              dim: true,
-              bg: backgroundColor,
-            })}
-          >
-            {String(result).slice(0, 120)}
-          </span>
-        </text>
+          </Text>
+          <Text color={theme.error} dimColor>
+            {String(result).slice(0, MAX_RESULT_PREVIEW_CHARS)}
+          </Text>
+        </Text>
       )}
-    </box>
+    </Box>
   );
 }
 
@@ -330,46 +246,20 @@ function MessageSource({
   index: number;
 }) {
   const theme = useTheme();
-  const { backgroundColor, textColor } = useMessage();
+  const { textColor } = useMessage();
   const displayTitle = title || url || 'source';
 
   return (
-    <text>
-      <span
-        style={textStyle({
-          fg: textColor,
-          dim: true,
-          bg: backgroundColor,
-        })}
-      >
+    <Text>
+      <Text color={textColor} dimColor>
         {'['}
-      </span>
-      <span
-        style={textStyle({
-          fg: theme.accent,
-          bg: backgroundColor,
-        })}
-      >
-        {String(index + 1)}
-      </span>
-      <span
-        style={textStyle({
-          fg: textColor,
-          dim: true,
-          bg: backgroundColor,
-        })}
-      >
+      </Text>
+      <Text color={theme.accent}>{String(index + 1)}</Text>
+      <Text color={textColor} dimColor>
         {']'}
-      </span>
-      <span
-        style={textStyle({
-          fg: theme.accent,
-          bg: backgroundColor,
-        })}
-      >
-        {displayTitle}
-      </span>
-    </text>
+      </Text>
+      <Text color={theme.accent}>{displayTitle}</Text>
+    </Text>
   );
 }
 
@@ -381,38 +271,23 @@ function MessageFooter({ model, timestamp }: { model?: string; timestamp?: strin
   }
 
   return (
-    <text>
+    <Text>
       {model && (
-        <span
-          style={textStyle({
-            dim: true,
-            fg: theme.muted,
-          })}
-        >
+        <Text color={theme.muted} dimColor>
           {model}
-        </span>
+        </Text>
       )}
       {model && timestamp && (
-        <span
-          style={textStyle({
-            dim: true,
-            fg: theme.muted,
-          })}
-        >
+        <Text color={theme.muted} dimColor>
           {'·'}
-        </span>
+        </Text>
       )}
       {timestamp && (
-        <span
-          style={textStyle({
-            dim: true,
-            fg: theme.muted,
-          })}
-        >
+        <Text color={theme.muted} dimColor>
           {timestamp}
-        </span>
+        </Text>
       )}
-    </text>
+    </Text>
   );
 }
 
@@ -453,9 +328,9 @@ export function Message({
         textColor: theme.foreground,
       }}
     >
-      <box flexDirection="column" flexShrink={0} alignItems={isUser ? 'flex-end' : 'flex-start'}>
+      <Box flexDirection="column" flexShrink={0} alignItems={isUser ? 'flex-end' : 'flex-start'}>
         {children}
-      </box>
+      </Box>
     </MessageContext.Provider>
   );
 }
