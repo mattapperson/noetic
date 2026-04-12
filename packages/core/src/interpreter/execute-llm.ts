@@ -86,8 +86,33 @@ export async function executeLLM<TMemory, I, O>(
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
 
+  // Process user input through onItemAppend pipeline
   if (typeof input === 'string' && input.length > 0) {
-    baseCtx.itemLog.append(createMessage(input, 'user'));
+    const userItem = createMessage(input, 'user');
+
+    if (layers && layers.length > 0) {
+      // Run through pipeline — layers can filter/transform
+      const { items: finalItems, rerenderRequests } = await baseCtx.harness.runAppendPipeline(
+        layers,
+        [userItem],
+        baseCtx,
+      );
+
+      // Append only the items that survived the pipeline
+      for (const item of finalItems) {
+        baseCtx.itemLog.append(item);
+      }
+
+      // Process immediate re-render requests with the user query for context-aware recall
+      const immediateRequests = rerenderRequests.filter((r) => r.timing === 'immediate');
+      if (immediateRequests.length > 0) {
+        const userQuery = typeof input === 'string' ? input : '';
+        await baseCtx.harness.executeRerender(immediateRequests, layers, baseCtx, new Map(), userQuery);
+      }
+    } else {
+      // No layers, append directly
+      baseCtx.itemLog.append(userItem);
+    }
   }
 
   const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(

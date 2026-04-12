@@ -2,7 +2,7 @@
 
 > **Package:** `@noetic/memory`
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
+> **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
 
 ## Package Boundary
 
@@ -66,6 +66,7 @@ interface MemoryLayer<TState = unknown> {
   hooks: MemoryHooks<TState>;
   timeouts?: Partial<LayerTimeouts>;
   provides?: LayerProvides;
+  rerenderTiming?: 'immediate' | 'batched';
 }
 
 type MemoryScope =
@@ -106,6 +107,7 @@ interface MemoryHooks<TState = unknown> {
   init?:            (params: InitParams)                         => Promise<InitResult<TState>>;
   recall?:          (params: RecallParams<TState>)               => Promise<RecallResult<TState> | string | null>;
   store?:           (params: StoreParams<TState>)                => Promise<StoreResult<TState> | void>;
+  onItemAppend?:    (params: OnItemAppendParams<TState>)         => Promise<OnItemAppendResult<TState>>;
   beforeToolCall?:  (params: BeforeToolCallParams<TState>)       => Promise<BeforeToolCallResult | void>;
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
@@ -128,6 +130,12 @@ EXECUTION START
 │
 ▼
 LOOP ITERATION ─────────────────────────────────────────────────
+│
+├─ (on user input / tool output)
+│   └─ onItemAppend()  Sequential, SLOT ORDER. Pipeline: each layer receives
+│                      the output of the previous layer. Can filter, transform,
+│                      or inject items. MAY request re-render.
+│                      NOT called for LLM response items (use store()).
 │
 ├─ recall()            Sequential, SLOT ORDER (ascending). Ties by array index.
 │
@@ -207,6 +215,31 @@ interface StoreParams<TState> {
 
 interface StoreResult<TState> {
   state: TState;
+}
+
+type RerenderScope =
+  | 'self'        // Only the triggering layer
+  | 'slot-after'  // Triggering layer and all higher-slot layers (DEFAULT)
+  | 'all';        // All layers
+
+interface OnItemAppendParams<TState> {
+  items: Item[];         // Items to be appended (may be transformed by prior layers)
+  log: ItemLog;          // Full log (read-only)
+  ctx: ExecutionContext;
+  state: TState;
+}
+
+interface OnItemAppendResult<TState> {
+  /** Items to append — can filter, transform, or inject items. */
+  items: Item[];
+  /** Updated layer state. */
+  state?: TState;
+  /** Request context re-render. */
+  rerender?: boolean;
+  /** When to apply re-render (default: layer's rerenderTiming). */
+  timing?: 'immediate' | 'batched';
+  /** Which layers to re-recall (default: 'slot-after'). */
+  scope?: RerenderScope;
 }
 
 interface BeforeToolCallParams<TState> {
@@ -612,6 +645,7 @@ The ItemLog's rendering is handled by the Projector natively. Memory layers get 
 | `init`            | Layer **disabled** for this execution. Warning emitted.                 |
 | `recall`          | Layer **skipped** this iteration. Warning emitted.                      |
 | `store`           | Error **logged**. Other stores unaffected (`allSettled`).               |
+| `onItemAppend`    | Error **logged**. Items pass through unchanged.                         |
 | `beforeToolCall`  | Error **logged**. Tool call proceeds as if hook returned `void`.        |
 | `afterModelCall`  | Error **logged**. Turn continues as if hook returned `void`.            |
 | `onSpawn`         | Layer **unavailable** in child. Warning emitted.                        |
@@ -626,6 +660,7 @@ interface LayerTimeouts {
   init?:            number;  // ms, default 10_000
   recall?:          number;  // ms, default 5_000
   store?:           number;  // ms, default 30_000
+  onItemAppend?:    number;  // ms, default 5_000
   beforeToolCall?:  number;  // ms, default 5_000
   afterModelCall?:  number;  // ms, default 5_000
   onSpawn?:         number;  // ms, default 10_000

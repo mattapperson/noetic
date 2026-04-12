@@ -21,8 +21,10 @@ import {
   beforeToolCallLayers,
   createLayerStateStore,
   disposeLayers,
+  executeRerender,
   initLayers,
   recallLayers,
+  runAppendPipeline,
   storeLayers,
 } from '../memory/layer-lifecycle';
 import { SpanImpl } from '../observability/span-impl';
@@ -614,6 +616,61 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       response,
       ctx: this.toExecCtx(ctx),
       store: this.layerStateStore,
+    });
+  }
+
+  async runAppendPipeline(
+    layers: MemoryLayer[],
+    items: Item[],
+    ctx: Context,
+  ): Promise<{
+    items: Item[];
+    rerenderRequests: {
+      layerId: string;
+      slot: number;
+      timing: 'immediate' | 'batched';
+      scope: 'self' | 'slot-after' | 'all';
+    }[];
+  }> {
+    const hasHook = layers.some((l) => l.hooks.onItemAppend);
+    if (!hasHook) {
+      return { items, rerenderRequests: [] };
+    }
+    return runAppendPipeline({
+      layers,
+      items,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      store: this.layerStateStore,
+    });
+  }
+
+  async executeRerender(
+    requests: {
+      layerId: string;
+      slot: number;
+      timing: 'immediate' | 'batched';
+      scope: 'self' | 'slot-after' | 'all';
+    }[],
+    layers: MemoryLayer[],
+    ctx: Context,
+    budgets: Map<string, number>,
+    query?: string,
+  ): Promise<
+    {
+      layerId: string;
+      items: Item[];
+      tokenCount: number;
+    }[]
+  > {
+    return executeRerender({
+      requests,
+      layers,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets,
+      store: this.layerStateStore,
+      query,
     });
   }
 }

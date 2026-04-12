@@ -117,6 +117,27 @@ export interface AgentHarnessContract<
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
+  /**
+   * Run items through the onItemAppend pipeline before appending.
+   * Each layer can filter, transform, or inject items.
+   * Returns final items to append and any re-render requests.
+   */
+  runAppendPipeline(
+    layers: MemoryLayer[],
+    items: Item[],
+    ctx: Context,
+  ): Promise<AppendPipelineResult>;
+  /**
+   * Execute re-render based on collected requests.
+   * Determines which layers need re-recall based on scope and runs them.
+   */
+  executeRerender(
+    requests: RerenderRequest[],
+    layers: MemoryLayer[],
+    ctx: Context,
+    budgets: Map<string, number>,
+    query?: string,
+  ): Promise<RecallLayerOutput[]>;
 }
 
 /** @public Output from a single memory layer's recall phase, including items and token budget used. */
@@ -124,4 +145,20 @@ export interface RecallLayerOutput {
   layerId: string;
   items: Item[];
   tokenCount: number;
+}
+
+/** @public A request to re-render the context window, collected from onItemAppend hooks. */
+export interface RerenderRequest {
+  layerId: string;
+  slot: number;
+  timing: 'immediate' | 'batched';
+  scope: 'self' | 'slot-after' | 'all';
+}
+
+/** @public Result of running items through the onItemAppend pipeline. */
+export interface AppendPipelineResult {
+  /** Final items to append after all transformations. */
+  items: Item[];
+  /** Re-render requests collected from layers. */
+  rerenderRequests: RerenderRequest[];
 }

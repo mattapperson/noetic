@@ -449,6 +449,7 @@ const msg = harness.tryRecv(channel, ctx);
 
 ```typescript
 const Slot = {
+  STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
@@ -457,6 +458,97 @@ const Slot = {
   RAG: 350,
   SEMANTIC_RECALL: 400,
 } as const;
+```
+
+## Memory Layer Hooks
+
+### onItemAppend
+
+Called when input items (user messages, tool outputs) are about to be appended to the ItemLog. Enables middleware-style item transformation and context re-rendering.
+
+```typescript
+interface OnItemAppendParams<TState> {
+  items: Item[];         // Items to be appended (may be transformed by prior layers)
+  log: ItemLog;          // Full log (read-only)
+  ctx: ExecutionContext;
+  state: TState;
+}
+
+interface OnItemAppendResult<TState> {
+  items: Item[];           // Items to append (filter, transform, or inject)
+  state?: TState;          // Updated layer state
+  rerender?: boolean;      // Request context re-render
+  timing?: 'immediate' | 'batched';  // When to apply re-render
+  scope?: RerenderScope;   // Which layers to re-recall
+}
+
+type RerenderScope = 'self' | 'slot-after' | 'all';  // default: 'slot-after'
+```
+
+**Pipeline behavior:** Items flow through layers in slot order. Each layer receives the output of the previous layer. Returning an empty array stops the pipeline.
+
+**Re-render triggers:** When `rerender: true`, the harness re-runs `recall()` for affected layers based on `scope`:
+- `'self'`: Only the triggering layer
+- `'slot-after'`: Triggering layer and all higher-slot layers (default)
+- `'all'`: All layers
+
+**Layer configuration:**
+```typescript
+interface MemoryLayer<TState> {
+  // ... other fields
+  rerenderTiming?: 'immediate' | 'batched';  // default for this layer's re-renders
+}
+```
+
+**Example: Content filtering**
+```typescript
+const contentFilter = {
+  id: 'filter',
+  slot: Slot.STEERING - 10,
+  scope: 'execution',
+  hooks: {
+    async init() { return { state: null }; },
+    async onItemAppend({ items }) {
+      return {
+        items: items.map(item => ({
+          ...item,
+          content: redactSensitive(item.content),
+        })),
+      };
+    },
+  },
+} satisfies MemoryLayer<null>;
+```
+
+**Example: Keyword-triggered context injection**
+```typescript
+const keywordWatcher = {
+  id: 'keyword-watcher',
+  slot: Slot.STEERING + 5,
+  scope: 'execution',
+  rerenderTiming: 'immediate',
+  hooks: {
+    async init() { return { state: { docs: [] } }; },
+    async onItemAppend({ items, state }) {
+      const keywords = extractKeywords(items);
+      if (keywords.length === 0) return { items };
+      
+      const docs = await fetchRelevantDocs(keywords);
+      return {
+        items,  // pass through unchanged
+        state: { docs },
+        rerender: true,
+        scope: 'self',
+      };
+    },
+    async recall({ state }) {
+      return {
+        items: state.docs.map(d => createMessage(d.content, 'developer')),
+        tokenCount: estimateTokens(state.docs),
+      };
+    },
+  },
+} satisfies MemoryLayer<{ docs: Doc[] }>;
 ```
 
 ## ToolExecutionContext

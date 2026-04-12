@@ -88,6 +88,8 @@ export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 /** @public */
 export { workingMemory } from './memory/layers/working-memory';
+/** @public */
+export { fileReference } from './memory/layers/file-reference';
 
 //#endregion
 
