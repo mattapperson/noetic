@@ -634,7 +634,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }> {
     const hasHook = layers.some((l) => l.hooks.onItemAppend);
     if (!hasHook) {
-      return { items, rerenderRequests: [] };
+      return {
+        items,
+        rerenderRequests: [],
+      };
     }
     return runAppendPipeline({
       layers,

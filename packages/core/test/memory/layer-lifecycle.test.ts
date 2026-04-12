@@ -689,7 +689,12 @@ describe('runAppendPipeline', () => {
       type: 'message',
       role: 'user',
       status: 'completed',
-      content: [{ type: 'input_text', text }],
+      content: [
+        {
+          type: 'input_text',
+          text,
+        },
+      ],
     };
   }
 
@@ -704,8 +709,12 @@ describe('runAppendPipeline', () => {
         hooks: {},
       },
     ];
-    const ctx = makeCtx({ executionId: 'exec-no-hook' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-no-hook',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -732,7 +741,9 @@ describe('runAppendPipeline', () => {
         hooks: {
           onItemAppend: async ({ items }) => {
             order.push('high');
-            return { items };
+            return {
+              items,
+            };
           },
         },
       },
@@ -744,14 +755,20 @@ describe('runAppendPipeline', () => {
         hooks: {
           onItemAppend: async ({ items }) => {
             order.push('low');
-            return { items };
+            return {
+              items,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-order' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-order',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     await runAppendPipeline({
       layers,
@@ -761,7 +778,10 @@ describe('runAppendPipeline', () => {
       store,
     });
 
-    expect(order).toEqual(['low', 'high']);
+    expect(order).toEqual([
+      'low',
+      'high',
+    ]);
   });
 
   it('filters items when layer returns empty array', async () => {
@@ -773,13 +793,19 @@ describe('runAppendPipeline', () => {
         slot: 100,
         scope: 'execution',
         hooks: {
-          onItemAppend: async () => ({ items: [] }),
+          onItemAppend: async () => ({
+            items: [],
+          }),
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-filter' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-filter',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -806,14 +832,20 @@ describe('runAppendPipeline', () => {
               ...item,
               id: `transformed-${item.id}`,
             }));
-            return { items: transformed };
+            return {
+              items: transformed,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-transform' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-transform',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -838,14 +870,23 @@ describe('runAppendPipeline', () => {
         hooks: {
           onItemAppend: async ({ items }) => {
             const extra = makeUserMessage('injected');
-            return { items: [...items, extra] };
+            return {
+              items: [
+                ...items,
+                extra,
+              ],
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-inject' });
-    const items = [makeUserMessage('original')];
+    const ctx = makeCtx({
+      executionId: 'exec-inject',
+    });
+    const items = [
+      makeUserMessage('original'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -860,23 +901,33 @@ describe('runAppendPipeline', () => {
 
   it('updates layer state', async () => {
     const store = createLayerStateStore();
-    const layers: MemoryLayer<{ count: number }>[] = [
+    const layers: MemoryLayer<{
+      count: number;
+    }>[] = [
       {
         id: 'stateful',
         name: 'Stateful',
         slot: 100,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: { count: 0 } }),
+          init: async () => ({
+            state: {
+              count: 0,
+            },
+          }),
           onItemAppend: async ({ items, state }) => ({
             items,
-            state: { count: state.count + items.length },
+            state: {
+              count: state.count + items.length,
+            },
           }),
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-stateful' });
+    const ctx = makeCtx({
+      executionId: 'exec-stateful',
+    });
     await initLayers({
       layers,
       ctx,
@@ -884,7 +935,9 @@ describe('runAppendPipeline', () => {
       store,
     });
 
-    const items = [makeUserMessage('hello')];
+    const items = [
+      makeUserMessage('hello'),
+    ];
     await runAppendPipeline({
       layers,
       items,
@@ -893,7 +946,9 @@ describe('runAppendPipeline', () => {
       store,
     });
 
-    const state = store.get<{ count: number }>('exec-stateful', 'stateful');
+    const state = store.get<{
+      count: number;
+    }>('exec-stateful', 'stateful');
     expect(state?.count).toBe(1);
   });
 
@@ -915,8 +970,12 @@ describe('runAppendPipeline', () => {
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-rerender' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-rerender',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -949,8 +1008,12 @@ describe('runAppendPipeline', () => {
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-timing' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-timing',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -974,7 +1037,9 @@ describe('runAppendPipeline', () => {
         slot: 100,
         scope: 'execution',
         hooks: {
-          onItemAppend: async () => ({ items: [] }),
+          onItemAppend: async () => ({
+            items: [],
+          }),
         },
       },
       {
@@ -985,14 +1050,20 @@ describe('runAppendPipeline', () => {
         hooks: {
           onItemAppend: async ({ items }) => {
             secondCalled = true;
-            return { items };
+            return {
+              items,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-stop' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-stop',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     await runAppendPipeline({
       layers,
@@ -1006,9 +1077,15 @@ describe('runAppendPipeline', () => {
   });
 
   it('handles errors gracefully and passes items through', async () => {
-    const errors: { layerId: string; hook: string }[] = [];
+    const errors: {
+      layerId: string;
+      hook: string;
+    }[] = [];
     const store = createLayerStateStore((layerId, hook) => {
-      errors.push({ layerId, hook });
+      errors.push({
+        layerId,
+        hook,
+      });
     });
 
     const layers: MemoryLayer[] = [
@@ -1025,8 +1102,12 @@ describe('runAppendPipeline', () => {
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-error' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-error',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -1058,13 +1139,17 @@ describe('runAppendPipeline', () => {
           },
           onItemAppend: async ({ items }) => {
             hookCalled = true;
-            return { items };
+            return {
+              items,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-disabled' });
+    const ctx = makeCtx({
+      executionId: 'exec-disabled',
+    });
     await initLayers({
       layers,
       ctx,
@@ -1072,7 +1157,9 @@ describe('runAppendPipeline', () => {
       store,
     });
 
-    const items = [makeUserMessage('hello')];
+    const items = [
+      makeUserMessage('hello'),
+    ];
     await runAppendPipeline({
       layers,
       items,
@@ -1085,9 +1172,15 @@ describe('runAppendPipeline', () => {
   });
 
   it('times out slow onItemAppend hooks', async () => {
-    const errors: { layerId: string; hook: string }[] = [];
+    const errors: {
+      layerId: string;
+      hook: string;
+    }[] = [];
     const store = createLayerStateStore((layerId, hook) => {
-      errors.push({ layerId, hook });
+      errors.push({
+        layerId,
+        hook,
+      });
     });
 
     const layers: MemoryLayer[] = [
@@ -1103,14 +1196,20 @@ describe('runAppendPipeline', () => {
           onItemAppend: async ({ items }) => {
             // This will take longer than the timeout
             await new Promise((r) => setTimeout(r, 200));
-            return { items };
+            return {
+              items,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-timeout' });
-    const items = [makeUserMessage('hello')];
+    const ctx = makeCtx({
+      executionId: 'exec-timeout',
+    });
+    const items = [
+      makeUserMessage('hello'),
+    ];
 
     const result = await runAppendPipeline({
       layers,
@@ -1131,7 +1230,9 @@ describe('runAppendPipeline', () => {
 describe('executeRerender', () => {
   it('returns empty array when no requests', async () => {
     const store = createLayerStateStore();
-    const ctx = makeCtx({ executionId: 'exec-empty' });
+    const ctx = makeCtx({
+      executionId: 'exec-empty',
+    });
 
     const result = await executeRerender({
       requests: [],
@@ -1156,10 +1257,15 @@ describe('executeRerender', () => {
         slot: 100,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('target');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
@@ -1169,16 +1275,23 @@ describe('executeRerender', () => {
         slot: 200,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('other');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-self' });
+    const ctx = makeCtx({
+      executionId: 'exec-self',
+    });
     await initLayers({
       layers,
       ctx,
@@ -1188,16 +1301,32 @@ describe('executeRerender', () => {
 
     await executeRerender({
       requests: [
-        { layerId: 'target', slot: 100, timing: 'immediate', scope: 'self' },
+        {
+          layerId: 'target',
+          slot: 100,
+          timing: 'immediate',
+          scope: 'self',
+        },
       ],
       layers,
       ctx,
       log: makeItemLog(),
-      budgets: new Map([['target', 1e3], ['other', 1e3]]),
+      budgets: new Map([
+        [
+          'target',
+          1e3,
+        ],
+        [
+          'other',
+          1e3,
+        ],
+      ]),
       store,
     });
 
-    expect(recallOrder).toEqual(['target']);
+    expect(recallOrder).toEqual([
+      'target',
+    ]);
   });
 
   it('re-recalls slot-after scope', async () => {
@@ -1211,10 +1340,15 @@ describe('executeRerender', () => {
         slot: 50,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('before');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
@@ -1224,10 +1358,15 @@ describe('executeRerender', () => {
         slot: 100,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('target');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
@@ -1237,16 +1376,23 @@ describe('executeRerender', () => {
         slot: 200,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('after');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-slot-after' });
+    const ctx = makeCtx({
+      executionId: 'exec-slot-after',
+    });
     await initLayers({
       layers,
       ctx,
@@ -1256,17 +1402,38 @@ describe('executeRerender', () => {
 
     await executeRerender({
       requests: [
-        { layerId: 'target', slot: 100, timing: 'immediate', scope: 'slot-after' },
+        {
+          layerId: 'target',
+          slot: 100,
+          timing: 'immediate',
+          scope: 'slot-after',
+        },
       ],
       layers,
       ctx,
       log: makeItemLog(),
-      budgets: new Map([['before', 1e3], ['target', 1e3], ['after', 1e3]]),
+      budgets: new Map([
+        [
+          'before',
+          1e3,
+        ],
+        [
+          'target',
+          1e3,
+        ],
+        [
+          'after',
+          1e3,
+        ],
+      ]),
       store,
     });
 
     // Should include target and after, not before
-    expect(recallOrder).toEqual(['target', 'after']);
+    expect(recallOrder).toEqual([
+      'target',
+      'after',
+    ]);
   });
 
   it('re-recalls all scope', async () => {
@@ -1280,10 +1447,15 @@ describe('executeRerender', () => {
         slot: 50,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('first');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
@@ -1293,16 +1465,23 @@ describe('executeRerender', () => {
         slot: 150,
         scope: 'execution',
         hooks: {
-          init: async () => ({ state: {} }),
+          init: async () => ({
+            state: {},
+          }),
           recall: async () => {
             recallOrder.push('second');
-            return { items: [], tokenCount: 0 };
+            return {
+              items: [],
+              tokenCount: 0,
+            };
           },
         },
       },
     ];
 
-    const ctx = makeCtx({ executionId: 'exec-all' });
+    const ctx = makeCtx({
+      executionId: 'exec-all',
+    });
     await initLayers({
       layers,
       ctx,
@@ -1312,16 +1491,33 @@ describe('executeRerender', () => {
 
     await executeRerender({
       requests: [
-        { layerId: 'second', slot: 150, timing: 'immediate', scope: 'all' },
+        {
+          layerId: 'second',
+          slot: 150,
+          timing: 'immediate',
+          scope: 'all',
+        },
       ],
       layers,
       ctx,
       log: makeItemLog(),
-      budgets: new Map([['first', 1e3], ['second', 1e3]]),
+      budgets: new Map([
+        [
+          'first',
+          1e3,
+        ],
+        [
+          'second',
+          1e3,
+        ],
+      ]),
       store,
     });
 
     // Should recall all in slot order
-    expect(recallOrder).toEqual(['first', 'second']);
+    expect(recallOrder).toEqual([
+      'first',
+      'second',
+    ]);
   });
 });

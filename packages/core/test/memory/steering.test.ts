@@ -435,7 +435,9 @@ describe('steering layer', () => {
       assert(result.items[0].type === 'message');
       const text = result.items[0].content
         .filter(
-          (c: { type: string }): c is {
+          (c: {
+            type: string;
+          }): c is {
             type: 'input_text';
             text: string;
           } => c.type === 'input_text' && 'text' in c,

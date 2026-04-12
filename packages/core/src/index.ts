@@ -72,6 +72,8 @@ export type { DurableTaskState, DurableTaskStateConfig } from './memory/layers/d
 /** @public */
 export { durableTaskState } from './memory/layers/durable-task-state';
 /** @public */
+export { fileReference } from './memory/layers/file-reference';
+/** @public */
 export type {
   ObservationalMemoryConfig,
   ObservationalState,
@@ -88,8 +90,6 @@ export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 /** @public */
 export { workingMemory } from './memory/layers/working-memory';
-/** @public */
-export { fileReference } from './memory/layers/file-reference';
 
 //#endregion
 

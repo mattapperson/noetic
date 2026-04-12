@@ -1,18 +1,41 @@
-import type { Item, MessageItem } from '@noetic/core';
+import type { InputMessageItem, Item, MessageItem } from '@noetic/core';
 import type { Message } from 'chat';
 
 //#region Helper
 
-function mapRole(message: Message): 'user' | 'assistant' {
-  // isBot is typed boolean | 'unknown'; strict equality excludes the 'unknown' string value
-  if (message.author.isMe || message.author.isBot === true) {
-    return 'assistant';
-  }
-  return 'user';
+function isAssistant(message: Message): boolean {
+  return message.author.isMe || message.author.isBot === true;
 }
 
-function mapContentType(role: 'user' | 'assistant'): 'input_text' | 'output_text' {
-  return role === 'user' ? 'input_text' : 'output_text';
+function toAssistantItem(msg: Message): MessageItem {
+  return {
+    id: msg.id,
+    status: 'completed',
+    type: 'message',
+    role: 'assistant',
+    content: [
+      {
+        type: 'output_text',
+        text: msg.text,
+        annotations: [],
+      },
+    ],
+  };
+}
+
+function toUserItem(msg: Message): InputMessageItem {
+  return {
+    id: msg.id,
+    status: 'completed',
+    type: 'message',
+    role: 'user',
+    content: [
+      {
+        type: 'input_text',
+        text: msg.text,
+      },
+    ],
+  };
 }
 
 //#endregion
@@ -21,40 +44,18 @@ function mapContentType(role: 'user' | 'assistant'): 'input_text' | 'output_text
 
 /**
  * Convert chat-sdk Messages to Noetic Items for use as conversation context.
- * Parallel to chat-sdk's `toAiMessages()` but produces Noetic Items.
- *
- * - Bot/self messages become assistant role with output_text
- * - User messages become user role with input_text
- * - Empty messages are filtered out
- *
- * @param messages - Array of chat-sdk Message objects
- * @returns Array of Noetic MessageItem objects
  *
  * @public
  */
 export function toNoeticItems(messages: ReadonlyArray<Message>): Item[] {
-  const items: MessageItem[] = [];
+  const items: Item[] = [];
 
   for (const msg of messages) {
     if (!msg.text || msg.text.trim() === '') {
       continue;
     }
 
-    const role = mapRole(msg);
-    const contentType = mapContentType(role);
-
-    items.push({
-      id: msg.id,
-      status: 'completed',
-      type: 'message',
-      role,
-      content: [
-        {
-          type: contentType,
-          text: msg.text,
-        },
-      ],
-    });
+    items.push(isAssistant(msg) ? toAssistantItem(msg) : toUserItem(msg));
   }
 
   return items;

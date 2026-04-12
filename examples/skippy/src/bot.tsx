@@ -34,7 +34,7 @@ function createBot(env: Env): NoeticChat<SkippyAdapters> {
     initialStep: step.llm({
       id: 'respond',
       model: 'anthropic/claude-sonnet-4-5',
-      system: [
+      instructions: [
         'You are Skippy, a helpful and friendly Discord bot.',
         'Keep responses concise and conversational — this is chat, not an essay.',
         'Use markdown formatting when it helps readability.',
