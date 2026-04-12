@@ -4,9 +4,8 @@ import { AgentHarness, step } from '@noetic/core';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { skillsLayer } from '../memory/skills-layer.js';
 import type { NoeticPlugin } from '../plugins/types.js';
-import { discoverSkills } from '../skills/discovery.js';
+import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
-import { SkillSource } from '../skills/types.js';
 import { createActivateSkillTool, createCodingTools } from '../tools/index.js';
 import type { AgentConfig } from '../types/config.js';
 
@@ -36,26 +35,6 @@ async function collectPluginMemory(plugins: ReadonlyArray<NoeticPlugin>): Promis
   return layers;
 }
 
-async function collectPluginSkills(
-  plugins: ReadonlyArray<NoeticPlugin>,
-): Promise<SkillDefinition[]> {
-  const skills: SkillDefinition[] = [];
-  for (const plugin of plugins) {
-    const pluginSkills = await plugin.skills?.();
-    if (!pluginSkills) {
-      continue;
-    }
-    skills.push(
-      ...pluginSkills.map((s) => ({
-        ...s,
-        source: SkillSource.Plugin,
-        filePath: s.filePath ?? null,
-      })),
-    );
-  }
-  return skills;
-}
-
 function filterTools(allTools: Tool[], config: AgentConfig): Tool[] {
   const includes = new Set(config.tools?.include ?? []);
   const excludes = new Set(config.tools?.exclude ?? []);
@@ -75,29 +54,23 @@ function filterTools(allTools: Tool[], config: AgentConfig): Tool[] {
 
 //#region Public API
 
+export interface HarnessWithSkills {
+  harness: AgentHarness<{
+    model: string;
+  }>;
+  skills: ReadonlyArray<SkillDefinition>;
+}
+
+/**
+ * Create the agent harness with all tools, memory layers, and skills.
+ * Returns both the harness and the canonical skill catalog for UI use.
+ */
 export async function createAgentHarness(
   config: AgentConfig,
   plugins: ReadonlyArray<NoeticPlugin>,
-): Promise<
-  AgentHarness<{
-    model: string;
-  }>
-> {
-  // Discover skills from filesystem and plugins
-  const filesystemSkills = await discoverSkills(config.cwd);
-  const pluginSkills = await collectPluginSkills(plugins);
-
-  // Merge skills (filesystem skills have priority, they're already deduplicated)
-  const skillsByName = new Map<string, SkillDefinition>();
-  for (const skill of [
-    ...pluginSkills,
-    ...filesystemSkills,
-  ]) {
-    skillsByName.set(skill.name, skill);
-  }
-  const allSkills = [
-    ...skillsByName.values(),
-  ];
+): Promise<HarnessWithSkills> {
+  // Build canonical skill catalog (single source of truth)
+  const allSkills = await buildSkillCatalog(config.cwd, plugins);
 
   // Build tools including skill activation
   const builtinTools = createCodingTools(config.cwd);
@@ -130,7 +103,7 @@ export async function createAgentHarness(
       : []),
   ];
 
-  return new AgentHarness({
+  const harness = new AgentHarness({
     name: 'noetic-cli',
     params: {
       model: config.model,
@@ -147,6 +120,11 @@ export async function createAgentHarness(
       apiKey: config.apiKey,
     },
   });
+
+  return {
+    harness,
+    skills: allSkills,
+  };
 }
 
 //#endregion

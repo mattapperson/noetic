@@ -15,6 +15,7 @@ import {
   extractTextContent,
   getItemId,
   isErrorEntry,
+  isSystemEntry,
   isUserEntry,
 } from '../item-utils.js';
 import type { ToolCallState } from './message.js';
@@ -30,6 +31,11 @@ export interface ResponsesChatProps {
   onSubmit: (text: string) => void;
   onStop?: () => void;
   model?: string;
+  /** Slash commands for autocomplete */
+  commands?: Array<{
+    cmd: string;
+    desc?: string;
+  }>;
 }
 
 interface RenderContext {
@@ -167,6 +173,16 @@ function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext
     );
   }
 
+  if (isSystemEntry(entry)) {
+    return (
+      <Message key={`system-${index}`} {...ASSISTANT_ROLE}>
+        <Message.Content>
+          <Message.Text>{entry.content}</Message.Text>
+        </Message.Content>
+      </Message>
+    );
+  }
+
   const key = getItemId(entry);
   const isLastEntry = index === ctx.entryCount - 1;
   const isStreaming = isLastEntry && ctx.chatStatus === 'streaming' && entry.status !== 'completed';
@@ -233,6 +249,7 @@ export function ResponsesChat({
   onSubmit,
   onStop,
   model,
+  commands,
 }: ResponsesChatProps): ReactNode {
   const callNameMap = useMemo(
     () => buildCallNameMap(entries),
@@ -292,7 +309,13 @@ export function ResponsesChat({
         </Static>
         {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
       </Box>
-      <PromptInput status={status} onSubmit={handleSubmit} onStop={onStop} model={model} />
+      <PromptInput
+        status={status}
+        onSubmit={handleSubmit}
+        onStop={onStop}
+        model={model}
+        commands={commands}
+      />
     </Box>
   );
 }

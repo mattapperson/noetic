@@ -1,8 +1,7 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { discoverSkills } from '../src/skills/discovery.js';
 import { processSkillContent } from '../src/skills/processor.js';
@@ -273,7 +272,7 @@ More content.
   });
 
   test('handles command errors gracefully', async () => {
-    const content = `!exit 1`;
+    const content = '!exit 1';
 
     const result = await processSkillContent(content, tempDir);
 
@@ -297,7 +296,7 @@ More content.
     await fs.mkdir(nestedDir);
     await fs.writeFile(path.join(nestedDir, 'marker.txt'), 'found-it');
 
-    const content = `!cat marker.txt`;
+    const content = '!cat marker.txt';
 
     const result = await processSkillContent(content, nestedDir);
 

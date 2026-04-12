@@ -5,15 +5,30 @@
 import type { AgentHarness, InputMessageItem, Item } from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
+import {
+  BUILTIN_COMMANDS,
+  commandsToPromptSuggestions,
+  executeCommand,
+  findCommand,
+  isSlashCommand,
+  parseSlashCommand,
+} from '../commands/index.js';
+import type { Command, CommandContext } from '../commands/types.js';
 import { createAgentHarness } from '../harness/factory.js';
 import type { NoeticPlugin } from '../plugins/types.js';
+import type { SkillDefinition } from '../skills/types.js';
 import type { AgentConfig } from '../types/config.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
-import type { ConversationEntry, ErrorEntry, UserEntry } from './item-utils.js';
-import { appendOrUpdateEntry, isErrorEntry, isUserEntry } from './item-utils.js';
+import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
+import {
+  appendOrUpdateEntry,
+  extractActivatedSkills,
+  isErrorEntry,
+  isUserEntry,
+} from './item-utils.js';
 
 //#region Helpers
 
@@ -69,26 +84,6 @@ function entriesToItems(entries: ConversationEntry[]): Item[] {
   return items;
 }
 
-/**
- * Get or create the harness, retrying on failure.
- * Stores the harness directly to avoid race conditions where a rejected
- * promise would cause all subsequent awaits to fail.
- */
-async function getOrCreateHarness(
-  harnessRef: {
-    current: AgentHarness | null;
-  },
-  config: AgentConfig,
-  plugins: ReadonlyArray<NoeticPlugin>,
-): Promise<AgentHarness> {
-  if (harnessRef.current !== null) {
-    return harnessRef.current;
-  }
-  const harness = await createAgentHarness(config, plugins);
-  harnessRef.current = harness;
-  return harness;
-}
-
 //#endregion
 
 //#region Types
@@ -105,6 +100,8 @@ interface AppProps {
 function App({ config, plugins }: AppProps): ReactNode {
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
   const [status, setStatus] = useState<ChatStatus>('ready');
+  const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
+  const [commandOutput, setCommandOutput] = useState<ReactNode | null>(null);
 
   const harnessRef = useRef<AgentHarness | null>(null);
 
@@ -113,8 +110,104 @@ function App({ config, plugins }: AppProps): ReactNode {
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
+  // Built-in commands only - skills are not slash commands
+  const commands = useMemo<Command[]>(
+    () => [
+      ...BUILTIN_COMMANDS,
+    ],
+    [],
+  );
+
+  // Convert commands to PromptInput format
+  const commandSuggestions = useMemo(
+    () => commandsToPromptSuggestions(commands),
+    [
+      commands,
+    ],
+  );
+
+  // Clear entries callback for /clear command
+  const clearEntries = useCallback(() => {
+    setEntries([]);
+  }, []);
+
+  /**
+   * Get or create the harness, storing the canonical skill catalog.
+   */
+  const getOrCreateHarness = useCallback(async (): Promise<AgentHarness> => {
+    if (harnessRef.current !== null) {
+      return harnessRef.current;
+    }
+    const { harness, skills: resolvedSkills } = await createAgentHarness(config, plugins);
+    harnessRef.current = harness;
+    setSkills(resolvedSkills);
+    return harness;
+  }, [
+    config,
+    plugins,
+  ]);
+
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
+      // Check if this is a slash command
+      if (isSlashCommand(text)) {
+        const parsed = parseSlashCommand(text);
+        if (parsed) {
+          const cmd = findCommand(parsed.commandName, commands);
+          if (cmd) {
+            // Build command context with activated skills from conversation
+            const activatedSkills = extractActivatedSkills(entriesRef.current);
+            const ctx: CommandContext = {
+              config,
+              cwd: config.cwd,
+              entries: entriesRef.current,
+              skills,
+              activatedSkills,
+              commands,
+              clearEntries,
+            };
+
+            try {
+              const result = await executeCommand(cmd, parsed.args, ctx);
+              if (result.type === 'text') {
+                // Show text result as info message (not error)
+                setEntries((prev) => [
+                  ...prev,
+                  {
+                    role: 'system',
+                    type: 'info',
+                    content: result.value,
+                  } satisfies SystemEntry,
+                ]);
+              } else if (result.type === 'jsx') {
+                // Render JSX output
+                setCommandOutput(result.node);
+                // Clear after a short delay
+                setTimeout(() => setCommandOutput(null), 100);
+              }
+              // 'skip' type means no output
+            } catch (error) {
+              setEntries((prev) => [
+                ...prev,
+                buildErrorEntry(error),
+              ]);
+            }
+            return;
+          }
+        }
+        // Unknown command - show error
+        setEntries((prev) => [
+          ...prev,
+          {
+            role: 'system',
+            type: 'error',
+            content: `Unknown command: ${text}`,
+          } satisfies ErrorEntry,
+        ]);
+        return;
+      }
+
+      // Regular message - send to model
       const userEntry: UserEntry = {
         role: 'user',
         content: text,
@@ -126,7 +219,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       setStatus('submitted');
 
       try {
-        const harness = await getOrCreateHarness(harnessRef, config, plugins);
+        const harness = await getOrCreateHarness();
         // Build conversation history including the new user message
         const historyItems = entriesToItems([
           ...entriesRef.current,
@@ -148,17 +241,22 @@ function App({ config, plugins }: AppProps): ReactNode {
     },
     [
       config,
-      plugins,
+      commands,
+      skills,
+      clearEntries,
+      getOrCreateHarness,
     ],
   );
 
   return (
     <InkProvider>
+      {commandOutput}
       <ResponsesChat
         entries={entries}
         status={status}
         onSubmit={handleSubmit}
         model={config.model}
+        commands={commandSuggestions}
       />
     </InkProvider>
   );

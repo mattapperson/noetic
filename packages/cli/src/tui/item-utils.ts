@@ -17,8 +17,14 @@ export interface ErrorEntry {
   content: string;
 }
 
+export interface SystemEntry {
+  role: 'system';
+  type: 'info';
+  content: string;
+}
+
 export type AssistantEntry = Item | StreamingItem;
-export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry;
+export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry | SystemEntry;
 type MessageContentPart = Extract<
   AssistantEntry,
   {
@@ -36,6 +42,10 @@ export function isUserEntry(entry: ConversationEntry): entry is UserEntry {
 
 export function isErrorEntry(entry: ConversationEntry): entry is ErrorEntry {
   return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'error';
+}
+
+export function isSystemEntry(entry: ConversationEntry): entry is SystemEntry {
+  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'info';
 }
 
 //#endregion
@@ -111,7 +121,7 @@ export function appendOrUpdateEntry(
 ): ConversationEntry[] {
   const id = getItemId(item);
   const idx = prev.findIndex((existing) => {
-    if (isUserEntry(existing) || isErrorEntry(existing)) {
+    if (isUserEntry(existing) || isErrorEntry(existing) || isSystemEntry(existing)) {
       return false;
     }
     return getItemId(existing) === id;
@@ -127,6 +137,58 @@ export function appendOrUpdateEntry(
     ...prev,
     item,
   ];
+}
+
+//#endregion
+
+//#region Skill Activation Tracking
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasStringName(obj: Record<string, unknown>): obj is Record<string, unknown> & {
+  name: string;
+} {
+  return typeof obj.name === 'string';
+}
+
+/**
+ * Extract activated skill names from conversation entries.
+ * Looks for completed function_call items with name 'activateSkill'.
+ */
+export function extractActivatedSkills(entries: ReadonlyArray<ConversationEntry>): Set<string> {
+  const activated = new Set<string>();
+
+  for (const entry of entries) {
+    // Skip user/system entries
+    if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
+      continue;
+    }
+
+    // Look for activateSkill function calls
+    if (entry.type !== 'function_call') {
+      continue;
+    }
+    if (entry.name !== 'activateSkill') {
+      continue;
+    }
+    if (entry.status !== 'completed') {
+      continue;
+    }
+
+    // Parse the arguments to get skill name
+    try {
+      const parsed = JSON.parse(entry.arguments);
+      if (isRecord(parsed) && hasStringName(parsed)) {
+        activated.add(parsed.name);
+      }
+    } catch {
+      // Invalid JSON, skip
+    }
+  }
+
+  return activated;
 }
 
 //#endregion
