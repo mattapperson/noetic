@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { Item, MessageItem } from '@noetic/core';
+import type { InputMessageItem, Item, MessageItem } from '@noetic/core';
 import { Message, parseMarkdown } from 'chat';
 
 import { toNoeticItems } from '../src/messages';
@@ -34,14 +34,26 @@ function createMessage(overrides: {
   });
 }
 
-function isMessageItem(item: Item): item is MessageItem {
-  return item.type === 'message';
+function isAssistantItem(item: Item): item is MessageItem {
+  return item.type === 'message' && 'role' in item && item.role === 'assistant';
 }
 
-function getMessageItem(items: Item[], index: number): MessageItem {
+function isUserItem(item: Item): item is InputMessageItem {
+  return item.type === 'message' && 'role' in item && item.role === 'user';
+}
+
+function getAssistantItem(items: Item[], index: number): MessageItem {
   const item = items[index];
-  if (!isMessageItem(item)) {
-    throw new Error(`Expected MessageItem at index ${index}, got ${item.type}`);
+  if (!isAssistantItem(item)) {
+    throw new Error(`Expected assistant MessageItem at index ${index}`);
+  }
+  return item;
+}
+
+function getUserItem(items: Item[], index: number): InputMessageItem {
+  const item = items[index];
+  if (!isUserItem(item)) {
+    throw new Error(`Expected user InputMessageItem at index ${index}`);
   }
   return item;
 }
@@ -60,7 +72,7 @@ describe('toNoeticItems', () => {
     ]);
 
     expect(items).toHaveLength(1);
-    const item = getMessageItem(items, 0);
+    const item = getUserItem(items, 0);
     expect(item.type).toBe('message');
     expect(item.role).toBe('user');
     expect(item.id).toBe('msg-1');
@@ -84,12 +96,13 @@ describe('toNoeticItems', () => {
     ]);
 
     expect(items).toHaveLength(1);
-    const item = getMessageItem(items, 0);
+    const item = getAssistantItem(items, 0);
     expect(item.role).toBe('assistant');
     expect(item.content).toEqual([
       {
         type: 'output_text',
         text: 'Bot response',
+        annotations: [],
       },
     ]);
   });
@@ -104,7 +117,7 @@ describe('toNoeticItems', () => {
       msg,
     ]);
 
-    const item = getMessageItem(items, 0);
+    const item = getAssistantItem(items, 0);
     expect(item.role).toBe('assistant');
   });
 
@@ -124,13 +137,9 @@ describe('toNoeticItems', () => {
     const items = toNoeticItems(messages);
 
     expect(items).toHaveLength(1);
-    const item = getMessageItem(items, 0);
-    const part = item.content[0];
-    expect(part.type).toBe('input_text');
-    if (part.type === 'refusal') {
-      throw new Error('Unexpected refusal');
-    }
-    expect(part.text).toBe('Valid');
+    const item = getUserItem(items, 0);
+    expect(item.content[0].type).toBe('input_text');
+    expect(item.content[0].text).toBe('Valid');
   });
 
   test('preserves message order', () => {
@@ -172,7 +181,7 @@ describe('toNoeticItems', () => {
       msg,
     ]);
 
-    const item = getMessageItem(items, 0);
+    const item = getUserItem(items, 0);
     expect(item.role).toBe('user');
   });
 
@@ -187,7 +196,7 @@ describe('toNoeticItems', () => {
       msg,
     ]);
 
-    const item = getMessageItem(items, 0);
+    const item = getAssistantItem(items, 0);
     expect(item.role).toBe('assistant');
   });
 });

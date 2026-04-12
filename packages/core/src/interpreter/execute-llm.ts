@@ -94,7 +94,9 @@ export async function executeLLM<TMemory, I, O>(
       // Run through pipeline — layers can filter/transform
       const { items: finalItems, rerenderRequests } = await baseCtx.harness.runAppendPipeline(
         layers,
-        [userItem],
+        [
+          userItem,
+        ],
         baseCtx,
       );
 
@@ -107,7 +109,13 @@ export async function executeLLM<TMemory, I, O>(
       const immediateRequests = rerenderRequests.filter((r) => r.timing === 'immediate');
       if (immediateRequests.length > 0) {
         const userQuery = typeof input === 'string' ? input : '';
-        await baseCtx.harness.executeRerender(immediateRequests, layers, baseCtx, new Map(), userQuery);
+        await baseCtx.harness.executeRerender(
+          immediateRequests,
+          layers,
+          baseCtx,
+          new Map(),
+          userQuery,
+        );
       }
     } else {
       // No layers, append directly

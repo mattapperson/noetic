@@ -53,18 +53,50 @@ const DEFAULT_MAX_FILE_SIZE = 1024 * 1024;
 
 /** Default allowed extensions */
 const DEFAULT_ALLOWED_EXTENSIONS = [
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.json', '.yaml', '.yml', '.toml',
-  '.md', '.mdx', '.txt', '.csv',
-  '.html', '.css', '.scss', '.less',
-  '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift',
-  '.c', '.cpp', '.h', '.hpp',
-  '.sh', '.bash', '.zsh',
-  '.sql', '.graphql',
-  '.xml', '.svg',
-  '.env', '.env.local', '.env.example',
-  '.gitignore', '.dockerignore',
-  'Dockerfile', 'Makefile', 'Taskfile',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.md',
+  '.mdx',
+  '.txt',
+  '.csv',
+  '.html',
+  '.css',
+  '.scss',
+  '.less',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.java',
+  '.kt',
+  '.swift',
+  '.c',
+  '.cpp',
+  '.h',
+  '.hpp',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.sql',
+  '.graphql',
+  '.xml',
+  '.svg',
+  '.env',
+  '.env.local',
+  '.env.example',
+  '.gitignore',
+  '.dockerignore',
+  'Dockerfile',
+  'Makefile',
+  'Taskfile',
 ];
 
 //#endregion
@@ -88,12 +120,15 @@ function transformReferencesToAnchors(text: string): string {
 
 function extractFileReferences(text: string): string[] {
   const refs: string[] = [];
-  let match: RegExpExecArray | null;
   const pattern = new RegExp(FILE_REF_PATTERN);
-  while ((match = pattern.exec(text)) !== null) {
+  let match = pattern.exec(text);
+  while (match !== null) {
     refs.push(match[1]);
+    match = pattern.exec(text);
   }
-  return [...new Set(refs)]; // Dedupe
+  return [
+    ...new Set(refs),
+  ]; // Dedupe
 }
 
 function simpleHash(content: string): string {
@@ -113,12 +148,16 @@ function isInputMessage(item: Item): item is InputMessageItem {
     'role' in item &&
     'content' in item &&
     Array.isArray(item.content) &&
-    item.content.every((c) => 'type' in c && c.type === 'input_text')
+    item.content.every(
+      (c: unknown) => typeof c === 'object' && c !== null && 'type' in c && c.type === 'input_text',
+    )
   );
 }
 
 function extractTextFromItem(item: Item): string {
-  if (!isInputMessage(item)) return '';
+  if (!isInputMessage(item)) {
+    return '';
+  }
   return item.content.map((c) => c.text).join('\n');
 }
 
@@ -143,8 +182,15 @@ async function readFileContent(
     // Security: Validate path stays within baseDir (prevent path traversal)
     const normalizedBase = path.resolve(opts.baseDir);
     const normalizedPath = path.resolve(absolutePath);
-    if (!normalizedPath.startsWith(normalizedBase + path.sep) && normalizedPath !== normalizedBase) {
-      return { content: null, deleted: false, error: 'PATH_TRAVERSAL: File outside allowed directory' };
+    if (
+      !normalizedPath.startsWith(normalizedBase + path.sep) &&
+      normalizedPath !== normalizedBase
+    ) {
+      return {
+        content: null,
+        deleted: false,
+        error: 'PATH_TRAVERSAL: File outside allowed directory',
+      };
     }
 
     // Security: Check file extension
@@ -154,13 +200,21 @@ async function readFileContent(
       (allowed) => ext === allowed.toLowerCase() || basename === allowed,
     );
     if (!isAllowedExt && opts.allowedExtensions.length > 0) {
-      return { content: null, deleted: false, error: `DISALLOWED_EXTENSION: ${ext || 'no extension'}` };
+      return {
+        content: null,
+        deleted: false,
+        error: `DISALLOWED_EXTENSION: ${ext || 'no extension'}`,
+      };
     }
 
     // Security: Check for symlinks if not allowed
     const stats = await fs.lstat(absolutePath);
     if (stats.isSymbolicLink() && !opts.followSymlinks) {
-      return { content: null, deleted: false, error: 'SYMLINK: Symlinks not allowed' };
+      return {
+        content: null,
+        deleted: false,
+        error: 'SYMLINK: Symlinks not allowed',
+      };
     }
 
     // Security: Check file size
@@ -174,13 +228,23 @@ async function readFileContent(
     }
 
     const content = await fs.readFile(absolutePath, 'utf-8');
-    return { content, deleted: false };
+    return {
+      content,
+      deleted: false,
+    };
   } catch (e) {
     if (isNodeError(e) && e.code === 'ENOENT') {
-      return { content: null, deleted: true };
+      return {
+        content: null,
+        deleted: true,
+      };
     }
     if (isNodeError(e) && e.code === 'EACCES') {
-      return { content: null, deleted: false, error: 'PERMISSION_DENIED: Cannot read file' };
+      return {
+        content: null,
+        deleted: false,
+        error: 'PERMISSION_DENIED: Cannot read file',
+      };
     }
     throw e;
   }
@@ -193,8 +257,12 @@ function isNodeError(e: unknown): e is NodeJS.ErrnoException {
 function extractResponseText(items: Item[]): string {
   const texts: string[] = [];
   for (const item of items) {
-    if (item.type !== 'message') continue;
-    if (!('content' in item) || !Array.isArray(item.content)) continue;
+    if (item.type !== 'message') {
+      continue;
+    }
+    if (!('content' in item) || !Array.isArray(item.content)) {
+      continue;
+    }
     for (const part of item.content) {
       if ('text' in part && typeof part.text === 'string') {
         texts.push(part.text);
@@ -204,15 +272,18 @@ function extractResponseText(items: Item[]): string {
   return texts.join('').trim();
 }
 
-async function scoreFileRelevance(
-  filePath: string,
-  fileContent: string,
-  userQuery: string,
-  ctx: ExecutionContext,
-  model: string,
-): Promise<number> {
+interface ScoreFileRelevanceParams {
+  filePath: string;
+  fileContent: string;
+  userQuery: string;
+  ctx: ExecutionContext;
+  model: string;
+}
+
+async function scoreFileRelevance(params: ScoreFileRelevanceParams): Promise<number> {
+  const { filePath, fileContent, userQuery, ctx, model } = params;
+
   if (!ctx.callModel) {
-    // No LLM available, use simple heuristic (filename match)
     const queryLower = userQuery.toLowerCase();
     const pathLower = filePath.toLowerCase();
     if (pathLower.includes(queryLower) || queryLower.includes(path.basename(pathLower))) {
@@ -241,7 +312,9 @@ Score:`;
   try {
     const response = await ctx.callModel({
       model,
-      items: [createMessage(scoringPrompt, 'user')],
+      items: [
+        createMessage(scoringPrompt, 'user'),
+      ],
       instructions: 'You are a relevance scorer. Respond with only a number 0-100.',
     });
 
@@ -249,11 +322,11 @@ Score:`;
 
     const score = Number.parseInt(responseText, 10);
     if (Number.isNaN(score) || score < 0 || score > 100) {
-      return 50; // Default on parse failure
+      return 50;
     }
     return score;
   } catch {
-    return 50; // Default on error
+    return 50;
   }
 }
 
@@ -315,7 +388,10 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
         let userQuery = '';
 
         // Update readOpts with current state's baseDir
-        const currentReadOpts: ReadFileOptions = { ...readOpts, baseDir: state.baseDir };
+        const currentReadOpts: ReadFileOptions = {
+          ...readOpts,
+          baseDir: state.baseDir,
+        };
 
         // Process each item
         const transformedItems: Item[] = [];
@@ -358,7 +434,13 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
               const result = await readFileContent(absolutePath, currentReadOpts);
 
               const priority = result.content
-                ? await scoreFileRelevance(ref, result.content, userQuery, ctx, scoringModel)
+                ? await scoreFileRelevance({
+                    filePath: ref,
+                    fileContent: result.content,
+                    userQuery,
+                    ctx,
+                    model: scoringModel,
+                  })
                 : 0;
 
               newFiles.set(ref, {
@@ -385,7 +467,10 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
               };
               return part;
             });
-            const transformedItem: InputMessageItem = { ...item, content: transformedContent };
+            const transformedItem: InputMessageItem = {
+              ...item,
+              content: transformedContent,
+            };
             transformedItems.push(transformedItem);
           } else {
             transformedItems.push(item);
@@ -395,24 +480,40 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
         // Check existing files for changes
         for (const [ref, tracked] of newFiles) {
           // Skip files with errors - they won't change
-          if (tracked.error) continue;
+          if (tracked.error) {
+            continue;
+          }
 
           const result = await readFileContent(tracked.absolutePath, currentReadOpts);
 
           if (result.deleted && !tracked.deleted) {
             // File was deleted
-            newFiles.set(ref, { ...tracked, content: null, deleted: true });
+            newFiles.set(ref, {
+              ...tracked,
+              content: null,
+              deleted: true,
+            });
             hasChanges = true;
           } else if (result.error && !tracked.error) {
             // File now has error (e.g., permission changed)
-            newFiles.set(ref, { ...tracked, content: null, error: result.error });
+            newFiles.set(ref, {
+              ...tracked,
+              content: null,
+              error: result.error,
+            });
             hasChanges = true;
           } else if (!result.deleted && result.content) {
             const newHash = simpleHash(result.content);
             if (newHash !== tracked.contentHash) {
               // File content changed
               const priority = userQuery
-                ? await scoreFileRelevance(ref, result.content, userQuery, ctx, scoringModel)
+                ? await scoreFileRelevance({
+                    filePath: ref,
+                    fileContent: result.content,
+                    userQuery,
+                    ctx,
+                    model: scoringModel,
+                  })
                 : tracked.priority;
 
               newFiles.set(ref, {
@@ -431,7 +532,10 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
 
         return {
           items: transformedItems,
-          state: { ...state, files: newFiles },
+          state: {
+            ...state,
+            files: newFiles,
+          },
           rerender: hasChanges,
           timing: 'immediate',
           scope: 'self',
@@ -440,11 +544,16 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
 
       async recall({ state, budget }) {
         if (state.files.size === 0) {
-          return { items: [], tokenCount: 0 };
+          return {
+            items: [],
+            tokenCount: 0,
+          };
         }
 
         // Sort files by priority (highest first)
-        const sortedFiles = [...state.files.values()].sort((a, b) => b.priority - a.priority);
+        const sortedFiles = [
+          ...state.files.values(),
+        ].sort((a, b) => b.priority - a.priority);
 
         // Build content blocks within budget
         const blocks: string[] = [];
@@ -473,7 +582,9 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
             continue;
           }
 
-          if (!file.content) continue;
+          if (!file.content) {
+            continue;
+          }
 
           const header = `## ${file.referencePath}`;
           const headerTokens = estimateTokens(header);
@@ -508,13 +619,18 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
         }
 
         if (blocks.length === 0) {
-          return { items: [], tokenCount: 0 };
+          return {
+            items: [],
+            tokenCount: 0,
+          };
         }
 
         const content = `# Referenced Files\n\n${blocks.join('\n\n')}`;
 
         return {
-          items: [createMessage(content, 'developer')],
+          items: [
+            createMessage(content, 'developer'),
+          ],
           tokenCount: estimateTokens(content),
         };
       },

@@ -9,7 +9,15 @@ import {
 } from '../../src/memory/layer-lifecycle';
 import { fileReference } from '../../src/memory/layers/file-reference';
 import type { InputMessageItem, Item } from '../../src/types/items';
+import type { MemoryLayer, RecallParams } from '../../src/types/memory';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
+
+function callRecall(
+  layer: MemoryLayer,
+  params: RecallParams<unknown>,
+): ReturnType<NonNullable<MemoryLayer['hooks']['recall']>> {
+  return layer.hooks.recall!(params);
+}
 
 describe('fileReference', () => {
   let tempDir: string;
@@ -47,7 +55,10 @@ describe('fileReference', () => {
       item.role === 'user' &&
       'content' in item &&
       Array.isArray(item.content) &&
-      item.content.every((c) => 'type' in c && c.type === 'input_text')
+      item.content.every(
+        (c: unknown) =>
+          typeof c === 'object' && c !== null && 'type' in c && c.type === 'input_text',
+      )
     );
   }
 
@@ -494,8 +505,8 @@ describe('fileReference', () => {
       }
 
       // Call recall - use getRecallContent helper for type safety
-      const recallResult = await layer.hooks.recall!({
-        state: state as never,
+      const recallResult = await callRecall(layer, {
+        state,
         budget: 10000,
         query: '',
         ctx,
@@ -550,8 +561,8 @@ describe('fileReference', () => {
       const state = store.get<TestFileRefState>('exec-errors', 'file-reference');
 
       // Call recall
-      const recallResult = await layer.hooks.recall!({
-        state: state as never,
+      const recallResult = await callRecall(layer, {
+        state,
         budget: 10000,
         query: '',
         ctx,
@@ -605,8 +616,8 @@ describe('fileReference', () => {
       const state = store.get<TestFileRefState>('exec-truncate', 'file-reference');
 
       // Call recall with very small budget
-      const recallResult = await layer.hooks.recall!({
-        state: state as never,
+      const recallResult = await callRecall(layer, {
+        state,
         budget: 100, // Very small budget
         query: '',
         ctx,
@@ -672,8 +683,8 @@ describe('fileReference', () => {
       const state = store.get<TestFileRefState>('exec-del-recall', 'file-reference');
 
       // Call recall
-      const recallResult = await layer.hooks.recall!({
-        state: state as never,
+      const recallResult = await callRecall(layer, {
+        state,
         budget: 10000,
         query: '',
         ctx,
@@ -705,8 +716,8 @@ describe('fileReference', () => {
 
       const state = store.get<TestFileRefState>('exec-empty', 'file-reference');
 
-      const recallResult = await layer.hooks.recall!({
-        state: state as never,
+      const recallResult = await callRecall(layer, {
+        state,
         budget: 10000,
         query: '',
         ctx,
