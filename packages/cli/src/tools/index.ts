@@ -13,6 +13,10 @@ import { createWriteTool } from './write.js';
 
 //#region Re-exports
 
+export {
+  type ActivateSkillTool,
+  createActivateSkillTool,
+} from './activate-skill.js';
 export { type BashOperations, type BashOutput, type BashTool, createBashTool } from './bash.js';
 export { createEditTool, type EditOperations, type EditOutput, type EditTool } from './edit.js';
 export {
