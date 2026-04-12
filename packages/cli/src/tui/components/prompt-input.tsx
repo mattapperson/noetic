@@ -266,17 +266,19 @@ function resolveStatusHintText(options: StatusHintTextOptions): string {
 // Subcomponents
 // ============================================================================
 
-/** Horizontal divider line. */
+/** Horizontal divider line fills the full terminal width. */
 function PromptInputDivider() {
   const { dividerColor, dividerDashed, theme } = usePromptInput();
   const { stdout } = useStdout();
+  // Ink's useStdout provides the terminal dimensions
   const width = stdout?.columns ?? 80;
   const color = dividerColor ?? theme.muted;
   const char = dividerDashed ? '\u254C' : '\u2500';
+  const line = char.repeat(width);
   return (
-    <Box marginLeft={-1} marginRight={-1}>
+    <Box width="100%">
       <Text color={color} dimColor={!dividerColor}>
-        {char.repeat(width)}
+        {line}
       </Text>
     </Box>
   );
