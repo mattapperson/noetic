@@ -2,6 +2,7 @@
  * Skills system exports.
  */
 
+export { buildSkillCatalog } from './catalog.js';
 export { discoverSkills, loadSkillFromFile } from './discovery.js';
 export { processSkillContent } from './processor.js';
 export type {

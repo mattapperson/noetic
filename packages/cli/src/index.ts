@@ -4,7 +4,7 @@
 
 export { buildSystemPrompt } from './ai/system-prompt.js';
 export { discoverConfig, resolvePluginBaseDir } from './config/discovery.js';
-export { createAgentHarness } from './harness/factory.js';
+export { createAgentHarness, type HarnessWithSkills } from './harness/factory.js';
 export { disposePlugins, loadPlugins } from './plugins/loader.js';
 export type { NoeticPlugin } from './plugins/types.js';
 export { createCodingTools, createReadOnlyTools } from './tools/index.js';
