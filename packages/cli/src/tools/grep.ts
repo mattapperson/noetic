@@ -6,8 +6,8 @@
 
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import { tool } from '@noetic/core';
+import type { Tool } from '@noetic/core';
 import { z } from 'zod';
 import { normalizeToLf } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';
@@ -261,7 +261,7 @@ export interface GrepToolOptions {
   operations?: GrepOperations;
 }
 
-export type GrepTool = ToolWithExecute<typeof GrepInputSchema, typeof GrepOutputSchema>;
+export type GrepTool = Tool<typeof GrepInputSchema, typeof GrepOutputSchema>;
 
 export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool {
   const ops = options?.operations ?? defaultGrepOperations;
@@ -269,8 +269,8 @@ export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool
   return tool({
     name: 'Grep',
     description: GREP_TOOL_DESCRIPTION,
-    inputSchema: GrepInputSchema,
-    outputSchema: GrepOutputSchema,
+    input: GrepInputSchema,
+    output: GrepOutputSchema,
     async execute(params) {
       const {
         pattern,

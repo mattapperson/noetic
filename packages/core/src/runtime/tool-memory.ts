@@ -1,4 +1,4 @@
-import type { TurnContext } from '@openrouter/sdk';
+import type { TurnContext } from '@openrouter/agent';
 import type { Context } from '../types/context';
 import type { AgentHarnessContract } from '../types/runtime';
 import type { ToolExecutionContext, ToolMemory } from '../types/tool-context';

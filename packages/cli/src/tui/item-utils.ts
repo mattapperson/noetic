@@ -1,8 +1,8 @@
 /**
- * Shared utilities for processing StreamableOutputItem from @openrouter/sdk.
+ * Shared utilities for processing StreamableOutputItem from @openrouter/agent.
  */
 
-import type { StreamableOutputItem } from '@openrouter/sdk';
+import type { Item, StreamingItem } from '@noetic/core';
 
 //#region Types
 
@@ -11,7 +11,14 @@ export interface UserEntry {
   content: string;
 }
 
-export type ConversationEntry = StreamableOutputItem | UserEntry;
+export type AssistantEntry = Item | StreamingItem;
+export type ConversationEntry = AssistantEntry | UserEntry;
+type MessageContentPart = Extract<
+  AssistantEntry,
+  {
+    type: 'message';
+  }
+>['content'][number];
 
 //#endregion
 
@@ -27,7 +34,7 @@ export function isUserEntry(entry: ConversationEntry): entry is UserEntry {
 
 let anonCounter = 0;
 
-export function getItemId(item: StreamableOutputItem): string {
+export function getItemId(item: AssistantEntry): string {
   if (item.type === 'function_call') {
     return `call-${item.callId}`;
   }
@@ -41,7 +48,7 @@ export function getItemId(item: StreamableOutputItem): string {
 
 //#region Text Extraction
 
-export function extractTextContent(item: StreamableOutputItem): string {
+export function extractTextContent(item: AssistantEntry): string {
   if (item.type !== 'message') {
     return '';
   }
@@ -51,17 +58,17 @@ export function extractTextContent(item: StreamableOutputItem): string {
   return item.content
     .filter(
       (
-        part,
+        part: MessageContentPart,
       ): part is {
         type: 'output_text';
         text: string;
       } => part.type === 'output_text',
     )
-    .map((part) => part.text)
+    .map((part: { type: 'output_text'; text: string }) => part.text)
     .join('');
 }
 
-export function extractReasoning(item: StreamableOutputItem): string | undefined {
+export function extractReasoning(item: AssistantEntry): string | undefined {
   if (item.type !== 'reasoning') {
     return undefined;
   }
@@ -90,7 +97,7 @@ export function extractReasoning(item: StreamableOutputItem): string | undefined
 
 export function appendOrUpdateEntry(
   prev: ConversationEntry[],
-  item: StreamableOutputItem,
+  item: AssistantEntry,
 ): ConversationEntry[] {
   const id = getItemId(item);
   const idx = prev.findIndex((existing) => {

@@ -4,11 +4,15 @@
  * @noetic/cli entry point.
  */
 
-import { createClient } from '../ai/client.js';
+import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
+import { loadPlugins } from '../plugins/loader.js';
 import { runAgent } from '../tui/app.js';
 import { parseArgs } from './args.js';
 
-const config = parseArgs(process.argv);
-const client = createClient(config.apiKey);
+const argsConfig = parseArgs(process.argv);
+const discovered = await discoverConfig();
+const config = discovered?.config ?? argsConfig;
+const pluginBaseDir = discovered ? resolvePluginBaseDir(discovered.sourcePath) : config.cwd;
+const plugins = await loadPlugins(config, pluginBaseDir);
 
-await runAgent(client, config);
+await runAgent(plugins, config);

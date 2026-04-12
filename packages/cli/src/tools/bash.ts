@@ -8,8 +8,8 @@ import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ToolWithGenerator } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import type { Tool } from '@noetic/core';
+import { toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
 import { validateCommand } from './security.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from './truncate.js';
@@ -251,21 +251,17 @@ export interface BashToolOptions {
   operations?: BashOperations;
 }
 
-export type BashTool = ToolWithGenerator<
-  typeof BashInputSchema,
-  typeof BashEventSchema,
-  typeof BashOutputSchema
->;
+export type BashTool = Tool<typeof BashInputSchema, typeof BashOutputSchema>;
 
 export function createBashTool(cwd: string, options?: BashToolOptions): BashTool {
   const ops = options?.operations ?? defaultBashOperations;
 
-  return tool({
+  return toolWithGenerator({
     name: 'Bash',
     description: BASH_TOOL_DESCRIPTION,
-    inputSchema: BashInputSchema,
-    outputSchema: BashOutputSchema,
-    eventSchema: BashEventSchema,
+    input: BashInputSchema,
+    output: BashOutputSchema,
+    event: BashEventSchema,
     async *execute(params) {
       const { command, timeout: userTimeout } = params;
       const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 6e2);

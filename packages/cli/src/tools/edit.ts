@@ -6,8 +6,8 @@
 
 import { constants } from 'node:fs';
 import { access as fsAccess, readFile, writeFile } from 'node:fs/promises';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import { tool } from '@noetic/core';
+import type { Tool } from '@noetic/core';
 import { z } from 'zod';
 import {
   applyReplacement,
@@ -94,7 +94,7 @@ export interface EditToolOptions {
   operations?: EditOperations;
 }
 
-export type EditTool = ToolWithExecute<typeof EditInputSchema, typeof EditOutputSchema>;
+export type EditTool = Tool<typeof EditInputSchema, typeof EditOutputSchema>;
 
 export function createEditTool(cwd: string, options?: EditToolOptions): EditTool {
   const ops = options?.operations ?? defaultEditOperations;
@@ -102,8 +102,8 @@ export function createEditTool(cwd: string, options?: EditToolOptions): EditTool
   return tool({
     name: 'Edit',
     description: EDIT_TOOL_DESCRIPTION,
-    inputSchema: EditInputSchema,
-    outputSchema: EditOutputSchema,
+    input: EditInputSchema,
+    output: EditOutputSchema,
     async execute(params) {
       const { path, oldText, newText } = params;
       const absolutePath = resolveToCwd(path, cwd);

@@ -26,7 +26,7 @@ export { spawn } from './builders/spawn-builder';
 /** @public */
 export { step } from './builders/step-builders';
 /** @public */
-export { tool } from './builders/tool-builder';
+export { tool, toolWithGenerator } from './builders/tool-builder';
 
 //#endregion
 

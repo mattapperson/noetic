@@ -11,7 +11,11 @@ export class ItemLogImpl implements ItemLog {
         ...this._items,
       ]);
     }
-    return this._frozenCache;
+    const frozenItems = this._frozenCache;
+    if (!frozenItems) {
+      return [];
+    }
+    return frozenItems;
   }
 
   append(item: Item): void {

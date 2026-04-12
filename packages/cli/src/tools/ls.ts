@@ -6,8 +6,8 @@
 
 import { readdir, stat } from 'node:fs/promises';
 import nodePath from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import { tool } from '@noetic/core';
+import type { Tool } from '@noetic/core';
 import { z } from 'zod';
 import { pathExists, resolveToCwd } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from './truncate.js';
@@ -149,7 +149,7 @@ export interface LsToolOptions {
   operations?: LsOperations;
 }
 
-export type LsTool = ToolWithExecute<typeof LsInputSchema, typeof LsOutputSchema>;
+export type LsTool = Tool<typeof LsInputSchema, typeof LsOutputSchema>;
 
 export function createLsTool(cwd: string, options?: LsToolOptions): LsTool {
   const ops = options?.operations ?? defaultLsOperations;
@@ -157,8 +157,8 @@ export function createLsTool(cwd: string, options?: LsToolOptions): LsTool {
   return tool({
     name: 'Ls',
     description: LS_TOOL_DESCRIPTION,
-    inputSchema: LsInputSchema,
-    outputSchema: LsOutputSchema,
+    input: LsInputSchema,
+    output: LsOutputSchema,
     async execute(params) {
       const { path, limit } = params;
       const dirPath = resolveToCwd(path || '.', cwd);

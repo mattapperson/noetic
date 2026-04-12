@@ -1,4 +1,4 @@
-import { OpenRouter } from '@openrouter/sdk';
+import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
 import {

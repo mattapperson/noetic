@@ -1,4 +1,4 @@
-import type { TurnContext } from '@openrouter/sdk';
+import type { TurnContext } from '@openrouter/agent';
 import type { StepMeta } from './common';
 import type { Context } from './context';
 import type { Item } from './items';

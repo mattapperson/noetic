@@ -6,8 +6,8 @@
 
 import { constants } from 'node:fs';
 import { access as fsAccess, readFile } from 'node:fs/promises';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import { tool } from '@noetic/core';
+import type { Tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveReadPath } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from './truncate.js';
@@ -174,7 +174,7 @@ export interface ReadToolOptions {
   operations?: ReadOperations;
 }
 
-export type ReadTool = ToolWithExecute<typeof ReadInputSchema, typeof ReadOutputSchema>;
+export type ReadTool = Tool<typeof ReadInputSchema, typeof ReadOutputSchema>;
 
 export function createReadTool(cwd: string, options?: ReadToolOptions): ReadTool {
   const ops = options?.operations ?? defaultReadOperations;
@@ -182,8 +182,8 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): ReadTool
   return tool({
     name: 'Read',
     description: READ_TOOL_DESCRIPTION,
-    inputSchema: ReadInputSchema,
-    outputSchema: ReadOutputSchema,
+    input: ReadInputSchema,
+    output: ReadOutputSchema,
     async execute(params) {
       const { path, offset, limit } = params;
       const absolutePath = resolveReadPath(path, cwd);

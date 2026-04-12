@@ -435,16 +435,12 @@ describe('steering layer', () => {
       assert(result.items[0].type === 'message');
       const text = result.items[0].content
         .filter(
-          (
-            c,
-          ): c is Extract<
-            typeof c,
-            {
-              type: 'input_text';
-            }
-          > => c.type === 'input_text',
+          (c: { type: string }): c is {
+            type: 'input_text';
+            text: string;
+          } => c.type === 'input_text' && 'text' in c,
         )
-        .map((c) => c.text)
+        .map((c: { text: string }) => c.text)
         .join('');
       expect(text).toContain('steering_feedback');
       expect(text).toContain('rule-1');

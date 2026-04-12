@@ -2,7 +2,7 @@
  * Tool exports and convenience factories.
  */
 
-import type { Tool } from '@openrouter/sdk';
+import type { Tool } from '@noetic/core';
 import { createBashTool } from './bash.js';
 import { createEditTool } from './edit.js';
 import { createFindTool } from './find.js';

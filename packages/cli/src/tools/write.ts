@@ -6,8 +6,8 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import { tool } from '@noetic/core';
+import type { Tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveToCwd } from './path-utils.js';
 
@@ -82,7 +82,7 @@ export interface WriteToolOptions {
   operations?: WriteOperations;
 }
 
-export type WriteTool = ToolWithExecute<typeof WriteInputSchema, typeof WriteOutputSchema>;
+export type WriteTool = Tool<typeof WriteInputSchema, typeof WriteOutputSchema>;
 
 export function createWriteTool(cwd: string, options?: WriteToolOptions): WriteTool {
   const ops = options?.operations ?? defaultWriteOperations;
@@ -90,8 +90,8 @@ export function createWriteTool(cwd: string, options?: WriteToolOptions): WriteT
   return tool({
     name: 'Write',
     description: WRITE_TOOL_DESCRIPTION,
-    inputSchema: WriteInputSchema,
-    outputSchema: WriteOutputSchema,
+    input: WriteInputSchema,
+    output: WriteOutputSchema,
     async execute(params) {
       const { path, content } = params;
       const absolutePath = resolveToCwd(path, cwd);

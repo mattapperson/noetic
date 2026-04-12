@@ -1,61 +1,55 @@
 /**
- * Root TUI application — Ink-rendered interactive agent loop.
+ * Root TUI application — Gridland-rendered interactive agent loop.
  */
 
-import type { OpenRouter } from '@openrouter/sdk';
-import { stepCountIs } from '@openrouter/sdk';
-import { render } from 'ink';
+import { createCliRenderer, createRoot, useKeyboard } from '@gridland/bun';
+import type { HarnessResult, Item } from '@noetic/core';
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
-import { buildSystemPrompt } from '../ai/system-prompt.js';
-import { createCodingTools } from '../tools/index.js';
+
+import { createAgentHarness } from '../harness/factory.js';
+import type { NoeticPlugin } from '../plugins/types.js';
 import type { AgentConfig } from '../types/config.js';
 import type { ChatStatus } from './components/index.js';
-import { InkProvider, ResponsesChat } from './components/index.js';
+import { GridlandProvider, ResponsesChat } from './components/index.js';
 import type { ConversationEntry, UserEntry } from './item-utils.js';
-import { appendOrUpdateEntry, isUserEntry } from './item-utils.js';
+import { appendOrUpdateEntry } from './item-utils.js';
 
-//#region Types
+//#region Helpers
 
-interface AppProps {
-  client: OpenRouter;
-  config: AgentConfig;
+function buildErrorEntry(error: unknown): UserEntry {
+  return {
+    role: 'user',
+    content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+  };
+}
+
+async function collectItems(result: HarnessResult): Promise<Item[]> {
+  const items: Item[] = [];
+  for await (const item of result.getItemStream()) {
+    items.push(item);
+  }
+  return items;
 }
 
 //#endregion
 
-//#region Helpers
+//#region Types
 
-function entriesToCallModelInput(entries: ConversationEntry[]): Array<
-  | {
-      role: 'user';
-      content: string;
-    }
-  | ConversationEntry
-> {
-  return entries.map((entry) => {
-    if (isUserEntry(entry)) {
-      return {
-        role: 'user' as const,
-        content: entry.content,
-      };
-    }
-    return entry;
-  });
+interface AppProps {
+  config: AgentConfig;
+  plugins: ReadonlyArray<NoeticPlugin>;
 }
 
 //#endregion
 
 //#region App Component
 
-function App({ client, config }: AppProps): ReactNode {
+function App({ config, plugins }: AppProps): ReactNode {
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
   const [status, setStatus] = useState<ChatStatus>('ready');
 
-  const toolsRef = useRef(createCodingTools(config.cwd));
-  const systemPromptRef = useRef(config.systemPrompt ?? buildSystemPrompt(config.cwd));
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
+  const harnessPromiseRef = useRef(createAgentHarness(config, plugins));
 
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
@@ -69,51 +63,41 @@ function App({ client, config }: AppProps): ReactNode {
       ]);
       setStatus('submitted');
 
-      const input = entriesToCallModelInput([
-        ...entriesRef.current,
-        userEntry,
-      ]);
-
-      const result = client.callModel({
-        model: config.model,
-        instructions: systemPromptRef.current,
-        input,
-        tools: toolsRef.current,
-        stopWhen: [
-          stepCountIs(config.maxTurns),
-        ],
-      });
-
       try {
-        let firstItem = true;
-
-        for await (const item of result.getItemsStream()) {
-          if (firstItem) {
-            setStatus('streaming');
-            firstItem = false;
+        const harness = await harnessPromiseRef.current;
+        const result = harness.execute(text);
+        setStatus('streaming');
+        const items = await collectItems(result);
+        setEntries((prev) => {
+          let nextEntries = [
+            ...prev,
+          ];
+          for (const item of items) {
+            nextEntries = appendOrUpdateEntry(nextEntries, item);
           }
-          setEntries((prev) => appendOrUpdateEntry(prev, item));
-        }
+          return nextEntries;
+        });
+      } catch (error) {
+        setEntries((prev) => [
+          ...prev,
+          buildErrorEntry(error),
+        ]);
       } finally {
         setStatus('ready');
       }
     },
-    [
-      client,
-      config.model,
-      config.maxTurns,
-    ],
+    [config, plugins],
   );
 
   return (
-    <InkProvider>
+    <GridlandProvider useKeyboard={useKeyboard}>
       <ResponsesChat
         entries={entries}
         status={status}
         onSubmit={handleSubmit}
         model={config.model}
       />
-    </InkProvider>
+    </GridlandProvider>
   );
 }
 
@@ -121,9 +105,14 @@ function App({ client, config }: AppProps): ReactNode {
 
 //#region Entry Point
 
-export async function runAgent(client: OpenRouter, config: AgentConfig): Promise<void> {
-  const { waitUntilExit } = render(<App client={client} config={config} />);
-  await waitUntilExit();
+export async function runAgent(
+  plugins: ReadonlyArray<NoeticPlugin>,
+  config: AgentConfig,
+): Promise<void> {
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: true,
+  });
+  createRoot(renderer).render(<App config={config} plugins={plugins} />);
 }
 
 //#endregion

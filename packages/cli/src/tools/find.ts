@@ -6,8 +6,8 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import { tool } from '@noetic/core';
+import type { Tool } from '@noetic/core';
 import { globSync } from 'glob';
 import { z } from 'zod';
 import { pathExists, resolveToCwd } from './path-utils.js';
@@ -131,7 +131,7 @@ export interface FindToolOptions {
   operations?: FindOperations;
 }
 
-export type FindTool = ToolWithExecute<typeof FindInputSchema, typeof FindOutputSchema>;
+export type FindTool = Tool<typeof FindInputSchema, typeof FindOutputSchema>;
 
 export function createFindTool(cwd: string, options?: FindToolOptions): FindTool {
   const customOps = options?.operations ?? defaultFindOperations;
@@ -139,8 +139,8 @@ export function createFindTool(cwd: string, options?: FindToolOptions): FindTool
   return tool({
     name: 'Find',
     description: FIND_TOOL_DESCRIPTION,
-    inputSchema: FindInputSchema,
-    outputSchema: FindOutputSchema,
+    input: FindInputSchema,
+    output: FindOutputSchema,
     async execute(params) {
       const { pattern, path: searchDir, limit } = params;
       const searchPath = resolveToCwd(searchDir || '.', cwd);

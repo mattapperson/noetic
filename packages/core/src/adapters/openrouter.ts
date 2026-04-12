@@ -1,12 +1,4 @@
-import type { CallModelInput } from '@openrouter/sdk';
-import type {
-  OpenResponsesEasyInputMessage,
-  OpenResponsesFunctionCallOutput,
-  OpenResponsesFunctionToolCall,
-  OpenResponsesNonStreamingResponse,
-  OpenResponsesUsage,
-  ResponsesOutputItem,
-} from '@openrouter/sdk/models';
+import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
 
 import { frameworkCast } from '../interpreter/framework-cast';
@@ -20,29 +12,21 @@ import type { MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 
-//#region SDK Tool Type
+//#region Provider Types
 
-// Re-export the SDK Tool type under a distinct name to avoid collision with
-// Noetic's Tool type. Import aliases (`as`) are banned by our biome config,
-// so we use a type extracted from CallModelInput's generic parameter instead.
-type SdkToolArray = CallModelInput extends {
-  tools?: infer T;
-}
-  ? NonNullable<T>
-  : never;
+type ProviderOutputItem = OpenRouterAgent.OpenResponsesResult['output'][number];
+type OpenRouterInputItem =
+  | OpenRouterAgent.EasyInputMessage
+  | OpenRouterAgent.FunctionCallItem
+  | OpenRouterAgent.FunctionCallOutputItem
+  | ProviderOutputItem;
+
 /** @internal */
-export type SdkTool = SdkToolArray[number];
+export type SdkTool = OpenRouterAgent.Tool;
 
 //#endregion
 
 //#region Types
-
-/** @internal Input items accepted by the OpenRouter SDK. */
-type OpenRouterInputItem =
-  | OpenResponsesEasyInputMessage
-  | OpenResponsesFunctionToolCall
-  | OpenResponsesFunctionCallOutput
-  | ResponsesOutputItem;
 
 /** @internal */
 export interface ConvertToolsParams {
@@ -122,7 +106,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     return {
       role: item.role,
       content: contentPartsToText(item.content),
-    } satisfies OpenResponsesEasyInputMessage;
+    } satisfies OpenRouterAgent.EasyInputMessage;
   }
 
   if (item.type === 'function_call') {
@@ -132,7 +116,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
       id: item.id ?? crypto.randomUUID(),
       name: item.name,
       arguments: item.arguments,
-    } satisfies OpenResponsesFunctionToolCall;
+    } satisfies OpenRouterAgent.FunctionCallItem;
   }
 
   if (item.type === 'function_call_output') {
@@ -140,12 +124,12 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
       type: 'function_call_output',
       callId: item.callId,
       output: item.output,
-    } satisfies OpenResponsesFunctionCallOutput;
+    } satisfies OpenRouterAgent.FunctionCallOutputItem;
   }
 
   // Reasoning, web_search_call, file_search_call, image_generation_call,
   // server tool outputs — pass through directly for round-tripping
-  return frameworkCast<ResponsesOutputItem>(item);
+  return frameworkCast<ProviderOutputItem>(item);
 }
 
 /** @internal Converts Noetic Items to OpenRouter SDK input format. */
@@ -170,7 +154,7 @@ export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] 
  * as Open Responses compliant items. Falls back to creating a message from `outputText`
  * when the output array contains no message items.
  */
-export function extractOutputItems(response: OpenResponsesNonStreamingResponse): Item[] {
+export function extractOutputItems(response: OpenRouterAgent.OpenResponsesResult): Item[] {
   const items: Item[] = frameworkCast<Item[]>(response.output);
 
   const hasMessage = items.some(isAssistantMessage);
@@ -197,7 +181,9 @@ export function extractOutputItems(response: OpenResponsesNonStreamingResponse):
 }
 
 /** @internal */
-export function extractUsage(usage: OpenResponsesUsage | null | undefined): LLMResponse['usage'] {
+export function extractUsage(
+  usage: OpenRouterAgent.Usage | null | undefined,
+): LLMResponse['usage'] {
   if (!usage) {
     return {
       inputTokens: 0,
