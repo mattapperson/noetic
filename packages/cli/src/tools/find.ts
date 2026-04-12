@@ -6,8 +6,8 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { tool } from '@noetic/core';
 import type { Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { globSync } from 'glob';
 import { z } from 'zod';
 import { pathExists, resolveToCwd } from './path-utils.js';

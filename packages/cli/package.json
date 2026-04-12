@@ -8,12 +8,12 @@
     "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
-    "@gridland/bun": "0.2.53",
-    "@gridland/web": "0.2.53",
     "@noetic/core": "workspace:*",
     "@openrouter/agent": "0.3.0",
     "diff": "7.0.0",
     "glob": "11.0.3",
+    "ink": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "react": "19.1.0",
     "zod": "^4.0.0"
   },

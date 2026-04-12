@@ -11,8 +11,14 @@ export interface UserEntry {
   content: string;
 }
 
+export interface ErrorEntry {
+  role: 'system';
+  type: 'error';
+  content: string;
+}
+
 export type AssistantEntry = Item | StreamingItem;
-export type ConversationEntry = AssistantEntry | UserEntry;
+export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry;
 type MessageContentPart = Extract<
   AssistantEntry,
   {
@@ -26,6 +32,10 @@ type MessageContentPart = Extract<
 
 export function isUserEntry(entry: ConversationEntry): entry is UserEntry {
   return 'role' in entry && entry.role === 'user';
+}
+
+export function isErrorEntry(entry: ConversationEntry): entry is ErrorEntry {
+  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'error';
 }
 
 //#endregion
@@ -101,7 +111,7 @@ export function appendOrUpdateEntry(
 ): ConversationEntry[] {
   const id = getItemId(item);
   const idx = prev.findIndex((existing) => {
-    if (isUserEntry(existing)) {
+    if (isUserEntry(existing) || isErrorEntry(existing)) {
       return false;
     }
     return getItemId(existing) === id;

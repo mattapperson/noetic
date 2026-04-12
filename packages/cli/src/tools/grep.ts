@@ -6,8 +6,8 @@
 
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { tool } from '@noetic/core';
 import type { Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { normalizeToLf } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';

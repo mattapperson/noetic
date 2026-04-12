@@ -234,6 +234,25 @@ export interface ExecuteToolCallParams {
   layers?: MemoryLayer[];
 }
 
+function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unknown> {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  return Symbol.asyncIterator in value;
+}
+
+async function consumeGenerator(generator: AsyncGenerator<unknown, unknown>): Promise<unknown> {
+  let result: unknown;
+  while (true) {
+    const next = await generator.next();
+    if (next.done) {
+      result = next.value;
+      break;
+    }
+  }
+  return result;
+}
+
 /** @internal Execute a single tool call with steering checks. */
 export async function executeToolCall(params: ExecuteToolCallParams): Promise<string> {
   const matchedTool = params.tools.find((t) => t.name === params.toolName);
@@ -258,7 +277,11 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<st
 
   const toolCtx = buildToolExecutionContext(params.context, params.harness);
   try {
-    const result = await matchedTool.execute(params.args, toolCtx);
+    const executionResult = matchedTool.execute(params.args, toolCtx);
+    // Handle generator-based tools (like Bash) that return AsyncGenerator
+    const result = isAsyncGenerator(executionResult)
+      ? await consumeGenerator(executionResult)
+      : await executionResult;
     return typeof result === 'string' ? result : JSON.stringify(result);
   } catch (e) {
     return `Error: ${e instanceof Error ? e.message : String(e)}`;

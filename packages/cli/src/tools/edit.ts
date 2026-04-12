@@ -6,8 +6,8 @@
 
 import { constants } from 'node:fs';
 import { access as fsAccess, readFile, writeFile } from 'node:fs/promises';
-import { tool } from '@noetic/core';
 import type { Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
 import {
   applyReplacement,

@@ -4,7 +4,9 @@ import type { ToolExecutionContext } from './tool-context';
 
 //#region Tool Execution Types
 
-type ToolExecutionResult<O extends ZodTypeAny> = Promise<z.infer<O>> | AsyncGenerator<unknown, z.infer<O>>;
+type ToolExecutionResult<O extends ZodTypeAny> =
+  | Promise<z.infer<O>>
+  | AsyncGenerator<unknown, z.infer<O>>;
 
 //#endregion
 

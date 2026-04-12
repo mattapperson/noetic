@@ -1,10 +1,10 @@
-import { AgentHarness, step } from '@noetic/core';
 import type { MemoryLayer, Tool } from '@noetic/core';
+import { AgentHarness, step } from '@noetic/core';
 
 import { buildSystemPrompt } from '../ai/system-prompt.js';
+import type { NoeticPlugin } from '../plugins/types.js';
 import { createCodingTools } from '../tools/index.js';
 import type { AgentConfig } from '../types/config.js';
-import type { NoeticPlugin } from '../plugins/types.js';
 
 //#region Helpers
 
@@ -54,7 +54,11 @@ function filterTools(allTools: Tool[], config: AgentConfig): Tool[] {
 export async function createAgentHarness(
   config: AgentConfig,
   plugins: ReadonlyArray<NoeticPlugin>,
-): Promise<AgentHarness<{ model: string }>> {
+): Promise<
+  AgentHarness<{
+    model: string;
+  }>
+> {
   const builtinTools = createCodingTools(config.cwd);
   const pluginTools = await collectPluginTools(plugins);
   const tools = filterTools(

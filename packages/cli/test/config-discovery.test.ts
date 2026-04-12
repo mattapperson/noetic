@@ -15,10 +15,14 @@ afterEach(async () => {
     if (!dir) {
       continue;
     }
-    await rm(dir, {
-      recursive: true,
-      force: true,
-    });
+    try {
+      await rm(dir, {
+        recursive: true,
+        force: true,
+      });
+    } catch {
+      // Directory may already be deleted or not exist
+    }
   }
 });
 

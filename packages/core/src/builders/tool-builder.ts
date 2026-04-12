@@ -21,7 +21,10 @@ interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O exte
   input: I;
   event: E;
   output: O;
-  execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => AsyncGenerator<z.infer<E>, z.infer<O>>;
+  execute: (
+    args: z.infer<I>,
+    toolCtx: ToolExecutionContext,
+  ) => AsyncGenerator<z.infer<E>, z.infer<O>>;
   needsApproval?: boolean;
 }
 
@@ -56,7 +59,9 @@ function validateToolConfig(name: string, execute: unknown): void {
  *
  * @public
  */
-export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(config: ToolConfig<I, O>): Tool<I, O> {
+export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
+  config: ToolConfig<I, O>,
+): Tool<I, O> {
   validateToolConfig(config.name, config.execute);
 
   return {

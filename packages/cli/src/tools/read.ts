@@ -6,8 +6,8 @@
 
 import { constants } from 'node:fs';
 import { access as fsAccess, readFile } from 'node:fs/promises';
-import { tool } from '@noetic/core';
 import type { Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveReadPath } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from './truncate.js';

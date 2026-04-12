@@ -6,8 +6,8 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { tool } from '@noetic/core';
 import type { Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveToCwd } from './path-utils.js';
 

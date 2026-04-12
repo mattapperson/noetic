@@ -6,10 +6,17 @@
  */
 
 import type { Item } from '@noetic/core';
+import { Box } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-import type { ConversationEntry } from '../item-utils.js';
-import { extractReasoning, extractTextContent, getItemId, isUserEntry } from '../item-utils.js';
+import type { ConversationEntry, ErrorEntry } from '../item-utils.js';
+import {
+  extractReasoning,
+  extractTextContent,
+  getItemId,
+  isErrorEntry,
+  isUserEntry,
+} from '../item-utils.js';
 import type { ToolCallState } from './message.js';
 import { Message } from './message.js';
 import type { ChatStatus } from './prompt-input.js';
@@ -40,6 +47,9 @@ const USER_ROLE = {
 };
 const ASSISTANT_ROLE = {
   role: 'assistant' as const,
+};
+const SYSTEM_ROLE = {
+  role: 'system' as const,
 };
 
 function mapItemStatus(status: string | undefined): ToolCallState {
@@ -141,6 +151,16 @@ function renderReasoningItem(
   );
 }
 
+function renderErrorEntry(entry: ErrorEntry, key: string): ReactNode {
+  return (
+    <Message key={key} {...SYSTEM_ROLE}>
+      <Message.Content>
+        <Message.Text>{entry.content}</Message.Text>
+      </Message.Content>
+    </Message>
+  );
+}
+
 //#endregion
 
 //#region Entry Dispatch
@@ -148,6 +168,10 @@ function renderReasoningItem(
 function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext): ReactNode {
   if (isUserEntry(entry)) {
     return renderUserEntry(entry, `user-${index}`);
+  }
+
+  if (isErrorEntry(entry)) {
+    return renderErrorEntry(entry, `error-${index}`);
   }
 
   const key = getItemId(entry);
@@ -235,10 +259,12 @@ export function ResponsesChat({
   };
 
   return (
-    <box flexDirection="column" height="100%">
-      <scrollbox flex={1}>{entries.map((entry, i) => renderEntry(entry, i, ctx))}</scrollbox>
+    <Box flexDirection="column" height="100%">
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        {entries.map((entry, i) => renderEntry(entry, i, ctx))}
+      </Box>
       <PromptInput status={status} onSubmit={handleSubmit} onStop={onStop} model={model} />
-    </box>
+    </Box>
   );
 }
 
