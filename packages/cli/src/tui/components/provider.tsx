@@ -8,17 +8,15 @@ type UseKeyboardHook = (handler: KeyboardHandler) => void;
 
 const KeyboardContext = createContext<UseKeyboardHook | null>(null);
 
-export interface GridlandProviderProps {
+export interface InkProviderProps {
   /** Theme object. Defaults to darkTheme. */
   theme?: Theme;
-  /** Keyboard hook from @opentui/react. Provided once here so components don't need it as a prop. */
-  useKeyboard?: UseKeyboardHook;
   children: ReactNode;
 }
 
-export function GridlandProvider({ theme, useKeyboard, children }: GridlandProviderProps) {
+export function InkProvider({ theme, children }: InkProviderProps) {
   const inner = (
-    <KeyboardContext.Provider value={useKeyboard ?? null}>{children}</KeyboardContext.Provider>
+    <KeyboardContext.Provider value={null}>{children}</KeyboardContext.Provider>
   );
 
   // Only wrap with ThemeProvider if a theme is explicitly provided
@@ -32,6 +30,7 @@ export function GridlandProvider({ theme, useKeyboard, children }: GridlandProvi
 /**
  * Returns the useKeyboard hook from context, or the prop override if provided.
  * Components should call this instead of using the prop directly.
+ * Note: In Ink, components use useInput() directly instead of this context.
  */
 export function useKeyboardContext(propOverride?: UseKeyboardHook): UseKeyboardHook | undefined {
   const fromContext = useContext(KeyboardContext);

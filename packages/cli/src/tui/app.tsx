@@ -1,8 +1,8 @@
 /**
- * Root TUI application — Gridland-rendered interactive agent loop.
+ * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import { createCliRenderer, createRoot, useKeyboard } from '@gridland/bun';
+import { render } from 'ink';
 import type { OpenRouter } from '@openrouter/sdk';
 import { stepCountIs } from '@openrouter/sdk';
 import type { ReactNode } from 'react';
@@ -11,7 +11,7 @@ import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { createCodingTools } from '../tools/index.js';
 import type { AgentConfig } from '../types/config.js';
 import type { ChatStatus } from './components/index.js';
-import { GridlandProvider, ResponsesChat } from './components/index.js';
+import { InkProvider, ResponsesChat } from './components/index.js';
 import type { ConversationEntry, UserEntry } from './item-utils.js';
 import { appendOrUpdateEntry, isUserEntry } from './item-utils.js';
 
@@ -106,14 +106,14 @@ function App({ client, config }: AppProps): ReactNode {
   );
 
   return (
-    <GridlandProvider useKeyboard={useKeyboard}>
+    <InkProvider>
       <ResponsesChat
         entries={entries}
         status={status}
         onSubmit={handleSubmit}
         model={config.model}
       />
-    </GridlandProvider>
+    </InkProvider>
   );
 }
 
@@ -122,10 +122,8 @@ function App({ client, config }: AppProps): ReactNode {
 //#region Entry Point
 
 export async function runAgent(client: OpenRouter, config: AgentConfig): Promise<void> {
-  const renderer = await createCliRenderer({
-    exitOnCtrlC: true,
-  });
-  createRoot(renderer).render(<App client={client} config={config} />);
+  const { waitUntilExit } = render(<App client={client} config={config} />);
+  await waitUntilExit();
 }
 
 //#endregion
