@@ -8,12 +8,10 @@
  * 4. ~/.agent/skills/{skill-name}/SKILL.md (user agent folder)
  */
 
-import * as fs from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
-
+import type { FsAdapter } from '@noetic/core';
 import yaml from 'yaml';
-
 import type { SkillDefinition, SkillFrontmatter } from './types.js';
 import { SkillSource } from './types.js';
 
@@ -101,18 +99,20 @@ function parseFrontmatter(content: string, filePath?: string): ParsedSkillFile {
   };
 }
 
-async function loadSkillFile(
-  filePath: string,
-  source: SkillSource,
-  dirName: string,
-): Promise<SkillDefinition> {
-  const content = await fs.readFile(filePath, 'utf-8');
+interface LoadSkillFileParams {
+  filePath: string;
+  source: SkillSource;
+  dirName: string;
+  fs: FsAdapter;
+}
+
+async function loadSkillFile(params: LoadSkillFileParams): Promise<SkillDefinition> {
+  const { filePath, source, dirName, fs } = params;
+  const content = await fs.readFileText(filePath);
   const { frontmatter, body } = parseFrontmatter(content, filePath);
 
-  // Use directory name if frontmatter name is empty
   const name = frontmatter.name || dirName;
 
-  // Validate skill name
   if (!isValidSkillName(name)) {
     throw new Error(
       `Invalid skill name '${name}': must be alphanumeric with hyphens/underscores, max 64 chars`,
@@ -132,36 +132,59 @@ async function loadSkillFile(
   };
 }
 
+interface TryLoadSkillParams {
+  dir: string;
+  entry: string;
+  source: SkillSource;
+  fs: FsAdapter;
+}
+
+async function tryLoadSkill(params: TryLoadSkillParams): Promise<SkillDefinition | null> {
+  const { dir, entry, source, fs } = params;
+  const entryPath = path.join(dir, entry);
+  try {
+    const entryStat = await fs.stat(entryPath);
+    if (!entryStat.isDirectory()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  try {
+    return await loadSkillFile({
+      filePath: path.join(dir, entry, 'SKILL.md'),
+      source,
+      dirName: entry,
+      fs,
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function loadSkillsFromDirectory(
   dir: string,
   source: SkillSource,
+  fs: FsAdapter,
 ): Promise<SkillDefinition[]> {
-  const skills: SkillDefinition[] = [];
-
   try {
-    const entries = await fs.readdir(dir, {
-      withFileTypes: true,
-    });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      // Check for SKILL.md (case-sensitive)
-      const skillPath = path.join(dir, entry.name, 'SKILL.md');
-      try {
-        await fs.access(skillPath);
-        const skill = await loadSkillFile(skillPath, source, entry.name);
-        skills.push(skill);
-      } catch {
-        // SKILL.md doesn't exist, skip this directory
-      }
-    }
+    const entries = await fs.readdir(dir);
+    const results = await Promise.all(
+      entries.map((entry) =>
+        tryLoadSkill({
+          dir,
+          entry,
+          source,
+          fs,
+        }),
+      ),
+    );
+    return results.filter((s): s is SkillDefinition => s !== null);
   } catch {
     // Directory doesn't exist, return empty
+    return [];
   }
-
-  return skills;
 }
 
 //#endregion
@@ -178,9 +201,10 @@ async function loadSkillsFromDirectory(
  * 4. User ~/.agent/skills/
  *
  * @param cwd - Current working directory (project root)
+ * @param fs - Filesystem adapter
  * @returns Array of discovered skill definitions, deduplicated by name
  */
-export async function discoverSkills(cwd: string): Promise<SkillDefinition[]> {
+export async function discoverSkills(cwd: string, fs: FsAdapter): Promise<SkillDefinition[]> {
   const home = homedir();
   const discovered: DiscoveredSkill[] = [];
 
@@ -212,10 +236,9 @@ export async function discoverSkills(cwd: string): Promise<SkillDefinition[]> {
     },
   ];
 
-  // Load from all locations in parallel
   const results = await Promise.all(
     locations.map(async ({ dir, source, priority }) => {
-      const skills = await loadSkillsFromDirectory(dir, source);
+      const skills = await loadSkillsFromDirectory(dir, source, fs);
       return skills.map((s) => ({
         ...s,
         priority,
@@ -227,7 +250,6 @@ export async function discoverSkills(cwd: string): Promise<SkillDefinition[]> {
     discovered.push(...skills);
   }
 
-  // Dedupe by name (lower priority number wins)
   const byName = new Map<string, DiscoveredSkill>();
   for (const skill of discovered.sort((a, b) => a.priority - b.priority)) {
     if (!byName.has(skill.name)) {
@@ -235,7 +257,6 @@ export async function discoverSkills(cwd: string): Promise<SkillDefinition[]> {
     }
   }
 
-  // Remove priority from final result
   return [
     ...byName.values(),
   ].map(({ priority: _, ...skill }) => skill);
@@ -247,10 +268,16 @@ export async function discoverSkills(cwd: string): Promise<SkillDefinition[]> {
  */
 export async function loadSkillFromFile(
   filePath: string,
+  fs: FsAdapter,
   source: SkillSource = SkillSource.Plugin,
 ): Promise<SkillDefinition> {
   const dirName = path.basename(path.dirname(filePath));
-  return loadSkillFile(filePath, source, dirName);
+  return loadSkillFile({
+    filePath,
+    source,
+    dirName,
+    fs,
+  });
 }
 
 //#endregion

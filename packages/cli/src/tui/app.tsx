@@ -19,7 +19,7 @@ import type { Command, CommandContext } from '../commands/types.js';
 import { createAgentHarness } from '../harness/factory.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import type { SkillDefinition } from '../skills/types.js';
-import type { AgentConfig } from '../types/config.js';
+import type { AgentRuntimeConfig } from '../types/config.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
@@ -91,7 +91,7 @@ function entriesToItems(entries: ConversationEntry[]): Item[] {
 //#region Types
 
 interface AppProps {
-  config: AgentConfig;
+  config: AgentRuntimeConfig;
   plugins: ReadonlyArray<NoeticPlugin>;
 }
 
@@ -165,7 +165,11 @@ function App({ config, plugins }: AppProps): ReactNode {
     if (harnessRef.current !== null) {
       return harnessRef.current;
     }
-    const { harness, skills: resolvedSkills } = await createAgentHarness(config, plugins);
+    const { harness, skills: resolvedSkills } = await createAgentHarness(
+      config,
+      plugins,
+      config.fs,
+    );
     harnessRef.current = harness;
     setSkills(resolvedSkills);
     return harness;
@@ -307,7 +311,7 @@ function App({ config, plugins }: AppProps): ReactNode {
 
 export async function runAgent(
   plugins: ReadonlyArray<NoeticPlugin>,
-  config: AgentConfig,
+  config: AgentRuntimeConfig,
 ): Promise<void> {
   const { waitUntilExit } = render(<App config={config} plugins={plugins} />);
   await waitUntilExit();

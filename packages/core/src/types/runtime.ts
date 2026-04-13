@@ -3,6 +3,7 @@ import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, Tool } from './common';
 import type { Context } from './context';
 import type { DetachedHandle } from './detached';
+import type { FsAdapter } from './fs-adapter';
 import type { HarnessResult } from './harness-result';
 import type { ExecuteInput, Item } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
@@ -70,6 +71,8 @@ export interface AgentHarnessContract<
   TParams extends Record<string, unknown> = Record<string, unknown>,
 > {
   readonly config: AgentConfig<TParams>;
+  /** Filesystem adapter for virtual or real filesystem access. */
+  readonly fs: FsAdapter;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
   execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;

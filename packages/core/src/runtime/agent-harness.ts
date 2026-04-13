@@ -1,6 +1,7 @@
 import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
+import { createLocalFsAdapter } from '../adapters/local-fs-adapter';
 import {
   convertTools,
   executeToolCall,
@@ -33,6 +34,7 @@ import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
+import type { FsAdapter } from '../types/fs-adapter';
 import type { HarnessResult } from '../types/harness-result';
 import type { ExecuteInput, Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
@@ -67,6 +69,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   hooks?: AgentHooks;
   params: TParams;
   paramsSchema?: ZodType<TParams>;
+  /** Filesystem adapter. Defaults to local node:fs when not provided. */
+  fs?: FsAdapter;
   llm?: LlmProviderConfig;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
@@ -158,6 +162,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   implements AgentHarnessContract<TParams>
 {
   readonly config: AgentConfig<TParams>;
+  readonly fs: FsAdapter;
   private readonly initialStep?: Step<ContextMemory, string, string>;
   private readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
@@ -175,6 +180,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       hooks: opts.hooks,
       params: validatedParams,
     };
+    this.fs = opts.fs ?? createLocalFsAdapter();
     this.initialStep = opts.initialStep;
     this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;

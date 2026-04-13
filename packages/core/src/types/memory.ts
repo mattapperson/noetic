@@ -1,6 +1,7 @@
 import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
+import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { CallModelRequest } from './runtime';
 import type {
@@ -154,6 +155,8 @@ export interface ExecutionContext {
     output: number;
   };
   cost: number;
+  /** Filesystem adapter for virtual or real filesystem access. */
+  fs: FsAdapter;
   callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   tokenize(text: string): number;
   trace: {

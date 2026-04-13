@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
+import { createLocalFsAdapter } from '../../src/adapters/local-fs-adapter';
 import { layerData, layerFn } from '../../src/builders/layer-provides-builders';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { resolveLayerTools } from '../../src/memory/layer-api';
@@ -341,6 +342,7 @@ describe('resolveLayerTools', () => {
     const toolCtx = {
       ctx,
       harness,
+      fs: harness.fs,
       memory: {
         get: () => undefined,
         set: () => {},
@@ -460,6 +462,7 @@ describe('workingMemory provides', () => {
           output: 0,
         },
         cost: 0,
+        fs: createLocalFsAdapter(),
         tokenize: () => 0,
         trace: {
           setAttribute() {},

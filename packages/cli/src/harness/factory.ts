@@ -1,4 +1,4 @@
-import type { MemoryLayer, Tool } from '@noetic/core';
+import type { FsAdapter, MemoryLayer, Tool } from '@noetic/core';
 import { AgentHarness, step } from '@noetic/core';
 
 import { buildSystemPrompt } from '../ai/system-prompt.js';
@@ -68,12 +68,13 @@ export interface HarnessWithSkills {
 export async function createAgentHarness(
   config: AgentConfig,
   plugins: ReadonlyArray<NoeticPlugin>,
+  fs: FsAdapter,
 ): Promise<HarnessWithSkills> {
   // Build canonical skill catalog (single source of truth)
-  const allSkills = await buildSkillCatalog(config.cwd, plugins);
+  const allSkills = await buildSkillCatalog(config.cwd, plugins, fs);
 
   // Build tools including skill activation
-  const builtinTools = createCodingTools(config.cwd);
+  const builtinTools = createCodingTools(config.cwd, fs);
   const pluginTools = await collectPluginTools(plugins);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
 
@@ -105,6 +106,7 @@ export async function createAgentHarness(
 
   const harness = new AgentHarness({
     name: 'noetic-cli',
+    fs,
     params: {
       model: config.model,
     },

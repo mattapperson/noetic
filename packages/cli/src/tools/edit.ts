@@ -4,9 +4,7 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import { constants } from 'node:fs';
-import { access as fsAccess, readFile, writeFile } from 'node:fs/promises';
-import type { Tool } from '@noetic/core';
+import type { FsAdapter, Tool } from '@noetic/core';
 import { tool } from '@noetic/core';
 import { z } from 'zod';
 import {
@@ -18,16 +16,6 @@ import {
   stripBom,
 } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';
-
-//#region Types
-
-export interface EditOperations {
-  readFile: (absolutePath: string) => Promise<Buffer>;
-  writeFile: (absolutePath: string, content: string) => Promise<void>;
-  access: (absolutePath: string) => Promise<void>;
-}
-
-//#endregion
 
 //#region Schemas
 
@@ -46,16 +34,6 @@ export const EditOutputSchema = z.object({
 });
 
 export type EditOutput = z.infer<typeof EditOutputSchema>;
-
-//#endregion
-
-//#region Default Operations
-
-const defaultEditOperations: EditOperations = {
-  readFile: (absolutePath) => readFile(absolutePath),
-  writeFile: (absolutePath, content) => writeFile(absolutePath, content, 'utf-8'),
-  access: (absolutePath) => fsAccess(absolutePath, constants.R_OK | constants.W_OK),
-};
 
 //#endregion
 
@@ -90,15 +68,9 @@ When NOT to use:
 
 //#region Public API
 
-export interface EditToolOptions {
-  operations?: EditOperations;
-}
-
 export type EditTool = Tool<typeof EditInputSchema, typeof EditOutputSchema>;
 
-export function createEditTool(cwd: string, options?: EditToolOptions): EditTool {
-  const ops = options?.operations ?? defaultEditOperations;
-
+export function createEditTool(cwd: string, fs: FsAdapter): EditTool {
   return tool({
     name: 'Edit',
     description: EDIT_TOOL_DESCRIPTION,
@@ -109,13 +81,10 @@ export function createEditTool(cwd: string, options?: EditToolOptions): EditTool
       const absolutePath = resolveToCwd(path, cwd);
 
       try {
-        try {
-          await ops.access(absolutePath);
-        } catch {
-          throw new Error(`File not found: ${path}`);
-        }
-
-        const buffer = await ops.readFile(absolutePath);
+        const buffer = await fs.readFile(absolutePath).catch((err: unknown) => {
+          const isNotFound = err instanceof Error && 'code' in err && err.code === 'ENOENT';
+          throw new Error(`${isNotFound ? 'File not found' : 'Cannot read file'}: ${path}`);
+        });
         const rawContent = buffer.toString('utf-8');
         const { bom, text: content } = stripBom(rawContent);
 
@@ -136,7 +105,7 @@ export function createEditTool(cwd: string, options?: EditToolOptions): EditTool
         }
 
         const finalContent = bom + restoreLineEndings(replacement.newContent, originalEnding);
-        await ops.writeFile(absolutePath, finalContent);
+        await fs.writeFile(absolutePath, finalContent);
 
         const diffResult = generateDiffString(normalizedContent, replacement.newContent);
 

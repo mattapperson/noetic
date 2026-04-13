@@ -2,6 +2,7 @@
  * Agent configuration types.
  */
 
+import type { FsAdapter } from '@noetic/core';
 import { z } from 'zod';
 
 export const PluginSpecSchema = z.union([
@@ -31,3 +32,8 @@ export const AgentConfigSchema = z.object({
 
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
+
+/** Runtime-only config that extends the serializable AgentConfig with non-serializable fields. */
+export interface AgentRuntimeConfig extends AgentConfig {
+  fs: FsAdapter;
+}

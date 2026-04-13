@@ -393,9 +393,74 @@ step.run<Mem>({
 
 Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
 
+## FsAdapter
+
+Filesystem abstraction used by the harness, tools, memory layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
+
+```typescript
+interface FsStats {
+  size: number;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFile(): boolean;
+}
+
+interface FsAdapter {
+  readFile(path: string): Promise<Buffer>;
+  readFileText(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(dir: string): Promise<void>;
+  access(path: string, mode?: number): Promise<void>;
+  stat(path: string): Promise<FsStats>;
+  lstat(path: string): Promise<FsStats>;
+  readdir(path: string): Promise<string[]>;
+}
+```
+
+Pass a custom adapter to the harness:
+
+```typescript
+import { AgentHarness, createLocalFsAdapter } from '@noetic/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  fs: myCustomFsAdapter,  // optional, defaults to createLocalFsAdapter()
+});
+```
+
+Access from tools and layers:
+
+```typescript
+// In a tool execute function:
+tool({
+  name: 'read-config',
+  execute: async (args, toolCtx) => {
+    const content = await toolCtx.fs.readFileText('/etc/config.json');
+    return JSON.parse(content);
+  },
+});
+
+// In a memory layer hook:
+hooks: {
+  async init({ ctx }) {
+    const data = await ctx.fs.readFileText('./state.json');
+    return { state: JSON.parse(data) };
+  },
+}
+
+// From Context in a step:
+step.run({
+  id: 'load',
+  execute: async (input, ctx) => {
+    return ctx.fs.readFileText('./data.txt');
+  },
+});
+```
+
 ## AgentHarness
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`).
 
 ```typescript
 // High-level API: execute() returns HarnessResult with streaming accessors
@@ -559,10 +624,12 @@ Available inside tool `execute` functions:
 interface ToolExecutionContext {
   ctx: Context;                 // Step execution context (ctx.harness also available)
   harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
+  fs: FsAdapter;                // Filesystem adapter (from harness)
   memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
   assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
 // Access harness params: toolCtx.harness.config.params
 // Or via context: toolCtx.ctx.harness.config.params
+// Filesystem: toolCtx.fs.readFileText('/path')
 ```

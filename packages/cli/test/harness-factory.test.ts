@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { Tool } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/core';
 import { z } from 'zod';
 
 import { createAgentHarness } from '../src/harness/factory.js';
 import type { NoeticPlugin } from '../src/plugins/types.js';
 import type { AgentConfig } from '../src/types/config.js';
+
+const testFs = createLocalFsAdapter();
 
 const baseConfig: AgentConfig = {
   model: 'openai/gpt-4o-mini',
@@ -34,9 +37,13 @@ describe('createAgentHarness', () => {
       ],
     };
 
-    const { harness } = await createAgentHarness(baseConfig, [
-      plugin,
-    ]);
+    const { harness } = await createAgentHarness(
+      baseConfig,
+      [
+        plugin,
+      ],
+      testFs,
+    );
 
     expect(harness).toBeDefined();
   });
@@ -62,6 +69,7 @@ describe('createAgentHarness', () => {
       [
         plugin,
       ],
+      testFs,
     );
 
     expect(harness).toBeDefined();
@@ -88,13 +96,14 @@ describe('createAgentHarness', () => {
       [
         plugin,
       ],
+      testFs,
     );
 
     expect(harness).toBeDefined();
   });
 
   it('returns canonical skill catalog', async () => {
-    const { skills } = await createAgentHarness(baseConfig, []);
+    const { skills } = await createAgentHarness(baseConfig, [], testFs);
 
     expect(skills).toBeDefined();
     expect(Array.isArray(skills)).toBe(true);

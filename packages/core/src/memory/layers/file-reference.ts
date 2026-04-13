@@ -1,6 +1,6 @@
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
+import type { FsAdapter } from '../../types/fs-adapter';
 import type { InputMessageItem, InputTextPart, Item } from '../../types/items';
 import type { ExecutionContext, MemoryLayer } from '../../types/memory';
 import { Slot } from '../../types/memory';
@@ -177,6 +177,7 @@ interface ReadFileResult {
 async function readFileContent(
   absolutePath: string,
   opts: ReadFileOptions,
+  fsAdapter: FsAdapter,
 ): Promise<ReadFileResult> {
   try {
     // Security: Validate path stays within baseDir (prevent path traversal)
@@ -208,7 +209,7 @@ async function readFileContent(
     }
 
     // Security: Check for symlinks if not allowed
-    const stats = await fs.lstat(absolutePath);
+    const stats = await fsAdapter.lstat(absolutePath);
     if (stats.isSymbolicLink() && !opts.followSymlinks) {
       return {
         content: null,
@@ -218,7 +219,7 @@ async function readFileContent(
     }
 
     // Security: Check file size
-    const fileStats = opts.followSymlinks ? await fs.stat(absolutePath) : stats;
+    const fileStats = opts.followSymlinks ? await fsAdapter.stat(absolutePath) : stats;
     if (fileStats.size > opts.maxFileSize) {
       return {
         content: null,
@@ -227,7 +228,7 @@ async function readFileContent(
       };
     }
 
-    const content = await fs.readFile(absolutePath, 'utf-8');
+    const content = await fsAdapter.readFileText(absolutePath);
     return {
       content,
       deleted: false,
@@ -431,7 +432,7 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
               }
 
               const absolutePath = path.resolve(state.baseDir, ref);
-              const result = await readFileContent(absolutePath, currentReadOpts);
+              const result = await readFileContent(absolutePath, currentReadOpts, ctx.fs);
 
               const priority = result.content
                 ? await scoreFileRelevance({
@@ -484,7 +485,7 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
             continue;
           }
 
-          const result = await readFileContent(tracked.absolutePath, currentReadOpts);
+          const result = await readFileContent(tracked.absolutePath, currentReadOpts, ctx.fs);
 
           if (result.deleted && !tracked.deleted) {
             // File was deleted

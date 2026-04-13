@@ -595,6 +595,7 @@ interface ExecutionContext {
   readonly tokenUsage: { input: number; output: number };
   readonly cost: number;
   readonly model: string;
+  readonly fs: FsAdapter;
   tokenize(text: string): number;
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;
@@ -602,6 +603,8 @@ interface ExecutionContext {
   };
 }
 ```
+
+`ExecutionContext` includes `readonly fs: FsAdapter` so memory layers can perform filesystem operations (e.g., reading config files, persisting state to disk) through the harness's configured adapter.
 
 Note what is NOT on `ExecutionContext`: no `getLayerState()`, no `storage` (captured in `init`), no `itemLog` mutation, no `setRenderingHint()`.
 

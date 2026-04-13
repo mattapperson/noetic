@@ -86,7 +86,7 @@ Tools are created with a `cwd` context and return `Tool` type from `@noetic/core
 | `find` | Find files by pattern |
 | `ls` | List directory contents |
 
-Use `createCodingTools(cwd)` for full toolset or `createReadOnlyTools(cwd)` for safe exploration.
+Use `createCodingTools(cwd, fs?)` for full toolset or `createReadOnlyTools(cwd, fs?)` for safe exploration. Both accept an optional `FsAdapter` from `@noetic/core` (defaults to local filesystem).
 
 ### Plugin System
 

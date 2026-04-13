@@ -10,6 +10,7 @@ The core execution engine interface.
 ```ts
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly config: AgentConfig<TParams>;
+  readonly fs: FsAdapter;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<ContextMemory, I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts & { memory?: MemoryLayer[] }): Context;
@@ -33,6 +34,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | Method | Description |
 |---|---|
 | `config` | The `AgentConfig<TParams>` the harness was constructed with |
+| `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and memory layers — route through this adapter. |
 | `execute(input, options?)` | Run the agent's `initialStep`. Returns a [`HarnessResult`](#harnessresult) with streaming accessors. |
 | `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
@@ -118,6 +120,7 @@ Declarative configuration for an agent harness. Generic over `TParams`, an arbit
 ```ts
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
+  fs?: FsAdapter;
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
@@ -127,6 +130,7 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | yes | Agent name |
+| `fs` | `FsAdapter` | no | Filesystem adapter. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`). Pass a custom adapter for in-memory, sandboxed, or remote filesystem backends. |
 | `storage` | `StorageAdapter` | no | Storage backend for memory persistence |
 | `hooks` | `AgentHooks` | no | Before/after step hooks |
 | `params` | `TParams` | yes | Arbitrary key-value parameters for steps and tools |

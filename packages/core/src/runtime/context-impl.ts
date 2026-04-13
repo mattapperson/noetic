@@ -2,6 +2,7 @@ import { buildContextMemory } from '../memory/layer-api';
 import type { Channel } from '../types/channel';
 import type { StepMeta, TokenUsage, Tool } from '../types/common';
 import type { Context, ItemLog } from '../types/context';
+import type { FsAdapter } from '../types/fs-adapter';
 import type { Item } from '../types/items';
 import type { ContextMemory, MemoryLayer } from '../types/memory';
 import type { Span } from '../types/observability';
@@ -98,6 +99,10 @@ export class ContextImpl implements Context<ContextMemory> {
 
   get aborted(): boolean {
     return this._aborted;
+  }
+
+  get fs(): FsAdapter {
+    return this.harness.fs;
   }
 
   get memory(): ContextMemory {

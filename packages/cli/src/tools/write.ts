@@ -4,21 +4,11 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Tool } from '@noetic/core';
+import type { FsAdapter, Tool } from '@noetic/core';
 import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveToCwd } from './path-utils.js';
-
-//#region Types
-
-export interface WriteOperations {
-  writeFile: (absolutePath: string, content: string) => Promise<void>;
-  mkdir: (dir: string) => Promise<void>;
-}
-
-//#endregion
 
 //#region Schemas
 
@@ -35,18 +25,6 @@ export const WriteOutputSchema = z.object({
 });
 
 export type WriteOutput = z.infer<typeof WriteOutputSchema>;
-
-//#endregion
-
-//#region Default Operations
-
-const defaultWriteOperations: WriteOperations = {
-  writeFile: (absolutePath, content) => writeFile(absolutePath, content, 'utf-8'),
-  mkdir: (dir) =>
-    mkdir(dir, {
-      recursive: true,
-    }).then(() => undefined),
-};
 
 //#endregion
 
@@ -78,15 +56,9 @@ When NOT to use:
 
 //#region Public API
 
-export interface WriteToolOptions {
-  operations?: WriteOperations;
-}
-
 export type WriteTool = Tool<typeof WriteInputSchema, typeof WriteOutputSchema>;
 
-export function createWriteTool(cwd: string, options?: WriteToolOptions): WriteTool {
-  const ops = options?.operations ?? defaultWriteOperations;
-
+export function createWriteTool(cwd: string, fs: FsAdapter): WriteTool {
   return tool({
     name: 'Write',
     description: WRITE_TOOL_DESCRIPTION,
@@ -98,8 +70,8 @@ export function createWriteTool(cwd: string, options?: WriteToolOptions): WriteT
       const dir = dirname(absolutePath);
 
       try {
-        await ops.mkdir(dir);
-        await ops.writeFile(absolutePath, content);
+        await fs.mkdir(dir);
+        await fs.writeFile(absolutePath, content);
 
         const bytes = Buffer.byteLength(content, 'utf-8');
         return {

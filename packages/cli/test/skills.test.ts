@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createLocalFsAdapter } from '@noetic/core';
 
 import { discoverSkills } from '../src/skills/discovery.js';
 import { processSkillContent } from '../src/skills/processor.js';
 import type { SkillDefinition } from '../src/skills/types.js';
 import { SkillSource } from '../src/skills/types.js';
+
+const testFs = createLocalFsAdapter();
 
 //#region Test Helpers
 
@@ -65,7 +68,7 @@ Do something useful.
 
     await createSkillFile(tempDir, 'test-skill', skillContent);
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe('test-skill');
@@ -87,7 +90,7 @@ Instructions here.
 
     await createSkillFile(tempDir, 'from-dir-name', skillContent);
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe('from-dir-name');
@@ -101,7 +104,7 @@ No frontmatter here.
 
     await createSkillFile(tempDir, 'plain-skill', skillContent);
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe('plain-skill');
@@ -124,7 +127,7 @@ Instructions.
 `,
     );
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe('agent-skill');
@@ -161,14 +164,14 @@ Agent version.
 `,
     );
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].description).toBe('From noetic');
   });
 
   test('returns empty array when no skills exist', async () => {
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
     expect(skills).toHaveLength(0);
   });
 
@@ -185,7 +188,7 @@ Instructions.
 
     await createSkillFile(tempDir, 'restricted-skill', skillContent);
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].userInvocable).toBe(false);
@@ -206,7 +209,7 @@ Instructions.
 
     await createSkillFile(tempDir, 'limited-skill', skillContent);
 
-    const skills = await discoverSkills(tempDir);
+    const skills = await discoverSkills(tempDir, testFs);
 
     expect(skills).toHaveLength(1);
     expect(skills[0].allowedTools).toEqual([

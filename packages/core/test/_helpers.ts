@@ -4,6 +4,7 @@
 
 import { expect } from 'bun:test';
 import { z } from 'zod';
+import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
 import { frameworkCast } from '../src/interpreter/framework-cast';
 import { HarnessResultImpl } from '../src/runtime/harness-result';
 import type { LLMResponse, Tool } from '../src/types/common';
@@ -71,6 +72,7 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       output: 0,
     },
     cost: 0,
+    fs: createLocalFsAdapter(),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute() {},
@@ -200,6 +202,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     itemLog: makeItemLog(),
     lastStepMeta: null,
     harness,
+    fs: harness.fs,
     layers: undefined,
     memory: {},
     recv: async () => {
@@ -310,9 +313,11 @@ export function mockEmbed(vectors: Record<string, number[]>): EmbedFn {
 
 export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   const resolvedCtx = ctx ?? makeMockContext();
+  const harness = makeMockHarness();
   return {
     ctx: resolvedCtx,
-    harness: makeMockHarness(),
+    harness,
+    fs: harness.fs,
     memory: {
       get: () => undefined,
       set: () => {},
@@ -328,6 +333,7 @@ export function makeMockHarness(): AgentHarnessContract {
       name: 'test-harness',
       params: {},
     },
+    fs: createLocalFsAdapter(),
     callModel: async () => {
       throw new Error('not impl');
     },

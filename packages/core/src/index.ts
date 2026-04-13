@@ -1,6 +1,9 @@
 //#region Adapters
 
 /** @public */
+export { createLocalFsAdapter } from './adapters/local-fs-adapter';
+
+/** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
 
 //#endregion
@@ -314,6 +317,13 @@ export type {
   Until,
   Verdict,
 } from './types/step';
+
+//#endregion
+
+//#region Types — Filesystem
+
+/** @public */
+export type { FsAdapter, FsStats } from './types/fs-adapter';
 
 //#endregion
 

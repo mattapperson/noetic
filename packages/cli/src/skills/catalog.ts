@@ -5,6 +5,7 @@
  * used by both the harness and the UI.
  */
 
+import type { FsAdapter } from '@noetic/core';
 import type { NoeticPlugin } from '../plugins/types.js';
 
 import { discoverSkills } from './discovery.js';
@@ -46,8 +47,9 @@ async function collectPluginSkills(
 export async function buildSkillCatalog(
   cwd: string,
   plugins: ReadonlyArray<NoeticPlugin>,
+  fs: FsAdapter,
 ): Promise<SkillDefinition[]> {
-  const filesystemSkills = await discoverSkills(cwd);
+  const filesystemSkills = await discoverSkills(cwd, fs);
   const pluginSkills = await collectPluginSkills(plugins);
 
   // Merge skills (filesystem skills have priority, they're already deduplicated)
