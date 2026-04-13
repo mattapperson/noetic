@@ -117,7 +117,7 @@ function getToolStateColor(state: ToolCallState, theme: Theme): string {
 /** Bubble wrapper. Ink Box doesn't support backgroundColor. */
 function MessageContent({ children }: { children: ReactNode }) {
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} width="85%">
+    <Box flexDirection="column" paddingX={1}>
       {children}
     </Box>
   );
