@@ -5,8 +5,8 @@
     "": {
       "name": "proj-orchid",
       "dependencies": {
-        "@openrouter/agent": "^0.3.0",
-        "@openrouter/sdk": "0.5.1",
+        "@openrouter/agent": "0.3.1",
+        "@openrouter/sdk": "0.12.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.3.11",
@@ -369,9 +369,9 @@
 
     "@noetic/web": ["@noetic/web@workspace:packages/web"],
 
-    "@openrouter/agent": ["@openrouter/agent@0.3.0", "", { "dependencies": { "@openrouter/sdk": "*", "zod": "^4.0.0" } }, "sha512-u+AXwOfjb6rh1Kx9pnNDlqtX9FBvAD76bFAzT+ppPvob+wrA3gxKxu/f6MAkMGmkNBNe4b1839dYQUSviuXOfg=="],
+    "@openrouter/agent": ["@openrouter/agent@0.3.1", "", { "dependencies": { "@openrouter/sdk": "*", "zod": "^4.0.0" } }, "sha512-pKAi02SFsgs2W4RPCzZemqzguzjvneoj4+oQ4dnaZnwj9sBQBIoEy9mbpinCYnsF4Xwa/4P05g4ZPDlgpaVZ2w=="],
 
-    "@openrouter/sdk": ["@openrouter/sdk@0.5.1", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-Kl0N1jIj7A3lnkM5dO3SGP8JP3jAozzs6JWcHVuZUBt5DsGKxFGNH1Y15bCfsJiLNA2ylAQpCN3aNcgEYkkL5Q=="],
+    "@openrouter/sdk": ["@openrouter/sdk@0.12.0", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-+X7Sl0uJ3BHBKc6VINCi3x1Y+TIVvBrAuxHCRX01ll8NoG8hvyoT9rk4WbbDaTI80aJJGe4EIlkmZ1OPk1t8jA=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
 
@@ -1311,13 +1311,15 @@
 
     "@microsoft/tui-test/glob": ["glob@10.5.0", "", { "dependencies": { "foreground-child": "^3.1.0", "jackspeak": "^3.1.2", "minimatch": "^9.0.4", "minipass": "^7.1.2", "package-json-from-dist": "^1.0.0", "path-scurry": "^1.11.1" }, "bin": { "glob": "dist/esm/bin.mjs" } }, "sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg=="],
 
+    "@noetic/cli/@openrouter/agent": ["@openrouter/agent@0.3.0", "", { "dependencies": { "@openrouter/sdk": "*", "zod": "^4.0.0" } }, "sha512-u+AXwOfjb6rh1Kx9pnNDlqtX9FBvAD76bFAzT+ppPvob+wrA3gxKxu/f6MAkMGmkNBNe4b1839dYQUSviuXOfg=="],
+
+    "@noetic/core/@openrouter/agent": ["@openrouter/agent@0.3.0", "", { "dependencies": { "@openrouter/sdk": "*", "zod": "^4.0.0" } }, "sha512-u+AXwOfjb6rh1Kx9pnNDlqtX9FBvAD76bFAzT+ppPvob+wrA3gxKxu/f6MAkMGmkNBNe4b1839dYQUSviuXOfg=="],
+
     "@noetic/web/@types/react": ["@types/react@19.1.6", "", { "dependencies": { "csstype": "^3.0.2" } }, "sha512-JeG0rEWak0N6Itr6QUx+X60uQmN+5t3j9r/OVDtWzFXKaj6kD1BwJzOksD0FF6iWxZlbE1kB0q9vtnU2ekqa1Q=="],
 
     "@noetic/web/react": ["react@19.1.0", "", {}, "sha512-FS+XFBNvn3GTAWq26joslQgWNoFu08F4kl0J4CgdNKADkdSGXQyTCnKteIAJy96Br6YbpEU1LSzV5dYtjMkMDg=="],
 
     "@noetic/web/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
-
-    "@openrouter/agent/@openrouter/sdk": ["@openrouter/sdk@0.10.2", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-od0aWkk+vhndEI78YyPvPgMxv2+32KO4MRrk8lFxro/YABKAHkozXugc+x3YeNf/d9KQaBO6M4Rut1uf+yeD2g=="],
 
     "@radix-ui/react-collection/@radix-ui/react-slot": ["@radix-ui/react-slot@1.2.3", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.2" }, "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-aeNmHnBxbi2St0au6VBVC7JXFlhLlOnvIIlePNniyUNAClzmtAUEY8/pBiK3iHjufOlwA+c20/8jngo7xcrg8A=="],
 
@@ -1410,6 +1412,10 @@
     "@microsoft/tui-test/glob/minimatch": ["minimatch@9.0.9", "", { "dependencies": { "brace-expansion": "^2.0.2" } }, "sha512-OBwBN9AL4dqmETlpS2zasx+vTeWclWzkblfZk7KTA5j3jeOONz/tRCnZomUyvNg83wL5Zv9Ss6HMJXAgL8R2Yg=="],
 
     "@microsoft/tui-test/glob/path-scurry": ["path-scurry@1.11.1", "", { "dependencies": { "lru-cache": "^10.2.0", "minipass": "^5.0.0 || ^6.0.2 || ^7.0.0" } }, "sha512-Xa4Nw17FS9ApQFJ9umLiJS4orGjm7ZzwUrwamcGQuHSzDyth9boKDaycYdDcZDuqYATXw4HFXgaqWTctW/v1HA=="],
+
+    "@noetic/cli/@openrouter/agent/@openrouter/sdk": ["@openrouter/sdk@0.10.2", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-od0aWkk+vhndEI78YyPvPgMxv2+32KO4MRrk8lFxro/YABKAHkozXugc+x3YeNf/d9KQaBO6M4Rut1uf+yeD2g=="],
+
+    "@noetic/core/@openrouter/agent/@openrouter/sdk": ["@openrouter/sdk@0.10.2", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-od0aWkk+vhndEI78YyPvPgMxv2+32KO4MRrk8lFxro/YABKAHkozXugc+x3YeNf/d9KQaBO6M4Rut1uf+yeD2g=="],
 
     "@tailwindcss/oxide-wasm32-wasi/@napi-rs/wasm-runtime/@tybys/wasm-util": ["@tybys/wasm-util@0.10.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg=="],
 

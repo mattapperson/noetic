@@ -21,8 +21,8 @@
     "check:exports": "bun scripts/check-export-tags.ts"
   },
   "dependencies": {
-    "@openrouter/agent": "^0.3.0",
-    "@openrouter/sdk": "0.5.1"
+    "@openrouter/agent": "0.3.1",
+    "@openrouter/sdk": "0.12.0"
   },
   "patchedDependencies": {
   }
