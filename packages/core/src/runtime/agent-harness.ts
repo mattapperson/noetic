@@ -1,6 +1,8 @@
-import { OpenRouter } from '@openrouter/sdk';
+import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
+import { createLocalFsAdapter } from '../adapters/local-fs-adapter';
+import { createLocalShellAdapter } from '../adapters/local-shell-adapter';
 import {
   convertTools,
   executeToolCall,
@@ -21,8 +23,10 @@ import {
   beforeToolCallLayers,
   createLayerStateStore,
   disposeLayers,
+  executeRerender,
   initLayers,
   recallLayers,
+  runAppendPipeline,
   storeLayers,
 } from '../memory/layer-lifecycle';
 import { getRegisteredExporter } from '../observability/exporter-registry';
@@ -32,6 +36,7 @@ import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
+import type { FsAdapter } from '../types/fs-adapter';
 import type { HarnessResult } from '../types/harness-result';
 import type { ExecuteInput, Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
@@ -44,6 +49,7 @@ import type {
   ExecuteOptions,
   RecallLayerOutput,
 } from '../types/runtime';
+import type { ShellAdapter } from '../types/shell-adapter';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
@@ -66,6 +72,10 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   hooks?: AgentHooks;
   params: TParams;
   paramsSchema?: ZodType<TParams>;
+  /** Filesystem adapter. Defaults to local node:fs when not provided. */
+  fs?: FsAdapter;
+  /** Shell adapter. Defaults to local sh when not provided. */
+  shell?: ShellAdapter;
   llm?: LlmProviderConfig;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
@@ -157,6 +167,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   implements AgentHarnessContract<TParams>
 {
   readonly config: AgentConfig<TParams>;
+  readonly fs: FsAdapter;
+  readonly shell: ShellAdapter;
   private readonly initialStep?: Step<ContextMemory, string, string>;
   private readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
@@ -181,6 +193,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       hooks: opts.hooks,
       params: validatedParams,
     };
+    this.fs = opts.fs ?? createLocalFsAdapter();
+    this.shell = opts.shell ?? createLocalShellAdapter();
     this.initialStep = opts.initialStep;
     this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;
@@ -228,10 +242,21 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
     };
 
+    // Filter tools to allowed names when per-step restriction is set.
+    // The OpenRouter API doesn't support an 'allowed_tools' toolChoice type,
+    // so we filter the tools array instead to achieve the same restriction.
+    const allowedNamesSet =
+      request.tools && 'allowedToolNames' in request && request.allowedToolNames
+        ? new Set(request.allowedToolNames)
+        : undefined;
+    const filteredTools = allowedNamesSet
+      ? request.tools?.filter((t) => allowedNamesSet.has(t.name))
+      : request.tools;
+
     let sdkTools: ReturnType<typeof convertTools> | undefined;
-    if (request.tools && request.tools.length > 0) {
+    if (filteredTools && filteredTools.length > 0) {
       sdkTools = convertTools({
-        tools: request.tools,
+        tools: filteredTools,
       });
     }
 
@@ -245,22 +270,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     const conversationInput = itemsToInput(remaining);
     const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
-
-    // Build toolChoice for per-step restriction when allowedToolNames is set.
-    // The allowed_tools type is not yet in the OpenRouter SDK types, so we
-    // construct it as unknown and spread it into the call.
-    const allowedNames = request.tools ? request.allowedToolNames : undefined;
-    const toolChoiceOverride: Record<string, unknown> | undefined = allowedNames
-      ? {
-          toolChoice: {
-            type: 'allowed_tools',
-            tools: allowedNames.map((n: string) => ({
-              type: 'function',
-              name: n,
-            })),
-          },
-        }
-      : undefined;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const callResult = this.client.callModel({
@@ -276,7 +285,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               text: textFormat,
             }
           : {}),
-        ...toolChoiceOverride,
       });
 
       // The OpenRouter SDK internally tees the HTTP stream, so
@@ -679,6 +687,64 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       response,
       ctx: this.toExecCtx(ctx),
       store: this.layerStateStore,
+    });
+  }
+
+  async runAppendPipeline(
+    layers: MemoryLayer[],
+    items: Item[],
+    ctx: Context,
+  ): Promise<{
+    items: Item[];
+    rerenderRequests: {
+      layerId: string;
+      slot: number;
+      timing: 'immediate' | 'batched';
+      scope: 'self' | 'slot-after' | 'all';
+    }[];
+  }> {
+    const hasHook = layers.some((l) => l.hooks.onItemAppend);
+    if (!hasHook) {
+      return {
+        items,
+        rerenderRequests: [],
+      };
+    }
+    return runAppendPipeline({
+      layers,
+      items,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      store: this.layerStateStore,
+    });
+  }
+
+  async executeRerender(
+    requests: {
+      layerId: string;
+      slot: number;
+      timing: 'immediate' | 'batched';
+      scope: 'self' | 'slot-after' | 'all';
+    }[],
+    layers: MemoryLayer[],
+    ctx: Context,
+    budgets: Map<string, number>,
+    query?: string,
+  ): Promise<
+    {
+      layerId: string;
+      items: Item[];
+      tokenCount: number;
+    }[]
+  > {
+    return executeRerender({
+      requests,
+      layers,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets,
+      store: this.layerStateStore,
+      query,
     });
   }
 }

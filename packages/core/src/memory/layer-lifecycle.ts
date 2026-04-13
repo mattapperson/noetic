@@ -87,6 +87,46 @@ interface AfterModelCallLayersParams {
   store: LayerStateStore;
 }
 
+/** @public A request to re-render the context window, collected from onItemAppend hooks. */
+export interface RerenderRequest {
+  layerId: string;
+  slot: number;
+  timing: 'immediate' | 'batched';
+  scope: 'self' | 'slot-after' | 'all';
+}
+
+/** @public Result of running items through the onItemAppend pipeline. */
+export interface AppendPipelineResult {
+  /** Final items to append after all transformations. */
+  items: Item[];
+  /** Re-render requests collected from layers. */
+  rerenderRequests: RerenderRequest[];
+}
+
+interface RunAppendPipelineParams {
+  layers: MemoryLayer[];
+  items: Item[];
+  ctx: ExecutionContext;
+  log: ItemLog;
+  store: LayerStateStore;
+}
+
+interface ExecuteRerenderParams {
+  requests: RerenderRequest[];
+  layers: MemoryLayer[];
+  ctx: ExecutionContext;
+  log: ItemLog;
+  budgets: Map<string, number>;
+  store: LayerStateStore;
+  /** Query for context-aware recall (e.g., last user message) */
+  query?: string;
+  /** Current re-render depth (for loop protection) */
+  depth?: number;
+}
+
+/** Maximum allowed re-render depth to prevent infinite loops */
+const MAX_RERENDER_DEPTH = 3;
+
 //#endregion
 
 //#region Helper Functions
@@ -560,6 +600,159 @@ export async function afterModelCallLayers({
   }
 
   return mostRestrictive(decisions);
+}
+
+const DEFAULT_ON_ITEM_APPEND_TIMEOUT = 5e3;
+
+/**
+ * Run items through the onItemAppend pipeline.
+ * Each layer can filter, transform, or inject items.
+ * Returns final items to append and any re-render requests.
+ */
+export async function runAppendPipeline({
+  layers,
+  items,
+  ctx,
+  log,
+  store,
+}: RunAppendPipelineParams): Promise<AppendPipelineResult> {
+  const requests: RerenderRequest[] = [];
+  let currentItems = items;
+
+  // Run pipeline in slot order
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+
+  for (const layer of sorted) {
+    if (!layer.hooks.onItemAppend) {
+      continue;
+    }
+
+    // Skip if no items left (all filtered by previous layer)
+    if (currentItems.length === 0) {
+      break;
+    }
+
+    const state = store.get(ctx.executionId, layer.id);
+    // Skip if layer was disabled (has init but no state)
+    if (state === undefined && layer.hooks.init) {
+      continue;
+    }
+
+    try {
+      const timeout = layer.timeouts?.onItemAppend ?? DEFAULT_ON_ITEM_APPEND_TIMEOUT;
+      const result = await withTimeout(
+        layer.hooks.onItemAppend({
+          items: currentItems,
+          log,
+          ctx,
+          state,
+        }),
+        timeout,
+      );
+
+      // Update items for next layer in pipeline
+      currentItems = result.items;
+
+      // Update state if provided
+      if (result.state !== undefined) {
+        store.set(ctx.executionId, layer.id, result.state);
+      }
+
+      // Collect re-render request if present
+      if (result.rerender) {
+        requests.push({
+          layerId: layer.id,
+          slot: layer.slot,
+          timing: result.timing ?? layer.rerenderTiming ?? 'batched',
+          scope: result.scope ?? 'slot-after',
+        });
+      }
+    } catch (e) {
+      store.diagnostic(layer.id, 'onItemAppend', e);
+      // On error, pass through items unchanged for this layer
+    }
+  }
+
+  return {
+    items: currentItems,
+    rerenderRequests: requests,
+  };
+}
+
+/**
+ * Execute re-render based on collected requests.
+ * Determines which layers need re-recall based on scope and runs them.
+ * Returns new recall results to merge into view.
+ */
+export async function executeRerender({
+  requests,
+  layers,
+  ctx,
+  log,
+  budgets,
+  store,
+  query = '',
+  depth = 0,
+}: ExecuteRerenderParams): Promise<
+  {
+    layerId: string;
+    items: Item[];
+    tokenCount: number;
+  }[]
+> {
+  if (requests.length === 0) {
+    return [];
+  }
+
+  // Prevent infinite re-render loops
+  if (depth >= MAX_RERENDER_DEPTH) {
+    // Log warning and return empty - don't throw to avoid breaking the flow
+    console.warn(
+      `[noetic] Re-render depth exceeded (${depth} >= ${MAX_RERENDER_DEPTH}). ` +
+        'Possible infinite re-render loop detected. Stopping re-render cascade.',
+    );
+    return [];
+  }
+
+  // Determine which layers need re-recall based on scope
+  const layersToRecall = new Set<string>();
+
+  for (const req of requests) {
+    switch (req.scope) {
+      case 'self':
+        layersToRecall.add(req.layerId);
+        break;
+      case 'slot-after':
+        for (const layer of layers) {
+          if (layer.slot >= req.slot) {
+            layersToRecall.add(layer.id);
+          }
+        }
+        break;
+      case 'all':
+        for (const layer of layers) {
+          layersToRecall.add(layer.id);
+        }
+        break;
+    }
+  }
+
+  // Re-run recall for affected layers
+  const affectedLayers = layers
+    .filter((l) => layersToRecall.has(l.id))
+    .sort((a, b) => a.slot - b.slot);
+
+  // Use existing recallLayers with filtered layers
+  return recallLayers({
+    layers: affectedLayers,
+    query,
+    ctx,
+    log,
+    budgets,
+    store,
+  });
 }
 
 //#endregion

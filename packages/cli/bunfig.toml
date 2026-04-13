@@ -1,0 +1,5 @@
+[test]
+# E2E tests use @microsoft/tui-test which has its own runner.
+# Run them with `bun run test:e2e` instead.
+preload = ["./test/setup.ts"]
+pathIgnorePatterns = ["**/e2e/**"]

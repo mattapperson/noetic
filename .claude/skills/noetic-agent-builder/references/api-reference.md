@@ -393,9 +393,132 @@ step.run<Mem>({
 
 Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
 
+## FsAdapter
+
+Filesystem abstraction used by the harness, tools, memory layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
+
+```typescript
+interface FsStats {
+  size: number;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFile(): boolean;
+}
+
+interface FsAdapter {
+  readFile(path: string): Promise<Buffer>;
+  readFileText(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(dir: string): Promise<void>;
+  access(path: string, mode?: number): Promise<void>;
+  stat(path: string): Promise<FsStats>;
+  lstat(path: string): Promise<FsStats>;
+  readdir(path: string): Promise<string[]>;
+}
+```
+
+Pass a custom adapter to the harness:
+
+```typescript
+import { AgentHarness, createLocalFsAdapter } from '@noetic/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  fs: myCustomFsAdapter,  // optional, defaults to createLocalFsAdapter()
+});
+```
+
+Access from tools and layers:
+
+```typescript
+// In a tool execute function:
+tool({
+  name: 'read-config',
+  execute: async (args, toolCtx) => {
+    const content = await toolCtx.fs.readFileText('/etc/config.json');
+    return JSON.parse(content);
+  },
+});
+
+// In a memory layer hook:
+hooks: {
+  async init({ ctx }) {
+    const data = await ctx.fs.readFileText('./state.json');
+    return { state: JSON.parse(data) };
+  },
+}
+
+// From Context in a step:
+step.run({
+  id: 'load',
+  execute: async (input, ctx) => {
+    return ctx.fs.readFileText('./data.txt');
+  },
+});
+```
+
+## ShellAdapter
+
+Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+
+```typescript
+interface ShellExecOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeout?: number;
+  stdin?: string;
+  signal?: AbortSignal;
+  onData?: (data: Buffer) => void;
+}
+
+interface ShellExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+interface ShellAdapter {
+  exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
+}
+```
+
+Pass a custom adapter to the harness:
+
+```typescript
+import { AgentHarness, createLocalShellAdapter } from '@noetic/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  shell: myCustomShellAdapter,  // optional, defaults to createLocalShellAdapter()
+});
+```
+
+Access from tools and layers:
+
+```typescript
+// In a tool execute function:
+tool({
+  name: 'run-lint',
+  execute: async (args, toolCtx) => {
+    const result = await toolCtx.shell.exec('eslint .', { cwd: '/app' });
+    return result.stdout;
+  },
+});
+
+// In a memory layer hook:
+hooks: {
+  async init({ ctx }) {
+    const result = await ctx.shell.exec('git rev-parse HEAD', { cwd: '.' });
+    return { state: { commitHash: result.stdout.trim() } };
+  },
+}
+```
+
 ## AgentHarness
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`). The `shell` property exposes the `ShellAdapter` (defaults to `createLocalShellAdapter()`).
 
 ```typescript
 // High-level API: execute() returns HarnessResult with streaming accessors
@@ -449,6 +572,7 @@ const msg = harness.tryRecv(channel, ctx);
 
 ```typescript
 const Slot = {
+  STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
@@ -459,6 +583,97 @@ const Slot = {
 } as const;
 ```
 
+## Memory Layer Hooks
+
+### onItemAppend
+
+Called when input items (user messages, tool outputs) are about to be appended to the ItemLog. Enables middleware-style item transformation and context re-rendering.
+
+```typescript
+interface OnItemAppendParams<TState> {
+  items: Item[];         // Items to be appended (may be transformed by prior layers)
+  log: ItemLog;          // Full log (read-only)
+  ctx: ExecutionContext;
+  state: TState;
+}
+
+interface OnItemAppendResult<TState> {
+  items: Item[];           // Items to append (filter, transform, or inject)
+  state?: TState;          // Updated layer state
+  rerender?: boolean;      // Request context re-render
+  timing?: 'immediate' | 'batched';  // When to apply re-render
+  scope?: RerenderScope;   // Which layers to re-recall
+}
+
+type RerenderScope = 'self' | 'slot-after' | 'all';  // default: 'slot-after'
+```
+
+**Pipeline behavior:** Items flow through layers in slot order. Each layer receives the output of the previous layer. Returning an empty array stops the pipeline.
+
+**Re-render triggers:** When `rerender: true`, the harness re-runs `recall()` for affected layers based on `scope`:
+- `'self'`: Only the triggering layer
+- `'slot-after'`: Triggering layer and all higher-slot layers (default)
+- `'all'`: All layers
+
+**Layer configuration:**
+```typescript
+interface MemoryLayer<TState> {
+  // ... other fields
+  rerenderTiming?: 'immediate' | 'batched';  // default for this layer's re-renders
+}
+```
+
+**Example: Content filtering**
+```typescript
+const contentFilter = {
+  id: 'filter',
+  slot: Slot.STEERING - 10,
+  scope: 'execution',
+  hooks: {
+    async init() { return { state: null }; },
+    async onItemAppend({ items }) {
+      return {
+        items: items.map(item => ({
+          ...item,
+          content: redactSensitive(item.content),
+        })),
+      };
+    },
+  },
+} satisfies MemoryLayer<null>;
+```
+
+**Example: Keyword-triggered context injection**
+```typescript
+const keywordWatcher = {
+  id: 'keyword-watcher',
+  slot: Slot.STEERING + 5,
+  scope: 'execution',
+  rerenderTiming: 'immediate',
+  hooks: {
+    async init() { return { state: { docs: [] } }; },
+    async onItemAppend({ items, state }) {
+      const keywords = extractKeywords(items);
+      if (keywords.length === 0) return { items };
+      
+      const docs = await fetchRelevantDocs(keywords);
+      return {
+        items,  // pass through unchanged
+        state: { docs },
+        rerender: true,
+        scope: 'self',
+      };
+    },
+    async recall({ state }) {
+      return {
+        items: state.docs.map(d => createMessage(d.content, 'developer')),
+        tokenCount: estimateTokens(state.docs),
+      };
+    },
+  },
+} satisfies MemoryLayer<{ docs: Doc[] }>;
+```
+
 ## ToolExecutionContext
 
 Available inside tool `execute` functions:
@@ -467,10 +682,13 @@ Available inside tool `execute` functions:
 interface ToolExecutionContext {
   ctx: Context;                 // Step execution context (ctx.harness also available)
   harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
+  fs: FsAdapter;                // Filesystem adapter (from harness)
+  shell: ShellAdapter;          // Shell adapter (from harness)
   memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
   assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
 // Access harness params: toolCtx.harness.config.params
 // Or via context: toolCtx.ctx.harness.config.params
+// Filesystem: toolCtx.fs.readFileText('/path')
 ```

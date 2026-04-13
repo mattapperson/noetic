@@ -4,33 +4,16 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import { readdir, stat } from 'node:fs/promises';
 import nodePath from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import type { FsAdapter, Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
-import { pathExists, resolveToCwd } from './path-utils.js';
+import { resolveToCwd } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from './truncate.js';
 
 //#region Constants
 
 const DEFAULT_LIMIT = 5e2;
-
-//#endregion
-
-//#region Types
-
-export interface LsOperations {
-  exists: (absolutePath: string) => Promise<boolean> | boolean;
-  stat: (absolutePath: string) =>
-    | Promise<{
-        isDirectory: () => boolean;
-      }>
-    | {
-        isDirectory: () => boolean;
-      };
-  readdir: (absolutePath: string) => Promise<string[]> | string[];
-}
 
 //#endregion
 
@@ -53,21 +36,6 @@ export const LsOutputSchema = z.object({
 });
 
 export type LsOutput = z.infer<typeof LsOutputSchema>;
-
-//#endregion
-
-//#region Default Operations
-
-const defaultLsOperations: LsOperations = {
-  exists: pathExists,
-  stat: async (absolutePath) => {
-    const s = await stat(absolutePath);
-    return {
-      isDirectory: () => s.isDirectory(),
-    };
-  },
-  readdir: (absolutePath) => readdir(absolutePath),
-};
 
 //#endregion
 
@@ -103,37 +71,28 @@ interface FormatEntriesParams {
   dirPath: string;
   entries: string[];
   effectiveLimit: number;
-  ops: LsOperations;
+  fs: FsAdapter;
+}
+
+async function formatEntry(dirPath: string, entry: string, fs: FsAdapter): Promise<string | null> {
+  const fullPath = nodePath.join(dirPath, entry);
+  try {
+    const entryStat = await fs.stat(fullPath);
+    return entryStat.isDirectory() ? `${entry}/` : entry;
+  } catch {
+    return null;
+  }
 }
 
 async function formatEntries(params: FormatEntriesParams): Promise<{
   results: string[];
   entryLimitReached: boolean;
 }> {
-  const { dirPath, entries, effectiveLimit, ops } = params;
-  const results: string[] = [];
-  let entryLimitReached = false;
-
-  for (const entry of entries) {
-    if (results.length >= effectiveLimit) {
-      entryLimitReached = true;
-      break;
-    }
-
-    const fullPath = nodePath.join(dirPath, entry);
-    let suffix = '';
-
-    try {
-      const entryStat = await ops.stat(fullPath);
-      if (entryStat.isDirectory()) {
-        suffix = '/';
-      }
-    } catch {
-      continue;
-    }
-
-    results.push(entry + suffix);
-  }
+  const { dirPath, entries, effectiveLimit, fs } = params;
+  const formatted = await Promise.all(entries.map((entry) => formatEntry(dirPath, entry, fs)));
+  const valid = formatted.filter((e): e is string => e !== null);
+  const entryLimitReached = valid.length > effectiveLimit;
+  const results = valid.slice(0, effectiveLimit);
 
   return {
     results,
@@ -145,43 +104,36 @@ async function formatEntries(params: FormatEntriesParams): Promise<{
 
 //#region Public API
 
-export interface LsToolOptions {
-  operations?: LsOperations;
-}
+export type LsTool = Tool<typeof LsInputSchema, typeof LsOutputSchema>;
 
-export type LsTool = ToolWithExecute<typeof LsInputSchema, typeof LsOutputSchema>;
-
-export function createLsTool(cwd: string, options?: LsToolOptions): LsTool {
-  const ops = options?.operations ?? defaultLsOperations;
-
+export function createLsTool(cwd: string, fs: FsAdapter): LsTool {
   return tool({
     name: 'Ls',
     description: LS_TOOL_DESCRIPTION,
-    inputSchema: LsInputSchema,
-    outputSchema: LsOutputSchema,
+    input: LsInputSchema,
+    output: LsOutputSchema,
     async execute(params) {
       const { path, limit } = params;
       const dirPath = resolveToCwd(path || '.', cwd);
       const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
       try {
-        if (!(await ops.exists(dirPath))) {
+        const dirStat = await fs.stat(dirPath).catch(() => null);
+        if (!dirStat) {
           throw new Error(`Path not found: ${dirPath}`);
         }
-
-        const dirStat = await ops.stat(dirPath);
         if (!dirStat.isDirectory()) {
           throw new Error(`Not a directory: ${dirPath}`);
         }
 
-        const rawEntries = await ops.readdir(dirPath);
+        const rawEntries = await fs.readdir(dirPath);
         rawEntries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
         const { results, entryLimitReached } = await formatEntries({
           dirPath,
           entries: rawEntries,
           effectiveLimit,
-          ops,
+          fs,
         });
 
         if (results.length === 0) {

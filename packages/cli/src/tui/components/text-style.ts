@@ -1,3 +1,81 @@
+//#region Types
+
+/**
+ * Props compatible with Ink's `<Text>` component.
+ */
+export interface InkTextProps {
+  color?: string;
+  backgroundColor?: string;
+  bold?: boolean;
+  dimColor?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  inverse?: boolean;
+}
+
+/**
+ * Input options for text styling. Uses Gridland-style naming (fg/bg/dim)
+ * which gets mapped to Ink naming (color/backgroundColor/dimColor).
+ */
+export interface TextStyleOptions {
+  fg?: string;
+  bg?: string;
+  bold?: boolean;
+  dim?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  inverse?: boolean;
+}
+
+//#endregion
+
+//#region Ink-Compatible Helper
+
+/**
+ * Converts friendly boolean flags into props compatible with Ink's `<Text>` component.
+ *
+ * Maps Gridland-style naming to Ink naming:
+ * - `fg` -> `color`
+ * - `bg` -> `backgroundColor`
+ * - `dim` -> `dimColor`
+ *
+ * @example
+ * ```tsx
+ * <Text {...textStyleProps({ fg: 'green', bold: true })}>Hello</Text>
+ * ```
+ */
+export function textStyleProps(opts: TextStyleOptions): InkTextProps {
+  const result: InkTextProps = {};
+
+  if (opts.fg) {
+    result.color = opts.fg;
+  }
+  if (opts.bg) {
+    result.backgroundColor = opts.bg;
+  }
+  if (opts.bold) {
+    result.bold = true;
+  }
+  if (opts.dim) {
+    result.dimColor = true;
+  }
+  if (opts.italic) {
+    result.italic = true;
+  }
+  if (opts.underline) {
+    result.underline = true;
+  }
+  if (opts.inverse) {
+    result.inverse = true;
+  }
+
+  return result;
+}
+
+//#endregion
+
+//#region Deprecated Gridland Helper
+
 const BOLD = 1 << 0; // 1
 const DIM = 1 << 1; // 2
 const ITALIC = 1 << 2; // 4
@@ -13,16 +91,11 @@ const INVERSE = 1 << 5; // 32
  * Colors (`fg`, `bg`) are instance properties so they work directly,
  * but text decorations (bold, dim, inverse, etc.) must be packed into
  * the numeric `attributes` bitmask.
+ *
+ * @deprecated Use `textStyleProps()` for Ink compatibility. This function
+ * will be removed once all components are migrated to Ink.
  */
-export function textStyle(opts: {
-  fg?: string;
-  bg?: string;
-  bold?: boolean;
-  dim?: boolean;
-  italic?: boolean;
-  underline?: boolean;
-  inverse?: boolean;
-}): {
+export function textStyle(opts: TextStyleOptions): {
   fg?: string;
   bg?: string;
   attributes?: number;
@@ -60,3 +133,5 @@ export function textStyle(opts: {
   }
   return result;
 }
+
+//#endregion

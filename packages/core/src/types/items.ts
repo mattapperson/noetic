@@ -1,14 +1,46 @@
-import type { OpenAIResponsesRefusalContent } from '@openrouter/sdk/models/openairesponsesrefusalcontent';
-import type { ReasoningSummaryText } from '@openrouter/sdk/models/reasoningsummarytext';
-import type { ReasoningTextContent } from '@openrouter/sdk/models/reasoningtextcontent';
-import type { ResponseOutputText } from '@openrouter/sdk/models/responseoutputtext';
-import type { ResponsesImageGenerationCall } from '@openrouter/sdk/models/responsesimagegenerationcall';
-import type { ResponsesOutputItemFileSearchCall } from '@openrouter/sdk/models/responsesoutputitemfilesearchcall';
-import type { ResponsesOutputItemFunctionCall } from '@openrouter/sdk/models/responsesoutputitemfunctioncall';
-import type { ResponsesOutputItemReasoning } from '@openrouter/sdk/models/responsesoutputitemreasoning';
-import type { ResponsesOutputMessage } from '@openrouter/sdk/models/responsesoutputmessage';
-import type { ResponsesServerToolOutput } from '@openrouter/sdk/models/responsesservertooloutput';
-import type { ResponsesWebSearchCallOutput } from '@openrouter/sdk/models/responseswebsearchcalloutput';
+import type * as OpenRouterAgent from '@openrouter/agent';
+
+//#region Provider Types
+
+type ResponseOutputText = OpenRouterAgent.ResponseOutputText;
+type ResponsesImageGenerationCall = OpenRouterAgent.OutputImageGenerationCallItem;
+type ResponsesOutputItemFileSearchCall = OpenRouterAgent.OutputFileSearchCallItem;
+type ResponsesOutputItemFunctionCall = OpenRouterAgent.OutputFunctionCallItem;
+type ResponsesOutputItemReasoning = OpenRouterAgent.OutputReasoningItem;
+type ResponsesOutputMessage = OpenRouterAgent.OutputMessage;
+type ResponsesWebSearchCallOutput = OpenRouterAgent.OutputWebSearchCallItem;
+type ResponsesServerToolOutput = Exclude<
+  OpenRouterAgent.OpenResponsesResult['output'][number],
+  | OpenRouterAgent.OutputMessage
+  | OpenRouterAgent.OutputFunctionCallItem
+  | OpenRouterAgent.OutputReasoningItem
+  | OpenRouterAgent.OutputWebSearchCallItem
+  | OpenRouterAgent.OutputFileSearchCallItem
+  | OpenRouterAgent.OutputImageGenerationCallItem
+>;
+type OutputMessageContentPart = OpenRouterAgent.OutputMessage['content'][number];
+type OpenAIResponsesRefusalContent = Extract<
+  OutputMessageContentPart,
+  {
+    type: 'refusal';
+  }
+>;
+type ReasoningContentPart = NonNullable<OpenRouterAgent.OutputReasoningItem['content']>[number];
+type SummaryContentPart = NonNullable<OpenRouterAgent.OutputReasoningItem['summary']>[number];
+type ReasoningTextContent = Extract<
+  ReasoningContentPart,
+  {
+    type: 'reasoning_text';
+  }
+>;
+type ReasoningSummaryText = Extract<
+  SummaryContentPart,
+  {
+    type: 'summary_text';
+  }
+>;
+
+//#endregion
 
 //#region Content Parts
 
@@ -35,7 +67,7 @@ export type ContentPart = OutputTextPart | RefusalPart | InputTextPart;
 
 //#endregion
 
-//#region Output Items (from model — extends SDK types)
+//#region Output Items (from model — extends provider types)
 
 /** @public Assistant message output item. */
 export type MessageItem = ResponsesOutputMessage;
@@ -57,8 +89,7 @@ export type ImageGenerationItem = ResponsesImageGenerationCall;
 
 /**
  * @public Server tool output (vendor-prefixed type like `openrouter:datetime`).
- * Constrains the SDK's `ResponsesServerToolOutput.type` from `string` to `${string}:${string}`
- * so that discriminant narrowing works correctly in Item unions.
+ * Constrains provider output items to the vendor-prefixed subset so discriminant narrowing works in Item unions.
  */
 export type ServerToolItem = Omit<ResponsesServerToolOutput, 'type'> & {
   readonly type: `${string}:${string}`;
@@ -66,7 +97,7 @@ export type ServerToolItem = Omit<ResponsesServerToolOutput, 'type'> & {
 
 //#endregion
 
-//#region Framework Items (created by Noetic, not from SDK)
+//#region Framework Items (created by Noetic, not from provider)
 
 /**
  * @public Input message created by the framework (user, system, or developer role).

@@ -8,7 +8,11 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
+import type { OpenResponsesResult } from '@openrouter/agent';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
+
+type OpenResponsesOutputItem = OpenResponsesResult['output'][number];
+
 import {
   createLayerStateStore,
   disposeLayers,
@@ -48,7 +52,7 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
   }
 
   return async (request) => {
-    const { OpenRouter } = await import('@openrouter/sdk');
+    const { OpenRouter } = await import('@openrouter/agent');
     const client = new OpenRouter({
       apiKey,
     });
@@ -82,8 +86,8 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
 
     // Extract text from output items (outputText is often undefined)
     const text = response.output
-      .filter((o) => o.type === 'message' && 'content' in o)
-      .flatMap((m) => {
+      .filter((o: OpenResponsesOutputItem) => o.type === 'message' && 'content' in o)
+      .flatMap((m: OpenResponsesOutputItem) => {
         if (!('content' in m)) {
           return [];
         }
@@ -93,8 +97,8 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
         }> = Array.isArray(m.content) ? m.content : [];
         return parts;
       })
-      .filter((c) => c.type === 'output_text' && c.text)
-      .map((c) => c.text ?? '')
+      .filter((c: { type: string; text?: string }) => c.type === 'output_text' && c.text)
+      .map((c: { type: string; text?: string }) => c.text ?? '')
       .join('');
     return {
       items: [

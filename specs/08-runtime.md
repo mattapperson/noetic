@@ -1,7 +1,66 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `setHarness()`, `setTraceExporter()`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `setHarness()`, `setTraceExporter()`
+
+---
+
+## Filesystem Abstraction
+
+The `FsAdapter` interface abstracts all filesystem operations used by the agent harness, tools, memory layers, and skill discovery. This enables sandboxed, virtualized, or remote filesystem backends without changing agent code.
+
+```typescript
+interface FsStats {
+  size: number;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFile(): boolean;
+}
+
+interface FsAdapter {
+  readFile(path: string): Promise<Buffer>;
+  readFileText(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(dir: string): Promise<void>;
+  access(path: string, mode?: number): Promise<void>;
+  stat(path: string): Promise<FsStats>;
+  lstat(path: string): Promise<FsStats>;
+  readdir(path: string): Promise<string[]>;
+}
+```
+
+`createLocalFsAdapter()` returns the default implementation backed by Node.js `fs/promises`. The agent harness uses this when no custom adapter is provided.
+
+---
+
+## Shell Abstraction
+
+The `ShellAdapter` interface abstracts all shell command execution used by the agent harness, tools, memory layers, and skill processing. This enables sandboxed or emulated shell backends (e.g., `just-bash`) without changing agent code.
+
+```typescript
+interface ShellExecOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeout?: number;
+  stdin?: string;
+  signal?: AbortSignal;
+  onData?: (data: Buffer) => void;
+}
+
+interface ShellExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+interface ShellAdapter {
+  exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
+}
+```
+
+`createLocalShellAdapter()` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
+
+The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
 
 ---
 
@@ -13,6 +72,12 @@ The agent harness is the engine. It's behind an interface with methods covering 
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   // Agent configuration
   readonly config: AgentConfig<TParams>;
+
+  // Filesystem abstraction
+  readonly fs: FsAdapter;
+
+  // Shell abstraction
+  readonly shell: ShellAdapter;
 
   // Primary execution — returns a HarnessResult with streaming accessors
   execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
@@ -199,6 +264,7 @@ When `execute()` is called without an `initialStep`, all accessors reject with `
 - **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
 - **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
+- **`fs`** exposes the `FsAdapter` that the harness was constructed with (or the default `createLocalFsAdapter()`). All filesystem operations — CLI tools (read, write, edit, ls, grep, find), skill discovery, and memory layers — use `ctx.harness.fs` rather than importing `fs/promises` directly. This enables sandboxed or virtualized filesystems (e.g., in-memory FS for testing, remote FS for cloud execution). `Context` exposes a `readonly fs: FsAdapter` getter that delegates to the harness. `ToolExecutionContext` and memory `ExecutionContext` also expose `readonly fs: FsAdapter`.
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
 - **`memory` on AgentConfig** are default memory layers applied to every context created via `createContext()`. When `createContext` is called with its own `memory` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up memory for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns.
@@ -310,6 +376,12 @@ The top-level configuration for an agent harness. `AgentConfig` is generic over 
 ```typescript
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
+
+  /** Filesystem adapter. Defaults to createLocalFsAdapter(). */
+  fs?: FsAdapter;
+
+  /** Shell adapter. Defaults to createLocalShellAdapter(). */
+  shell?: ShellAdapter;
 
   /** Storage backend for memory persistence. See 11-memory-layer-system. */
   storage?: StorageAdapter;

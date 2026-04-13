@@ -8,24 +8,30 @@
     "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
-    "@gridland/bun": "0.2.53",
-    "@gridland/web": "0.2.53",
-    "@openrouter/sdk": "0.10.2",
+    "@noetic/core": "workspace:*",
+    "@openrouter/agent": "0.3.1",
     "diff": "7.0.0",
     "glob": "11.0.3",
-    "react": "19.1.0",
+    "ink": "^7.0.0",
+    "ink-text-input": "^6.0.0",
+    "just-bash": "2.14.1",
+    "react": "^19.2.0",
+    "yaml": "^2.8.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@microsoft/tui-test": "0.0.4",
     "@types/diff": "^8.0.0",
-    "@types/react": "19.1.6",
+    "@types/react": "^19.2.14",
     "bun-types": "latest"
   },
   "scripts": {
     "dev": "bun run src/cli/cli.ts",
-    "test": "bun test",
-    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
-    "test:ci": "bun test --coverage --coverage-reporter=text",
+    "test": "bun test --preload ./test/setup.ts test/*.test.ts",
+    "test:coverage": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=json",
+    "test:e2e": "bunx tui-test 'e2e'",
+    "test:e2e:live": "bunx tui-test 'live\\.test\\.ts$'",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",

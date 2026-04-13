@@ -1,6 +1,12 @@
 //#region Adapters
 
 /** @public */
+export { createLocalFsAdapter } from './adapters/local-fs-adapter';
+
+/** @public */
+export { createLocalShellAdapter } from './adapters/local-shell-adapter';
+
+/** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
 
 //#endregion
@@ -26,7 +32,7 @@ export { spawn } from './builders/spawn-builder';
 /** @public */
 export { step } from './builders/step-builders';
 /** @public */
-export { tool } from './builders/tool-builder';
+export { tool, toolWithGenerator } from './builders/tool-builder';
 
 //#endregion
 
@@ -71,6 +77,8 @@ export { execute } from './interpreter/execute';
 export type { DurableTaskState, DurableTaskStateConfig } from './memory/layers/durable-task-state';
 /** @public */
 export { durableTaskState } from './memory/layers/durable-task-state';
+/** @public */
+export { fileReference } from './memory/layers/file-reference';
 /** @public */
 export type {
   ObservationalMemoryConfig,
@@ -318,6 +326,20 @@ export type {
   Until,
   Verdict,
 } from './types/step';
+
+//#endregion
+
+//#region Types — Filesystem
+
+/** @public */
+export type { FsAdapter, FsStats } from './types/fs-adapter';
+
+//#endregion
+
+//#region Types — Shell
+
+/** @public */
+export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
 
 //#endregion
 

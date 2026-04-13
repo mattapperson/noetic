@@ -1,3 +1,8 @@
+/**
+ * Theme system for the TUI. This is pure React context code that works with Ink.
+ * No framework-specific dependencies - just React context patterns.
+ */
+
 export interface Theme {
   /** Whether this is a dark theme */
   isDark: boolean;
@@ -23,6 +28,8 @@ export interface Theme {
   error: string;
   /** Warning state color */
   warning: string;
+  /** User message background color (cyan-ish) */
+  userMessageBg: string;
 }
 
 export const darkTheme: Theme = {
@@ -38,6 +45,7 @@ export const darkTheme: Theme = {
   success: '#05FFA1',
   error: '#FF6B6B',
   warning: '#FFC164',
+  userMessageBg: '#1A2A2A', // Dark cyan-ish for user message background
 };
 
 export const lightTheme: Theme = {
@@ -53,6 +61,7 @@ export const lightTheme: Theme = {
   success: '#0B8438',
   error: '#E11D48',
   warning: '#B45309',
+  userMessageBg: '#E8F4F4', // Light cyan-ish for user message background
 };
 
 import type { ReactNode } from 'react';

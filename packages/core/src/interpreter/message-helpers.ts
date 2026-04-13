@@ -28,7 +28,7 @@ export function extractAssistantText(items: ReadonlyArray<Item>): string {
   return (
     lastMsg.content
       ?.filter(isOutputText)
-      ?.map((c) => c.text)
+      ?.map((c: { text: string }) => c.text)
       ?.join('') ?? ''
   );
 }

@@ -4,6 +4,8 @@
 
 import { expect } from 'bun:test';
 import { z } from 'zod';
+import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
+import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
 import { frameworkCast } from '../src/interpreter/framework-cast';
 import { HarnessResultImpl } from '../src/runtime/harness-result';
 import type { LLMResponse, Tool } from '../src/types/common';
@@ -71,6 +73,8 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       output: 0,
     },
     cost: 0,
+    fs: createLocalFsAdapter(),
+    shell: createLocalShellAdapter(),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute() {},
@@ -200,6 +204,8 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     itemLog: makeItemLog(),
     lastStepMeta: null,
     harness,
+    fs: harness.fs,
+    shell: harness.shell,
     layers: undefined,
     memory: {},
     recv: async () => {
@@ -310,9 +316,12 @@ export function mockEmbed(vectors: Record<string, number[]>): EmbedFn {
 
 export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   const resolvedCtx = ctx ?? makeMockContext();
+  const harness = makeMockHarness();
   return {
     ctx: resolvedCtx,
-    harness: makeMockHarness(),
+    harness,
+    fs: harness.fs,
+    shell: harness.shell,
     memory: {
       get: () => undefined,
       set: () => {},
@@ -328,6 +337,8 @@ export function makeMockHarness(): AgentHarnessContract {
       name: 'test-harness',
       params: {},
     },
+    fs: createLocalFsAdapter(),
+    shell: createLocalShellAdapter(),
     callModel: async () => {
       throw new Error('not impl');
     },
@@ -378,6 +389,11 @@ export function makeMockHarness(): AgentHarnessContract {
     afterModelCall: async () => ({
       action: SteeringAction.Allow,
     }),
+    runAppendPipeline: async (_layers, items) => ({
+      items,
+      rerenderRequests: [],
+    }),
+    executeRerender: async () => [],
   };
   return harness;
 }

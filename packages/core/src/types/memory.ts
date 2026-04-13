@@ -1,8 +1,10 @@
 import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
+import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { CallModelRequest } from './runtime';
+import type { ShellAdapter } from './shell-adapter';
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
@@ -136,6 +138,7 @@ export interface LayerTimeouts {
   dispose?: number;
   beforeToolCall?: number;
   afterModelCall?: number;
+  onItemAppend?: number;
 }
 
 /** @public Terminal outcome of an execution run, reported to memory layers on completion. */
@@ -153,6 +156,10 @@ export interface ExecutionContext {
     output: number;
   };
   cost: number;
+  /** Filesystem adapter for virtual or real filesystem access. */
+  fs: FsAdapter;
+  /** Shell adapter for virtual or real shell command execution. */
+  shell: ShellAdapter;
   callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   tokenize(text: string): number;
   trace: {
@@ -258,6 +265,48 @@ export interface DisposeParams<TState> {
   state: TState;
 }
 
+//#region onItemAppend Hook
+
+/** @public Controls which layers re-run recall() when a re-render is triggered. */
+export type RerenderScope =
+  | 'self' // Only the triggering layer
+  | 'slot-after' // Triggering layer and all higher-slot layers (DEFAULT)
+  | 'all'; // All layers
+
+/** @public Parameters passed to a memory layer's `onItemAppend` hook when input items are about to be appended. */
+export interface OnItemAppendParams<TState> {
+  /** Items to be appended (may have been transformed by prior layers in the pipeline). */
+  items: Item[];
+  /** Full item log (read-only). */
+  log: ItemLog;
+  /** Current execution context. */
+  ctx: ExecutionContext;
+  /** Layer's current state snapshot. */
+  state: TState;
+}
+
+/** @public Value returned by a memory layer's `onItemAppend` hook. */
+export interface OnItemAppendResult<TState> {
+  /**
+   * Items to actually append to the log.
+   * - Return original items unchanged to pass through
+   * - Return modified items to transform
+   * - Return empty array to filter/drop items
+   * - Return additional items to inject extras
+   */
+  items: Item[];
+  /** Updated layer state. */
+  state?: TState;
+  /** Request context re-render. */
+  rerender?: boolean;
+  /** When to apply re-render (default: layer's configured `rerenderTiming`). */
+  timing?: 'immediate' | 'batched';
+  /** Which layers to re-recall (default: 'slot-after'). */
+  scope?: RerenderScope;
+}
+
+//#endregion
+
 /** @public Lifecycle hook implementations for a memory layer. Method syntax enables bivariant assignability for typed layers. */
 export interface MemoryHooks<TState = unknown> {
   init?(params: InitParams): Promise<InitResult<TState>>;
@@ -274,6 +323,16 @@ export interface MemoryHooks<TState = unknown> {
   dispose?(params: DisposeParams<TState>): Promise<void>;
   beforeToolCall?(params: BeforeToolCallParams<TState>): Promise<BeforeToolCallResult<TState>>;
   afterModelCall?(params: AfterModelCallParams<TState>): Promise<AfterModelCallResult<TState>>;
+  /**
+   * Called when input items (user messages, tool outputs) are about to be appended.
+   * Returns items to append — enables filtering, transformation, and injection.
+   *
+   * Pipeline: items flow through layers in slot order. Each layer receives
+   * the output of the previous layer (or original items for first layer).
+   *
+   * NOT called for LLM response items — use `store()` for those.
+   */
+  onItemAppend?(params: OnItemAppendParams<TState>): Promise<OnItemAppendResult<TState>>;
 }
 
 /**
@@ -297,6 +356,8 @@ export interface MemoryLayer<TState = unknown> {
   timeouts?: Partial<LayerTimeouts>;
   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
   provides?: LayerProvides;
+  /** Default re-render timing when `onItemAppend` requests a re-render. */
+  rerenderTiming?: 'immediate' | 'batched';
 }
 
 /** @public Configuration for how the runtime projects conversation items into the model's context window. */

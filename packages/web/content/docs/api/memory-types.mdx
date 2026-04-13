@@ -189,6 +189,7 @@ interface ExecutionContext {
   tokenUsage: { input: number; output: number };
   cost: number;
   model?: string;
+  fs: FsAdapter;
   tokenize(text: string): number;
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;
@@ -196,6 +197,8 @@ interface ExecutionContext {
   };
 }
 ```
+
+`fs` is the `FsAdapter` from `ctx.harness.fs`, giving memory layer hooks access to the same filesystem backend as tools and skill discovery (real, in-memory, or remote).
 
 ## LayerTimeouts
 

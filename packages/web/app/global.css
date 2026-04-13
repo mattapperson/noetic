@@ -116,7 +116,6 @@
   grid-column: span 2;
 }
 
-/* Base styles for landing sections - low specificity first */
 .side-by-side-sections {
   display: flex;
   flex-direction: row;
@@ -130,25 +129,6 @@
 
 .side-by-side-sections section {
   max-width: 100%;
-}
-
-/* Higher specificity sibling selectors come after base styles */
-.landing-section + .landing-section,
-.side-by-side-sections + .landing-section,
-.landing-section + .side-by-side-sections {
-  border-top: 1px solid var(--color-tui-border);
-}
-
-.primitives-grid {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.patterns-grid {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.memory-layers-grid {
-  grid-template-columns: repeat(5, 1fr);
 }
 
 .section-split {
@@ -165,6 +145,24 @@
 /* Memory section: swap order on desktop so SVG appears on left */
 .section-split > .memory-visual {
   order: -1;
+}
+
+.landing-section + .landing-section,
+.side-by-side-sections + .landing-section,
+.landing-section + .side-by-side-sections {
+  border-top: 1px solid var(--color-tui-border);
+}
+
+.primitives-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.patterns-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.memory-layers-grid {
+  grid-template-columns: repeat(5, 1fr);
 }
 
 @media (max-width: 1024px) {

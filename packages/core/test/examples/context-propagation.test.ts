@@ -15,6 +15,8 @@ function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionCon
   return {
     ctx,
     harness,
+    fs: harness.fs,
+    shell: harness.shell,
     memory: {
       get: () => undefined,
       set: () => {},

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { Item, MessageItem } from '@noetic/core';
+import type { InputMessageItem, Item } from '@noetic/core';
 
 import type { ModalSubmitValues } from '../src/modals';
 import { modalToNoeticInput } from '../src/modals';
@@ -8,8 +8,8 @@ import { ModalInputMode } from '../src/types';
 
 //#region Helpers
 
-function isMessageItem(item: Item): item is MessageItem {
-  return item.type === 'message';
+function isInputMessageItem(item: Item): item is InputMessageItem {
+  return item.type === 'message' && 'role' in item && item.role === 'user';
 }
 
 function isItemArray(value: unknown): value is ReadonlyArray<Item> {
@@ -54,15 +54,11 @@ describe('modalToNoeticInput', () => {
     }
     expect(result).toHaveLength(1);
     const item = result[0];
-    if (!isMessageItem(item)) {
-      throw new Error('Expected MessageItem');
+    if (!isInputMessageItem(item)) {
+      throw new Error('Expected InputMessageItem');
     }
     expect(item.role).toBe('user');
-    const part = item.content[0];
-    if (part.type === 'refusal') {
-      throw new Error('Unexpected refusal');
-    }
-    expect(part.text).toContain('feedback: Great product');
+    expect(item.content[0].text).toContain('feedback: Great product');
   });
 
   test('custom mapper overrides mode', () => {
