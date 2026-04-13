@@ -1,15 +1,29 @@
 import type React from 'react';
 import { useState } from 'react';
+import { formatDuration, formatTimestamp } from '../lib/format';
 import type { ExecutionNode, LLMStepData, ToolStepData } from '../types';
+import { ChildrenList } from './inspector/ChildrenList';
 import { ContextState } from './inspector/ContextState';
 import { InputOutput } from './inspector/InputOutput';
 import { ItemLog } from './inspector/ItemLog';
-import { AlertCircle, Layers, Terminal } from './inspector/icons';
+import { AlertCircle, Terminal } from './inspector/icons';
 import { RawTrace } from './inspector/RawTrace';
+import { getSummaryRenderer } from './inspector/summaries/registry';
 import type { TabId } from './inspector/Tabs';
 import { InspectorTabs } from './inspector/Tabs';
 
-// Type guard functions to avoid type casting
+//#region Types
+
+interface NodeInspectorProps {
+  selectedNode: ExecutionNode | null;
+  nodes: Map<string, ExecutionNode>;
+  onSelectNode?: (nodeId: string) => void;
+}
+
+//#endregion
+
+//#region Type Guards (for attempt tab only)
+
 const isLLMNode = (
   node: ExecutionNode,
 ): node is ExecutionNode & {
@@ -26,11 +40,15 @@ const isToolNode = (
   return node.kind === 'tool' && 'toolName' in node.stepData;
 };
 
-interface NodeInspectorProps {
-  selectedNode: ExecutionNode | null;
-}
+//#endregion
 
-export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) => {
+//#region Public API
+
+export const NodeInspector: React.FC<NodeInspectorProps> = ({
+  selectedNode,
+  nodes,
+  onSelectNode,
+}) => {
   const [activeTab, setActiveTab] = useState<TabId>('session');
   const [detailMode, setDetailMode] = useState<'follow' | 'overview'>('follow');
 
@@ -49,6 +67,10 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
     );
   }
 
+  const SummaryCard = getSummaryRenderer(selectedNode.kind);
+  const showChildren =
+    selectedNode.kind !== 'loop' && selectedNode.children && selectedNode.children.length > 0;
+
   return (
     <div className="w-full h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
       <InspectorTabs activeTab={activeTab} onTabChange={setActiveTab} />
@@ -61,13 +83,8 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
           {/* Tab Content */}
           {activeTab === 'session' && (
             <div className="space-y-4">
-              {/* System Prompt (for LLM steps) */}
-              {isLLMNode(selectedNode) && <SystemPrompt stepData={selectedNode.stepData} />}
-
-              {/* Tool Calls (for LLM steps) */}
-              {isLLMNode(selectedNode) && selectedNode.stepData.toolCalls.length > 0 && (
-                <ToolCalls toolCalls={selectedNode.stepData.toolCalls} />
-              )}
+              {/* Summary Card (from registry) */}
+              <SummaryCard node={selectedNode} nodes={nodes} onSelectNode={onSelectNode} />
 
               {/* Input/Output */}
               <InputOutput
@@ -79,9 +96,13 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
               {/* Context State */}
               <ContextState snapshot={selectedNode.contextSnapshot} />
 
-              {/* Children */}
-              {selectedNode.children && selectedNode.children.length > 0 && (
-                <ChildrenSection childIds={selectedNode.children} />
+              {/* Children (skip for loop nodes — LoopSummary embeds its own) */}
+              {showChildren && (
+                <ChildrenList
+                  childIds={selectedNode.children}
+                  nodes={nodes}
+                  onSelectNode={onSelectNode}
+                />
               )}
             </div>
           )}
@@ -114,6 +135,10 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ selectedNode }) =>
     </div>
   );
 };
+
+//#endregion
+
+//#region NodeHeader
 
 interface NodeHeaderProps {
   node: ExecutionNode;
@@ -210,31 +235,9 @@ const NodeHeader: React.FC<NodeHeaderProps> = ({ node, detailMode, onModeChange 
   );
 };
 
-interface SystemPromptProps {
-  stepData: LLMStepData;
-}
+//#endregion
 
-const SystemPrompt: React.FC<SystemPromptProps> = ({ stepData }) => {
-  const systemMessage = stepData.messages.find((m) => m.role === 'system');
-
-  if (!systemMessage) {
-    return null;
-  }
-
-  return (
-    <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-[var(--noetic-accent)]/10 border-b border-[var(--noetic-border)]">
-        <Terminal className="w-3.5 h-3.5 text-[var(--noetic-accent)]" />
-        <span className="text-xs font-medium text-[var(--noetic-accent)]">System Prompt</span>
-      </div>
-      <div className="p-3 bg-[var(--noetic-code-bg)]">
-        <pre className="text-xs font-mono text-[var(--noetic-text)] whitespace-pre-wrap break-words max-h-40 overflow-auto">
-          {systemMessage.content}
-        </pre>
-      </div>
-    </div>
-  );
-};
+//#region AttemptDetails
 
 interface AttemptDetailsProps {
   node: ExecutionNode;
@@ -270,6 +273,10 @@ const AttemptDetails: React.FC<AttemptDetailsProps> = ({ node }) => {
     </div>
   );
 };
+
+//#endregion
+
+//#region Shared Helpers
 
 interface DetailItemProps {
   label: string;
@@ -314,82 +321,4 @@ const ToolResult: React.FC<ToolResultProps> = ({ stepData }) => {
   );
 };
 
-const formatDuration = (ms: number): string => {
-  if (ms < 1000) {
-    return `${ms}ms`;
-  }
-  if (ms < 60000) {
-    return `${(ms / 1000).toFixed(1)}s`;
-  }
-  const minutes = Math.floor(ms / 60000);
-  const seconds = ((ms % 60000) / 1000).toFixed(0);
-  return `${minutes}m ${seconds}s`;
-};
-
-interface ChildrenSectionProps {
-  childIds: string[];
-}
-
-const ChildrenSection: React.FC<ChildrenSectionProps> = ({ childIds }) => {
-  return (
-    <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-[var(--noetic-node-bg)] border-b border-[var(--noetic-border)]">
-        <Layers className="w-3.5 h-3.5 text-[var(--noetic-accent)]" />
-        <span className="text-xs font-medium text-[var(--noetic-text)]">
-          Children ({childIds.length})
-        </span>
-      </div>
-      <div className="p-3 space-y-1">
-        {[
-          ...new Set(childIds),
-        ].map((childId) => (
-          <div
-            key={childId}
-            className="text-xs font-mono text-[var(--noetic-text-secondary)] bg-[var(--noetic-code-bg)] px-2 py-1 rounded truncate"
-            title={childId}
-          >
-            {childId.slice(0, 8)}...
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-interface ToolCallsProps {
-  toolCalls: LLMStepData['toolCalls'];
-}
-
-const ToolCalls: React.FC<ToolCallsProps> = ({ toolCalls }) => {
-  return (
-    <div className="border border-[var(--noetic-border)] rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-orange-500/10 border-b border-[var(--noetic-border)]">
-        <Terminal className="w-3.5 h-3.5 text-orange-500" />
-        <span className="text-xs font-medium text-orange-500">Tool Calls ({toolCalls.length})</span>
-      </div>
-      <div className="p-3 space-y-2">
-        {toolCalls.map((call) => (
-          <div
-            key={`${call.name}-${JSON.stringify(call.arguments)}`}
-            className="border border-[var(--noetic-border)] rounded overflow-hidden"
-          >
-            <div className="px-2 py-1.5 bg-[var(--noetic-node-bg)] border-b border-[var(--noetic-border)]">
-              <span className="text-xs font-medium font-mono text-[var(--noetic-text)]">
-                {call.name}
-              </span>
-            </div>
-            <pre className="text-xs font-mono text-[var(--noetic-text-secondary)] bg-[var(--noetic-code-bg)] p-2 max-h-32 overflow-auto whitespace-pre-wrap break-words">
-              {JSON.stringify(call.arguments, null, 2)}
-            </pre>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const formatTimestamp = (timestamp: number): string => {
-  const date = new Date(timestamp);
-  // Use ISO time format to avoid hydration mismatches with locale-dependent toLocaleTimeString
-  return date.toISOString().split('T')[1].slice(0, 8);
-};
+//#endregion

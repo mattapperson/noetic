@@ -213,55 +213,33 @@ registerStepDataExtractor('fork', (spanAttrs, tokenUsage, cost) => {
 
 /** Loop step - Iterative execution */
 registerStepDataExtractor('loop', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    stepCount: spanAttrs.loopStepCount || 0,
+  return {
+    iteration: spanAttrs.currentIteration || 0,
+    totalIterations: spanAttrs.totalIterations || 0,
+    maxIterations: spanAttrs.maxIterations || 0,
     tokenUsage,
     cost,
   };
-
-  if (spanAttrs.currentIteration !== undefined) {
-    result.currentIteration = spanAttrs.currentIteration;
-  }
-
-  if (spanAttrs.maxIterations !== undefined) {
-    result.maxIterations = spanAttrs.maxIterations;
-  }
-
-  return result;
 });
 
 /** Spawn step - Child process/agent spawning */
 registerStepDataExtractor('spawn', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    childId: spanAttrs.spawnChildId || 'unknown',
+  return {
+    childStepId: spanAttrs.spawnChildId || 'unknown',
+    childStepKind: spanAttrs.spawnChildKind || 'run',
     tokenUsage,
     cost,
   };
-
-  if (spanAttrs.spawnChildKind) {
-    result.childKind = spanAttrs.spawnChildKind;
-  }
-
-  return result;
 });
 
 /** Branch step - Conditional routing */
 registerStepDataExtractor('branch', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    branchType: spanAttrs.branchType || 'dynamic',
+  return {
+    condition: spanAttrs.condition,
+    selectedPath: spanAttrs.selectedPath,
     tokenUsage,
     cost,
   };
-
-  if (spanAttrs.selectedPath !== undefined) {
-    result.selectedPath = spanAttrs.selectedPath;
-  }
-
-  if (spanAttrs.condition) {
-    result.condition = spanAttrs.condition;
-  }
-
-  return result;
 });
 
 /** Run step - Generic execution step */

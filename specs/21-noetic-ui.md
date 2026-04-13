@@ -201,7 +201,7 @@ packages/ui/
   │   │   ├── components/   # Node graph, inspectors, controls
   │   │   ├── stores/       # Zustand state management
   │   │   ├── hooks/        # React hooks (WebSocket, execution)
-  │   │   └── lib/          # Client utilities
+  │   │   └── lib/          # Client utilities (format.ts, sequential-layout, etc.)
   │   ├── runtime/          # Runtime integration
   │   │   ├── exporter.ts   # TraceExporter implementation
   │   │   ├── debugger.ts   # Debug runtime with pause/resume
@@ -302,9 +302,9 @@ The following step kinds have built-in extractors registered by default:
 | `llm` | model, messages, toolCalls, systemPrompt, tokenUsage, cost |
 | `tool` | toolName, arguments, result |
 | `fork` | mode, pathCount, winnerPath |
-| `loop` | stepCount, currentIteration, maxIterations |
-| `spawn` | childId, childKind |
-| `branch` | branchType, selectedPath, condition |
+| `loop` | iteration, totalIterations, maxIterations |
+| `spawn` | childStepId, childStepKind |
+| `branch` | condition, selectedPath |
 | `run` | description |
 | `provide` | providerId, provides |
 
@@ -893,9 +893,8 @@ interface ToolStepData {
 }
 
 interface BranchStepData {
-  branchType: 'dynamic';          // Type of branching (currently only dynamic)
-  selectedPath?: number;          // Which branch path was selected (0-indexed)
   condition?: string;            // Condition evaluated for branching
+  selectedPath?: number;          // Which branch path was selected (0-indexed)
 }
 
 interface ForkStepData {
@@ -905,14 +904,14 @@ interface ForkStepData {
 }
 
 interface SpawnStepData {
-  childId: string;               // ID of the spawned child step
-  childKind?: string;             // Kind of the child step
+  childStepId: string;           // ID of the spawned child step
+  childStepKind: StepKind;       // Kind of the child step
 }
 
 interface LoopStepData {
-  stepCount: number;             // Number of steps inside the loop body
-  currentIteration?: number;      // Current iteration number (0-indexed)
-  maxIterations?: number;         // Maximum iterations configured
+  iteration: number;             // Current iteration number (0-indexed)
+  totalIterations: number;       // Total iterations completed
+  maxIterations: number;         // Maximum iterations configured
 }
 
 interface ProvideStepData {
@@ -1012,7 +1011,15 @@ To add a new step kind with full UI support:
      cost,
    }));
    ```
-3. **In UI:** Add a node component for rendering (optional)
+3. **In UI:** Register a summary renderer for the inspector (optional — `DefaultSummary` handles unregistered kinds):
+   ```typescript
+   import { registerSummaryRenderer } from '@noetic/ui/inspector/summaries/registry';
+   
+   registerSummaryRenderer('newStep', ({ node, nodes, onSelectNode }) => (
+     <div>/* custom inspector card */</div>
+   ));
+   ```
+4. **In UI:** Add a node component for graph rendering (optional)
 
 **Node Rendering:**
 
@@ -1449,9 +1456,33 @@ registerAgent({
 
 ### 3. Right Inspector Panel
 
+**Props:**
+```typescript
+interface NodeInspectorProps {
+  selectedNode: ExecutionNode | null;
+  nodes: Map<string, ExecutionNode>;
+  onSelectNode?: (nodeId: string) => void;
+}
+```
+
 **Tab Navigation:**
 - session | attempt | events
 - Pill-style tabs with active state highlight
+
+**Session Tab — Rendering Order:**
+
+1. **Node Header** — Status indicator, kind badge, step ID, node ID, depth, duration, error, Follow/Overview toggle. Renders for all step kinds.
+2. **Summary Card** — Kind-specific content via the summary renderer registry (see below).
+3. **Input/Output** — Auto-detected rendering for all step kinds.
+4. **Context State** — Depth, step count, tokens, cost, elapsed time.
+5. **Children List** — Rich interactive list when `children.length > 0`. Skipped for loop nodes (LoopSummary embeds its own grouped children list).
+
+**Attempt Tab:**
+- Execution details (started, ended, duration, status) — universal for all kinds.
+- Raw step data as JSON.
+
+**Events Tab:**
+- Raw trace / OpenTelemetry span data.
 
 **Content Display:**
 - **Monospace text** for code/system prompts
@@ -1464,25 +1495,98 @@ registerAgent({
 - **Scrollable areas** with custom dark scrollbar
 - **Collapsible sections** for nested data
 
+#### Summary Renderer Registry
+
+A registry maps step kind strings to React components that render kind-specific summary cards. Built-in renderers register at module load. Users register custom renderers for user-defined step kinds.
+
+**Registry API:**
+```typescript
+type SummaryRenderer = React.FC<{
+  node: ExecutionNode;
+  nodes: Map<string, ExecutionNode>;
+  onSelectNode?: (nodeId: string) => void;
+}>;
+
+function registerSummaryRenderer(kind: string, renderer: SummaryRenderer): void;
+function getSummaryRenderer(kind: string): SummaryRenderer; // DefaultSummary if not found
+function unregisterSummaryRenderer(kind: string): void;     // For testing
+function clearSummaryRenderers(): void;                      // For testing — removes all, including built-ins
+```
+
+`getSummaryRenderer` falls back through three levels: registered renderer for the kind, then the `default` renderer, then an inline `FallbackSummary` component that renders `stepData` as JSON. The `FallbackSummary` is defined directly in `registry.tsx` so the registry never returns `undefined`, even after `clearSummaryRenderers()` removes all entries including built-ins.
+
+**File structure:**
+```
+inspector/summaries/
+  registry.tsx
+  BranchSummary.tsx
+  ForkSummary.tsx
+  LoopSummary.tsx
+  SpawnSummary.tsx
+  LLMSummary.tsx
+  ToolSummary.tsx
+  DefaultSummary.tsx
+```
+
+**Built-in Summary Cards:**
+
+| Kind | Card Title | Content |
+|------|-----------|---------|
+| **branch** | Branch Config | Condition string (code block, or "Implicit branch" if absent), selected path as highlighted badge |
+| **fork** | Fork Status | Mode badge (race/all/settle), path count, winner path (race mode only) |
+| **loop** | Loop Progress | Progress bar (`iteration / maxIterations`), total iterations, children grouped by iteration (see Children List). Embeds its own ChildrenList with iteration grouping — the standard Children List section is skipped for loop nodes. |
+| **spawn** | Spawned Step | Child step kind badge + child step ID, clickable to navigate via `onSelectNode` |
+| **llm** | (System Prompt + Tool Calls) | System prompt in monospace code block, tool call names with collapsible JSON arguments |
+| **tool** | (Tool Result) | Tool name header, arguments JSON, result JSON |
+| **run** | — | Uses DefaultSummary (no dedicated file) |
+| **provide** | — | Uses DefaultSummary (no dedicated file) |
+| **default** | Step Details | Structured key/value rendering of `stepData` — strings inline, objects/arrays as collapsible JSON trees. Fallback for any kind without a registered renderer. |
+
+#### Children List
+
+Replaces the basic truncated-ID list. Each child entry shows:
+- Kind badge (colored)
+- Status icon
+- Step ID
+- Duration
+
+Children are clickable — calls `onSelectNode` to navigate to the child in the graph and inspector. Truncated with "Show all N" expand toggle when > 10 children.
+
+**Iteration grouping** (used by LoopSummary): Children organized under collapsible "Iteration 1", "Iteration 2", etc. headers. Each header shows iteration number, aggregate status, and aggregate duration.
+
+**Grouping algorithm:** The loop body has a fixed number of steps per iteration. The group size is `children.length / totalIterations` (integer division). Children are assigned to iterations by their index in the `children` array: children `[0, groupSize)` belong to iteration 1, `[groupSize, 2*groupSize)` to iteration 2, and so on. Any remainder children (from a partial final iteration) form the last group. If `totalIterations` is 0 or `children` is empty, no grouping is applied.
+
+#### Container Node Selection
+
+Clicking a container node in the graph both selects it (populating the inspector) and zooms into it if the container is nested inside another container (scale < 1). Top-level containers at full scale are selected without zooming. This matches the existing leaf-node click behavior.
+
+**Re-click behavior:** Clicking an already-selected container is a no-op — it does not zoom further or deselect. Clicking the canvas background deselects the current node and clears the inspector.
+
 **Example content layout:**
 ```
 ┌────────────────────────────────────┐
 │  session │ attempt │ events      │
 ├────────────────────────────────────┤
+│ ● FORK  fork-classify      [Follow]│
+│ ID: abc123  Depth: 1  Duration: 2s │
 │                                    │
-│  Return exactly one JSON object    │
-│  and nothing else...               │
+│ ┌─ Fork Status ──────────────────┐ │
+│ │ Mode: race   Paths: 3         │ │
+│ │ Winner: Path 1                │ │
+│ └────────────────────────────────┘ │
 │                                    │
-│  {                                   │
-│    "route": "collect_review",      │
-│    "summary": "short..."           │
-│  }                                   │
+│ ▼ Input                           │
+│   { "query": "classify..." }      │
+│ ▼ Output                          │
+│   { "route": "collect_review" }   │
 │                                    │
-│  I'm reading the saved CI state    │
-│  for the current branch head...    │
+│ ▼ Context State                   │
+│   Tokens: 1.2k  Cost: $0.002     │
 │                                    │
-├────────────────────────────────────┤
-│  [Follow] [Overview]              │
+│ ▼ Children (3)                    │
+│   🟣 LLM  classify-a  ✓  0.8s    │
+│   🟣 LLM  classify-b  ✓  1.2s    │
+│   🟠 TOOL validate    ✓  0.3s    │
 └────────────────────────────────────┘
 ```
 

@@ -164,32 +164,114 @@ describe('Step Data Extractors', () => {
   });
 
   describe('loop extractor', () => {
-    it('extracts stepCount', () => {
+    it('extracts iteration, totalIterations, maxIterations, tokenUsage, cost', () => {
       const extractor = getStepDataExtractor('loop');
+      const tokens: TokenUsage = {
+        input: 50,
+        output: 25,
+        total: 75,
+      };
       const result = extractor(
         {
-          loopStepCount: 5,
-        },
-        ZERO_TOKENS,
-        0,
-      );
-      expect(result.stepCount).toBe(5);
-    });
-
-    it('includes currentIteration and maxIterations when present', () => {
-      const extractor = getStepDataExtractor('loop');
-      const result = extractor(
-        {
-          loopStepCount: 3,
-          currentIteration: 2,
+          currentIteration: 3,
+          totalIterations: 5,
           maxIterations: 10,
         },
+        tokens,
+        0.02,
+      );
+
+      expect(result.iteration).toBe(3);
+      expect(result.totalIterations).toBe(5);
+      expect(result.maxIterations).toBe(10);
+      expect(result.tokenUsage).toBe(tokens);
+      expect(result.cost).toBe(0.02);
+    });
+
+    it('defaults iteration fields to 0 when missing', () => {
+      const extractor = getStepDataExtractor('loop');
+      const result = extractor({}, ZERO_TOKENS, 0);
+
+      expect(result.iteration).toBe(0);
+      expect(result.totalIterations).toBe(0);
+      expect(result.maxIterations).toBe(0);
+    });
+  });
+
+  describe('spawn extractor', () => {
+    it('extracts childStepId, childStepKind, tokenUsage, cost', () => {
+      const extractor = getStepDataExtractor('spawn');
+      const tokens: TokenUsage = {
+        input: 20,
+        output: 10,
+        total: 30,
+      };
+      const result = extractor(
+        {
+          spawnChildId: 'child-1',
+          spawnChildKind: 'llm',
+        },
+        tokens,
+        0.005,
+      );
+
+      expect(result.childStepId).toBe('child-1');
+      expect(result.childStepKind).toBe('llm');
+      expect(result.tokenUsage).toBe(tokens);
+      expect(result.cost).toBe(0.005);
+    });
+
+    it('defaults childStepId to unknown and childStepKind to run', () => {
+      const extractor = getStepDataExtractor('spawn');
+      const result = extractor({}, ZERO_TOKENS, 0);
+
+      expect(result.childStepId).toBe('unknown');
+      expect(result.childStepKind).toBe('run');
+    });
+  });
+
+  describe('branch extractor', () => {
+    it('extracts condition, selectedPath, tokenUsage, cost', () => {
+      const extractor = getStepDataExtractor('branch');
+      const tokens: TokenUsage = {
+        input: 10,
+        output: 5,
+        total: 15,
+      };
+      const result = extractor(
+        {
+          condition: 'x > 0',
+          selectedPath: 1,
+        },
+        tokens,
+        0.001,
+      );
+
+      expect(result.condition).toBe('x > 0');
+      expect(result.selectedPath).toBe(1);
+      expect(result.tokenUsage).toBe(tokens);
+      expect(result.cost).toBe(0.001);
+    });
+
+    it('does not include branchType field', () => {
+      const extractor = getStepDataExtractor('branch');
+      const result = extractor(
+        {
+          branchType: 'dynamic',
+        },
         ZERO_TOKENS,
         0,
       );
 
-      expect(result.currentIteration).toBe(2);
-      expect(result.maxIterations).toBe(10);
+      expect(result.branchType).toBeUndefined();
+    });
+
+    it('returns undefined for condition and selectedPath when missing', () => {
+      const extractor = getStepDataExtractor('branch');
+      const result = extractor({}, ZERO_TOKENS, 0);
+
+      expect(result.condition).toBeUndefined();
+      expect(result.selectedPath).toBeUndefined();
     });
   });
 
@@ -241,15 +323,20 @@ describe('Step Data Extractors', () => {
       expect(getRegisteredStepKinds()).toHaveLength(0);
       expect(hasStepDataExtractor('llm')).toBe(false);
 
-      // Re-register built-ins by re-importing the module side effects
-      // Since modules are cached, we need to manually re-register
-      registerStepDataExtractor('llm', (attrs, tokens, cost) => ({
-        model: attrs.model || 'unknown',
-        messages: attrs.messages || [],
-        toolCalls: attrs.toolCalls || [],
-        tokenUsage: tokens,
-        cost,
-      }));
+      // Re-register built-ins matching current implementation
+      registerStepDataExtractor('llm', (attrs, tokens, cost) => {
+        const result: Record<string, unknown> = {
+          model: attrs.model || 'unknown',
+          messages: attrs.messages || [],
+          toolCalls: attrs.toolCalls || [],
+          tokenUsage: tokens,
+          cost,
+        };
+        if (attrs.systemPrompt) {
+          result.systemPrompt = attrs.systemPrompt;
+        }
+        return result;
+      });
       registerStepDataExtractor('tool', (attrs, tokens, cost) => ({
         toolName: attrs.toolName || 'unknown',
         arguments: attrs.toolArguments,
@@ -257,37 +344,59 @@ describe('Step Data Extractors', () => {
         tokenUsage: tokens,
         cost,
       }));
-      registerStepDataExtractor('fork', (attrs, tokens, cost) => ({
-        mode: attrs.forkMode || 'race',
-        pathCount: attrs.forkPathCount || 0,
-        tokenUsage: tokens,
-        cost,
-      }));
+      registerStepDataExtractor('fork', (attrs, tokens, cost) => {
+        const result: Record<string, unknown> = {
+          mode: attrs.forkMode || 'race',
+          pathCount: attrs.forkPathCount || 0,
+          tokenUsage: tokens,
+          cost,
+        };
+        if (attrs.winnerPath !== undefined) {
+          result.winnerPath = attrs.winnerPath;
+        }
+        return result;
+      });
       registerStepDataExtractor('loop', (attrs, tokens, cost) => ({
-        stepCount: attrs.loopStepCount || 0,
+        iteration: attrs.currentIteration || 0,
+        totalIterations: attrs.totalIterations || 0,
+        maxIterations: attrs.maxIterations || 0,
         tokenUsage: tokens,
         cost,
       }));
       registerStepDataExtractor('spawn', (attrs, tokens, cost) => ({
-        childId: attrs.spawnChildId || 'unknown',
+        childStepId: attrs.spawnChildId || 'unknown',
+        childStepKind: attrs.spawnChildKind || 'run',
         tokenUsage: tokens,
         cost,
       }));
       registerStepDataExtractor('branch', (attrs, tokens, cost) => ({
-        branchType: attrs.branchType || 'dynamic',
+        condition: attrs.condition,
+        selectedPath: attrs.selectedPath,
         tokenUsage: tokens,
         cost,
       }));
-      registerStepDataExtractor('run', (_attrs, tokens, cost) => ({
-        tokenUsage: tokens,
-        cost,
-      }));
-      registerStepDataExtractor('provide', (attrs, tokens, cost) => ({
-        providerId: attrs.providerId,
-        provides: attrs.provides,
-        tokenUsage: tokens,
-        cost,
-      }));
+      registerStepDataExtractor('run', (attrs, tokens, cost) => {
+        const result: Record<string, unknown> = {
+          tokenUsage: tokens,
+          cost,
+        };
+        if (attrs.stepDescription) {
+          result.description = attrs.stepDescription;
+        }
+        return result;
+      });
+      registerStepDataExtractor('provide', (attrs, tokens, cost) => {
+        const result: Record<string, unknown> = {
+          providerId: attrs.providerId,
+          provides: attrs.provides,
+          tokenUsage: tokens,
+          cost,
+        };
+        if (attrs.stepDescription) {
+          result.description = attrs.stepDescription;
+        }
+        return result;
+      });
     });
 
     it('getStepDataExtractor returns generic fallback for unknown kind', () => {

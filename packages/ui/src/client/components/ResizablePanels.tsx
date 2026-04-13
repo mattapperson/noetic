@@ -220,16 +220,17 @@ const CenterCanvas: React.FC<CenterCanvasProps> = ({
 interface RightPanelProps {
   selectedNodeId: string | null;
   nodes: unknown; // Can be Map or serialized object
+  onSelectNode?: (nodeId: string) => void;
 }
 
-const RightPanel: React.FC<RightPanelProps> = ({ selectedNodeId, nodes }) => {
+const RightPanel: React.FC<RightPanelProps> = ({ selectedNodeId, nodes, onSelectNode }) => {
   // Ensure nodes is a Map using ensureMap
   const nodeMap = ensureMap<string, import('../types').ExecutionNode>(nodes);
   const selectedNode = selectedNodeId ? (nodeMap.get(selectedNodeId) ?? null) : null;
 
   return (
     <div className="h-full border-l border-[var(--noetic-border)] bg-[var(--noetic-sidebar-bg)] flex flex-col">
-      <NodeInspector selectedNode={selectedNode} />
+      <NodeInspector selectedNode={selectedNode} nodes={nodeMap} onSelectNode={onSelectNode} />
     </div>
   );
 };
@@ -538,7 +539,11 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = (_props) => {
             side="right"
             isHydrated={hasHydrated}
           >
-            <RightPanel selectedNodeId={selectedNodeId} nodes={nodes} />
+            <RightPanel
+              selectedNodeId={selectedNodeId}
+              nodes={nodes}
+              onSelectNode={handleNodeSelect}
+            />
           </ResizableSidebar>
         )}
       </div>
