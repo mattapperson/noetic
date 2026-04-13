@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { executeProvide } from '../../src/interpreter/execute-provide';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { ContextImpl } from '../../src/runtime/context-impl';
@@ -149,8 +150,12 @@ describe('executeProvide', () => {
 
       await executeProvide(step, 'input', ctx, simpleExecute);
       expect(ctx.itemLog.items).toHaveLength(2);
-      expect(ctx.itemLog.items[0].id).toBe('p1');
-      expect(ctx.itemLog.items[1].id).toBe('c1');
+      const item0 = ctx.itemLog.items[0];
+      const item1 = ctx.itemLog.items[1];
+      assert(item0 !== undefined && 'id' in item0);
+      assert(item1 !== undefined && 'id' in item1);
+      expect(item0.id).toBe('p1');
+      expect(item1.id).toBe('c1');
     });
 
     it('state mutations in child are visible to parent', async () => {

@@ -830,7 +830,10 @@ describe('runAppendPipeline', () => {
           onItemAppend: async ({ items }) => {
             const transformed = items.map((item) => ({
               ...item,
-              id: `transformed-${item.id}`,
+              id:
+                'id' in item && typeof item.id === 'string'
+                  ? `transformed-${item.id}`
+                  : 'transformed-anon',
             }));
             return {
               items: transformed,
@@ -856,7 +859,9 @@ describe('runAppendPipeline', () => {
     });
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].id).toMatch(/^transformed-/);
+    const firstItem = result.items[0];
+    assert(firstItem !== undefined && 'id' in firstItem);
+    expect(firstItem.id).toMatch(/^transformed-/);
   });
 
   it('injects additional items', async () => {

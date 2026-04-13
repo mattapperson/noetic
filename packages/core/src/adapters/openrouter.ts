@@ -14,13 +14,6 @@ import { SteeringAction } from '../types/steering';
 
 //#region Provider Types
 
-type ProviderOutputItem = OpenRouterAgent.OpenResponsesResult['output'][number];
-type OpenRouterInputItem =
-  | OpenRouterAgent.EasyInputMessage
-  | OpenRouterAgent.FunctionCallItem
-  | OpenRouterAgent.FunctionCallOutputItem
-  | ProviderOutputItem;
-
 /** @internal */
 export type SdkTool = OpenRouterAgent.Tool;
 
@@ -99,14 +92,35 @@ export function extractSystemInstruction(items: ReadonlyArray<Item>): {
   };
 }
 
-function itemToInputItem(item: Item): OpenRouterInputItem | null {
+function itemToInputItem(item: Item): OpenRouterAgent.Item | null {
+  // Assistant (output) messages — pass through directly as AssistantMessageItem
+  if (isAssistantMessage(item)) {
+    return item;
+  }
+
+  // Input messages (user, system, developer) — create role-specific SDK variants
   if (item.type === 'message' && 'content' in item && 'role' in item) {
-    // All message types (input and output) are converted to EasyInputMessage
-    // because the SDK's input union does not accept ResponsesOutputMessage directly.
-    return {
-      role: item.role,
-      content: contentPartsToText(item.content),
-    } satisfies OpenRouterAgent.EasyInputMessage;
+    const text = contentPartsToText(item.content);
+    if (item.role === 'user') {
+      return {
+        role: 'user',
+        content: text,
+      };
+    }
+    if (item.role === 'developer') {
+      return {
+        role: 'developer',
+        content: text,
+      };
+    }
+    if (item.role === 'system') {
+      return {
+        role: 'system',
+        content: text,
+        id: item.id,
+      };
+    }
+    return null;
   }
 
   if (item.type === 'function_call') {
@@ -127,14 +141,27 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     } satisfies OpenRouterAgent.FunctionCallOutputItem;
   }
 
-  // Reasoning, web_search_call, file_search_call, image_generation_call,
-  // server tool outputs — pass through directly for round-tripping
-  return frameworkCast<ProviderOutputItem>(item);
+  // Pass through output types that are in the SDK Item union
+  if (item.type === 'reasoning') {
+    return item;
+  }
+  if (item.type === 'web_search_call') {
+    return item;
+  }
+  if (item.type === 'file_search_call') {
+    return item;
+  }
+  if (item.type === 'image_generation_call') {
+    return item;
+  }
+
+  // Server tool outputs and unknown types — not in SDK Item union, skip
+  return null;
 }
 
 /** @internal Converts Noetic Items to OpenRouter SDK input format. */
-export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
-  const result: OpenRouterInputItem[] = [];
+export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterAgent.Item[] {
+  const result: OpenRouterAgent.Item[] = [];
   for (const item of items) {
     const inputItem = itemToInputItem(item);
     if (!inputItem) {

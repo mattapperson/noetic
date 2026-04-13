@@ -100,7 +100,7 @@ describe('itemsToInput', () => {
     expect(input).toHaveLength(2);
   });
 
-  it('passes extension items through for round-tripping', () => {
+  it('drops vendor-prefixed server tool items not in SDK Item union', () => {
     const webSearch = frameworkCast<Item>({
       type: 'openrouter:web_search',
       id: 'ws-1',
@@ -110,7 +110,8 @@ describe('itemsToInput', () => {
       makeMessage('user', 'Hi'),
       webSearch,
     ]);
-    expect(input).toHaveLength(2);
+    // Server tool items with vendor-prefixed types are not in the SDK Item union
+    expect(input).toHaveLength(1);
   });
 });
 

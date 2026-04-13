@@ -51,56 +51,53 @@ export class PiMonoAgent implements CodingAgent {
     }
   }
 
-  private sendRpcRequest(recommendation: OptimizationRecommendation): Promise<ApplyResult> {
-    return new Promise((resolve, reject) => {
-      const child = spawnProcess(
-        'pi',
-        [
-          '--mode',
-          'rpc',
+  private async sendRpcRequest(recommendation: OptimizationRecommendation): Promise<ApplyResult> {
+    const child = spawnProcess(
+      'pi',
+      [
+        '--mode',
+        'rpc',
+      ],
+      {
+        stdio: [
+          'pipe',
+          'pipe',
+          'pipe',
         ],
-        {
-          stdio: [
-            'pipe',
-            'pipe',
-            'pipe',
-          ],
-        },
-      );
+      },
+    );
 
-      let stdout = '';
-      let stderr = '';
+    let stdout = '';
+    let stderr = '';
 
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
+    child.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
 
-      child.stdin?.write(buildRpcRequest(recommendation));
-      child.stdin?.end();
+    child.stdin?.write(buildRpcRequest(recommendation));
+    child.stdin?.end();
 
-      child.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`pi-mono exited with code ${code}: ${stderr}`));
-          return;
-        }
-        try {
-          resolve(parseRpcResponse(stdout));
-        } catch {
-          reject(new Error(`Failed to parse pi-mono response: ${stdout}`));
-        }
-      });
-
-      child.on('error', (err) => {
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.ref();
+      child.exitCode !== null
+        ? resolve(child.exitCode)
+        : child.stdout?.once('end', () => resolve(child.exitCode));
+      child.stderr?.once('error', (err: Error) =>
         reject(
           new Error(
             `Failed to spawn pi-mono: ${err.message}. Is @mariozechner/pi-coding-agent installed?`,
           ),
-        );
-      });
+        ),
+      );
     });
+
+    if (code !== 0) {
+      throw new Error(`pi-mono exited with code ${code}: ${stderr}`);
+    }
+    return parseRpcResponse(stdout);
   }
 }
 

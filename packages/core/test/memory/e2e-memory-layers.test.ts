@@ -9,7 +9,6 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { OpenResponsesResult } from '@openrouter/agent';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 
 type OpenResponsesOutputItem = OpenResponsesResult['output'][number];
 
@@ -58,24 +57,23 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
     });
 
     // Extract user message text from items
-    const inputMessages = request.items
-      .filter((i) => i.type === 'message' && 'content' in i && 'role' in i)
+    const inputMessages: Array<{
+      role: 'user';
+      content: string;
+    }> = request.items
+      .filter((i) => i.type === 'message' && 'content' in i && 'role' in i && i.role === 'user')
       .map((m) => {
         const parts: Array<{
           type: string;
           text?: string;
         }> = 'content' in m && Array.isArray(m.content) ? m.content : [];
-        const role = 'role' in m ? m.role : 'user';
-        return frameworkCast<{
-          role: 'user' | 'system' | 'developer';
-          content: string;
-        }>({
-          role,
+        return {
+          role: 'user' as const,
           content: parts
             .filter((c) => (c.type === 'input_text' || c.type === 'output_text') && c.text)
             .map((c) => c.text ?? '')
             .join(''),
-        });
+        };
       });
 
     const sdkResult = client.callModel({

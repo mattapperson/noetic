@@ -413,6 +413,7 @@ describe('HarnessResult — getItemStream', () => {
     // Last snapshot: completed
     const last = items[items.length - 1];
     expect(last.isComplete).toBe(true);
+    assert('status' in last);
     expect(last.status).toBe('completed');
   });
 

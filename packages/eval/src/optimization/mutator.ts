@@ -76,6 +76,11 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
       return {
         ...step,
       };
+    case 'provide':
+      return {
+        ...step,
+        child: cloneAndReplace(step.child, candidate, `${path}.`),
+      };
   }
 }
 

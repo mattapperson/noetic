@@ -197,6 +197,7 @@ describe('executeSpawn', () => {
       expect(childItems).toHaveLength(1);
       const firstItem = childItems[0];
       assert(firstItem !== undefined);
+      assert('id' in firstItem);
       expect(firstItem.id).toBe('spawn-1');
     });
   });
@@ -303,6 +304,7 @@ describe('executeSpawn', () => {
       expect(childItems).toHaveLength(1);
       const item = childItems[0];
       assert(item !== undefined);
+      assert('id' in item);
       expect(item.id).toBe('spawn-item');
     });
   });
@@ -366,6 +368,8 @@ describe('executeSpawn', () => {
       const second = childItems[1];
       assert(first !== undefined);
       assert(second !== undefined);
+      assert('id' in first);
+      assert('id' in second);
       // Lower slot (WORKING_MEMORY=100) should come before higher slot (EPISODIC=300)
       expect(first.id).toBe('low-item');
       expect(second.id).toBe('high-item');
