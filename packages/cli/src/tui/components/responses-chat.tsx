@@ -15,6 +15,7 @@ import {
   extractTextContent,
   getItemId,
   isErrorEntry,
+  isJsxEntry,
   isSystemEntry,
   isUserEntry,
 } from '../item-utils.js';
@@ -183,6 +184,10 @@ function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext
     );
   }
 
+  if (isJsxEntry(entry)) {
+    return <Box key={entry.key}>{entry.node}</Box>;
+  }
+
   const key = getItemId(entry);
   const isLastEntry = index === ctx.entryCount - 1;
   const isStreaming = isLastEntry && ctx.chatStatus === 'streaming' && entry.status !== 'completed';
@@ -290,7 +295,11 @@ export function ResponsesChat({
           ? `user-${i}`
           : isErrorEntry(entry)
             ? `error-${i}`
-            : getItemId(entry),
+            : isSystemEntry(entry)
+              ? `system-${i}`
+              : isJsxEntry(entry)
+                ? entry.key
+                : getItemId(entry),
         entry,
         index: i,
       })),

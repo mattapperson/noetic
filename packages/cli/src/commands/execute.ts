@@ -32,9 +32,17 @@ export async function executeCommand(
 
   if (command.type === 'local-jsx') {
     const mod = await command.load();
-    // For JSX commands, we return a special result that the caller handles
+    // For JSX commands, we need to handle two possible outcomes:
+    // 1. The command returns a ReactNode to display
+    // 2. The command calls onDone with optional text result
+    // The first one to resolve wins.
     return new Promise((resolve) => {
+      let resolved = false;
       const onDone = (result?: string): void => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
         if (result) {
           resolve({
             type: 'text',
@@ -47,6 +55,10 @@ export async function executeCommand(
         }
       };
       mod.call(onDone, ctx, args).then((node) => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
         resolve({
           type: 'jsx',
           node,

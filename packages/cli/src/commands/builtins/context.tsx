@@ -6,14 +6,13 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { ConversationEntry } from '../../tui/item-utils.js';
-import type { Command, LocalJsxCommandCall, LocalJsxCommandOnDone } from '../types.js';
+import type { Command, LocalJsxCommandCall } from '../types.js';
 
 //#region Types
 
 interface ContextDisplayProps {
   model: string;
   entries: ReadonlyArray<ConversationEntry>;
-  onDone: LocalJsxCommandOnDone;
 }
 
 interface StatRowProps {
@@ -80,12 +79,9 @@ function StatRow({ label, value, color = 'white' }: StatRowProps): ReactNode {
   );
 }
 
-function ContextDisplay({ model, entries, onDone }: ContextDisplayProps): ReactNode {
+function ContextDisplay({ model, entries }: ContextDisplayProps): ReactNode {
   const counts = countByType(entries);
   const totalMessages = counts.userMessages + counts.assistantMessages;
-
-  // Auto-dismiss after render
-  setTimeout(() => onDone(), 0);
 
   return (
     <Box flexDirection="column" marginY={1}>
@@ -111,8 +107,8 @@ function ContextDisplay({ model, entries, onDone }: ContextDisplayProps): ReactN
 
 //#region Implementation
 
-const call: LocalJsxCommandCall = async (onDone, ctx, _args) => {
-  return <ContextDisplay model={ctx.config.model} entries={ctx.entries} onDone={onDone} />;
+const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
+  return <ContextDisplay model={ctx.config.model} entries={ctx.entries} />;
 };
 
 //#endregion

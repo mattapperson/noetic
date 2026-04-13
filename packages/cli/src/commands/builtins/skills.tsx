@@ -6,14 +6,13 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import type { SkillDefinition } from '../../skills/types.js';
 import { SkillSource } from '../../skills/types.js';
-import type { Command, LocalJsxCommandCall, LocalJsxCommandOnDone } from '../types.js';
+import type { Command, LocalJsxCommandCall } from '../types.js';
 
 //#region Types
 
 interface SkillsListProps {
   skills: ReadonlyArray<SkillDefinition>;
   activatedSkills: ReadonlySet<string>;
-  onDone: LocalJsxCommandOnDone;
 }
 
 interface SkillGroupProps {
@@ -50,7 +49,7 @@ function SkillGroup({ title, skills, activatedSkills }: SkillGroupProps): ReactN
   );
 }
 
-function SkillsList({ skills, activatedSkills, onDone }: SkillsListProps): ReactNode {
+function SkillsList({ skills, activatedSkills }: SkillsListProps): ReactNode {
   // Group skills by source
   const projectSkills = skills.filter((s) => s.source === SkillSource.Project);
   const userSkills = skills.filter((s) => s.source === SkillSource.User);
@@ -58,9 +57,6 @@ function SkillsList({ skills, activatedSkills, onDone }: SkillsListProps): React
 
   const totalCount = skills.length;
   const activeCount = activatedSkills.size;
-
-  // Auto-dismiss after render (skills list is informational)
-  setTimeout(() => onDone(), 0);
 
   if (totalCount === 0) {
     return (
@@ -87,8 +83,8 @@ function SkillsList({ skills, activatedSkills, onDone }: SkillsListProps): React
 
 //#region Implementation
 
-const call: LocalJsxCommandCall = async (onDone, ctx, _args) => {
-  return <SkillsList skills={ctx.skills} activatedSkills={ctx.activatedSkills} onDone={onDone} />;
+const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
+  return <SkillsList skills={ctx.skills} activatedSkills={ctx.activatedSkills} />;
 };
 
 //#endregion

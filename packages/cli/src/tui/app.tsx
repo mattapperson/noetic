@@ -22,11 +22,13 @@ import type { SkillDefinition } from '../skills/types.js';
 import type { AgentConfig } from '../types/config.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
-import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
+import type { ConversationEntry, ErrorEntry, JsxEntry, SystemEntry, UserEntry } from './item-utils.js';
 import {
   appendOrUpdateEntry,
   extractActivatedSkills,
   isErrorEntry,
+  isJsxEntry,
+  isSystemEntry,
   isUserEntry,
 } from './item-utils.js';
 
@@ -69,7 +71,8 @@ function isItem(entry: ConversationEntry): entry is Item {
 function entriesToItems(entries: ConversationEntry[]): Item[] {
   const items: Item[] = [];
   for (const entry of entries) {
-    if (isErrorEntry(entry)) {
+    // Skip system UI entries that aren't part of the conversation
+    if (isErrorEntry(entry) || isSystemEntry(entry) || isJsxEntry(entry)) {
       continue;
     }
     if (isUserEntry(entry)) {
@@ -97,11 +100,12 @@ interface AppProps {
 
 //#region App Component
 
+let jsxKeyCounter = 0;
+
 function App({ config, plugins }: AppProps): ReactNode {
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
-  const [commandOutput, setCommandOutput] = useState<ReactNode | null>(null);
 
   const harnessRef = useRef<AgentHarness | null>(null);
 
@@ -180,10 +184,16 @@ function App({ config, plugins }: AppProps): ReactNode {
                   } satisfies SystemEntry,
                 ]);
               } else if (result.type === 'jsx') {
-                // Render JSX output
-                setCommandOutput(result.node);
-                // Clear after a short delay
-                setTimeout(() => setCommandOutput(null), 100);
+                // Add JSX output as a conversation entry
+                setEntries((prev) => [
+                  ...prev,
+                  {
+                    role: 'system',
+                    type: 'jsx',
+                    node: result.node,
+                    key: `jsx-${++jsxKeyCounter}`,
+                  } satisfies JsxEntry,
+                ]);
               }
               // 'skip' type means no output
             } catch (error) {
@@ -250,7 +260,6 @@ function App({ config, plugins }: AppProps): ReactNode {
 
   return (
     <InkProvider>
-      {commandOutput}
       <ResponsesChat
         entries={entries}
         status={status}
