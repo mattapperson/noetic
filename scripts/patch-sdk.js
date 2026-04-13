@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Adds compatibility shims for @openrouter/agent and @openrouter/sdk
-import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const scriptsDir = fileURLToPath(new URL('.', import.meta.url));
 
 // Shim 1: Export aliases for renamed types
 const shimContent = `// Shim: re-export with old names for @openrouter/agent compatibility
@@ -18,9 +18,15 @@ export {
 
 // Patch all SDK versions that might be resolved
 const sdkPaths = [
-  join(__dirname, '../node_modules/@openrouter/sdk/esm/models'),
-  join(__dirname, '../node_modules/.bun/@openrouter+sdk@0.10.2/node_modules/@openrouter/sdk/esm/models'),
-  join(__dirname, '../node_modules/.bun/@openrouter+sdk@0.5.1/node_modules/@openrouter/sdk/esm/models'),
+  join(scriptsDir, '../node_modules/@openrouter/sdk/esm/models'),
+  join(
+    scriptsDir,
+    '../node_modules/.bun/@openrouter+sdk@0.10.2/node_modules/@openrouter/sdk/esm/models',
+  ),
+  join(
+    scriptsDir,
+    '../node_modules/.bun/@openrouter+sdk@0.5.1/node_modules/@openrouter/sdk/esm/models',
+  ),
 ];
 
 for (const modelsDir of sdkPaths) {
@@ -37,9 +43,9 @@ for (const modelsDir of sdkPaths) {
 // Shim 2: Fix responsesRequest -> openResponsesRequest mismatch between agent and SDK
 // This is only needed when agent uses one name but the SDK it resolves to uses another
 const agentPaths = [
-  join(__dirname, '../node_modules/@openrouter/agent'),
-  join(__dirname, '../node_modules/.bun/@openrouter+agent@0.3.0/node_modules/@openrouter/agent'),
-  join(__dirname, '../node_modules/.bun/@openrouter+agent@0.3.1/node_modules/@openrouter/agent'),
+  join(scriptsDir, '../node_modules/@openrouter/agent'),
+  join(scriptsDir, '../node_modules/.bun/@openrouter+agent@0.3.0/node_modules/@openrouter/agent'),
+  join(scriptsDir, '../node_modules/.bun/@openrouter+agent@0.3.1/node_modules/@openrouter/agent'),
 ];
 
 for (const agentPath of agentPaths) {
@@ -56,8 +62,11 @@ for (const agentPath of agentPaths) {
   let sdkExpectsOpen = false;
   const sdkCheckPaths = [
     join(agentPath, 'node_modules/@openrouter/sdk/esm/funcs/betaResponsesSend.d.ts'),
-    join(__dirname, `../node_modules/.bun/@openrouter+sdk@${sdkVersion?.replace('^', '')}/node_modules/@openrouter/sdk/esm/funcs/betaResponsesSend.d.ts`),
-    join(__dirname, '../node_modules/@openrouter/sdk/esm/funcs/betaResponsesSend.d.ts'),
+    join(
+      scriptsDir,
+      `../node_modules/.bun/@openrouter+sdk@${sdkVersion?.replace('^', '')}/node_modules/@openrouter/sdk/esm/funcs/betaResponsesSend.d.ts`,
+    ),
+    join(scriptsDir, '../node_modules/@openrouter/sdk/esm/funcs/betaResponsesSend.d.ts'),
   ];
 
   for (const sdkPath of sdkCheckPaths) {
@@ -69,7 +78,8 @@ for (const agentPath of agentPaths) {
   }
 
   let content = readFileSync(modelResultPath, 'utf-8');
-  const agentUsesResponses = content.includes('responsesRequest:') && !content.includes('openResponsesRequest:');
+  const agentUsesResponses =
+    content.includes('responsesRequest:') && !content.includes('openResponsesRequest:');
   const agentUsesOpen = content.includes('openResponsesRequest:');
 
   if (sdkExpectsOpen && agentUsesResponses) {
