@@ -315,6 +315,30 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
+### planMemory
+
+Manages PRD authoring and plan execution lifecycle. Enters a restricted "plan mode" where only read-only tools are allowed, the LLM writes a PRD and structures a PlanNode tree, then exits to execution.
+
+```typescript
+planMemory({
+  scope?: MemoryScope;                    // default 'thread'
+  additionalAllowedTools?: string[];      // extra tools allowed in plan mode
+  maxPrdLength?: number;                  // default 50_000
+  maxTreeDepth?: number;                  // default 5
+}): MemoryLayer<PlanState>
+```
+
+**State:** `{ phase, prd, planTree, executionLog, version }`. Phase transitions: `idle → planning → executing → completed/failed`.
+
+**Provides (auto-exposed as LLM tools):**
+- `plan/enterPlanMode({ goal? })` — transitions idle → planning, optionally seeds PRD
+- `plan/updatePrd({ content })` — replaces PRD content (planning phase only)
+- `plan/setPlanTree(PlanNode)` — sets execution tree (validated against PlanNodeSchema)
+- `plan/exitPlanMode({ action: 'execute' | 'cancel' })` — exits plan mode
+- `status` (layerData) — `{ phase, hasPrd, hasPlanTree, version }`
+
+**Lifecycle hooks:** `init` (load from storage), `recall` (phase-dependent context injection), `beforeToolCall` (restrict to read-only in planning), `onSpawn` (clone state), `onComplete` (record outcome).
+
 ## Layer Provides API
 
 Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.memory['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).

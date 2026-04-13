@@ -1,0 +1,443 @@
+import { z } from 'zod';
+import { layerData, layerFn } from '../../builders/layer-provides-builders';
+import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
+import type { PlanNode } from '../../patterns/plans';
+import { PlanNodeSchema } from '../../patterns/plans';
+import type { MemoryLayer, MemoryScope } from '../../types/memory';
+import { Slot } from '../../types/memory';
+import { SteeringAction } from '../../types/steering';
+
+//#region Constants
+
+const MAX_PRD_LENGTH = 5e4;
+const MAX_TREE_DEPTH = 5;
+const MAX_EXECUTION_LOG_ENTRIES = 10;
+const PLAN_SLOT = Slot.PROCEDURAL - 10; // 240
+
+const ALLOWED_TOOLS_IN_PLAN_MODE = new Set([
+  'Read',
+  'Grep',
+  'Find',
+  'Ls',
+  'activateSkill',
+  'plan/enterPlanMode',
+  'plan/updatePrd',
+  'plan/setPlanTree',
+  'plan/exitPlanMode',
+]);
+
+//#endregion
+
+//#region Types
+
+export const PlanPhase = {
+  Idle: 'idle',
+  Planning: 'planning',
+  Executing: 'executing',
+  Completed: 'completed',
+  Failed: 'failed',
+} as const;
+
+export type PlanPhase = (typeof PlanPhase)[keyof typeof PlanPhase];
+
+export interface PlanExecutionEntry {
+  timestamp: number;
+  version: number;
+  outcome: 'success' | 'failure' | 'aborted';
+}
+
+export interface PlanState {
+  phase: PlanPhase;
+  prd: string | null;
+  planTree: PlanNode | null;
+  executionLog: PlanExecutionEntry[];
+  version: number;
+}
+
+export interface PlanMemoryConfig {
+  scope?: MemoryScope;
+  additionalAllowedTools?: string[];
+  maxPrdLength?: number;
+  maxTreeDepth?: number;
+}
+
+//#endregion
+
+//#region Helpers
+
+function createDefaultState(): PlanState {
+  return {
+    phase: PlanPhase.Idle,
+    prd: null,
+    planTree: null,
+    executionLog: [],
+    version: 0,
+  };
+}
+
+function validateTreeDepth(node: PlanNode, maxDepth: number, currentDepth = 0): boolean {
+  if (currentDepth > maxDepth) {
+    return false;
+  }
+  if (!node.children) {
+    return true;
+  }
+  return node.children.every((child) => validateTreeDepth(child, maxDepth, currentDepth + 1));
+}
+
+function buildAllowedTools(config?: PlanMemoryConfig): Set<string> {
+  if (!config?.additionalAllowedTools?.length) {
+    return ALLOWED_TOOLS_IN_PLAN_MODE;
+  }
+  return new Set([
+    ...ALLOWED_TOOLS_IN_PLAN_MODE,
+    ...config.additionalAllowedTools,
+  ]);
+}
+
+function trimExecutionLog(log: PlanExecutionEntry[]): PlanExecutionEntry[] {
+  if (log.length <= MAX_EXECUTION_LOG_ENTRIES) {
+    return log;
+  }
+  return log.slice(log.length - MAX_EXECUTION_LOG_ENTRIES);
+}
+
+//#endregion
+
+//#region Recall Renderers
+
+function recallPlanning(state: PlanState): string {
+  const sections: string[] = [
+    '<plan_mode>',
+    'You are in PLAN MODE. You may only use read-only tools (Read, Grep, Find, Ls) to explore the codebase.',
+    'Your goal is to produce a PRD document and a structured execution plan.',
+    '',
+    'Available actions:',
+    '- Call plan/updatePrd with your PRD content (markdown)',
+    '- Call plan/setPlanTree with a PlanNode JSON tree',
+    '- Call plan/exitPlanMode with { action: "execute" } to begin execution',
+    '- Call plan/exitPlanMode with { action: "cancel" } to cancel',
+  ];
+
+  if (state.prd) {
+    sections.push('', '## Current PRD Draft', '', state.prd);
+  }
+
+  if (state.planTree) {
+    sections.push('', '## Current Plan Tree', '', JSON.stringify(state.planTree, null, 2));
+  }
+
+  sections.push('</plan_mode>');
+  return sections.join('\n');
+}
+
+function recallExecuting(state: PlanState): string {
+  const sections: string[] = [
+    '<active_plan>',
+    '## PRD',
+    '',
+    state.prd ?? '',
+    '',
+    '## Execution Plan',
+    '',
+    JSON.stringify(state.planTree, null, 2),
+    '</active_plan>',
+  ];
+  return sections.join('\n');
+}
+
+function recallTerminal(state: PlanState): string {
+  const lastEntry = state.executionLog[state.executionLog.length - 1];
+  const outcome = lastEntry?.outcome ?? 'unknown';
+  return `<plan_outcome>Plan v${state.version} ${outcome}.</plan_outcome>`;
+}
+
+type RecallRenderer = (state: PlanState) => string;
+
+const RECALL_RENDERERS: Partial<Record<PlanPhase, RecallRenderer>> = {
+  [PlanPhase.Planning]: recallPlanning,
+  [PlanPhase.Executing]: recallExecuting,
+  [PlanPhase.Completed]: recallTerminal,
+  [PlanPhase.Failed]: recallTerminal,
+};
+
+//#endregion
+
+//#region Public API
+
+/**
+ * Creates a plan memory layer that manages the PRD authoring and plan execution lifecycle.
+ *
+ * @public
+ * @param config - Optional configuration for scope, allowed tools, and limits.
+ * @returns A `MemoryLayer` providing plan mode, PRD storage, and execution tracking.
+ */
+export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
+  const scope: MemoryScope = config?.scope ?? 'thread';
+  const maxPrdLength = config?.maxPrdLength ?? MAX_PRD_LENGTH;
+  const maxTreeDepth = config?.maxTreeDepth ?? MAX_TREE_DEPTH;
+  const allowedTools = buildAllowedTools(config);
+
+  return {
+    id: 'plan',
+    name: 'Plan Memory',
+    slot: PLAN_SLOT,
+    scope,
+    budget: {
+      min: 100,
+      max: 3e3,
+    },
+    provides: {
+      status: layerData<
+        {
+          phase: PlanPhase;
+          hasPrd: boolean;
+          hasPlanTree: boolean;
+          version: number;
+        },
+        PlanState
+      >({
+        read: (state) => ({
+          phase: state.phase,
+          hasPrd: state.prd !== null,
+          hasPlanTree: state.planTree !== null,
+          version: state.version,
+        }),
+      }),
+
+      enterPlanMode: layerFn<
+        {
+          goal?: string;
+        },
+        string,
+        PlanState
+      >({
+        description:
+          'Enter plan mode. The agent switches to read-only exploration and PRD authoring.',
+        input: z.object({
+          goal: z.string().optional(),
+        }),
+        output: z.string(),
+        execute: async (args, state) => {
+          if (state.phase !== PlanPhase.Idle) {
+            return {
+              result: `Cannot enter plan mode: current phase is "${state.phase}".`,
+              state,
+            };
+          }
+          return {
+            result: 'Plan mode activated. Explore the codebase, then call plan/updatePrd.',
+            state: {
+              ...state,
+              phase: PlanPhase.Planning,
+              prd: args.goal ? `# Goal\n\n${args.goal}\n` : null,
+              planTree: null,
+              version: state.version + 1,
+            },
+          };
+        },
+      }),
+
+      updatePrd: layerFn<
+        {
+          content: string;
+        },
+        string,
+        PlanState
+      >({
+        description: 'Update the PRD document with new markdown content.',
+        input: z.object({
+          content: z.string(),
+        }),
+        output: z.string(),
+        execute: async (args, state) => {
+          if (state.phase !== PlanPhase.Planning) {
+            return {
+              result: `Cannot update PRD: current phase is "${state.phase}". Enter plan mode first.`,
+              state,
+            };
+          }
+          if (args.content.length > maxPrdLength) {
+            return {
+              result: `PRD content exceeds maximum length of ${maxPrdLength} characters.`,
+              state,
+            };
+          }
+          return {
+            result: 'PRD updated successfully.',
+            state: {
+              ...state,
+              prd: args.content,
+            },
+          };
+        },
+      }),
+
+      setPlanTree: layerFn<PlanNode, string, PlanState>({
+        description:
+          'Set the execution plan tree. Input must be a valid PlanNode with id, description, assignee, execution, and optional children.',
+        input: PlanNodeSchema,
+        output: z.string(),
+        execute: async (args, state) => {
+          if (state.phase !== PlanPhase.Planning) {
+            return {
+              result: `Cannot set plan tree: current phase is "${state.phase}". Enter plan mode first.`,
+              state,
+            };
+          }
+          if (!validateTreeDepth(args, maxTreeDepth)) {
+            return {
+              result: `Plan tree exceeds maximum depth of ${maxTreeDepth}.`,
+              state,
+            };
+          }
+          return {
+            result: 'Plan tree set successfully. Call plan/exitPlanMode to begin execution.',
+            state: {
+              ...state,
+              planTree: args,
+            },
+          };
+        },
+      }),
+
+      exitPlanMode: layerFn<
+        {
+          action: 'execute' | 'cancel';
+        },
+        string,
+        PlanState
+      >({
+        description:
+          'Exit plan mode. Use action "execute" to begin executing the plan, or "cancel" to discard it.',
+        input: z.object({
+          action: z.enum([
+            'execute',
+            'cancel',
+          ]),
+        }),
+        output: z.string(),
+        execute: async (args, state) => {
+          if (state.phase !== PlanPhase.Planning) {
+            return {
+              result: `Cannot exit plan mode: current phase is "${state.phase}".`,
+              state,
+            };
+          }
+
+          if (args.action === 'cancel') {
+            return {
+              result: 'Plan cancelled. Returned to idle.',
+              state: createDefaultState(),
+            };
+          }
+
+          if (!state.prd) {
+            return {
+              result: 'Cannot execute: no PRD has been written. Call plan/updatePrd first.',
+              state,
+            };
+          }
+          if (!state.planTree) {
+            return {
+              result: 'Cannot execute: no plan tree has been set. Call plan/setPlanTree first.',
+              state,
+            };
+          }
+
+          return {
+            result: 'Plan mode exited. Execution phase begun.',
+            state: {
+              ...state,
+              phase: PlanPhase.Executing,
+            },
+          };
+        },
+      }),
+    },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<PlanState>('state');
+        return {
+          state: saved ?? createDefaultState(),
+        };
+      },
+
+      async recall({ state }) {
+        if (state.phase === PlanPhase.Idle) {
+          return null;
+        }
+
+        const renderer = RECALL_RENDERERS[state.phase];
+        if (!renderer) {
+          return null;
+        }
+
+        const content = renderer(state);
+        return {
+          items: [
+            createMessage(content, 'developer'),
+          ],
+          tokenCount: estimateTokens(content),
+        };
+      },
+
+      async beforeToolCall({ toolName, state }) {
+        if (state.phase !== PlanPhase.Planning) {
+          return {
+            decision: {
+              action: SteeringAction.Allow,
+            },
+            state,
+          };
+        }
+
+        if (allowedTools.has(toolName)) {
+          return {
+            decision: {
+              action: SteeringAction.Allow,
+            },
+            state,
+          };
+        }
+
+        return {
+          decision: {
+            action: SteeringAction.Deny,
+            guidance: `Plan mode is active. "${toolName}" is not allowed during planning. Use read-only tools (Read, Grep, Find, Ls) to explore the codebase, then call plan/updatePrd to write your PRD.`,
+          },
+          state,
+        };
+      },
+
+      async onSpawn({ parentState }) {
+        return {
+          childState: structuredClone(parentState),
+        };
+      },
+
+      async onComplete({ state, outcome }) {
+        if (state.phase !== PlanPhase.Executing) {
+          return;
+        }
+
+        return {
+          state: {
+            ...state,
+            phase: outcome === 'success' ? PlanPhase.Completed : PlanPhase.Failed,
+            executionLog: trimExecutionLog([
+              ...state.executionLog,
+              {
+                timestamp: Date.now(),
+                version: state.version,
+                outcome,
+              },
+            ]),
+          },
+        };
+      },
+    },
+  } satisfies MemoryLayer<PlanState>;
+}
+
+//#endregion

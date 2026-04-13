@@ -87,6 +87,14 @@ export type {
 /** @public */
 export { observationalMemory } from './memory/layers/observational-memory';
 /** @public */
+export type {
+  PlanExecutionEntry,
+  PlanMemoryConfig,
+  PlanState,
+} from './memory/layers/plan';
+/** @public */
+export { PlanPhase, planMemory } from './memory/layers/plan';
+/** @public */
 export { staticContent } from './memory/layers/static-content';
 /** @public */
 export { steering } from './memory/layers/steering';

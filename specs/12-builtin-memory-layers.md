@@ -2,7 +2,7 @@
 
 > **Package:** `@noetic/memory`
 > **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
 
 ---
 
@@ -343,6 +343,64 @@ function sharedSwarmMemory(config: { channel: PubSubChannel }): MemoryLayer<Swar
 ```
 
 Slot `380`, scope `'execution'`. Subscribes to peer findings in `init`, drains in `recall`, publishes in `store`, cleans up in `dispose`. Uses `onSpawn`/`onReturn` for parent-child finding merge.
+
+---
+
+## `planMemory()`
+
+Manages the full plan lifecycle: entering plan mode, authoring a PRD, structuring an execution tree, and tracking execution outcomes.
+
+```typescript
+interface PlanMemoryConfig {
+  scope?: MemoryScope;
+  additionalAllowedTools?: string[];
+  maxPrdLength?: number;
+  maxTreeDepth?: number;
+}
+
+function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'plan'` |
+| **slot** | `Slot.PROCEDURAL - 10` (240) |
+| **scope** | `config.scope ?? 'thread'` |
+| **budget** | `{ min: 100, max: 3000 }` |
+| **hooks** | `init`, `recall`, `beforeToolCall`, `onSpawn`, `onComplete` |
+
+**State:**
+
+```typescript
+type PlanPhase = 'idle' | 'planning' | 'executing' | 'completed' | 'failed';
+
+interface PlanState {
+  phase: PlanPhase;
+  prd: string | null;
+  planTree: PlanNode | null;
+  executionLog: PlanExecutionEntry[];
+  version: number;
+}
+```
+
+**Behavior:**
+- `init`: Loads persisted `PlanState` from `ScopedStorage`. Defaults to idle with null PRD/tree.
+- `recall`: Phase-dependent context injection. Returns `null` in idle. In `planning`, renders `<plan_mode>` block with instructions and draft PRD. In `executing`, renders `<active_plan>` block with PRD and plan tree. In terminal phases, renders `<plan_outcome>` summary.
+- `beforeToolCall`: In `planning` phase, restricts tools to read-only (`Read`, `Grep`, `Find`, `Ls`) plus plan layer tools and `activateSkill`. Denies mutating tools (`Write`, `Edit`, `Bash`). No restrictions outside planning phase.
+- `onSpawn`: Deep-clones state to child execution.
+- `onComplete`: If `executing`, records outcome in `executionLog` and transitions to `completed` or `failed`. State is returned to the runtime for persistence.
+
+**Provides:**
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `status` | `layerData` | Read-only projection: `{ phase, hasPrd, hasPlanTree, version }`. |
+| `enterPlanMode` | `layerFn` | Transitions idle → planning. Accepts optional `goal` string to seed the PRD. |
+| `updatePrd` | `layerFn` | Replaces the PRD content. Only works in planning phase. Validates max length. |
+| `setPlanTree` | `layerFn` | Sets the `PlanNode` execution tree. Validates against `PlanNodeSchema` and max depth. |
+| `exitPlanMode` | `layerFn` | Exits plan mode. `action: 'execute'` validates PRD + tree exist and transitions to executing. `action: 'cancel'` resets to idle. |
+
+**Integration with `compilePlan`/`adaptivePlan`:** The plan layer stores the `PlanNode` tree produced by the LLM. Advanced users can extract the tree from `status` and pass it to `compilePlan()` for programmatic execution. The default CLI flow uses context injection — the plan is recalled into the LLM's view and the model executes by making tool calls.
 
 ---
 

@@ -389,3 +389,36 @@ const agent = spawn({
   memory: mem,
 });
 ```
+
+## Plan Mode with `planMemory()`
+
+The `planMemory()` layer adds Claude Code-style plan mode to any agent. It restricts tools during planning and injects plan context during execution.
+
+### Basic Usage
+
+```typescript
+import { planMemory, react } from '@noetic/core';
+
+const agent = react({
+  model: 'anthropic/claude-sonnet-4',
+  instructions: 'You are a coding assistant.',
+  tools: codingTools,
+  memory: [planMemory()],
+});
+```
+
+When the model calls `plan/enterPlanMode`, tool calls are restricted to read-only. The model authors a PRD via `plan/updatePrd`, structures a `PlanNode` tree via `plan/setPlanTree`, then calls `plan/exitPlanMode({ action: 'execute' })` to begin execution.
+
+### With Custom Allowed Tools
+
+```typescript
+planMemory({
+  additionalAllowedTools: ['SearchDocs', 'ListIssues'],
+  maxPrdLength: 1e5,
+  maxTreeDepth: 3,
+})
+```
+
+### CLI Integration
+
+The CLI includes `planMemory()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures a plan tree, then exits to execute.
