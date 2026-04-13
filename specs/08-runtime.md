@@ -1,7 +1,7 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `setHarness()`, `setTraceExporter()`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `setHarness()`, `setTraceExporter()`
 
 ---
 
@@ -33,6 +33,37 @@ interface FsAdapter {
 
 ---
 
+## Shell Abstraction
+
+The `ShellAdapter` interface abstracts all shell command execution used by the agent harness, tools, memory layers, and skill processing. This enables sandboxed or emulated shell backends (e.g., `just-bash`) without changing agent code.
+
+```typescript
+interface ShellExecOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeout?: number;
+  stdin?: string;
+  signal?: AbortSignal;
+  onData?: (data: Buffer) => void;
+}
+
+interface ShellExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+interface ShellAdapter {
+  exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
+}
+```
+
+`createLocalShellAdapter()` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
+
+The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
+
+---
+
 ## The `AgentHarness` Interface
 
 The agent harness is the engine. It's behind an interface with methods covering execution, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
@@ -44,6 +75,9 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 
   // Filesystem abstraction
   readonly fs: FsAdapter;
+
+  // Shell abstraction
+  readonly shell: ShellAdapter;
 
   // Primary execution — returns a HarnessResult with streaming accessors
   execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
@@ -345,6 +379,9 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Filesystem adapter. Defaults to createLocalFsAdapter(). */
   fs?: FsAdapter;
+
+  /** Shell adapter. Defaults to createLocalShellAdapter(). */
+  shell?: ShellAdapter;
 
   /** Storage backend for memory persistence. See 11-memory-layer-system. */
   storage?: StorageAdapter;

@@ -458,9 +458,67 @@ step.run({
 });
 ```
 
+## ShellAdapter
+
+Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+
+```typescript
+interface ShellExecOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeout?: number;
+  stdin?: string;
+  signal?: AbortSignal;
+  onData?: (data: Buffer) => void;
+}
+
+interface ShellExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+interface ShellAdapter {
+  exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
+}
+```
+
+Pass a custom adapter to the harness:
+
+```typescript
+import { AgentHarness, createLocalShellAdapter } from '@noetic/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  shell: myCustomShellAdapter,  // optional, defaults to createLocalShellAdapter()
+});
+```
+
+Access from tools and layers:
+
+```typescript
+// In a tool execute function:
+tool({
+  name: 'run-lint',
+  execute: async (args, toolCtx) => {
+    const result = await toolCtx.shell.exec('eslint .', { cwd: '/app' });
+    return result.stdout;
+  },
+});
+
+// In a memory layer hook:
+hooks: {
+  async init({ ctx }) {
+    const result = await ctx.shell.exec('git rev-parse HEAD', { cwd: '.' });
+    return { state: { commitHash: result.stdout.trim() } };
+  },
+}
+```
+
 ## AgentHarness
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`).
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`). The `shell` property exposes the `ShellAdapter` (defaults to `createLocalShellAdapter()`).
 
 ```typescript
 // High-level API: execute() returns HarnessResult with streaming accessors
@@ -625,6 +683,7 @@ interface ToolExecutionContext {
   ctx: Context;                 // Step execution context (ctx.harness also available)
   harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
   fs: FsAdapter;                // Filesystem adapter (from harness)
+  shell: ShellAdapter;          // Shell adapter (from harness)
   memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
   assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;

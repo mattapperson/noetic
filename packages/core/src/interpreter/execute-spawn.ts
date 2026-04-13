@@ -73,6 +73,7 @@ function buildChildExecutionContext(ctx: Context): ExecutionContext {
     },
     cost: 0,
     fs: ctx.harness.fs,
+    shell: ctx.harness.shell,
     tokenize: naiveTokenize,
     trace: noopTrace,
   };
@@ -91,6 +92,7 @@ function buildParentExecutionContext(ctx: Context): ExecutionContext {
     },
     cost: ctx.cost,
     fs: ctx.harness.fs,
+    shell: ctx.harness.shell,
     tokenize: naiveTokenize,
     trace: noopTrace,
   };

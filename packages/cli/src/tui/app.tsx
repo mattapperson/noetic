@@ -165,11 +165,11 @@ function App({ config, plugins }: AppProps): ReactNode {
     if (harnessRef.current !== null) {
       return harnessRef.current;
     }
-    const { harness, skills: resolvedSkills } = await createAgentHarness(
+    const { harness, skills: resolvedSkills } = await createAgentHarness({
       config,
       plugins,
-      config.fs,
-    );
+      fs: config.fs,
+    });
     harnessRef.current = harness;
     setSkills(resolvedSkills);
     return harness;

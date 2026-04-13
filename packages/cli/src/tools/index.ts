@@ -2,8 +2,8 @@
  * Tool exports and convenience factories.
  */
 
-import type { FsAdapter, Tool } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 import { createBashTool } from './bash.js';
 import { createEditTool } from './edit.js';
 import { createFindTool } from './find.js';
@@ -18,7 +18,7 @@ export {
   type ActivateSkillTool,
   createActivateSkillTool,
 } from './activate-skill.js';
-export { type BashOperations, type BashOutput, type BashTool, createBashTool } from './bash.js';
+export { type BashOutput, type BashTool, createBashTool } from './bash.js';
 export { createEditTool, type EditOutput, type EditTool } from './edit.js';
 export {
   computeEditDiff,
@@ -58,22 +58,30 @@ export {
 
 //#region Tool Collection Factories
 
-export function createCodingTools(cwd: string, fs: FsAdapter = createLocalFsAdapter()): Tool[] {
+export function createCodingTools(
+  cwd: string,
+  fs: FsAdapter = createLocalFsAdapter(),
+  shell: ShellAdapter = createLocalShellAdapter(),
+): Tool[] {
   return [
     createReadTool(cwd, fs),
     createWriteTool(cwd, fs),
     createEditTool(cwd, fs),
-    createBashTool(cwd),
-    createGrepTool(cwd, fs),
+    createBashTool(cwd, shell),
+    createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
   ];
 }
 
-export function createReadOnlyTools(cwd: string, fs: FsAdapter = createLocalFsAdapter()): Tool[] {
+export function createReadOnlyTools(
+  cwd: string,
+  fs: FsAdapter = createLocalFsAdapter(),
+  shell: ShellAdapter = createLocalShellAdapter(),
+): Tool[] {
   return [
     createReadTool(cwd, fs),
-    createGrepTool(cwd, fs),
+    createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
   ];

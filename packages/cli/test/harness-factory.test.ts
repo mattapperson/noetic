@@ -37,13 +37,13 @@ describe('createAgentHarness', () => {
       ],
     };
 
-    const { harness } = await createAgentHarness(
-      baseConfig,
-      [
+    const { harness } = await createAgentHarness({
+      config: baseConfig,
+      plugins: [
         plugin,
       ],
-      testFs,
-    );
+      fs: testFs,
+    });
 
     expect(harness).toBeDefined();
   });
@@ -57,8 +57,8 @@ describe('createAgentHarness', () => {
       ],
     };
 
-    const { harness } = await createAgentHarness(
-      {
+    const { harness } = await createAgentHarness({
+      config: {
         ...baseConfig,
         tools: {
           include: [
@@ -66,11 +66,11 @@ describe('createAgentHarness', () => {
           ],
         },
       },
-      [
+      plugins: [
         plugin,
       ],
-      testFs,
-    );
+      fs: testFs,
+    });
 
     expect(harness).toBeDefined();
   });
@@ -84,8 +84,8 @@ describe('createAgentHarness', () => {
       ],
     };
 
-    const { harness } = await createAgentHarness(
-      {
+    const { harness } = await createAgentHarness({
+      config: {
         ...baseConfig,
         tools: {
           exclude: [
@@ -93,17 +93,21 @@ describe('createAgentHarness', () => {
           ],
         },
       },
-      [
+      plugins: [
         plugin,
       ],
-      testFs,
-    );
+      fs: testFs,
+    });
 
     expect(harness).toBeDefined();
   });
 
   it('returns canonical skill catalog', async () => {
-    const { skills } = await createAgentHarness(baseConfig, [], testFs);
+    const { skills } = await createAgentHarness({
+      config: baseConfig,
+      plugins: [],
+      fs: testFs,
+    });
 
     expect(skills).toBeDefined();
     expect(Array.isArray(skills)).toBe(true);

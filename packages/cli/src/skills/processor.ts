@@ -5,105 +5,17 @@
  * (lines starting with `!`) and replacing them with their output.
  */
 
-import { spawn } from 'node:child_process';
+import type { ShellAdapter } from '@noetic/core';
 
 //#region Constants
 
-const COMMAND_TIMEOUT_MS = 10_000;
+const COMMAND_TIMEOUT_S = 10;
 const COMMAND_PATTERN = /^(\s*)!(.+)$/gm;
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB max output per command
 
 //#endregion
 
 //#region Helpers
-
-function executeCommand(
-  command: string,
-  cwd: string,
-): Promise<{
-  stdout: string;
-  stderr: string;
-}> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      'sh',
-      [
-        '-c',
-        command,
-      ],
-      {
-        cwd,
-        stdio: [
-          'ignore',
-          'pipe',
-          'pipe',
-        ],
-        timeout: COMMAND_TIMEOUT_MS,
-      },
-    );
-
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let totalBytes = 0;
-    let truncated = false;
-
-    child.stdout.on('data', (data: Buffer) => {
-      if (truncated) {
-        return;
-      }
-      totalBytes += data.length;
-      if (totalBytes > MAX_OUTPUT_BYTES) {
-        truncated = true;
-        child.kill('SIGTERM');
-        return;
-      }
-      stdout.push(data);
-    });
-    child.stderr.on('data', (data: Buffer) => {
-      if (truncated) {
-        return;
-      }
-      totalBytes += data.length;
-      if (totalBytes > MAX_OUTPUT_BYTES) {
-        truncated = true;
-        child.kill('SIGTERM');
-        return;
-      }
-      stderr.push(data);
-    });
-
-    child.on('error', (err) => {
-      reject(err);
-    });
-
-    child.on('close', (code, signal) => {
-      const stdoutStr = Buffer.concat(stdout).toString('utf-8').trim();
-      const stderrStr = Buffer.concat(stderr).toString('utf-8').trim();
-
-      // Handle output truncation
-      if (truncated) {
-        reject(new Error(`Command output exceeded ${MAX_OUTPUT_BYTES} bytes limit`));
-        return;
-      }
-
-      // Handle timeout (signal is SIGTERM when spawn's timeout kills the process)
-      if (code === null && signal !== null) {
-        reject(new Error(`Command timed out (signal: ${signal})`));
-        return;
-      }
-
-      if (code !== 0) {
-        reject(new Error(`Command exited with code ${code}: ${stderrStr || stdoutStr}`));
-        return;
-      }
-
-      resolve({
-        stdout: stdoutStr,
-        stderr: stderrStr,
-      });
-    });
-  });
-}
 
 function formatOutput(output: string, indent: string): string {
   if (output === '') {
@@ -120,6 +32,23 @@ function formatOutput(output: string, indent: string): string {
   return `${indent}\`\`\`\n${indentedLines}\n${indent}\`\`\``;
 }
 
+function truncateOutput(
+  stdout: string,
+  stderr: string,
+): {
+  stdout: string;
+  stderr: string;
+} {
+  const totalBytes = Buffer.byteLength(stdout) + Buffer.byteLength(stderr);
+  if (totalBytes <= MAX_OUTPUT_BYTES) {
+    return {
+      stdout,
+      stderr,
+    };
+  }
+  throw new Error(`Command output exceeded ${MAX_OUTPUT_BYTES} bytes limit`);
+}
+
 //#endregion
 
 //#region Public API
@@ -132,9 +61,14 @@ function formatOutput(output: string, indent: string): string {
  *
  * @param content - The raw skill instructions
  * @param cwd - Working directory for command execution
+ * @param shell - Shell adapter to execute commands through
  * @returns Processed content with command outputs
  */
-export async function processSkillContent(content: string, cwd: string): Promise<string> {
+export async function processSkillContent(
+  content: string,
+  cwd: string,
+  shell: ShellAdapter,
+): Promise<string> {
   const matches: Array<{
     full: string;
     indent: string;
@@ -161,10 +95,28 @@ export async function processSkillContent(content: string, cwd: string): Promise
 
   // Execute commands and collect results
   const results = await Promise.allSettled(
-    matches.map(async ({ command }) => executeCommand(command, cwd)),
+    matches.map(async ({ command }) => {
+      const result = await shell.exec(command, {
+        cwd,
+        timeout: COMMAND_TIMEOUT_S,
+      });
+
+      // null exitCode means the process was killed (e.g., timeout)
+      if (result.exitCode === null) {
+        throw new Error('Command was killed (timeout or signal)');
+      }
+
+      if (result.exitCode !== 0) {
+        const errMsg = result.stderr.trim() || result.stdout.trim();
+        throw new Error(`Command exited with code ${result.exitCode}: ${errMsg}`);
+      }
+
+      const trimmed = truncateOutput(result.stdout.trim(), result.stderr.trim());
+      return trimmed;
+    }),
   );
 
-  // Replace matches with results
+  // Replace matches with results (use split/join to avoid $ token interpretation)
   let processed = content;
   for (let i = 0; i < matches.length; i++) {
     const { full, indent, command } = matches[i];
@@ -186,7 +138,7 @@ export async function processSkillContent(content: string, cwd: string): Promise
       replacement = `${indent}<!-- error executing \`${command}\`: ${errorMsg} -->`;
     }
 
-    processed = processed.replace(full, replacement);
+    processed = processed.split(full).join(replacement);
   }
 
   return processed;

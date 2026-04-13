@@ -23,6 +23,7 @@ export function buildToolExecutionContext(
     ctx,
     harness,
     fs: harness.fs,
+    shell: harness.shell,
     memory: buildToolMemory(harness, ctx),
     assembledView: ctx.itemLog.items,
     lastStepMeta: ctx.lastStepMeta,

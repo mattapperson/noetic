@@ -5,6 +5,7 @@ import type { Item } from './items';
 import type { ContextMemory, MemoryLayer } from './memory';
 import type { Span } from './observability';
 import type { AgentHarnessContract } from './runtime';
+import type { ShellAdapter } from './shell-adapter';
 
 /** @public Append-only log of conversation items accumulated during execution. */
 export interface ItemLog {
@@ -30,6 +31,8 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly harness: AgentHarnessContract;
   /** Filesystem adapter for virtual or real filesystem access. */
   readonly fs: FsAdapter;
+  /** Shell adapter for virtual or real shell command execution. */
+  readonly shell: ShellAdapter;
   readonly layers?: MemoryLayer[];
   /** Layer provides keyed by layer ID. Access data/functions via `ctx.memory['layerId'].prop`. */
   readonly memory: TMemory;

@@ -171,7 +171,7 @@ export function skillsLayer(
         return sections.join('\n');
       },
 
-      async store({ newItems, state }) {
+      async store({ newItems, state, ctx }) {
         const args = findFunctionCall(newItems, 'activateSkill');
         if (!args) {
           return;
@@ -194,7 +194,7 @@ export function skillsLayer(
         // Process instructions now (during store, not recall) to avoid mutation during recall
         let processedInstructions = new Map(state.processedInstructions);
         if (!processedInstructions.has(name)) {
-          const processed = await processSkillContent(skill.instructions, cwd);
+          const processed = await processSkillContent(skill.instructions, cwd, ctx.shell);
           processedInstructions.set(name, {
             content: processed,
             lastAccess: Date.now(),

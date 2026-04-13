@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 
 import { discoverSkills } from '../src/skills/discovery.js';
 import { processSkillContent } from '../src/skills/processor.js';
@@ -10,6 +10,7 @@ import type { SkillDefinition } from '../src/skills/types.js';
 import { SkillSource } from '../src/skills/types.js';
 
 const testFs = createLocalFsAdapter();
+const testShell = createLocalShellAdapter();
 
 //#region Test Helpers
 
@@ -240,7 +241,7 @@ describe('processSkillContent', () => {
 No commands here.
 `;
 
-    const result = await processSkillContent(content, tempDir);
+    const result = await processSkillContent(content, tempDir, testShell);
 
     expect(result).toBe(content);
   });
@@ -252,7 +253,7 @@ No commands here.
 More content.
 `;
 
-    const result = await processSkillContent(content, tempDir);
+    const result = await processSkillContent(content, tempDir, testShell);
 
     expect(result).toContain('test-output');
     expect(result).not.toContain('!echo');
@@ -261,7 +262,7 @@ More content.
   test('preserves indentation for command output', async () => {
     const content = `  !echo "indented"`;
 
-    const result = await processSkillContent(content, tempDir);
+    const result = await processSkillContent(content, tempDir, testShell);
 
     expect(result).toContain('  indented');
   });
@@ -269,7 +270,7 @@ More content.
   test('wraps multiline output in code blocks', async () => {
     const content = `!echo -e "line1\\nline2"`;
 
-    const result = await processSkillContent(content, tempDir);
+    const result = await processSkillContent(content, tempDir, testShell);
 
     expect(result).toContain('```');
   });
@@ -277,7 +278,7 @@ More content.
   test('handles command errors gracefully', async () => {
     const content = '!exit 1';
 
-    const result = await processSkillContent(content, tempDir);
+    const result = await processSkillContent(content, tempDir, testShell);
 
     expect(result).toContain('error executing');
   });
@@ -288,7 +289,7 @@ More content.
 
     const content = `!cat ${path.join(tempDir, 'empty.txt')}`;
 
-    const result = await processSkillContent(content, tempDir);
+    const result = await processSkillContent(content, tempDir, testShell);
 
     expect(result).toContain('(no output)');
   });
@@ -301,7 +302,7 @@ More content.
 
     const content = '!cat marker.txt';
 
-    const result = await processSkillContent(content, nestedDir);
+    const result = await processSkillContent(content, nestedDir, testShell);
 
     expect(result).toContain('found-it');
   });

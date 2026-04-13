@@ -2,6 +2,7 @@ import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
 import { createLocalFsAdapter } from '../adapters/local-fs-adapter';
+import { createLocalShellAdapter } from '../adapters/local-shell-adapter';
 import {
   convertTools,
   executeToolCall,
@@ -47,6 +48,7 @@ import type {
   ExecuteOptions,
   RecallLayerOutput,
 } from '../types/runtime';
+import type { ShellAdapter } from '../types/shell-adapter';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
@@ -71,6 +73,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   paramsSchema?: ZodType<TParams>;
   /** Filesystem adapter. Defaults to local node:fs when not provided. */
   fs?: FsAdapter;
+  /** Shell adapter. Defaults to local sh when not provided. */
+  shell?: ShellAdapter;
   llm?: LlmProviderConfig;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
@@ -163,6 +167,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 {
   readonly config: AgentConfig<TParams>;
   readonly fs: FsAdapter;
+  readonly shell: ShellAdapter;
   private readonly initialStep?: Step<ContextMemory, string, string>;
   private readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
@@ -181,6 +186,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       params: validatedParams,
     };
     this.fs = opts.fs ?? createLocalFsAdapter();
+    this.shell = opts.shell ?? createLocalShellAdapter();
     this.initialStep = opts.initialStep;
     this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;

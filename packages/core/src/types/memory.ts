@@ -4,6 +4,7 @@ import type { ItemLog } from './context';
 import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { CallModelRequest } from './runtime';
+import type { ShellAdapter } from './shell-adapter';
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
@@ -157,6 +158,8 @@ export interface ExecutionContext {
   cost: number;
   /** Filesystem adapter for virtual or real filesystem access. */
   fs: FsAdapter;
+  /** Shell adapter for virtual or real shell command execution. */
+  shell: ShellAdapter;
   callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   tokenize(text: string): number;
   trace: {

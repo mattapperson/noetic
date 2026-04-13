@@ -4,6 +4,9 @@
 export { createLocalFsAdapter } from './adapters/local-fs-adapter';
 
 /** @public */
+export { createLocalShellAdapter } from './adapters/local-shell-adapter';
+
+/** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
 
 //#endregion
@@ -324,6 +327,13 @@ export type {
 
 /** @public */
 export type { FsAdapter, FsStats } from './types/fs-adapter';
+
+//#endregion
+
+//#region Types — Shell
+
+/** @public */
+export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
 
 //#endregion
 

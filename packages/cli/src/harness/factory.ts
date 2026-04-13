@@ -1,5 +1,5 @@
-import type { FsAdapter, MemoryLayer, Tool } from '@noetic/core';
-import { AgentHarness, step } from '@noetic/core';
+import type { FsAdapter, MemoryLayer, ShellAdapter, Tool } from '@noetic/core';
+import { AgentHarness, createLocalShellAdapter, step } from '@noetic/core';
 
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { skillsLayer } from '../memory/skills-layer.js';
@@ -61,20 +61,26 @@ export interface HarnessWithSkills {
   skills: ReadonlyArray<SkillDefinition>;
 }
 
+interface CreateAgentHarnessOpts {
+  config: AgentConfig;
+  plugins: ReadonlyArray<NoeticPlugin>;
+  fs: FsAdapter;
+  shell?: ShellAdapter;
+}
+
 /**
  * Create the agent harness with all tools, memory layers, and skills.
  * Returns both the harness and the canonical skill catalog for UI use.
  */
-export async function createAgentHarness(
-  config: AgentConfig,
-  plugins: ReadonlyArray<NoeticPlugin>,
-  fs: FsAdapter,
-): Promise<HarnessWithSkills> {
+export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<HarnessWithSkills> {
+  const { config, plugins, fs } = opts;
+  const shell = opts.shell ?? createLocalShellAdapter();
+
   // Build canonical skill catalog (single source of truth)
   const allSkills = await buildSkillCatalog(config.cwd, plugins, fs);
 
   // Build tools including skill activation
-  const builtinTools = createCodingTools(config.cwd, fs);
+  const builtinTools = createCodingTools(config.cwd, fs, shell);
   const pluginTools = await collectPluginTools(plugins);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
 
@@ -107,6 +113,7 @@ export async function createAgentHarness(
   const harness = new AgentHarness({
     name: 'noetic-cli',
     fs,
+    shell,
     params: {
       model: config.model,
     },

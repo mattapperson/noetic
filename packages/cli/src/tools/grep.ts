@@ -5,7 +5,7 @@
  */
 
 import path from 'node:path';
-import type { FsAdapter, Tool } from '@noetic/core';
+import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
 import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { normalizeToLf } from './edit-diff.js';
@@ -237,7 +237,7 @@ async function formatMatches(params: FormatMatchesParams): Promise<{
 
 export type GrepTool = Tool<typeof GrepInputSchema, typeof GrepOutputSchema>;
 
-export function createGrepTool(cwd: string, fs: FsAdapter): GrepTool {
+export function createGrepTool(cwd: string, fs: FsAdapter, shell: ShellAdapter): GrepTool {
   return tool({
     name: 'Grep',
     description: GREP_TOOL_DESCRIPTION,
@@ -281,26 +281,15 @@ export function createGrepTool(cwd: string, fs: FsAdapter): GrepTool {
         }
         cmdParts.push(shellQuote(pattern), shellQuote(searchPath));
 
-        const proc = Bun.spawn(
-          [
-            'sh',
-            '-c',
-            cmdParts.join(' '),
-          ],
-          {
-            cwd: searchPath,
-            stdout: 'pipe',
-            stderr: 'pipe',
-          },
-        );
+        const result = await shell.exec(cmdParts.join(' '), {
+          cwd: searchPath,
+        });
 
-        const stdout = await new Response(proc.stdout).text();
-        const stderr = await new Response(proc.stderr).text();
-        const exitCode = await proc.exited;
+        const { stdout, stderr, exitCode } = result;
 
         const { matches, matchLimitReached } = parseRgOutput(stdout, effectiveLimit);
 
-        if (matches.length === 0 && exitCode <= 1) {
+        if (matches.length === 0 && (exitCode === null || exitCode <= 1)) {
           return {
             matches: 'No matches found',
             pattern,
@@ -310,7 +299,7 @@ export function createGrepTool(cwd: string, fs: FsAdapter): GrepTool {
           };
         }
 
-        if (matches.length === 0 && exitCode > 1) {
+        if (matches.length === 0 && exitCode !== null && exitCode > 1) {
           throw new Error(stderr.trim() || `rg exited with code ${exitCode}`);
         }
 
