@@ -8,7 +8,7 @@ import {
   semanticRoute,
   semanticSwitch,
   when,
-} from '../../src/conditions';
+} from '../../src/conditions/conditions';
 import type { EmbedFn } from '../../src/types/embed';
 import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';

@@ -4,17 +4,18 @@
 
 import { describe, expect, test } from 'bun:test';
 
+import { BUILTIN_COMMANDS } from '../src/commands/builtins/index.js';
+import { isSlashCommand, parseSlashCommand } from '../src/commands/parse.js';
 import {
-  BUILTIN_COMMANDS,
-  commandsToPromptSuggestions,
   findCommand,
-  generateCommandSuggestions,
   getEnabledCommands,
   getVisibleCommands,
   hasCommand,
-  isSlashCommand,
-  parseSlashCommand,
-} from '../src/commands/index.js';
+} from '../src/commands/registry.js';
+import {
+  commandsToPromptSuggestions,
+  generateCommandSuggestions,
+} from '../src/commands/suggestions.js';
 
 describe('parseSlashCommand', () => {
   test('returns null for non-slash input', () => {

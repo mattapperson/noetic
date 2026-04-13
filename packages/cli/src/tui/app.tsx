@@ -7,21 +7,19 @@ import { render } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import {
-  BUILTIN_COMMANDS,
-  commandsToPromptSuggestions,
-  executeCommand,
-  findCommand,
-  isSlashCommand,
-  parseSlashCommand,
-} from '../commands/index.js';
+import { BUILTIN_COMMANDS } from '../commands/builtins/index.js';
+import { executeCommand } from '../commands/execute.js';
+import { isSlashCommand, parseSlashCommand } from '../commands/parse.js';
+import { findCommand } from '../commands/registry.js';
+import { commandsToPromptSuggestions } from '../commands/suggestions.js';
 import type { Command, CommandContext } from '../commands/types.js';
 import { createAgentHarness } from '../harness/factory.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
-import type { ChatStatus } from './components/index.js';
-import { InkProvider, ResponsesChat } from './components/index.js';
+import type { ChatStatus } from './components/prompt-input.js';
+import { InkProvider } from './components/provider.js';
+import { ResponsesChat } from './components/responses-chat.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
 import {
   appendOrUpdateEntry,

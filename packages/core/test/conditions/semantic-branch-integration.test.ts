@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { branch } from '../../src/builders/control-flow-builders';
-import { otherwise, semanticRoute, when } from '../../src/conditions';
+import { otherwise, semanticRoute, when } from '../../src/conditions/conditions';
 import { executeBranch } from '../../src/interpreter/execute-branch';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { ContextMemory } from '../../src/types/memory';

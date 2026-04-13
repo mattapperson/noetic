@@ -39,19 +39,20 @@ export { tool, toolWithGenerator } from './builders/tool-builder';
 //#region Conditions
 
 /** @public */
-export type { Condition, OtherwiseClause, WhenClause } from './conditions';
+export type { Condition, OtherwiseClause, WhenClause } from './conditions/conditions';
 /** @public */
 export {
   aiCondition,
   allCondition,
   anyCondition,
-  cosineSimilarity,
   embeddingMatch,
   otherwise,
   semanticRoute,
   semanticSwitch,
   when,
-} from './conditions';
+} from './conditions/conditions';
+/** @public */
+export { cosineSimilarity } from './conditions/cosine-similarity';
 
 //#endregion
 
