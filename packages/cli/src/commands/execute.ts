@@ -33,7 +33,7 @@ export async function executeCommand(
   if (command.type === 'local-jsx') {
     const mod = await command.load();
     // For JSX commands, we need to handle two possible outcomes:
-    // 1. The command returns a ReactNode to display
+    // 1. The command returns a ReactNode to display as modal
     // 2. The command calls onDone with optional text result
     // The first one to resolve wins.
     return new Promise((resolve) => {
@@ -59,9 +59,13 @@ export async function executeCommand(
           return;
         }
         resolved = true;
+        // Return as modal - command name is capitalized
+        const displayName = command.name.charAt(0).toUpperCase() + command.name.slice(1);
         resolve({
-          type: 'jsx',
+          type: 'modal',
           node,
+          commandName: command.name,
+          dismissMessage: `${displayName} dialog dismissed`,
         });
       });
     });

@@ -22,12 +22,11 @@ import type { SkillDefinition } from '../skills/types.js';
 import type { AgentConfig } from '../types/config.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
-import type { ConversationEntry, ErrorEntry, JsxEntry, SystemEntry, UserEntry } from './item-utils.js';
+import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
 import {
   appendOrUpdateEntry,
   extractActivatedSkills,
   isErrorEntry,
-  isJsxEntry,
   isSystemEntry,
   isUserEntry,
 } from './item-utils.js';
@@ -72,7 +71,7 @@ function entriesToItems(entries: ConversationEntry[]): Item[] {
   const items: Item[] = [];
   for (const entry of entries) {
     // Skip system UI entries that aren't part of the conversation
-    if (isErrorEntry(entry) || isSystemEntry(entry) || isJsxEntry(entry)) {
+    if (isErrorEntry(entry) || isSystemEntry(entry)) {
       continue;
     }
     if (isUserEntry(entry)) {
@@ -100,12 +99,17 @@ interface AppProps {
 
 //#region App Component
 
-let jsxKeyCounter = 0;
+interface ModalState {
+  content: ReactNode;
+  commandName: string;
+  dismissMessage: string;
+}
 
 function App({ config, plugins }: AppProps): ReactNode {
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
+  const [modal, setModal] = useState<ModalState | null>(null);
 
   const harnessRef = useRef<AgentHarness | null>(null);
 
@@ -134,6 +138,25 @@ function App({ config, plugins }: AppProps): ReactNode {
   const clearEntries = useCallback(() => {
     setEntries([]);
   }, []);
+
+  // Handle modal close (Escape pressed)
+  const handleModalClose = useCallback(() => {
+    if (!modal) {
+      return;
+    }
+    // Add dismiss message to chat history
+    setEntries((prev) => [
+      ...prev,
+      {
+        role: 'system',
+        type: 'info',
+        content: modal.dismissMessage,
+      } satisfies SystemEntry,
+    ]);
+    setModal(null);
+  }, [
+    modal,
+  ]);
 
   /**
    * Get or create the harness, storing the canonical skill catalog.
@@ -183,17 +206,22 @@ function App({ config, plugins }: AppProps): ReactNode {
                     content: result.value,
                   } satisfies SystemEntry,
                 ]);
-              } else if (result.type === 'jsx') {
-                // Add JSX output as a conversation entry
+              } else if (result.type === 'modal') {
+                // Add command invocation to chat history
                 setEntries((prev) => [
                   ...prev,
                   {
                     role: 'system',
-                    type: 'jsx',
-                    node: result.node,
-                    key: `jsx-${++jsxKeyCounter}`,
-                  } satisfies JsxEntry,
+                    type: 'info',
+                    content: `/${result.commandName}`,
+                  } satisfies SystemEntry,
                 ]);
+                // Open modal overlay
+                setModal({
+                  content: result.node,
+                  commandName: result.commandName,
+                  dismissMessage: result.dismissMessage,
+                });
               }
               // 'skip' type means no output
             } catch (error) {
@@ -266,6 +294,8 @@ function App({ config, plugins }: AppProps): ReactNode {
         onSubmit={handleSubmit}
         model={config.model}
         commands={commandSuggestions}
+        modalContent={modal?.content}
+        onModalClose={handleModalClose}
       />
     </InkProvider>
   );

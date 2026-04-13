@@ -6,7 +6,7 @@
  */
 
 import type { Item } from '@noetic/core';
-import { Box, Static } from 'ink';
+import { Box, Static, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import type { ConversationEntry } from '../item-utils.js';
@@ -15,7 +15,6 @@ import {
   extractTextContent,
   getItemId,
   isErrorEntry,
-  isJsxEntry,
   isSystemEntry,
   isUserEntry,
 } from '../item-utils.js';
@@ -37,6 +36,10 @@ export interface ResponsesChatProps {
     cmd: string;
     desc?: string;
   }>;
+  /** Modal content to display over chat area */
+  modalContent?: ReactNode;
+  /** Called when modal should be dismissed (Escape pressed) */
+  onModalClose?: () => void;
 }
 
 interface RenderContext {
@@ -184,10 +187,6 @@ function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext
     );
   }
 
-  if (isJsxEntry(entry)) {
-    return <Box key={entry.key}>{entry.node}</Box>;
-  }
-
   const key = getItemId(entry);
   const isLastEntry = index === ctx.entryCount - 1;
   const isStreaming = isLastEntry && ctx.chatStatus === 'streaming' && entry.status !== 'completed';
@@ -255,6 +254,8 @@ export function ResponsesChat({
   onStop,
   model,
   commands,
+  modalContent,
+  onModalClose,
 }: ResponsesChatProps): ReactNode {
   const callNameMap = useMemo(
     () => buildCallNameMap(entries),
@@ -297,9 +298,7 @@ export function ResponsesChat({
             ? `error-${i}`
             : isSystemEntry(entry)
               ? `system-${i}`
-              : isJsxEntry(entry)
-                ? entry.key
-                : getItemId(entry),
+              : getItemId(entry),
         entry,
         index: i,
       })),
@@ -311,17 +310,30 @@ export function ResponsesChat({
   return (
     <Box flexDirection="column" height="100%">
       <Box flexDirection="column" flexGrow={1}>
-        <Static items={staticItems}>
-          {(item: { key: string; entry: ConversationEntry; index: number }) => (
-            <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
-          )}
-        </Static>
-        {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
+        {modalContent ? (
+          // Modal overlay covers the chat area
+          <Box flexDirection="column" flexGrow={1}>
+            {modalContent}
+            <Text dimColor>Esc to cancel</Text>
+          </Box>
+        ) : (
+          // Normal chat view
+          <>
+            <Static items={staticItems}>
+              {(item: { key: string; entry: ConversationEntry; index: number }) => (
+                <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
+              )}
+            </Static>
+            {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
+          </>
+        )}
       </Box>
       <PromptInput
         status={status}
         onSubmit={handleSubmit}
         onStop={onStop}
+        onModalClose={onModalClose}
+        isModalOpen={!!modalContent}
         model={model}
         commands={commands}
       />

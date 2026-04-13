@@ -23,15 +23,8 @@ export interface SystemEntry {
   content: string;
 }
 
-export interface JsxEntry {
-  role: 'system';
-  type: 'jsx';
-  node: import('react').ReactNode;
-  key: string;
-}
-
 export type AssistantEntry = Item | StreamingItem;
-export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry | SystemEntry | JsxEntry;
+export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry | SystemEntry;
 type MessageContentPart = Extract<
   AssistantEntry,
   {
@@ -53,10 +46,6 @@ export function isErrorEntry(entry: ConversationEntry): entry is ErrorEntry {
 
 export function isSystemEntry(entry: ConversationEntry): entry is SystemEntry {
   return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'info';
-}
-
-export function isJsxEntry(entry: ConversationEntry): entry is JsxEntry {
-  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'jsx';
 }
 
 //#endregion
@@ -132,7 +121,7 @@ export function appendOrUpdateEntry(
 ): ConversationEntry[] {
   const id = getItemId(item);
   const idx = prev.findIndex((existing) => {
-    if (isUserEntry(existing) || isErrorEntry(existing) || isSystemEntry(existing) || isJsxEntry(existing)) {
+    if (isUserEntry(existing) || isErrorEntry(existing) || isSystemEntry(existing)) {
       return false;
     }
     return getItemId(existing) === id;

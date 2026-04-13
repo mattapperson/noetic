@@ -139,8 +139,10 @@ type CommandExecutionResult =
       type: 'skip';
     }
   | {
-      type: 'jsx';
+      type: 'modal';
       node: ReactNode;
+      commandName: string;
+      dismissMessage: string;
     };
 
 //#endregion

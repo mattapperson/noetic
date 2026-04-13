@@ -173,6 +173,10 @@ export interface PromptInputProps {
   status?: ChatStatus;
   /** Called when user presses Escape during streaming to stop generation */
   onStop?: () => void;
+  /** Called when user presses Escape to close a modal */
+  onModalClose?: () => void;
+  /** Whether a modal is currently open (changes Escape behavior) */
+  isModalOpen?: boolean;
   /** Text shown when status is "submitted" */
   submittedText?: string;
   /** Text shown when status is "streaming" */
@@ -284,28 +288,39 @@ function PromptInputDivider() {
   );
 }
 
-/** Autocomplete suggestion list. */
+/** Autocomplete suggestion list - appears below input like Claude Code. */
 function PromptInputSuggestions() {
   const { suggestions, sugIdx, maxSuggestions, theme } = usePromptInput();
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 80;
   const visible = suggestions.slice(0, maxSuggestions);
   if (visible.length === 0) {
     return null;
   }
+  // Calculate column width for command names (longest command + padding)
+  const maxCmdLen = Math.max(...visible.map((s) => s.text.length));
+  const cmdColWidth = Math.min(maxCmdLen + 4, 32);
+
   return (
-    <Box flexDirection="column" marginLeft={2}>
+    <Box flexDirection="column">
       {visible.map((sug, i) => {
         const active = i === sugIdx;
+        // Pad command name to fixed width for aligned descriptions
+        const paddedCmd = sug.text.padEnd(cmdColWidth);
+        // Truncate description to fit remaining width
+        const descMaxLen = width - cmdColWidth - 2;
+        const desc = sug.desc
+          ? sug.desc.length > descMaxLen
+            ? sug.desc.slice(0, descMaxLen - 1) + '\u2026'
+            : sug.desc
+          : '';
+
         return (
           <Text key={sug.text}>
-            <Text color={active ? theme.primary : theme.muted}>{active ? '\u25B8' : ' '}</Text>
-            <Text color={active ? theme.primary : theme.muted} bold={active}>
-              {sug.text}
+            <Text color={active ? theme.primary : theme.muted}>{paddedCmd}</Text>
+            <Text dimColor color={theme.placeholder}>
+              {desc}
             </Text>
-            {sug.desc && (
-              <Text dimColor color={theme.placeholder}>
-                {' ' + sug.desc}
-              </Text>
-            )}
           </Text>
         );
       })}
@@ -421,6 +436,8 @@ export function PromptInput({
   promptColor,
   status,
   onStop,
+  onModalClose,
+  isModalOpen = false,
   submittedText = 'Thinking...',
   streamingText: streamingLabel = 'Generating...',
   errorText = 'An error occurred. Try again.',
@@ -683,9 +700,22 @@ export function PromptInput({
 
   useInput(
     (_input, key) => {
-      // Escape during submitted/streaming calls onStop (always active when focus=true)
-      if (key.escape && (status === 'streaming' || status === 'submitted') && onStop) {
-        onStop();
+      // Escape: handle modal close first, then streaming stop, then suggestions dismiss
+      if (key.escape) {
+        // Priority 1: Close modal if open
+        if (isModalOpen && onModalClose) {
+          onModalClose();
+          return;
+        }
+        // Priority 2: Stop streaming
+        if ((status === 'streaming' || status === 'submitted') && onStop) {
+          onStop();
+          return;
+        }
+        // Priority 3: Dismiss suggestions
+        if (suggestionsRef.current.length > 0) {
+          setSug([]);
+        }
         return;
       }
 
@@ -723,14 +753,6 @@ export function PromptInput({
         } else if (enableHistory && histIdxRef.current === 0) {
           setHistI(-1);
           updateValue('');
-        }
-        return;
-      }
-
-      // Escape: dismiss suggestions (when not streaming)
-      if (key.escape) {
-        if (suggestionsRef.current.length > 0) {
-          setSug([]);
         }
         return;
       }
@@ -812,12 +834,12 @@ export function PromptInput({
       <Box flexDirection="column" flexShrink={0}>
         {showDividers && <PromptInputDivider />}
         <Box flexDirection="column" paddingX={1}>
-          <PromptInputSuggestions />
           <PromptInputTextarea />
           <PromptInputStatusText />
           <PromptInputModel />
         </Box>
         {showDividers && <PromptInputDivider />}
+        <PromptInputSuggestions />
       </Box>
     </PromptInputContext.Provider>
   );
