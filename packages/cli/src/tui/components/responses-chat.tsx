@@ -6,7 +6,7 @@
  */
 
 import type { Item } from '@noetic/core';
-import { Box, Static, Text } from 'ink';
+import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import type { ConversationEntry } from '../item-utils.js';
@@ -268,6 +268,16 @@ export function ResponsesChat({
     onSubmit(msg.text);
   }
 
+  // Handle Escape when modal is open (PromptInput is not rendered so we need this)
+  useInput(
+    (_input, key) => {
+      if (key.escape && modalContent && onModalClose) {
+        onModalClose();
+      }
+    },
+    { isActive: !!modalContent },
+  );
+
   const ctx: RenderContext = {
     chatStatus: status,
     callNameMap,
@@ -307,26 +317,27 @@ export function ResponsesChat({
     ],
   );
 
+  // When modal is open, hide the prompt and show modal with Esc hint
+  if (modalContent) {
+    return (
+      <Box flexDirection="column" height="100%">
+        <Box flexDirection="column" flexGrow={1}>
+          {modalContent}
+        </Box>
+        <Text dimColor>Esc to cancel</Text>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" height="100%">
       <Box flexDirection="column" flexGrow={1}>
-        {modalContent ? (
-          // Modal overlay covers the chat area
-          <Box flexDirection="column" flexGrow={1}>
-            {modalContent}
-            <Text dimColor>Esc to cancel</Text>
-          </Box>
-        ) : (
-          // Normal chat view
-          <>
-            <Static items={staticItems}>
-              {(item: { key: string; entry: ConversationEntry; index: number }) => (
-                <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
-              )}
-            </Static>
-            {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
-          </>
-        )}
+        <Static items={staticItems}>
+          {(item: { key: string; entry: ConversationEntry; index: number }) => (
+            <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
+          )}
+        </Static>
+        {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
       </Box>
       <PromptInput
         status={status}
