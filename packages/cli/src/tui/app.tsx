@@ -14,25 +14,26 @@ import { render } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import {
-  BUILTIN_COMMANDS,
-  commandsToPromptSuggestions,
-  executeCommand,
-  findCommand,
-  isSlashCommand,
-  parseSlashCommand,
-} from '../commands/index.js';
+import { BUILTIN_COMMANDS } from '../commands/builtins/index.js';
+import { executeCommand } from '../commands/execute.js';
+import { isSlashCommand, parseSlashCommand } from '../commands/parse.js';
+import { findCommand } from '../commands/registry.js';
+import { commandsToPromptSuggestions } from '../commands/suggestions.js';
 import type { Command, CommandContext } from '../commands/types.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness } from '../harness/factory.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
-import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
+import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
+
+type FooterContextValue = FooterContext;
+
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
 import { getModelContextLimit } from '../types/model-context.js';
-import type { ChatStatus } from './components/index.js';
-import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
+import type { ChatStatus } from './components/prompt-input.js';
+import { InkProvider } from './components/provider.js';
+import { ResponsesChat } from './components/responses-chat.js';
 import { FooterContextProvider } from './footer-context.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
 import {

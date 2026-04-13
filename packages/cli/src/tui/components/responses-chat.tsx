@@ -18,16 +18,15 @@ import {
   isSystemEntry,
   isUserEntry,
 } from '../item-utils.js';
-import type { SpinnerMode, ToolCallStatus } from './items/index.js';
-import {
-  AssistantText,
-  LoadingSpinner,
-  Reasoning,
-  SystemMessage,
-  ToolCall,
-  ToolResult,
-  UserPrompt,
-} from './items/index.js';
+import { AssistantText } from './items/assistant-text.js';
+import type { SpinnerMode } from './items/loading-spinner.js';
+import { LoadingSpinner } from './items/loading-spinner.js';
+import { Reasoning } from './items/reasoning.js';
+import { SystemMessage } from './items/system-message.js';
+import type { ToolCallStatus } from './items/tool-call.js';
+import { ToolCall } from './items/tool-call.js';
+import { ToolResult } from './items/tool-result.js';
+import { UserPrompt } from './items/user-prompt.js';
 import type { ChatStatus } from './prompt-input.js';
 import { PromptInput } from './prompt-input.js';
 
