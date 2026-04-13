@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@noetic/core": "workspace:*",
-    "@openrouter/agent": "0.3.0",
+    "@openrouter/agent": "0.3.1",
     "diff": "7.0.0",
     "glob": "11.0.3",
     "ink": "^7.0.0",

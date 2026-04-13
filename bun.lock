@@ -50,7 +50,7 @@
       },
       "dependencies": {
         "@noetic/core": "workspace:*",
-        "@openrouter/agent": "0.3.0",
+        "@openrouter/agent": "0.3.1",
         "diff": "7.0.0",
         "glob": "11.0.3",
         "ink": "^7.0.0",
@@ -70,15 +70,15 @@
       "name": "@noetic/core",
       "version": "0.1.0",
       "dependencies": {
-        "@openrouter/agent": "0.3.0",
+        "@openrouter/agent": "0.3.1",
         "zod": "^4.0.0",
       },
       "devDependencies": {
-        "@openrouter/agent": "0.3.0",
+        "@openrouter/agent": "0.3.1",
         "bun-types": "latest",
       },
       "peerDependencies": {
-        "@openrouter/agent": "0.3.0",
+        "@openrouter/agent": "0.3.1",
         "zod": "^4.0.0",
       },
       "optionalPeers": [
@@ -1311,10 +1311,6 @@
 
     "@microsoft/tui-test/glob": ["glob@10.5.0", "", { "dependencies": { "foreground-child": "^3.1.0", "jackspeak": "^3.1.2", "minimatch": "^9.0.4", "minipass": "^7.1.2", "package-json-from-dist": "^1.0.0", "path-scurry": "^1.11.1" }, "bin": { "glob": "dist/esm/bin.mjs" } }, "sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg=="],
 
-    "@noetic/cli/@openrouter/agent": ["@openrouter/agent@0.3.0", "", { "dependencies": { "@openrouter/sdk": "*", "zod": "^4.0.0" } }, "sha512-u+AXwOfjb6rh1Kx9pnNDlqtX9FBvAD76bFAzT+ppPvob+wrA3gxKxu/f6MAkMGmkNBNe4b1839dYQUSviuXOfg=="],
-
-    "@noetic/core/@openrouter/agent": ["@openrouter/agent@0.3.0", "", { "dependencies": { "@openrouter/sdk": "*", "zod": "^4.0.0" } }, "sha512-u+AXwOfjb6rh1Kx9pnNDlqtX9FBvAD76bFAzT+ppPvob+wrA3gxKxu/f6MAkMGmkNBNe4b1839dYQUSviuXOfg=="],
-
     "@noetic/web/@types/react": ["@types/react@19.1.6", "", { "dependencies": { "csstype": "^3.0.2" } }, "sha512-JeG0rEWak0N6Itr6QUx+X60uQmN+5t3j9r/OVDtWzFXKaj6kD1BwJzOksD0FF6iWxZlbE1kB0q9vtnU2ekqa1Q=="],
 
     "@noetic/web/react": ["react@19.1.0", "", {}, "sha512-FS+XFBNvn3GTAWq26joslQgWNoFu08F4kl0J4CgdNKADkdSGXQyTCnKteIAJy96Br6YbpEU1LSzV5dYtjMkMDg=="],
@@ -1412,10 +1408,6 @@
     "@microsoft/tui-test/glob/minimatch": ["minimatch@9.0.9", "", { "dependencies": { "brace-expansion": "^2.0.2" } }, "sha512-OBwBN9AL4dqmETlpS2zasx+vTeWclWzkblfZk7KTA5j3jeOONz/tRCnZomUyvNg83wL5Zv9Ss6HMJXAgL8R2Yg=="],
 
     "@microsoft/tui-test/glob/path-scurry": ["path-scurry@1.11.1", "", { "dependencies": { "lru-cache": "^10.2.0", "minipass": "^5.0.0 || ^6.0.2 || ^7.0.0" } }, "sha512-Xa4Nw17FS9ApQFJ9umLiJS4orGjm7ZzwUrwamcGQuHSzDyth9boKDaycYdDcZDuqYATXw4HFXgaqWTctW/v1HA=="],
-
-    "@noetic/cli/@openrouter/agent/@openrouter/sdk": ["@openrouter/sdk@0.10.2", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-od0aWkk+vhndEI78YyPvPgMxv2+32KO4MRrk8lFxro/YABKAHkozXugc+x3YeNf/d9KQaBO6M4Rut1uf+yeD2g=="],
-
-    "@noetic/core/@openrouter/agent/@openrouter/sdk": ["@openrouter/sdk@0.10.2", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-od0aWkk+vhndEI78YyPvPgMxv2+32KO4MRrk8lFxro/YABKAHkozXugc+x3YeNf/d9KQaBO6M4Rut1uf+yeD2g=="],
 
     "@tailwindcss/oxide-wasm32-wasi/@napi-rs/wasm-runtime/@tybys/wasm-util": ["@tybys/wasm-util@0.10.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg=="],
 
