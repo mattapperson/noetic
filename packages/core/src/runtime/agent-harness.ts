@@ -274,7 +274,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const callResult = this.client.callModel({
         model: request.model,
-        input: conversationInput,
+        input: frameworkCast(conversationInput),
         instructions,
         tools: sdkTools,
         temperature: request.params?.temperature,

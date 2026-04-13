@@ -194,7 +194,6 @@ export async function stopNoeticUI(
 // ============================================================================
 
 // Start server when this file is run directly
-// @ts-expect-error Bun-specific import.meta.main property
 if (import.meta.main) {
   const PORT_WS = Number.parseInt(process.env.NOETIC_UI_WS_PORT || '3333', 10);
   const PORT_API = Number.parseInt(process.env.NOETIC_UI_API_PORT || '3334', 10);

@@ -78,7 +78,7 @@ export function deserialize<T>(value: unknown): T {
   }
 
   // Check if it's a serialized Map
-  const obj: Record<string, unknown> = value;
+  const obj = value as Record<string, unknown>;
   if (obj.dataType === 'Map' && Array.isArray(obj.value)) {
     const map = new Map<string, unknown>();
     const entries = obj.value;

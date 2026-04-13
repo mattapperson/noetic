@@ -7,7 +7,7 @@ import type { FsAdapter } from './fs-adapter';
 import type { HarnessResult } from './harness-result';
 import type { ExecuteInput, Item } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
-import type { Span } from './observability';
+import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
@@ -76,6 +76,8 @@ export interface AgentHarnessContract<
   readonly fs: FsAdapter;
   /** Shell adapter for virtual or real shell command execution. */
   readonly shell: ShellAdapter;
+  /** Trace exporter for observability spans. */
+  readonly traceExporter: TraceExporter;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
   execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
