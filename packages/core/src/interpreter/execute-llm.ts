@@ -231,6 +231,10 @@ export async function executeLLM<TMemory, I, O>(
       }),
     );
 
+    if (hasLayers) {
+      await baseCtx.harness.storeLayers(layers, response, baseCtx);
+    }
+
     const lastText = extractAssistantText(response.items);
 
     if (step.output) {

@@ -60,6 +60,7 @@ import { DetachedHandleImpl } from './detached-handle';
 import { EventBroadcaster } from './event-broadcaster';
 import { contextToExecCtx } from './exec-context-factory';
 import { HarnessResultImpl } from './harness-result';
+import { createInMemoryStorage } from './in-memory-storage';
 
 //#region Types
 
@@ -182,7 +183,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     this.config = {
       name: opts.name,
-      storage: opts.storage,
+      storage: opts.storage ?? createInMemoryStorage(),
       hooks: opts.hooks,
       params: validatedParams,
     };
@@ -423,7 +424,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       });
       // Resolve layer tools now that ctx exists, then build unified set
       this.setUnifiedTools(ctx, stepTools);
-      executionPromise = this.run(this.initialStep, input, ctx);
+      executionPromise = this.initAndRun(this.initialStep, input, ctx);
     } else {
       const items = Array.isArray(input)
         ? input
@@ -436,7 +437,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         _broadcaster: broadcaster,
       });
       this.setUnifiedTools(ctx, stepTools);
-      executionPromise = this.run(this.initialStep, '', ctx);
+      executionPromise = this.initAndRun(this.initialStep, '', ctx);
     }
 
     // Complete broadcaster when execution finishes
@@ -449,6 +450,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+    return execute(s, input, ctx);
+  }
+
+  /** Run all layer `init` hooks before the first step executes. Per spec 11,
+   *  init MUST complete before any recall fires so layer state is populated. */
+  private async initAndRun<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+    const layers = ctx.layers;
+    const storage = this.config.storage;
+    if (layers && layers.length > 0 && storage) {
+      await this.initLayers(layers, ctx, storage);
+    }
     return execute(s, input, ctx);
   }
 
