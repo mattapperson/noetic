@@ -9,6 +9,7 @@ import {
   buildBar,
   buildRows,
   formatTokens,
+  getModelContextLimit,
   summarizeItem,
 } from '../src/commands/builtins/context.js';
 
@@ -209,5 +210,32 @@ describe('summarizeItem', () => {
       summary: [],
     };
     expect(summarizeItem(item)).toBe('[reasoning]');
+  });
+});
+
+describe('getModelContextLimit', () => {
+  test('returns 200k for Claude Sonnet 4 family', () => {
+    expect(getModelContextLimit('anthropic/claude-sonnet-4')).toBe(2e5);
+    expect(getModelContextLimit('anthropic/claude-sonnet-4-6')).toBe(2e5);
+    expect(getModelContextLimit('claude-sonnet-4')).toBe(2e5);
+  });
+
+  test('returns 1M when the [1m] suffix is present', () => {
+    expect(getModelContextLimit('claude-opus-4-6[1m]')).toBe(1e6);
+    expect(getModelContextLimit('anthropic/claude-sonnet-4-6[1m]')).toBe(1e6);
+  });
+
+  test('returns 128k for gpt-4o family', () => {
+    expect(getModelContextLimit('openai/gpt-4o')).toBe(128e3);
+    expect(getModelContextLimit('openai/gpt-4o-mini')).toBe(128e3);
+  });
+
+  test('returns 400k for gpt-5', () => {
+    expect(getModelContextLimit('openai/gpt-5')).toBe(4e5);
+  });
+
+  test('falls back to 200k default for unknown models', () => {
+    expect(getModelContextLimit('some/unknown-model')).toBe(2e5);
+    expect(getModelContextLimit('weird-string')).toBe(2e5);
   });
 });
