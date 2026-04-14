@@ -5,7 +5,7 @@
  * distinct from skills which are instruction prompts for the model.
  */
 
-import type { LastLayerUsage } from '@noetic/core';
+import type { LastLayerUsage, MemoryLayer } from '@noetic/core';
 import type { ReactNode } from 'react';
 
 import type { SkillDefinition } from '../skills/types.js';
@@ -34,6 +34,8 @@ interface CommandContext {
   clearEntries: () => void;
   /** Per-memory-layer breakdown captured after the most recent agent run (undefined before the first run completes). */
   lastLayerUsage?: LastLayerUsage;
+  /** Memory layers registered with the harness — includes layers that did not contribute on the last run. */
+  memoryLayers: ReadonlyArray<MemoryLayer>;
 }
 
 //#endregion

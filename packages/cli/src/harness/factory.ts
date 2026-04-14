@@ -1,5 +1,15 @@
 import type { FsAdapter, MemoryLayer, ShellAdapter, Tool } from '@noetic/core';
-import { AgentHarness, createLocalShellAdapter, planMemory, step } from '@noetic/core';
+import {
+  AgentHarness,
+  createLocalShellAdapter,
+  durableTaskState,
+  fileReference,
+  observationalMemory,
+  planMemory,
+  step,
+  toolMemoryLayer,
+  workingMemory,
+} from '@noetic/core';
 
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { skillsLayer } from '../memory/skills-layer.js';
@@ -59,6 +69,7 @@ export interface HarnessWithSkills {
     model: string;
   }>;
   skills: ReadonlyArray<SkillDefinition>;
+  memoryLayers: ReadonlyArray<MemoryLayer>;
 }
 
 interface CreateAgentHarnessOpts {
@@ -101,6 +112,11 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   const pluginMemory = await collectPluginMemory(plugins);
   const memory: MemoryLayer[] = [
     planMemory(),
+    workingMemory(),
+    observationalMemory(),
+    fileReference(),
+    durableTaskState(),
+    ...toolMemoryLayer(tools),
     ...pluginMemory,
     ...(allSkills.length > 0
       ? [
@@ -134,6 +150,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   return {
     harness,
     skills: allSkills,
+    memoryLayers: memory,
   };
 }
 

@@ -2,7 +2,13 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import type { AgentHarness, InputMessageItem, Item, LastLayerUsage } from '@noetic/core';
+import type {
+  AgentHarness,
+  InputMessageItem,
+  Item,
+  LastLayerUsage,
+  MemoryLayer,
+} from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -113,6 +119,7 @@ function App({ config, plugins }: AppProps): ReactNode {
 
   const harnessRef = useRef<AgentHarness | null>(null);
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
+  const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
 
   // Use a ref to track entries so we can access current value in the callback
   // without adding entries to the dependency array (which would cause re-renders)
@@ -166,12 +173,17 @@ function App({ config, plugins }: AppProps): ReactNode {
     if (harnessRef.current !== null) {
       return harnessRef.current;
     }
-    const { harness, skills: resolvedSkills } = await createAgentHarness({
+    const {
+      harness,
+      skills: resolvedSkills,
+      memoryLayers,
+    } = await createAgentHarness({
       config,
       plugins,
       fs: config.fs,
     });
     harnessRef.current = harness;
+    memoryLayersRef.current = memoryLayers;
     setSkills(resolvedSkills);
     return harness;
   }, [
@@ -198,6 +210,7 @@ function App({ config, plugins }: AppProps): ReactNode {
               commands,
               clearEntries,
               lastLayerUsage: lastLayerUsageRef.current,
+              memoryLayers: memoryLayersRef.current,
             };
 
             try {

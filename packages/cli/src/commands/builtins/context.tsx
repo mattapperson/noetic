@@ -1,4 +1,4 @@
-import type { Item, LastLayerUsage, LayerUsageEntry } from '@noetic/core';
+import type { Item, LastLayerUsage, LayerUsageEntry, MemoryLayer } from '@noetic/core';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useContext } from 'react';
@@ -19,6 +19,7 @@ interface BreakdownRow {
 interface ContextDisplayProps {
   model: string;
   usage?: LastLayerUsage;
+  registeredLayers: ReadonlyArray<MemoryLayer>;
 }
 
 interface BreakdownRowViewProps {
@@ -115,7 +116,9 @@ export function summarizeItem(item: Item): string {
   return `[${item.type}]`;
 }
 
-function hasId(item: Item): item is Item & { id: string } {
+function hasId(item: Item): item is Item & {
+  id: string;
+} {
   return 'id' in item && typeof item.id === 'string';
 }
 
@@ -178,14 +181,41 @@ function ContextOverview({ usage }: { usage: LastLayerUsage }): ReactNode {
   );
 }
 
-function LayerTab({ entry }: { entry: LayerUsageEntry }): ReactNode {
+interface LayerTabProps {
+  layerId: string;
+  entry: LayerUsageEntry | undefined;
+}
+
+function LayerTab({ layerId, entry }: LayerTabProps): ReactNode {
   const { headerFocused } = useContext(TabsContext);
+  if (!entry) {
+    return (
+      <Box flexDirection="column">
+        <Text>
+          <Text color="cyan">{layerId}</Text>
+          <Text dimColor> · inactive on last run</Text>
+        </Text>
+        <Box height={1} />
+        <Text dimColor>
+          This layer is registered but did not contribute items on the last LLM call.
+        </Text>
+        <Text dimColor>
+          Some layers (e.g. planMemory) only activate once a corresponding flow has started.
+        </Text>
+      </Box>
+    );
+  }
   if (entry.items.length === 0) {
     return (
       <Box flexDirection="column">
+        <Text>
+          <Text color="cyan">{layerId}</Text>
+          <Text dimColor> · {formatTokens(entry.tokenCount)} tokens, no items</Text>
+        </Text>
+        <Box height={1} />
         <Text dimColor>
           {entry.tokenCount > 0
-            ? `This layer consumed ${formatTokens(entry.tokenCount)} tokens but exposed no items.`
+            ? 'This layer consumed tokens but exposed no items (likely a string-only recall).'
             : 'No items contributed by this layer on the last call.'}
         </Text>
       </Box>
@@ -195,7 +225,7 @@ function LayerTab({ entry }: { entry: LayerUsageEntry }): ReactNode {
   return (
     <Box flexDirection="column">
       <Text>
-        <Text color="cyan">{entry.layerId}</Text>
+        <Text color="cyan">{layerId}</Text>
         <Text dimColor>
           {' '}
           · {entry.items.length} items · {formatTokens(entry.tokenCount)} tokens
@@ -227,19 +257,33 @@ function EmptyState({ model }: { model: string }): ReactNode {
   );
 }
 
-export function ContextDisplay({ model, usage }: ContextDisplayProps): ReactNode {
+function lookupEntry(
+  layers: ReadonlyArray<LayerUsageEntry>,
+  layerId: string,
+): LayerUsageEntry | undefined {
+  return layers.find((l) => l.layerId === layerId);
+}
+
+export function ContextDisplay({ model, usage, registeredLayers }: ContextDisplayProps): ReactNode {
   if (!usage) {
     return <EmptyState model={model} />;
   }
+  const knownIds = new Set(registeredLayers.map((l) => l.id));
+  const orphanEntries = usage.layers.filter((l) => !knownIds.has(l.layerId));
   return (
     <Box flexDirection="column" marginY={1}>
       <Tabs title="Context Status" contentHeight={TAB_CONTENT_HEIGHT + 4} navFromContent={true}>
         <Tab title="Overview" id="__overview">
           <ContextOverview usage={usage} />
         </Tab>
-        {usage.layers.map((entry) => (
+        {registeredLayers.map((layer) => (
+          <Tab key={layer.id} title={layer.id} id={layer.id}>
+            <LayerTab layerId={layer.id} entry={lookupEntry(usage.layers, layer.id)} />
+          </Tab>
+        ))}
+        {orphanEntries.map((entry) => (
           <Tab key={entry.layerId} title={entry.layerId} id={entry.layerId}>
-            <LayerTab entry={entry} />
+            <LayerTab layerId={entry.layerId} entry={entry} />
           </Tab>
         ))}
       </Tabs>
@@ -252,7 +296,13 @@ export function ContextDisplay({ model, usage }: ContextDisplayProps): ReactNode
 //#region Implementation
 
 const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
-  return <ContextDisplay model={ctx.config.model} usage={ctx.lastLayerUsage} />;
+  return (
+    <ContextDisplay
+      model={ctx.config.model}
+      usage={ctx.lastLayerUsage}
+      registeredLayers={ctx.memoryLayers}
+    />
+  );
 };
 
 //#endregion
