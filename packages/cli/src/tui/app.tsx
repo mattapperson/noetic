@@ -120,6 +120,9 @@ function App({ config, plugins }: AppProps): ReactNode {
   const harnessRef = useRef<AgentHarness | null>(null);
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
+  // Stable per-session threadId so memory layers that persist by thread/resource
+  // scope rehydrate across turns. Random UUID lives for the CLI process lifetime.
+  const threadIdRef = useRef<string>(crypto.randomUUID());
 
   // Use a ref to track entries so we can access current value in the callback
   // without adding entries to the dependency array (which would cause re-renders)
@@ -282,7 +285,9 @@ function App({ config, plugins }: AppProps): ReactNode {
           ...entriesRef.current,
           userEntry,
         ]);
-        const result = harness.execute(historyItems);
+        const result = harness.execute(historyItems, {
+          threadId: threadIdRef.current,
+        });
         setStatus('streaming');
         for await (const item of result.getItemStream()) {
           setEntries((prev) => appendOrUpdateEntry(prev, item));

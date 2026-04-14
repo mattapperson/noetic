@@ -565,12 +565,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void> {
+    const storage = this.config.storage;
+    if (!storage) {
+      return;
+    }
     await storeLayers({
       layers,
       response,
       ctx: this.toExecCtx(ctx),
       log: ctx.itemLog,
       store: this.layerStateStore,
+      storage,
     });
   }
 

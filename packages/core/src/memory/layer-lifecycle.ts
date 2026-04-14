@@ -40,6 +40,7 @@ interface StoreLayersParams {
   ctx: ExecutionContext;
   log: ItemLog;
   store: LayerStateStore;
+  storage: StorageAdapter;
 }
 
 interface SpawnLayersParams {
@@ -330,6 +331,7 @@ export async function storeLayers({
   ctx,
   log,
   store,
+  storage,
 }: StoreLayersParams): Promise<void> {
   // Concurrent via Promise.allSettled — each layer gets its own state snapshot
   const snapshots: {
@@ -368,6 +370,20 @@ export async function storeLayers({
         );
         if (result?.state !== undefined) {
           store.set(ctx.executionId, layer.id, result.state);
+          // Mirror to durable storage so the next execution's init() can
+          // rehydrate. Skip 'execution' scope — its key rotates each run.
+          if (layer.scope !== 'execution') {
+            const scopedStorage = createScopedStorage(
+              storage,
+              layer.id,
+              resolveScopeKey(layer.scope, ctx),
+            );
+            try {
+              await scopedStorage.set('state', result.state);
+            } catch (persistErr) {
+              store.diagnostic(layer.id, 'store', persistErr);
+            }
+          }
         }
       } catch (e) {
         store.diagnostic(layer.id, 'store', e);

@@ -367,6 +367,7 @@ describe('Observational Memory: real LLM observer', () => {
         ctx,
         log,
         store,
+        storage: makeStorage(),
       });
 
       // Recall via lifecycle function so state is read from the store
@@ -455,6 +456,7 @@ describe('Working Memory: full lifecycle', () => {
       ctx,
       log,
       store,
+      storage: makeStorage(),
     });
 
     // 4. Recall (populated)
@@ -507,6 +509,7 @@ describe('Working Memory: full lifecycle', () => {
       ctx,
       log,
       store,
+      storage: makeStorage(),
     });
 
     // 6. Recall (merged)

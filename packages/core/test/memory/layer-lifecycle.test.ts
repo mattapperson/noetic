@@ -197,6 +197,7 @@ describe('layer-lifecycle', () => {
       ctx,
       log: makeItemLog(),
       store,
+      storage: makeStorage(),
     });
     // Both should have run (order may vary since concurrent)
     expect(order).toHaveLength(2);
@@ -680,6 +681,185 @@ describe('layer-lifecycle', () => {
       store,
     });
     expect(results).toHaveLength(0);
+  });
+
+  it('storeLayers persists thread-scoped state so a later init rehydrates it', async () => {
+    const storage = makeStorage();
+    const layer: MemoryLayer<{
+      n: number;
+    }> = {
+      id: 'counter',
+      name: 'Counter',
+      slot: 100,
+      scope: 'thread',
+      hooks: {
+        async init({ storage: s }) {
+          const saved = await s.get<{
+            n: number;
+          }>('state');
+          return {
+            state: saved ?? {
+              n: 0,
+            },
+          };
+        },
+        async store({ state }) {
+          const current = state ?? {
+            n: 0,
+          };
+          return {
+            state: {
+              n: current.n + 1,
+            },
+          };
+        },
+      },
+    };
+    const response: LLMResponse = {
+      items: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
+
+    // Execution A: init + store once
+    const storeA = createLayerStateStore();
+    const ctxA = makeCtx({
+      executionId: 'exec-A',
+      threadId: 'shared-thread',
+    });
+    await initLayers({
+      layers: [
+        layer,
+      ],
+      ctx: ctxA,
+      storage,
+      store: storeA,
+    });
+    await storeLayers({
+      layers: [
+        layer,
+      ],
+      response,
+      ctx: ctxA,
+      log: makeItemLog(),
+      store: storeA,
+      storage,
+    });
+    expect(
+      storeA.get<{
+        n: number;
+      }>('exec-A', 'counter'),
+    ).toEqual({
+      n: 1,
+    });
+
+    // Execution B: shares threadId, different executionId → should rehydrate.
+    const storeB = createLayerStateStore();
+    const ctxB = makeCtx({
+      executionId: 'exec-B',
+      threadId: 'shared-thread',
+    });
+    await initLayers({
+      layers: [
+        layer,
+      ],
+      ctx: ctxB,
+      storage,
+      store: storeB,
+    });
+    expect(
+      storeB.get<{
+        n: number;
+      }>('exec-B', 'counter'),
+    ).toEqual({
+      n: 1,
+    });
+  });
+
+  it('storeLayers does NOT persist execution-scoped state', async () => {
+    const storage = makeStorage();
+    const layer: MemoryLayer<{
+      n: number;
+    }> = {
+      id: 'ephemeral',
+      name: 'Ephemeral',
+      slot: 100,
+      scope: 'execution',
+      hooks: {
+        async init({ storage: s }) {
+          const saved = await s.get<{
+            n: number;
+          }>('state');
+          return {
+            state: saved ?? {
+              n: 0,
+            },
+          };
+        },
+        async store() {
+          return {
+            state: {
+              n: 99,
+            },
+          };
+        },
+      },
+    };
+    const response: LLMResponse = {
+      items: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
+
+    const storeA = createLayerStateStore();
+    const ctxA = makeCtx({
+      executionId: 'exec-A',
+      threadId: 'shared',
+    });
+    await initLayers({
+      layers: [
+        layer,
+      ],
+      ctx: ctxA,
+      storage,
+      store: storeA,
+    });
+    await storeLayers({
+      layers: [
+        layer,
+      ],
+      response,
+      ctx: ctxA,
+      log: makeItemLog(),
+      store: storeA,
+      storage,
+    });
+
+    // Execution B with the same threadId should not see A's state — scope is execution.
+    const storeB = createLayerStateStore();
+    const ctxB = makeCtx({
+      executionId: 'exec-B',
+      threadId: 'shared',
+    });
+    await initLayers({
+      layers: [
+        layer,
+      ],
+      ctx: ctxB,
+      storage,
+      store: storeB,
+    });
+    expect(
+      storeB.get<{
+        n: number;
+      }>('exec-B', 'ephemeral'),
+    ).toEqual({
+      n: 0,
+    });
   });
 });
 
