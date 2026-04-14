@@ -3,8 +3,8 @@
  * Each component renders a specific item type from the Responses API.
  */
 
-export type { AssistantTextProps } from './assistant-text.js';
-export { AssistantText } from './assistant-text.js';
+export type { AssistantTextLineProps, AssistantTextProps } from './assistant-text.js';
+export { AssistantText, AssistantTextLine } from './assistant-text.js';
 export type { LoadingSpinnerProps, SpinnerMode } from './loading-spinner.js';
 export { LoadingSpinner } from './loading-spinner.js';
 export type { ReasoningProps } from './reasoning.js';

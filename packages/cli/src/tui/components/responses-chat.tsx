@@ -3,10 +3,26 @@
  *
  * Accepts StreamableOutputItem directly from callModel — no adapter types.
  * Renders each item type with Claude Code-style presentation.
+ *
+ * Rendering model:
+ * - Completed entries are rendered through <Static>, which is append-only
+ *   (Ink never reprints items already emitted to stdout).
+ * - The currently streaming assistant message is split by newline:
+ *   every complete line (i.e. any line followed by "\n") is committed to
+ *   <Static> as its own sub-item with a stable key, and only the
+ *   trailing partial line remains in the live region. This keeps the
+ *   live region ≤ a few terminal rows so Ink's log-update can always
+ *   properly erase it — otherwise Ink's clear stops at the terminal top
+ *   edge and each re-render duplicates the overflow into scrollback.
+ * - Every <Static> item is wrapped in a Box with explicit terminal-width.
+ *   Items rendered through Static are measured with no parent width
+ *   constraint, so flexGrow-based layouts don't know how wide to wrap.
+ *   Without this, Text "wrap" falls through and the terminal hard-wraps
+ *   mid-word at its column boundary.
  */
 
 import type { Item } from '@noetic/core';
-import { Box, Static, Text, useInput } from 'ink';
+import { Box, Static, Text, useInput, useStdout } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import type { ConversationEntry } from '../item-utils.js';
@@ -20,7 +36,7 @@ import {
 } from '../item-utils.js';
 import type { SpinnerMode, ToolCallStatus } from './items/index.js';
 import {
-  AssistantText,
+  AssistantTextLine,
   LoadingSpinner,
   Reasoning,
   SystemMessage,
@@ -49,10 +65,9 @@ export interface ResponsesChatProps {
   onModalClose?: () => void;
 }
 
-interface RenderContext {
-  chatStatus: ChatStatus;
-  callNameMap: Map<string, string>;
-  entryCount: number;
+interface StaticSubItem {
+  key: string;
+  node: ReactNode;
 }
 
 //#endregion
@@ -86,122 +101,210 @@ function buildCallNameMap(entries: ConversationEntry[]): Map<string, string> {
 
 //#region Entry Renderers
 
-function renderUserEntry(
-  entry: {
-    content: string;
-  },
-  key: string,
-): ReactNode {
-  return <UserPrompt key={key} text={entry.content} />;
+function messageLines(item: Item & { type: 'message' }): string[] {
+  // Split by '\n' so each emitted line becomes its own sub-item. A trailing
+  // '\n' produces a final '' entry — that represents a blank tail line the
+  // streamer hasn't written into yet; we still want to preserve blank
+  // lines in the middle of the message for paragraph spacing.
+  return extractTextContent(item).split('\n');
 }
 
-function renderMessageItem(
-  item: Item & {
-    type: 'message';
-  },
-  key: string,
-  isStreaming: boolean,
+function renderToolCallForEntry(
+  entry: ConversationEntry,
+  callNameMap: Map<string, string>,
 ): ReactNode {
-  const text = extractTextContent(item);
-  if (!text) {
+  if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
     return null;
   }
-  return <AssistantText key={key} text={text} isStreaming={isStreaming} />;
+  if (entry.type === 'function_call') {
+    return <ToolCall name={entry.name ?? 'tool'} status={mapItemStatus(entry.status)} />;
+  }
+  if (entry.type === 'function_call_output') {
+    return (
+      <ToolCall
+        name={callNameMap.get(entry.callId) ?? 'tool'}
+        status="completed"
+        result={entry.output}
+      />
+    );
+  }
+  if (entry.type === 'web_search_call') {
+    return <ToolCall name="web_search" status={mapItemStatus(entry.status)} />;
+  }
+  if (entry.type === 'file_search_call') {
+    return <ToolCall name="file_search" status={mapItemStatus(entry.status)} />;
+  }
+  if (entry.type === 'image_generation_call') {
+    return <ToolCall name="image_generation" status={mapItemStatus(entry.status)} />;
+  }
+  return null;
 }
 
-function renderReasoningItem(
-  item: Item & {
-    type: 'reasoning';
-  },
-  key: string,
+function renderNonMessageEntry(
+  entry: ConversationEntry,
+  keySuffix: string,
+  callNameMap: Map<string, string>,
 ): ReactNode {
-  const text = extractReasoning(item);
-  return <Reasoning key={key} text={text} collapsed={item.status === 'completed'} />;
-}
-
-interface ToolCallRenderParams {
-  key: string;
-  name: string;
-  status: ToolCallStatus;
-  result?: unknown;
-}
-
-function renderToolCallItem({ key, name, status, result }: ToolCallRenderParams): ReactNode {
-  return <ToolCall key={key} name={name} status={status} result={result} />;
+  if (isUserEntry(entry)) {
+    return <UserPrompt text={entry.content} />;
+  }
+  if (isErrorEntry(entry)) {
+    return <SystemMessage text={entry.content} type="error" />;
+  }
+  if (isSystemEntry(entry)) {
+    return <SystemMessage text={entry.content} type="info" />;
+  }
+  if (entry.type === 'reasoning') {
+    const text = extractReasoning(entry);
+    return <Reasoning text={text} collapsed={entry.status === 'completed'} />;
+  }
+  void keySuffix;
+  return renderToolCallForEntry(entry, callNameMap);
 }
 
 //#endregion
 
-//#region Entry Dispatch
+//#region Static Sub-Item Building
 
-function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext): ReactNode {
-  if (isUserEntry(entry)) {
-    return renderUserEntry(entry, `user-${index}`);
+/**
+ * Convert entries to a flat list of Static sub-items.
+ *
+ * Every assistant message is split into per-line sub-items so that the
+ * last (partial) line of the currently-streaming message can stay out
+ * of <Static> while all earlier lines commit in append-only fashion.
+ *
+ * Keys:
+ *   user:<index>                     — user turn
+ *   error:<index>                    — error banner
+ *   system:<index>                   — system/info line
+ *   <itemId>:L<n>                    — nth line of an assistant message
+ *   <itemId>                         — any other assistant item (tool call,
+ *                                      reasoning, etc.)
+ *
+ * Keys stay stable across renders because message ids and line indices
+ * both stay stable once emitted — message text grows only by appending.
+ */
+function buildStaticSubItems(
+  entries: ConversationEntry[],
+  streamingIndex: number | null,
+  callNameMap: Map<string, string>,
+  columns: number,
+): StaticSubItem[] {
+  const out: StaticSubItem[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) {
+      continue;
+    }
+
+    if (isUserEntry(entry)) {
+      out.push({
+        key: `user-${i}`,
+        node: renderNonMessageEntry(entry, `user-${i}`, callNameMap),
+      });
+      continue;
+    }
+    if (isErrorEntry(entry)) {
+      out.push({
+        key: `error-${i}`,
+        node: renderNonMessageEntry(entry, `error-${i}`, callNameMap),
+      });
+      continue;
+    }
+    if (isSystemEntry(entry)) {
+      out.push({
+        key: `system-${i}`,
+        node: renderNonMessageEntry(entry, `system-${i}`, callNameMap),
+      });
+      continue;
+    }
+
+    const itemId = getItemId(entry);
+
+    if (entry.type === 'message') {
+      const lines = messageLines(entry);
+      const isStreaming = i === streamingIndex;
+      // When streaming, drop the trailing partial line — the live region
+      // owns it. When not streaming, everything is committed.
+      const commitCount = isStreaming ? lines.length - 1 : lines.length;
+      for (let li = 0; li < commitCount; li++) {
+        const lineText = lines[li] ?? '';
+        out.push({
+          key: `${itemId}:L${li}`,
+          node: <AssistantTextLine text={lineText} isFirst={li === 0} width={columns} />,
+        });
+      }
+      continue;
+    }
+
+    // Non-message assistant items (reasoning, tool calls, etc.). Skip the
+    // streaming tail — it re-renders in the live region until complete.
+    if (i === streamingIndex) {
+      continue;
+    }
+    out.push({
+      key: itemId,
+      node: renderNonMessageEntry(entry, itemId, callNameMap),
+    });
   }
 
-  if (isErrorEntry(entry)) {
-    return <SystemMessage key={`error-${index}`} text={entry.content} type="error" />;
+  return out;
+}
+
+//#endregion
+
+//#region Live Region Rendering
+
+/**
+ * Render the live (non-Static) portion of the currently streaming entry.
+ * For messages this is the last partial line with a streaming cursor; for
+ * other item types it's the whole item (they re-render until complete).
+ *
+ * When a single "line" (paragraph with no embedded \n) has already grown
+ * past a few terminal rows, we display only its tail. The live region is
+ * managed by Ink's log-update, which can only erase up to the terminal's
+ * top edge. If live content exceeds terminal height, each re-render
+ * pushes the overflow into scrollback — producing the duplicated-prefix
+ * artifact observed when streaming long paragraphs. Truncating the live
+ * display keeps it well below terminal height; the full paragraph still
+ * becomes visible once streaming completes and the message commits to
+ * <Static>.
+ */
+function renderLiveEntry(
+  entry: ConversationEntry,
+  callNameMap: Map<string, string>,
+  columns: number,
+  rows: number,
+): ReactNode {
+  if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
+    return null;
   }
-
-  if (isSystemEntry(entry)) {
-    return <SystemMessage key={`system-${index}`} text={entry.content} type="info" />;
-  }
-
-  const key = getItemId(entry);
-  const isLastEntry = index === ctx.entryCount - 1;
-
   if (entry.type === 'message') {
-    const isStreaming =
-      isLastEntry && ctx.chatStatus === 'streaming' && entry.status !== 'completed';
-    return renderMessageItem(entry, key, isStreaming);
+    const lines = messageLines(entry);
+    const lastIdx = lines.length - 1;
+    const fullLine = lines[lastIdx] ?? '';
+    const maxLiveRows = Math.max(3, Math.floor(rows / 3));
+    const maxLiveChars = Math.max(columns * maxLiveRows, 200);
+    let displayLine = fullLine;
+    if (fullLine.length > maxLiveChars) {
+      const tail = fullLine.slice(-maxLiveChars);
+      // Snap to the next word boundary so we don't display a partial word
+      // at the start of the live tail.
+      const spaceIdx = tail.indexOf(' ');
+      displayLine = spaceIdx >= 0 ? tail.slice(spaceIdx + 1) : tail;
+    }
+    const isTrulyFirst = lastIdx === 0 && displayLine === fullLine;
+    return (
+      <AssistantTextLine
+        text={displayLine}
+        isFirst={isTrulyFirst}
+        isStreaming
+        width={columns}
+      />
+    );
   }
-
-  if (entry.type === 'reasoning') {
-    return renderReasoningItem(entry, key);
-  }
-
-  if (entry.type === 'function_call') {
-    return renderToolCallItem({
-      key,
-      name: entry.name ?? 'tool',
-      status: mapItemStatus(entry.status),
-    });
-  }
-
-  if (entry.type === 'function_call_output') {
-    return renderToolCallItem({
-      key,
-      name: ctx.callNameMap.get(entry.callId) ?? 'tool',
-      status: 'completed',
-      result: entry.output,
-    });
-  }
-
-  if (entry.type === 'web_search_call') {
-    return renderToolCallItem({
-      key,
-      name: 'web_search',
-      status: mapItemStatus(entry.status),
-    });
-  }
-
-  if (entry.type === 'file_search_call') {
-    return renderToolCallItem({
-      key,
-      name: 'file_search',
-      status: mapItemStatus(entry.status),
-    });
-  }
-
-  if (entry.type === 'image_generation_call') {
-    return renderToolCallItem({
-      key,
-      name: 'image_generation',
-      status: mapItemStatus(entry.status),
-    });
-  }
-
-  return null;
+  return renderNonMessageEntry(entry, getItemId(entry), callNameMap);
 }
 
 //#endregion
@@ -218,6 +321,11 @@ export function ResponsesChat({
   modalContent,
   onModalClose,
 }: ResponsesChatProps): ReactNode {
+  const { stdout } = useStdout();
+  // Fallback dimensions keep tests predictable when stdout has no tty.
+  const columns = stdout.columns ?? 80;
+  const rows = stdout.rows ?? 24;
+
   const callNameMap = useMemo(
     () => buildCallNameMap(entries),
     [
@@ -241,25 +349,23 @@ export function ResponsesChat({
     },
   );
 
-  const ctx: RenderContext = {
-    chatStatus: status,
-    callNameMap,
-    entryCount: entries.length,
-  };
-
-  // Split entries into completed (for Static) and streaming (for live updates).
-  // Static renders items once and never updates them, so streaming content
-  // must be rendered outside Static.
-  //
-  // Only treat the last entry as "streaming" if:
-  // 1. We're in streaming status
-  // 2. The last entry is NOT a user entry (user entries don't stream)
-  // 3. There's at least one entry
+  // Determine whether the last entry is still streaming (and therefore
+  // must not be fully committed to <Static>).
   const lastEntry = entries[entries.length - 1];
   const hasStreamingEntry =
     status === 'streaming' && lastEntry !== undefined && !isUserEntry(lastEntry);
-  const completedEntries = hasStreamingEntry ? entries.slice(0, -1) : entries;
+  const streamingIndex = hasStreamingEntry ? entries.length - 1 : null;
   const streamingEntry = hasStreamingEntry ? lastEntry : null;
+
+  const staticSubItems = useMemo(
+    () => buildStaticSubItems(entries, streamingIndex, callNameMap, columns),
+    [
+      entries,
+      streamingIndex,
+      callNameMap,
+      columns,
+    ],
+  );
 
   // Determine if we should show the loading spinner
   // Show when streaming and either:
@@ -345,25 +451,6 @@ export function ResponsesChat({
     showLoadingSpinner,
   ]);
 
-  // Wrap completed entries for Static component
-  const staticItems = useMemo(
-    () =>
-      completedEntries.map((entry, i) => ({
-        key: isUserEntry(entry)
-          ? `user-${i}`
-          : isErrorEntry(entry)
-            ? `error-${i}`
-            : isSystemEntry(entry)
-              ? `system-${i}`
-              : getItemId(entry),
-        entry,
-        index: i,
-      })),
-    [
-      completedEntries,
-    ],
-  );
-
   // When modal is open, hide the prompt and show modal with Esc hint
   if (modalContent) {
     return (
@@ -379,12 +466,18 @@ export function ResponsesChat({
   return (
     <Box flexDirection="column" height="100%">
       <Box flexDirection="column" flexGrow={1}>
-        <Static items={staticItems}>
-          {(item: { key: string; entry: ConversationEntry; index: number }) => (
-            <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
+        <Static items={staticSubItems}>
+          {(item: StaticSubItem) => (
+            <Box key={item.key} width={columns}>
+              {item.node}
+            </Box>
           )}
         </Static>
-        {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
+        {streamingEntry && (
+          <Box width={columns}>
+            {renderLiveEntry(streamingEntry, callNameMap, columns, rows)}
+          </Box>
+        )}
         {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} />}
       </Box>
       <PromptInput
