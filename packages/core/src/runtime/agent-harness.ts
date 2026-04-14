@@ -26,6 +26,7 @@ import {
   executeRerender,
   initLayers,
   recallLayers,
+  resolveLayerBudgets,
   runAppendPipeline,
   storeLayers,
 } from '../memory/layer-lifecycle';
@@ -546,7 +547,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       query: input,
       ctx: this.toExecCtx(ctx),
       log: ctx.itemLog,
-      budgets: new Map(),
+      budgets: resolveLayerBudgets(layers),
       store: this.layerStateStore,
     });
   }

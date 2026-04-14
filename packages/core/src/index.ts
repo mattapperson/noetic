@@ -160,7 +160,7 @@ export type {
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog } from './types/context';
+export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
 
 //#endregion
 

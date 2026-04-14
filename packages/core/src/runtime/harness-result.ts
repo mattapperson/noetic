@@ -53,6 +53,7 @@ function buildHarnessResponse(text: string, ctx: Context): HarnessResponse {
     },
     cost: ctx.cost > 0 ? ctx.cost : undefined,
     text,
+    lastLayerUsage: ctx.lastLayerUsage,
   };
 }
 

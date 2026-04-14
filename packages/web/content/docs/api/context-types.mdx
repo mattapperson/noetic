@@ -25,6 +25,7 @@ interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly fs: FsAdapter;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
+  readonly lastLayerUsage?: LastLayerUsage;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
   send<T>(channel: Channel<T>, value: T): void;
   tryRecv<T>(channel: Channel<T>): T | null;
@@ -56,6 +57,7 @@ interface Context<TMemory = ContextMemory, TState = unknown> {
 | `fs` | `FsAdapter` | Filesystem adapter delegated from `ctx.harness.fs`. Use for all filesystem operations inside steps and tools. |
 | `itemLog` | `ItemLog` | Conversation history |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last executed step |
+| `lastLayerUsage` | `LastLayerUsage \| undefined` | Per-memory-layer breakdown of the context window from the most recent `callModel`. Undefined until the first LLM call completes. |
 | `completed` | `boolean` | Whether `complete()` has been called |
 | `completionValue` | `unknown` | Value passed to `complete()` |
 | `aborted` | `boolean` | Whether `abort()` has been called |
@@ -184,3 +186,43 @@ type ContentPart =
 | `usage` | `{ inputTokens, outputTokens, cachedTokens? }` | Token usage (optional) |
 | `cost` | `number` | Step cost in USD (optional) |
 | `responseItems` | `ReadonlyArray<Item>` | Items produced by this step (optional) |
+
+## LayerUsageEntry
+
+```ts
+interface LayerUsageEntry {
+  readonly layerId: string;
+  readonly tokenCount: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `layerId` | `string` | The contributing memory layer's id |
+| `tokenCount` | `number` | Self-reported token count from the layer's `recall()` output |
+
+## LastLayerUsage
+
+```ts
+interface LastLayerUsage {
+  readonly executionId: string;
+  readonly modelId: string;
+  readonly layers: ReadonlyArray<LayerUsageEntry>;
+  readonly systemPromptTokens: number;
+  readonly toolsTokens: number;
+  readonly historyTokens: number;
+  readonly totalUsedTokens: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `executionId` | `string` | The owning `Context.id` |
+| `modelId` | `string` | Model id from the step that triggered the snapshot |
+| `layers` | `ReadonlyArray<LayerUsageEntry>` | Per-memory-layer contributions, sorted by `layerId` |
+| `systemPromptTokens` | `number` | Estimated tokens from `step.instructions` |
+| `toolsTokens` | `number` | Estimated tokens from the tool definitions sent to the model |
+| `historyTokens` | `number` | Estimated tokens for `itemLog` items not owned by a layer |
+| `totalUsedTokens` | `number` | Sum of all four buckets |
+
+`LastLayerUsage` is captured by the runtime after each successful `callModel` and surfaced on `Context.lastLayerUsage` and `HarnessResponse.lastLayerUsage`. Use it for context-window introspection (e.g., the CLI `/context` command). The snapshot is overwritten on the next call; export to your observability span if you need historical retention.

@@ -1,7 +1,7 @@
 # Context and Item Log
 
 > **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
-> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`
+> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
 
 ---
 
@@ -31,6 +31,10 @@ interface Context<TState = unknown> {
 
   // Last step execution metadata (tool calls, token usage, cost)
   readonly lastStepMeta: StepMeta | null;
+
+  // Per-memory-layer breakdown of the context window as of the most recent
+  // callModel in this execution. See "Per-Layer Usage Breakdown" below.
+  readonly lastLayerUsage?: LastLayerUsage;
 
   // Channel operations (thin wrappers over runtime.send/recv, see 06-channels)
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
@@ -214,6 +218,39 @@ interface LLMResponse {
 - **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).
 - **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus memory layer outputs.
 - **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all memory layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-memory-layer-system`.
+
+## Per-Layer Usage Breakdown
+
+After every successful `callModel`, the runtime records a snapshot of how the context window decomposes into its contributors. The snapshot lives on `ctx.lastLayerUsage` and is also surfaced on `HarnessResponse.lastLayerUsage` (see `08-runtime`). It is the data source for introspection tools such as the CLI `/context` command.
+
+```typescript
+interface LayerUsageEntry {
+  readonly layerId: string;       // matches MemoryLayer.id
+  readonly tokenCount: number;    // self-reported by the layer's recall() output
+}
+
+interface LastLayerUsage {
+  readonly executionId: string;   // ctx.id
+  readonly modelId: string;       // step.model
+  readonly layers: ReadonlyArray<LayerUsageEntry>;  // sorted by layerId
+  readonly systemPromptTokens: number;  // estimated from step.instructions
+  readonly toolsTokens: number;         // estimated from the tool definitions
+  readonly historyTokens: number;       // estimated from ctx.itemLog items not owned by a layer
+  readonly totalUsedTokens: number;     // sum of the four buckets
+}
+```
+
+### How the buckets are computed
+
+Layer tokens come from each layer's `recall()` self-reported `tokenCount` (see `11-memory-layer-system`). System-prompt and tools tokens are estimated against a 4-chars-per-token heuristic. History tokens are estimated from `ctx.itemLog.items` — recall output items live in the assembled view but never in the item log, so there is no overlap to deduplicate.
+
+### When the snapshot is taken
+
+`lastLayerUsage` is committed at the end of each `executeLLM` step, after the `afterModelCall` steering decision resolves Allow and the response items are appended to the log. Steering retries replay against the same recall output but only the final accepted call writes the snapshot. The field is `undefined` until the first `callModel` completes.
+
+### Stability
+
+The snapshot reflects the most recent LLM call only; it is overwritten on the next call. Long-lived telemetry should be exported via `Span` attributes on the `ctx.span` (see `10-observability`).
 
 ## Circular Reference with Channels
 

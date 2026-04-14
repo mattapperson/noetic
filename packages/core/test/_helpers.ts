@@ -203,6 +203,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     threadId: 'thread-1',
     itemLog: makeItemLog(),
     lastStepMeta: null,
+    lastLayerUsage: undefined,
     harness,
     fs: harness.fs,
     shell: harness.shell,

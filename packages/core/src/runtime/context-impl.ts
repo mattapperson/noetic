@@ -1,7 +1,7 @@
 import { buildContextMemory } from '../memory/layer-api';
 import type { Channel } from '../types/channel';
 import type { StepMeta, TokenUsage, Tool } from '../types/common';
-import type { Context, ItemLog } from '../types/context';
+import type { Context, ItemLog, LastLayerUsage } from '../types/context';
 import type { FsAdapter } from '../types/fs-adapter';
 import type { Item } from '../types/items';
 import type { ContextMemory, MemoryLayer } from '../types/memory';
@@ -39,6 +39,7 @@ export class ContextImpl implements Context<ContextMemory> {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   lastStepMeta: StepMeta | null = null;
+  lastLayerUsage: LastLayerUsage | undefined = undefined;
   readonly harness: AgentHarnessContract;
   readonly layers?: MemoryLayer[];
   unifiedTools?: ReadonlyArray<Tool>;

@@ -240,6 +240,24 @@ Content arrays use these discriminated variants:
 | `input_text` | `text: string` | User-provided text |
 | `refusal` | `refusal: string` | Model refusal message |
 
+## Per-Layer Usage Breakdown
+
+`ctx.lastLayerUsage` exposes how the most recent `callModel` decomposed the context window across its contributors. The runtime captures this snapshot after every successful LLM step and overwrites it on the next call.
+
+```ts
+const usage = ctx.lastLayerUsage;
+if (usage) {
+  for (const layer of usage.layers) {
+    console.log(`${layer.layerId}: ${layer.tokenCount} tokens`);
+  }
+  console.log(`system: ${usage.systemPromptTokens}, history: ${usage.historyTokens}`);
+}
+```
+
+Each entry's `tokenCount` is self-reported by the layer's `recall()` output; `systemPromptTokens`, `toolsTokens`, and `historyTokens` are estimates derived from the rendered request. The sum is `totalUsedTokens`. The same snapshot is also surfaced on `HarnessResponse.lastLayerUsage` so external callers (CLIs, dashboards) can read it after the run completes without holding a Context reference.
+
+See [Context Types](/docs/api/context-types) for the `LastLayerUsage` and `LayerUsageEntry` interfaces.
+
 ## Related Pages
 
 - [AgentHarness](/docs/runtime) -- creates and manages contexts.

@@ -698,6 +698,31 @@ const keywordWatcher = {
 } satisfies MemoryLayer<{ docs: Doc[] }>;
 ```
 
+## Per-Layer Context Usage (`ctx.lastLayerUsage`)
+
+After every successful `callModel`, the runtime records a snapshot of how the context window decomposed across its contributors and stores it on `ctx.lastLayerUsage`. The same snapshot is mirrored on `HarnessResponse.lastLayerUsage` for callers that have already released the `Context`.
+
+```typescript
+interface LayerUsageEntry {
+  readonly layerId: string;
+  readonly tokenCount: number;
+}
+
+interface LastLayerUsage {
+  readonly executionId: string;
+  readonly modelId: string;
+  readonly layers: ReadonlyArray<LayerUsageEntry>; // sorted by layerId
+  readonly systemPromptTokens: number;
+  readonly toolsTokens: number;
+  readonly historyTokens: number;
+  readonly totalUsedTokens: number;
+}
+```
+
+- `layers[i].tokenCount` comes from each memory layer's own `recall()` `tokenCount`.
+- The other three buckets are estimated via the framework's 4-chars-per-token heuristic.
+- Use this to power introspection UIs (e.g., the CLI `/context` command). The snapshot is overwritten on the next call — export to your span if you need historical retention.
+
 ## ToolExecutionContext
 
 Available inside tool `execute` functions:

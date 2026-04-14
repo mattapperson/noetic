@@ -127,6 +127,32 @@ interface ExecuteRerenderParams {
 /** Maximum allowed re-render depth to prevent infinite loops */
 const MAX_RERENDER_DEPTH = 3;
 
+/**
+ * Default per-layer token budget when a layer has no `budget` config or uses
+ * `'auto'`. Big enough that budget-respecting layers (e.g. file-reference)
+ * render their content; real auto-allocation across layers is future work.
+ */
+const DEFAULT_LAYER_BUDGET = 1.6e4;
+
+/** Resolve each layer's `BudgetConfig` to a concrete token budget for recall. */
+export function resolveLayerBudgets(layers: ReadonlyArray<MemoryLayer>): Map<string, number> {
+  const budgets = new Map<string, number>();
+  for (const layer of layers) {
+    const cfg = layer.budget;
+    if (typeof cfg === 'number') {
+      budgets.set(layer.id, cfg);
+      continue;
+    }
+    if (typeof cfg === 'object') {
+      budgets.set(layer.id, cfg.max);
+      continue;
+    }
+    // 'auto' or undefined → use the default ceiling.
+    budgets.set(layer.id, DEFAULT_LAYER_BUDGET);
+  }
+  return budgets;
+}
+
 //#endregion
 
 //#region Helper Functions

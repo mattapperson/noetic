@@ -1,104 +1,159 @@
 /**
- * /context command - Shows current context usage.
+ * /context command - Shows per-memory-layer breakdown of the agent's
+ * context window from the most recent run.
  */
 
+import type { LastLayerUsage } from '@noetic/core';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
-import type { ConversationEntry } from '../../tui/item-utils.js';
 import type { Command, LocalJsxCommandCall } from '../types.js';
 
 //#region Types
 
-interface ContextDisplayProps {
-  model: string;
-  entries: ReadonlyArray<ConversationEntry>;
+type RowColor = 'magenta' | 'blue' | 'cyan' | 'green';
+
+interface BreakdownRow {
+  label: string;
+  tokens: number;
+  color: RowColor;
 }
 
-interface StatRowProps {
-  label: string;
-  value: string | number;
-  color?: string;
+interface ContextDisplayProps {
+  model: string;
+  usage?: LastLayerUsage;
+}
+
+interface BreakdownRowViewProps {
+  row: BreakdownRow;
+  total: number;
 }
 
 //#endregion
 
 //#region Helpers
 
-function countByType(entries: ReadonlyArray<ConversationEntry>): {
-  userMessages: number;
-  assistantMessages: number;
-  toolCalls: number;
-  errors: number;
-} {
-  let userMessages = 0;
-  let assistantMessages = 0;
-  let toolCalls = 0;
-  let errors = 0;
+const BAR_WIDTH = 24;
+const FILLED = '█';
+const EMPTY = '░';
 
-  for (const entry of entries) {
-    if ('role' in entry && entry.role === 'user') {
-      userMessages++;
-      continue;
-    }
-    if ('type' in entry) {
-      if (entry.type === 'error') {
-        errors++;
-        continue;
-      }
-      if (entry.type === 'message') {
-        assistantMessages++;
-        continue;
-      }
-      if (entry.type === 'function_call' || entry.type === 'function_call_output') {
-        toolCalls++;
-      }
-    }
+function formatTokens(n: number): string {
+  if (n >= 1e3) {
+    return `${(n / 1e3).toFixed(1)}k`;
   }
+  return String(n);
+}
 
-  return {
-    userMessages,
-    assistantMessages,
-    toolCalls,
-    errors,
-  };
+function buildBar(pct: number): string {
+  const filled = Math.round((pct / 1e2) * BAR_WIDTH);
+  return FILLED.repeat(filled) + EMPTY.repeat(BAR_WIDTH - filled);
+}
+
+function buildRows(usage: LastLayerUsage): BreakdownRow[] {
+  const rows: BreakdownRow[] = [];
+  if (usage.systemPromptTokens > 0) {
+    rows.push({
+      label: 'System prompt',
+      tokens: usage.systemPromptTokens,
+      color: 'magenta',
+    });
+  }
+  if (usage.toolsTokens > 0) {
+    rows.push({
+      label: 'Tools',
+      tokens: usage.toolsTokens,
+      color: 'blue',
+    });
+  }
+  for (const layer of usage.layers) {
+    rows.push({
+      label: layer.layerId,
+      tokens: layer.tokenCount,
+      color: 'cyan',
+    });
+  }
+  if (usage.historyTokens > 0) {
+    rows.push({
+      label: 'Messages',
+      tokens: usage.historyTokens,
+      color: 'green',
+    });
+  }
+  return rows;
 }
 
 //#endregion
 
 //#region Components
 
-function StatRow({ label, value, color = 'white' }: StatRowProps): ReactNode {
+function BreakdownRowView({ row, total }: BreakdownRowViewProps): ReactNode {
+  const pct = total > 0 ? (row.tokens / total) * 1e2 : 0;
   return (
     <Box>
-      <Box width={20}>
-        <Text dimColor>{label}</Text>
+      <Box width={18}>
+        <Text color={row.color}>{row.label}</Text>
       </Box>
-      <Text color={color}>{String(value)}</Text>
+      <Box width={8}>
+        <Text>{formatTokens(row.tokens)}</Text>
+      </Box>
+      <Box width={7}>
+        <Text dimColor>{pct.toFixed(1)}%</Text>
+      </Box>
+      <Text color={row.color}>{buildBar(pct)}</Text>
     </Box>
   );
 }
 
-function ContextDisplay({ model, entries }: ContextDisplayProps): ReactNode {
-  const counts = countByType(entries);
-  const totalMessages = counts.userMessages + counts.assistantMessages;
+function ContextDisplay({ model, usage }: ContextDisplayProps): ReactNode {
+  if (!usage) {
+    return (
+      <Box flexDirection="column" marginY={1}>
+        <Text bold>Context Status</Text>
+        <Box height={1} />
+        <Box marginLeft={2}>
+          <Text dimColor>Model: {model}</Text>
+        </Box>
+        <Box marginLeft={2}>
+          <Text dimColor>No runs yet — send a message to populate the breakdown.</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  const rows = buildRows(usage);
+  const total = usage.totalUsedTokens;
 
   return (
     <Box flexDirection="column" marginY={1}>
       <Text bold>Context Status</Text>
       <Box height={1} />
-
-      <Box flexDirection="column" marginLeft={2}>
-        <StatRow label="Model" value={model} color="cyan" />
-        <StatRow label="Total Messages" value={totalMessages} color="green" />
-        <StatRow label="  User" value={counts.userMessages} />
-        <StatRow label="  Assistant" value={counts.assistantMessages} />
-        <StatRow label="Tool Calls" value={counts.toolCalls} color="yellow" />
-        {counts.errors > 0 && <StatRow label="Errors" value={counts.errors} color="red" />}
+      <Box marginLeft={2} flexDirection="column">
+        <Box>
+          <Box width={18}>
+            <Text dimColor>Model</Text>
+          </Box>
+          <Text color="cyan">{usage.modelId}</Text>
+        </Box>
+        <Box>
+          <Box width={18}>
+            <Text dimColor>Total used</Text>
+          </Box>
+          <Text color="yellow">{formatTokens(total)} tokens</Text>
+        </Box>
       </Box>
-
       <Box height={1} />
-      <Text dimColor>Note: Token usage tracking coming soon.</Text>
+      <Box marginLeft={2} flexDirection="column">
+        {rows.map((row) => (
+          <BreakdownRowView key={row.label} row={row} total={total} />
+        ))}
+      </Box>
+      <Box height={1} />
+      <Box marginLeft={2}>
+        <Text dimColor>
+          Token counts are estimates (~4 chars/token). Layer attribution covers items rendered via
+          memory-layer recall.
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -108,7 +163,7 @@ function ContextDisplay({ model, entries }: ContextDisplayProps): ReactNode {
 //#region Implementation
 
 const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
-  return <ContextDisplay model={ctx.config.model} entries={ctx.entries} />;
+  return <ContextDisplay model={ctx.config.model} usage={ctx.lastLayerUsage} />;
 };
 
 //#endregion
@@ -118,7 +173,7 @@ const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
 export const context: Command = {
   type: 'local-jsx',
   name: 'context',
-  description: 'Show current context usage',
+  description: 'Show context window breakdown by memory layer (from last run)',
   load: async () => ({
     call,
   }),

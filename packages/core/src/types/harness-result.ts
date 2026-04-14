@@ -1,3 +1,4 @@
+import type { LastLayerUsage } from './context';
 import type { Item } from './items';
 
 //#region Stream Event Types
@@ -37,6 +38,8 @@ export interface HarnessResponse {
   };
   readonly cost?: number;
   readonly text: string;
+  /** Per-memory-layer context window breakdown captured at the last callModel of this execution. */
+  readonly lastLayerUsage?: LastLayerUsage;
 }
 
 //#endregion

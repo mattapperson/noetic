@@ -2,7 +2,7 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import type { AgentHarness, InputMessageItem, Item } from '@noetic/core';
+import type { AgentHarness, InputMessageItem, Item, LastLayerUsage } from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -112,6 +112,7 @@ function App({ config, plugins }: AppProps): ReactNode {
   const [modal, setModal] = useState<ModalState | null>(null);
 
   const harnessRef = useRef<AgentHarness | null>(null);
+  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
 
   // Use a ref to track entries so we can access current value in the callback
   // without adding entries to the dependency array (which would cause re-renders)
@@ -196,6 +197,7 @@ function App({ config, plugins }: AppProps): ReactNode {
               activatedSkills,
               commands,
               clearEntries,
+              lastLayerUsage: lastLayerUsageRef.current,
             };
 
             try {
@@ -272,6 +274,8 @@ function App({ config, plugins }: AppProps): ReactNode {
         for await (const item of result.getItemStream()) {
           setEntries((prev) => appendOrUpdateEntry(prev, item));
         }
+        const finalResponse = await result.getResponse();
+        lastLayerUsageRef.current = finalResponse.lastLayerUsage;
       } catch (error) {
         setEntries((prev) => [
           ...prev,
