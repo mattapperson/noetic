@@ -71,6 +71,31 @@ describe('layer-usage', () => {
     expect(usage.historyTokens).toBeGreaterThan(0);
   });
 
+  test('layer entries preserve the recalled items so UI can show per-layer contents', () => {
+    const ctx = makeCtx();
+    const recallResults: RecallLayerOutput[] = [
+      makeRecall('planMemory', 'plan summary', 42),
+      makeRecall('workingMemory', 'scratchpad', 17),
+    ];
+
+    const usage = computeLayerUsage({
+      ctx,
+      modelId: 'm',
+      instructions: undefined,
+      tools: undefined,
+      recallResults,
+    });
+
+    expect(usage.layers[0]?.layerId).toBe('planMemory');
+    expect(usage.layers[0]?.items.length).toBe(1);
+    const planItem = usage.layers[0]?.items[0];
+    expect(planItem && 'id' in planItem && planItem.id).toBe('planMemory-msg');
+    expect(usage.layers[1]?.layerId).toBe('workingMemory');
+    expect(usage.layers[1]?.items.length).toBe(1);
+    const wmItem = usage.layers[1]?.items[0];
+    expect(wmItem && 'id' in wmItem && wmItem.id).toBe('workingMemory-msg');
+  });
+
   test('commitLayerUsage writes onto ctx.lastLayerUsage', () => {
     const ctx = makeCtx();
     expect(ctx.lastLayerUsage).toBeUndefined();

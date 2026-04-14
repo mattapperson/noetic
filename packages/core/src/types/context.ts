@@ -17,6 +17,8 @@ export interface ItemLog {
 export interface LayerUsageEntry {
   readonly layerId: string;
   readonly tokenCount: number;
+  /** Items this layer contributed to the context view for the last LLM call. */
+  readonly items: ReadonlyArray<Item>;
 }
 
 /** @public Breakdown of the context window as of the most recent LLM call in an execution. */

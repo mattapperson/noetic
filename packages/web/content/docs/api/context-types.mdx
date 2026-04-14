@@ -193,6 +193,7 @@ type ContentPart =
 interface LayerUsageEntry {
   readonly layerId: string;
   readonly tokenCount: number;
+  readonly items: ReadonlyArray<Item>;
 }
 ```
 
@@ -200,6 +201,7 @@ interface LayerUsageEntry {
 |---|---|---|
 | `layerId` | `string` | The contributing memory layer's id |
 | `tokenCount` | `number` | Self-reported token count from the layer's `recall()` output |
+| `items` | `ReadonlyArray<Item>` | Items this layer contributed to the context view for the last LLM call |
 
 ## LastLayerUsage
 

@@ -706,6 +706,7 @@ After every successful `callModel`, the runtime records a snapshot of how the co
 interface LayerUsageEntry {
   readonly layerId: string;
   readonly tokenCount: number;
+  readonly items: ReadonlyArray<Item>;
 }
 
 interface LastLayerUsage {

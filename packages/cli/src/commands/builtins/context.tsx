@@ -1,12 +1,9 @@
-/**
- * /context command - Shows per-memory-layer breakdown of the agent's
- * context window from the most recent run.
- */
-
-import type { LastLayerUsage } from '@noetic/core';
+import type { Item, LastLayerUsage, LayerUsageEntry } from '@noetic/core';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
-
+import { useContext } from 'react';
+import type { ScrollableRow } from '../../tui/components/tabs/index.js';
+import { ScrollableBox, Tab, Tabs, TabsContext } from '../../tui/components/tabs/index.js';
 import type { Command, LocalJsxCommandCall } from '../types.js';
 
 //#region Types
@@ -36,20 +33,23 @@ interface BreakdownRowViewProps {
 const BAR_WIDTH = 24;
 const FILLED = '█';
 const EMPTY = '░';
+const TAB_CONTENT_HEIGHT = 18;
+const PREVIEW_CHARS = 80;
 
-function formatTokens(n: number): string {
+export function formatTokens(n: number): string {
   if (n >= 1e3) {
     return `${(n / 1e3).toFixed(1)}k`;
   }
   return String(n);
 }
 
-function buildBar(pct: number): string {
-  const filled = Math.round((pct / 1e2) * BAR_WIDTH);
+export function buildBar(pct: number): string {
+  const raw = Math.round((pct / 1e2) * BAR_WIDTH);
+  const filled = Math.max(0, Math.min(BAR_WIDTH, raw));
   return FILLED.repeat(filled) + EMPTY.repeat(BAR_WIDTH - filled);
 }
 
-function buildRows(usage: LastLayerUsage): BreakdownRow[] {
+export function buildRows(usage: LastLayerUsage): BreakdownRow[] {
   const rows: BreakdownRow[] = [];
   if (usage.systemPromptTokens > 0) {
     rows.push({
@@ -82,6 +82,51 @@ function buildRows(usage: LastLayerUsage): BreakdownRow[] {
   return rows;
 }
 
+function extractMessageText(item: Item): string {
+  if (item.type !== 'message') {
+    return '';
+  }
+  const parts: string[] = [];
+  for (const part of item.content) {
+    if (part.type === 'input_text' || part.type === 'output_text') {
+      parts.push(part.text);
+    }
+  }
+  return parts.join('');
+}
+
+export function summarizeItem(item: Item): string {
+  if (item.type === 'message') {
+    const text = extractMessageText(item);
+    const collapsed = text.replace(/\s+/g, ' ').trim();
+    const preview =
+      collapsed.length > PREVIEW_CHARS ? `${collapsed.slice(0, PREVIEW_CHARS)}…` : collapsed;
+    return `[${item.role}] ${preview}`;
+  }
+  if (item.type === 'function_call') {
+    return `[call] ${item.name}(${item.arguments.slice(0, 40)})`;
+  }
+  if (item.type === 'function_call_output') {
+    return `[output] ${item.output.slice(0, PREVIEW_CHARS)}`;
+  }
+  if (item.type === 'reasoning') {
+    return '[reasoning]';
+  }
+  return `[${item.type}]`;
+}
+
+function hasId(item: Item): item is Item & { id: string } {
+  return 'id' in item && typeof item.id === 'string';
+}
+
+function itemToRow(item: Item, index: number): ScrollableRow {
+  const key = hasId(item) ? item.id : `item-${index}`;
+  return {
+    key,
+    node: <Text dimColor>{summarizeItem(item)}</Text>,
+  };
+}
+
 //#endregion
 
 //#region Components
@@ -104,56 +149,100 @@ function BreakdownRowView({ row, total }: BreakdownRowViewProps): ReactNode {
   );
 }
 
-function ContextDisplay({ model, usage }: ContextDisplayProps): ReactNode {
-  if (!usage) {
+function ContextOverview({ usage }: { usage: LastLayerUsage }): ReactNode {
+  const rows = buildRows(usage);
+  const total = usage.totalUsedTokens;
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Box width={18}>
+          <Text dimColor>Model</Text>
+        </Box>
+        <Text color="cyan">{usage.modelId}</Text>
+      </Box>
+      <Box>
+        <Box width={18}>
+          <Text dimColor>Total used</Text>
+        </Box>
+        <Text color="yellow">{formatTokens(total)} tokens</Text>
+      </Box>
+      <Box height={1} />
+      {rows.map((row) => (
+        <BreakdownRowView key={row.label} row={row} total={total} />
+      ))}
+      <Box height={1} />
+      <Text dimColor>
+        Tab/Shift+Tab or ←/→ to switch tabs. ↓ to scroll layer content, ↑ to return to tabs.
+      </Text>
+    </Box>
+  );
+}
+
+function LayerTab({ entry }: { entry: LayerUsageEntry }): ReactNode {
+  const { headerFocused } = useContext(TabsContext);
+  if (entry.items.length === 0) {
     return (
-      <Box flexDirection="column" marginY={1}>
-        <Text bold>Context Status</Text>
-        <Box height={1} />
-        <Box marginLeft={2}>
-          <Text dimColor>Model: {model}</Text>
-        </Box>
-        <Box marginLeft={2}>
-          <Text dimColor>No runs yet — send a message to populate the breakdown.</Text>
-        </Box>
+      <Box flexDirection="column">
+        <Text dimColor>
+          {entry.tokenCount > 0
+            ? `This layer consumed ${formatTokens(entry.tokenCount)} tokens but exposed no items.`
+            : 'No items contributed by this layer on the last call.'}
+        </Text>
       </Box>
     );
   }
+  const rows = entry.items.map((item, index) => itemToRow(item, index));
+  return (
+    <Box flexDirection="column">
+      <Text>
+        <Text color="cyan">{entry.layerId}</Text>
+        <Text dimColor>
+          {' '}
+          · {entry.items.length} items · {formatTokens(entry.tokenCount)} tokens
+        </Text>
+      </Text>
+      <Box height={1} />
+      <ScrollableBox
+        rows={rows}
+        height={TAB_CONTENT_HEIGHT}
+        isFocused={!headerFocused}
+        overflowHint="↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · ↑ to tabs"
+      />
+    </Box>
+  );
+}
 
-  const rows = buildRows(usage);
-  const total = usage.totalUsedTokens;
-
+function EmptyState({ model }: { model: string }): ReactNode {
   return (
     <Box flexDirection="column" marginY={1}>
       <Text bold>Context Status</Text>
       <Box height={1} />
-      <Box marginLeft={2} flexDirection="column">
-        <Box>
-          <Box width={18}>
-            <Text dimColor>Model</Text>
-          </Box>
-          <Text color="cyan">{usage.modelId}</Text>
-        </Box>
-        <Box>
-          <Box width={18}>
-            <Text dimColor>Total used</Text>
-          </Box>
-          <Text color="yellow">{formatTokens(total)} tokens</Text>
-        </Box>
-      </Box>
-      <Box height={1} />
-      <Box marginLeft={2} flexDirection="column">
-        {rows.map((row) => (
-          <BreakdownRowView key={row.label} row={row} total={total} />
-        ))}
-      </Box>
-      <Box height={1} />
       <Box marginLeft={2}>
-        <Text dimColor>
-          Token counts are estimates (~4 chars/token). Layer attribution covers items rendered via
-          memory-layer recall.
-        </Text>
+        <Text dimColor>Model: {model}</Text>
       </Box>
+      <Box marginLeft={2}>
+        <Text dimColor>No runs yet — send a message to populate the breakdown.</Text>
+      </Box>
+    </Box>
+  );
+}
+
+export function ContextDisplay({ model, usage }: ContextDisplayProps): ReactNode {
+  if (!usage) {
+    return <EmptyState model={model} />;
+  }
+  return (
+    <Box flexDirection="column" marginY={1}>
+      <Tabs title="Context Status" contentHeight={TAB_CONTENT_HEIGHT + 4} navFromContent={true}>
+        <Tab title="Overview" id="__overview">
+          <ContextOverview usage={usage} />
+        </Tab>
+        {usage.layers.map((entry) => (
+          <Tab key={entry.layerId} title={entry.layerId} id={entry.layerId}>
+            <LayerTab entry={entry} />
+          </Tab>
+        ))}
+      </Tabs>
     </Box>
   );
 }

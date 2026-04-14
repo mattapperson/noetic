@@ -227,6 +227,7 @@ After every successful `callModel`, the runtime records a snapshot of how the co
 interface LayerUsageEntry {
   readonly layerId: string;       // matches MemoryLayer.id
   readonly tokenCount: number;    // self-reported by the layer's recall() output
+  readonly items: ReadonlyArray<Item>; // items this layer contributed to the last render
 }
 
 interface LastLayerUsage {

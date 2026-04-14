@@ -42,6 +42,7 @@ export function computeLayerUsage({
     .map((r) => ({
       layerId: r.layerId,
       tokenCount: r.tokenCount,
+      items: r.items,
     }))
     .sort((a, b) => a.layerId.localeCompare(b.layerId));
 
