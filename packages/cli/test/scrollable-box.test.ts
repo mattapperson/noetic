@@ -4,10 +4,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import {
-  clampScrollTop,
-  computeMaxScroll,
-} from '../src/tui/components/tabs/scrollable-box.js';
+import { clampScrollTop, computeMaxScroll } from '../src/tui/components/tabs/scrollable-box.js';
 
 describe('computeMaxScroll', () => {
   test('yields 0 when rowCount < height', () => {

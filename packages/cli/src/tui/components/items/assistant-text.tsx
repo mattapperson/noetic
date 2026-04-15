@@ -16,27 +16,28 @@ export interface AssistantTextProps {
   isStreaming?: boolean;
   /** Streaming cursor character */
   streamingCursor?: string;
+  /** Add a blank line above when this is the first item in a new turn. */
+  addMargin?: boolean;
 }
 
 export function AssistantText({
   text,
   isStreaming = false,
   streamingCursor = '\u258E',
+  addMargin = false,
 }: AssistantTextProps): ReactNode {
   if (!text) {
     return null;
   }
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row">
-        <Text dimColor>{BLACK_CIRCLE} </Text>
-        <Box flexShrink={1} flexGrow={1}>
-          <Text wrap="wrap">
-            {text}
-            {isStreaming && <Text dimColor>{streamingCursor}</Text>}
-          </Text>
-        </Box>
+    <Box flexDirection="row" marginTop={addMargin ? 1 : 0}>
+      <Text dimColor>{BLACK_CIRCLE} </Text>
+      <Box flexShrink={1} flexGrow={1}>
+        <Text wrap="wrap">
+          {text}
+          {isStreaming && <Text dimColor>{streamingCursor}</Text>}
+        </Text>
       </Box>
     </Box>
   );

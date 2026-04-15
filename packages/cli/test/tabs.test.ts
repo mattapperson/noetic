@@ -4,8 +4,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createElement, type ReactElement } from 'react';
-import { Tab, type TabProps } from '../src/tui/components/tabs/tab.js';
+import type { ReactElement } from 'react';
+import { createElement } from 'react';
+import type { TabProps } from '../src/tui/components/tabs/tab.js';
+import { Tab } from '../src/tui/components/tabs/tab.js';
 import {
   collectTabs,
   resolveDefaultIndex,

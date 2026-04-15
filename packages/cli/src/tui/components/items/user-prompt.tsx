@@ -12,9 +12,11 @@ const POINTER = '\u276F'; // ❯
 export interface UserPromptProps {
   /** The user's message text */
   text: string;
+  /** Add a blank line above; typically true except for the very first turn. */
+  addMargin?: boolean;
 }
 
-export function UserPrompt({ text }: UserPromptProps): ReactNode {
+export function UserPrompt({ text, addMargin = false }: UserPromptProps): ReactNode {
   const theme = useTheme();
 
   if (!text) {
@@ -22,7 +24,12 @@ export function UserPrompt({ text }: UserPromptProps): ReactNode {
   }
 
   return (
-    <Box flexDirection="row" backgroundColor={theme.userMessageBg} paddingRight={1}>
+    <Box
+      flexDirection="row"
+      backgroundColor={theme.userMessageBg}
+      paddingRight={1}
+      marginTop={addMargin ? 1 : 0}
+    >
       <Text color={theme.muted}>{POINTER} </Text>
       <Text color={theme.foreground} wrap="wrap">
         {text}
