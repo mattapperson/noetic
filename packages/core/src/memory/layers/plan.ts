@@ -52,13 +52,34 @@ export interface PlanState {
   planTree: PlanNode | null;
   executionLog: PlanExecutionEntry[];
   version: number;
+  /** Identifier of the on-disk plan session (set by `onEnterSession` host callback). */
+  planSlug?: string | null;
 }
+
+/** Host-supplied callback invoked when entering plan mode. Returns a session identifier the host owns (e.g. on-disk dir slug). */
+export type PlanEnterSessionCallback = () => Promise<{
+  slug: string;
+}>;
+
+/**
+ * Host-supplied callback invoked when the model requests `exitPlanMode` with `action: 'execute'`.
+ * Return `{ approved: false }` to keep the layer in `Planning` (e.g. user rejected the plan in the UI).
+ */
+export type PlanExitCallback = (state: PlanState) => Promise<{
+  approved: boolean;
+}>;
 
 export interface PlanMemoryConfig {
   scope?: MemoryScope;
   additionalAllowedTools?: string[];
   maxPrdLength?: number;
   maxTreeDepth?: number;
+  /** Extra free-form instructions appended to the planning-phase recall payload. */
+  additionalPlanInstructions?: string;
+  /** Called once when the layer transitions Idle → Planning. */
+  onEnterSession?: PlanEnterSessionCallback;
+  /** Called when `exitPlanMode` is requested with `action: 'execute'`. */
+  onExit?: PlanExitCallback;
 }
 
 //#endregion
@@ -106,18 +127,35 @@ function trimExecutionLog(log: PlanExecutionEntry[]): PlanExecutionEntry[] {
 
 //#region Recall Renderers
 
-function recallPlanning(state: PlanState): string {
+function recallPlanning(state: PlanState, additionalInstructions?: string): string {
   const sections: string[] = [
     '<plan_mode>',
     'You are in PLAN MODE. You may only use read-only tools (Read, Grep, Find, Ls) to explore the codebase.',
-    'Your goal is to produce a PRD document and a structured execution plan.',
+    'Your goal is to produce a PRD document and (optionally) a structured execution plan.',
     '',
-    'Available actions:',
-    '- Call plan/updatePrd with your PRD content (markdown)',
-    '- Call plan/setPlanTree with a PlanNode JSON tree',
-    '- Call plan/exitPlanMode with { action: "execute" } to begin execution',
-    '- Call plan/exitPlanMode with { action: "cancel" } to cancel',
+    '## Workflow (5 phases)',
+    '',
+    '1. **Initial Understanding** — Read code and gather context. To parallelise exploration, fork over `{ kind: "subagent", preset: "explore", prompt: "..." }` nodes; up to 3 in parallel. Each Explore subagent returns a focused report.',
+    '2. **Design** — Synthesise findings. Optionally invoke `{ kind: "subagent", preset: "plan", prompt: "..." }` (1–3 in parallel) to draft alternative implementation approaches and surface trade-offs.',
+    '3. **Review** — Read the critical files identified by your subagents directly so you understand them first-hand. If anything is ambiguous, ask the user a focused question.',
+    '4. **Final Plan** — Write the PRD via `plan/updatePrd`. Lead with a **Context** section (why this change), then your single recommended approach, the paths of files to modify, existing functions/utilities to reuse, and a **Verification** section. If the task warrants custom step orchestration, also call `plan/setPlanTree` with a JSON noetic flow built from the existing step primitives (`step.llm`, `step.branch`, `step.fork`, `step.spawn`, `step.loop`) — tool refs by name string. Otherwise omit the tree.',
+    '5. **Exit** — Call `plan/exitPlanMode` with `{ action: "execute" }` to request approval. The user must accept before execution begins; if they reject, you stay in Plan Mode and may revise.',
+    '',
+    '## Available actions',
+    '- `plan/updatePrd` — set markdown PRD content',
+    '- `plan/setPlanTree` — set the optional JSON execution plan',
+    '- `plan/exitPlanMode` `{ action: "execute" }` — request approval and exit to executing',
+    '- `plan/exitPlanMode` `{ action: "cancel" }` — discard plan and return to idle',
+    '',
+    '## Constraints',
+    '- DO NOT create, modify, or delete files (other than via `plan/updatePrd`).',
+    '- DO NOT run mutating shell commands. Read-only exploration only.',
+    '- End each turn either by asking the user a focused clarifying question or by calling `plan/exitPlanMode`.',
   ];
+
+  if (additionalInstructions) {
+    sections.push('', '## Additional Instructions', '', additionalInstructions);
+  }
 
   if (state.prd) {
     sections.push('', '## Current PRD Draft', '', state.prd);
@@ -152,7 +190,7 @@ function recallTerminal(state: PlanState): string {
   return `<plan_outcome>Plan v${state.version} ${outcome}.</plan_outcome>`;
 }
 
-type RecallRenderer = (state: PlanState) => string;
+type RecallRenderer = (state: PlanState, additionalInstructions?: string) => string;
 
 const RECALL_RENDERERS: Partial<Record<PlanPhase, RecallRenderer>> = {
   [PlanPhase.Planning]: recallPlanning,
@@ -177,6 +215,9 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
   const maxPrdLength = config?.maxPrdLength ?? MAX_PRD_LENGTH;
   const maxTreeDepth = config?.maxTreeDepth ?? MAX_TREE_DEPTH;
   const allowedTools = buildAllowedTools(config);
+  const additionalPlanInstructions = config?.additionalPlanInstructions;
+  const onEnterSession = config?.onEnterSession;
+  const onExit = config?.onExit;
 
   return {
     id: 'plan',
@@ -225,6 +266,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
               state,
             };
           }
+          const session = onEnterSession ? await onEnterSession() : null;
           return {
             result: 'Plan mode activated. Explore the codebase, then call plan/updatePrd.',
             state: {
@@ -233,6 +275,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
               prd: args.goal ? `# Goal\n\n${args.goal}\n` : null,
               planTree: null,
               version: state.version + 1,
+              planSlug: session?.slug ?? null,
             },
           };
         },
@@ -345,6 +388,17 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
             };
           }
 
+          if (onExit) {
+            const { approved } = await onExit(state);
+            if (!approved) {
+              return {
+                result:
+                  'User did not approve the plan. Stay in plan mode, address their feedback, and call plan/exitPlanMode again when ready.',
+                state,
+              };
+            }
+          }
+
           return {
             result: 'Plan mode exited. Execution phase begun.',
             state: {
@@ -373,7 +427,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
           return null;
         }
 
-        const content = renderer(state);
+        const content = renderer(state, additionalPlanInstructions);
         return {
           items: [
             createMessage(content, 'developer'),

@@ -747,6 +747,104 @@ describe('planMemory layer', () => {
 
   //#endregion
 
+  //#region Host Callbacks (onEnterSession, onExit, additionalPlanInstructions)
+
+  describe('host callbacks', () => {
+    it('calls onEnterSession and stores returned slug in state', async () => {
+      let called = 0;
+      const layer = planMemory({
+        onEnterSession: async () => {
+          called += 1;
+          return {
+            slug: 'amber-cobalt-falcon',
+          };
+        },
+      });
+      const fn = layer.provides!.enterPlanMode;
+      assert(fn.kind === 'function');
+      const result = await fn.execute({}, makeIdleState(), makeCtx());
+      assert(result.state);
+      expect(called).toBe(1);
+      expect(result.state.planSlug).toBe('amber-cobalt-falcon');
+    });
+
+    it('leaves planSlug null when no callback configured', async () => {
+      const layer = planMemory();
+      const fn = layer.provides!.enterPlanMode;
+      assert(fn.kind === 'function');
+      const result = await fn.execute({}, makeIdleState(), makeCtx());
+      assert(result.state);
+      expect(result.state.planSlug ?? null).toBeNull();
+    });
+
+    it('rejected onExit keeps phase in Planning and reports rejection', async () => {
+      const layer = planMemory({
+        onExit: async () => ({
+          approved: false,
+        }),
+      });
+      const fn = layer.provides!.exitPlanMode;
+      assert(fn.kind === 'function');
+      const inputState = makePlanningState({
+        prd: '# PRD',
+        planTree: makePlanNode(),
+      });
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        inputState,
+        makeCtx(),
+      );
+      expect(result.result).toContain('did not approve');
+      expect(result.state).toBe(inputState);
+    });
+
+    it('approved onExit transitions to Executing', async () => {
+      const layer = planMemory({
+        onExit: async () => ({
+          approved: true,
+        }),
+      });
+      const fn = layer.provides!.exitPlanMode;
+      assert(fn.kind === 'function');
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        makePlanningState({
+          prd: '# PRD',
+          planTree: makePlanNode(),
+        }),
+        makeCtx(),
+      );
+      assert(result.state);
+      expect(result.state.phase).toBe(PlanPhase.Executing);
+    });
+
+    it('appends additionalPlanInstructions to recall payload', async () => {
+      const layer = planMemory({
+        additionalPlanInstructions: 'PROJECT_RULE: do not touch the auth module.',
+      });
+      const result = await layer.hooks.recall!({
+        log: makeItemLog(),
+        query: '',
+        ctx: makeCtx(),
+        state: makePlanningState(),
+        budget: 3e3,
+      });
+      assert(result !== null);
+      assert(typeof result !== 'string');
+      const part = result.items[0];
+      assert(part.type === 'message');
+      const text = part.content[0];
+      assert(text.type === 'input_text');
+      expect(text.text).toContain('PROJECT_RULE');
+    });
+  });
+
+  //#endregion
+
   //#region Status Data
 
   describe('status layerData', () => {

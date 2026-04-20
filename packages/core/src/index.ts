@@ -88,7 +88,9 @@ export type {
 export { observationalMemory } from './memory/layers/observational-memory';
 /** @public */
 export type {
+  PlanEnterSessionCallback,
   PlanExecutionEntry,
+  PlanExitCallback,
   PlanMemoryConfig,
   PlanState,
 } from './memory/layers/plan';

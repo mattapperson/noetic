@@ -36,6 +36,13 @@ interface CommandContext {
   lastLayerUsage?: LastLayerUsage;
   /** Memory layers registered with the harness — includes layers that did not contribute on the last run. */
   memoryLayers: ReadonlyArray<MemoryLayer>;
+  /** Current agent mode. */
+  agentMode: 'normal' | 'planning';
+  /**
+   * Switch the active agent mode. Triggers harness recreation so the model
+   * sees the correct toolset (full vs read-only) on the next turn.
+   */
+  setAgentMode: (mode: 'normal' | 'planning') => Promise<void>;
 }
 
 //#endregion

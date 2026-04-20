@@ -8,6 +8,7 @@ import type {
   Item,
   LastLayerUsage,
   MemoryLayer,
+  PlanState,
 } from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
@@ -22,7 +23,9 @@ import {
   parseSlashCommand,
 } from '../commands/index.js';
 import type { Command, CommandContext } from '../commands/types.js';
+import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness } from '../harness/factory.js';
+import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
 import type { SkillDefinition } from '../skills/types.js';
@@ -30,6 +33,7 @@ import type { AgentRuntimeConfig } from '../types/config.js';
 import { getModelContextLimit } from '../types/model-context.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
+import { PlanApprovalModal } from './components/plan-approval-modal.js';
 import { FooterContextProvider } from './footer-context.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
 import {
@@ -120,6 +124,7 @@ function App({ config, plugins }: AppProps): ReactNode {
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
+  const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
 
   const buildCtx = useMemo(
     () => createPluginContextBuilder(config),
@@ -129,9 +134,11 @@ function App({ config, plugins }: AppProps): ReactNode {
   );
 
   const harnessRef = useRef<AgentHarness | null>(null);
+  const harnessModeRef = useRef<AgentMode>('normal');
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
   const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
+  const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
   // Stable per-session threadId so memory layers that persist by thread/resource
   // scope rehydrate across turns. Random UUID lives for the CLI process lifetime.
   const threadIdRef = useRef<string>(crypto.randomUUID());
@@ -196,12 +203,17 @@ function App({ config, plugins }: AppProps): ReactNode {
     setEntries([]);
   }, []);
 
-  // Handle modal close (Escape pressed)
+  // Handle modal close (Escape pressed). If a plan-approval modal is open and
+  // the user dismisses without explicitly accepting, we treat that as rejection
+  // so the layer stays in plan mode rather than silently auto-approving.
   const handleModalClose = useCallback(() => {
     if (!modal) {
       return;
     }
-    // Add dismiss message to chat history
+    if (pendingApprovalRef.current) {
+      pendingApprovalRef.current(false);
+      pendingApprovalRef.current = null;
+    }
     setEntries((prev) => [
       ...prev,
       {
@@ -215,32 +227,104 @@ function App({ config, plugins }: AppProps): ReactNode {
     modal,
   ]);
 
+  // Plan-mode hooks: own session creation and approval-modal lifecycle.
+  // Memoised once — they read from refs so they don't need React re-renders.
+  const planHooks = useMemo<PlanHooks>(
+    () => ({
+      onEnterSession: async () => createPlanSession(),
+      onExit: async (state: PlanState) => {
+        const slug = state.planSlug;
+        return new Promise<{
+          approved: boolean;
+        }>((resolve) => {
+          pendingApprovalRef.current = async (approved) => {
+            if (approved && slug) {
+              if (state.prd) {
+                await writePrd(slug, state.prd);
+              }
+              if (state.planTree) {
+                await writeFlow(slug, state.planTree).catch(() => {
+                  // planTree may be a legacy PlanNode that doesn't match the flow schema; ignore.
+                });
+              }
+            }
+            resolve({
+              approved,
+            });
+          };
+          setModal({
+            content: (
+              <PlanApprovalModal
+                prd={state.prd ?? '(no PRD)'}
+                planTree={state.planTree}
+                onAccept={() => {
+                  const cb = pendingApprovalRef.current;
+                  pendingApprovalRef.current = null;
+                  setModal(null);
+                  cb?.(true);
+                }}
+                onReject={() => {
+                  const cb = pendingApprovalRef.current;
+                  pendingApprovalRef.current = null;
+                  setModal(null);
+                  cb?.(false);
+                }}
+              />
+            ),
+            commandName: 'plan/exitPlanMode',
+            dismissMessage: 'Plan approval dismissed (treated as rejection).',
+          });
+        });
+      },
+    }),
+    [],
+  );
+
   /**
-   * Get or create the harness, storing the canonical skill catalog.
+   * Get or create the harness for the requested mode. If the requested mode
+   * differs from the active harness's mode, the existing harness is discarded
+   * and a fresh one is built so the model sees the correct toolset.
    */
-  const getOrCreateHarness = useCallback(async (): Promise<AgentHarness> => {
-    if (harnessRef.current !== null) {
-      return harnessRef.current;
-    }
-    const {
-      harness,
-      skills: resolvedSkills,
-      memoryLayers,
-    } = await createAgentHarness({
+  const getOrCreateHarness = useCallback(
+    async (mode: AgentMode): Promise<AgentHarness> => {
+      if (harnessRef.current !== null && harnessModeRef.current === mode) {
+        return harnessRef.current;
+      }
+      const {
+        harness,
+        skills: resolvedSkills,
+        memoryLayers,
+      } = await createAgentHarness({
+        config,
+        plugins,
+        fs: config.fs,
+        mode,
+        planHooks,
+        buildContext: buildCtx,
+      });
+      harnessRef.current = harness;
+      harnessModeRef.current = mode;
+      memoryLayersRef.current = memoryLayers;
+      setSkills(resolvedSkills);
+      return harness;
+    },
+    [
       config,
       plugins,
-      fs: config.fs,
-      buildContext: buildCtx,
-    });
-    harnessRef.current = harness;
-    memoryLayersRef.current = memoryLayers;
-    setSkills(resolvedSkills);
-    return harness;
-  }, [
-    config,
-    plugins,
-    buildCtx,
-  ]);
+      planHooks,
+      buildCtx,
+    ],
+  );
+
+  // Switching mode invalidates the cached harness so the next turn rebuilds with
+  // the correct tool set. We don't proactively rebuild here — `getOrCreateHarness`
+  // does it lazily on the next message.
+  const setAgentMode = useCallback(async (mode: AgentMode): Promise<void> => {
+    if (harnessModeRef.current !== mode) {
+      harnessRef.current = null;
+    }
+    setAgentModeState(mode);
+  }, []);
 
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
@@ -262,6 +346,8 @@ function App({ config, plugins }: AppProps): ReactNode {
               clearEntries,
               lastLayerUsage: lastLayerUsageRef.current,
               memoryLayers: memoryLayersRef.current,
+              agentMode,
+              setAgentMode,
             };
 
             try {
@@ -341,7 +427,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       setStatus('submitted');
 
       try {
-        const harness = await getOrCreateHarness();
+        const harness = await getOrCreateHarness(agentMode);
         // Build conversation history including the new user message
         const historyItems = entriesToItems([
           ...entriesRef.current,
@@ -372,6 +458,8 @@ function App({ config, plugins }: AppProps): ReactNode {
       skills,
       clearEntries,
       getOrCreateHarness,
+      agentMode,
+      setAgentMode,
     ],
   );
 
@@ -385,6 +473,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       threadId: threadIdRef.current,
       sessionStartedAt: sessionStartedAtRef.current,
       entryCount: entries.length,
+      agentMode,
     }),
     [
       config.model,
@@ -392,6 +481,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       status,
       lastLayerUsage,
       entries.length,
+      agentMode,
     ],
   );
 

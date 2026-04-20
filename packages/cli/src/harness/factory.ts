@@ -1,4 +1,11 @@
-import type { FsAdapter, MemoryLayer, ShellAdapter, Tool } from '@noetic/core';
+import type {
+  FsAdapter,
+  MemoryLayer,
+  PlanEnterSessionCallback,
+  PlanExitCallback,
+  ShellAdapter,
+  Tool,
+} from '@noetic/core';
 import {
   AgentHarness,
   createLocalShellAdapter,
@@ -17,8 +24,20 @@ import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
-import { createActivateSkillTool, createCodingTools } from '../tools/index.js';
+import { createActivateSkillTool, createCodingTools, createReadOnlyTools } from '../tools/index.js';
 import type { AgentConfig } from '../types/config.js';
+
+//#region Types
+
+export type AgentMode = 'normal' | 'planning';
+
+export interface PlanHooks {
+  onEnterSession?: PlanEnterSessionCallback;
+  onExit?: PlanExitCallback;
+  additionalPlanInstructions?: string;
+}
+
+//#endregion
 
 //#region Helpers
 
@@ -85,6 +104,10 @@ interface CreateAgentHarnessOpts {
   fs: FsAdapter;
   shell?: ShellAdapter;
   buildContext: PluginContextBuilder;
+  /** Initial agent mode. Defaults to `'normal'`. */
+  mode?: AgentMode;
+  /** Optional plan-mode lifecycle hooks (session creation, approval gate, extra instructions). */
+  planHooks?: PlanHooks;
 }
 
 /**
@@ -94,6 +117,8 @@ interface CreateAgentHarnessOpts {
 export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<HarnessWithSkills> {
   const { config, plugins, fs, buildContext } = opts;
   const shell = opts.shell ?? createLocalShellAdapter();
+  const mode: AgentMode = opts.mode ?? 'normal';
+  const planHooks = opts.planHooks;
 
   // Build canonical skill catalog (single source of truth)
   const allSkills = await buildSkillCatalog({
@@ -103,8 +128,12 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     buildCtx: buildContext,
   });
 
-  // Build tools including skill activation
-  const builtinTools = createCodingTools(config.cwd, fs, shell);
+  // Build tools including skill activation. In planning mode we hide mutating
+  // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
+  const builtinTools =
+    mode === 'planning'
+      ? createReadOnlyTools(config.cwd, fs, shell)
+      : createCodingTools(config.cwd, fs, shell);
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
 
@@ -124,7 +153,11 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // Build memory layers including plan and skills layers
   const pluginMemory = await collectPluginMemory(plugins, buildContext);
   const memory: MemoryLayer[] = [
-    planMemory(),
+    planMemory({
+      additionalPlanInstructions: planHooks?.additionalPlanInstructions,
+      onEnterSession: planHooks?.onEnterSession,
+      onExit: planHooks?.onExit,
+    }),
     workingMemory(),
     observationalMemory(),
     fileReference(),
