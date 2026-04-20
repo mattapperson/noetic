@@ -789,7 +789,13 @@ describe('planMemory layer', () => {
         prd: '# PRD',
         planTree: makePlanNode(),
       });
-      const result = await fn.execute({ action: 'execute' }, inputState, makeCtx());
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        inputState,
+        makeCtx(),
+      );
       expect(result.result).toContain('did not approve');
       expect(result.state).toBe(inputState);
     });
@@ -803,7 +809,9 @@ describe('planMemory layer', () => {
       const fn = layer.provides!.exitPlanMode;
       assert(fn.kind === 'function');
       const result = await fn.execute(
-        { action: 'execute' },
+        {
+          action: 'execute',
+        },
         makePlanningState({
           prd: '# PRD',
           planTree: makePlanNode(),
