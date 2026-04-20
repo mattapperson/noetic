@@ -1,9 +1,9 @@
 ---
 name: plan-mode
-description: Author plan.md PRDs and FlowSchema plan-trees during noetic plan mode. This skill should be consulted whenever the agent is in plan mode and about to call plan/updatePrd or plan/setPlanTree.
-when-to-use: Automatically active during plan mode (PlanPhase.Planning).
+description: Author plan.md PRDs and FlowSchema plan-trees during noetic plan mode. This skill should be consulted whenever the agent is in plan mode and about to call plan/updatePrd or plan/setPlanTree, or whenever the model needs to reference the FlowSchema node shape (llm, subagent, fork, spawn, sequence).
+when-to-use: Auto-injected while plan mode is active. Outside plan mode, activate explicitly to learn the FlowSchema and plan.md authoring format before orchestration work.
 user-invocable: false
-model-invocable: false
+model-invocable: true
 ---
 
 # Plan-mode authoring guide

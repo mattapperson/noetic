@@ -63,10 +63,15 @@ describe('BUILT_IN_SKILLS registry', () => {
     expect(planMode?.source).toBe(SkillSource.BuiltIn);
   });
 
-  test('plan-mode skill is neither user- nor model-invocable', () => {
+  test('plan-mode skill is model-invocable but not user-invocable', () => {
+    // model-invocable: true so the model can activateSkill({name: 'plan-mode'})
+    //   to learn FlowSchema outside plan mode (inside plan mode the content is
+    //   auto-injected via additionalPlanInstructions regardless).
+    // user-invocable: false because plan mode is entered via /plan, not via
+    //   the skill's user slash command.
     const planMode = BUILT_IN_SKILLS.find((s) => s.name === 'plan-mode');
     expect(planMode?.userInvocable).toBe(false);
-    expect(planMode?.modelInvocable).toBe(false);
+    expect(planMode?.modelInvocable).toBe(true);
   });
 
   test('plan-mode instructions mention the FlowSchema and plan/updatePrd tool', () => {
