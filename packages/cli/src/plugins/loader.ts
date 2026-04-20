@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 
 import type { AgentConfig, PluginSpec } from '../types/config.js';
+import type { PluginContextBuilder } from './context.js';
 import type { NoeticPlugin } from './types.js';
 
 //#region Schemas
@@ -17,36 +18,36 @@ const NoeticPluginSchema = z
     version: z.string(),
     tools: z.unknown().optional(),
     memoryLayers: z.unknown().optional(),
+    skills: z.unknown().optional(),
     initialize: z.unknown().optional(),
     dispose: z.unknown().optional(),
     footer: z.unknown().optional(),
     loadingMessages: z.unknown().optional(),
+    commands: z.unknown().optional(),
   })
   .refine(
     (obj) => {
-      if (obj.tools !== undefined && typeof obj.tools !== 'function') {
-        return false;
-      }
-      if (obj.memoryLayers !== undefined && typeof obj.memoryLayers !== 'function') {
-        return false;
-      }
-      if (obj.initialize !== undefined && typeof obj.initialize !== 'function') {
-        return false;
-      }
-      if (obj.dispose !== undefined && typeof obj.dispose !== 'function') {
-        return false;
-      }
-      if (obj.footer !== undefined && typeof obj.footer !== 'function') {
-        return false;
-      }
-      if (obj.loadingMessages !== undefined && typeof obj.loadingMessages !== 'function') {
-        return false;
+      const fnFields = [
+        'tools',
+        'memoryLayers',
+        'skills',
+        'initialize',
+        'dispose',
+        'footer',
+        'loadingMessages',
+        'commands',
+      ] as const;
+      for (const field of fnFields) {
+        const value = obj[field];
+        if (value !== undefined && typeof value !== 'function') {
+          return false;
+        }
       }
       return true;
     },
     {
       message:
-        'Optional fields (tools, memoryLayers, initialize, dispose, footer, loadingMessages) must be functions if provided',
+        'Optional hook fields (tools, memoryLayers, skills, initialize, dispose, footer, loadingMessages, commands) must be functions if provided',
     },
   );
 
@@ -89,11 +90,12 @@ function resolvePluginPath(spec: PluginSpec, baseDir: string): string {
     return spec;
   }
 
-  if (spec.path) {
-    if (isAbsolute(spec.path)) {
-      return spec.path;
+  const path = typeof spec.path === 'string' ? spec.path : undefined;
+  if (path) {
+    if (isAbsolute(path)) {
+      return path;
     }
-    return resolve(baseDir, spec.path);
+    return resolve(baseDir, path);
   }
 
   return spec.name;
@@ -122,7 +124,11 @@ async function importPlugin(spec: PluginSpec, baseDir: string): Promise<NoeticPl
 
 //#region Public API
 
-export async function loadPlugins(config: AgentConfig, baseDir: string): Promise<NoeticPlugin[]> {
+export async function loadPlugins(
+  config: AgentConfig,
+  baseDir: string,
+  buildContext?: PluginContextBuilder,
+): Promise<NoeticPlugin[]> {
   const plugins: NoeticPlugin[] = [];
   const seenNames = new Set<string>();
 
@@ -132,7 +138,14 @@ export async function loadPlugins(config: AgentConfig, baseDir: string): Promise
       throw new Error(`Duplicate plugin name: ${plugin.name}`);
     }
     seenNames.add(plugin.name);
-    await plugin.initialize?.(config);
+    if (plugin.initialize) {
+      if (!buildContext) {
+        throw new Error(
+          `Plugin ${plugin.name} defines initialize but loadPlugins was called without a context builder`,
+        );
+      }
+      await plugin.initialize(buildContext(plugin.name));
+    }
     plugins.push(plugin);
   }
 
