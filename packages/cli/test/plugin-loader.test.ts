@@ -130,6 +130,35 @@ describe('plugin loader', () => {
     ).rejects.toThrow('Invalid plugin');
   });
 
+  it('accepts already-instantiated plugins inline in config.plugins', async () => {
+    const initCalls: string[] = [];
+    const plugins = await loadPlugins(
+      {
+        ...baseConfig,
+        plugins: [
+          {
+            name: 'inline-plugin',
+            version: '1.2.3',
+            initialize: async () => {
+              initCalls.push('inline-plugin');
+            },
+            loadingMessages: () => [
+              'Thinking',
+            ],
+          },
+        ],
+      },
+      process.cwd(),
+    );
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]?.name).toBe('inline-plugin');
+    expect(typeof plugins[0]?.loadingMessages).toBe('function');
+    expect(initCalls).toEqual([
+      'inline-plugin',
+    ]);
+  });
+
   it('disposes plugins in reverse order', async () => {
     const calls: string[] = [];
     await disposePlugins([

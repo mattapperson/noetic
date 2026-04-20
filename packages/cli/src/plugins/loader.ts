@@ -62,6 +62,21 @@ function isNoeticPlugin(value: unknown): value is NoeticPlugin {
   return NoeticPluginSchema.safeParse(value).success;
 }
 
+/**
+ * An inline-plugin spec is a PluginSpec object that already has at least one
+ * plugin hook defined. Distinguishing it from a `{name, path?, options?}`
+ * spec lets `loadPlugins` use it directly instead of trying to `import()` it.
+ */
+function isInlineNoeticPlugin(spec: PluginSpec): spec is NoeticPlugin {
+  if (typeof spec !== 'object' || spec === null) {
+    return false;
+  }
+  if (!('version' in spec) || typeof spec.version !== 'string') {
+    return false;
+  }
+  return isNoeticPlugin(spec);
+}
+
 //#endregion
 
 //#region Helpers
@@ -112,7 +127,7 @@ export async function loadPlugins(config: AgentConfig, baseDir: string): Promise
   const seenNames = new Set<string>();
 
   for (const spec of config.plugins ?? []) {
-    const plugin = await importPlugin(spec, baseDir);
+    const plugin = isInlineNoeticPlugin(spec) ? spec : await importPlugin(spec, baseDir);
     if (seenNames.has(plugin.name)) {
       throw new Error(`Duplicate plugin name: ${plugin.name}`);
     }

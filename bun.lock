@@ -116,13 +116,17 @@
       "dependencies": {
         "@noetic/cli": "workspace:*",
         "@noetic/core": "workspace:*",
-        "ink": "^7.0.0",
-        "react": "^19.2.0",
         "zod": "^4.0.0",
       },
       "devDependencies": {
         "@types/react": "^19.2.14",
         "bun-types": "latest",
+        "ink": "^7.0.0",
+        "react": "^19.2.0",
+      },
+      "peerDependencies": {
+        "ink": "^7.0.0",
+        "react": "^19.2.0",
       },
     },
     "packages/web": {
