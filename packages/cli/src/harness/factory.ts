@@ -152,9 +152,25 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
 
   // Build memory layers including plan and skills layers
   const pluginMemory = await collectPluginMemory(plugins, buildContext);
+
+  // The built-in (or user-overridden) `plan-mode` skill carries detailed
+  // authoring guidance for plan.md PRDs and FlowSchema plan-trees. Inject its
+  // content as additional plan instructions so it's in context from turn one
+  // of plan mode, concatenated with any host-supplied instructions.
+  const planModeSkill = allSkills.find((s) => s.name === 'plan-mode');
+  const planInstructionBlocks: string[] = [];
+  if (planModeSkill) {
+    planInstructionBlocks.push(planModeSkill.instructions);
+  }
+  if (planHooks?.additionalPlanInstructions) {
+    planInstructionBlocks.push(planHooks.additionalPlanInstructions);
+  }
+  const additionalPlanInstructions =
+    planInstructionBlocks.length > 0 ? planInstructionBlocks.join('\n\n---\n\n') : undefined;
+
   const memory: MemoryLayer[] = [
     planMemory({
-      additionalPlanInstructions: planHooks?.additionalPlanInstructions,
+      additionalPlanInstructions,
       onEnterSession: planHooks?.onEnterSession,
       onExit: planHooks?.onExit,
     }),

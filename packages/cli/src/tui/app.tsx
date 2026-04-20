@@ -28,6 +28,7 @@ import { createAgentHarness } from '../harness/factory.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
+import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
 import { getModelContextLimit } from '../types/model-context.js';
@@ -176,6 +177,38 @@ function App({ config, plugins }: AppProps): ReactNode {
       cancelled = true;
     };
   }, [
+    plugins,
+    buildCtx,
+  ]);
+
+  // Prime the skill catalog on mount so `/skills` works before the first
+  // chat turn (which is when getOrCreateHarness would otherwise be the first
+  // caller of buildSkillCatalog). The harness path re-populates later with
+  // the same data, so the two code paths stay consistent.
+  useEffect(() => {
+    let cancelled = false;
+    async function prime(): Promise<void> {
+      try {
+        const catalog = await buildSkillCatalog({
+          cwd: config.cwd,
+          plugins,
+          fs: config.fs,
+          buildCtx,
+        });
+        if (cancelled) {
+          return;
+        }
+        setSkills(catalog);
+      } catch {
+        // Swallow — skill discovery failures shouldn't prevent the TUI booting.
+      }
+    }
+    void prime();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    config,
     plugins,
     buildCtx,
   ]);

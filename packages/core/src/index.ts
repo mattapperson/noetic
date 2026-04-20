@@ -119,6 +119,17 @@ export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 //#region Patterns
 
 /** @public */
+export type {
+  FlowNode,
+  ForkFlowNode,
+  LlmFlowNode,
+  SequenceFlowNode,
+  SpawnFlowNode,
+  SubagentFlowNode,
+} from './patterns/flow';
+/** @public */
+export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
+/** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
 export { adaptivePlan, compilePlan, PlanNodeSchema } from './patterns/plans';

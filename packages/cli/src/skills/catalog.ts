@@ -9,6 +9,7 @@ import type { FsAdapter } from '@noetic/core';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 
+import { BUILT_IN_SKILLS } from './built-in/index.js';
 import { discoverSkills } from './discovery.js';
 import type { SkillDefinition } from './types.js';
 import { SkillSource } from './types.js';
@@ -58,9 +59,11 @@ export async function buildSkillCatalog(args: BuildSkillCatalogArgs): Promise<Sk
   const filesystemSkills = await discoverSkills(cwd, fs);
   const pluginSkills = await collectPluginSkills(plugins, buildCtx);
 
-  // Merge skills (filesystem skills have priority, they're already deduplicated)
+  // Precedence (later entries override earlier by name):
+  // built-in (lowest) → plugin → filesystem (highest)
   const skillsByName = new Map<string, SkillDefinition>();
   for (const skill of [
+    ...BUILT_IN_SKILLS,
     ...pluginSkills,
     ...filesystemSkills,
   ]) {
