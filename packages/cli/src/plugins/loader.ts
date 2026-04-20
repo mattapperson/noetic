@@ -19,10 +19,11 @@ const NoeticPluginSchema = z
     memoryLayers: z.unknown().optional(),
     initialize: z.unknown().optional(),
     dispose: z.unknown().optional(),
+    footer: z.unknown().optional(),
+    loadingMessages: z.unknown().optional(),
   })
   .refine(
     (obj) => {
-      // Additional runtime checks for function fields
       if (obj.tools !== undefined && typeof obj.tools !== 'function') {
         return false;
       }
@@ -35,11 +36,17 @@ const NoeticPluginSchema = z
       if (obj.dispose !== undefined && typeof obj.dispose !== 'function') {
         return false;
       }
+      if (obj.footer !== undefined && typeof obj.footer !== 'function') {
+        return false;
+      }
+      if (obj.loadingMessages !== undefined && typeof obj.loadingMessages !== 'function') {
+        return false;
+      }
       return true;
     },
     {
       message:
-        'Optional fields (tools, memoryLayers, initialize, dispose) must be functions if provided',
+        'Optional fields (tools, memoryLayers, initialize, dispose, footer, loadingMessages) must be functions if provided',
     },
   );
 

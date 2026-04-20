@@ -23,11 +23,13 @@ import {
 } from '../commands/index.js';
 import type { Command, CommandContext } from '../commands/types.js';
 import { createAgentHarness } from '../harness/factory.js';
-import type { NoeticPlugin } from '../plugins/types.js';
+import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
+import { getModelContextLimit } from '../types/model-context.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
+import { FooterContextProvider } from './footer-context.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
 import {
   appendOrUpdateEntry,
@@ -119,10 +121,12 @@ function App({ config, plugins }: AppProps): ReactNode {
 
   const harnessRef = useRef<AgentHarness | null>(null);
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
+  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
   // Stable per-session threadId so memory layers that persist by thread/resource
   // scope rehydrate across turns. Random UUID lives for the CLI process lifetime.
   const threadIdRef = useRef<string>(crypto.randomUUID());
+  const sessionStartedAtRef = useRef<number>(Date.now());
 
   // Use a ref to track entries so we can access current value in the callback
   // without adding entries to the dependency array (which would cause re-renders)
@@ -294,6 +298,7 @@ function App({ config, plugins }: AppProps): ReactNode {
         }
         const finalResponse = await result.getResponse();
         lastLayerUsageRef.current = finalResponse.lastLayerUsage;
+        setLastLayerUsage(finalResponse.lastLayerUsage);
       } catch (error) {
         setEntries((prev) => [
           ...prev,
@@ -312,17 +317,40 @@ function App({ config, plugins }: AppProps): ReactNode {
     ],
   );
 
+  const footerValue = useMemo<FooterContextValue>(
+    () => ({
+      model: config.model,
+      cwd: config.cwd,
+      status,
+      lastLayerUsage,
+      contextLimit: getModelContextLimit(config.model),
+      threadId: threadIdRef.current,
+      sessionStartedAt: sessionStartedAtRef.current,
+      entryCount: entries.length,
+    }),
+    [
+      config.model,
+      config.cwd,
+      status,
+      lastLayerUsage,
+      entries.length,
+    ],
+  );
+
   return (
     <InkProvider>
-      <ResponsesChat
-        entries={entries}
-        status={status}
-        onSubmit={handleSubmit}
-        model={config.model}
-        commands={commandSuggestions}
-        modalContent={modal?.content}
-        onModalClose={handleModalClose}
-      />
+      <FooterContextProvider value={footerValue}>
+        <ResponsesChat
+          entries={entries}
+          status={status}
+          onSubmit={handleSubmit}
+          model={config.model}
+          commands={commandSuggestions}
+          modalContent={modal?.content}
+          onModalClose={handleModalClose}
+          plugins={plugins}
+        />
+      </FooterContextProvider>
     </InkProvider>
   );
 }

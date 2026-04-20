@@ -70,6 +70,66 @@ describe('plugin loader', () => {
     ).rejects.toThrow('Duplicate plugin name');
   });
 
+  it('accepts plugins that provide footer and loadingMessages', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'noetic-cli-plugin-'));
+    await writeFile(
+      join(dir, 'with-ui.ts'),
+      [
+        'export default {',
+        "  name: 'with-ui',",
+        "  version: '1.0.0',",
+        '  footer: () => null,',
+        '  loadingMessages: () => [',
+        "    'Pondering',",
+        "    'Musing',",
+        '  ],',
+        '};',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const plugins = await loadPlugins(
+      {
+        ...baseConfig,
+        plugins: [
+          './with-ui.ts',
+        ],
+      },
+      dir,
+    );
+
+    expect(plugins[0]?.name).toBe('with-ui');
+    expect(typeof plugins[0]?.footer).toBe('function');
+    expect(typeof plugins[0]?.loadingMessages).toBe('function');
+  });
+
+  it('rejects plugins where footer is not a function', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'noetic-cli-plugin-'));
+    await writeFile(
+      join(dir, 'bad-footer.ts'),
+      [
+        'export default {',
+        "  name: 'bad-footer',",
+        "  version: '1.0.0',",
+        "  footer: 'not a function',",
+        '};',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      loadPlugins(
+        {
+          ...baseConfig,
+          plugins: [
+            './bad-footer.ts',
+          ],
+        },
+        dir,
+      ),
+    ).rejects.toThrow('Invalid plugin');
+  });
+
   it('disposes plugins in reverse order', async () => {
     const calls: string[] = [];
     await disposePlugins([

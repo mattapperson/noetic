@@ -110,6 +110,21 @@
         "@mariozechner/pi-coding-agent",
       ],
     },
+    "packages/plugin-powerline": {
+      "name": "@noetic/plugin-powerline",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic/cli": "workspace:*",
+        "@noetic/core": "workspace:*",
+        "ink": "^7.0.0",
+        "react": "^19.2.0",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.2.14",
+        "bun-types": "latest",
+      },
+    },
     "packages/web": {
       "name": "@noetic/web",
       "version": "0.1.0",
@@ -383,6 +398,8 @@
     "@noetic/core": ["@noetic/core@workspace:packages/core"],
 
     "@noetic/eval": ["@noetic/eval@workspace:packages/eval"],
+
+    "@noetic/plugin-powerline": ["@noetic/plugin-powerline@workspace:packages/plugin-powerline"],
 
     "@noetic/web": ["@noetic/web@workspace:packages/web"],
 
@@ -1437,6 +1454,12 @@
     "@microsoft/tui-test/glob": ["glob@10.5.0", "", { "dependencies": { "foreground-child": "^3.1.0", "jackspeak": "^3.1.2", "minimatch": "^9.0.4", "minipass": "^7.1.2", "package-json-from-dist": "^1.0.0", "path-scurry": "^1.11.1" }, "bin": { "glob": "dist/esm/bin.mjs" } }, "sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg=="],
 
     "@mongodb-js/zstd/node-addon-api": ["node-addon-api@8.7.0", "", {}, "sha512-9MdFxmkKaOYVTV+XVRG8ArDwwQ77XIgIPyKASB1k3JPq3M8fGQQQE3YpMOrKm6g//Ktx8ivZr8xo1Qmtqub+GA=="],
+
+    "@noetic/cli/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
+
+    "@noetic/core/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
+
+    "@noetic/plugin-powerline/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
     "@noetic/web/@types/react": ["@types/react@19.1.6", "", { "dependencies": { "csstype": "^3.0.2" } }, "sha512-JeG0rEWak0N6Itr6QUx+X60uQmN+5t3j9r/OVDtWzFXKaj6kD1BwJzOksD0FF6iWxZlbE1kB0q9vtnU2ekqa1Q=="],
 

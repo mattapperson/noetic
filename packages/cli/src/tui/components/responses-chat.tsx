@@ -7,7 +7,8 @@
 
 import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { NoeticPlugin } from '../../plugins/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import {
   extractReasoning,
@@ -44,6 +45,7 @@ export interface ResponsesChatProps {
   }>;
   modalContent?: ReactNode;
   onModalClose?: () => void;
+  plugins?: ReadonlyArray<NoeticPlugin>;
 }
 
 /**
@@ -326,7 +328,69 @@ export function ResponsesChat({
   commands,
   modalContent,
   onModalClose,
+  plugins,
 }: ResponsesChatProps): ReactNode {
+  const pluginsList = plugins ?? [];
+  const footerPlugin = useMemo(
+    () => pluginsList.find((p) => typeof p.footer === 'function'),
+    [
+      pluginsList,
+    ],
+  );
+
+  const [loadingPool, setLoadingPool] = useState<ReadonlyArray<string>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    async function collect(): Promise<void> {
+      const pools = await Promise.all(
+        pluginsList.map(async (p): Promise<ReadonlyArray<string>> => {
+          if (typeof p.loadingMessages !== 'function') {
+            return [];
+          }
+          try {
+            return await p.loadingMessages();
+          } catch {
+            return [];
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setLoadingPool(pools.flat());
+    }
+    void collect();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pluginsList,
+  ]);
+
+  // Bump the turn id when a new turn begins so the spinner message stays stable
+  // within a turn but rotates across turns.
+  const prevStatusRef = useRef<ChatStatus>(status);
+  const [turnId, setTurnId] = useState(0);
+  useEffect(() => {
+    if (prevStatusRef.current !== 'submitted' && status === 'submitted') {
+      setTurnId((n) => n + 1);
+    }
+    prevStatusRef.current = status;
+  }, [
+    status,
+  ]);
+
+  const spinnerMessage = useMemo<string | undefined>(() => {
+    if (loadingPool.length === 0) {
+      return undefined;
+    }
+    const idx = Math.abs(turnId) % loadingPool.length;
+    const picked = loadingPool[idx];
+    return picked ? `${picked}...` : undefined;
+  }, [
+    loadingPool,
+    turnId,
+  ]);
   const callStatusMap = useMemo(
     () => buildCallStatusMap(entries),
     [
@@ -476,8 +540,9 @@ export function ResponsesChat({
           )}
         </Static>
         {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
-        {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} />}
+        {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
+      {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
       <PromptInput
         status={status}
         onSubmit={handleSubmit}
