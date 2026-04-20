@@ -11,7 +11,7 @@ import type {
 } from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   BUILTIN_COMMANDS,
@@ -23,6 +23,7 @@ import {
 } from '../commands/index.js';
 import type { Command, CommandContext } from '../commands/types.js';
 import { createAgentHarness } from '../harness/factory.js';
+import { createPluginContextBuilder } from '../plugins/context.js';
 import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
@@ -118,6 +119,14 @@ function App({ config, plugins }: AppProps): ReactNode {
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
+
+  const buildCtx = useMemo(
+    () => createPluginContextBuilder(config),
+    [
+      config,
+    ],
+  );
 
   const harnessRef = useRef<AgentHarness | null>(null);
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
@@ -133,12 +142,45 @@ function App({ config, plugins }: AppProps): ReactNode {
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
-  // Built-in commands only - skills are not slash commands
+  // Collect plugin-contributed commands. Done in an effect so a plugin's
+  // commands() can be async (e.g. read prior snapshots from disk).
+  useEffect(() => {
+    let cancelled = false;
+    async function collect(): Promise<void> {
+      const lists = await Promise.all(
+        plugins.map(async (p): Promise<ReadonlyArray<Command>> => {
+          if (!p.commands) {
+            return [];
+          }
+          try {
+            return await p.commands(buildCtx(p.name));
+          } catch {
+            return [];
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setPluginCommands(lists.flat());
+    }
+    void collect();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    plugins,
+    buildCtx,
+  ]);
+
   const commands = useMemo<Command[]>(
     () => [
       ...BUILTIN_COMMANDS,
+      ...pluginCommands,
     ],
-    [],
+    [
+      pluginCommands,
+    ],
   );
 
   // Convert commands to PromptInput format
@@ -188,6 +230,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       config,
       plugins,
       fs: config.fs,
+      buildContext: buildCtx,
     });
     harnessRef.current = harness;
     memoryLayersRef.current = memoryLayers;
@@ -196,6 +239,7 @@ function App({ config, plugins }: AppProps): ReactNode {
   }, [
     config,
     plugins,
+    buildCtx,
   ]);
 
   const handleSubmit = useCallback(
@@ -221,7 +265,21 @@ function App({ config, plugins }: AppProps): ReactNode {
             };
 
             try {
-              const result = await executeCommand(cmd, parsed.args, ctx);
+              const result = await executeCommand(cmd, parsed.args, ctx, {
+                onJsxComplete: (summary) => {
+                  if (summary) {
+                    setEntries((prev) => [
+                      ...prev,
+                      {
+                        role: 'system',
+                        type: 'info',
+                        content: summary,
+                      } satisfies SystemEntry,
+                    ]);
+                  }
+                  setModal(null);
+                },
+              });
               if (result.type === 'text') {
                 // Show text result as info message (not error)
                 setEntries((prev) => [

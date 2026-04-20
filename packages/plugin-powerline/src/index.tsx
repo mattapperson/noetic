@@ -37,7 +37,6 @@ export default function powerline(userInput: PowerlineInput = {}): NoeticPlugin 
   const inputParsed = PowerlineInputSchema.parse(userInput);
   const options = PowerlineOptionsSchema.parse(inputParsed);
 
-  let apiKey = '';
   let vibes: ReadonlyArray<string> = [];
 
   const segments = options.segments ?? PRESETS[options.preset];
@@ -45,11 +44,10 @@ export default function powerline(userInput: PowerlineInput = {}): NoeticPlugin 
   return {
     name: NAME,
     version: VERSION,
-    initialize: async (config) => {
-      apiKey = config.apiKey;
+    initialize: async (ctx) => {
       vibes = await resolveVibes({
         options: options.vibe,
-        apiKey,
+        apiKey: ctx.config.apiKey,
       });
     },
     loadingMessages: () => vibes,

@@ -6,6 +6,7 @@
  */
 
 import type { FsAdapter } from '@noetic/core';
+import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 
 import { discoverSkills } from './discovery.js';
@@ -16,10 +17,11 @@ import { SkillSource } from './types.js';
 
 async function collectPluginSkills(
   plugins: ReadonlyArray<NoeticPlugin>,
+  buildCtx: PluginContextBuilder,
 ): Promise<SkillDefinition[]> {
   const skills: SkillDefinition[] = [];
   for (const plugin of plugins) {
-    const pluginSkills = await plugin.skills?.();
+    const pluginSkills = await plugin.skills?.(buildCtx(plugin.name));
     if (!pluginSkills) {
       continue;
     }
@@ -44,13 +46,17 @@ async function collectPluginSkills(
  * This is the single source of truth for skill discovery.
  * Filesystem skills have priority over plugin skills with the same name.
  */
-export async function buildSkillCatalog(
-  cwd: string,
-  plugins: ReadonlyArray<NoeticPlugin>,
-  fs: FsAdapter,
-): Promise<SkillDefinition[]> {
+export interface BuildSkillCatalogArgs {
+  cwd: string;
+  plugins: ReadonlyArray<NoeticPlugin>;
+  fs: FsAdapter;
+  buildCtx: PluginContextBuilder;
+}
+
+export async function buildSkillCatalog(args: BuildSkillCatalogArgs): Promise<SkillDefinition[]> {
+  const { cwd, plugins, fs, buildCtx } = args;
   const filesystemSkills = await discoverSkills(cwd, fs);
-  const pluginSkills = await collectPluginSkills(plugins);
+  const pluginSkills = await collectPluginSkills(plugins, buildCtx);
 
   // Merge skills (filesystem skills have priority, they're already deduplicated)
   const skillsByName = new Map<string, SkillDefinition>();

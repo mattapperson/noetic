@@ -5,6 +5,7 @@ import { createLocalFsAdapter } from '@noetic/core';
 import { z } from 'zod';
 
 import { createAgentHarness } from '../src/harness/factory.js';
+import { createPluginContextBuilder } from '../src/plugins/context.js';
 import type { NoeticPlugin } from '../src/plugins/types.js';
 import type { AgentConfig } from '../src/types/config.js';
 
@@ -16,6 +17,8 @@ const baseConfig: AgentConfig = {
   apiKey: 'test-key',
   maxTurns: 5,
 };
+
+const buildContext = createPluginContextBuilder(baseConfig);
 
 function makePluginTool(name: string): Tool {
   return {
@@ -43,6 +46,7 @@ describe('createAgentHarness', () => {
         plugin,
       ],
       fs: testFs,
+      buildContext,
     });
 
     expect(harness).toBeDefined();
@@ -70,6 +74,7 @@ describe('createAgentHarness', () => {
         plugin,
       ],
       fs: testFs,
+      buildContext,
     });
 
     expect(harness).toBeDefined();
@@ -97,6 +102,7 @@ describe('createAgentHarness', () => {
         plugin,
       ],
       fs: testFs,
+      buildContext,
     });
 
     expect(harness).toBeDefined();
@@ -107,6 +113,7 @@ describe('createAgentHarness', () => {
       config: baseConfig,
       plugins: [],
       fs: testFs,
+      buildContext,
     });
 
     expect(skills).toBeDefined();

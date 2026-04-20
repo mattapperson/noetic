@@ -3,7 +3,9 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createPluginContextBuilder } from '../src/plugins/context.js';
 import { disposePlugins, loadPlugins } from '../src/plugins/loader.js';
+import type { NoeticPlugin } from '../src/plugins/types.js';
 import type { AgentConfig } from '../src/types/config.js';
 
 const baseConfig: AgentConfig = {
@@ -12,6 +14,8 @@ const baseConfig: AgentConfig = {
   apiKey: 'test-key',
   maxTurns: 3,
 };
+
+const buildCtx = createPluginContextBuilder(baseConfig);
 
 describe('plugin loader', () => {
   it('loads a local plugin module from relative path', async () => {
@@ -37,6 +41,7 @@ describe('plugin loader', () => {
         ],
       },
       dir,
+      buildCtx,
     );
 
     expect(plugins).toHaveLength(1);
@@ -66,6 +71,7 @@ describe('plugin loader', () => {
           ],
         },
         dir,
+        buildCtx,
       ),
     ).rejects.toThrow('Duplicate plugin name');
   });
@@ -96,6 +102,7 @@ describe('plugin loader', () => {
         ],
       },
       dir,
+      buildCtx,
     );
 
     expect(plugins[0]?.name).toBe('with-ui');
@@ -126,6 +133,7 @@ describe('plugin loader', () => {
           ],
         },
         dir,
+        buildCtx,
       ),
     ).rejects.toThrow('Invalid plugin');
   });
@@ -149,6 +157,7 @@ describe('plugin loader', () => {
         ],
       },
       process.cwd(),
+      buildCtx,
     );
 
     expect(plugins).toHaveLength(1);
@@ -157,6 +166,69 @@ describe('plugin loader', () => {
     expect(initCalls).toEqual([
       'inline-plugin',
     ]);
+  });
+
+  it('passes a PluginContext into initialize', async () => {
+    let receivedCtx: unknown = null;
+    const inspector: NoeticPlugin = {
+      name: 'ctx-inspector',
+      version: '1.0.0',
+      initialize: async (ctx) => {
+        receivedCtx = ctx;
+      },
+    };
+    await loadPlugins(
+      {
+        ...baseConfig,
+        plugins: [
+          inspector,
+        ],
+      },
+      process.cwd(),
+      buildCtx,
+    );
+    expect(receivedCtx).not.toBeNull();
+    if (
+      receivedCtx !== null &&
+      typeof receivedCtx === 'object' &&
+      'config' in receivedCtx &&
+      'callModel' in receivedCtx &&
+      'dataDir' in receivedCtx
+    ) {
+      expect(typeof receivedCtx.callModel).toBe('function');
+      expect(typeof receivedCtx.dataDir).toBe('function');
+    } else {
+      throw new Error('ctx missing expected shape');
+    }
+  });
+
+  it('accepts plugins that provide commands', async () => {
+    const plugins = await loadPlugins(
+      {
+        ...baseConfig,
+        plugins: [
+          {
+            name: 'with-commands',
+            version: '1.0.0',
+            commands: () => [
+              {
+                name: 'my-cmd',
+                description: 'test',
+                type: 'local',
+                load: async () => ({
+                  call: async () => ({
+                    type: 'skip',
+                  }),
+                }),
+              },
+            ],
+          },
+        ],
+      },
+      process.cwd(),
+      buildCtx,
+    );
+    expect(typeof plugins[0]?.commands).toBe('function');
   });
 
   it('disposes plugins in reverse order', async () => {

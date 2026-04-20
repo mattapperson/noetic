@@ -8,6 +8,16 @@ import type { Command, CommandContext, CommandExecutionResult } from './types.js
 
 //#region Execute
 
+export interface ExecuteCommandOptions {
+  /**
+   * Called when a JSX modal command invokes its `onDone` AFTER the modal has
+   * opened — e.g. a deck submit that should post a summary to chat and
+   * dismiss the modal. The App owns this handler so it can mutate chat +
+   * modal state directly; `executeCommand` has no access to React state.
+   */
+  onJsxComplete?: (result: string | undefined) => void;
+}
+
 /**
  * Execute a command and return the result.
  */
@@ -15,8 +25,8 @@ export async function executeCommand(
   command: Command,
   args: string,
   ctx: CommandContext,
+  options: ExecuteCommandOptions = {},
 ): Promise<CommandExecutionResult> {
-  // Check if command is enabled
   if (command.isEnabled && !command.isEnabled()) {
     return {
       type: 'text',
@@ -32,46 +42,26 @@ export async function executeCommand(
 
   if (command.type === 'local-jsx') {
     const mod = await command.load();
-    // For JSX commands, we need to handle two possible outcomes:
-    // 1. The command returns a ReactNode to display as modal
-    // 2. The command calls onDone with optional text result
-    // The first one to resolve wins.
-    return new Promise((resolve) => {
-      let resolved = false;
-      const onDone = (result?: string): void => {
-        if (resolved) {
-          return;
-        }
-        resolved = true;
-        if (result) {
-          resolve({
-            type: 'text',
-            value: result,
-          });
-        } else {
-          resolve({
-            type: 'skip',
-          });
-        }
-      };
-      mod.call(onDone, ctx, args).then((node) => {
-        if (resolved) {
-          return;
-        }
-        resolved = true;
-        // Return as modal - command name is capitalized
-        const displayName = command.name.charAt(0).toUpperCase() + command.name.slice(1);
-        resolve({
-          type: 'modal',
-          node,
-          commandName: command.name,
-          dismissMessage: `${displayName} dialog dismissed`,
-        });
-      });
-    });
+    let modalOpened = false;
+    const onDone = (result?: string): void => {
+      // Before the modal opens, onDone isn't yet meaningful — the command
+      // should return its node synchronously. After the modal opens, this
+      // forwards completion to the App so chat + modal state can update.
+      if (modalOpened) {
+        options.onJsxComplete?.(result);
+      }
+    };
+    const node = await mod.call(onDone, ctx, args);
+    modalOpened = true;
+    const displayName = command.name.charAt(0).toUpperCase() + command.name.slice(1);
+    return {
+      type: 'modal',
+      node,
+      commandName: command.name,
+      dismissMessage: `${displayName} dialog dismissed`,
+    };
   }
 
-  // Exhaustive check - should never reach here
   const _exhaustive: never = command;
   return _exhaustive;
 }

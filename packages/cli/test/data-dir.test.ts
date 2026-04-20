@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'bun:test';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { createDataDir, pluginNameToDirSegment } from '../src/plugins/data-dir.js';
+
+describe('pluginNameToDirSegment', () => {
+  it('strips scope prefix', () => {
+    expect(pluginNameToDirSegment('@noetic/plugin-powerline')).toBe('plugin-powerline');
+  });
+
+  it('leaves un-scoped names alone', () => {
+    expect(pluginNameToDirSegment('plain-plugin')).toBe('plain-plugin');
+  });
+
+  it('sanitises spaces and slashes to dashes', () => {
+    expect(pluginNameToDirSegment('weird/one/with spaces')).toBe('weird-one-with-spaces');
+  });
+
+  it('strips scope prefix then sanitises rest', () => {
+    expect(pluginNameToDirSegment('@scope/plugin/sub')).toBe('plugin-sub');
+  });
+});
+
+describe('createDataDir', () => {
+  it('creates a project-scoped dir under cwd/.noetic/<name>', () => {
+    const base = mkdtempSync(join(tmpdir(), 'noetic-dd-'));
+    const dataDir = createDataDir(base, 'plugin-foo');
+    const projectDir = dataDir('project');
+    expect(projectDir).toBe(join(base, '.noetic', 'plugin-foo'));
+    expect(existsSync(projectDir)).toBe(true);
+  });
+
+  it('rejects names with path separators', () => {
+    expect(() => createDataDir('/tmp', '../evil')).toThrow(/Invalid plugin name/);
+  });
+});
