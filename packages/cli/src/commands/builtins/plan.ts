@@ -1,31 +1,51 @@
 /**
- * /plan command - Manages the plan mode lifecycle.
+ * /plan command — alias for `/mode plan` (and `/mode normal` via `/plan cancel`).
  *
  * Subcommands:
- *   /plan          - Enter plan mode
- *   /plan status   - Show current plan status
- *   /plan cancel   - Cancel the current plan
+ *   /plan          - enter plan mode
+ *   /plan status   - show current mode
+ *   /plan cancel   - exit plan mode (return to normal)
  */
 
-import type { Command, LocalCommandCall } from '../types.js';
+import type { Command, CommandContext, LocalCommandCall, LocalCommandResult } from '../types.js';
 
 //#region Subcommand Handlers
 
-type SubcommandHandler = () => string;
+type SubcommandHandler = (ctx: CommandContext) => Promise<LocalCommandResult>;
 
-function handleEnter(): string {
-  return [
-    'Enter plan mode. Explore the codebase with read-only tools, then produce a PRD document.',
-    'Call plan/enterPlanMode to begin.',
-  ].join('\n');
+async function handleEnter(ctx: CommandContext): Promise<LocalCommandResult> {
+  if (ctx.agentMode === 'planning') {
+    return {
+      type: 'text',
+      value: 'Already in plan mode.',
+    };
+  }
+  await ctx.setAgentMode('planning');
+  return {
+    type: 'text',
+    value: 'Plan mode enabled. Explore the codebase with read-only tools, then write your PRD.',
+  };
 }
 
-function handleStatus(): string {
-  return 'Show the current plan status. Check the plan/status data for phase, PRD, and plan tree state.';
+async function handleStatus(ctx: CommandContext): Promise<LocalCommandResult> {
+  return {
+    type: 'text',
+    value: `Current mode: ${ctx.agentMode}`,
+  };
 }
 
-function handleCancel(): string {
-  return 'Cancel the current plan and return to idle. Call plan/exitPlanMode with { action: "cancel" }.';
+async function handleCancel(ctx: CommandContext): Promise<LocalCommandResult> {
+  if (ctx.agentMode === 'normal') {
+    return {
+      type: 'text',
+      value: 'Not currently in plan mode.',
+    };
+  }
+  await ctx.setAgentMode('normal');
+  return {
+    type: 'text',
+    value: 'Plan mode cancelled. Returned to normal mode.',
+  };
 }
 
 const SUBCOMMANDS: Record<string, SubcommandHandler> = {
@@ -38,7 +58,7 @@ const SUBCOMMANDS: Record<string, SubcommandHandler> = {
 
 //#region Implementation
 
-const call: LocalCommandCall = async (args) => {
+const call: LocalCommandCall = async (args, ctx) => {
   const subcommand = args.trim().toLowerCase();
   const handler = SUBCOMMANDS[subcommand];
 
@@ -49,10 +69,7 @@ const call: LocalCommandCall = async (args) => {
     };
   }
 
-  return {
-    type: 'text',
-    value: handler(),
-  };
+  return handler(ctx);
 };
 
 //#endregion
@@ -62,7 +79,7 @@ const call: LocalCommandCall = async (args) => {
 export const plan: Command = {
   type: 'local',
   name: 'plan',
-  description: 'Enter plan mode to create a PRD and execution plan',
+  description: 'Enter plan mode (alias for /mode plan)',
   load: async () => ({
     call,
   }),

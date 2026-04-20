@@ -1,6 +1,7 @@
 import type { LastLayerUsage, MemoryLayer, Tool } from '@noetic/core';
 import type { ReactNode } from 'react';
 
+import type { SubagentPreset } from '../plan/subagents.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentConfig } from '../types/config.js';
 
@@ -20,6 +21,8 @@ export interface FooterContext {
   threadId: string;
   sessionStartedAt: number;
   entryCount: number;
+  /** Current agent mode: `'normal'` (full toolset) or `'planning'` (read-only, plan mode). */
+  agentMode: 'normal' | 'planning';
 }
 
 //#endregion
@@ -43,4 +46,9 @@ export interface NoeticPlugin {
    * default verb. Called once after plugin init; no per-turn calls.
    */
   loadingMessages?: () => ReadonlyArray<string> | Promise<ReadonlyArray<string>>;
+  /**
+   * Optional registry of subagent presets the plugin contributes. These names
+   * become valid `preset` values inside plan-mode flow JSON `subagent` nodes.
+   */
+  subagentPresets?: () => Record<string, SubagentPreset> | Promise<Record<string, SubagentPreset>>;
 }
