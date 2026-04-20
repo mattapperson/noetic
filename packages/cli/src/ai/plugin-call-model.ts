@@ -74,10 +74,7 @@ const CompletionSchema = z.object({
  * narrower than the full `typeof fetch` so tests can pass simple async stubs
  * without implementing `preconnect`, etc.
  */
-export type FetchLike = (
-  input: RequestInfo | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 interface CreateCallModelArgs {
   apiKey: string;

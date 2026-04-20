@@ -18,15 +18,19 @@ export interface ExecuteCommandOptions {
   onJsxComplete?: (result: string | undefined) => void;
 }
 
+export interface ExecuteCommandArgs {
+  command: Command;
+  args: string;
+  ctx: CommandContext;
+  options?: ExecuteCommandOptions;
+}
+
 /**
  * Execute a command and return the result.
  */
-export async function executeCommand(
-  command: Command,
-  args: string,
-  ctx: CommandContext,
-  options: ExecuteCommandOptions = {},
-): Promise<CommandExecutionResult> {
+export async function executeCommand(input: ExecuteCommandArgs): Promise<CommandExecutionResult> {
+  const { command, args: commandArgs, ctx, options = {} } = input;
+
   if (command.isEnabled && !command.isEnabled()) {
     return {
       type: 'text',
@@ -36,7 +40,7 @@ export async function executeCommand(
 
   if (command.type === 'local') {
     const mod = await command.load();
-    const result = await mod.call(args, ctx);
+    const result = await mod.call(commandArgs, ctx);
     return result;
   }
 
@@ -51,7 +55,7 @@ export async function executeCommand(
         options.onJsxComplete?.(result);
       }
     };
-    const node = await mod.call(onDone, ctx, args);
+    const node = await mod.call(onDone, ctx, commandArgs);
     modalOpened = true;
     const displayName = command.name.charAt(0).toUpperCase() + command.name.slice(1);
     return {

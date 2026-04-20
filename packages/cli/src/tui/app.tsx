@@ -351,19 +351,24 @@ function App({ config, plugins }: AppProps): ReactNode {
             };
 
             try {
-              const result = await executeCommand(cmd, parsed.args, ctx, {
-                onJsxComplete: (summary) => {
-                  if (summary) {
-                    setEntries((prev) => [
-                      ...prev,
-                      {
-                        role: 'system',
-                        type: 'info',
-                        content: summary,
-                      } satisfies SystemEntry,
-                    ]);
-                  }
-                  setModal(null);
+              const result = await executeCommand({
+                command: cmd,
+                args: parsed.args,
+                ctx,
+                options: {
+                  onJsxComplete: (summary) => {
+                    if (summary) {
+                      setEntries((prev) => [
+                        ...prev,
+                        {
+                          role: 'system',
+                          type: 'info',
+                          content: summary,
+                        } satisfies SystemEntry,
+                      ]);
+                    }
+                    setModal(null);
+                  },
                 },
               });
               if (result.type === 'text') {
