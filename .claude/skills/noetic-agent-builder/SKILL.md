@@ -130,10 +130,46 @@ const agent = react({
   memory: layers,  // auto-wraps in spawn when provided
 });
 
-const harness = new AgentHarness({ name: 'agent', params: {} });
+const harness = new AgentHarness({
+  name: 'agent',
+  initialStep: agent,
+  params: {},
+});
+
+// Session-scoped execution: execute() enqueues, getAgentResponse() awaits idle.
+await harness.execute(userInput);
+const response = await harness.getAgentResponse();
+
+// Or drive the step tree directly (bypassing the session queue).
 const ctx = harness.createContext();
 const result = await harness.run(agent, userInput, ctx);
 ```
+
+### Step 5: Queue Messages During Generation
+
+The session runner accepts new messages while a turn is in flight. Use `DeliveryMode` to choose how they're delivered:
+
+```typescript
+// Default: queue and run as the next turn
+await harness.execute('hello');
+await harness.execute('follow-up'); // runs after 'hello' finishes
+
+// Inject mid-turn between tool rounds (like Claude Code's inbox attachments)
+await harness.execute('urgent note', { deliveryMode: 'between-rounds' });
+
+// Interrupt: cancel in-flight turn and restart with the new message at head
+await harness.execute('stop, do this instead', { deliveryMode: 'interrupt' });
+
+// Set a harness-wide default (still overridable per-call)
+const harness = new AgentHarness({ ..., defaultDeliveryMode: 'between-rounds' });
+```
+
+Observability:
+
+- `harness.getStatus()` — `{ kind: 'idle' | 'generating' | 'aborting' }`
+- `harness.getQueueSize()` — number of pending messages
+- `harness.abort()` — cancel the in-flight turn; queued messages drive the next turn
+- Framework events `{name}:turn_started`, `{name}:turn_completed`, `{name}:inbox_injected` expose queue delivery for UI integration
 
 ## Key Rules
 

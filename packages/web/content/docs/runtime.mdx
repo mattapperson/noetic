@@ -20,10 +20,13 @@ const harness = new AgentHarness({
   params: {},
 });
 
-const result = await harness.execute('Find recent AI news');
+await harness.execute('Find recent AI news');
+const response = await harness.getAgentResponse();
 ```
 
-The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, dispatches steps, manages channels and memory layers, and provides tracing infrastructure.
+The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, manages per-thread **sessions** with a message queue, dispatches steps, coordinates channels and memory layers, and provides tracing infrastructure.
+
+Calls to `execute()` enqueue the input on the session identified by `options.threadId` (a single default thread is used when omitted). Stream accessors are session-scoped — subscribe once and events flow across every turn in that session.
 
 ## Constructor Options
 
@@ -49,57 +52,64 @@ const harness = new AgentHarness({
 | `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
+| `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
 
 ## execute()
 
-The primary way to run an agent. Returns a `HarnessResult` with multiple stream accessors. Accepts a string, a single `Item`, or an array of `Item[]`.
+Enqueues input on the session identified by `options.threadId` (or the default thread). Returns a `Promise<void>` that resolves once the message is accepted into the queue — **not** when the model finishes responding. Use the session-scoped accessors to observe the response.
 
 ```ts
-// Simple: get the final text
-const text = await harness.execute('What is 2+2?').getText();
+await harness.execute('What is 2+2?');
+const response = await harness.getAgentResponse();
+console.log(response.text);
 
-// Full response with items and usage
-const response = await harness.execute('Hello').getResponse();
-console.log(response.text, response.usage);
-
-// Stream text as it arrives
-for await (const delta of harness.execute('Write a story').getTextStream()) {
+// Stream text across all turns in the session
+for await (const delta of harness.getTextStream()) {
   process.stdout.write(delta);
 }
 
-// Stream all events (SDK + framework)
-for await (const event of harness.execute('Hello').getFullStream()) {
-  console.log(event.source, event.type);
-}
-
 // With options
-const result = harness.execute('Hello', {
+await harness.execute('Hello', {
   threadId: 'thread-1',
   resourceId: 'user-1',
 });
+
+// Submit a second message while the first turn is still running — it queues
+// and runs as a new turn after the current turn completes.
+await harness.execute('follow-up', { threadId: 'thread-1' });
 ```
 
 | Parameter | Type | Description |
 |---|---|---|
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
-| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, and `state`. |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `memory`, `deliveryMode`. |
 
-Returns a `HarnessResult` immediately (execution starts eagerly). See [HarnessResult](#harnessresult) for all accessors.
+Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
 
-Throws `NoeticConfigError` with code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
+## Session Accessors
 
-## HarnessResult
-
-The object returned by `execute()`. Provides six ways to consume execution output.
+Stream accessors are keyed by `threadId` (via `SessionScope`), are safe to call before the first `execute()`, and stay alive across every turn in the session.
 
 | Method | Returns | Description |
 |---|---|---|
-| `getText()` | `Promise<string>` | Complete text after execution finishes. |
-| `getResponse()` | `Promise<HarnessResponse>` | Full response with items, usage, and cost. |
-| `getTextStream()` | `AsyncIterable<string>` | Text deltas as they arrive from the model. |
-| `getReasoningStream()` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
-| `getItemStream()` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. |
-| `getFullStream()` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework). |
+| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
+| `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns. |
+| `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. |
+| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
+| `abort(scope?)` | `Promise<void>` | Cancel the in-flight turn. Queued messages are preserved and trigger a fresh turn once abort completes. |
+| `getStatus(scope?)` | `HarnessStatus` | Snapshot: `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
+| `getQueueSize(scope?)` | `number` | Count of messages queued on the session. |
+
+### Delivery Modes
+
+Each message carries a `DeliveryMode`. Override per-call via `options.deliveryMode`, or set `defaultDeliveryMode` on the harness.
+
+| Mode | Behaviour |
+|---|---|
+| `next-turn` (default) | Queue until the current turn completes, then run as a new turn. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. Matches Claude Code's inbox-attachment pattern. |
+| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
 
 ### HarnessResponse
 
@@ -109,6 +119,7 @@ interface HarnessResponse {
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   readonly cost?: number;
   readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
 }
 ```
 
@@ -124,6 +135,10 @@ Framework events emitted during execution:
 
 | Event | Description |
 |---|---|
+| `{name}:turn_started` | A session turn began. Data: `{ turnId, messageIds }`. |
+| `{name}:turn_completed` | A session turn completed. Data: `{ turnId, durationMs }`. |
+| `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
+| `{name}:inbox_injected` | Between-rounds messages were injected. Data: `{ round, count, messageIds }`. |
 | `{name}:step_started` | Before each step executes. |
 | `{name}:step_completed` | After each step completes. |
 | `{name}:tool_round_started` | Before a tool execution round. |
@@ -131,7 +146,7 @@ Framework events emitted during execution:
 | `{name}:tool_call_completed` | After each tool call. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
 
-LLM steps support an `emit` option to control framework event emission — set `false` to suppress or pass a filter function.
+LLM steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
 
 ## run()
 

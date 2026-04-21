@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { layerData, layerFn } from '../../builders/layer-provides-builders';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
-import type { PlanNode } from '../../patterns/plans';
-import { PlanNodeSchema } from '../../patterns/plans';
+import type { FlowNode } from '../../patterns/flow';
+import { FlowSchema, flowDepth } from '../../patterns/flow';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
 import { SteeringAction } from '../../types/steering';
@@ -49,7 +49,7 @@ export interface PlanExecutionEntry {
 export interface PlanState {
   phase: PlanPhase;
   prd: string | null;
-  planTree: PlanNode | null;
+  planTree: FlowNode | null;
   executionLog: PlanExecutionEntry[];
   version: number;
   /** Identifier of the on-disk plan session (set by `onEnterSession` host callback). */
@@ -96,14 +96,8 @@ function createDefaultState(): PlanState {
   };
 }
 
-function validateTreeDepth(node: PlanNode, maxDepth: number, currentDepth = 0): boolean {
-  if (currentDepth > maxDepth) {
-    return false;
-  }
-  if (!node.children) {
-    return true;
-  }
-  return node.children.every((child) => validateTreeDepth(child, maxDepth, currentDepth + 1));
+function validateTreeDepth(node: FlowNode, maxDepth: number): boolean {
+  return flowDepth(node) <= maxDepth;
 }
 
 function buildAllowedTools(config?: PlanMemoryConfig): Set<string> {
@@ -316,10 +310,10 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         },
       }),
 
-      setPlanTree: layerFn<PlanNode, string, PlanState>({
+      setPlanTree: layerFn<FlowNode, string, PlanState>({
         description:
-          'Set the execution plan tree. Input must be a valid PlanNode with id, description, assignee, execution, and optional children.',
-        input: PlanNodeSchema,
+          'Set the execution plan tree. Input must be a valid FlowNode — a discriminated union with kind: "llm" | "subagent" | "fork" | "spawn" | "sequence". Structural nodes (sequence, fork, spawn) nest child FlowNodes; leaf nodes (llm, subagent) carry execution instructions.',
+        input: FlowSchema,
         output: z.string(),
         execute: async (args, state) => {
           if (state.phase !== PlanPhase.Planning) {

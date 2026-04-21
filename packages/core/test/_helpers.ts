@@ -7,7 +7,6 @@ import { z } from 'zod';
 import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
 import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
 import { frameworkCast } from '../src/interpreter/framework-cast';
-import { HarnessResultImpl } from '../src/runtime/harness-result';
 import type { LLMResponse, Tool } from '../src/types/common';
 import type { Context, ItemLog } from '../src/types/context';
 import type { EmbedFn } from '../src/types/embed';
@@ -343,9 +342,57 @@ export function makeMockHarness(): AgentHarnessContract {
     callModel: async () => {
       throw new Error('not impl');
     },
-    execute: () => {
-      return HarnessResultImpl.fromError(new Error('not impl'));
+    execute: async () => {
+      throw new Error('not impl');
     },
+    getAgentResponse: async () => {
+      throw new Error('not impl');
+    },
+    getItemStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    getTextStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    getReasoningStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    getFullStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    abort: async () => {},
+    getStatus: () => ({
+      kind: 'idle',
+    }),
+    getQueueSize: () => 0,
     run: async () => {
       throw new Error('not impl');
     },

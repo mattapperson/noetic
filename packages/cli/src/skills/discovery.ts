@@ -11,19 +11,14 @@
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { FsAdapter } from '@noetic/core';
-import yaml from 'yaml';
-import type { SkillDefinition, SkillFrontmatter } from './types.js';
+import { parseFrontmatter } from './frontmatter.js';
+import type { SkillDefinition } from './types.js';
 import { SkillSource } from './types.js';
 
 //#region Types
 
 interface DiscoveredSkill extends SkillDefinition {
   priority: number;
-}
-
-interface ParsedSkillFile {
-  frontmatter: SkillFrontmatter;
-  body: string;
 }
 
 //#endregion
@@ -37,66 +32,8 @@ const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/i;
 
 //#region Helpers
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isValidSkillName(name: string): boolean {
   return SKILL_NAME_PATTERN.test(name) && name.length <= 64;
-}
-
-function isSkillFrontmatter(value: unknown): value is SkillFrontmatter {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return typeof value.name === 'string';
-}
-
-function parseFrontmatter(content: string, filePath?: string): ParsedSkillFile {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!fmMatch) {
-    // No frontmatter, treat entire content as body with derived name
-    return {
-      frontmatter: {
-        name: '',
-      },
-      body: content,
-    };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = yaml.parse(fmMatch[1]);
-  } catch (err) {
-    const location = filePath ? ` in ${filePath}` : '';
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[skills] Invalid YAML frontmatter${location}: ${message}`);
-    return {
-      frontmatter: {
-        name: '',
-      },
-      body: fmMatch[2],
-    };
-  }
-
-  if (!isSkillFrontmatter(parsed)) {
-    const location = filePath ? ` in ${filePath}` : '';
-    console.warn(
-      `[skills] Frontmatter missing required 'name' field${location}, using directory name`,
-    );
-  }
-
-  const frontmatter = isSkillFrontmatter(parsed)
-    ? parsed
-    : {
-        name: '',
-      };
-  const body = fmMatch[2];
-
-  return {
-    frontmatter,
-    body,
-  };
 }
 
 interface LoadSkillFileParams {

@@ -2,19 +2,32 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { PlanState } from '../../src/memory/layers/plan';
 import { PlanPhase, planMemory } from '../../src/memory/layers/plan';
-import type { PlanNode } from '../../src/patterns/plans';
+import type { FlowNode, LlmFlowNode, SequenceFlowNode } from '../../src/patterns/flow';
 import { SteeringAction } from '../../src/types/steering';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 //#region Test Fixtures
 
-function makePlanNode(overrides?: Partial<PlanNode>): PlanNode {
+function makeLlmNode(overrides?: Partial<LlmFlowNode>): LlmFlowNode {
   return {
-    id: 'root',
-    description: 'Root task',
-    assignee: 'agent-1',
-    execution: 'sequential',
+    kind: 'llm',
+    id: 'leaf',
+    instructions: 'Do the thing',
     ...overrides,
+  };
+}
+
+/** Depth-0 leaf FlowNode (llm kind), used as the default planTree in fixtures. */
+function makeFlowNode(overrides?: Partial<LlmFlowNode>): FlowNode {
+  return makeLlmNode(overrides);
+}
+
+/** Wraps nodes in a sequence to add one level of depth. */
+function makeSequence(steps: FlowNode[], id = 'seq'): SequenceFlowNode {
+  return {
+    kind: 'sequence',
+    id,
+    steps,
   };
 }
 
@@ -46,7 +59,7 @@ function makeExecutingState(overrides?: Partial<PlanState>): PlanState {
   return {
     phase: PlanPhase.Executing,
     prd: '# My Plan',
-    planTree: makePlanNode(),
+    planTree: makeFlowNode(),
 
     executionLog: [],
     version: 1,
@@ -178,7 +191,7 @@ describe('planMemory layer', () => {
         state: {
           phase: PlanPhase.Completed,
           prd: '# Done',
-          planTree: makePlanNode(),
+          planTree: makeFlowNode(),
           executionLog: [
             {
               timestamp: Date.now(),
@@ -209,7 +222,7 @@ describe('planMemory layer', () => {
         state: {
           phase: PlanPhase.Failed,
           prd: '# Failed',
-          planTree: makePlanNode(),
+          planTree: makeFlowNode(),
           executionLog: [
             {
               timestamp: Date.now(),
@@ -483,7 +496,7 @@ describe('planMemory layer', () => {
       const layer = planMemory();
       const fn = layer.provides!.setPlanTree;
       assert(fn.kind === 'function');
-      const node = makePlanNode();
+      const node = makeFlowNode();
       const result = await fn.execute(node, makePlanningState(), makeCtx());
       assert(result.state);
       expect(result.state.planTree).toEqual(node);
@@ -493,7 +506,7 @@ describe('planMemory layer', () => {
       const layer = planMemory();
       const fn = layer.provides!.setPlanTree;
       assert(fn.kind === 'function');
-      const result = await fn.execute(makePlanNode(), makeExecutingState(), makeCtx());
+      const result = await fn.execute(makeFlowNode(), makeExecutingState(), makeCtx());
       expect(result.result).toContain('Cannot set plan tree');
     });
 
@@ -503,18 +516,20 @@ describe('planMemory layer', () => {
       });
       const fn = layer.provides!.setPlanTree;
       assert(fn.kind === 'function');
-      const deepTree = makePlanNode({
-        children: [
-          makePlanNode({
-            id: 'child',
-            children: [
-              makePlanNode({
+      // Nested sequences → depth 2, exceeds max of 1.
+      const deepTree = makeSequence(
+        [
+          makeSequence(
+            [
+              makeLlmNode({
                 id: 'grandchild',
               }),
             ],
-          }),
+            'child',
+          ),
         ],
-      });
+        'root',
+      );
       const result = await fn.execute(deepTree, makePlanningState(), makeCtx());
       expect(result.result).toContain('exceeds maximum depth');
     });
@@ -525,13 +540,15 @@ describe('planMemory layer', () => {
       });
       const fn = layer.provides!.setPlanTree;
       assert(fn.kind === 'function');
-      const shallowTree = makePlanNode({
-        children: [
-          makePlanNode({
+      // One sequence wrapping a leaf → depth 1, at boundary.
+      const shallowTree = makeSequence(
+        [
+          makeLlmNode({
             id: 'child',
           }),
         ],
-      });
+        'root',
+      );
       const result = await fn.execute(shallowTree, makePlanningState(), makeCtx());
       expect(result.result).toContain('successfully');
     });
@@ -542,7 +559,8 @@ describe('planMemory layer', () => {
       });
       const fn = layer.provides!.setPlanTree;
       assert(fn.kind === 'function');
-      const leafTree = makePlanNode();
+      // Bare leaf → depth 0, below boundary.
+      const leafTree = makeFlowNode();
       const result = await fn.execute(leafTree, makePlanningState(), makeCtx());
       expect(result.result).toContain('successfully');
     });
@@ -559,7 +577,7 @@ describe('planMemory layer', () => {
         },
         makePlanningState({
           prd: '# PRD',
-          planTree: makePlanNode(),
+          planTree: makeFlowNode(),
         }),
         makeCtx(),
       );
@@ -576,7 +594,7 @@ describe('planMemory layer', () => {
           action: 'execute',
         },
         makePlanningState({
-          planTree: makePlanNode(),
+          planTree: makeFlowNode(),
         }),
         makeCtx(),
       );
@@ -787,7 +805,7 @@ describe('planMemory layer', () => {
       assert(fn.kind === 'function');
       const inputState = makePlanningState({
         prd: '# PRD',
-        planTree: makePlanNode(),
+        planTree: makeFlowNode(),
       });
       const result = await fn.execute(
         {
@@ -814,7 +832,7 @@ describe('planMemory layer', () => {
         },
         makePlanningState({
           prd: '# PRD',
-          planTree: makePlanNode(),
+          planTree: makeFlowNode(),
         }),
         makeCtx(),
       );
@@ -855,7 +873,7 @@ describe('planMemory layer', () => {
       const value = status.read(
         makePlanningState({
           prd: '# PRD',
-          planTree: makePlanNode(),
+          planTree: makeFlowNode(),
         }),
       );
       expect(value.phase).toBe(PlanPhase.Planning);

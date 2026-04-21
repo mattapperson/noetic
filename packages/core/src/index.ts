@@ -120,6 +120,17 @@ export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 //#region Patterns
 
 /** @public */
+export type {
+  FlowNode,
+  ForkFlowNode,
+  LlmFlowNode,
+  SequenceFlowNode,
+  SpawnFlowNode,
+  SubagentFlowNode,
+} from './patterns/flow';
+/** @public */
+export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
+/** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
 export { adaptivePlan, compilePlan, PlanNodeSchema } from './patterns/plans';
@@ -268,7 +279,6 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 export type {
   FrameworkStreamEvent,
   HarnessResponse,
-  HarnessResult,
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,
@@ -284,8 +294,11 @@ export type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  DeliveryMode,
   ExecuteOptions,
+  HarnessStatus,
   RecallLayerOutput,
+  SessionScope,
 } from './types/runtime';
 
 //#endregion

@@ -1,27 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { HarnessResult, StreamEvent } from '@noetic/core';
+import type { StreamEvent } from '@noetic/core';
 
 import { chatStream } from '../src/chat-stream';
 
 //#region Helpers
 
-function emptyAsyncIterable<T>(): AsyncIterable<T> {
-  return {
-    [Symbol.asyncIterator](): AsyncIterator<T> {
-      return {
-        async next(): Promise<IteratorResult<T>> {
-          return {
-            done: true,
-            value: undefined,
-          };
-        },
-      };
-    },
-  };
-}
-
-function createMockResult(events: StreamEvent[]): HarnessResult {
+function createMockSource(events: StreamEvent[]): {
+  getFullStream(): AsyncIterable<StreamEvent>;
+} {
   const fullStream: AsyncIterable<StreamEvent> = {
     [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
       let index = 0;
@@ -45,20 +32,6 @@ function createMockResult(events: StreamEvent[]): HarnessResult {
   };
 
   return {
-    getText: () => Promise.resolve(''),
-    getResponse: () =>
-      Promise.resolve({
-        items: [],
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-        },
-        cost: 0,
-        text: '',
-      }),
-    getTextStream: () => emptyAsyncIterable<string>(),
-    getReasoningStream: () => emptyAsyncIterable<string>(),
-    getItemStream: () => emptyAsyncIterable(),
     getFullStream: () => fullStream,
   };
 }
@@ -106,7 +79,7 @@ async function collectStream(stream: AsyncIterable<string>): Promise<string[]> {
 
 describe('chatStream', () => {
   test('yields text deltas', async () => {
-    const result = createMockResult([
+    const result = createMockSource([
       textDelta('Hello'),
       textDelta(' world'),
     ]);
@@ -120,7 +93,7 @@ describe('chatStream', () => {
   });
 
   test('injects paragraph break on tool_round_completed', async () => {
-    const result = createMockResult([
+    const result = createMockSource([
       textDelta('Step 1'),
       toolRoundCompleted('myagent'),
       textDelta('Step 2'),
@@ -136,7 +109,7 @@ describe('chatStream', () => {
   });
 
   test('no leading separator when first event is tool_round_completed', async () => {
-    const result = createMockResult([
+    const result = createMockSource([
       toolRoundCompleted('myagent'),
       textDelta('Hello'),
     ]);
@@ -149,7 +122,7 @@ describe('chatStream', () => {
   });
 
   test('no duplicate separators for consecutive tool rounds without text', async () => {
-    const result = createMockResult([
+    const result = createMockSource([
       textDelta('Start'),
       toolRoundCompleted('myagent'),
       toolRoundCompleted('myagent'),
@@ -166,7 +139,7 @@ describe('chatStream', () => {
   });
 
   test('ignores non-text SDK events', async () => {
-    const result = createMockResult([
+    const result = createMockSource([
       reasoningDelta('thinking...'),
       textDelta('Hello'),
     ]);
@@ -184,7 +157,7 @@ describe('chatStream', () => {
       type: 'myagent:step_started',
       data: {},
     };
-    const result = createMockResult([
+    const result = createMockSource([
       textDelta('Hello'),
       stepStarted,
       textDelta(' world'),
@@ -199,7 +172,7 @@ describe('chatStream', () => {
   });
 
   test('handles empty stream', async () => {
-    const result = createMockResult([]);
+    const result = createMockSource([]);
 
     const chunks = await collectStream(chatStream(result));
 
@@ -214,7 +187,7 @@ describe('chatStream', () => {
         delta: 42,
       },
     };
-    const result = createMockResult([
+    const result = createMockSource([
       badDelta,
       textDelta('ok'),
     ]);
@@ -227,7 +200,7 @@ describe('chatStream', () => {
   });
 
   test('works with any agent name prefix', async () => {
-    const result = createMockResult([
+    const result = createMockSource([
       textDelta('A'),
       toolRoundCompleted('custom-agent-v2'),
       textDelta('B'),

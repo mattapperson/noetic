@@ -11,6 +11,7 @@ const SkillSource = {
   Project: 'project',
   User: 'user',
   Plugin: 'plugin',
+  BuiltIn: 'built-in',
 } as const;
 
 type SkillSource = (typeof SkillSource)[keyof typeof SkillSource];

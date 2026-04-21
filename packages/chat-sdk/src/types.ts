@@ -1,4 +1,4 @@
-import type { AgentHarness, ExecuteInput, HarnessResult, Tool } from '@noetic/core';
+import type { AgentHarness, ExecuteInput, HarnessResponse, Tool } from '@noetic/core';
 import type { Adapter, ChatConfig, ChatElement, Message, Thread } from 'chat';
 import type { ZodTypeAny } from 'zod';
 
@@ -18,18 +18,20 @@ export interface ChatTool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAn
 
 //#region NoeticChat Config
 
-/** @public Handler that receives an execute convenience function alongside thread and message. */
+/** @public Handler that receives an execute convenience function alongside thread and message.
+ *  The `execute` helper enqueues input on the harness session and resolves with
+ *  the accumulated response once the session returns to idle. */
 export type NoeticMentionHandler = (
   thread: Thread,
   message: Message,
-  execute: (input?: ExecuteInput) => HarnessResult,
+  execute: (input?: ExecuteInput) => Promise<HarnessResponse>,
 ) => void | Promise<void>;
 
 /** @public Handler for subscribed thread messages with execute convenience. */
 export type NoeticSubscribedHandler = (
   thread: Thread,
   message: Message,
-  execute: (input?: ExecuteInput) => HarnessResult,
+  execute: (input?: ExecuteInput) => Promise<HarnessResponse>,
 ) => void | Promise<void>;
 
 /** @public Mode for converting modal form values to Noetic input. */

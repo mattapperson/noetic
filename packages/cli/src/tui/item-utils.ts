@@ -9,6 +9,13 @@ import type { Item, StreamingItem } from '@noetic/core';
 export interface UserEntry {
   role: 'user';
   content: string;
+  /** Stable id assigned when the entry is created. Used to flip `deliveryStatus`
+   *  from `queued` to `sent` once the message is delivered to the agent. */
+  id?: string;
+  /** `queued` when the message was enqueued while the session was generating;
+   *  `sent` once the session has started a turn that includes it. Undefined
+   *  defaults to `sent` in the UI (i.e. messages sent while idle). */
+  deliveryStatus?: 'queued' | 'sent';
 }
 
 export interface ErrorEntry {

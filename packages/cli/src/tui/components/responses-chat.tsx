@@ -210,7 +210,14 @@ function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext
   const addMargin = shouldAddMargin(ctx.categories, index);
 
   if (isUserEntry(entry)) {
-    return <UserPrompt key={`user-${index}`} text={entry.content} addMargin={addMargin} />;
+    return (
+      <UserPrompt
+        key={`user-${entry.id ?? index}`}
+        text={entry.content}
+        addMargin={addMargin}
+        deliveryStatus={entry.deliveryStatus}
+      />
+    );
   }
 
   if (isErrorEntry(entry)) {
