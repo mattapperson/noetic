@@ -33,6 +33,41 @@ import { resolveVibes } from './working-vibes/index.js';
 const NAME = '@noetic/plugin-powerline';
 const VERSION = '0.1.0';
 
+interface PluginContextLike {
+  config: {
+    apiKey: string;
+  };
+}
+
+interface AgentConfigLike {
+  apiKey: string;
+}
+
+function hasNestedConfig(value: object): value is PluginContextLike {
+  if (!('config' in value)) {
+    return false;
+  }
+  const { config } = value;
+  if (typeof config !== 'object' || config === null) {
+    return false;
+  }
+  return 'apiKey' in config && typeof config.apiKey === 'string';
+}
+
+function hasTopLevelApiKey(value: object): value is AgentConfigLike {
+  return 'apiKey' in value && typeof value.apiKey === 'string';
+}
+
+function extractApiKey(ctx: object): string {
+  if (hasNestedConfig(ctx)) {
+    return ctx.config.apiKey;
+  }
+  if (hasTopLevelApiKey(ctx)) {
+    return ctx.apiKey;
+  }
+  return '';
+}
+
 export default function powerline(userInput: PowerlineInput = {}): NoeticPlugin {
   const inputParsed = PowerlineInputSchema.parse(userInput);
   const options = PowerlineOptionsSchema.parse(inputParsed);
@@ -47,7 +82,7 @@ export default function powerline(userInput: PowerlineInput = {}): NoeticPlugin 
     initialize: async (ctx) => {
       vibes = await resolveVibes({
         options: options.vibe,
-        apiKey: ctx.config.apiKey,
+        apiKey: extractApiKey(ctx),
       });
     },
     loadingMessages: () => vibes,
