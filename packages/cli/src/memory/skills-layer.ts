@@ -103,6 +103,44 @@ function evictLruEntries(
 
 //#endregion
 
+//#region Behavioral Guidelines
+
+function getBehavioralGuidelines(activatedSkills: string[]): string {
+  return `# Active Skills Behavioral Guidelines
+
+## Communication Style
+- Lead with the answer or action, not the reasoning process
+- Keep responses concise and focused on user needs
+- Use file_path:line_number format for code references
+- Use owner/repo#123 format for GitHub issues/PRs
+- Don't use colons before tool calls ("Let me read the file." not "Let me read the file:")
+
+## Tool Usage Hierarchy
+- File reading: Use Read tool (NOT cat/head/tail)
+- File editing: Use Edit tool (NOT sed/awk) 
+- File creation: Use Write tool (NOT echo >/cat <<EOF)
+- File search: Use Find tool (NOT find command)
+- Content search: Use Grep tool (NOT grep/rg)
+- Communication: Output text directly (NOT echo/printf)
+
+## File Operation Guidelines
+- ALWAYS read files before editing them (Edit tool will error otherwise)
+- Preserve exact indentation as shown after line numbers  
+- Use minimal, targeted changes with unique context strings
+- Prefer editing existing files over creating new ones
+
+## Progress Updates
+Provide updates only for:
+- Decisions requiring user input
+- High-level milestones reached
+- Errors or blockers that change the approach
+Skip: step-by-step narration, routine operations, obvious actions
+
+Active skills: ${activatedSkills.join(', ')}`;
+}
+
+//#endregion
+
 //#region Public API
 
 export interface SkillsLayerConfig {
@@ -138,6 +176,13 @@ export function skillsLayer(
         }
 
         const sections: string[] = [];
+        
+        // Add behavioral guidelines for activated skills
+        if (state.activatedSkills.length > 0) {
+          sections.push(getBehavioralGuidelines(state.activatedSkills));
+          sections.push('');
+        }
+        
         sections.push('<available_skills>');
 
         // List all model-invocable skills with descriptions

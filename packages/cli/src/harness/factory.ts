@@ -19,7 +19,12 @@ import {
 } from '@noetic/core';
 
 import { buildSystemPrompt } from '../ai/system-prompt.js';
+import { communicationStyleLayer } from '../memory/communication-style-layer.js';
+import { environmentContextLayer } from '../memory/environment-context-layer.js';
+import { planningModeLayer } from '../memory/planning-mode-layer.js';
+import { promptEngineeringLayer } from '../memory/prompt-engineering-layer.js';
 import { skillsLayer } from '../memory/skills-layer.js';
+import { toolGuidanceLayer } from '../memory/tool-guidance-layer.js';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import { buildSkillCatalog } from '../skills/catalog.js';
@@ -169,6 +174,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     planInstructionBlocks.length > 0 ? planInstructionBlocks.join('\n\n---\n\n') : undefined;
 
   const memory: MemoryLayer[] = [
+    // Core memory layers
     planMemory({
       additionalPlanInstructions,
       onEnterSession: planHooks?.onEnterSession,
@@ -176,10 +182,23 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     }),
     workingMemory(),
     observationalMemory(),
+    
+    // Enhanced prompt engineering layers
+    promptEngineeringLayer(),
+    communicationStyleLayer(),
+    environmentContextLayer({ config, shell }),
+    toolGuidanceLayer({ tools, mode }),
+    
+    // Mode-specific layers
+    ...(mode === 'planning' ? [planningModeLayer({ availableTools: tools, currentMode: mode })] : []),
+    
+    // Existing layers continue
     fileReference(),
     durableTaskState(),
     ...toolMemoryLayer(tools),
     ...pluginMemory,
+    
+    // Enhanced skills layer (now with behavioral guidelines)
     ...(allSkills.length > 0
       ? [
           skillsLayer(allSkills, {
