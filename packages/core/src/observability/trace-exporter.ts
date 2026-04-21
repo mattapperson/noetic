@@ -8,9 +8,35 @@ export class NoopExporter implements TraceExporter {
   }
 }
 
+/** @internal Test-only record of a trace lifecycle. */
+export interface TraceRecord {
+  traceId: string;
+  input: unknown;
+  completed: boolean;
+  error?: Error;
+}
+
 /** @public Collects SpanImpl instances for test assertions and diagnostics. Non-SpanImpl spans are filtered out. */
 export class InMemoryExporter implements TraceExporter {
   readonly spans: SpanImpl[] = [];
+  readonly traces: TraceRecord[] = [];
+
+  startTrace(traceId: string, input: unknown): void {
+    this.traces.push({
+      traceId,
+      input,
+      completed: false,
+    });
+  }
+
+  completeTrace(traceId: string, error?: Error): void {
+    const record = this.traces.find((t) => t.traceId === traceId);
+    if (!record) {
+      return;
+    }
+    record.completed = true;
+    record.error = error;
+  }
 
   async export(spans: Span[]): Promise<void> {
     this.spans.push(...spans.filter((s): s is SpanImpl => s instanceof SpanImpl));
@@ -18,6 +44,7 @@ export class InMemoryExporter implements TraceExporter {
 
   clear(): void {
     this.spans.length = 0;
+    this.traces.length = 0;
   }
 
   getSpansByName(name: string): SpanImpl[] {
