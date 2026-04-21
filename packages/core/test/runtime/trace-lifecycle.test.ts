@@ -59,3 +59,74 @@ describe('trace lifecycle via run()', () => {
     expect(exporter.traces[0].error?.message).toContain('step-boom');
   });
 });
+
+describe('trace lifecycle via session execute()', () => {
+  it('calls startTrace and completeTrace on session turn', async () => {
+    const exporter = new InMemoryExporter();
+    const harness = new AgentHarness({
+      name: 'session-trace',
+      initialStep: echoStep,
+      params: {},
+      traceExporter: exporter,
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('response'),
+      ]),
+    });
+
+    await harness.execute('hello');
+    await harness.getAgentResponse();
+
+    expect(exporter.traces).toHaveLength(1);
+    expect(exporter.traces[0].completed).toBe(true);
+    expect(exporter.traces[0].error).toBeUndefined();
+  });
+
+  it('calls completeTrace with error when session turn fails', async () => {
+    const failStep: Step<ContextMemory, string, string> = {
+      kind: 'run',
+      id: 'fail',
+      execute: async () => {
+        throw new Error('session-boom');
+      },
+    };
+    const exporter = new InMemoryExporter();
+    const harness = new AgentHarness({
+      name: 'session-trace',
+      initialStep: failStep,
+      params: {},
+      traceExporter: exporter,
+      _testCallModel: createScriptedCallModel([]),
+    });
+
+    await harness.execute('hello');
+    await expect(harness.getAgentResponse()).rejects.toThrow('session-boom');
+
+    expect(exporter.traces).toHaveLength(1);
+    expect(exporter.traces[0].completed).toBe(true);
+    expect(exporter.traces[0].error?.message).toContain('session-boom');
+  });
+
+  it('exports root span with stepKind and stepId attributes', async () => {
+    const exporter = new InMemoryExporter();
+    const harness = new AgentHarness({
+      name: 'span-test',
+      initialStep: echoStep,
+      params: {},
+      traceExporter: exporter,
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('response'),
+      ]),
+    });
+
+    await harness.execute('hello');
+    await harness.getAgentResponse();
+
+    const rootSpans = exporter.spans.filter(
+      (s, i, arr) =>
+        s.attributes.get('stepKind') === 'run' && s.parentSpanId === null && arr.indexOf(s) === i,
+    );
+    expect(rootSpans).toHaveLength(1);
+    expect(rootSpans[0].attributes.get('stepId')).toBe('span-test');
+    expect(rootSpans[0].endTime).toBeDefined();
+  });
+});

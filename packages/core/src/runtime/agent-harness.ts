@@ -430,12 +430,49 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               },
             );
           }
-          const result = await this.initAndRun(this.initialStep, '', ctx);
-          // Snapshot final items into session history for the next turn.
-          session.accumulatedItems = [
-            ...ctx.itemLog.items,
-          ];
-          return result;
+          // Trace lifecycle: start trace and export root span
+          const rootSpan = ctx.span;
+          this.traceExporter.startTrace?.(rootSpan.traceId, '');
+          rootSpan.setAttribute('stepKind', 'run');
+          rootSpan.setAttribute('stepId', this.config.name);
+          rootSpan.setAttribute('input', '');
+          rootSpan.setAttribute('depth', 0);
+          void this.traceExporter.export([
+            rootSpan,
+          ]);
+
+          try {
+            const result = await this.initAndRun(this.initialStep, '', ctx);
+            // Snapshot final items into session history for the next turn.
+            session.accumulatedItems = [
+              ...ctx.itemLog.items,
+            ];
+
+            // Trace lifecycle: complete root span and trace
+            rootSpan.setAttribute('output', JSON.stringify(result));
+            rootSpan.end();
+            await this.traceExporter.export([
+              rootSpan,
+            ]);
+            this.traceExporter.completeTrace?.(rootSpan.traceId);
+
+            return result;
+          } catch (error) {
+            // Trace lifecycle: complete root span and trace with error
+            rootSpan.setAttribute('error', 'true');
+            rootSpan.setAttribute(
+              'errorMessage',
+              error instanceof Error ? error.message : String(error),
+            );
+            rootSpan.end();
+            await this.traceExporter.export([
+              rootSpan,
+            ]);
+            const traceError = error instanceof Error ? error : new Error(String(error));
+            this.traceExporter.completeTrace?.(rootSpan.traceId, traceError);
+
+            throw error;
+          }
         },
       }),
     };
