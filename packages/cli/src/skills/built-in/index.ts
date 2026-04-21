@@ -14,6 +14,8 @@ import { SkillSource } from '../types.js';
 // Bun supports `with { type: 'text' }` to import any file as a string literal.
 // @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
 import planModeSkillSource from './plan-mode/SKILL.md' with { type: 'text' };
+// @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
+import promptOptimizationSkillSource from './prompt-optimization/SKILL.md' with { type: 'text' };
 
 //#region Helpers
 
@@ -53,6 +55,11 @@ export const BUILT_IN_SKILLS: ReadonlyArray<SkillDefinition> = [
     dirName: 'plan-mode',
     source: planModeSkillSource,
     filePath: path.join(BUILT_IN_DIR, 'plan-mode', 'SKILL.md'),
+  }),
+  fromSource({
+    dirName: 'prompt-optimization',
+    source: promptOptimizationSkillSource,
+    filePath: path.join(BUILT_IN_DIR, 'prompt-optimization', 'SKILL.md'),
   }),
 ];
 
