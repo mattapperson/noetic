@@ -1,85 +1,74 @@
 /**
- * Tool call item - renders tool invocations with status icons.
- * Matches Claude Code's AssistantToolUseMessage style.
+ * Tool call header - renders `● name(args?)` at top level.
+ *
+ * Mirrors Claude Code's AssistantToolUseMessage layout:
+ *   <Box row nowrap>
+ *     <Box minWidth={2}>●</Box>   // dot column, always 2 chars wide
+ *     <Box flexShrink={0}>name</Box>   // name never shrinks
+ *     <Box nowrap>(args)</Box>    // args box absorbs truncation
+ *   </Box>
+ *
+ * Only the dot recolors on status change so the name doesn't flash.
+ * The tool *result* is rendered separately via <ToolResult>.
  */
 
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useTheme } from '../theme.js';
 
-const MAX_RESULT_PREVIEW_CHARS = 120;
-const RESPONSE_PREFIX = '\u23BF'; // ⎿ - used for tool outputs
+const STATUS_DOT = '\u25CF'; // ●
 
 export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'error';
 
-const STATUS_ICONS: Record<ToolCallStatus, string> = {
-  pending: '\u25CB', // ○
-  running: '\u25CF', // ●
-  completed: '\u2713', // ✓
-  error: '\u2715', // ✕
-};
-
 export interface ToolCallProps {
-  /** Tool name */
   name: string;
-  /** Tool execution status */
   status?: ToolCallStatus;
-  /** Tool result (shown when completed) */
-  result?: unknown;
+  /** Serialized arguments to show in parens, e.g. "path/to/file". */
+  args?: string;
+  /** Add a blank line above when this is the first item in a new turn. */
+  addMargin?: boolean;
 }
 
-export function ToolCall({ name, status = 'pending', result }: ToolCallProps): ReactNode {
+export function ToolCall({
+  name,
+  status = 'pending',
+  args,
+  addMargin = false,
+}: ToolCallProps): ReactNode {
   const theme = useTheme();
-  const icon = STATUS_ICONS[status];
-  const isActive = status === 'pending' || status === 'running';
 
-  function getStatusColor(): string {
-    switch (status) {
-      case 'pending':
-        return theme.muted;
-      case 'running':
-        return theme.warning;
-      case 'completed':
-        return theme.success;
-      case 'error':
-        return theme.error;
+  function getDotColor(): string | undefined {
+    if (status === 'completed') {
+      return theme.success;
     }
+    if (status === 'error') {
+      return theme.error;
+    }
+    return undefined;
   }
 
-  const stateColor = getStatusColor();
+  const isDim = status === 'pending';
+  const hasArgs = args !== undefined && args.length > 0;
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row">
-        <Text dimColor>
-          {'  '}
-          {RESPONSE_PREFIX}{' '}
+    <Box flexDirection="row" flexWrap="nowrap" marginTop={addMargin ? 1 : 0}>
+      <Box minWidth={2}>
+        <Text color={getDotColor()} dimColor={isDim}>
+          {STATUS_DOT}
         </Text>
-        <Box flexDirection="column" flexGrow={1}>
-          <Text>
-            <Text color={stateColor}>{icon}</Text>
-            <Text> </Text>
-            <Text color={stateColor} bold={isActive}>
-              {name}
-            </Text>
-            {isActive && <Text dimColor>{'...'}</Text>}
-          </Text>
-          {status === 'completed' && result !== undefined && (
-            <Text dimColor>
-              {'    '}
-              {'\u2514\u2500'}
-              {String(result).slice(0, MAX_RESULT_PREVIEW_CHARS)}
-            </Text>
-          )}
-          {status === 'error' && result !== undefined && (
-            <Text color={theme.error} dimColor>
-              {'    '}
-              {'\u2514\u2500'}
-              {String(result).slice(0, MAX_RESULT_PREVIEW_CHARS)}
-            </Text>
-          )}
-        </Box>
       </Box>
+      <Box flexShrink={0}>
+        <Text bold wrap="truncate-end">
+          {name}
+        </Text>
+      </Box>
+      {hasArgs && (
+        <Box flexWrap="nowrap">
+          <Text dimColor wrap="truncate-end">
+            ({args})
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

@@ -5,10 +5,10 @@
  * Renders each item type with Claude Code-style presentation.
  */
 
-import type { Item } from '@noetic/core';
 import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { NoeticPlugin } from '../../plugins/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import {
   extractReasoning,
@@ -25,6 +25,7 @@ import {
   Reasoning,
   SystemMessage,
   ToolCall,
+  ToolResult,
   UserPrompt,
 } from './items/index.js';
 import type { ChatStatus } from './prompt-input.js';
@@ -38,21 +39,33 @@ export interface ResponsesChatProps {
   onSubmit: (text: string) => void;
   onStop?: () => void;
   model?: string;
-  /** Slash commands for autocomplete */
   commands?: Array<{
     cmd: string;
     desc?: string;
   }>;
-  /** Modal content to display over chat area */
   modalContent?: ReactNode;
-  /** Called when modal should be dismissed (Escape pressed) */
   onModalClose?: () => void;
+  plugins?: ReadonlyArray<NoeticPlugin>;
 }
+
+/**
+ * Visual category of an entry — drives vertical spacing between consecutive
+ * entries. `tool-result` never gets a top margin; other categories get one
+ * when they follow an entry of a different category.
+ */
+type EntryCategory =
+  | 'user'
+  | 'assistant-text'
+  | 'reasoning'
+  | 'tool-call'
+  | 'tool-result'
+  | 'system';
 
 interface RenderContext {
   chatStatus: ChatStatus;
-  callNameMap: Map<string, string>;
+  callStatusMap: Map<string, ToolCallStatus>;
   entryCount: number;
+  categories: EntryCategory[];
 }
 
 //#endregion
@@ -72,62 +85,122 @@ function mapItemStatus(status: string | undefined): ToolCallStatus {
   return 'pending';
 }
 
-function buildCallNameMap(entries: ConversationEntry[]): Map<string, string> {
-  const map = new Map<string, string>();
+function buildCallStatusMap(entries: ConversationEntry[]): Map<string, ToolCallStatus> {
+  const statuses = new Map<string, ToolCallStatus>();
   for (const entry of entries) {
-    if (!isUserEntry(entry) && entry.type === 'function_call') {
-      map.set(entry.callId, entry.name ?? 'tool');
+    if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
+      continue;
+    }
+    if (entry.type === 'function_call') {
+      statuses.set(entry.callId, mapItemStatus(entry.status));
     }
   }
-  return map;
+  return statuses;
+}
+
+function categorize(entry: ConversationEntry): EntryCategory {
+  if (isUserEntry(entry)) {
+    return 'user';
+  }
+  if (isErrorEntry(entry) || isSystemEntry(entry)) {
+    return 'system';
+  }
+  if (entry.type === 'message') {
+    return 'assistant-text';
+  }
+  if (entry.type === 'reasoning') {
+    return 'reasoning';
+  }
+  if (entry.type === 'function_call_output') {
+    return 'tool-result';
+  }
+  return 'tool-call';
+}
+
+function computeCategories(entries: ConversationEntry[]): EntryCategory[] {
+  return entries.map(categorize);
+}
+
+function shouldAddMargin(categories: EntryCategory[], index: number): boolean {
+  if (index <= 0) {
+    return false;
+  }
+  const current = categories[index];
+  const previous = categories[index - 1];
+  if (current === undefined || previous === undefined) {
+    return false;
+  }
+  if (current === 'tool-result') {
+    return false;
+  }
+  return previous !== current;
+}
+
+/**
+ * True when the previous entry is part of an assistant turn — used to decide
+ * whether a system/error message should render as a sub-response (⎿ prefix)
+ * under the assistant turn rather than as a standalone top-level line.
+ */
+function isPartOfAssistantTurn(categories: EntryCategory[], index: number): boolean {
+  if (index <= 0) {
+    return false;
+  }
+  const previous = categories[index - 1];
+  return (
+    previous === 'assistant-text' ||
+    previous === 'reasoning' ||
+    previous === 'tool-call' ||
+    previous === 'tool-result'
+  );
 }
 
 //#endregion
 
-//#region Entry Renderers
+//#region Argument Preview
 
-function renderUserEntry(
-  entry: {
-    content: string;
-  },
-  key: string,
-): ReactNode {
-  return <UserPrompt key={key} text={entry.content} />;
+const MAX_ARGS_PREVIEW = 80;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function renderMessageItem(
-  item: Item & {
-    type: 'message';
-  },
-  key: string,
-  isStreaming: boolean,
-): ReactNode {
-  const text = extractTextContent(item);
-  if (!text) {
-    return null;
+function truncate(value: string, max: number): string {
+  if (value.length <= max) {
+    return value;
   }
-  return <AssistantText key={key} text={text} isStreaming={isStreaming} />;
+  return `${value.slice(0, max)}…`;
 }
 
-function renderReasoningItem(
-  item: Item & {
-    type: 'reasoning';
-  },
-  key: string,
-): ReactNode {
-  const text = extractReasoning(item);
-  return <Reasoning key={key} text={text} collapsed={item.status === 'completed'} />;
-}
-
-interface ToolCallRenderParams {
-  key: string;
-  name: string;
-  status: ToolCallStatus;
-  result?: unknown;
-}
-
-function renderToolCallItem({ key, name, status, result }: ToolCallRenderParams): ReactNode {
-  return <ToolCall key={key} name={name} status={status} result={result} />;
+function previewArgs(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return '';
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (isRecord(parsed)) {
+      const preferred = [
+        'path',
+        'file',
+        'file_path',
+        'command',
+        'pattern',
+        'query',
+      ];
+      for (const key of preferred) {
+        const value = parsed[key];
+        if (typeof value === 'string') {
+          return truncate(value, MAX_ARGS_PREVIEW);
+        }
+      }
+      // Parsed as a record but no preferred key — don't dump raw JSON; better
+      // to show no args than `{"recursive":true,"depth":3}`.
+      return '';
+    }
+  } catch {
+    // Not JSON — fall through to raw truncation.
+  }
+  return truncate(trimmed, MAX_ARGS_PREVIEW);
 }
 
 //#endregion
@@ -135,70 +208,115 @@ function renderToolCallItem({ key, name, status, result }: ToolCallRenderParams)
 //#region Entry Dispatch
 
 function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext): ReactNode {
+  const addMargin = shouldAddMargin(ctx.categories, index);
+
   if (isUserEntry(entry)) {
-    return renderUserEntry(entry, `user-${index}`);
+    return (
+      <UserPrompt
+        key={`user-${entry.id ?? index}`}
+        text={entry.content}
+        addMargin={addMargin}
+        deliveryStatus={entry.deliveryStatus}
+      />
+    );
   }
 
   if (isErrorEntry(entry)) {
-    return <SystemMessage key={`error-${index}`} text={entry.content} type="error" />;
+    const asResponse = isPartOfAssistantTurn(ctx.categories, index);
+    return (
+      <SystemMessage
+        key={`error-${index}`}
+        text={entry.content}
+        type="error"
+        asResponse={asResponse}
+        addMargin={!asResponse && addMargin}
+      />
+    );
   }
 
   if (isSystemEntry(entry)) {
-    return <SystemMessage key={`system-${index}`} text={entry.content} type="info" />;
+    return (
+      <SystemMessage
+        key={`system-${index}`}
+        text={entry.content}
+        type="info"
+        addMargin={addMargin}
+      />
+    );
   }
 
   const key = getItemId(entry);
   const isLastEntry = index === ctx.entryCount - 1;
 
   if (entry.type === 'message') {
+    const text = extractTextContent(entry);
+    if (!text) {
+      return null;
+    }
     const isStreaming =
       isLastEntry && ctx.chatStatus === 'streaming' && entry.status !== 'completed';
-    return renderMessageItem(entry, key, isStreaming);
+    return <AssistantText key={key} text={text} isStreaming={isStreaming} addMargin={addMargin} />;
   }
 
   if (entry.type === 'reasoning') {
-    return renderReasoningItem(entry, key);
+    return (
+      <Reasoning
+        key={key}
+        text={extractReasoning(entry)}
+        collapsed={entry.status === 'completed'}
+        addMargin={addMargin}
+      />
+    );
   }
 
   if (entry.type === 'function_call') {
-    return renderToolCallItem({
-      key,
-      name: entry.name ?? 'tool',
-      status: mapItemStatus(entry.status),
-    });
+    return (
+      <ToolCall
+        key={key}
+        name={entry.name ?? 'tool'}
+        status={mapItemStatus(entry.status)}
+        args={previewArgs(entry.arguments ?? '')}
+        addMargin={addMargin}
+      />
+    );
   }
 
   if (entry.type === 'function_call_output') {
-    return renderToolCallItem({
-      key,
-      name: ctx.callNameMap.get(entry.callId) ?? 'tool',
-      status: 'completed',
-      result: entry.output,
-    });
+    const callStatus = ctx.callStatusMap.get(entry.callId);
+    return <ToolResult key={key} output={entry.output} isError={callStatus === 'error'} />;
   }
 
   if (entry.type === 'web_search_call') {
-    return renderToolCallItem({
-      key,
-      name: 'web_search',
-      status: mapItemStatus(entry.status),
-    });
+    return (
+      <ToolCall
+        key={key}
+        name="web_search"
+        status={mapItemStatus(entry.status)}
+        addMargin={addMargin}
+      />
+    );
   }
 
   if (entry.type === 'file_search_call') {
-    return renderToolCallItem({
-      key,
-      name: 'file_search',
-      status: mapItemStatus(entry.status),
-    });
+    return (
+      <ToolCall
+        key={key}
+        name="file_search"
+        status={mapItemStatus(entry.status)}
+        addMargin={addMargin}
+      />
+    );
   }
 
   if (entry.type === 'image_generation_call') {
-    return renderToolCallItem({
-      key,
-      name: 'image_generation',
-      status: mapItemStatus(entry.status),
-    });
+    return (
+      <ToolCall
+        key={key}
+        name="image_generation"
+        status={mapItemStatus(entry.status)}
+        addMargin={addMargin}
+      />
+    );
   }
 
   return null;
@@ -217,9 +335,77 @@ export function ResponsesChat({
   commands,
   modalContent,
   onModalClose,
+  plugins,
 }: ResponsesChatProps): ReactNode {
-  const callNameMap = useMemo(
-    () => buildCallNameMap(entries),
+  const pluginsList = plugins ?? [];
+  const footerPlugin = useMemo(
+    () => pluginsList.find((p) => typeof p.footer === 'function'),
+    [
+      pluginsList,
+    ],
+  );
+
+  const [loadingPool, setLoadingPool] = useState<ReadonlyArray<string>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    async function collect(): Promise<void> {
+      const pools = await Promise.all(
+        pluginsList.map(async (p): Promise<ReadonlyArray<string>> => {
+          if (typeof p.loadingMessages !== 'function') {
+            return [];
+          }
+          try {
+            return await p.loadingMessages();
+          } catch {
+            return [];
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setLoadingPool(pools.flat());
+    }
+    void collect();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pluginsList,
+  ]);
+
+  // Bump the turn id when a new turn begins so the spinner message stays stable
+  // within a turn but rotates across turns.
+  const prevStatusRef = useRef<ChatStatus>(status);
+  const [turnId, setTurnId] = useState(0);
+  useEffect(() => {
+    if (prevStatusRef.current !== 'submitted' && status === 'submitted') {
+      setTurnId((n) => n + 1);
+    }
+    prevStatusRef.current = status;
+  }, [
+    status,
+  ]);
+
+  const spinnerMessage = useMemo<string | undefined>(() => {
+    if (loadingPool.length === 0) {
+      return undefined;
+    }
+    const idx = Math.abs(turnId) % loadingPool.length;
+    const picked = loadingPool[idx];
+    return picked ? `${picked}...` : undefined;
+  }, [
+    loadingPool,
+    turnId,
+  ]);
+  const callStatusMap = useMemo(
+    () => buildCallStatusMap(entries),
+    [
+      entries,
+    ],
+  );
+  const categories = useMemo(
+    () => computeCategories(entries),
     [
       entries,
     ],
@@ -229,7 +415,6 @@ export function ResponsesChat({
     onSubmit(msg.text);
   }
 
-  // Handle Escape when modal is open (PromptInput is not rendered so we need this)
   useInput(
     (_input, key) => {
       if (key.escape && modalContent && onModalClose) {
@@ -243,35 +428,22 @@ export function ResponsesChat({
 
   const ctx: RenderContext = {
     chatStatus: status,
-    callNameMap,
+    callStatusMap,
     entryCount: entries.length,
+    categories,
   };
 
-  // Split entries into completed (for Static) and streaming (for live updates).
-  // Static renders items once and never updates them, so streaming content
-  // must be rendered outside Static.
-  //
-  // Only treat the last entry as "streaming" if:
-  // 1. We're in streaming status
-  // 2. The last entry is NOT a user entry (user entries don't stream)
-  // 3. There's at least one entry
   const lastEntry = entries[entries.length - 1];
   const hasStreamingEntry =
     status === 'streaming' && lastEntry !== undefined && !isUserEntry(lastEntry);
   const completedEntries = hasStreamingEntry ? entries.slice(0, -1) : entries;
   const streamingEntry = hasStreamingEntry ? lastEntry : null;
 
-  // Determine if we should show the loading spinner
-  // Show when streaming and either:
-  // - No entries at all after user message
-  // - Last entry is reasoning (thinking mode)
-  // - Last entry has no visible text content yet
   const showLoadingSpinner = useMemo(() => {
     if (status !== 'streaming') {
       return false;
     }
 
-    // Find the last user entry index
     let lastUserIndex = -1;
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i];
@@ -281,15 +453,11 @@ export function ResponsesChat({
       }
     }
 
-    // Get entries after the last user message
     const entriesAfterUser = entries.slice(lastUserIndex + 1);
-
-    // No assistant entries yet - show spinner
     if (entriesAfterUser.length === 0) {
       return true;
     }
 
-    // Check if we have any visible text content
     const hasVisibleText = entriesAfterUser.some((entry) => {
       if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
         return false;
@@ -300,20 +468,17 @@ export function ResponsesChat({
       return false;
     });
 
-    // Show spinner if no visible text yet
     return !hasVisibleText;
   }, [
     entries,
     status,
   ]);
 
-  // Determine spinner mode
   const spinnerMode: SpinnerMode = useMemo(() => {
     if (!showLoadingSpinner) {
       return 'loading';
     }
 
-    // Check if the last entry is reasoning
     const lastNonUserEntry = [
       ...entries,
     ]
@@ -324,7 +489,6 @@ export function ResponsesChat({
       return 'thinking';
     }
 
-    // Check if there's an active tool call
     const hasActiveTool = entries.some((e) => {
       if (isUserEntry(e) || isErrorEntry(e) || isSystemEntry(e)) {
         return false;
@@ -345,7 +509,6 @@ export function ResponsesChat({
     showLoadingSpinner,
   ]);
 
-  // Wrap completed entries for Static component
   const staticItems = useMemo(
     () =>
       completedEntries.map((entry, i) => ({
@@ -364,7 +527,6 @@ export function ResponsesChat({
     ],
   );
 
-  // When modal is open, hide the prompt and show modal with Esc hint
   if (modalContent) {
     return (
       <Box flexDirection="column" height="100%">
@@ -385,8 +547,9 @@ export function ResponsesChat({
           )}
         </Static>
         {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
-        {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} />}
+        {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
+      {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
       <PromptInput
         status={status}
         onSubmit={handleSubmit}

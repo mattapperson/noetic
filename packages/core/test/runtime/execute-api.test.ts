@@ -24,8 +24,9 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute('hello').getText();
-    expect(result).toBe('echo: hello');
+    await harness.execute('hello');
+    const response = await harness.getAgentResponse();
+    expect(response.text).toBe('echo: hello');
   });
 
   it('accepts a single Item input', async () => {
@@ -40,8 +41,9 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute(item).getText();
-    expect(result).toBe('echo: from item');
+    await harness.execute(item);
+    const response = await harness.getAgentResponse();
+    expect(response.text).toBe('echo: from item');
   });
 
   it('accepts an array of Items', async () => {
@@ -59,8 +61,9 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness.execute(items).getText();
-    expect(result).toBe('echo: second');
+    await harness.execute(items);
+    const response = await harness.getAgentResponse();
+    expect(response.text).toBe('echo: second');
   });
 
   it('forwards ExecuteOptions to the context', async () => {
@@ -73,47 +76,55 @@ describe('AgentHarness.execute()', () => {
       ]),
     });
 
-    const result = await harness
-      .execute('hi', {
-        threadId: 'thread-42',
-        resourceId: 'user-7',
-      })
-      .getText();
-    expect(result).toBe('ok');
+    await harness.execute('hi', {
+      threadId: 'thread-42',
+      resourceId: 'user-7',
+    });
+    const response = await harness.getAgentResponse({
+      threadId: 'thread-42',
+    });
+    expect(response.text).toBe('ok');
   });
 
-  it('throws NoeticConfigError when no step is configured', async () => {
+  it('rejects with NoeticConfigError when no step is configured', async () => {
     const harness = new AgentHarness({
       name: 'test',
       params: {},
     });
 
     try {
-      await harness.execute('hello').getText();
-      expect.unreachable('should have thrown');
+      await harness.execute('hello');
+      expect.unreachable('should have rejected');
     } catch (e) {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('NO_STEP_CONFIGURED');
     }
   });
 
-  it('creates a fresh context per execute() call (no state leakage)', async () => {
+  it('isolates sessions by threadId', async () => {
     const harness = new AgentHarness({
       name: 'test',
       initialStep: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
-        textOnlyResponse('ok'),
-        textOnlyResponse('ok'),
+        textOnlyResponse('first'),
+        textOnlyResponse('second'),
       ]),
     });
 
-    const r1 = await harness.execute('first').getResponse();
-    const r2 = await harness.execute('second').getResponse();
-    // Each call produces its own response with independent items
-    expect(r1.text).toBe('ok');
-    expect(r2.text).toBe('ok');
-    // Items should not accumulate across calls
-    expect(r1.items.length).toBe(r2.items.length);
+    await harness.execute('alpha', {
+      threadId: 't1',
+    });
+    await harness.execute('beta', {
+      threadId: 't2',
+    });
+    const r1 = await harness.getAgentResponse({
+      threadId: 't1',
+    });
+    const r2 = await harness.getAgentResponse({
+      threadId: 't2',
+    });
+    expect(r1.text).toBe('first');
+    expect(r2.text).toBe('second');
   });
 });

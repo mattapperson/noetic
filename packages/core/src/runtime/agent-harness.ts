@@ -26,6 +26,7 @@ import {
   executeRerender,
   initLayers,
   recallLayers,
+  resolveLayerBudgets,
   runAppendPipeline,
   storeLayers,
 } from '../memory/layer-lifecycle';
@@ -37,8 +38,8 @@ import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { FsAdapter } from '../types/fs-adapter';
-import type { HarnessResult } from '../types/harness-result';
-import type { ExecuteInput, Item } from '../types/items';
+import type { HarnessResponse, StreamEvent, StreamingItem } from '../types/harness-result';
+import type { ExecuteInput, InputMessageItem, Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
 import type {
@@ -46,8 +47,11 @@ import type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  DeliveryMode,
   ExecuteOptions,
+  HarnessStatus,
   RecallLayerOutput,
+  SessionScope,
 } from '../types/runtime';
 import type { ShellAdapter } from '../types/shell-adapter';
 import type { SteeringDecision } from '../types/steering';
@@ -57,9 +61,12 @@ import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-ut
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { DetachedHandleImpl } from './detached-handle';
-import { EventBroadcaster } from './event-broadcaster';
+import type { EventBroadcaster } from './event-broadcaster';
 import { contextToExecCtx } from './exec-context-factory';
-import { HarnessResultImpl } from './harness-result';
+import { createInMemoryStorage } from './in-memory-storage';
+import type { MessageQueue, QueuedMessage } from './message-queue';
+import { SessionRunner } from './session-runner';
+import { buildItemStream, filterReasoningStream, filterTextStream } from './session-streams';
 
 //#region Types
 
@@ -79,13 +86,21 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   llm?: LlmProviderConfig;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
+  /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
+  defaultDeliveryMode?: DeliveryMode;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
+}
+
+interface Session {
+  readonly runner: SessionRunner;
+  accumulatedItems: Item[];
 }
 
 //#endregion
 
 const MAX_TOOL_ROUNDS = 32;
+const DEFAULT_THREAD_ID = '__default__';
 
 //#region Helpers
 
@@ -120,13 +135,51 @@ function isStreamRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-async function pipeStreamEventsToBroadcaster(
-  stream: AsyncIterable<unknown>,
-  broadcaster: EventBroadcaster,
-  agentName: string,
-): Promise<void> {
+/** Race a promise against an AbortSignal so callers (e.g. `SessionRunner.abort`)
+ *  can break out of a long `await` without waiting for the underlying call to
+ *  settle. When the signal fires, the returned promise rejects with
+ *  `signal.reason` (an `Error`) or a generic `Error('aborted')` fallback. */
+function awaitWithAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) {
+    return p;
+  }
+  if (signal.aborted) {
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+    };
+    signal.addEventListener('abort', onAbort, {
+      once: true,
+    });
+    p.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
+interface PipeStreamOpts {
+  stream: AsyncIterable<unknown>;
+  broadcaster: EventBroadcaster;
+  agentName: string;
+  signal?: AbortSignal;
+}
+
+async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void> {
+  const { stream, broadcaster, agentName, signal } = opts;
   try {
     for await (const event of stream) {
+      if (signal?.aborted) {
+        return;
+      }
       if (!isStreamRecord(event)) {
         continue;
       }
@@ -147,10 +200,25 @@ async function pipeStreamEventsToBroadcaster(
         error: err instanceof Error ? err.message : String(err),
       },
     });
-    // Re-throw so pipePromise rejects and the error propagates
-    // through the execution promise to broadcaster.error().
     throw err;
   }
+}
+
+/** @internal Context carries the session queue reference so callModel can
+ *  inject between-rounds messages into the current tool-round loop. */
+interface SessionCtxExtension {
+  _sessionQueue?: MessageQueue;
+  _sessionBetweenRounds?: boolean;
+  _sessionRunnerAgentName?: string;
+}
+
+function hasSessionQueue(ctx: Context): ctx is Context & Required<SessionCtxExtension> {
+  const maybe = frameworkCast<Context & SessionCtxExtension>(ctx);
+  return (
+    maybe._sessionBetweenRounds === true &&
+    maybe._sessionQueue !== undefined &&
+    typeof maybe._sessionRunnerAgentName === 'string'
+  );
 }
 
 //#endregion
@@ -160,6 +228,10 @@ async function pipeStreamEventsToBroadcaster(
 /**
  * Default agent harness for executing agent steps with built-in channel, memory, and trace support.
  * Provides channel store, memory layer lifecycle, and trace export with no external dependencies.
+ *
+ * Messages submitted via `execute()` are enqueued on a per-thread session and
+ * processed by a `SessionRunner`. Consumers observe responses via the session-
+ * scoped accessors: `getAgentResponse`, `getItemStream`, etc.
  *
  * @public
  */
@@ -174,6 +246,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
+  private readonly defaultDeliveryMode: DeliveryMode;
+  private readonly sessions = new Map<string, Session>();
   readonly layerStateStore: LayerStateStore;
   private _traceExporter: TraceExporter | null;
 
@@ -189,7 +263,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     this.config = {
       name: opts.name,
-      storage: opts.storage,
+      storage: opts.storage ?? createInMemoryStorage(),
       hooks: opts.hooks,
       params: validatedParams,
     };
@@ -202,7 +276,188 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.channelStore = new ChannelStore();
     this._traceExporter = opts.traceExporter ?? null;
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
+    this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
   }
+
+  //#region Session Accessors
+
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void> {
+    if (!this.initialStep) {
+      return Promise.reject(
+        new NoeticConfigError({
+          code: 'NO_STEP_CONFIGURED',
+          message: 'No initialStep configured on this harness.',
+          hint: 'Pass `initialStep` in constructor options, or use run() directly.',
+        }),
+      );
+    }
+
+    const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
+    const deliveryMode = options?.deliveryMode ?? this.defaultDeliveryMode;
+    const session = this.getOrCreateSession(threadId);
+    const message: QueuedMessage = {
+      id: options?.messageId ?? `msg-${crypto.randomUUID()}`,
+      input,
+      deliveryMode,
+      options: options ?? {},
+      enqueuedAt: Date.now(),
+    };
+
+    if (deliveryMode === 'interrupt' && session.runner.getStatus().kind === 'generating') {
+      session.runner.queue.prepend(message);
+      // Abort kicks the runner via queue subscription after the in-flight turn settles.
+      void session.runner.abort('interrupt');
+      return Promise.resolve();
+    }
+
+    session.runner.queue.enqueue(message);
+    return Promise.resolve();
+  }
+
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse> {
+    const session = this.requireSession(scope);
+    return session.runner.getAgentResponse();
+  }
+
+  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem> {
+    const session = this.requireSession(scope);
+    return buildItemStream(session.runner.broadcaster);
+  }
+
+  getTextStream(scope?: SessionScope): AsyncIterable<string> {
+    const session = this.requireSession(scope);
+    return filterTextStream(session.runner.broadcaster);
+  }
+
+  getReasoningStream(scope?: SessionScope): AsyncIterable<string> {
+    const session = this.requireSession(scope);
+    return filterReasoningStream(session.runner.broadcaster);
+  }
+
+  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent> {
+    const session = this.requireSession(scope);
+    return session.runner.broadcaster;
+  }
+
+  async abort(
+    scope?: SessionScope & {
+      reason?: string;
+    },
+  ): Promise<void> {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    const session = this.sessions.get(threadId);
+    if (!session) {
+      return;
+    }
+    await session.runner.abort(scope?.reason);
+  }
+
+  getStatus(scope?: SessionScope): HarnessStatus {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    const session = this.sessions.get(threadId);
+    if (!session) {
+      return {
+        kind: 'idle',
+      };
+    }
+    return session.runner.getStatus();
+  }
+
+  getQueueSize(scope?: SessionScope): number {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    const session = this.sessions.get(threadId);
+    return session ? session.runner.queue.size : 0;
+  }
+
+  private getOrCreateSession(threadId: string): Session {
+    const existing = this.sessions.get(threadId);
+    if (existing) {
+      return existing;
+    }
+
+    const session: Session = {
+      accumulatedItems: [],
+      runner: new SessionRunner({
+        threadId,
+        agentName: this.config.name,
+        // The first queued message in a batch establishes `resourceId` /
+        // `state` / `memory` for the turn. If multiple messages are drained
+        // together (queue flush), later messages' values for these fields
+        // are ignored. `deliveryMode` is resolved per-message at enqueue
+        // time and doesn't apply here.
+        createContext: (items, _turnId, messages) => {
+          const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
+          const allItems: Item[] = [
+            ...session.accumulatedItems,
+            ...items,
+          ];
+          const ctx = this.createContext({
+            items: allItems,
+            threadId,
+            resourceId: perTurnOptions.resourceId,
+            state: perTurnOptions.state,
+            memory: perTurnOptions.memory,
+            _broadcaster: session.runner.broadcaster,
+          });
+          const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
+          ext._sessionQueue = session.runner.queue;
+          ext._sessionBetweenRounds = true;
+          ext._sessionRunnerAgentName = this.config.name;
+          if (this.initialStep) {
+            this.setUnifiedTools(ctx, collectAllTools(this.initialStep));
+          }
+          return ctx;
+        },
+        runTurn: async (ctx, _turn, signal) => {
+          if (!this.initialStep) {
+            throw new NoeticConfigError({
+              code: 'NO_STEP_CONFIGURED',
+              message: 'No initialStep configured on this harness.',
+              hint: 'Pass `initialStep` in constructor options.',
+            });
+          }
+          // Wire signal-abort to context-abort so the interpreter bails cleanly.
+          if (signal.aborted) {
+            ctx.abort(signal.reason ? String(signal.reason) : 'aborted');
+          } else {
+            signal.addEventListener(
+              'abort',
+              () => {
+                ctx.abort(signal.reason ? String(signal.reason) : 'aborted');
+              },
+              {
+                once: true,
+              },
+            );
+          }
+          const result = await this.initAndRun(this.initialStep, '', ctx);
+          // Snapshot final items into session history for the next turn.
+          session.accumulatedItems = [
+            ...ctx.itemLog.items,
+          ];
+          return result;
+        },
+      }),
+    };
+
+    this.sessions.set(threadId, session);
+    return session;
+  }
+
+  private requireSession(scope: SessionScope | undefined): Session {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    let session = this.sessions.get(threadId);
+    if (session) {
+      return session;
+    }
+    // Lazily create so consumers can attach stream listeners before the first execute.
+    session = this.getOrCreateSession(threadId);
+    return session;
+  }
+
+  //#endregion
+
+  //#region callModel
 
   async callModel(request: CallModelRequest): Promise<LLMResponse> {
     if (this.callModelOverride) {
@@ -229,8 +484,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         .join('\n\n') || undefined;
     const broadcaster = getBroadcaster(request.ctx);
     const agentName = this.config.name;
+    const signal = request.signal;
 
-    /** Emit a framework event, respecting request.emit filter. */
     const emitIfAllowed = (eventType: string, data: Record<string, unknown>): void => {
       if (shouldEmit(request.emit, eventType, data)) {
         emitFrameworkEvent({
@@ -242,9 +497,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
     };
 
-    // Filter tools to allowed names when per-step restriction is set.
-    // The OpenRouter API doesn't support an 'allowed_tools' toolChoice type,
-    // so we filter the tools array instead to achieve the same restriction.
     const allowedNamesSet =
       request.tools && 'allowedToolNames' in request && request.allowedToolNames
         ? new Set(request.allowedToolNames)
@@ -272,33 +524,89 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const callResult = this.client.callModel({
-        model: request.model,
-        input: frameworkCast(conversationInput),
-        instructions,
-        tools: sdkTools,
-        temperature: request.params?.temperature,
-        maxOutputTokens: request.params?.maxTokens,
-        topP: request.params?.topP,
-        ...(textFormat
-          ? {
-              text: textFormat,
-            }
-          : {}),
-      });
+      if (signal?.aborted) {
+        break;
+      }
 
-      // The OpenRouter SDK internally tees the HTTP stream, so
-      // getFullResponsesStream() and getResponse() can be consumed
-      // concurrently. Events flow to the broadcaster in real-time while
-      // getResponse() accumulates the final result independently.
-      // `await pipePromise` ensures all events are emitted before
-      // proceeding to tool-round processing.
+      // Inject between-rounds inbox messages (mode: 'between-rounds') before
+      // the next LLM call. Mirrors Claude Code's teammate-attachment path.
+      // Also append to ctx.itemLog so the session's post-turn snapshot
+      // carries the injected messages into next turn's history.
+      if (round > 0 && request.ctx && hasSessionQueue(request.ctx)) {
+        const injected = this.drainBetweenRoundsMessages(request.ctx._sessionQueue);
+        if (injected.length > 0) {
+          for (const msg of injected) {
+            const text = itemToText(msg);
+            const userItem: InputMessageItem = {
+              id: `user-${crypto.randomUUID()}`,
+              type: 'message',
+              role: 'user',
+              status: 'completed',
+              content: [
+                {
+                  type: 'input_text',
+                  text,
+                },
+              ],
+            };
+            conversationInput.push({
+              type: 'message',
+              role: 'user',
+              content: [
+                {
+                  type: 'input_text',
+                  text,
+                },
+              ],
+            });
+            request.ctx.itemLog.append(userItem);
+          }
+          emitIfAllowed('inbox_injected', {
+            round,
+            count: injected.length,
+            messageIds: injected.map((i) => i.id),
+          });
+        }
+      }
+
+      const callResult = this.client.callModel(
+        {
+          model: request.model,
+          input: frameworkCast(conversationInput),
+          instructions,
+          tools: sdkTools,
+          temperature: request.params?.temperature,
+          maxOutputTokens: request.params?.maxTokens,
+          topP: request.params?.topP,
+          ...(textFormat
+            ? {
+                text: textFormat,
+              }
+            : {}),
+        },
+        signal
+          ? {
+              signal,
+            }
+          : undefined,
+      );
+
       const pipePromise = broadcaster
-        ? pipeStreamEventsToBroadcaster(callResult.getFullResponsesStream(), broadcaster, agentName)
+        ? pipeStreamEventsToBroadcaster({
+            stream: callResult.getFullResponsesStream(),
+            broadcaster,
+            agentName,
+            signal,
+          })
         : undefined;
 
-      const sdkResponse = await callResult.getResponse();
-      await pipePromise;
+      const sdkResponse = await awaitWithAbort(callResult.getResponse(), signal);
+      if (pipePromise) {
+        await awaitWithAbort(pipePromise, signal);
+      }
+      if (signal?.aborted) {
+        break;
+      }
       const roundItems = extractOutputItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 
@@ -314,13 +622,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         break;
       }
 
-      // Emit tool round framework event
       emitIfAllowed('tool_round_started', {
         round,
         toolCount: functionCalls.length,
       });
 
-      // Add function calls to conversation, then execute and append results
       for (const fc of functionCalls) {
         conversationInput.push({
           type: 'function_call',
@@ -332,6 +638,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       }
 
       for (const fc of functionCalls) {
+        if (signal?.aborted) {
+          break;
+        }
         emitIfAllowed('tool_call_started', {
           name: fc.name,
           callId: fc.callId,
@@ -404,63 +713,30 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     };
   }
 
-  execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult {
-    if (!this.initialStep) {
-      return HarnessResultImpl.fromError(
-        new NoeticConfigError({
-          code: 'NO_STEP_CONFIGURED',
-          message: 'No initialStep configured on this harness.',
-          hint: 'Pass `initialStep` in constructor options, or use run() directly.',
-        }),
-      );
+  /** @internal Drain only messages tagged `between-rounds` from the queue. */
+  private drainBetweenRoundsMessages(queue: MessageQueue): QueuedMessage[] {
+    const pending = queue.peekAll();
+    const toInject: QueuedMessage[] = [];
+    const keep: QueuedMessage[] = [];
+    for (const msg of pending) {
+      if (msg.deliveryMode === 'between-rounds') {
+        toInject.push(msg);
+        continue;
+      }
+      keep.push(msg);
     }
-
-    // Collect all tools from the step tree for unified tool set
-    const stepTools = collectAllTools(this.initialStep);
-
-    const broadcaster = new EventBroadcaster();
-
-    let executionPromise: Promise<string>;
-    let ctx: Context;
-
-    if (typeof input === 'string') {
-      ctx = this.createContext({
-        ...options,
-        _broadcaster: broadcaster,
-      });
-      // Resolve layer tools now that ctx exists, then build unified set
-      this.setUnifiedTools(ctx, stepTools);
-      executionPromise = this.run(this.initialStep, input, ctx);
-    } else {
-      const items = Array.isArray(input)
-        ? input
-        : [
-            input,
-          ];
-      ctx = this.createContext({
-        items,
-        ...options,
-        _broadcaster: broadcaster,
-      });
-      this.setUnifiedTools(ctx, stepTools);
-      executionPromise = this.run(this.initialStep, '', ctx);
+    if (toInject.length === 0) {
+      return [];
     }
-
-    // Complete broadcaster when execution finishes
-    executionPromise.then(
-      () => {
-        this.traceExporter.completeTrace?.(ctx.span.traceId);
-        broadcaster.complete();
-      },
-      (err: unknown) => {
-        const error = err instanceof Error ? err : new Error(String(err));
-        this.traceExporter.completeTrace?.(ctx.span.traceId, error);
-        broadcaster.error(error);
-      },
-    );
-
-    return new HarnessResultImpl(broadcaster, executionPromise, ctx);
+    // Replace queue contents: re-prepend kept messages in order after draining.
+    queue.drainAll();
+    for (const msg of keep) {
+      queue.enqueue(msg);
+    }
+    return toInject;
   }
+
+  //#endregion
 
   async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
     // Explicitly start the trace before execution
@@ -502,6 +778,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       ]);
       throw error;
     }
+  }
+
+  /** Run all layer `init` hooks before the first step executes. Per spec 11,
+   *  init MUST complete before any recall fires so layer state is populated. */
+  private async initAndRun<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+    const layers = ctx.layers;
+    const storage = this.config.storage;
+    if (layers && layers.length > 0 && storage) {
+      await this.initLayers(layers, ctx, storage);
+    }
+    return execute(s, input, ctx);
   }
 
   detachedSpawn<I, O>(
@@ -573,8 +860,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       ...layerTools,
     ]);
     if (allTools.length > 0) {
-      // Set unifiedTools after construction since resolveLayerTools requires a context reference.
-      // The Context interface is readonly but ContextImpl is mutable.
       const impl = frameworkCast<{
         unifiedTools: ReadonlyArray<Tool>;
       }>(ctx);
@@ -605,18 +890,23 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       query: input,
       ctx: this.toExecCtx(ctx),
       log: ctx.itemLog,
-      budgets: new Map(),
+      budgets: resolveLayerBudgets(layers),
       store: this.layerStateStore,
     });
   }
 
   async storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void> {
+    const storage = this.config.storage;
+    if (!storage) {
+      return;
+    }
     await storeLayers({
       layers,
       response,
       ctx: this.toExecCtx(ctx),
       log: ctx.itemLog,
       store: this.layerStateStore,
+      storage,
     });
   }
 
@@ -628,9 +918,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  async checkpoint(_ctx: Context): Promise<void> {
-    // No-op for in-memory harness
-  }
+  async checkpoint(_ctx: Context): Promise<void> {}
 
   async restore(_executionId: string): Promise<Context | null> {
     return null;
@@ -747,6 +1035,33 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       query,
     });
   }
+}
+
+//#endregion
+
+//#region Text extraction helper
+
+function itemToText(msg: QueuedMessage): string {
+  if (typeof msg.input === 'string') {
+    return msg.input;
+  }
+  const items = Array.isArray(msg.input)
+    ? msg.input
+    : [
+        msg.input,
+      ];
+  const texts: string[] = [];
+  for (const item of items) {
+    if (item.type !== 'message') {
+      continue;
+    }
+    for (const part of item.content) {
+      if (part.type === 'input_text' || part.type === 'output_text') {
+        texts.push(part.text);
+      }
+    }
+  }
+  return texts.join('\n');
 }
 
 //#endregion

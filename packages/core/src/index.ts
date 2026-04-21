@@ -87,6 +87,16 @@ export type {
 /** @public */
 export { observationalMemory } from './memory/layers/observational-memory';
 /** @public */
+export type {
+  PlanEnterSessionCallback,
+  PlanExecutionEntry,
+  PlanExitCallback,
+  PlanMemoryConfig,
+  PlanState,
+} from './memory/layers/plan';
+/** @public */
+export { PlanPhase, planMemory } from './memory/layers/plan';
+/** @public */
 export { staticContent } from './memory/layers/static-content';
 /** @public */
 export { steering } from './memory/layers/steering';
@@ -114,6 +124,17 @@ export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 
 //#region Patterns
 
+/** @public */
+export type {
+  FlowNode,
+  ForkFlowNode,
+  LlmFlowNode,
+  SequenceFlowNode,
+  SpawnFlowNode,
+  SubagentFlowNode,
+} from './patterns/flow';
+/** @public */
+export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
 /** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
@@ -158,7 +179,7 @@ export type {
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog } from './types/context';
+export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
 
 //#endregion
 
@@ -263,7 +284,6 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 export type {
   FrameworkStreamEvent,
   HarnessResponse,
-  HarnessResult,
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,
@@ -279,8 +299,11 @@ export type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  DeliveryMode,
   ExecuteOptions,
+  HarnessStatus,
   RecallLayerOutput,
+  SessionScope,
 } from './types/runtime';
 
 //#endregion

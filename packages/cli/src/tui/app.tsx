@@ -2,10 +2,16 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import type { AgentHarness, InputMessageItem, Item } from '@noetic/core';
+import type {
+  AgentHarness,
+  LastLayerUsage,
+  MemoryLayer,
+  PlanState,
+  StreamEvent,
+} from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   BUILTIN_COMMANDS,
@@ -16,20 +22,21 @@ import {
   parseSlashCommand,
 } from '../commands/index.js';
 import type { Command, CommandContext } from '../commands/types.js';
+import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness } from '../harness/factory.js';
-import type { NoeticPlugin } from '../plugins/types.js';
+import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
+import { createPluginContextBuilder } from '../plugins/context.js';
+import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
+import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
+import { getModelContextLimit } from '../types/model-context.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
+import { PlanApprovalModal } from './components/plan-approval-modal.js';
+import { FooterContextProvider } from './footer-context.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
-import {
-  appendOrUpdateEntry,
-  extractActivatedSkills,
-  isErrorEntry,
-  isSystemEntry,
-  isUserEntry,
-} from './item-utils.js';
+import { appendOrUpdateEntry, extractActivatedSkills, isUserEntry } from './item-utils.js';
 
 //#region Helpers
 
@@ -41,49 +48,43 @@ function buildErrorEntry(error: unknown): ErrorEntry {
   };
 }
 
-/**
- * Convert a UserEntry to an Item for passing to the harness.
- */
-function userEntryToItem(entry: UserEntry): InputMessageItem {
-  return {
-    id: `user-${Date.now()}`,
-    type: 'message',
-    role: 'user',
-    status: 'completed',
-    content: [
-      {
-        type: 'input_text',
-        text: entry.content,
-      },
-    ],
-  } satisfies InputMessageItem;
-}
-
-function isItem(entry: ConversationEntry): entry is Item {
-  return 'type' in entry && typeof entry.type === 'string' && entry.type !== 'error';
-}
-
-/**
- * Convert conversation entries to Items for the harness.
- * Filters out ErrorEntry since they aren't meaningful conversation context.
- */
-function entriesToItems(entries: ConversationEntry[]): Item[] {
-  const items: Item[] = [];
-  for (const entry of entries) {
-    // Skip system UI entries that aren't part of the conversation
-    if (isErrorEntry(entry) || isSystemEntry(entry)) {
-      continue;
-    }
-    if (isUserEntry(entry)) {
-      items.push(userEntryToItem(entry));
-      continue;
-    }
-    // AssistantEntry is already an Item - use type guard
-    if (isItem(entry)) {
-      items.push(entry);
-    }
+function isFrameworkEvent(event: StreamEvent): event is Extract<
+  StreamEvent,
+  {
+    source: 'framework';
   }
-  return items;
+> {
+  return event.source === 'framework';
+}
+
+function extractEventSuffix(type: string): string {
+  const idx = type.indexOf(':');
+  if (idx < 0) {
+    return type;
+  }
+  return type.slice(idx + 1);
+}
+
+/** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
+ *  entry was updated; otherwise returns the input reference. */
+function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
+  const idx = entries.findIndex((e) => isUserEntry(e) && e.id === id);
+  if (idx < 0) {
+    return entries;
+  }
+  const entry = entries[idx];
+  if (!entry || !isUserEntry(entry)) {
+    return entries;
+  }
+  const updated: UserEntry = {
+    ...entry,
+    deliveryStatus: 'sent',
+  };
+  const next = [
+    ...entries,
+  ];
+  next[idx] = updated;
+  return next;
 }
 
 //#endregion
@@ -95,38 +96,202 @@ interface AppProps {
   plugins: ReadonlyArray<NoeticPlugin>;
 }
 
-//#endregion
-
-//#region App Component
-
 interface ModalState {
   content: ReactNode;
   commandName: string;
   dismissMessage: string;
 }
 
+//#endregion
+
+//#region Stream consumers
+
+interface ConsumeItemsOpts {
+  harness: AgentHarness;
+  threadId: string;
+  setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
+}
+
+async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
+  try {
+    for await (const item of opts.harness.getItemStream({
+      threadId: opts.threadId,
+    })) {
+      opts.setEntries((prev) => appendOrUpdateEntry(prev, item));
+    }
+  } catch (err: unknown) {
+    opts.setEntries((prev) => [
+      ...prev,
+      buildErrorEntry(err),
+    ]);
+  }
+}
+
+interface ConsumeEventsOpts {
+  harness: AgentHarness;
+  threadId: string;
+  setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
+  setStatus: (s: ChatStatus) => void;
+  setLastLayerUsage: (u: LastLayerUsage | undefined) => void;
+  lastLayerUsageRef: {
+    current: LastLayerUsage | undefined;
+  };
+  pendingMessageIdsRef: {
+    current: Set<string>;
+  };
+}
+
+async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
+  try {
+    for await (const event of opts.harness.getFullStream({
+      threadId: opts.threadId,
+    })) {
+      if (!isFrameworkEvent(event)) {
+        continue;
+      }
+      const suffix = extractEventSuffix(event.type);
+      if (suffix === 'turn_started') {
+        const rawIds = event.data.messageIds;
+        const ids = Array.isArray(rawIds)
+          ? rawIds.filter((id): id is string => typeof id === 'string')
+          : [];
+        opts.setEntries((prev) => {
+          let next = prev;
+          for (const id of ids) {
+            if (opts.pendingMessageIdsRef.current.has(id)) {
+              opts.pendingMessageIdsRef.current.delete(id);
+              next = markUserEntrySent(next, id);
+            }
+          }
+          return next;
+        });
+        opts.setStatus('streaming');
+        continue;
+      }
+      if (suffix === 'turn_completed' || suffix === 'turn_aborted') {
+        try {
+          const resp = await opts.harness.getAgentResponse({
+            threadId: opts.threadId,
+          });
+          opts.lastLayerUsageRef.current = resp.lastLayerUsage;
+          opts.setLastLayerUsage(resp.lastLayerUsage);
+        } catch {
+          // getAgentResponse can only reject if no session exists; here it does.
+        }
+        if (
+          opts.harness.getQueueSize({
+            threadId: opts.threadId,
+          }) === 0
+        ) {
+          opts.setStatus('ready');
+        }
+      }
+    }
+  } catch {
+    // Stream ended — normal on harness swap.
+  }
+}
+
+//#endregion
+
+//#region App Component
+
 function App({ config, plugins }: AppProps): ReactNode {
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
+  const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
+
+  const buildCtx = useMemo(
+    () => createPluginContextBuilder(config),
+    [
+      config,
+    ],
+  );
 
   const harnessRef = useRef<AgentHarness | null>(null);
+  const harnessModeRef = useRef<AgentMode>('normal');
+  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
+  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
+  const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
+  const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
+  const threadIdRef = useRef<string>(crypto.randomUUID());
+  const sessionStartedAtRef = useRef<number>(Date.now());
+  const pendingMessageIdsRef = useRef<Set<string>>(new Set());
+  const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
 
-  // Use a ref to track entries so we can access current value in the callback
-  // without adding entries to the dependency array (which would cause re-renders)
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
-  // Built-in commands only - skills are not slash commands
+  useEffect(() => {
+    let cancelled = false;
+    async function collect(): Promise<void> {
+      const lists = await Promise.all(
+        plugins.map(async (p): Promise<ReadonlyArray<Command>> => {
+          if (!p.commands) {
+            return [];
+          }
+          try {
+            return await p.commands(buildCtx(p.name));
+          } catch {
+            return [];
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setPluginCommands(lists.flat());
+    }
+    void collect();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    plugins,
+    buildCtx,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function prime(): Promise<void> {
+      try {
+        const catalog = await buildSkillCatalog({
+          cwd: config.cwd,
+          plugins,
+          fs: config.fs,
+          buildCtx,
+        });
+        if (cancelled) {
+          return;
+        }
+        setSkills(catalog);
+      } catch {
+        // Swallow — skill discovery failures shouldn't prevent the TUI booting.
+      }
+    }
+    void prime();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    config,
+    plugins,
+    buildCtx,
+  ]);
+
   const commands = useMemo<Command[]>(
     () => [
       ...BUILTIN_COMMANDS,
+      ...pluginCommands,
     ],
-    [],
+    [
+      pluginCommands,
+    ],
   );
 
-  // Convert commands to PromptInput format
   const commandSuggestions = useMemo(
     () => commandsToPromptSuggestions(commands),
     [
@@ -134,17 +299,18 @@ function App({ config, plugins }: AppProps): ReactNode {
     ],
   );
 
-  // Clear entries callback for /clear command
   const clearEntries = useCallback(() => {
     setEntries([]);
   }, []);
 
-  // Handle modal close (Escape pressed)
   const handleModalClose = useCallback(() => {
     if (!modal) {
       return;
     }
-    // Add dismiss message to chat history
+    if (pendingApprovalRef.current) {
+      pendingApprovalRef.current(false);
+      pendingApprovalRef.current = null;
+    }
     setEntries((prev) => [
       ...prev,
       {
@@ -158,35 +324,141 @@ function App({ config, plugins }: AppProps): ReactNode {
     modal,
   ]);
 
-  /**
-   * Get or create the harness, storing the canonical skill catalog.
-   */
-  const getOrCreateHarness = useCallback(async (): Promise<AgentHarness> => {
-    if (harnessRef.current !== null) {
-      return harnessRef.current;
+  const planHooks = useMemo<PlanHooks>(
+    () => ({
+      onEnterSession: async () => createPlanSession(),
+      onExit: async (state: PlanState) => {
+        const slug = state.planSlug;
+        return new Promise<{
+          approved: boolean;
+        }>((resolve) => {
+          pendingApprovalRef.current = async (approved) => {
+            if (approved && slug) {
+              if (state.prd) {
+                await writePrd(slug, state.prd);
+              }
+              if (state.planTree) {
+                await writeFlow(slug, state.planTree).catch(() => {
+                  // planTree may be a legacy PlanNode that doesn't match the flow schema; ignore.
+                });
+              }
+            }
+            resolve({
+              approved,
+            });
+          };
+          setModal({
+            content: (
+              <PlanApprovalModal
+                prd={state.prd ?? '(no PRD)'}
+                planTree={state.planTree}
+                onAccept={() => {
+                  const cb = pendingApprovalRef.current;
+                  pendingApprovalRef.current = null;
+                  setModal(null);
+                  cb?.(true);
+                }}
+                onReject={() => {
+                  const cb = pendingApprovalRef.current;
+                  pendingApprovalRef.current = null;
+                  setModal(null);
+                  cb?.(false);
+                }}
+              />
+            ),
+            commandName: 'plan/exitPlanMode',
+            dismissMessage: 'Plan approval dismissed (treated as rejection).',
+          });
+        });
+      },
+    }),
+    [],
+  );
+
+  /** Wire long-lived consumers to the harness's session streams. Called once
+   *  per harness instance via `getOrCreateHarness`. */
+  const wireStreams = useCallback((harness: AgentHarness) => {
+    if (streamWiredHarnessRef.current === harness) {
+      return;
     }
-    const { harness, skills: resolvedSkills } = await createAgentHarness({
+    streamWiredHarnessRef.current = harness;
+    const threadId = threadIdRef.current;
+
+    void consumeItemStream({
+      harness,
+      threadId,
+      setEntries,
+    });
+    void consumeFullStream({
+      harness,
+      threadId,
+      setEntries,
+      setStatus,
+      setLastLayerUsage,
+      lastLayerUsageRef,
+      pendingMessageIdsRef,
+    });
+  }, []);
+
+  const getOrCreateHarness = useCallback(
+    async (mode: AgentMode): Promise<AgentHarness> => {
+      if (harnessRef.current !== null && harnessModeRef.current === mode) {
+        return harnessRef.current;
+      }
+      const {
+        harness,
+        skills: resolvedSkills,
+        memoryLayers,
+      } = await createAgentHarness({
+        config,
+        plugins,
+        fs: config.fs,
+        mode,
+        planHooks,
+        buildContext: buildCtx,
+      });
+      harnessRef.current = harness;
+      harnessModeRef.current = mode;
+      memoryLayersRef.current = memoryLayers;
+      setSkills(resolvedSkills);
+      wireStreams(harness);
+      return harness;
+    },
+    [
       config,
       plugins,
-      fs: config.fs,
+      planHooks,
+      buildCtx,
+      wireStreams,
+    ],
+  );
+
+  const setAgentMode = useCallback(async (mode: AgentMode): Promise<void> => {
+    if (harnessModeRef.current !== mode) {
+      harnessRef.current = null;
+      streamWiredHarnessRef.current = null;
+    }
+    setAgentModeState(mode);
+  }, []);
+
+  const handleStop = useCallback(async () => {
+    const harness = harnessRef.current;
+    if (!harness) {
+      return;
+    }
+    await harness.abort({
+      threadId: threadIdRef.current,
+      reason: 'user-requested',
     });
-    harnessRef.current = harness;
-    setSkills(resolvedSkills);
-    return harness;
-  }, [
-    config,
-    plugins,
-  ]);
+  }, []);
 
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
-      // Check if this is a slash command
       if (isSlashCommand(text)) {
         const parsed = parseSlashCommand(text);
         if (parsed) {
           const cmd = findCommand(parsed.commandName, commands);
           if (cmd) {
-            // Build command context with activated skills from conversation
             const activatedSkills = extractActivatedSkills(entriesRef.current);
             const ctx: CommandContext = {
               config,
@@ -196,12 +468,34 @@ function App({ config, plugins }: AppProps): ReactNode {
               activatedSkills,
               commands,
               clearEntries,
+              lastLayerUsage: lastLayerUsageRef.current,
+              memoryLayers: memoryLayersRef.current,
+              agentMode,
+              setAgentMode,
             };
 
             try {
-              const result = await executeCommand(cmd, parsed.args, ctx);
+              const result = await executeCommand({
+                command: cmd,
+                args: parsed.args,
+                ctx,
+                options: {
+                  onJsxComplete: (summary) => {
+                    if (summary) {
+                      setEntries((prev) => [
+                        ...prev,
+                        {
+                          role: 'system',
+                          type: 'info',
+                          content: summary,
+                        } satisfies SystemEntry,
+                      ]);
+                    }
+                    setModal(null);
+                  },
+                },
+              });
               if (result.type === 'text') {
-                // Show text result as info message (not error)
                 setEntries((prev) => [
                   ...prev,
                   {
@@ -211,7 +505,6 @@ function App({ config, plugins }: AppProps): ReactNode {
                   } satisfies SystemEntry,
                 ]);
               } else if (result.type === 'modal') {
-                // Add command invocation to chat history
                 setEntries((prev) => [
                   ...prev,
                   {
@@ -220,14 +513,12 @@ function App({ config, plugins }: AppProps): ReactNode {
                     content: `/${result.commandName}`,
                   } satisfies SystemEntry,
                 ]);
-                // Open modal overlay
                 setModal({
                   content: result.node,
                   commandName: result.commandName,
                   dismissMessage: result.dismissMessage,
                 });
               }
-              // 'skip' type means no output
             } catch (error) {
               setEntries((prev) => [
                 ...prev,
@@ -237,7 +528,6 @@ function App({ config, plugins }: AppProps): ReactNode {
             return;
           }
         }
-        // Unknown command - show error
         setEntries((prev) => [
           ...prev,
           {
@@ -249,35 +539,39 @@ function App({ config, plugins }: AppProps): ReactNode {
         return;
       }
 
-      // Regular message - send to model
-      const userEntry: UserEntry = {
-        role: 'user',
-        content: text,
-      };
-      setEntries((prev) => [
-        ...prev,
-        userEntry,
-      ]);
-      setStatus('submitted');
-
+      // Regular message — enqueue on the session and let streams drive the UI.
       try {
-        const harness = await getOrCreateHarness();
-        // Build conversation history including the new user message
-        const historyItems = entriesToItems([
-          ...entriesRef.current,
+        const harness = await getOrCreateHarness(agentMode);
+        const isBusy =
+          harness.getStatus({
+            threadId: threadIdRef.current,
+          }).kind !== 'idle';
+        const messageId = `msg-${crypto.randomUUID()}`;
+        const userEntry: UserEntry = {
+          role: 'user',
+          content: text,
+          id: messageId,
+          deliveryStatus: isBusy ? 'queued' : 'sent',
+        };
+        setEntries((prev) => [
+          ...prev,
           userEntry,
         ]);
-        const result = harness.execute(historyItems);
-        setStatus('streaming');
-        for await (const item of result.getItemStream()) {
-          setEntries((prev) => appendOrUpdateEntry(prev, item));
+
+        if (isBusy) {
+          pendingMessageIdsRef.current.add(messageId);
         }
+        setStatus('submitted');
+
+        await harness.execute(text, {
+          threadId: threadIdRef.current,
+          messageId,
+        });
       } catch (error) {
         setEntries((prev) => [
           ...prev,
           buildErrorEntry(error),
         ]);
-      } finally {
         setStatus('ready');
       }
     },
@@ -287,20 +581,48 @@ function App({ config, plugins }: AppProps): ReactNode {
       skills,
       clearEntries,
       getOrCreateHarness,
+      agentMode,
+      setAgentMode,
+    ],
+  );
+
+  const footerValue = useMemo<FooterContextValue>(
+    () => ({
+      model: config.model,
+      cwd: config.cwd,
+      status,
+      lastLayerUsage,
+      contextLimit: getModelContextLimit(config.model),
+      threadId: threadIdRef.current,
+      sessionStartedAt: sessionStartedAtRef.current,
+      entryCount: entries.length,
+      agentMode,
+    }),
+    [
+      config.model,
+      config.cwd,
+      status,
+      lastLayerUsage,
+      entries.length,
+      agentMode,
     ],
   );
 
   return (
     <InkProvider>
-      <ResponsesChat
-        entries={entries}
-        status={status}
-        onSubmit={handleSubmit}
-        model={config.model}
-        commands={commandSuggestions}
-        modalContent={modal?.content}
-        onModalClose={handleModalClose}
-      />
+      <FooterContextProvider value={footerValue}>
+        <ResponsesChat
+          entries={entries}
+          status={status}
+          onSubmit={handleSubmit}
+          onStop={handleStop}
+          model={config.model}
+          commands={commandSuggestions}
+          modalContent={modal?.content}
+          onModalClose={handleModalClose}
+          plugins={plugins}
+        />
+      </FooterContextProvider>
     </InkProvider>
   );
 }

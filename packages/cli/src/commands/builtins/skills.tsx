@@ -54,6 +54,7 @@ function SkillsList({ skills, activatedSkills }: SkillsListProps): ReactNode {
   const projectSkills = skills.filter((s) => s.source === SkillSource.Project);
   const userSkills = skills.filter((s) => s.source === SkillSource.User);
   const pluginSkills = skills.filter((s) => s.source === SkillSource.Plugin);
+  const builtInSkills = skills.filter((s) => s.source === SkillSource.BuiltIn);
 
   const totalCount = skills.length;
   const activeCount = activatedSkills.size;
@@ -75,6 +76,11 @@ function SkillsList({ skills, activatedSkills }: SkillsListProps): ReactNode {
       <SkillGroup title="Project Skills" skills={projectSkills} activatedSkills={activatedSkills} />
       <SkillGroup title="User Skills" skills={userSkills} activatedSkills={activatedSkills} />
       <SkillGroup title="Plugin Skills" skills={pluginSkills} activatedSkills={activatedSkills} />
+      <SkillGroup
+        title="Built-in Skills"
+        skills={builtInSkills}
+        activatedSkills={activatedSkills}
+      />
     </Box>
   );
 }

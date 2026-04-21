@@ -315,6 +315,30 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
+### planMemory
+
+Manages PRD authoring and plan execution lifecycle. Enters a restricted "plan mode" where only read-only tools are allowed, the LLM writes a PRD and structures a PlanNode tree, then exits to execution.
+
+```typescript
+planMemory({
+  scope?: MemoryScope;                    // default 'thread'
+  additionalAllowedTools?: string[];      // extra tools allowed in plan mode
+  maxPrdLength?: number;                  // default 50_000
+  maxTreeDepth?: number;                  // default 5
+}): MemoryLayer<PlanState>
+```
+
+**State:** `{ phase, prd, planTree, executionLog, version }`. Phase transitions: `idle → planning → executing → completed/failed`.
+
+**Provides (auto-exposed as LLM tools):**
+- `plan/enterPlanMode({ goal? })` — transitions idle → planning, optionally seeds PRD
+- `plan/updatePrd({ content })` — replaces PRD content (planning phase only)
+- `plan/setPlanTree(PlanNode)` — sets execution tree (validated against PlanNodeSchema)
+- `plan/exitPlanMode({ action: 'execute' | 'cancel' })` — exits plan mode
+- `status` (layerData) — `{ phase, hasPrd, hasPlanTree, version }`
+
+**Lifecycle hooks:** `init` (load from storage), `recall` (phase-dependent context injection), `beforeToolCall` (restrict to read-only in planning), `onSpawn` (clone state), `onComplete` (record outcome).
+
 ## Layer Provides API
 
 Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.memory['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
@@ -520,41 +544,67 @@ hooks: {
 
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`). The `shell` property exposes the `ShellAdapter` (defaults to `createLocalShellAdapter()`).
 
+### Sessions and the Message Queue
+
+Each `threadId` is a **session**: a long-lived broadcaster + message queue + item log carried across turns. `execute()` enqueues a message on the session identified by `options.threadId` (or a default thread) and returns `Promise<void>` once the message is accepted. Response is observed via session-scoped accessors.
+
 ```typescript
-// High-level API: execute() returns HarnessResult with streaming accessors
 const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
+  defaultDeliveryMode: 'next-turn',
 });
 
-// Get final text (simplest usage)
-const text = await harness.execute('Hello').getText();
+// Queue a message and wait for the response.
+await harness.execute('Hello');
+const response = await harness.getAgentResponse();
 
-// Get full response with items, usage, cost
-const response = await harness.execute('Hello').getResponse();
-
-// Stream text deltas as they arrive
-for await (const delta of harness.execute('Hello').getTextStream()) {
+// Stream text deltas across every turn in the session.
+for await (const delta of harness.getTextStream()) {
   process.stdout.write(delta);
 }
 
-// Stream all events (SDK + framework)
-for await (const event of harness.execute('Hello').getFullStream()) {
-  console.log(event.source, event.type);
-}
-
-// With options
-const result = harness.execute('Hello', {
+// With options (per-thread routing + delivery mode override).
+await harness.execute('Hello', {
   threadId: 'thread-1',
   resourceId: 'user-1',
+  deliveryMode: 'between-rounds',
 });
 
-// Item inputs
-const text2 = await harness.execute(messageItem).getText();
-const text3 = await harness.execute([item1, item2]).getText();
+// Submit while the agent is generating — the message queues.
+await harness.execute('follow-up', { threadId: 'thread-1' });
 
-// Low-level API: manual context creation + run()
+// Cancel the in-flight turn. Queued messages stay and drive the next turn.
+await harness.abort({ threadId: 'thread-1', reason: 'user' });
+```
+
+### Delivery Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `next-turn` (default) | Queue and run after the current turn completes. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
+| `interrupt` | Abort the in-flight turn, place message at head of queue, restart. |
+
+### Session Accessors
+
+| Method | Description |
+|--------|-------------|
+| `getAgentResponse(scope?)` | Resolves once the session drains its queue. |
+| `getItemStream(scope?)` | Cumulative item snapshots across every turn. |
+| `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
+| `getFullStream(scope?)` | Raw SDK + framework events. |
+| `abort(scope?)` | Cancel in-flight turn; queued messages preserved. |
+| `getStatus(scope?)` | `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
+| `getQueueSize(scope?)` | Count of queued messages. |
+
+Subscribe to streams before the first `execute()` if you want to observe the very first turn — the session broadcaster replays buffered events to late subscribers within its buffer window.
+
+### Low-Level API
+
+```typescript
+// Manual context creation + run() (bypasses the session queue)
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
 
@@ -565,7 +615,7 @@ await handle.await();
 // Channels
 harness.send(channel, value, ctx);
 const msg = await harness.recv(channel, ctx);
-const msg = harness.tryRecv(channel, ctx);
+const msg2 = harness.tryRecv(channel, ctx);
 ```
 
 ## Slot Constants
@@ -673,6 +723,32 @@ const keywordWatcher = {
   },
 } satisfies MemoryLayer<{ docs: Doc[] }>;
 ```
+
+## Per-Layer Context Usage (`ctx.lastLayerUsage`)
+
+After every successful `callModel`, the runtime records a snapshot of how the context window decomposed across its contributors and stores it on `ctx.lastLayerUsage`. The same snapshot is mirrored on `HarnessResponse.lastLayerUsage` for callers that have already released the `Context`.
+
+```typescript
+interface LayerUsageEntry {
+  readonly layerId: string;
+  readonly tokenCount: number;
+  readonly items: ReadonlyArray<Item>;
+}
+
+interface LastLayerUsage {
+  readonly executionId: string;
+  readonly modelId: string;
+  readonly layers: ReadonlyArray<LayerUsageEntry>; // sorted by layerId
+  readonly systemPromptTokens: number;
+  readonly toolsTokens: number;
+  readonly historyTokens: number;
+  readonly totalUsedTokens: number;
+}
+```
+
+- `layers[i].tokenCount` comes from each memory layer's own `recall()` `tokenCount`.
+- The other three buckets are estimated via the framework's 4-chars-per-token heuristic.
+- Use this to power introspection UIs (e.g., the CLI `/context` command). The snapshot is overwritten on the next call — export to your span if you need historical retention.
 
 ## ToolExecutionContext
 

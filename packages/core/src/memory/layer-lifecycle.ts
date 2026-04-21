@@ -40,6 +40,7 @@ interface StoreLayersParams {
   ctx: ExecutionContext;
   log: ItemLog;
   store: LayerStateStore;
+  storage: StorageAdapter;
 }
 
 interface SpawnLayersParams {
@@ -126,6 +127,32 @@ interface ExecuteRerenderParams {
 
 /** Maximum allowed re-render depth to prevent infinite loops */
 const MAX_RERENDER_DEPTH = 3;
+
+/**
+ * Default per-layer token budget when a layer has no `budget` config or uses
+ * `'auto'`. Big enough that budget-respecting layers (e.g. file-reference)
+ * render their content; real auto-allocation across layers is future work.
+ */
+const DEFAULT_LAYER_BUDGET = 1.6e4;
+
+/** Resolve each layer's `BudgetConfig` to a concrete token budget for recall. */
+export function resolveLayerBudgets(layers: ReadonlyArray<MemoryLayer>): Map<string, number> {
+  const budgets = new Map<string, number>();
+  for (const layer of layers) {
+    const cfg = layer.budget;
+    if (typeof cfg === 'number') {
+      budgets.set(layer.id, cfg);
+      continue;
+    }
+    if (typeof cfg === 'object') {
+      budgets.set(layer.id, cfg.max);
+      continue;
+    }
+    // 'auto' or undefined → use the default ceiling.
+    budgets.set(layer.id, DEFAULT_LAYER_BUDGET);
+  }
+  return budgets;
+}
 
 //#endregion
 
@@ -304,6 +331,7 @@ export async function storeLayers({
   ctx,
   log,
   store,
+  storage,
 }: StoreLayersParams): Promise<void> {
   // Concurrent via Promise.allSettled — each layer gets its own state snapshot
   const snapshots: {
@@ -342,6 +370,20 @@ export async function storeLayers({
         );
         if (result?.state !== undefined) {
           store.set(ctx.executionId, layer.id, result.state);
+          // Mirror to durable storage so the next execution's init() can
+          // rehydrate. Skip 'execution' scope — its key rotates each run.
+          if (layer.scope !== 'execution') {
+            const scopedStorage = createScopedStorage(
+              storage,
+              layer.id,
+              resolveScopeKey(layer.scope, ctx),
+            );
+            try {
+              await scopedStorage.set('state', result.state);
+            } catch (persistErr) {
+              store.diagnostic(layer.id, 'store', persistErr);
+            }
+          }
         }
       } catch (e) {
         store.diagnostic(layer.id, 'store', e);

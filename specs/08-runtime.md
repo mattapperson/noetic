@@ -66,7 +66,7 @@ The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shel
 
 ## The `AgentHarness` Interface
 
-The agent harness is the engine. It's behind an interface with methods covering execution, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
+The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
 
 ```typescript
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
@@ -79,8 +79,27 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Shell abstraction
   readonly shell: ShellAdapter;
 
-  // Primary execution — returns a HarnessResult with streaming accessors
-  execute(input: ExecuteInput, options?: ExecuteOptions): HarnessResult;
+  // Primary execution — enqueues input on the session identified by
+  // options.threadId and returns once the message is accepted. The session
+  // runner processes queued messages and emits events on the session
+  // broadcaster.
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+
+  // Session-scoped accessors. Each session is keyed by threadId (defaulting
+  // to a single built-in thread). Accessors may be subscribed BEFORE execute()
+  // is called; they stay alive across turns.
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
+  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
+  getTextStream(scope?: SessionScope): AsyncIterable<string>;
+  getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
+  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+
+  // Cancel the in-flight turn. Queued messages are preserved.
+  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+
+  // Session observability.
+  getStatus(scope?: SessionScope): HarnessStatus;
+  getQueueSize(scope?: SessionScope): number;
 
   // Core execution
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
@@ -159,25 +178,33 @@ interface DetachedHandle<O> {
 
 ---
 
-## HarnessResult
+## Sessions and the Message Queue
 
-`execute()` returns a `HarnessResult` synchronously. Before execution starts, the harness walks the step tree to collect all tools from all LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. Execution then starts eagerly in the background. The result provides six accessors for consuming output in different modes.
+`execute()` enqueues a message on a **session** keyed by `options.threadId` (or a default thread when omitted). Each session owns:
+
+- a FIFO `MessageQueue`,
+- a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
+- an `itemLog` snapshot that carries conversation history from turn to turn.
+
+Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter.
+
+A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
+
+1. Drains the queue (combining all queued messages into one turn's input).
+2. Emits `{name}:turn_started` with the drained message IDs.
+3. Invokes the initial step (which ultimately calls `callModel`).
+4. Emits `{name}:turn_completed` (or `{name}:turn_aborted` on failure/cancellation).
+5. Returns to idle. If the queue became non-empty during the turn, the next turn begins immediately.
+
+### Response Shape
 
 ```typescript
-interface HarnessResult {
-  getText(): Promise<string>;
-  getResponse(): Promise<HarnessResponse>;
-  getTextStream(): AsyncIterable<string>;
-  getReasoningStream(): AsyncIterable<string>;
-  getItemStream(): AsyncIterable<StreamingItem>;
-  getFullStream(): AsyncIterable<StreamEvent>;
-}
-
 interface HarnessResponse {
   readonly items: ReadonlyArray<Item>;
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   readonly cost?: number;
   readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
 }
 
 type StreamingItem = Item & { readonly isComplete: boolean };
@@ -187,12 +214,25 @@ type StreamingItem = Item & { readonly isComplete: boolean };
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `getText()` | `Promise<string>` | Complete text after execution finishes |
-| `getResponse()` | `Promise<HarnessResponse>` | Full response with items, usage, cost |
-| `getTextStream()` | `AsyncIterable<string>` | Text deltas as they arrive from the model |
-| `getReasoningStream()` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models) |
-| `getItemStream()` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Replace, do not append. |
-| `getFullStream()` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) |
+| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
+| `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns in the session. |
+| `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots. Replace, do not append. |
+| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
+
+Stream accessors MAY be subscribed before any `execute()` call; the underlying `EventBroadcaster` replays buffered events so late subscribers observe turn history within the buffer window.
+
+### Delivery Modes
+
+Each queued message carries a `DeliveryMode`:
+
+| Mode | Behaviour |
+|------|-----------|
+| `next-turn` (default) | Message runs as a new turn once the current turn completes. Safe and predictable. |
+| `between-rounds` | Message is injected as an additional user item before the next tool-round LLM call within the currently generating turn. If no turn is active, behaves like `next-turn`. Mirrors Claude Code's inbox-attachment pattern. |
+| `interrupt` | Cancels the in-flight turn (if any), places the message at the head of the queue, and restarts. |
+
+`AgentConfig.defaultDeliveryMode` (default `next-turn`) applies to messages that don't specify a mode. Callers may override per-call via `ExecuteOptions.deliveryMode`.
 
 ### StreamEvent
 
@@ -220,6 +260,10 @@ interface FrameworkStreamEvent {
 
 | Event | Description |
 |-------|-------------|
+| `{name}:turn_started` | Emitted when the session runner starts a turn. Data: `{ turnId, messageIds }` |
+| `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
+| `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
+| `{name}:inbox_injected` | Emitted between tool rounds when queued `between-rounds` messages are injected into the prompt. Data: `{ round, count, messageIds }` |
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
 | `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
@@ -253,7 +297,31 @@ The internal `EventBroadcaster` buffer is capped at 10,000 events. When the buff
 
 ### Error Handling
 
-When `execute()` is called without an `initialStep`, all accessors reject with `NoeticConfigError` code `NO_STEP_CONFIGURED`. When execution fails mid-stream, the error propagates to all active stream consumers.
+When `execute()` is called on a harness without an `initialStep`, it rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED`. When a turn fails mid-stream, `getAgentResponse()` surfaces the error and the session remains usable for subsequent turns.
+
+### ExecuteOptions
+
+```typescript
+interface ExecuteOptions {
+  threadId?: string;
+  resourceId?: string;
+  state?: unknown;
+  memory?: MemoryLayer[];
+  /** Per-call override of the harness default. */
+  deliveryMode?: DeliveryMode;
+}
+
+interface SessionScope {
+  threadId?: string;
+}
+
+type HarnessStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'aborting'; readonly turnId: string };
+
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+```
 
 ---
 

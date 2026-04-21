@@ -5,8 +5,24 @@
 import type { FsAdapter } from '@noetic/core';
 import { z } from 'zod';
 
+/**
+ * A plugin reference in a config file. Either:
+ * - a string (module path or package name),
+ * - a `{ name, path?, options? }` spec resolved by the loader, or
+ * - an already-instantiated `NoeticPlugin` object (detected by `name` +
+ *   `version` + at least one plugin hook; the loader does the strict check).
+ *
+ * The inline branch uses `passthrough()` so function fields survive parsing —
+ * zod would otherwise strip them from a plain `z.object({...})`.
+ */
 export const PluginSpecSchema = z.union([
   z.string(),
+  z
+    .object({
+      name: z.string(),
+      version: z.string(),
+    })
+    .passthrough(),
   z.object({
     name: z.string(),
     path: z.string().optional(),

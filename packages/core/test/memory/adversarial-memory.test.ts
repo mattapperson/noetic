@@ -1225,6 +1225,7 @@ describe('Cross-layer full lifecycle', () => {
       ctx,
       log,
       store,
+      storage: makeStorage(),
     });
 
     // 4. Recall again — working memory should have data
