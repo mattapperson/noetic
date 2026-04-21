@@ -44,10 +44,10 @@ export default function powerline(userInput: PowerlineInput = {}): NoeticPlugin 
   return {
     name: NAME,
     version: VERSION,
-    initialize: async (config) => {
+    initialize: async (ctx) => {
       vibes = await resolveVibes({
         options: options.vibe,
-        apiKey: config.apiKey,
+        apiKey: ctx.config.apiKey,
       });
     },
     loadingMessages: () => vibes,
