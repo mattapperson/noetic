@@ -91,6 +91,14 @@ export interface ExecuteOptions {
   memory?: MemoryLayer[];
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
+  /**
+   * Stable id used for the enqueued message. When provided, this id is emitted
+   * in the `turn_started` framework event (`messageIds`), allowing callers to
+   * correlate their own UI state (e.g. flipping a `queued` indicator to
+   * `sent`) with the message they submitted. A random id is generated when
+   * omitted.
+   */
+  messageId?: string;
 }
 
 //#endregion

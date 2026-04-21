@@ -565,6 +565,7 @@ function App({ config, plugins }: AppProps): ReactNode {
 
         await harness.execute(text, {
           threadId: threadIdRef.current,
+          messageId,
         });
       } catch (error) {
         setEntries((prev) => [

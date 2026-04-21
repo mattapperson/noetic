@@ -134,6 +134,37 @@ function isStreamRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/** Race a promise against an AbortSignal so callers (e.g. `SessionRunner.abort`)
+ *  can break out of a long `await` without waiting for the underlying call to
+ *  settle. When the signal fires, the returned promise rejects with
+ *  `signal.reason` (an `Error`) or a generic `Error('aborted')` fallback. */
+function awaitWithAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) {
+    return p;
+  }
+  if (signal.aborted) {
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+    };
+    signal.addEventListener('abort', onAbort, {
+      once: true,
+    });
+    p.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
 interface PipeStreamOpts {
   stream: AsyncIterable<unknown>;
   broadcaster: EventBroadcaster;
@@ -170,35 +201,6 @@ async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void
     });
     throw err;
   }
-}
-
-function executeInputToItems(input: ExecuteInput): Item[] {
-  if (typeof input === 'string') {
-    if (input.length === 0) {
-      return [];
-    }
-    const item: InputMessageItem = {
-      id: `user-${crypto.randomUUID()}`,
-      type: 'message',
-      role: 'user',
-      status: 'completed',
-      content: [
-        {
-          type: 'input_text',
-          text: input,
-        },
-      ],
-    };
-    return [
-      item,
-    ];
-  }
-  if (Array.isArray(input)) {
-    return input;
-  }
-  return [
-    input,
-  ];
 }
 
 /** @internal Context carries the session queue reference so callModel can
@@ -284,9 +286,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
     const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
     const deliveryMode = options?.deliveryMode ?? this.defaultDeliveryMode;
-    const session = this.getOrCreateSession(threadId, options);
+    const session = this.getOrCreateSession(threadId);
     const message: QueuedMessage = {
-      id: `msg-${crypto.randomUUID()}`,
+      id: options?.messageId ?? `msg-${crypto.randomUUID()}`,
       input,
       deliveryMode,
       options: options ?? {},
@@ -359,7 +361,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return session ? session.runner.queue.size : 0;
   }
 
-  private getOrCreateSession(threadId: string, options: ExecuteOptions | undefined): Session {
+  private getOrCreateSession(threadId: string): Session {
     const existing = this.sessions.get(threadId);
     if (existing) {
       return existing;
@@ -370,27 +372,29 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       runner: new SessionRunner({
         threadId,
         agentName: this.config.name,
-        createContext: (input, _turnId) => {
-          // Merge accumulated history with this turn's new items.
-          const newItems = executeInputToItems(input);
-          const allItems = [
+        // The first queued message in a batch establishes `resourceId` /
+        // `state` / `memory` for the turn. If multiple messages are drained
+        // together (queue flush), later messages' values for these fields
+        // are ignored. `deliveryMode` is resolved per-message at enqueue
+        // time and doesn't apply here.
+        createContext: (items, _turnId, messages) => {
+          const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
+          const allItems: Item[] = [
             ...session.accumulatedItems,
-            ...newItems,
+            ...items,
           ];
           const ctx = this.createContext({
             items: allItems,
             threadId,
-            resourceId: options?.resourceId,
-            state: options?.state,
-            memory: options?.memory,
+            resourceId: perTurnOptions.resourceId,
+            state: perTurnOptions.state,
+            memory: perTurnOptions.memory,
             _broadcaster: session.runner.broadcaster,
           });
-          // Expose the queue + agent name so callModel can inject between rounds.
           const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
           ext._sessionQueue = session.runner.queue;
           ext._sessionBetweenRounds = true;
           ext._sessionRunnerAgentName = this.config.name;
-          // Attach step tools.
           if (this.initialStep) {
             this.setUnifiedTools(ctx, collectAllTools(this.initialStep));
           }
@@ -439,7 +443,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return session;
     }
     // Lazily create so consumers can attach stream listeners before the first execute.
-    session = this.getOrCreateSession(threadId, undefined);
+    session = this.getOrCreateSession(threadId);
     return session;
   }
 
@@ -518,20 +522,36 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
       // Inject between-rounds inbox messages (mode: 'between-rounds') before
       // the next LLM call. Mirrors Claude Code's teammate-attachment path.
+      // Also append to ctx.itemLog so the session's post-turn snapshot
+      // carries the injected messages into next turn's history.
       if (round > 0 && request.ctx && hasSessionQueue(request.ctx)) {
         const injected = this.drainBetweenRoundsMessages(request.ctx._sessionQueue);
         if (injected.length > 0) {
-          for (const item of injected) {
+          for (const msg of injected) {
+            const text = itemToText(msg);
+            const userItem: InputMessageItem = {
+              id: `user-${crypto.randomUUID()}`,
+              type: 'message',
+              role: 'user',
+              status: 'completed',
+              content: [
+                {
+                  type: 'input_text',
+                  text,
+                },
+              ],
+            };
             conversationInput.push({
               type: 'message',
               role: 'user',
               content: [
                 {
                   type: 'input_text',
-                  text: itemToText(item),
+                  text,
                 },
               ],
             });
+            request.ctx.itemLog.append(userItem);
           }
           emitIfAllowed('inbox_injected', {
             round,
@@ -541,20 +561,27 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         }
       }
 
-      const callResult = this.client.callModel({
-        model: request.model,
-        input: conversationInput,
-        instructions,
-        tools: sdkTools,
-        temperature: request.params?.temperature,
-        maxOutputTokens: request.params?.maxTokens,
-        topP: request.params?.topP,
-        ...(textFormat
+      const callResult = this.client.callModel(
+        {
+          model: request.model,
+          input: conversationInput,
+          instructions,
+          tools: sdkTools,
+          temperature: request.params?.temperature,
+          maxOutputTokens: request.params?.maxTokens,
+          topP: request.params?.topP,
+          ...(textFormat
+            ? {
+                text: textFormat,
+              }
+            : {}),
+        },
+        signal
           ? {
-              text: textFormat,
+              signal,
             }
-          : {}),
-      });
+          : undefined,
+      );
 
       const pipePromise = broadcaster
         ? pipeStreamEventsToBroadcaster({
@@ -565,8 +592,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           })
         : undefined;
 
-      const sdkResponse = await callResult.getResponse();
-      await pipePromise;
+      const sdkResponse = await awaitWithAbort(callResult.getResponse(), signal);
+      if (pipePromise) {
+        await awaitWithAbort(pipePromise, signal);
+      }
+      if (signal?.aborted) {
+        break;
+      }
       const roundItems = extractOutputItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 

@@ -20,12 +20,23 @@ export interface TurnContext {
   readonly session: SessionRunner;
 }
 
+/** @internal Callback the harness supplies to build a fresh context for a
+ *  single turn. Receives the already-converted items to seed the context
+ *  (so the runner is the single point of ExecuteInput → Item[] conversion),
+ *  plus the messages being delivered this turn so the harness can honour
+ *  per-turn `ExecuteOptions` (the first message's options establish
+ *  resourceId/state/memory for the turn). */
+export type CreateContextFn = (
+  items: ReadonlyArray<Item>,
+  turnId: string,
+  messages: ReadonlyArray<QueuedMessage>,
+) => Context;
+
 export interface SessionRunnerOpts {
   readonly threadId: string;
   readonly agentName: string;
   readonly runTurn: RunTurnFn;
-  readonly createContext: (input: ExecuteInput, turnId: string) => Context;
-  readonly disposeContext?: (ctx: Context) => Promise<void>;
+  readonly createContext: CreateContextFn;
 }
 
 //#endregion
@@ -61,7 +72,7 @@ function inputToItems(input: ExecuteInput): Item[] {
   ];
 }
 
-function mergeInputs(messages: QueuedMessage[]): ExecuteInput {
+function mergeInputsToItems(messages: ReadonlyArray<QueuedMessage>): Item[] {
   const items: Item[] = [];
   for (const msg of messages) {
     items.push(...inputToItems(msg.input));
@@ -94,8 +105,7 @@ export class SessionRunner {
 
   private readonly agentName: string;
   private readonly runTurn: RunTurnFn;
-  private readonly createContext: (input: ExecuteInput, turnId: string) => Context;
-  private readonly disposeContext?: (ctx: Context) => Promise<void>;
+  private readonly createContext: CreateContextFn;
 
   private status: HarnessStatus = {
     kind: 'idle',
@@ -115,7 +125,6 @@ export class SessionRunner {
     this.agentName = opts.agentName;
     this.runTurn = opts.runTurn;
     this.createContext = opts.createContext;
-    this.disposeContext = opts.disposeContext;
 
     this.queue.subscribe(() => {
       this.kick();
@@ -127,12 +136,17 @@ export class SessionRunner {
   }
 
   /** Resolves once the queue has been drained and the runner is idle with a
-   *  response available. If nothing has run yet, waits for the first turn. */
+   *  response available. If nothing has run yet, waits for the first turn.
+   *
+   *  The cached `lastError` is only surfaced when the session is genuinely
+   *  idle with no pending work. If a new turn is running or a message is
+   *  queued, the caller is asking about the NEXT response — we must wait
+   *  for that turn rather than reject with the stale error. */
   getAgentResponse(): Promise<HarnessResponse> {
     if (this.status.kind === 'idle' && this.queue.size === 0 && this.lastResponse) {
       return Promise.resolve(this.lastResponse);
     }
-    if (this.lastError) {
+    if (this.status.kind === 'idle' && this.queue.size === 0 && this.lastError) {
       return Promise.reject(this.lastError);
     }
     return new Promise<HarnessResponse>((resolve, reject) => {
@@ -203,8 +217,11 @@ export class SessionRunner {
 
     const controller = new AbortController();
     this.currentController = controller;
-    const mergedInput = mergeInputs(messages);
-    const ctx = this.createContext(mergedInput, turnId);
+    // The runner is the single point of ExecuteInput → Item[] conversion —
+    // the harness's createContext callback receives Item[] directly and
+    // seeds the context without re-converting.
+    const items = mergeInputsToItems(messages);
+    const ctx = this.createContext(items, turnId, messages);
     this.currentCtx = ctx;
 
     emitFrameworkEvent({
@@ -257,9 +274,6 @@ export class SessionRunner {
       });
       this.rejectWaiters(error);
     } finally {
-      if (this.disposeContext && this.currentCtx) {
-        await this.disposeContext(this.currentCtx).catch(() => {});
-      }
       this.currentCtx = undefined;
       this.currentController = undefined;
       this.status = {
