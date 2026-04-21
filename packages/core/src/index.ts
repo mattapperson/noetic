@@ -278,7 +278,6 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 export type {
   FrameworkStreamEvent,
   HarnessResponse,
-  HarnessResult,
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,
@@ -294,8 +293,11 @@ export type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  DeliveryMode,
   ExecuteOptions,
+  HarnessStatus,
   RecallLayerOutput,
+  SessionScope,
 } from './types/runtime';
 
 //#endregion

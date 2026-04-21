@@ -544,41 +544,67 @@ hooks: {
 
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`). The `shell` property exposes the `ShellAdapter` (defaults to `createLocalShellAdapter()`).
 
+### Sessions and the Message Queue
+
+Each `threadId` is a **session**: a long-lived broadcaster + message queue + item log carried across turns. `execute()` enqueues a message on the session identified by `options.threadId` (or a default thread) and returns `Promise<void>` once the message is accepted. Response is observed via session-scoped accessors.
+
 ```typescript
-// High-level API: execute() returns HarnessResult with streaming accessors
 const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
+  defaultDeliveryMode: 'next-turn',
 });
 
-// Get final text (simplest usage)
-const text = await harness.execute('Hello').getText();
+// Queue a message and wait for the response.
+await harness.execute('Hello');
+const response = await harness.getAgentResponse();
 
-// Get full response with items, usage, cost
-const response = await harness.execute('Hello').getResponse();
-
-// Stream text deltas as they arrive
-for await (const delta of harness.execute('Hello').getTextStream()) {
+// Stream text deltas across every turn in the session.
+for await (const delta of harness.getTextStream()) {
   process.stdout.write(delta);
 }
 
-// Stream all events (SDK + framework)
-for await (const event of harness.execute('Hello').getFullStream()) {
-  console.log(event.source, event.type);
-}
-
-// With options
-const result = harness.execute('Hello', {
+// With options (per-thread routing + delivery mode override).
+await harness.execute('Hello', {
   threadId: 'thread-1',
   resourceId: 'user-1',
+  deliveryMode: 'between-rounds',
 });
 
-// Item inputs
-const text2 = await harness.execute(messageItem).getText();
-const text3 = await harness.execute([item1, item2]).getText();
+// Submit while the agent is generating — the message queues.
+await harness.execute('follow-up', { threadId: 'thread-1' });
 
-// Low-level API: manual context creation + run()
+// Cancel the in-flight turn. Queued messages stay and drive the next turn.
+await harness.abort({ threadId: 'thread-1', reason: 'user' });
+```
+
+### Delivery Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `next-turn` (default) | Queue and run after the current turn completes. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
+| `interrupt` | Abort the in-flight turn, place message at head of queue, restart. |
+
+### Session Accessors
+
+| Method | Description |
+|--------|-------------|
+| `getAgentResponse(scope?)` | Resolves once the session drains its queue. |
+| `getItemStream(scope?)` | Cumulative item snapshots across every turn. |
+| `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
+| `getFullStream(scope?)` | Raw SDK + framework events. |
+| `abort(scope?)` | Cancel in-flight turn; queued messages preserved. |
+| `getStatus(scope?)` | `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
+| `getQueueSize(scope?)` | Count of queued messages. |
+
+Subscribe to streams before the first `execute()` if you want to observe the very first turn — the session broadcaster replays buffered events to late subscribers within its buffer window.
+
+### Low-Level API
+
+```typescript
+// Manual context creation + run() (bypasses the session queue)
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
 
@@ -589,7 +615,7 @@ await handle.await();
 // Channels
 harness.send(channel, value, ctx);
 const msg = await harness.recv(channel, ctx);
-const msg = harness.tryRecv(channel, ctx);
+const msg2 = harness.tryRecv(channel, ctx);
 ```
 
 ## Slot Constants

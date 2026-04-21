@@ -1,4 +1,4 @@
-import type { HarnessResult, StreamEvent } from '@noetic/core';
+import type { StreamEvent } from '@noetic/core';
 
 //#region Helper
 
@@ -15,19 +15,37 @@ function isToolRoundCompleted(event: StreamEvent): boolean {
 //#region Public API
 
 /**
- * Convert a Noetic HarnessResult into an AsyncIterable<string> suitable for
- * chat-sdk's `thread.post()`. Equivalent to AI SDK's `fullStream` —
- * yields text deltas and injects paragraph breaks between tool rounds.
+ * Convert a Noetic stream event iterable into an AsyncIterable<string> suitable for
+ * chat-sdk's `thread.post()`. Equivalent to AI SDK's `fullStream` — yields text
+ * deltas and injects paragraph breaks between tool rounds.
  *
- * @param result - The HarnessResult from harness.execute()
- * @returns AsyncIterable<string> compatible with thread.post()
+ * @param source - Either an async iterable of stream events, or an object that
+ *   exposes `getFullStream()` (e.g. `AgentHarness`).
  *
  * @public
  */
-export async function* chatStream(result: HarnessResult): AsyncIterable<string> {
+interface HasGetFullStream {
+  getFullStream(): AsyncIterable<StreamEvent>;
+}
+
+function hasGetFullStream(value: object): value is HasGetFullStream {
+  if (!('getFullStream' in value)) {
+    return false;
+  }
+  const maybe: {
+    getFullStream?: unknown;
+  } = value;
+  return typeof maybe.getFullStream === 'function';
+}
+
+export async function* chatStream(
+  source: AsyncIterable<StreamEvent> | HasGetFullStream,
+): AsyncIterable<string> {
+  const stream = hasGetFullStream(source) ? source.getFullStream() : source;
+
   let hasEmittedText = false;
 
-  for await (const event of result.getFullStream()) {
+  for await (const event of stream) {
     if (isToolRoundCompleted(event)) {
       if (hasEmittedText) {
         yield '\n\n';

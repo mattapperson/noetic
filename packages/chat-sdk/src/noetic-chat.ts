@@ -1,4 +1,4 @@
-import type { ExecuteInput, HarnessResult } from '@noetic/core';
+import type { ExecuteInput, ExecuteOptions, HarnessResponse, SessionScope } from '@noetic/core';
 import type {
   ActionHandler,
   Adapter,
@@ -43,8 +43,7 @@ async function collectMessages(thread: Thread, maxMessages: number): Promise<Mes
   return messages;
 }
 
-async function postToolCards(thread: Thread, result: HarnessResult): Promise<void> {
-  const response = await result.getResponse();
+async function postToolCards(thread: Thread, response: HarnessResponse): Promise<void> {
   for (const item of response.items) {
     if (item.type !== 'function_call_output') {
       continue;
@@ -80,6 +79,30 @@ function findToolNameForCallId(
     }
   }
   return '';
+}
+
+/** Minimal harness surface used by `buildThreadExecuteFn`. Production callers
+ *  satisfy this via the full `AgentHarness` class; tests can stub it directly. */
+interface HarnessExecuteSurface {
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
+}
+
+/** Construct a per-thread `executeFn` that routes enqueue + response through
+ *  the thread's session. Exported for testing; production code calls it via
+ *  `NoeticChat#buildExecuteFn`. */
+export function buildThreadExecuteFn(
+  harness: HarnessExecuteSurface,
+  threadId: string,
+): (input?: ExecuteInput) => Promise<HarnessResponse> {
+  return async (input) => {
+    await harness.execute(input ?? '', {
+      threadId,
+    });
+    return harness.getAgentResponse({
+      threadId,
+    });
+  };
 }
 
 //#endregion
@@ -258,8 +281,7 @@ export class NoeticChat<TAdapters extends Record<string, Adapter> = Record<strin
 
   private async handleMention(thread: Thread, message: Message): Promise<void> {
     if (this.customMentionHandler) {
-      const executeFn = (input?: ExecuteInput): HarnessResult =>
-        this.config.harness.execute(input ?? '');
+      const executeFn = this.buildExecuteFn(thread);
       await this.customMentionHandler(thread, message, executeFn);
       return;
     }
@@ -269,13 +291,17 @@ export class NoeticChat<TAdapters extends Record<string, Adapter> = Record<strin
 
   private async handleSubscribed(thread: Thread, message: Message): Promise<void> {
     if (this.customSubscribedHandler) {
-      const executeFn = (input?: ExecuteInput): HarnessResult =>
-        this.config.harness.execute(input ?? '');
+      const executeFn = this.buildExecuteFn(thread);
       await this.customSubscribedHandler(thread, message, executeFn);
       return;
     }
 
     await this.autoExecute(thread);
+  }
+
+  /** Bind the per-thread session so callers don't share the harness's default thread. */
+  private buildExecuteFn(thread: Thread): (input?: ExecuteInput) => Promise<HarnessResponse> {
+    return buildThreadExecuteFn(this.config.harness, thread.id);
   }
 
   private async autoExecute(thread: Thread): Promise<void> {
@@ -285,14 +311,26 @@ export class NoeticChat<TAdapters extends Record<string, Adapter> = Record<strin
       await thread.subscribe();
     }
 
+    const threadId = thread.id;
     const maxHistory = this.config.maxHistoryMessages ?? DEFAULT_MAX_HISTORY;
     const historyMessages = await collectMessages(thread, maxHistory);
     const items = toNoeticItems(historyMessages);
 
-    const result = this.config.harness.execute(items);
+    await this.config.harness.execute(items, {
+      threadId,
+    });
 
-    await thread.post(chatStream(result));
-    await postToolCards(thread, result);
+    await thread.post(
+      chatStream(
+        this.config.harness.getFullStream({
+          threadId,
+        }),
+      ),
+    );
+    const response = await this.config.harness.getAgentResponse({
+      threadId,
+    });
+    await postToolCards(thread, response);
   }
 
   //#endregion
