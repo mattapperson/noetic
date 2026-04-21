@@ -459,8 +459,11 @@ export function PromptInput({
 
   const resolvedPromptColor = promptColor ?? theme.muted;
 
-  // Status-driven state
-  const disabled = status ? status === 'submitted' || status === 'streaming' : disabledProp;
+  // Status-driven state. The input stays focused during 'submitted'/'streaming'
+  // so the user can keep typing — submissions made while the agent is working
+  // are enqueued on the harness session and delivered as subsequent turns.
+  // `disabledProp` still hard-disables (used when a modal is open, etc.).
+  const disabled = disabledProp;
   const isFocused = focus && !disabled;
   const statusHintText = resolveStatusHintText({
     status,

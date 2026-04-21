@@ -102,7 +102,8 @@ describe('AgentHarness memory', () => {
         ]),
       });
 
-      await harness.execute('hello').getText();
+      await harness.execute('hello');
+      await harness.getAgentResponse();
       expect(contextLayers).toBeDefined();
       expect(contextLayers).toHaveLength(1);
       expect(contextLayers![0].id).toBe('exec-layer');

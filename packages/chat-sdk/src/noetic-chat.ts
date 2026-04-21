@@ -1,4 +1,4 @@
-import type { ExecuteInput, HarnessResult } from '@noetic/core';
+import type { ExecuteInput, HarnessResponse } from '@noetic/core';
 import type {
   ActionHandler,
   Adapter,
@@ -43,8 +43,7 @@ async function collectMessages(thread: Thread, maxMessages: number): Promise<Mes
   return messages;
 }
 
-async function postToolCards(thread: Thread, result: HarnessResult): Promise<void> {
-  const response = await result.getResponse();
+async function postToolCards(thread: Thread, response: HarnessResponse): Promise<void> {
   for (const item of response.items) {
     if (item.type !== 'function_call_output') {
       continue;
@@ -258,8 +257,10 @@ export class NoeticChat<TAdapters extends Record<string, Adapter> = Record<strin
 
   private async handleMention(thread: Thread, message: Message): Promise<void> {
     if (this.customMentionHandler) {
-      const executeFn = (input?: ExecuteInput): HarnessResult =>
-        this.config.harness.execute(input ?? '');
+      const executeFn = async (input?: ExecuteInput): Promise<HarnessResponse> => {
+        await this.config.harness.execute(input ?? '');
+        return this.config.harness.getAgentResponse();
+      };
       await this.customMentionHandler(thread, message, executeFn);
       return;
     }
@@ -269,8 +270,10 @@ export class NoeticChat<TAdapters extends Record<string, Adapter> = Record<strin
 
   private async handleSubscribed(thread: Thread, message: Message): Promise<void> {
     if (this.customSubscribedHandler) {
-      const executeFn = (input?: ExecuteInput): HarnessResult =>
-        this.config.harness.execute(input ?? '');
+      const executeFn = async (input?: ExecuteInput): Promise<HarnessResponse> => {
+        await this.config.harness.execute(input ?? '');
+        return this.config.harness.getAgentResponse();
+      };
       await this.customSubscribedHandler(thread, message, executeFn);
       return;
     }
@@ -289,10 +292,11 @@ export class NoeticChat<TAdapters extends Record<string, Adapter> = Record<strin
     const historyMessages = await collectMessages(thread, maxHistory);
     const items = toNoeticItems(historyMessages);
 
-    const result = this.config.harness.execute(items);
+    await this.config.harness.execute(items);
 
-    await thread.post(chatStream(result));
-    await postToolCards(thread, result);
+    await thread.post(chatStream(this.config.harness));
+    const response = await this.config.harness.getAgentResponse();
+    await postToolCards(thread, response);
   }
 
   //#endregion

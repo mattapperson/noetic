@@ -4,11 +4,10 @@
 
 import type {
   AgentHarness,
-  InputMessageItem,
-  Item,
   LastLayerUsage,
   MemoryLayer,
   PlanState,
+  StreamEvent,
 } from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
@@ -37,13 +36,7 @@ import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
 import { FooterContextProvider } from './footer-context.js';
 import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
-import {
-  appendOrUpdateEntry,
-  extractActivatedSkills,
-  isErrorEntry,
-  isSystemEntry,
-  isUserEntry,
-} from './item-utils.js';
+import { appendOrUpdateEntry, extractActivatedSkills, isUserEntry } from './item-utils.js';
 
 //#region Helpers
 
@@ -55,49 +48,43 @@ function buildErrorEntry(error: unknown): ErrorEntry {
   };
 }
 
-/**
- * Convert a UserEntry to an Item for passing to the harness.
- */
-function userEntryToItem(entry: UserEntry): InputMessageItem {
-  return {
-    id: `user-${Date.now()}`,
-    type: 'message',
-    role: 'user',
-    status: 'completed',
-    content: [
-      {
-        type: 'input_text',
-        text: entry.content,
-      },
-    ],
-  } satisfies InputMessageItem;
-}
-
-function isItem(entry: ConversationEntry): entry is Item {
-  return 'type' in entry && typeof entry.type === 'string' && entry.type !== 'error';
-}
-
-/**
- * Convert conversation entries to Items for the harness.
- * Filters out ErrorEntry since they aren't meaningful conversation context.
- */
-function entriesToItems(entries: ConversationEntry[]): Item[] {
-  const items: Item[] = [];
-  for (const entry of entries) {
-    // Skip system UI entries that aren't part of the conversation
-    if (isErrorEntry(entry) || isSystemEntry(entry)) {
-      continue;
-    }
-    if (isUserEntry(entry)) {
-      items.push(userEntryToItem(entry));
-      continue;
-    }
-    // AssistantEntry is already an Item - use type guard
-    if (isItem(entry)) {
-      items.push(entry);
-    }
+function isFrameworkEvent(event: StreamEvent): event is Extract<
+  StreamEvent,
+  {
+    source: 'framework';
   }
-  return items;
+> {
+  return event.source === 'framework';
+}
+
+function extractEventSuffix(type: string): string {
+  const idx = type.indexOf(':');
+  if (idx < 0) {
+    return type;
+  }
+  return type.slice(idx + 1);
+}
+
+/** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
+ *  entry was updated; otherwise returns the input reference. */
+function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
+  const idx = entries.findIndex((e) => isUserEntry(e) && e.id === id);
+  if (idx < 0) {
+    return entries;
+  }
+  const entry = entries[idx];
+  if (!entry || !isUserEntry(entry)) {
+    return entries;
+  }
+  const updated: UserEntry = {
+    ...entry,
+    deliveryStatus: 'sent',
+  };
+  const next = [
+    ...entries,
+  ];
+  next[idx] = updated;
+  return next;
 }
 
 //#endregion
@@ -109,15 +96,105 @@ interface AppProps {
   plugins: ReadonlyArray<NoeticPlugin>;
 }
 
-//#endregion
-
-//#region App Component
-
 interface ModalState {
   content: ReactNode;
   commandName: string;
   dismissMessage: string;
 }
+
+//#endregion
+
+//#region Stream consumers
+
+interface ConsumeItemsOpts {
+  harness: AgentHarness;
+  threadId: string;
+  setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
+}
+
+async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
+  try {
+    for await (const item of opts.harness.getItemStream({
+      threadId: opts.threadId,
+    })) {
+      opts.setEntries((prev) => appendOrUpdateEntry(prev, item));
+    }
+  } catch (err: unknown) {
+    opts.setEntries((prev) => [
+      ...prev,
+      buildErrorEntry(err),
+    ]);
+  }
+}
+
+interface ConsumeEventsOpts {
+  harness: AgentHarness;
+  threadId: string;
+  setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
+  setStatus: (s: ChatStatus) => void;
+  setLastLayerUsage: (u: LastLayerUsage | undefined) => void;
+  lastLayerUsageRef: {
+    current: LastLayerUsage | undefined;
+  };
+  pendingMessageIdsRef: {
+    current: Set<string>;
+  };
+}
+
+async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
+  try {
+    for await (const event of opts.harness.getFullStream({
+      threadId: opts.threadId,
+    })) {
+      if (!isFrameworkEvent(event)) {
+        continue;
+      }
+      const suffix = extractEventSuffix(event.type);
+      if (suffix === 'turn_started') {
+        const rawIds = event.data.messageIds;
+        const ids = Array.isArray(rawIds)
+          ? rawIds.filter((id): id is string => typeof id === 'string')
+          : [];
+        opts.setEntries((prev) => {
+          let next = prev;
+          for (const id of ids) {
+            if (opts.pendingMessageIdsRef.current.has(id)) {
+              opts.pendingMessageIdsRef.current.delete(id);
+              next = markUserEntrySent(next, id);
+            }
+          }
+          return next;
+        });
+        opts.setStatus('streaming');
+        continue;
+      }
+      if (suffix === 'turn_completed' || suffix === 'turn_aborted') {
+        try {
+          const resp = await opts.harness.getAgentResponse({
+            threadId: opts.threadId,
+          });
+          opts.lastLayerUsageRef.current = resp.lastLayerUsage;
+          opts.setLastLayerUsage(resp.lastLayerUsage);
+        } catch {
+          // getAgentResponse can only reject if no session exists; here it does.
+        }
+        if (
+          opts.harness.getQueueSize({
+            threadId: opts.threadId,
+          }) === 0
+        ) {
+          opts.setStatus('ready');
+        }
+      }
+    }
+  } catch {
+    // Stream ended — normal on harness swap.
+  }
+}
+
+//#endregion
+
+//#region App Component
 
 function App({ config, plugins }: AppProps): ReactNode {
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
@@ -140,18 +217,14 @@ function App({ config, plugins }: AppProps): ReactNode {
   const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
-  // Stable per-session threadId so memory layers that persist by thread/resource
-  // scope rehydrate across turns. Random UUID lives for the CLI process lifetime.
   const threadIdRef = useRef<string>(crypto.randomUUID());
   const sessionStartedAtRef = useRef<number>(Date.now());
+  const pendingMessageIdsRef = useRef<Set<string>>(new Set());
+  const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
 
-  // Use a ref to track entries so we can access current value in the callback
-  // without adding entries to the dependency array (which would cause re-renders)
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
-  // Collect plugin-contributed commands. Done in an effect so a plugin's
-  // commands() can be async (e.g. read prior snapshots from disk).
   useEffect(() => {
     let cancelled = false;
     async function collect(): Promise<void> {
@@ -181,10 +254,6 @@ function App({ config, plugins }: AppProps): ReactNode {
     buildCtx,
   ]);
 
-  // Prime the skill catalog on mount so `/skills` works before the first
-  // chat turn (which is when getOrCreateHarness would otherwise be the first
-  // caller of buildSkillCatalog). The harness path re-populates later with
-  // the same data, so the two code paths stay consistent.
   useEffect(() => {
     let cancelled = false;
     async function prime(): Promise<void> {
@@ -223,7 +292,6 @@ function App({ config, plugins }: AppProps): ReactNode {
     ],
   );
 
-  // Convert commands to PromptInput format
   const commandSuggestions = useMemo(
     () => commandsToPromptSuggestions(commands),
     [
@@ -231,14 +299,10 @@ function App({ config, plugins }: AppProps): ReactNode {
     ],
   );
 
-  // Clear entries callback for /clear command
   const clearEntries = useCallback(() => {
     setEntries([]);
   }, []);
 
-  // Handle modal close (Escape pressed). If a plan-approval modal is open and
-  // the user dismisses without explicitly accepting, we treat that as rejection
-  // so the layer stays in plan mode rather than silently auto-approving.
   const handleModalClose = useCallback(() => {
     if (!modal) {
       return;
@@ -260,8 +324,6 @@ function App({ config, plugins }: AppProps): ReactNode {
     modal,
   ]);
 
-  // Plan-mode hooks: own session creation and approval-modal lifecycle.
-  // Memoised once — they read from refs so they don't need React re-renders.
   const planHooks = useMemo<PlanHooks>(
     () => ({
       onEnterSession: async () => createPlanSession(),
@@ -313,11 +375,31 @@ function App({ config, plugins }: AppProps): ReactNode {
     [],
   );
 
-  /**
-   * Get or create the harness for the requested mode. If the requested mode
-   * differs from the active harness's mode, the existing harness is discarded
-   * and a fresh one is built so the model sees the correct toolset.
-   */
+  /** Wire long-lived consumers to the harness's session streams. Called once
+   *  per harness instance via `getOrCreateHarness`. */
+  const wireStreams = useCallback((harness: AgentHarness) => {
+    if (streamWiredHarnessRef.current === harness) {
+      return;
+    }
+    streamWiredHarnessRef.current = harness;
+    const threadId = threadIdRef.current;
+
+    void consumeItemStream({
+      harness,
+      threadId,
+      setEntries,
+    });
+    void consumeFullStream({
+      harness,
+      threadId,
+      setEntries,
+      setStatus,
+      setLastLayerUsage,
+      lastLayerUsageRef,
+      pendingMessageIdsRef,
+    });
+  }, []);
+
   const getOrCreateHarness = useCallback(
     async (mode: AgentMode): Promise<AgentHarness> => {
       if (harnessRef.current !== null && harnessModeRef.current === mode) {
@@ -339,6 +421,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       harnessModeRef.current = mode;
       memoryLayersRef.current = memoryLayers;
       setSkills(resolvedSkills);
+      wireStreams(harness);
       return harness;
     },
     [
@@ -346,28 +429,36 @@ function App({ config, plugins }: AppProps): ReactNode {
       plugins,
       planHooks,
       buildCtx,
+      wireStreams,
     ],
   );
 
-  // Switching mode invalidates the cached harness so the next turn rebuilds with
-  // the correct tool set. We don't proactively rebuild here — `getOrCreateHarness`
-  // does it lazily on the next message.
   const setAgentMode = useCallback(async (mode: AgentMode): Promise<void> => {
     if (harnessModeRef.current !== mode) {
       harnessRef.current = null;
+      streamWiredHarnessRef.current = null;
     }
     setAgentModeState(mode);
   }, []);
 
+  const handleStop = useCallback(async () => {
+    const harness = harnessRef.current;
+    if (!harness) {
+      return;
+    }
+    await harness.abort({
+      threadId: threadIdRef.current,
+      reason: 'user-requested',
+    });
+  }, []);
+
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
-      // Check if this is a slash command
       if (isSlashCommand(text)) {
         const parsed = parseSlashCommand(text);
         if (parsed) {
           const cmd = findCommand(parsed.commandName, commands);
           if (cmd) {
-            // Build command context with activated skills from conversation
             const activatedSkills = extractActivatedSkills(entriesRef.current);
             const ctx: CommandContext = {
               config,
@@ -405,7 +496,6 @@ function App({ config, plugins }: AppProps): ReactNode {
                 },
               });
               if (result.type === 'text') {
-                // Show text result as info message (not error)
                 setEntries((prev) => [
                   ...prev,
                   {
@@ -415,7 +505,6 @@ function App({ config, plugins }: AppProps): ReactNode {
                   } satisfies SystemEntry,
                 ]);
               } else if (result.type === 'modal') {
-                // Add command invocation to chat history
                 setEntries((prev) => [
                   ...prev,
                   {
@@ -424,14 +513,12 @@ function App({ config, plugins }: AppProps): ReactNode {
                     content: `/${result.commandName}`,
                   } satisfies SystemEntry,
                 ]);
-                // Open modal overlay
                 setModal({
                   content: result.node,
                   commandName: result.commandName,
                   dismissMessage: result.dismissMessage,
                 });
               }
-              // 'skip' type means no output
             } catch (error) {
               setEntries((prev) => [
                 ...prev,
@@ -441,7 +528,6 @@ function App({ config, plugins }: AppProps): ReactNode {
             return;
           }
         }
-        // Unknown command - show error
         setEntries((prev) => [
           ...prev,
           {
@@ -453,40 +539,38 @@ function App({ config, plugins }: AppProps): ReactNode {
         return;
       }
 
-      // Regular message - send to model
-      const userEntry: UserEntry = {
-        role: 'user',
-        content: text,
-      };
-      setEntries((prev) => [
-        ...prev,
-        userEntry,
-      ]);
-      setStatus('submitted');
-
+      // Regular message — enqueue on the session and let streams drive the UI.
       try {
         const harness = await getOrCreateHarness(agentMode);
-        // Build conversation history including the new user message
-        const historyItems = entriesToItems([
-          ...entriesRef.current,
+        const isBusy =
+          harness.getStatus({
+            threadId: threadIdRef.current,
+          }).kind !== 'idle';
+        const messageId = `msg-${crypto.randomUUID()}`;
+        const userEntry: UserEntry = {
+          role: 'user',
+          content: text,
+          id: messageId,
+          deliveryStatus: isBusy ? 'queued' : 'sent',
+        };
+        setEntries((prev) => [
+          ...prev,
           userEntry,
         ]);
-        const result = harness.execute(historyItems, {
+
+        if (isBusy) {
+          pendingMessageIdsRef.current.add(messageId);
+        }
+        setStatus('submitted');
+
+        await harness.execute(text, {
           threadId: threadIdRef.current,
         });
-        setStatus('streaming');
-        for await (const item of result.getItemStream()) {
-          setEntries((prev) => appendOrUpdateEntry(prev, item));
-        }
-        const finalResponse = await result.getResponse();
-        lastLayerUsageRef.current = finalResponse.lastLayerUsage;
-        setLastLayerUsage(finalResponse.lastLayerUsage);
       } catch (error) {
         setEntries((prev) => [
           ...prev,
           buildErrorEntry(error),
         ]);
-      } finally {
         setStatus('ready');
       }
     },
@@ -530,6 +614,7 @@ function App({ config, plugins }: AppProps): ReactNode {
           entries={entries}
           status={status}
           onSubmit={handleSubmit}
+          onStop={handleStop}
           model={config.model}
           commands={commandSuggestions}
           modalContent={modal?.content}

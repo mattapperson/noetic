@@ -11,6 +11,15 @@ The core execution engine interface.
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly config: AgentConfig<TParams>;
   readonly fs: FsAdapter;
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
+  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
+  getTextStream(scope?: SessionScope): AsyncIterable<string>;
+  getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
+  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+  getStatus(scope?: SessionScope): HarnessStatus;
+  getQueueSize(scope?: SessionScope): number;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<ContextMemory, I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts & { memory?: MemoryLayer[] }): Context;
@@ -35,7 +44,15 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 |---|---|
 | `config` | The `AgentConfig<TParams>` the harness was constructed with |
 | `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and memory layers — route through this adapter. |
-| `execute(input, options?)` | Run the agent's `initialStep`. Returns a [`HarnessResult`](#harnessresult) with streaming accessors. |
+| `execute(input, options?)` | Enqueue a message on the session identified by `options.threadId`. Resolves once the message is accepted into the queue — not when the model responds. |
+| `getAgentResponse(scope?)` | Resolves with the accumulated response once the session drains. |
+| `getItemStream(scope?)` | Yields cumulative Item snapshots across every turn in the session. |
+| `getTextStream(scope?)` | Yields text deltas across every turn. |
+| `getReasoningStream(scope?)` | Yields reasoning-token deltas. |
+| `getFullStream(scope?)` | Yields all raw SDK + framework events. |
+| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. |
+| `getStatus(scope?)` | Session status snapshot. |
+| `getQueueSize(scope?)` | Messages currently queued on the session. |
 | `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
 | `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
@@ -52,29 +69,42 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `cancel(ctx, reason?)` | Cancel an execution |
 | `createSpan(name, parent)` | Create an observability span |
 
-## HarnessResult
-
-Returned by `execute()`. Provides multiple ways to consume execution output.
+## DeliveryMode
 
 ```ts
-interface HarnessResult {
-  getText(): Promise<string>;
-  getResponse(): Promise<HarnessResponse>;
-  getTextStream(): AsyncIterable<string>;
-  getReasoningStream(): AsyncIterable<string>;
-  getItemStream(): AsyncIterable<StreamingItem>;
-  getFullStream(): AsyncIterable<StreamEvent>;
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+```
+
+| Mode | Behaviour |
+|---|---|
+| `next-turn` (default) | Queue and run after the current turn completes. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
+| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
+
+## ExecuteOptions
+
+```ts
+interface ExecuteOptions {
+  threadId?: string;
+  resourceId?: string;
+  state?: unknown;
+  memory?: MemoryLayer[];
+  deliveryMode?: DeliveryMode;
+}
+
+interface SessionScope {
+  threadId?: string;
 }
 ```
 
-| Method | Returns | Description |
-|---|---|---|
-| `getText()` | `Promise<string>` | Complete text after execution finishes |
-| `getResponse()` | `Promise<HarnessResponse>` | Full response with items, usage, cost |
-| `getTextStream()` | `AsyncIterable<string>` | Text deltas as they arrive |
-| `getReasoningStream()` | `AsyncIterable<string>` | Reasoning token deltas |
-| `getItemStream()` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` |
-| `getFullStream()` | `AsyncIterable<StreamEvent>` | All raw SDK + framework events |
+## HarnessStatus
+
+```ts
+type HarnessStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'aborting'; readonly turnId: string };
+```
 
 ## HarnessResponse
 
@@ -84,6 +114,7 @@ interface HarnessResponse {
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   readonly cost?: number;
   readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
 }
 ```
 

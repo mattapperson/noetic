@@ -28,7 +28,13 @@ export type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
 
 //#region Harness Response
 
-/** @public Final accumulated result of an execution, including all items, usage, cost, and extracted text. */
+/** @public Final accumulated result of an execution, including all items, usage, cost, and extracted text.
+ *
+ *  Returned from `AgentHarness.getAgentResponse()`. Resolves once the session's
+ *  message queue drains and the runner goes idle. When multiple turns run in a
+ *  burst (e.g. queued inbox messages), the response covers the span from the
+ *  last-idle point through the point at which idle is reached again.
+ */
 export interface HarnessResponse {
   readonly items: ReadonlyArray<Item>;
   readonly usage: {
@@ -50,25 +56,5 @@ export interface HarnessResponse {
 export type StreamingItem = Item & {
   readonly isComplete: boolean;
 };
-
-//#endregion
-
-//#region Harness Result
-
-/** @public Result object returned by execute(), providing multiple stream accessors for consuming execution output. */
-export interface HarnessResult {
-  /** Resolves with the final text output after execution completes. */
-  getText(): Promise<string>;
-  /** Resolves with the full response including items, usage, and cost. */
-  getResponse(): Promise<HarnessResponse>;
-  /** Yields text deltas as they arrive from the model. */
-  getTextStream(): AsyncIterable<string>;
-  /** Yields reasoning token deltas from reasoning-capable models. */
-  getReasoningStream(): AsyncIterable<string>;
-  /** Yields cumulative Item snapshots with isComplete flag. Replace, do not append. */
-  getItemStream(): AsyncIterable<StreamingItem>;
-  /** Yields all raw stream events (SDK + framework). */
-  getFullStream(): AsyncIterable<StreamEvent>;
-}
 
 //#endregion

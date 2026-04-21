@@ -7,33 +7,43 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useTheme } from '../theme.js';
 
-const POINTER = '\u276F'; // ❯
+const POINTER = '❯'; // ❯
 
 export interface UserPromptProps {
   /** The user's message text */
   text: string;
   /** Add a blank line above; typically true except for the very first turn. */
   addMargin?: boolean;
+  /** `queued` when the message is enqueued during generation and not yet delivered. */
+  deliveryStatus?: 'queued' | 'sent';
 }
 
-export function UserPrompt({ text, addMargin = false }: UserPromptProps): ReactNode {
+export function UserPrompt({
+  text,
+  addMargin = false,
+  deliveryStatus,
+}: UserPromptProps): ReactNode {
   const theme = useTheme();
 
   if (!text) {
     return null;
   }
 
+  const isQueued = deliveryStatus === 'queued';
+  const pointer = isQueued ? '⋯' : POINTER; // ⋯ for queued, ❯ for sent
+
   return (
     <Box
       flexDirection="row"
-      backgroundColor={theme.userMessageBg}
+      backgroundColor={isQueued ? undefined : theme.userMessageBg}
       paddingRight={1}
       marginTop={addMargin ? 1 : 0}
     >
-      <Text color={theme.muted}>{POINTER} </Text>
-      <Text color={theme.foreground} wrap="wrap">
+      <Text color={theme.muted}>{pointer} </Text>
+      <Text color={isQueued ? theme.muted : theme.foreground} wrap="wrap">
         {text}
       </Text>
+      {isQueued ? <Text color={theme.muted}> (queued)</Text> : null}
     </Box>
   );
 }
