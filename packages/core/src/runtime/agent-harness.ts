@@ -768,6 +768,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       await this.traceExporter.export([
         rootSpan,
       ]);
+      this.traceExporter.completeTrace?.(rootSpan.traceId);
       return result;
     } catch (error) {
       rootSpan.setAttribute('error', 'true');
@@ -776,6 +777,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       await this.traceExporter.export([
         rootSpan,
       ]);
+      const traceError = error instanceof Error ? error : new Error(String(error));
+      this.traceExporter.completeTrace?.(rootSpan.traceId, traceError);
       throw error;
     }
   }
