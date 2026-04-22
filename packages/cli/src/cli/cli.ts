@@ -15,6 +15,7 @@ import { runAgent } from '../tui/app.js';
 import { runPicker } from '../tui/run-picker.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import { parseArgs } from './args.js';
+import { composeRuntimeModel } from './compose-runtime-config.js';
 
 const { config: argsConfig, flags } = parseArgs(process.argv);
 const discovered = await discoverConfig();
@@ -25,17 +26,28 @@ const plugins = await loadPlugins(baseConfig, pluginBaseDir, buildCtx);
 
 const initialSession = await resolveInitialSession(baseConfig.cwd, flags);
 
+// Plugin discovery (above) intentionally uses the launch cwd; only the
+// harness follows a resumed session's saved cwd so file ops land in the
+// session's original project.
+const runtimeCwd = initialSession?.cwd ?? baseConfig.cwd;
+
 const runtimeConfig: AgentRuntimeConfig = {
   ...baseConfig,
+  cwd: runtimeCwd,
   fs: createLocalFsAdapter(),
-  // CLI `--model` wins over the saved session's model (user intent is explicit).
-  model: argsConfig.model !== baseConfig.model ? argsConfig.model : baseConfig.model,
+  model: composeRuntimeModel({
+    cliModel: argsConfig.model,
+    modelExplicit: flags.modelExplicit,
+    sessionModel: initialSession?.model,
+    configFileModel: discovered?.config.model,
+  }),
 };
 
 await runAgent(plugins, runtimeConfig, {
   initialSession,
   disablePersistence: flags.noSessionPersistence,
   name: flags.name,
+  forcedSessionId: flags.sessionId,
 });
 
 async function resolveInitialSession(cwd: string, cliFlags: CliFlags): Promise<SessionFile | null> {
@@ -52,9 +64,7 @@ async function resolveInitialSession(cwd: string, cliFlags: CliFlags): Promise<S
   }
 
   if (loaded.cwd !== cwd) {
-    process.stderr.write(
-      `Warning: resuming session originally from ${loaded.cwd} (current cwd: ${cwd})\n`,
-    );
+    process.stderr.write(`Resuming from ${loaded.cwd}; switched there (launched from ${cwd}).\n`);
   }
 
   if (cliFlags.forkSession) {

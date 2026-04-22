@@ -87,16 +87,16 @@ export async function saveSession(file: SessionFile, opts?: SaveOptions): Promis
 
 //#region Load
 
-async function readJson(path: string): Promise<unknown> {
-  return Bun.file(path).json();
-}
-
 async function readAndParse(path: string): Promise<SessionFile | null> {
-  const file = Bun.file(path);
-  if (!(await file.exists())) {
-    return null;
+  let raw: unknown;
+  try {
+    raw = await Bun.file(path).json();
+  } catch (err: unknown) {
+    if (isEnoent(err)) {
+      return null;
+    }
+    throw err;
   }
-  const raw = await readJson(path);
   return SessionFileV1Schema.parse(raw);
 }
 

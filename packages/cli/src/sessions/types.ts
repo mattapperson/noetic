@@ -1,12 +1,6 @@
 /**
- * Session file schema — v1.
- *
- * Persisted at `~/.noetic/projects/{slug}/sessions/{sessionId}.json` as a
- * full snapshot overwritten each turn (see `./store.ts`). `items` is the LLM
- * source of truth; `entries` is a redundant TUI view persisted for faster
- * render on resume. On load, `entries` is trusted as-is except that queued
- * user messages are flipped to sent (see `normalizeEntriesForResume` in
- * `app.tsx`).
+ * Session file schema — v1. `items` is the LLM source of truth; `entries`
+ * is a redundant TUI view persisted for faster render on resume.
  */
 
 import type { LastLayerUsage } from '@noetic/core';
@@ -20,23 +14,27 @@ const CumulativeUsageSchema = z.object({
   cachedTokens: z.number().int().nonnegative(),
 });
 
+const LayerUsageEntrySchema = z.object({
+  layerId: z.string(),
+  tokenCount: z.number().int().nonnegative(),
+  items: z.array(ItemSchema),
+});
+
 /**
- * Structural guard for the persisted `lastLayerUsage` field. The logical
- * shape is `@noetic/core#LastLayerUsage`, but historical files may carry
- * slightly different keys and the field is advisory (used only by the
- * footer). We require a plain (non-null, non-array) object so malformed
- * numeric/array/null payloads can't reach the UI through the loose
- * `isLastLayerUsageLike` guard in `app.tsx`, while still accepting any key
- * set for forward/backward compatibility. Typed as `LastLayerUsage` so the
- * inferred `SessionFile` shape matches what the rest of the CLI already
- * treats this field as.
+ * Persisted shape of `LastLayerUsage` from `@noetic/core`. The core type is
+ * `readonly`, so we mirror it as a plain object schema and let Zod's inferred
+ * output (mutable) be assignable anywhere the core `readonly` type is
+ * expected (readonly is bivariant for indexed access).
  */
-export const LastLayerUsageSchema = z.custom<LastLayerUsage>(
-  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
-  {
-    message: 'lastLayerUsage must be a plain object',
-  },
-);
+export const LastLayerUsageSchema = z.object({
+  executionId: z.string(),
+  modelId: z.string(),
+  layers: z.array(LayerUsageEntrySchema),
+  systemPromptTokens: z.number().int().nonnegative(),
+  toolsTokens: z.number().int().nonnegative(),
+  historyTokens: z.number().int().nonnegative(),
+  totalUsedTokens: z.number().int().nonnegative(),
+});
 
 export const SessionFileV1Schema = z.object({
   version: z.literal(1),
@@ -61,7 +59,10 @@ export const SessionFileV1Schema = z.object({
   entries: z.array(ConversationEntrySchema),
 });
 
-export type SessionFile = z.infer<typeof SessionFileV1Schema>;
+// `lastLayerUsage` narrowed to the core readonly type (schema infers mutable).
+export type SessionFile = Omit<z.infer<typeof SessionFileV1Schema>, 'lastLayerUsage'> & {
+  lastLayerUsage?: LastLayerUsage;
+};
 
 export interface SessionMetadata {
   sessionId: string;

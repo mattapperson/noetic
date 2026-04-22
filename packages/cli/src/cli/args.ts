@@ -32,6 +32,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === '--model' && i + 1 < args.length) {
       model = args[++i];
+      flags.modelExplicit = true;
       continue;
     }
 
@@ -137,7 +138,9 @@ Session management:
   -c, --continue                Resume the most recent session for this cwd
   -r, --resume [id]             Open the picker, or resume a specific session by UUID
   --fork-session                On resume, fork into a new session id (requires -c or -r)
-  --session-id <uuid>           Force a specific session id
+  --session-id <uuid>           Force a specific session id (used for a fresh
+                                session's first write, or to override the
+                                forked id when combined with --fork-session)
   -n, --name <name>             Set a custom title for this session
   --no-session-persistence      Don't write this session to disk
 

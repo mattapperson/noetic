@@ -149,10 +149,6 @@ function countUserMessages(entries: ReadonlyArray<ConversationEntry>): number {
   return n;
 }
 
-function isLastLayerUsageLike(value: unknown): value is LastLayerUsage {
-  return typeof value === 'object' && value !== null;
-}
-
 /** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
  *  entry was updated; otherwise returns the input reference. */
 function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
@@ -201,7 +197,13 @@ interface AppProps {
   /** When true, session saves are skipped. Resume still works from existing files. */
   disablePersistence: boolean;
   /** From `-n/--name`. Applied as `customTitle` on the next save. */
-  nameOverride?: string;
+  name?: string;
+  /**
+   * From `--session-id <uuid>`. When set and no session is being resumed,
+   * this UUID is used as the thread id / session id so the first save lands
+   * at that path. Ignored on resume (the saved session's id wins).
+   */
+  forcedSessionId?: string;
   /** Called by `/resume` when the user wants to restart against a different session. */
   onRestart: (target: SessionRestartTarget) => void;
 }
@@ -390,7 +392,8 @@ function App({
   plugins,
   initialSession,
   disablePersistence,
-  nameOverride,
+  name,
+  forcedSessionId,
   onRestart,
 }: AppProps): ReactNode {
   const initialEntries = useMemo(
@@ -420,33 +423,31 @@ function App({
 
   const harnessRef = useRef<AgentHarness | null>(null);
   const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'normal');
-  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(
-    isLastLayerUsageLike(initialSession?.lastLayerUsage)
-      ? initialSession.lastLayerUsage
-      : undefined,
-  );
+  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(initialSession?.lastLayerUsage);
   const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(
-    isLastLayerUsageLike(initialSession?.lastLayerUsage)
-      ? initialSession.lastLayerUsage
-      : undefined,
+    initialSession?.lastLayerUsage,
   );
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
-  const threadIdRef = useRef<string>(initialSession?.sessionId ?? crypto.randomUUID());
+  const threadIdRef = useRef<string>(
+    initialSession?.sessionId ?? forcedSessionId ?? crypto.randomUUID(),
+  );
   const sessionStartedAtRef = useRef<number>(
     initialSession ? Date.parse(initialSession.createdAt) : Date.now(),
   );
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
 
-  /** Held only while resumed — items from the saved transcript, fed into
-   *  `seedSessionHistory` on every harness creation so the LLM sees prior
-   *  context even after a `/model` or `/plan` swap recreates the harness. */
+  /** Holds the canonical item list used to seed every harness recreation —
+   *  seeded from the resumed session's items on mount and refreshed after
+   *  every settled turn. A stale copy would mean a subsequent `/model` or
+   *  `/plan` swap reseeds with pre-swap history only, dropping any turns
+   *  that landed in between. */
   const resumedItemsRef = useRef<ReadonlyArray<Item> | null>(
     initialSession ? stripUnresolvedToolCalls(initialSession.items) : null,
   );
   const createdAtRef = useRef<string>(initialSession?.createdAt ?? new Date().toISOString());
-  const customTitleRef = useRef<string | undefined>(nameOverride ?? initialSession?.customTitle);
+  const customTitleRef = useRef<string | undefined>(name ?? initialSession?.customTitle);
   const tagRef = useRef<string | undefined>(initialSession?.tag);
   const cumulativeUsageRef = useRef<{
     inputTokens: number;
@@ -702,13 +703,12 @@ function App({
    * is set.
    */
   const persistSession = useCallback(
-    async (turnItems: ReadonlyArray<Item>): Promise<void> => {
+    async (cleanedItems: ReadonlyArray<Item>): Promise<void> => {
       if (disablePersistence) {
         return;
       }
       const nowIso = new Date().toISOString();
       const currentEntries = entriesRef.current;
-      const cleanedItems = stripUnresolvedToolCalls(turnItems);
       const file: SessionFile = {
         version: 1,
         sessionId: threadIdRef.current,
@@ -792,7 +792,11 @@ function App({
           if (resp.cost !== undefined) {
             cumulativeCostRef.current += resp.cost;
           }
-          void persistSession(resp.items);
+          // Keep the ref in sync so a later `/model` or `/plan` swap reseeds
+          // from the latest items rather than the original resume snapshot.
+          const cleaned = stripUnresolvedToolCalls(resp.items);
+          resumedItemsRef.current = cleaned;
+          void persistSession(cleaned);
         },
       });
     },
@@ -1182,6 +1186,8 @@ export interface RunAgentOptions {
   disablePersistence?: boolean;
   /** From `-n/--name`; overrides the saved `customTitle` when provided. */
   name?: string;
+  /** From `--session-id`; forces a specific session id for a fresh session. */
+  forcedSessionId?: string;
 }
 
 /**
@@ -1205,6 +1211,9 @@ export async function runAgent(
       disablePersistence: options.disablePersistence ?? false,
       initialSession: currentSession,
       name: currentName,
+      // Only apply --session-id to the initial session — after a /resume
+      // swap, the loaded session's id wins (the fallback is never consulted).
+      forcedSessionId: currentSession === null ? options.forcedSessionId : undefined,
     });
     if (outcome.kind === 'exit') {
       return;
@@ -1242,6 +1251,7 @@ interface RunOneSessionOpts {
   disablePersistence: boolean;
   initialSession: SessionFile | null;
   name: string | undefined;
+  forcedSessionId: string | undefined;
 }
 
 async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutcome> {
@@ -1261,7 +1271,8 @@ async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutc
         plugins={opts.plugins}
         initialSession={opts.initialSession}
         disablePersistence={opts.disablePersistence}
-        nameOverride={opts.name}
+        name={opts.name}
+        forcedSessionId={opts.forcedSessionId}
         onRestart={(target) => {
           instance.unmount();
           resolveOnce(

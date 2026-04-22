@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react';
 import type { SessionMetadata } from '../../../sessions/types.js';
 import { useTheme } from '../theme.js';
 import { formatRelativeTimeAgo, truncateFirstPrompt } from './format.js';
+import { shouldCancelOnKey } from './resume-screen.js';
 import { SessionPreview } from './session-preview.js';
 import { TagTabs } from './tag-tabs.js';
 
@@ -169,7 +170,7 @@ export function LogSelector({
   const clampedCursor = filtered.length === 0 ? 0 : Math.min(cursor, filtered.length - 1);
 
   useInput((input, key) => {
-    if (key.escape || (key.ctrl && input === 'c')) {
+    if (shouldCancelOnKey(input, key)) {
       onCancel();
       return;
     }

@@ -4,7 +4,8 @@
  * `ResumeConversation` (src/screens/ResumeConversation.tsx).
  */
 
-import { Box, Text } from 'ink';
+import type { Key } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
@@ -89,6 +90,39 @@ function ErrorView({ message }: { message: string }): ReactNode {
   );
 }
 
+/** Esc and Ctrl+C both cancel — matches `log-selector.tsx`'s inline check. */
+export function shouldCancelOnKey(input: string, key: Pick<Key, 'escape' | 'ctrl'>): boolean {
+  if (key.escape) {
+    return true;
+  }
+  if (key.ctrl && input === 'c') {
+    return true;
+  }
+  return false;
+}
+
+/** Local useInput so Esc/Ctrl+C actually exit this view when LogSelector is unmounted. */
+function LoadFailedView({
+  sessionId,
+  onCancel,
+}: {
+  sessionId: string;
+  onCancel: () => void;
+}): ReactNode {
+  const theme = useTheme();
+  useInput((input, key) => {
+    if (shouldCancelOnKey(input, key)) {
+      onCancel();
+    }
+  });
+  return (
+    <Box flexDirection="column" padding={1}>
+      <Text color={theme.error}>Failed to load session: {sessionId}</Text>
+      <Text dimColor>Press Esc to exit.</Text>
+    </Box>
+  );
+}
+
 export function ResumeScreen({ cwd, onSelect, onCancel }: ResumeScreenProps): ReactNode {
   const [state, setState] = useState<LoadState>({
     kind: 'loading',
@@ -135,12 +169,7 @@ export function ResumeScreen({ cwd, onSelect, onCancel }: ResumeScreenProps): Re
   }
 
   if (loadFailed !== null) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Text color="red">Failed to load session: {loadFailed}</Text>
-        <Text dimColor>Press Esc to exit.</Text>
-      </Box>
-    );
+    return <LoadFailedView sessionId={loadFailed} onCancel={onCancel} />;
   }
 
   return (

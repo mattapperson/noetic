@@ -89,6 +89,13 @@ export interface CliFlags {
   forkSession: boolean;
   /** `--session-id <uuid>`: force a specific session id (validated upstream). */
   sessionId?: string;
+  /**
+   * `true` when the user passed `--model` on the command line. Lets callers
+   * distinguish "user explicitly chose a model" from "args parser filled in
+   * the default" so a config-file model (or a resumed session's model) can
+   * still take precedence.
+   */
+  modelExplicit: boolean;
   /** `-n / --name <name>`: set `customTitle` on the session. */
   name?: string;
   /** `--no-session-persistence`: skip disk writes for this run. */
@@ -99,5 +106,6 @@ export const DEFAULT_CLI_FLAGS: CliFlags = {
   continueLatest: false,
   resume: false,
   forkSession: false,
+  modelExplicit: false,
   noSessionPersistence: false,
 };

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -94,9 +95,9 @@ describe('saveSession + loadSession', () => {
     expect(result.mtimeMs).toBeGreaterThan(0);
 
     const loaded = await loadSession(session.cwd, session.sessionId);
-    expect(loaded).not.toBeNull();
-    expect(loaded?.firstPrompt).toBe('hello world');
-    expect(loaded?.items).toHaveLength(1);
+    assert(loaded !== null);
+    expect(loaded.firstPrompt).toBe('hello world');
+    expect(loaded.items).toHaveLength(1);
   });
 
   it('creates the sessions directory if missing', async () => {
@@ -145,8 +146,8 @@ describe('saveSession + loadSession', () => {
     ]);
 
     const loaded = await loadSession(session.cwd, session.sessionId);
-    expect(loaded).not.toBeNull();
-    expect(loaded?.sessionId).toBe(session.sessionId);
+    assert(loaded !== null);
+    expect(loaded.sessionId).toBe(session.sessionId);
   });
 
   it('reports conflict=true when on-disk mtime is newer than lastKnownMtimeMs', async () => {
