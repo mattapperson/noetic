@@ -12,6 +12,7 @@ import { loadPlugins } from '../plugins/loader.js';
 import { findMostRecentSession, loadSession, loadSessionByIdAnywhere } from '../sessions/store.js';
 import type { SessionFile } from '../sessions/types.js';
 import { runAgent } from '../tui/app.js';
+import { runPicker } from '../tui/run-picker.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import { parseArgs } from './args.js';
 
@@ -84,17 +85,13 @@ async function loadForResume(
     }
     return direct;
   }
-  // --resume with no id: the picker ships in Phase 5. For now, fall back to
-  // the most recent session for the cwd and warn.
-  const latest = await findMostRecentSession(cwd);
-  if (!latest) {
-    process.stderr.write('No prior session for this cwd; starting fresh.\n');
-    return null;
+  // --resume with no id: open the interactive picker.
+  const picked = await runPicker(cwd);
+  if (picked === null) {
+    // User pressed Esc — exit cleanly.
+    process.exit(0);
   }
-  process.stderr.write(
-    'Note: interactive picker not yet wired up — loading most recent session for this cwd.\n',
-  );
-  return latest;
+  return picked;
 }
 
 function forkSession(source: SessionFile, forcedId: string | undefined): SessionFile {
