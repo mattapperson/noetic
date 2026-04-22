@@ -25,7 +25,7 @@ export const SessionFileV1Schema = z.object({
   model: z.string().min(1),
   agentMode: z.enum([
     'normal',
-    'plan',
+    'planning',
   ]),
   createdAt: z.string().datetime(),
   modifiedAt: z.string().datetime(),

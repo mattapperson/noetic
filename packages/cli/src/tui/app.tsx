@@ -4,6 +4,7 @@
 
 import type {
   AgentHarness,
+  Item,
   LastLayerUsage,
   MemoryLayer,
   PlanState,
@@ -30,6 +31,10 @@ import { createAgentHarness } from '../harness/factory.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
+import type { SaveResult } from '../sessions/store.js';
+import { saveSession } from '../sessions/store.js';
+import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
+import type { SessionFile } from '../sessions/types.js';
 import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
@@ -96,6 +101,53 @@ function extractEventSuffix(type: string): string {
   return type.slice(idx + 1);
 }
 
+/**
+ * On resume, strip `deliveryStatus: 'queued'` from restored UserEntries —
+ * a queued message was either delivered (followed by assistant items) or
+ * will never be delivered now that the session is loading fresh. Treat it
+ * as sent so the UI doesn't claim it's still pending forever.
+ */
+function normalizeEntriesForResume(raw: ReadonlyArray<ConversationEntry>): ConversationEntry[] {
+  const out: ConversationEntry[] = [];
+  for (const entry of raw) {
+    if (isUserEntry(entry) && entry.deliveryStatus === 'queued') {
+      const next: UserEntry = {
+        ...entry,
+        deliveryStatus: 'sent',
+      };
+      out.push(next);
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+/** Derive the first user message's text, truncated. Returns empty string if none. */
+function deriveFirstPrompt(entries: ReadonlyArray<ConversationEntry>): string {
+  for (const entry of entries) {
+    if (isUserEntry(entry)) {
+      return entry.content.length > 200 ? `${entry.content.slice(0, 200)}…` : entry.content;
+    }
+  }
+  return '';
+}
+
+/** Count distinct user messages. */
+function countUserMessages(entries: ReadonlyArray<ConversationEntry>): number {
+  let n = 0;
+  for (const entry of entries) {
+    if (isUserEntry(entry)) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+function isLastLayerUsageLike(value: unknown): value is LastLayerUsage {
+  return typeof value === 'object' && value !== null;
+}
+
 /** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
  *  entry was updated; otherwise returns the input reference. */
 function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
@@ -139,6 +191,12 @@ function augmentTextWithPendingBash(text: string, pending: ReadonlyArray<LocalBa
 interface AppProps {
   config: AgentRuntimeConfig;
   plugins: ReadonlyArray<NoeticPlugin>;
+  /** A persisted session to resume. `null` starts fresh. Phase 4 wires this into TUI state. */
+  initialSession: SessionFile | null;
+  /** When true, session saves are skipped. Resume still works from existing files. */
+  disablePersistence: boolean;
+  /** From `-n/--name`. Applied as `customTitle` on the next save. */
+  nameOverride?: string;
 }
 
 interface ModalState {
@@ -220,6 +278,17 @@ interface ConsumeEventsOpts {
   };
   streamMetrics: StreamMetricsRefs;
   perItemCharsRef: MutableRefObject<Map<string, number>>;
+  /** Called once per turn_completed/turn_aborted with the latest response. No-op if persistence is disabled. */
+  onTurnSettled: (resp: {
+    items: ReadonlyArray<Item>;
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      cachedTokens?: number;
+    };
+    cost?: number;
+    lastLayerUsage: LastLayerUsage | undefined;
+  }) => void;
 }
 
 function resetTurnMetrics(opts: {
@@ -277,6 +346,12 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
             cached: resp.usage.cachedTokens,
           };
           opts.streamMetrics.liveTokens.current = exact;
+          opts.onTurnSettled({
+            items: resp.items,
+            usage: resp.usage,
+            cost: resp.cost,
+            lastLayerUsage: resp.lastLayerUsage,
+          });
         } catch {
           // getAgentResponse can only reject if no session exists; here it does.
         }
@@ -303,16 +378,30 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
 
 //#region App Component
 
-function App({ config, plugins }: AppProps): ReactNode {
-  const [entries, setEntries] = useState<ConversationEntry[]>([]);
+function App({
+  config,
+  plugins,
+  initialSession,
+  disablePersistence,
+  nameOverride,
+}: AppProps): ReactNode {
+  const initialEntries = useMemo(
+    () => (initialSession ? normalizeEntriesForResume(initialSession.entries) : []),
+    [
+      initialSession,
+    ],
+  );
+  const [entries, setEntries] = useState<ConversationEntry[]>(initialEntries);
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
-  const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
+  const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'normal');
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
-  const [effectiveCwd, setEffectiveCwd] = useState<string>(config.cwd);
+  const [effectiveCwd, setEffectiveCwd] = useState<string>(
+    initialSession?.effectiveCwd ?? config.cwd,
+  );
 
   const buildCtx = useMemo(
     () => createPluginContextBuilder(config),
@@ -322,15 +411,48 @@ function App({ config, plugins }: AppProps): ReactNode {
   );
 
   const harnessRef = useRef<AgentHarness | null>(null);
-  const harnessModeRef = useRef<AgentMode>('normal');
-  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
-  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
+  const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'normal');
+  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(
+    isLastLayerUsageLike(initialSession?.lastLayerUsage)
+      ? initialSession.lastLayerUsage
+      : undefined,
+  );
+  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(
+    isLastLayerUsageLike(initialSession?.lastLayerUsage)
+      ? initialSession.lastLayerUsage
+      : undefined,
+  );
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
-  const threadIdRef = useRef<string>(crypto.randomUUID());
-  const sessionStartedAtRef = useRef<number>(Date.now());
+  const threadIdRef = useRef<string>(initialSession?.sessionId ?? crypto.randomUUID());
+  const sessionStartedAtRef = useRef<number>(
+    initialSession ? Date.parse(initialSession.createdAt) : Date.now(),
+  );
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
+
+  /** Held only while resumed — items from the saved transcript, fed into
+   *  `seedSessionHistory` on every harness creation so the LLM sees prior
+   *  context even after a `/model` or `/plan` swap recreates the harness. */
+  const resumedItemsRef = useRef<ReadonlyArray<Item> | null>(
+    initialSession ? stripUnresolvedToolCalls(initialSession.items) : null,
+  );
+  const createdAtRef = useRef<string>(initialSession?.createdAt ?? new Date().toISOString());
+  const customTitleRef = useRef<string | undefined>(nameOverride ?? initialSession?.customTitle);
+  const tagRef = useRef<string | undefined>(initialSession?.tag);
+  const cumulativeUsageRef = useRef<{
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+  }>(
+    initialSession?.cumulativeUsage ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    },
+  );
+  const cumulativeCostRef = useRef<number>(initialSession?.cumulativeCost ?? 0);
+  const lastSaveMtimeRef = useRef<number | undefined>(undefined);
 
   const turnStartedAtRef = useRef<number | null>(null);
   const firstTokenAtRef = useRef<number | null>(null);
@@ -352,7 +474,7 @@ function App({ config, plugins }: AppProps): ReactNode {
   if (shellRef.current === null) {
     shellRef.current = createLocalShellAdapter();
   }
-  const effectiveCwdRef = useRef<string>(config.cwd);
+  const effectiveCwdRef = useRef<string>(initialSession?.effectiveCwd ?? config.cwd);
   const prevCwdRef = useRef<string | null>(null);
   const pendingBashOutputsRef = useRef<LocalBashResult[]>([]);
   const cdNoticeShownRef = useRef<boolean>(false);
@@ -510,6 +632,66 @@ function App({ config, plugins }: AppProps): ReactNode {
     [],
   );
 
+  /**
+   * Build the session save payload from current state and persist atomically.
+   * Fire-and-forget; errors land on stderr. No-op when `--no-session-persistence`
+   * is set.
+   */
+  const persistSession = useCallback(
+    async (turnItems: ReadonlyArray<Item>): Promise<void> => {
+      if (disablePersistence) {
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      const currentEntries = entriesRef.current;
+      const cleanedItems = stripUnresolvedToolCalls(turnItems);
+      const file: SessionFile = {
+        version: 1,
+        sessionId: threadIdRef.current,
+        cwd: config.cwd,
+        effectiveCwd: effectiveCwdRef.current,
+        model: harnessModelRef.current,
+        agentMode: harnessModeRef.current,
+        createdAt: createdAtRef.current,
+        modifiedAt: nowIso,
+        customTitle: customTitleRef.current,
+        tag: tagRef.current,
+        firstPrompt: deriveFirstPrompt(currentEntries),
+        messageCount: countUserMessages(currentEntries),
+        cumulativeUsage: {
+          ...cumulativeUsageRef.current,
+        },
+        cumulativeCost: cumulativeCostRef.current,
+        lastLayerUsage: lastLayerUsageRef.current,
+        items: [
+          ...cleanedItems,
+        ],
+        entries: [
+          ...currentEntries,
+        ],
+      };
+      try {
+        const result: SaveResult = await saveSession(file, {
+          lastKnownMtimeMs: lastSaveMtimeRef.current,
+        });
+        lastSaveMtimeRef.current = result.mtimeMs;
+        if (result.conflict) {
+          process.stderr.write(
+            `Warning: concurrent write detected for session ${file.sessionId}; overwrote anyway.\n`,
+          );
+        }
+      } catch (err: unknown) {
+        process.stderr.write(
+          `Session save failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    },
+    [
+      config.cwd,
+      disablePersistence,
+    ],
+  );
+
   /** Wire long-lived consumers to the harness's session streams. Called once
    *  per harness instance via `getOrCreateHarness`. */
   const wireStreams = useCallback(
@@ -537,10 +719,22 @@ function App({ config, plugins }: AppProps): ReactNode {
         pendingMessageIdsRef,
         streamMetrics,
         perItemCharsRef,
+        onTurnSettled: (resp) => {
+          cumulativeUsageRef.current = {
+            inputTokens: cumulativeUsageRef.current.inputTokens + resp.usage.inputTokens,
+            outputTokens: cumulativeUsageRef.current.outputTokens + resp.usage.outputTokens,
+            cachedTokens: cumulativeUsageRef.current.cachedTokens + (resp.usage.cachedTokens ?? 0),
+          };
+          if (resp.cost !== undefined) {
+            cumulativeCostRef.current += resp.cost;
+          }
+          void persistSession(resp.items);
+        },
       });
     },
     [
       streamMetrics,
+      persistSession,
     ],
   );
 
@@ -573,6 +767,13 @@ function App({ config, plugins }: AppProps): ReactNode {
       harnessModelRef.current = activeModel;
       memoryLayersRef.current = memoryLayers;
       setSkills(resolvedSkills);
+      if (resumedItemsRef.current !== null) {
+        // Seed BEFORE wiring streams — wireStreams triggers lazy session
+        // creation inside the harness via requireSession, and the session
+        // runner reads session.accumulatedItems on each turn. Seeding first
+        // ensures the first turn after resume has the full prior history.
+        harness.seedSessionHistory(threadIdRef.current, resumedItemsRef.current);
+      }
       wireStreams(harness);
       return harness;
     },
@@ -902,11 +1103,27 @@ function App({ config, plugins }: AppProps): ReactNode {
 
 //#region Entry Point
 
+export interface RunAgentOptions {
+  initialSession?: SessionFile | null;
+  disablePersistence?: boolean;
+  /** From `-n/--name`; overrides the saved `customTitle` when provided. */
+  name?: string;
+}
+
 export async function runAgent(
   plugins: ReadonlyArray<NoeticPlugin>,
   config: AgentRuntimeConfig,
+  options: RunAgentOptions = {},
 ): Promise<void> {
-  const { waitUntilExit } = render(<App config={config} plugins={plugins} />);
+  const { waitUntilExit } = render(
+    <App
+      config={config}
+      plugins={plugins}
+      initialSession={options.initialSession ?? null}
+      disablePersistence={options.disablePersistence ?? false}
+      nameOverride={options.name}
+    />,
+  );
   await waitUntilExit();
 }
 

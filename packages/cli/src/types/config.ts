@@ -71,3 +71,33 @@ export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export interface AgentRuntimeConfig extends AgentConfig {
   fs: FsAdapter;
 }
+
+/**
+ * CLI-only flags carried alongside the serializable `AgentConfig`.
+ * Kept off `AgentConfigSchema` because these describe runtime dispatch
+ * (which session to resume, whether to persist) rather than agent shape.
+ */
+export interface CliFlags {
+  /** `-c / --continue`: load the most recent session for the current cwd. */
+  continueLatest: boolean;
+  /**
+   * `-r / --resume`: `true` opens the picker, a string is treated as a
+   * session id (UUID), `false` means the flag was not passed.
+   */
+  resume: boolean | string;
+  /** `--fork-session`: on resume, generate a fresh sessionId for the loaded history. */
+  forkSession: boolean;
+  /** `--session-id <uuid>`: force a specific session id (validated upstream). */
+  sessionId?: string;
+  /** `-n / --name <name>`: set `customTitle` on the session. */
+  name?: string;
+  /** `--no-session-persistence`: skip disk writes for this run. */
+  noSessionPersistence: boolean;
+}
+
+export const DEFAULT_CLI_FLAGS: CliFlags = {
+  continueLatest: false,
+  resume: false,
+  forkSession: false,
+  noSessionPersistence: false,
+};
