@@ -79,6 +79,7 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       setAttribute() {},
       addEvent() {},
     },
+    readLayerState: <T>(_layerId: string): T | undefined => undefined,
     ...overrides,
   };
 }

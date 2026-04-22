@@ -30,27 +30,23 @@ export type WriteOutput = z.infer<typeof WriteOutputSchema>;
 
 //#region Tool Description
 
-const WRITE_TOOL_DESCRIPTION = `Write content to a file, creating it if it doesn't exist.
+const WRITE_TOOL_DESCRIPTION = `Write content to a file, creating it if it doesn't exist. OVERWRITES the existing file completely.
 
-IMPORTANT: If the file already exists, you MUST read it first with the read tool to prevent accidental overwrites.
+CRITICAL: If the file already exists you MUST use the Read tool first to view the current contents. Skipping this will silently overwrite uncommitted work.
 
 Usage notes:
-- Creates parent directories automatically if needed
-- Overwrites existing files completely
-- ALWAYS prefer editing existing files over creating new ones
-- NEVER create documentation files unless explicitly requested
-
-Parameters:
-- path: File path to write (relative or absolute)
-- content: The complete file content
+ - Creates parent directories automatically if needed.
+ - ALWAYS prefer editing an existing file (Edit) over creating a new one.
+ - NEVER proactively create documentation files (README.md, CHANGES.md, CHANGELOG.md, etc.) unless the user explicitly requests it.
+ - Do not write files outside the cwd without explicit user instruction.
 
 When to use:
-- Creating new files that don't exist
-- Completely rewriting a file's content
+ - Creating a net-new file the user has asked for.
+ - Completely rewriting a file's contents.
 
 When NOT to use:
-- Making small changes: Use edit tool
-- Appending to files: Use edit tool with context`;
+ - Small, targeted changes: use Edit.
+ - Appending content: use Edit with surrounding context.`;
 
 //#endregion
 

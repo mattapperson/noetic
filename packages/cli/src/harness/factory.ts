@@ -17,8 +17,13 @@ import {
   toolMemoryLayer,
   workingMemory,
 } from '@noetic/core';
-
-import { buildSystemPrompt } from '../ai/system-prompt.js';
+import type { SystemPromptInputs } from '../ai/system-prompt.js';
+import { composeSystemPrompt } from '../ai/system-prompt.js';
+import { loadAgentInstructions } from '../config/agent-md-loader.js';
+import { agentMdLayer } from '../memory/agent-md-layer.js';
+import { reminderLayer } from '../memory/reminder-layer.js';
+import type { ReminderTrigger } from '../memory/reminder-triggers.js';
+import { BUILTIN_TRIGGERS, createReminderRegistry } from '../memory/reminder-triggers.js';
 import { skillsLayer } from '../memory/skills-layer.js';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
@@ -69,6 +74,37 @@ async function collectPluginMemory(
     layers.push(...memoryLayers);
   }
   return layers;
+}
+
+async function collectPluginReminderTriggers(
+  plugins: ReadonlyArray<NoeticPlugin>,
+  buildCtx: PluginContextBuilder,
+): Promise<ReminderTrigger[]> {
+  const triggers: ReminderTrigger[] = [];
+  for (const plugin of plugins) {
+    const provided = await plugin.reminderTriggers?.(buildCtx(plugin.name));
+    if (!provided) {
+      continue;
+    }
+    triggers.push(...provided);
+  }
+  return triggers;
+}
+
+async function detectIsGitRepo(fs: FsAdapter, cwd: string): Promise<boolean> {
+  try {
+    await fs.access(`${cwd}/.git`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function composeBaseInstructions(config: AgentConfig, inputs: SystemPromptInputs): string {
+  if (config.systemPromptMode === 'replace' && config.systemPrompt !== undefined) {
+    return config.systemPrompt;
+  }
+  return composeSystemPrompt(inputs);
 }
 
 function filterTools(allTools: Tool[], config: AgentConfig): Tool[] {
@@ -153,6 +189,25 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // Build memory layers including plan and skills layers
   const pluginMemory = await collectPluginMemory(plugins, buildContext);
 
+  // Load AGENT.md + rules once per harness construction. Layer caches the result
+  // in state via `scope: 'execution'`, so this doesn't re-read per turn.
+  const agentInstructions = await loadAgentInstructions({
+    cwd: config.cwd,
+    fs,
+    shell,
+    trustProjectEmbeddedCommands: config.trustProjectEmbeddedCommands === true,
+  });
+
+  // Assemble the reminder registry: built-ins + plugin-contributed triggers.
+  const reminderRegistry = createReminderRegistry();
+  for (const trigger of BUILTIN_TRIGGERS) {
+    reminderRegistry.register(trigger);
+  }
+  const pluginTriggers = await collectPluginReminderTriggers(plugins, buildContext);
+  for (const trigger of pluginTriggers) {
+    reminderRegistry.register(trigger);
+  }
+
   // The built-in (or user-overridden) `plan-mode` skill carries detailed
   // authoring guidance for plan.md PRDs and FlowSchema plan-trees. Inject its
   // content as additional plan instructions so it's in context from turn one
@@ -169,12 +224,18 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     planInstructionBlocks.length > 0 ? planInstructionBlocks.join('\n\n---\n\n') : undefined;
 
   const memory: MemoryLayer[] = [
+    reminderLayer({
+      registry: reminderRegistry,
+    }),
     planMemory({
       additionalPlanInstructions,
       onEnterSession: planHooks?.onEnterSession,
       onExit: planHooks?.onExit,
     }),
     workingMemory(),
+    agentMdLayer({
+      loader: () => Promise.resolve(agentInstructions),
+    }),
     observationalMemory(),
     fileReference(),
     durableTaskState(),
@@ -189,6 +250,18 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       : []),
   ];
 
+  const isGitRepo = await detectIsGitRepo(fs, config.cwd);
+  const instructions = composeBaseInstructions(config, {
+    cwd: config.cwd,
+    platform: process.platform,
+    shell: process.env.SHELL ?? 'unknown',
+    sessionDate: new Date().toISOString(),
+    model: config.model,
+    isGitRepo,
+    userOverrideIntro: config.systemPromptMode === 'replace' ? undefined : config.systemPrompt,
+    mode,
+  });
+
   const harness = new AgentHarness({
     name: 'noetic-cli',
     fs,
@@ -199,7 +272,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     initialStep: step.llm({
       id: 'chat',
       model: config.model,
-      instructions: config.systemPrompt ?? buildSystemPrompt(config.cwd),
+      instructions,
       tools,
     }),
     memory,

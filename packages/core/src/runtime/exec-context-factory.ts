@@ -29,5 +29,7 @@ export function contextToExecCtx(
       setAttribute: (key, value) => ctx.span.setAttribute(key, value),
       addEvent: (name, attributes) => ctx.span.addEvent(name, attributes),
     },
+    readLayerState: <T>(layerId: string): T | undefined =>
+      ctx.harness.getLayerState<T>(ctx.id, layerId),
   };
 }

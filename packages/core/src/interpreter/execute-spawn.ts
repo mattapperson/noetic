@@ -61,8 +61,9 @@ function resolveLayersForSpawn<TMemory, I, O>(
 }
 
 function buildChildExecutionContext(ctx: Context): ExecutionContext {
+  const childId = crypto.randomUUID();
   return {
-    executionId: crypto.randomUUID(),
+    executionId: childId,
     threadId: ctx.threadId,
     resourceId: ctx.resourceId,
     depth: ctx.depth + 1,
@@ -76,6 +77,8 @@ function buildChildExecutionContext(ctx: Context): ExecutionContext {
     shell: ctx.harness.shell,
     tokenize: naiveTokenize,
     trace: noopTrace,
+    readLayerState: <T>(layerId: string): T | undefined =>
+      ctx.harness.getLayerState<T>(childId, layerId),
   };
 }
 
@@ -95,6 +98,8 @@ function buildParentExecutionContext(ctx: Context): ExecutionContext {
     shell: ctx.harness.shell,
     tokenize: naiveTokenize,
     trace: noopTrace,
+    readLayerState: <T>(layerId: string): T | undefined =>
+      ctx.harness.getLayerState<T>(ctx.id, layerId),
   };
 }
 

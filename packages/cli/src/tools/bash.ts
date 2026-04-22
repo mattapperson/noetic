@@ -65,25 +65,52 @@ interface ExecState {
 
 //#region Tool Description
 
-const BASH_TOOL_DESCRIPTION = `Execute bash commands in the shell.
+const BASH_TOOL_DESCRIPTION = `Execute a bash command and return its output.
 
-Usage notes:
-- ALWAYS quote file paths containing spaces with double quotes
-- NEVER use interactive flags (-i) like 'git rebase -i' or 'git add -i'
-- Prefer dedicated tools over bash: read (not cat), write (not echo >), edit (not sed), grep (not grep/rg)
-- Output truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. If truncated, full output saved to temp file.
+The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's profile (bash or zsh).
 
-Parameters:
-- command: The bash command to execute
-- timeout: Timeout in seconds (default: ${DEFAULT_BASH_TIMEOUT}s, max: 600s)
+IMPORTANT: Avoid using this tool to run \`find\`, \`grep\`, \`cat\`, \`head\`, \`tail\`, \`sed\`, \`awk\`, or \`echo\` commands unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Use the dedicated tool instead:
+ - File search: Use Find (NOT find or ls)
+ - Content search: Use Grep (NOT grep or rg)
+ - Read files: Use Read (NOT cat/head/tail)
+ - Edit files: Use Edit (NOT sed/awk)
+ - Write files: Use Write (NOT echo >/cat <<EOF)
+ - Communication: Output text directly (NOT echo/printf)
 
-When NOT to use:
-- File reading: Use the read tool instead of cat/head/tail
-- File writing: Use the write tool instead of echo/cat heredoc
-- File editing: Use the edit tool instead of sed/awk
-- Code search: Use the grep tool instead of grep/rg
-- File search: Use the find tool instead of find command
-- Directory listing: Use the ls tool instead of ls command`;
+# Instructions
+ - Before creating new directories or files, run \`ls\` first to verify the parent exists.
+ - Always quote file paths with spaces using double quotes (e.g., cd "path with spaces/file.txt").
+ - Maintain your current working directory throughout the session by using absolute paths and avoiding \`cd\`. Use \`cd\` only if the user explicitly requests it.
+ - Default timeout: ${DEFAULT_BASH_TIMEOUT}s. Max: 600s. Output is truncated to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB; if truncated, the full output is saved to a temp file whose path is returned.
+
+# Issuing multiple commands
+ - Independent commands that can run in parallel: make multiple Bash calls in a single message.
+ - Commands that depend on each other: use a single Bash call with '&&'.
+ - Use ';' only when ordering matters but earlier failures are acceptable.
+ - Do NOT use newlines to separate commands (newlines are OK inside quoted strings).
+
+# Git safety protocol
+ - NEVER update the git config.
+ - NEVER run destructive git commands (push --force, reset --hard, checkout ., restore ., clean -f, branch -D) unless the user explicitly requests them. Destructive actions can result in lost work — only run them when given direct instructions.
+ - NEVER skip hooks (--no-verify, --no-gpg-sign) unless the user explicitly requests it. If a hook fails, investigate and fix the underlying issue.
+ - NEVER force-push to main/master. Warn the user if they request it.
+ - CRITICAL: Always create NEW commits rather than amending, unless the user explicitly requests an amend. When a pre-commit hook fails the commit did NOT happen — so --amend would modify the PREVIOUS commit, which may destroy work.
+ - Prefer adding specific files by name over \`git add -A\` / \`git add .\`, which can accidentally include secrets (.env, credentials) or large binaries.
+ - NEVER commit changes unless the user explicitly asks you to.
+ - Never use \`-i\` flags (git rebase -i, git add -i) — they require interactive input that is not supported.
+ - Never use \`--no-edit\` with \`git rebase\` — it is not a valid rebase option.
+ - Always pass commit messages via HEREDOC to preserve formatting.
+
+# Committing (only when the user explicitly asks)
+ 1. In parallel: \`git status\` (never with -uall — can cause memory issues on large repos), \`git diff\`, and \`git log\` to match the repo's commit-message style.
+ 2. Draft a concise 1-2 sentence message focused on *why*, not *what* — the diff already shows what changed.
+ 3. In parallel: stage specific files by name, run the commit using a HEREDOC-passed message, then run \`git status\` to verify success.
+ 4. If the commit fails due to a pre-commit hook: fix the issue, re-stage, and create a NEW commit — never amend.
+
+# Sleep hygiene
+ - Do not sleep between commands that can run immediately.
+ - For long-running commands, run the command synchronously if it's under 2 minutes, or ask the user how to proceed for longer jobs.
+ - Never retry failing commands in a sleep loop — diagnose the root cause.`;
 
 //#endregion
 

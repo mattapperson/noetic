@@ -105,6 +105,7 @@ export type InferMemory<T extends MemoryConfig> = T['_shape'];
 
 /** @public Well-known ordering slots for positioning memory layers in the recall/store pipeline. */
 export const Slot = {
+  REMINDER: 80,
   STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
@@ -166,6 +167,12 @@ export interface ExecutionContext {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
   };
+  /**
+   * Snapshot a sibling memory layer's state by its `layer.id`.
+   * Returns `undefined` if no layer with that ID has stored state in this execution.
+   * Enables cross-layer coordination (e.g., a reminder layer reading a planning layer's mode flag).
+   */
+  readLayerState<T>(layerId: string): T | undefined;
 }
 
 /** @public Low-level key-value persistence backend used by scoped storage and memory layers. */
