@@ -85,6 +85,7 @@ type BudgetConfig =
 
 ```typescript
 export const Slot = {
+  REMINDER:        80,
   STEERING:        90,
   WORKING_MEMORY:  100,
   ENTITY:          150,
@@ -95,6 +96,8 @@ export const Slot = {
   SEMANTIC_RECALL: 400,
 } as const;
 ```
+
+`REMINDER` (80) is reserved for ephemeral `<system-reminder>`-wrapped developer messages (e.g., mid-conversation nags, plan-mode reminders, error-recovery hints). Layers using this slot typically maintain their own turn counters and throttle emissions per trigger. Sitting below `STEERING` ensures reminders are visible to the model before any steering guidance runs.
 
 The agent harness sorts layers by slot ascending. Ties broken by array index (stable sort). Custom layers SHOULD use multiples of 10 within these ranges. The agent harness does NOT enforce slot uniqueness.
 
@@ -601,12 +604,17 @@ interface ExecutionContext {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
   };
+  readLayerState<T>(layerId: string): T | undefined;
 }
 ```
 
 `ExecutionContext` includes `readonly fs: FsAdapter` so memory layers can perform filesystem operations (e.g., reading config files, persisting state to disk) through the harness's configured adapter.
 
-Note what is NOT on `ExecutionContext`: no `getLayerState()`, no `storage` (captured in `init`), no `itemLog` mutation, no `setRenderingHint()`.
+`readLayerState<T>(layerId)` returns a sibling layer's current state by its `layer.id`, or `undefined` if no such state exists yet. This enables cross-layer coordination (e.g., a reminder layer reading a planning layer's mode flag). Layers MUST treat the returned value as read-only — mutations are not persisted and observability is undefined.
+
+**The generic `T` is an author-assertion — it is NOT runtime-validated.** Any layer may register under the queried id with an arbitrary state shape (including `unknown` where the reader expected a specific object), so callers MUST add a runtime shape guard (e.g. `Array.isArray`, a Zod parse, or a narrow `typeof` check) before dereferencing fields. The canonical pattern is a small type-predicate function (`function hasX(v: unknown): v is { x: ... }`) used immediately after the `readLayerState` call.
+
+Note what is NOT on `ExecutionContext`: no `storage` (captured in `init`), no `itemLog` mutation, no `setRenderingHint()`.
 
 ---
 

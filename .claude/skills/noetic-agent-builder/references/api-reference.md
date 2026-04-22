@@ -622,6 +622,7 @@ const msg2 = harness.tryRecv(channel, ctx);
 
 ```typescript
 const Slot = {
+  REMINDER: 80,
   STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
@@ -632,6 +633,55 @@ const Slot = {
   SEMANTIC_RECALL: 400,
 } as const;
 ```
+
+**`Slot.REMINDER` (80)** is reserved for layers that inject `<system-reminder>`-wrapped developer messages (turn-counter-throttled nags, plan-mode reminders, error-recovery hints). Reminder-slot layers maintain their own state and emit before any steering guidance.
+
+## Cross-layer state reads
+
+`ExecutionContext.readLayerState<T>(layerId)` returns a sibling layer's current state (or `undefined`). Used when a layer needs to inspect another layer's progress — e.g. the CLI reminder layer reads `plan-memory` to know whether plan mode is active:
+
+```typescript
+const plan = ctx.readLayerState<{ session?: { mode?: string } }>('plan-memory');
+if (plan?.session?.mode === 'planning') {
+  // emit a plan-mode reminder
+}
+```
+
+Treat returned values as read-only.
+
+## CLI-specific memory layers
+
+These are shipped by `@noetic/cli` on top of the core framework:
+
+### `reminderLayer(opts)`
+
+```typescript
+import { reminderLayer, createReminderRegistry, BUILTIN_TRIGGERS } from '@noetic/cli';
+
+const registry = createReminderRegistry();
+for (const t of BUILTIN_TRIGGERS) registry.register(t);
+registry.register({
+  id: 'my-custom',
+  minTurnsBetweenReminders: 10,
+  timing: 'recall',
+  shouldFire: ({ state }) => state.toolUsageCounts.get('Bash')! > 15 ? 'heavy Bash usage — consider dedicated tools' : null,
+});
+
+const layer = reminderLayer({ registry });
+```
+
+Emits `<system-reminder>`-wrapped developer messages based on registered triggers. `timing: 'recall'` fires on next turn; `timing: 'immediate'` fires via `onItemAppend` for faster reactivity.
+
+### `agentMdLayer(opts)`
+
+```typescript
+import { agentMdLayer, loadAgentInstructions } from '@noetic/cli';
+
+const instructions = await loadAgentInstructions({ cwd, fs });
+const layer = agentMdLayer({ loader: () => Promise.resolve(instructions) });
+```
+
+Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction files. Supports `@path.md` imports and skills-style `!command` inline execution (user-origin always; project-origin gated by `config.trustProjectEmbeddedCommands`). See `specs/12a-cli-memory-layers.md` for full discovery order.
 
 ## Memory Layer Hooks
 

@@ -128,29 +128,18 @@ function buildTextResult(params: BuildTextResultParams): ReadOutput {
 
 //#region Tool Description
 
-const READ_TOOL_DESCRIPTION = `Read file contents from the filesystem.
+const READ_TOOL_DESCRIPTION = `Read a file from the local filesystem.
 
 Usage notes:
-- Path can be relative to cwd or absolute
-- Images (jpg, png, gif, webp) are detected and noted
-- Text files return numbered lines for reference in edit tool
-- Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever first)
-- Use offset/limit for large files
+ - \`path\` may be relative to cwd or absolute; prefer absolute paths when known.
+ - By default, reads up to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB from the beginning. Use \`offset\` + \`limit\` for large files.
+ - When you already know which part of the file you need, only read that part — important for large files.
+ - Results are returned with cat-style line-number prefixes (leading spaces + line number + tab). When referencing content in the Edit tool, strip the prefix and preserve the exact indentation that follows it.
+ - Image files (jpg, png, gif, webp) are detected from extension and returned as base64 stubs rather than text.
+ - Binary / non-UTF-8 files may render garbled — use Bash with \`file\` to inspect when in doubt.
+ - Empty files return a system warning placeholder in place of content.
 
-Parameters:
-- path: File path (relative or absolute)
-- offset: Start line number (1-indexed, optional)
-- limit: Max lines to read (optional)
-
-When to use:
-- Reading file contents before editing
-- Viewing images
-- Understanding file structure
-
-When NOT to use:
-- Searching within files: Use grep tool
-- Finding files by name: Use find tool
-- Listing directory contents: Use ls tool`;
+This tool reads files only. To list a directory use Ls, to search within files use Grep, and to find files by name use Find.`;
 
 //#endregion
 

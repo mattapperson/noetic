@@ -36,6 +36,24 @@ export const AgentConfigSchema = z.object({
   apiKey: z.string().min(1),
   maxTurns: z.number().int().positive(),
   systemPrompt: z.string().optional(),
+  /**
+   * How `systemPrompt` combines with the built-in Claude-Code-parity prompt.
+   * - `'compose'` (default): `systemPrompt` replaces the intro section only;
+   *   cyber-risk, doing-tasks, tone/style, and env-info sections are still appended.
+   * - `'replace'`: `systemPrompt` fully replaces the built-in prompt.
+   * Ignored when `systemPrompt` is unset.
+   */
+  systemPromptMode: z
+    .enum([
+      'replace',
+      'compose',
+    ])
+    .optional(),
+  /**
+   * If `true`, project-origin AGENT.md / rules files execute `!command` lines at session start.
+   * Default `false` for supply-chain safety. User-origin files (`~/...`) always execute commands.
+   */
+  trustProjectEmbeddedCommands: z.boolean().optional(),
   plugins: z.array(PluginSpecSchema).optional(),
   tools: z
     .object({

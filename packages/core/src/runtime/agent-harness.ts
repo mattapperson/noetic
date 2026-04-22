@@ -816,7 +816,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   private toExecCtx(ctx: Context): ExecutionContext {
-    return contextToExecCtx(ctx, (request) => this.callModel(request));
+    return contextToExecCtx(ctx, {
+      callModel: (request) => this.callModel(request),
+    });
   }
 
   async initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {
