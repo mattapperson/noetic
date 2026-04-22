@@ -394,6 +394,7 @@ export function makeMockHarness(): AgentHarnessContract {
       kind: 'idle',
     }),
     getQueueSize: () => 0,
+    seedSessionHistory: () => {},
     run: async () => {
       throw new Error('not impl');
     },

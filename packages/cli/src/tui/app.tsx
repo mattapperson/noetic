@@ -4,6 +4,7 @@
 
 import type {
   AgentHarness,
+  Item,
   LastLayerUsage,
   MemoryLayer,
   PlanState,
@@ -24,12 +25,21 @@ import {
   parseBashCommand,
   parseSlashCommand,
 } from '../commands/index.js';
-import type { Command, CommandContext } from '../commands/types.js';
+import type {
+  Command,
+  CommandContext,
+  SessionRestartTarget,
+  SessionSnapshot,
+} from '../commands/types.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness } from '../harness/factory.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
+import type { SaveResult } from '../sessions/store.js';
+import { saveSession } from '../sessions/store.js';
+import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
+import type { SessionFile } from '../sessions/types.js';
 import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
@@ -96,6 +106,49 @@ function extractEventSuffix(type: string): string {
   return type.slice(idx + 1);
 }
 
+/**
+ * On resume, strip `deliveryStatus: 'queued'` from restored UserEntries —
+ * a queued message was either delivered (followed by assistant items) or
+ * will never be delivered now that the session is loading fresh. Treat it
+ * as sent so the UI doesn't claim it's still pending forever.
+ */
+function normalizeEntriesForResume(raw: ReadonlyArray<ConversationEntry>): ConversationEntry[] {
+  const out: ConversationEntry[] = [];
+  for (const entry of raw) {
+    if (isUserEntry(entry) && entry.deliveryStatus === 'queued') {
+      const next: UserEntry = {
+        ...entry,
+        deliveryStatus: 'sent',
+      };
+      out.push(next);
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+/** Derive the first user message's text, truncated. Returns empty string if none. */
+function deriveFirstPrompt(entries: ReadonlyArray<ConversationEntry>): string {
+  for (const entry of entries) {
+    if (isUserEntry(entry)) {
+      return entry.content.length > 200 ? `${entry.content.slice(0, 200)}…` : entry.content;
+    }
+  }
+  return '';
+}
+
+/** Count distinct user messages. */
+function countUserMessages(entries: ReadonlyArray<ConversationEntry>): number {
+  let n = 0;
+  for (const entry of entries) {
+    if (isUserEntry(entry)) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
 /** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
  *  entry was updated; otherwise returns the input reference. */
 function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
@@ -139,6 +192,20 @@ function augmentTextWithPendingBash(text: string, pending: ReadonlyArray<LocalBa
 interface AppProps {
   config: AgentRuntimeConfig;
   plugins: ReadonlyArray<NoeticPlugin>;
+  /** A persisted session to resume. `null` starts fresh. */
+  initialSession: SessionFile | null;
+  /** When true, session saves are skipped. Resume still works from existing files. */
+  disablePersistence: boolean;
+  /** From `-n/--name`. Applied as `customTitle` on the next save. */
+  name?: string;
+  /**
+   * From `--session-id <uuid>`. When set and no session is being resumed,
+   * this UUID is used as the thread id / session id so the first save lands
+   * at that path. Ignored on resume (the saved session's id wins).
+   */
+  forcedSessionId?: string;
+  /** Called by `/resume` when the user wants to restart against a different session. */
+  onRestart: (target: SessionRestartTarget) => void;
 }
 
 interface ModalState {
@@ -220,6 +287,17 @@ interface ConsumeEventsOpts {
   };
   streamMetrics: StreamMetricsRefs;
   perItemCharsRef: MutableRefObject<Map<string, number>>;
+  /** Called once per turn_completed/turn_aborted with the latest response. No-op if persistence is disabled. */
+  onTurnSettled: (resp: {
+    items: ReadonlyArray<Item>;
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      cachedTokens?: number;
+    };
+    cost?: number;
+    lastLayerUsage: LastLayerUsage | undefined;
+  }) => void;
 }
 
 function resetTurnMetrics(opts: {
@@ -277,6 +355,12 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
             cached: resp.usage.cachedTokens,
           };
           opts.streamMetrics.liveTokens.current = exact;
+          opts.onTurnSettled({
+            items: resp.items,
+            usage: resp.usage,
+            cost: resp.cost,
+            lastLayerUsage: resp.lastLayerUsage,
+          });
         } catch {
           // getAgentResponse can only reject if no session exists; here it does.
         }
@@ -303,16 +387,32 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
 
 //#region App Component
 
-function App({ config, plugins }: AppProps): ReactNode {
-  const [entries, setEntries] = useState<ConversationEntry[]>([]);
+function App({
+  config,
+  plugins,
+  initialSession,
+  disablePersistence,
+  name,
+  forcedSessionId,
+  onRestart,
+}: AppProps): ReactNode {
+  const initialEntries = useMemo(
+    () => (initialSession ? normalizeEntriesForResume(initialSession.entries) : []),
+    [
+      initialSession,
+    ],
+  );
+  const [entries, setEntries] = useState<ConversationEntry[]>(initialEntries);
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
-  const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
+  const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'normal');
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
-  const [effectiveCwd, setEffectiveCwd] = useState<string>(config.cwd);
+  const [effectiveCwd, setEffectiveCwd] = useState<string>(
+    initialSession?.effectiveCwd ?? config.cwd,
+  );
 
   const buildCtx = useMemo(
     () => createPluginContextBuilder(config),
@@ -322,15 +422,46 @@ function App({ config, plugins }: AppProps): ReactNode {
   );
 
   const harnessRef = useRef<AgentHarness | null>(null);
-  const harnessModeRef = useRef<AgentMode>('normal');
-  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
-  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
+  const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'normal');
+  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(initialSession?.lastLayerUsage);
+  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(
+    initialSession?.lastLayerUsage,
+  );
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
-  const threadIdRef = useRef<string>(crypto.randomUUID());
-  const sessionStartedAtRef = useRef<number>(Date.now());
+  const threadIdRef = useRef<string>(
+    initialSession?.sessionId ?? forcedSessionId ?? crypto.randomUUID(),
+  );
+  const sessionStartedAtRef = useRef<number>(
+    initialSession ? Date.parse(initialSession.createdAt) : Date.now(),
+  );
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
+
+  /** Holds the canonical item list used to seed every harness recreation —
+   *  seeded from the resumed session's items on mount and refreshed after
+   *  every settled turn. A stale copy would mean a subsequent `/model` or
+   *  `/plan` swap reseeds with pre-swap history only, dropping any turns
+   *  that landed in between. */
+  const resumedItemsRef = useRef<ReadonlyArray<Item> | null>(
+    initialSession ? stripUnresolvedToolCalls(initialSession.items) : null,
+  );
+  const createdAtRef = useRef<string>(initialSession?.createdAt ?? new Date().toISOString());
+  const customTitleRef = useRef<string | undefined>(name ?? initialSession?.customTitle);
+  const tagRef = useRef<string | undefined>(initialSession?.tag);
+  const cumulativeUsageRef = useRef<{
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+  }>(
+    initialSession?.cumulativeUsage ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    },
+  );
+  const cumulativeCostRef = useRef<number>(initialSession?.cumulativeCost ?? 0);
+  const lastSaveMtimeRef = useRef<number | undefined>(undefined);
 
   const turnStartedAtRef = useRef<number | null>(null);
   const firstTokenAtRef = useRef<number | null>(null);
@@ -352,7 +483,7 @@ function App({ config, plugins }: AppProps): ReactNode {
   if (shellRef.current === null) {
     shellRef.current = createLocalShellAdapter();
   }
-  const effectiveCwdRef = useRef<string>(config.cwd);
+  const effectiveCwdRef = useRef<string>(initialSession?.effectiveCwd ?? config.cwd);
   const prevCwdRef = useRef<string | null>(null);
   const pendingBashOutputsRef = useRef<LocalBashResult[]>([]);
   const cdNoticeShownRef = useRef<boolean>(false);
@@ -438,6 +569,62 @@ function App({ config, plugins }: AppProps): ReactNode {
     setEntries([]);
   }, []);
 
+  const clearSession = useCallback(() => {
+    // Full session reset: everything a `noetic --resume` would rebuild, plus UI.
+    threadIdRef.current = crypto.randomUUID();
+    createdAtRef.current = new Date().toISOString();
+    sessionStartedAtRef.current = Date.now();
+    resumedItemsRef.current = null;
+    customTitleRef.current = undefined;
+    tagRef.current = undefined;
+    cumulativeUsageRef.current = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
+    cumulativeCostRef.current = 0;
+    lastSaveMtimeRef.current = undefined;
+    lastLayerUsageRef.current = undefined;
+    setLastLayerUsage(undefined);
+    harnessRef.current = null;
+    streamWiredHarnessRef.current = null;
+    pendingMessageIdsRef.current.clear();
+    pendingBashOutputsRef.current = [];
+    setEntries([]);
+    setStatus('ready');
+  }, []);
+
+  const setCustomTitle = useCallback((name: string | undefined) => {
+    customTitleRef.current = name;
+  }, []);
+
+  const setTag = useCallback((next: string | undefined) => {
+    tagRef.current = next;
+  }, []);
+
+  const buildSessionSnapshot = useCallback(
+    (currentEntries: ReadonlyArray<ConversationEntry>): SessionSnapshot => ({
+      sessionId: threadIdRef.current,
+      cwd: config.cwd,
+      effectiveCwd: effectiveCwdRef.current,
+      model: harnessModelRef.current,
+      createdAt: createdAtRef.current,
+      customTitle: customTitleRef.current,
+      tag: tagRef.current,
+      firstPrompt: deriveFirstPrompt(currentEntries),
+      messageCount: countUserMessages(currentEntries),
+      cumulativeUsage: {
+        ...cumulativeUsageRef.current,
+      },
+      cumulativeCost: cumulativeCostRef.current,
+      persistenceEnabled: !disablePersistence,
+    }),
+    [
+      config.cwd,
+      disablePersistence,
+    ],
+  );
+
   const handleModalClose = useCallback(() => {
     if (!modal) {
       return;
@@ -510,6 +697,65 @@ function App({ config, plugins }: AppProps): ReactNode {
     [],
   );
 
+  /**
+   * Build the session save payload from current state and persist atomically.
+   * Fire-and-forget; errors land on stderr. No-op when `--no-session-persistence`
+   * is set.
+   */
+  const persistSession = useCallback(
+    async (cleanedItems: ReadonlyArray<Item>): Promise<void> => {
+      if (disablePersistence) {
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      const currentEntries = entriesRef.current;
+      const file: SessionFile = {
+        version: 1,
+        sessionId: threadIdRef.current,
+        cwd: config.cwd,
+        effectiveCwd: effectiveCwdRef.current,
+        model: harnessModelRef.current,
+        agentMode: harnessModeRef.current,
+        createdAt: createdAtRef.current,
+        modifiedAt: nowIso,
+        customTitle: customTitleRef.current,
+        tag: tagRef.current,
+        firstPrompt: deriveFirstPrompt(currentEntries),
+        messageCount: countUserMessages(currentEntries),
+        cumulativeUsage: {
+          ...cumulativeUsageRef.current,
+        },
+        cumulativeCost: cumulativeCostRef.current,
+        lastLayerUsage: lastLayerUsageRef.current,
+        items: [
+          ...cleanedItems,
+        ],
+        entries: [
+          ...currentEntries,
+        ],
+      };
+      try {
+        const result: SaveResult = await saveSession(file, {
+          lastKnownMtimeMs: lastSaveMtimeRef.current,
+        });
+        lastSaveMtimeRef.current = result.mtimeMs;
+        if (result.conflict) {
+          process.stderr.write(
+            `Warning: concurrent write detected for session ${file.sessionId}; overwrote anyway.\n`,
+          );
+        }
+      } catch (err: unknown) {
+        process.stderr.write(
+          `Session save failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    },
+    [
+      config.cwd,
+      disablePersistence,
+    ],
+  );
+
   /** Wire long-lived consumers to the harness's session streams. Called once
    *  per harness instance via `getOrCreateHarness`. */
   const wireStreams = useCallback(
@@ -537,10 +783,26 @@ function App({ config, plugins }: AppProps): ReactNode {
         pendingMessageIdsRef,
         streamMetrics,
         perItemCharsRef,
+        onTurnSettled: (resp) => {
+          cumulativeUsageRef.current = {
+            inputTokens: cumulativeUsageRef.current.inputTokens + resp.usage.inputTokens,
+            outputTokens: cumulativeUsageRef.current.outputTokens + resp.usage.outputTokens,
+            cachedTokens: cumulativeUsageRef.current.cachedTokens + (resp.usage.cachedTokens ?? 0),
+          };
+          if (resp.cost !== undefined) {
+            cumulativeCostRef.current += resp.cost;
+          }
+          // Keep the ref in sync so a later `/model` or `/plan` swap reseeds
+          // from the latest items rather than the original resume snapshot.
+          const cleaned = stripUnresolvedToolCalls(resp.items);
+          resumedItemsRef.current = cleaned;
+          void persistSession(cleaned);
+        },
       });
     },
     [
       streamMetrics,
+      persistSession,
     ],
   );
 
@@ -573,6 +835,13 @@ function App({ config, plugins }: AppProps): ReactNode {
       harnessModelRef.current = activeModel;
       memoryLayersRef.current = memoryLayers;
       setSkills(resolvedSkills);
+      if (resumedItemsRef.current !== null) {
+        // Seed BEFORE wiring streams — wireStreams triggers lazy session
+        // creation inside the harness via requireSession, and the session
+        // runner reads session.accumulatedItems on each turn. Seeding first
+        // ensures the first turn after resume has the full prior history.
+        harness.seedSessionHistory(threadIdRef.current, resumedItemsRef.current);
+      }
       wireStreams(harness);
       return harness;
     },
@@ -727,6 +996,11 @@ function App({ config, plugins }: AppProps): ReactNode {
               agentMode,
               setAgentMode,
               setModel,
+              sessionSnapshot: buildSessionSnapshot(entriesRef.current),
+              setCustomTitle,
+              setTag,
+              clearSession,
+              restartWithSession: onRestart,
             };
 
             try {
@@ -852,6 +1126,11 @@ function App({ config, plugins }: AppProps): ReactNode {
       model,
       setModel,
       runLocalBash,
+      buildSessionSnapshot,
+      setCustomTitle,
+      setTag,
+      clearSession,
+      onRestart,
     ],
   );
 
@@ -902,12 +1181,119 @@ function App({ config, plugins }: AppProps): ReactNode {
 
 //#region Entry Point
 
+export interface RunAgentOptions {
+  initialSession?: SessionFile | null;
+  disablePersistence?: boolean;
+  /** From `-n/--name`; overrides the saved `customTitle` when provided. */
+  name?: string;
+  /** From `--session-id`; forces a specific session id for a fresh session. */
+  forcedSessionId?: string;
+}
+
+/**
+ * Run the TUI until the user exits or restarts via `/resume`. Returns once
+ * Ink unmounts for good (either by user Ctrl+D or after an explicit restart
+ * leaves the loop with `initialSession` resolved to the new target).
+ */
 export async function runAgent(
   plugins: ReadonlyArray<NoeticPlugin>,
   config: AgentRuntimeConfig,
+  options: RunAgentOptions = {},
 ): Promise<void> {
-  const { waitUntilExit } = render(<App config={config} plugins={plugins} />);
-  await waitUntilExit();
+  let currentSession = options.initialSession ?? null;
+  let currentName = options.name;
+
+  // Loop so `/resume` can swap the session without quitting the process.
+  while (true) {
+    const outcome = await runOneSession({
+      plugins,
+      config,
+      disablePersistence: options.disablePersistence ?? false,
+      initialSession: currentSession,
+      name: currentName,
+      // Only apply --session-id to the initial session — after a /resume
+      // swap, the loaded session's id wins (the fallback is never consulted).
+      forcedSessionId: currentSession === null ? options.forcedSessionId : undefined,
+    });
+    if (outcome.kind === 'exit') {
+      return;
+    }
+    if (outcome.kind === 'restart-file') {
+      currentSession = outcome.file;
+      currentName = undefined;
+      continue;
+    }
+    // 'restart-picker' — render the picker, then loop back with the choice.
+    const picked = await (await import('./run-picker.js')).runPicker(config.cwd);
+    if (picked === null) {
+      return;
+    }
+    currentSession = picked;
+    currentName = undefined;
+  }
+}
+
+type RunOneSessionOutcome =
+  | {
+      kind: 'exit';
+    }
+  | {
+      kind: 'restart-file';
+      file: SessionFile;
+    }
+  | {
+      kind: 'restart-picker';
+    };
+
+interface RunOneSessionOpts {
+  plugins: ReadonlyArray<NoeticPlugin>;
+  config: AgentRuntimeConfig;
+  disablePersistence: boolean;
+  initialSession: SessionFile | null;
+  name: string | undefined;
+  forcedSessionId: string | undefined;
+}
+
+async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutcome> {
+  return new Promise<RunOneSessionOutcome>((resolve) => {
+    let resolved = false;
+    const resolveOnce = (outcome: RunOneSessionOutcome): void => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(outcome);
+    };
+
+    const instance = render(
+      <App
+        config={opts.config}
+        plugins={opts.plugins}
+        initialSession={opts.initialSession}
+        disablePersistence={opts.disablePersistence}
+        name={opts.name}
+        forcedSessionId={opts.forcedSessionId}
+        onRestart={(target) => {
+          instance.unmount();
+          resolveOnce(
+            target.kind === 'file'
+              ? {
+                  kind: 'restart-file',
+                  file: target.file,
+                }
+              : {
+                  kind: 'restart-picker',
+                },
+          );
+        }}
+      />,
+    );
+    instance.waitUntilExit().then(() => {
+      resolveOnce({
+        kind: 'exit',
+      });
+    });
+  });
 }
 
 //#endregion

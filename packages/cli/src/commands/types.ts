@@ -49,7 +49,56 @@ interface CommandContext {
    * turn runs against the new model.
    */
   setModel: (model: string) => Promise<void>;
+  /**
+   * A read-only snapshot of session-level metadata the TUI currently tracks.
+   * Used by `/session` to print a status report; updated live as turns complete.
+   */
+  sessionSnapshot: SessionSnapshot;
+  /** Set the session's `customTitle`. Applied on the next save. */
+  setCustomTitle: (name: string | undefined) => void;
+  /** Set the session's `tag`. Applied on the next save. */
+  setTag: (tag: string | undefined) => void;
+  /**
+   * Reset session state and start fresh: new sessionId, empty entries,
+   * zero cumulative counters, forget any resumed history. Use by `/clear`
+   * and (optionally) by `/resume` when the user cancels the picker.
+   */
+  clearSession: () => void;
+  /**
+   * Restart the TUI against a different session. Pass `null` to open the
+   * resume picker. Used by `/resume`.
+   */
+  restartWithSession: (target: SessionRestartTarget) => void;
 }
+
+export interface SessionSnapshot {
+  sessionId: string;
+  cwd: string;
+  effectiveCwd: string;
+  model: string;
+  createdAt: string;
+  customTitle?: string;
+  tag?: string;
+  firstPrompt: string;
+  messageCount: number;
+  cumulativeUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+  };
+  cumulativeCost: number;
+  persistenceEnabled: boolean;
+}
+
+/** What `restartWithSession` targets: a specific session file, or `null` meaning "open the picker". */
+export type SessionRestartTarget =
+  | {
+      kind: 'file';
+      file: import('../sessions/types.js').SessionFile;
+    }
+  | {
+      kind: 'picker';
+    };
 
 //#endregion
 
