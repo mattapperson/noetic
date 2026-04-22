@@ -8,9 +8,9 @@
  * Must be rendered inside a parent with `flexDirection="column"`.
  */
 
-import { Text, useStdout } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type { ReactNode } from 'react';
-import { Fragment, useMemo } from 'react';
+import { useMemo } from 'react';
 import wrapAnsi from 'wrap-ansi';
 
 export interface AnsiProps {
@@ -69,14 +69,18 @@ export function Ansi({
   );
 
   const lastIndex = lines.length - 1;
+  // `flexDirection="column"` is structural here, not cosmetic: Ink measures
+  // the dynamic-region row count from Box children. Using a Fragment emits
+  // N sibling rows whose height the parent may miscount, leaving ghost rows
+  // behind each interval tick from animated siblings (e.g. the spinner).
   return (
-    <Fragment>
+    <Box flexDirection="column">
       {lines.map(({ key, content }, i) => (
         <Text key={key} dimColor={dimColor}>
           {content}
           {i === lastIndex && trailing}
         </Text>
       ))}
-    </Fragment>
+    </Box>
   );
 }
