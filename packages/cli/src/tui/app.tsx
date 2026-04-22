@@ -280,11 +280,15 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
         } catch {
           // getAgentResponse can only reject if no session exists; here it does.
         }
-        if (
-          opts.harness.getQueueSize({
-            threadId: opts.threadId,
-          }) === 0
-        ) {
+        // Trust the runner's kind: if the next turn is already running
+        // ('generating'), its turn_started will bounce us back to 'streaming';
+        // otherwise we're genuinely idle and can accept input again.
+        const runnerStatus = opts.harness.getStatus({
+          threadId: opts.threadId,
+        });
+        if (runnerStatus.kind === 'generating') {
+          opts.setStatus('streaming');
+        } else {
           opts.streamMetrics.turnStartedAt.current = null;
           opts.setStatus('ready');
         }

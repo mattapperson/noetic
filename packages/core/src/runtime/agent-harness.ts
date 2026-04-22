@@ -87,6 +87,12 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   layerStateStore?: LayerStateStore;
   /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
   defaultDeliveryMode?: DeliveryMode;
+  /**
+   * Abort the in-flight model call if the provider stream emits no events for this
+   * many milliseconds. Defaults to `DEFAULT_STREAM_IDLE_TIMEOUT_MS` (120s).
+   * Pass `0` or a negative number to disable the watchdog.
+   */
+  streamIdleTimeoutMs?: number;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
 }
@@ -100,6 +106,10 @@ interface Session {
 
 const MAX_TOOL_ROUNDS = 32;
 const DEFAULT_THREAD_ID = '__default__';
+/** Default idle-timeout for a single model call's streaming response. Chosen to be
+ *  long enough that slow models aren't falsely aborted, but short enough that a
+ *  stalled SSE becomes a visible error rather than a silent hang. */
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120e3;
 
 //#region Helpers
 
@@ -167,22 +177,28 @@ function awaitWithAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Prom
 
 interface PipeStreamOpts {
   stream: AsyncIterable<unknown>;
-  broadcaster: EventBroadcaster;
+  /** Optional: when provided, each SDK event is emitted into it. Absent in
+   *  headless/test harness runs that still need the idle watchdog to reset. */
+  broadcaster?: EventBroadcaster;
   agentName: string;
   signal?: AbortSignal;
+  /** Invoked once per SDK event received — used by the idle watchdog to bump
+   *  its deadline so a still-streaming response isn't aborted. */
+  onEvent?: () => void;
 }
 
 async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void> {
-  const { stream, broadcaster, agentName, signal } = opts;
+  const { stream, broadcaster, agentName, signal, onEvent } = opts;
   try {
     for await (const event of stream) {
       if (signal?.aborted) {
         return;
       }
+      onEvent?.();
       if (!isStreamRecord(event)) {
         continue;
       }
-      broadcaster.emit({
+      broadcaster?.emit({
         source: 'sdk',
         type: typeof event.type === 'string' ? event.type : 'unknown',
         data: event,
@@ -191,16 +207,73 @@ async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void
       });
     }
   } catch (err: unknown) {
-    emitFrameworkEvent({
-      broadcaster,
-      agentName,
-      eventType: 'stream_pipe_error',
-      data: {
-        error: err instanceof Error ? err.message : String(err),
-      },
-    });
+    if (broadcaster) {
+      emitFrameworkEvent({
+        broadcaster,
+        agentName,
+        eventType: 'stream_pipe_error',
+        data: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
     throw err;
   }
+}
+
+interface StreamIdleWatchdog {
+  /** Bump the deadline because a stream event just arrived. */
+  reset: () => void;
+  /** Clear the pending timer. Safe to call multiple times. */
+  stop: () => void;
+}
+
+/** @internal Create a watchdog that aborts `controller` when no
+ *  {@link StreamIdleWatchdog.reset reset} is called within `timeoutMs`. When
+ *  `timeoutMs <= 0`, returns an inert no-op so callers can always call `.reset()`
+ *  / `.stop()` without a branch. Starts armed: the caller is responsible for
+ *  `.stop()` in a `finally`. `onTimeout` runs before the abort so observers can
+ *  emit a framework event with the original cause. Exported only for unit tests. */
+export function createStreamIdleWatchdog(
+  timeoutMs: number,
+  controller: AbortController,
+  onTimeout?: () => void,
+): StreamIdleWatchdog {
+  if (timeoutMs <= 0) {
+    return {
+      reset: () => {},
+      stop: () => {},
+    };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const arm = (): void => {
+    timer = setTimeout(() => {
+      if (stopped) {
+        return;
+      }
+      const reason = new Error(`llm stream idle timeout after ${timeoutMs}ms`);
+      onTimeout?.();
+      controller.abort(reason);
+    }, timeoutMs);
+  };
+  arm();
+  return {
+    reset: () => {
+      if (stopped || !timer) {
+        return;
+      }
+      clearTimeout(timer);
+      arm();
+    },
+    stop: () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }
 
 /** @internal Context carries the session queue reference so callModel can
@@ -246,6 +319,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
+  private readonly streamIdleTimeoutMs: number;
   private readonly sessions = new Map<string, Session>();
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
@@ -269,6 +343,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
+    this.streamIdleTimeoutMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   }
 
   //#region Session Accessors
@@ -561,6 +636,32 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         }
       }
 
+      // Build a round-scoped controller that also aborts when the caller's
+      // signal fires — `AbortSignal.any` handles listener lifecycle for us
+      // (no manual cleanup required on normal completion).
+      const roundController = new AbortController();
+      const roundSignal = signal
+        ? AbortSignal.any([
+            signal,
+            roundController.signal,
+          ])
+        : roundController.signal;
+      let firstEventSeen = false;
+      let idleStalled = false;
+      const watchdog = createStreamIdleWatchdog(this.streamIdleTimeoutMs, roundController, () => {
+        idleStalled = true;
+        emitIfAllowed('llm_call_stalled', {
+          round,
+          idleTimeoutMs: this.streamIdleTimeoutMs,
+        });
+      });
+
+      emitIfAllowed('llm_call_started', {
+        round,
+        messageCount: conversationInput.length,
+        toolCount: sdkTools?.length ?? 0,
+      });
+
       const callResult = this.client.callModel(
         {
           model: request.model,
@@ -576,29 +677,63 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               }
             : {}),
         },
-        signal
-          ? {
-              signal,
-            }
-          : undefined,
+        {
+          signal: roundSignal,
+        },
       );
 
-      const pipePromise = broadcaster
-        ? pipeStreamEventsToBroadcaster({
-            stream: callResult.getFullResponsesStream(),
-            broadcaster,
-            agentName,
-            signal,
-          })
-        : undefined;
+      const onStreamEvent = (): void => {
+        watchdog.reset();
+        if (!firstEventSeen) {
+          firstEventSeen = true;
+          emitIfAllowed('llm_call_first_event', {
+            round,
+          });
+        }
+      };
 
-      const sdkResponse = await awaitWithAbort(callResult.getResponse(), signal);
-      if (pipePromise) {
-        await awaitWithAbort(pipePromise, signal);
+      // Always consume the SDK stream so the watchdog gets reset per event
+      // even when no broadcaster is attached (headless / test harness runs).
+      // Emission into the broadcaster is optional inside the pipe function.
+      const pipePromise = pipeStreamEventsToBroadcaster({
+        stream: callResult.getFullResponsesStream(),
+        broadcaster,
+        agentName,
+        signal: roundSignal,
+        onEvent: onStreamEvent,
+      });
+
+      let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>>;
+      try {
+        sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
+        // Stop the watchdog synchronously the instant the response resolves,
+        // closing the race where a pending setTimeout could fire in the
+        // microtask gap between this await and the `finally` below.
+        watchdog.stop();
+        await awaitWithAbort(pipePromise, roundSignal);
+      } catch (err: unknown) {
+        if (idleStalled) {
+          // roundSignal.reason is the Error the watchdog passed to controller.abort().
+          throw roundSignal.reason instanceof Error
+            ? roundSignal.reason
+            : new Error(`llm stream idle timeout after ${this.streamIdleTimeoutMs}ms`);
+        }
+        // Parent signal cancelled the round — exit gracefully rather than
+        // propagating the abort error as an exception.
+        if (signal?.aborted) {
+          break;
+        }
+        throw err;
+      } finally {
+        watchdog.stop();
       }
       if (signal?.aborted) {
         break;
       }
+      emitIfAllowed('llm_call_completed', {
+        round,
+        itemCount: sdkResponse.output?.length ?? 0,
+      });
       const roundItems = extractOutputItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 

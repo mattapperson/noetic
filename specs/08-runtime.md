@@ -234,6 +234,10 @@ Each queued message carries a `DeliveryMode`:
 
 `AgentConfig.defaultDeliveryMode` (default `next-turn`) applies to messages that don't specify a mode. Callers may override per-call via `ExecuteOptions.deliveryMode`.
 
+### Stream Idle Timeout
+
+The harness runs a per-round watchdog over each provider call's SSE stream. If no stream event arrives for `streamIdleTimeoutMs` (default `120000`, set via `AgentHarnessOpts.streamIdleTimeoutMs`; pass `0` to disable), the round is aborted, `{name}:llm_call_stalled` is emitted, and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`. This prevents silent hangs when a provider drops the connection without sending a terminal event.
+
 ### StreamEvent
 
 Events have a `source` discriminant: `'sdk'` for raw OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix (e.g., `myagent:step_started`).
@@ -270,6 +274,10 @@ interface FrameworkStreamEvent {
 | `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
 | `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
 | `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
+| `{name}:llm_call_started` | Emitted before each provider call in the tool-round loop. Data: `{ round, messageCount, toolCount }` |
+| `{name}:llm_call_first_event` | Emitted when the first SDK event for the call arrives. Useful for measuring time-to-first-token. Only emitted when a broadcaster is attached to the context. Data: `{ round }` |
+| `{name}:llm_call_completed` | Emitted after the provider's response is fully received. Data: `{ round, itemCount }` |
+| `{name}:llm_call_stalled` | Emitted when the stream-idle watchdog fires (see `streamIdleTimeoutMs`). The turn then aborts. Data: `{ round, idleTimeoutMs }` |
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 
 ### Streaming Scope

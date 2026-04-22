@@ -587,6 +587,10 @@ await harness.abort({ threadId: 'thread-1', reason: 'user' });
 | `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
 | `interrupt` | Abort the in-flight turn, place message at head of queue, restart. |
 
+### Stream Idle Timeout
+
+`AgentHarnessOpts.streamIdleTimeoutMs` (default `120_000`; set `0` or negative to disable) aborts an in-flight provider call if its SSE stream emits no events for that many milliseconds. On timeout, the harness emits `{name}:llm_call_stalled` and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`. Use a smaller value for snappier recovery in interactive UIs, a larger value for long-running batch runs with slow models.
+
 ### Session Accessors
 
 | Method | Description |

@@ -145,8 +145,16 @@ Framework events emitted during execution:
 | `{name}:tool_call_started` | Before each tool call. |
 | `{name}:tool_call_completed` | After each tool call. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
+| `{name}:llm_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
+| `{name}:llm_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
+| `{name}:llm_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
+| `{name}:llm_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
 
 LLM steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
+
+### Stream Idle Timeout
+
+Each provider call is guarded by a watchdog that aborts the round if no SSE event arrives for `streamIdleTimeoutMs` (default `120000`; set `0` to disable). On timeout, `{name}:llm_call_stalled` is emitted and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`, so upstream providers that quietly drop a connection surface as errors rather than hangs.
 
 ## run()
 

@@ -456,6 +456,11 @@ export function makeMockContextWithClient(script: LLMResponse[]): Context {
   });
 }
 
+/** Wall-clock sleep for tests that exercise real timers. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Creates a scripted callModel function that returns responses in order.
  * For use with AgentHarness `_testCallModel` option.
