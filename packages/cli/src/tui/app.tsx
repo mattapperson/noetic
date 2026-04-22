@@ -12,7 +12,7 @@ import type {
 } from '@noetic/core';
 import { createLocalShellAdapter } from '@noetic/core';
 import { render } from 'ink';
-import type { ReactNode } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -52,8 +52,22 @@ import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
 import { FooterContextProvider } from './footer-context.js';
-import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
-import { appendOrUpdateEntry, extractActivatedSkills, isUserEntry } from './item-utils.js';
+import type {
+  AssistantEntry,
+  ConversationEntry,
+  ErrorEntry,
+  SystemEntry,
+  UserEntry,
+} from './item-utils.js';
+import {
+  appendOrUpdateEntry,
+  extractActivatedSkills,
+  extractTextContent,
+  getItemId,
+  isUserEntry,
+} from './item-utils.js';
+import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
+import { StreamMetricsProvider } from './stream-metrics-context.js';
 
 //#region Helpers
 
@@ -141,6 +155,35 @@ interface ConsumeItemsOpts {
   harness: AgentHarness;
   threadId: string;
   setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}
+
+/**
+ * For each streaming assistant message item, bump the live output-char counter
+ * by whatever new text appeared since the last yield of that item. The
+ * counter is reset per-turn by `consumeFullStream` on `turn_started`.
+ */
+function trackLiveOutput(opts: {
+  item: AssistantEntry;
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}): void {
+  if (opts.item.type !== 'message') {
+    return;
+  }
+  const id = getItemId(opts.item);
+  const currentLen = extractTextContent(opts.item).length;
+  const previousLen = opts.perItemCharsRef.current.get(id) ?? 0;
+  if (currentLen <= previousLen) {
+    return;
+  }
+  const delta = currentLen - previousLen;
+  opts.perItemCharsRef.current.set(id, currentLen);
+  opts.streamMetrics.liveOutputChars.current += delta;
+  if (opts.streamMetrics.firstTokenAt.current === null) {
+    opts.streamMetrics.firstTokenAt.current = Date.now();
+  }
 }
 
 async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
@@ -148,6 +191,11 @@ async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
     for await (const item of opts.harness.getItemStream({
       threadId: opts.threadId,
     })) {
+      trackLiveOutput({
+        item,
+        streamMetrics: opts.streamMetrics,
+        perItemCharsRef: opts.perItemCharsRef,
+      });
       opts.setEntries((prev) => appendOrUpdateEntry(prev, item));
     }
   } catch (err: unknown) {
@@ -170,6 +218,19 @@ interface ConsumeEventsOpts {
   pendingMessageIdsRef: {
     current: Set<string>;
   };
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}
+
+function resetTurnMetrics(opts: {
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}): void {
+  opts.streamMetrics.turnStartedAt.current = Date.now();
+  opts.streamMetrics.firstTokenAt.current = null;
+  opts.streamMetrics.liveOutputChars.current = 0;
+  opts.streamMetrics.liveTokens.current = null;
+  opts.perItemCharsRef.current.clear();
 }
 
 async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
@@ -196,6 +257,10 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
           }
           return next;
         });
+        resetTurnMetrics({
+          streamMetrics: opts.streamMetrics,
+          perItemCharsRef: opts.perItemCharsRef,
+        });
         opts.setStatus('streaming');
         continue;
       }
@@ -206,6 +271,12 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
           });
           opts.lastLayerUsageRef.current = resp.lastLayerUsage;
           opts.setLastLayerUsage(resp.lastLayerUsage);
+          const exact: LiveTokens = {
+            input: resp.usage.inputTokens,
+            output: resp.usage.outputTokens,
+            cached: resp.usage.cachedTokens,
+          };
+          opts.streamMetrics.liveTokens.current = exact;
         } catch {
           // getAgentResponse can only reject if no session exists; here it does.
         }
@@ -214,6 +285,7 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
             threadId: opts.threadId,
           }) === 0
         ) {
+          opts.streamMetrics.turnStartedAt.current = null;
           opts.setStatus('ready');
         }
       }
@@ -255,6 +327,22 @@ function App({ config, plugins }: AppProps): ReactNode {
   const sessionStartedAtRef = useRef<number>(Date.now());
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
+
+  const turnStartedAtRef = useRef<number | null>(null);
+  const firstTokenAtRef = useRef<number | null>(null);
+  const liveOutputCharsRef = useRef<number>(0);
+  const liveTokensRef = useRef<LiveTokens | null>(null);
+  const perItemCharsRef = useRef<Map<string, number>>(new Map());
+
+  const streamMetrics = useMemo<StreamMetricsRefs>(
+    () => ({
+      turnStartedAt: turnStartedAtRef,
+      firstTokenAt: firstTokenAtRef,
+      liveOutputChars: liveOutputCharsRef,
+      liveTokens: liveTokensRef,
+    }),
+    [],
+  );
 
   const shellRef = useRef<ShellAdapter | null>(null);
   if (shellRef.current === null) {
@@ -420,28 +508,37 @@ function App({ config, plugins }: AppProps): ReactNode {
 
   /** Wire long-lived consumers to the harness's session streams. Called once
    *  per harness instance via `getOrCreateHarness`. */
-  const wireStreams = useCallback((harness: AgentHarness) => {
-    if (streamWiredHarnessRef.current === harness) {
-      return;
-    }
-    streamWiredHarnessRef.current = harness;
-    const threadId = threadIdRef.current;
+  const wireStreams = useCallback(
+    (harness: AgentHarness) => {
+      if (streamWiredHarnessRef.current === harness) {
+        return;
+      }
+      streamWiredHarnessRef.current = harness;
+      const threadId = threadIdRef.current;
 
-    void consumeItemStream({
-      harness,
-      threadId,
-      setEntries,
-    });
-    void consumeFullStream({
-      harness,
-      threadId,
-      setEntries,
-      setStatus,
-      setLastLayerUsage,
-      lastLayerUsageRef,
-      pendingMessageIdsRef,
-    });
-  }, []);
+      void consumeItemStream({
+        harness,
+        threadId,
+        setEntries,
+        streamMetrics,
+        perItemCharsRef,
+      });
+      void consumeFullStream({
+        harness,
+        threadId,
+        setEntries,
+        setStatus,
+        setLastLayerUsage,
+        lastLayerUsageRef,
+        pendingMessageIdsRef,
+        streamMetrics,
+        perItemCharsRef,
+      });
+    },
+    [
+      streamMetrics,
+    ],
+  );
 
   const getOrCreateHarness = useCallback(
     async (mode: AgentMode, activeModel: string): Promise<AgentHarness> => {
@@ -779,17 +876,19 @@ function App({ config, plugins }: AppProps): ReactNode {
   return (
     <InkProvider>
       <FooterContextProvider value={footerValue}>
-        <ResponsesChat
-          entries={entries}
-          status={status}
-          onSubmit={handleSubmit}
-          onStop={handleStop}
-          model={model}
-          commands={commandSuggestions}
-          modalContent={modal?.content}
-          onModalClose={handleModalClose}
-          plugins={plugins}
-        />
+        <StreamMetricsProvider value={streamMetrics}>
+          <ResponsesChat
+            entries={entries}
+            status={status}
+            onSubmit={handleSubmit}
+            onStop={handleStop}
+            model={model}
+            commands={commandSuggestions}
+            modalContent={modal?.content}
+            onModalClose={handleModalClose}
+            plugins={plugins}
+          />
+        </StreamMetricsProvider>
       </FooterContextProvider>
     </InkProvider>
   );

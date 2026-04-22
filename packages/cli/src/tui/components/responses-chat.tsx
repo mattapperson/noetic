@@ -439,40 +439,11 @@ export function ResponsesChat({
   const completedEntries = hasStreamingEntry ? entries.slice(0, -1) : entries;
   const streamingEntry = hasStreamingEntry ? lastEntry : null;
 
-  const showLoadingSpinner = useMemo(() => {
-    if (status !== 'streaming') {
-      return false;
-    }
-
-    let lastUserIndex = -1;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i];
-      if (entry && isUserEntry(entry)) {
-        lastUserIndex = i;
-        break;
-      }
-    }
-
-    const entriesAfterUser = entries.slice(lastUserIndex + 1);
-    if (entriesAfterUser.length === 0) {
-      return true;
-    }
-
-    const hasVisibleText = entriesAfterUser.some((entry) => {
-      if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
-        return false;
-      }
-      if (entry.type === 'message') {
-        return extractTextContent(entry).length > 0;
-      }
-      return false;
-    });
-
-    return !hasVisibleText;
-  }, [
-    entries,
-    status,
-  ]);
+  // Keep the spinner visible for the full lifetime of a streaming turn — even
+  // after assistant text starts appearing — so the user sees live progress
+  // (elapsed time, tokens, tok/s) rather than a silent-feeling gap while the
+  // agent continues to work across tool rounds.
+  const showLoadingSpinner = status === 'streaming';
 
   const spinnerMode: SpinnerMode = useMemo(() => {
     if (!showLoadingSpinner) {
