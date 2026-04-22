@@ -43,6 +43,12 @@ interface CommandContext {
    * sees the correct toolset (full vs read-only) on the next turn.
    */
   setAgentMode: (mode: 'normal' | 'planning') => Promise<void>;
+  /**
+   * Switch the active LLM to the given OpenRouter model slug (e.g.
+   * `anthropic/claude-sonnet-4`). Triggers harness recreation so the next
+   * turn runs against the new model.
+   */
+  setModel: (model: string) => Promise<void>;
 }
 
 //#endregion

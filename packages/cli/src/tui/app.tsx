@@ -203,6 +203,8 @@ function App({ config, plugins }: AppProps): ReactNode {
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
   const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
+  const [model, setModelState] = useState<string>(config.model);
+  const harnessModelRef = useRef<string>(config.model);
 
   const buildCtx = useMemo(
     () => createPluginContextBuilder(config),
@@ -401,8 +403,12 @@ function App({ config, plugins }: AppProps): ReactNode {
   }, []);
 
   const getOrCreateHarness = useCallback(
-    async (mode: AgentMode): Promise<AgentHarness> => {
-      if (harnessRef.current !== null && harnessModeRef.current === mode) {
+    async (mode: AgentMode, activeModel: string): Promise<AgentHarness> => {
+      if (
+        harnessRef.current !== null &&
+        harnessModeRef.current === mode &&
+        harnessModelRef.current === activeModel
+      ) {
         return harnessRef.current;
       }
       const {
@@ -410,7 +416,10 @@ function App({ config, plugins }: AppProps): ReactNode {
         skills: resolvedSkills,
         memoryLayers,
       } = await createAgentHarness({
-        config,
+        config: {
+          ...config,
+          model: activeModel,
+        },
         plugins,
         fs: config.fs,
         mode,
@@ -419,6 +428,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       });
       harnessRef.current = harness;
       harnessModeRef.current = mode;
+      harnessModelRef.current = activeModel;
       memoryLayersRef.current = memoryLayers;
       setSkills(resolvedSkills);
       wireStreams(harness);
@@ -433,13 +443,35 @@ function App({ config, plugins }: AppProps): ReactNode {
     ],
   );
 
-  const setAgentMode = useCallback(async (mode: AgentMode): Promise<void> => {
-    if (harnessModeRef.current !== mode) {
-      harnessRef.current = null;
-      streamWiredHarnessRef.current = null;
-    }
-    setAgentModeState(mode);
+  /** Discard the current harness so the next submit recreates it with fresh config. */
+  const invalidateHarness = useCallback((): void => {
+    harnessRef.current = null;
+    streamWiredHarnessRef.current = null;
   }, []);
+
+  const setAgentMode = useCallback(
+    async (mode: AgentMode): Promise<void> => {
+      if (harnessModeRef.current !== mode) {
+        invalidateHarness();
+      }
+      setAgentModeState(mode);
+    },
+    [
+      invalidateHarness,
+    ],
+  );
+
+  const setModel = useCallback(
+    async (nextModel: string): Promise<void> => {
+      if (harnessModelRef.current !== nextModel) {
+        invalidateHarness();
+      }
+      setModelState(nextModel);
+    },
+    [
+      invalidateHarness,
+    ],
+  );
 
   const handleStop = useCallback(async () => {
     const harness = harnessRef.current;
@@ -461,7 +493,10 @@ function App({ config, plugins }: AppProps): ReactNode {
           if (cmd) {
             const activatedSkills = extractActivatedSkills(entriesRef.current);
             const ctx: CommandContext = {
-              config,
+              config: {
+                ...config,
+                model,
+              },
               cwd: config.cwd,
               entries: entriesRef.current,
               skills,
@@ -472,6 +507,7 @@ function App({ config, plugins }: AppProps): ReactNode {
               memoryLayers: memoryLayersRef.current,
               agentMode,
               setAgentMode,
+              setModel,
             };
 
             try {
@@ -541,7 +577,7 @@ function App({ config, plugins }: AppProps): ReactNode {
 
       // Regular message — enqueue on the session and let streams drive the UI.
       try {
-        const harness = await getOrCreateHarness(agentMode);
+        const harness = await getOrCreateHarness(agentMode, model);
         const isBusy =
           harness.getStatus({
             threadId: threadIdRef.current,
@@ -583,28 +619,30 @@ function App({ config, plugins }: AppProps): ReactNode {
       getOrCreateHarness,
       agentMode,
       setAgentMode,
+      model,
+      setModel,
     ],
   );
 
   const footerValue = useMemo<FooterContextValue>(
     () => ({
-      model: config.model,
+      model,
       cwd: config.cwd,
       status,
       lastLayerUsage,
-      contextLimit: getModelContextLimit(config.model),
+      contextLimit: getModelContextLimit(model),
       threadId: threadIdRef.current,
       sessionStartedAt: sessionStartedAtRef.current,
       entryCount: entries.length,
       agentMode,
     }),
     [
-      config.model,
       config.cwd,
       status,
       lastLayerUsage,
       entries.length,
       agentMode,
+      model,
     ],
   );
 
@@ -616,7 +654,7 @@ function App({ config, plugins }: AppProps): ReactNode {
           status={status}
           onSubmit={handleSubmit}
           onStop={handleStop}
-          model={config.model}
+          model={model}
           commands={commandSuggestions}
           modalContent={modal?.content}
           onModalClose={handleModalClose}
