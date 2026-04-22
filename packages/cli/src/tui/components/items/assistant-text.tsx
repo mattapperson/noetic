@@ -5,9 +5,12 @@
 
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
+import { Ansi } from '../ansi.js';
 
 // Claude Code uses ⏺ on macOS, ● on other platforms for assistant text
-const BLACK_CIRCLE = process.platform === 'darwin' ? '\u23FA' : '\u25CF'; // ⏺ or ●
+const BLACK_CIRCLE = process.platform === 'darwin' ? '⏺' : '●';
+// Glyph (1 col) + trailing space; must match what the dot Box reserves.
+const DOT_COLUMN_WIDTH = 2;
 
 export interface AssistantTextProps {
   /** The assistant's response text */
@@ -23,21 +26,27 @@ export interface AssistantTextProps {
 export function AssistantText({
   text,
   isStreaming = false,
-  streamingCursor = '\u258E',
+  streamingCursor = '▎',
   addMargin = false,
 }: AssistantTextProps): ReactNode {
   if (!text) {
     return null;
   }
 
+  // `minWidth={DOT_COLUMN_WIDTH}` pins the dot column so ⏺'s ambiguous
+  // East-Asian width can't shift the content box; `<Ansi>` handles the wrap.
   return (
-    <Box flexDirection="row" marginTop={addMargin ? 1 : 0}>
-      <Text dimColor>{BLACK_CIRCLE} </Text>
-      <Box flexShrink={1} flexGrow={1}>
-        <Text wrap="wrap">
+    <Box flexDirection="row" alignItems="flex-start" width="100%" marginTop={addMargin ? 1 : 0}>
+      <Box minWidth={DOT_COLUMN_WIDTH}>
+        <Text dimColor>{BLACK_CIRCLE}</Text>
+      </Box>
+      <Box flexDirection="column" flexShrink={1} flexGrow={1}>
+        <Ansi
+          columnOffset={DOT_COLUMN_WIDTH}
+          trailing={isStreaming ? <Text dimColor>{streamingCursor}</Text> : undefined}
+        >
           {text}
-          {isStreaming && <Text dimColor>{streamingCursor}</Text>}
-        </Text>
+        </Ansi>
       </Box>
     </Box>
   );
