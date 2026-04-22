@@ -6,11 +6,9 @@ const baseInputs: SystemPromptInputs = {
   cwd: '/fixture/project',
   platform: 'linux',
   shell: '/bin/bash',
-  sessionDate: '2026-04-21T00:00:00.000Z',
   model: 'anthropic/claude-sonnet-4',
   knowledgeCutoff: 'January 2026',
   isGitRepo: true,
-  gitBranch: 'main',
   mode: 'normal',
 };
 
@@ -18,7 +16,7 @@ describe('composeSystemPrompt', () => {
   it('includes every canonical section header in order', () => {
     const out = composeSystemPrompt(baseInputs);
     const headers = [
-      'You are an interactive coding agent',
+      'You are an interactive agent that helps users with software engineering tasks',
       '# System',
       '# Doing tasks',
       '# Executing actions with care',
@@ -56,30 +54,46 @@ describe('composeSystemPrompt', () => {
     expect(out).toContain('To edit files use Edit instead of sed');
     expect(out).toContain('To create files use Write instead of cat');
     expect(out).toContain('To search for files use Find instead of find');
+    expect(out).toContain('To list directory contents use Ls instead of ls');
     expect(out).toContain('To search the content of files, use Grep instead of grep');
-    expect(out).toContain('Reserve the Bash exclusively for system commands');
+    expect(out).toContain('Reserve using the Bash exclusively for system commands');
   });
 
   it('renders environment info from inputs', () => {
     const out = composeSystemPrompt(baseInputs);
     expect(out).toContain('Primary working directory: /fixture/project');
-    expect(out).toContain('Is a git repository: Yes');
-    expect(out).toContain('Current git branch: main');
+    expect(out).toContain('Is a git repository: true');
     expect(out).toContain('Platform: linux');
     expect(out).toContain('Shell: /bin/bash');
-    expect(out).toContain('Session start: 2026-04-21T00:00:00.000Z');
-    expect(out).toContain('Model: anthropic/claude-sonnet-4');
+    expect(out).toContain('You are powered by the model anthropic/claude-sonnet-4.');
     expect(out).toContain('Assistant knowledge cutoff is January 2026.');
   });
 
-  it('omits the git branch line when not in a repo', () => {
+  it('reports false when not in a repo', () => {
     const out = composeSystemPrompt({
       ...baseInputs,
       isGitRepo: false,
-      gitBranch: undefined,
     });
-    expect(out).toContain('Is a git repository: No');
+    expect(out).toContain('Is a git repository: false');
+  });
+
+  it('does not emit removed environment fields', () => {
+    const out = composeSystemPrompt(baseInputs);
+    expect(out).not.toContain('Session start:');
     expect(out).not.toContain('Current git branch:');
+  });
+
+  it('renders the OS Version line when provided', () => {
+    const out = composeSystemPrompt({
+      ...baseInputs,
+      osVersion: 'Darwin 25.3.0',
+    });
+    expect(out).toContain('OS Version: Darwin 25.3.0');
+  });
+
+  it('omits the OS Version line when not provided', () => {
+    const out = composeSystemPrompt(baseInputs);
+    expect(out).not.toContain('OS Version:');
   });
 
   it('omits the plan-mode section in normal mode', () => {
@@ -102,7 +116,9 @@ describe('composeSystemPrompt', () => {
       userOverrideIntro: 'You are a custom agent for the Acme project.',
     });
     expect(out.split('\n')[0]).toBe('You are a custom agent for the Acme project.');
-    expect(out).not.toContain('You are an interactive coding agent that helps users');
+    expect(out).not.toContain(
+      'You are an interactive agent that helps users with software engineering tasks',
+    );
   });
 
   it('trims whitespace from the user-supplied intro', () => {
@@ -118,7 +134,9 @@ describe('composeSystemPrompt', () => {
       ...baseInputs,
       userOverrideIntro: '   ',
     });
-    expect(out).toContain('You are an interactive coding agent that helps users');
+    expect(out).toContain(
+      'You are an interactive agent that helps users with software engineering tasks',
+    );
   });
 
   it('omits the knowledge-cutoff line when none is provided', () => {
@@ -144,15 +162,14 @@ describe('buildSystemPrompt (back-compat shim)', () => {
     expect(out).toContain('# Using your tools');
   });
 
-  it('detects the git repo and branch of the invoking cwd', async () => {
+  it('detects the git repo of the invoking cwd', async () => {
     const repoRoot = process.cwd();
     const out = await buildSystemPrompt(repoRoot);
-    expect(out).toContain('Is a git repository: Yes');
-    expect(out).toMatch(/Current git branch: [^\s]+/);
+    expect(out).toContain('Is a git repository: true');
   });
 
   it('reports no git repo for a non-repo path', async () => {
     const out = await buildSystemPrompt('/definitely/not/a/repo/xyz');
-    expect(out).toContain('Is a git repository: No');
+    expect(out).toContain('Is a git repository: false');
   });
 });

@@ -255,7 +255,6 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     cwd: config.cwd,
     platform: process.platform,
     shell: process.env.SHELL ?? 'unknown',
-    sessionDate: new Date().toISOString(),
     model: config.model,
     isGitRepo,
     userOverrideIntro: config.systemPromptMode === 'replace' ? undefined : config.systemPrompt,
