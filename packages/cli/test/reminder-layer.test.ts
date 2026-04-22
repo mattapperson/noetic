@@ -732,3 +732,280 @@ describe('built-in triggers', () => {
 });
 
 //#endregion
+
+//#region Cross-layer-read safety (#5)
+
+describe('agent-md-loaded — malformed sibling state', () => {
+  function findTrigger(id: string) {
+    const t = BUILTIN_TRIGGERS.find((x) => x.id === id);
+    if (t === undefined) {
+      throw new Error(`trigger ${id} not found`);
+    }
+    return t;
+  }
+
+  const emptyState: ReminderLayerState = {
+    assistantTurnCount: 0,
+    firedHistory: new Map(),
+    toolUsageCounts: new Map(),
+    recentToolNames: [],
+    consecutiveErrorCount: 0,
+  };
+
+  const shapes: Array<{
+    name: string;
+    value: unknown;
+  }> = [
+    {
+      name: 'non-object string',
+      value: 'bogus',
+    },
+    {
+      name: 'non-object number',
+      value: 42,
+    },
+    {
+      name: 'object with non-array sources',
+      value: {
+        sources: 'not-an-array',
+      },
+    },
+    {
+      name: 'object missing sources',
+      value: {
+        other: true,
+      },
+    },
+    {
+      name: 'null',
+      value: null,
+    },
+  ];
+
+  for (const shape of shapes) {
+    it(`does not crash on ${shape.name} under 'agent-md'`, () => {
+      const trigger = findTrigger('agent-md-loaded');
+      const ctx = makeCtx({
+        readLayerState: <T>(id: string): T | undefined => {
+          if (id !== 'agent-md') {
+            return undefined;
+          }
+          // Mock returns the attacker-shaped value through the unknown boundary
+          // that `readLayerState` promises callers. Serialize → deserialize
+          // launders the type without an `as` cast (test-helper convention).
+          return JSON.parse(JSON.stringify(shape.value));
+        },
+      });
+      // Must return null, not throw.
+      expect(() =>
+        trigger.shouldFire({
+          state: emptyState,
+          ctx,
+          log: makeLog(),
+        }),
+      ).not.toThrow();
+      expect(
+        trigger.shouldFire({
+          state: emptyState,
+          ctx,
+          log: makeLog(),
+        }),
+      ).toBeNull();
+    });
+  }
+
+  it('does not crash on malformed plan-memory state', () => {
+    const trigger = findTrigger('plan-mode-still-active');
+    const ctx = makeCtx({
+      readLayerState: <T>(id: string): T | undefined => {
+        if (id !== 'plan-memory') {
+          return undefined;
+        }
+        return JSON.parse(
+          JSON.stringify({
+            mode: 123,
+          }),
+        );
+      },
+    });
+    expect(() =>
+      trigger.shouldFire({
+        state: emptyState,
+        ctx,
+        log: makeLog(),
+      }),
+    ).not.toThrow();
+    expect(
+      trigger.shouldFire({
+        state: emptyState,
+        ctx,
+        log: makeLog(),
+      }),
+    ).toBeNull();
+  });
+});
+
+//#endregion
+
+//#region Boundary tests (#15)
+
+describe('throttling thresholds — boundary matrix', () => {
+  const mkCtx = () => makeCtx();
+
+  function mkState(overrides: Partial<ReminderLayerState>): ReminderLayerState {
+    return {
+      assistantTurnCount: 0,
+      firedHistory: new Map(),
+      toolUsageCounts: new Map(),
+      recentToolNames: [],
+      consecutiveErrorCount: 0,
+      ...overrides,
+    };
+  }
+
+  type Case = {
+    label: string;
+    state: ReminderLayerState;
+    expected: 'fires' | 'null';
+  };
+
+  const longConvoCases: Case[] = [
+    {
+      label: '39 (N-1)',
+      state: mkState({
+        assistantTurnCount: 39,
+      }),
+      expected: 'null',
+    },
+    {
+      label: '40 (N)',
+      state: mkState({
+        assistantTurnCount: 40,
+      }),
+      expected: 'fires',
+    },
+    {
+      label: '41 (N+1)',
+      state: mkState({
+        assistantTurnCount: 41,
+      }),
+      expected: 'fires',
+    },
+  ];
+  describe.each(longConvoCases)('long-conversation @ turn $label', ({ state, expected }) => {
+    it(`is ${expected}`, () => {
+      const trigger = BUILTIN_TRIGGERS.find((t) => t.id === 'long-conversation');
+      if (trigger === undefined) {
+        throw new Error('unreachable');
+      }
+      const result = trigger.shouldFire({
+        state,
+        ctx: mkCtx(),
+        log: makeLog(),
+      });
+      if (expected === 'fires') {
+        expect(result).not.toBeNull();
+      } else {
+        expect(result).toBeNull();
+      }
+    });
+  });
+
+  const errCases: Case[] = [
+    {
+      label: '2 (N-1)',
+      state: mkState({
+        consecutiveErrorCount: 2,
+      }),
+      expected: 'null',
+    },
+    {
+      label: '3 (N)',
+      state: mkState({
+        consecutiveErrorCount: 3,
+      }),
+      expected: 'fires',
+    },
+    {
+      label: '4 (N+1)',
+      state: mkState({
+        consecutiveErrorCount: 4,
+      }),
+      expected: 'fires',
+    },
+  ];
+  describe.each(errCases)('error-recovery @ streak $label', ({ state, expected }) => {
+    it(`is ${expected}`, () => {
+      const trigger = BUILTIN_TRIGGERS.find((t) => t.id === 'error-recovery');
+      if (trigger === undefined) {
+        throw new Error('unreachable');
+      }
+      const result = trigger.shouldFire({
+        state,
+        ctx: mkCtx(),
+        log: makeLog(),
+      });
+      if (expected === 'fires') {
+        expect(result).not.toBeNull();
+      } else {
+        expect(result).toBeNull();
+      }
+    });
+  });
+
+  const bashCases: Case[] = [
+    {
+      label: '2 (N-1)',
+      state: mkState({
+        recentToolNames: [
+          'Bash',
+          'Bash',
+        ],
+      }),
+      expected: 'null',
+    },
+    {
+      label: '3 (N)',
+      state: mkState({
+        recentToolNames: [
+          'Bash',
+          'Bash',
+          'Bash',
+        ],
+      }),
+      expected: 'fires',
+    },
+    {
+      label: '3 + non-Bash interleaved',
+      state: mkState({
+        recentToolNames: [
+          'Bash',
+          'Bash',
+          'Read',
+          'Bash',
+        ],
+      }),
+      expected: 'null',
+    },
+  ];
+  describe.each(bashCases)('consecutive-bash $label', ({ state, expected }) => {
+    it(`is ${expected}`, () => {
+      const trigger = BUILTIN_TRIGGERS.find((t) => t.id === 'consecutive-bash');
+      if (trigger === undefined) {
+        throw new Error('unreachable');
+      }
+      const result = trigger.shouldFire({
+        state,
+        ctx: mkCtx(),
+        log: makeLog(),
+      });
+      if (expected === 'fires') {
+        expect(result).not.toBeNull();
+      } else {
+        expect(result).toBeNull();
+      }
+    });
+  });
+});
+
+//#endregion

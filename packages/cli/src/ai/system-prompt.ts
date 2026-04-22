@@ -246,19 +246,87 @@ export function composeSystemPrompt(inputs: SystemPromptInputs): string {
 }
 
 /**
- * Back-compat shim used by existing callers that only have a cwd. Produces
- * a reasonable default prompt with conservative environment inputs.
+ * Back-compat shim used by existing callers that only have a cwd. Detects
+ * the git repository state of `cwd` so the environment section reports
+ * accurately — no hard-coded `isGitRepo: false` / `model: 'unknown'` lies.
  */
-export function buildSystemPrompt(cwd: string): string {
+export async function buildSystemPrompt(cwd: string): Promise<string> {
+  const { isGitRepo, gitBranch } = await detectGit(cwd);
   return composeSystemPrompt({
     cwd,
     platform: process.platform,
     shell: process.env.SHELL ?? 'unknown',
     sessionDate: new Date().toISOString(),
-    model: 'unknown',
-    isGitRepo: false,
+    model: process.env.NOETIC_MODEL ?? 'unspecified',
+    isGitRepo,
+    gitBranch,
     mode: 'normal',
   });
+}
+
+interface GitDetection {
+  isGitRepo: boolean;
+  gitBranch?: string;
+}
+
+async function detectGit(cwd: string): Promise<GitDetection> {
+  const { stat, readFile } = await import('node:fs/promises');
+  const { dirname, join, resolve } = await import('node:path');
+
+  let current = resolve(cwd);
+  let gitPath: string | undefined;
+  while (true) {
+    const candidate = join(current, '.git');
+    try {
+      await stat(candidate);
+      gitPath = candidate;
+      break;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) {
+        return {
+          isGitRepo: false,
+        };
+      }
+      current = parent;
+    }
+  }
+
+  // `.git` may be a directory (classic repo) or a file (worktree / submodule
+  // pointer) whose first line reads `gitdir: <absolute path>`.
+  let headFile = join(gitPath, 'HEAD');
+  try {
+    const gitStat = await stat(gitPath);
+    if (!gitStat.isDirectory()) {
+      const pointer = await readFile(gitPath, 'utf-8');
+      const match = pointer.match(/^gitdir:\s*(.+)\s*$/m);
+      if (match?.[1] !== undefined) {
+        headFile = join(match[1].trim(), 'HEAD');
+      }
+    }
+  } catch {
+    return {
+      isGitRepo: true,
+    };
+  }
+
+  try {
+    const head = await readFile(headFile, 'utf-8');
+    const refMatch = head.match(/^ref:\s*refs\/heads\/(.+)\s*$/m);
+    if (refMatch?.[1] !== undefined) {
+      return {
+        isGitRepo: true,
+        gitBranch: refMatch[1].trim(),
+      };
+    }
+    return {
+      isGitRepo: true,
+    };
+  } catch {
+    return {
+      isGitRepo: true,
+    };
+  }
 }
 
 //#endregion

@@ -2,6 +2,7 @@ import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
+import { contextToExecCtx } from '../runtime/exec-context-factory';
 import type { Context } from '../types/context';
 import type { Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryConfig, MemoryLayer } from '../types/memory';
@@ -26,19 +27,6 @@ interface CollectSpawnItemsParams {
 
 //#endregion
 
-//#region Constants
-
-/** Naive token estimate shared across all spawn execution contexts. */
-const naiveTokenize = (text: string): number => Math.ceil(text.length / 4);
-
-/** No-op trace shared across all spawn execution contexts. */
-const noopTrace = {
-  setAttribute(): void {},
-  addEvent(): void {},
-} satisfies ExecutionContext['trace'];
-
-//#endregion
-
 //#region Helper Functions
 
 function isMemoryConfig(value: unknown): value is MemoryConfig {
@@ -58,49 +46,6 @@ function resolveLayersForSpawn<TMemory, I, O>(
     ];
   }
   return step.memory;
-}
-
-function buildChildExecutionContext(ctx: Context): ExecutionContext {
-  const childId = crypto.randomUUID();
-  return {
-    executionId: childId,
-    threadId: ctx.threadId,
-    resourceId: ctx.resourceId,
-    depth: ctx.depth + 1,
-    stepNumber: 0,
-    tokenUsage: {
-      input: 0,
-      output: 0,
-    },
-    cost: 0,
-    fs: ctx.harness.fs,
-    shell: ctx.harness.shell,
-    tokenize: naiveTokenize,
-    trace: noopTrace,
-    readLayerState: <T>(layerId: string): T | undefined =>
-      ctx.harness.getLayerState<T>(childId, layerId),
-  };
-}
-
-function buildParentExecutionContext(ctx: Context): ExecutionContext {
-  return {
-    executionId: ctx.id,
-    threadId: ctx.threadId,
-    resourceId: ctx.resourceId,
-    depth: ctx.depth,
-    stepNumber: ctx.stepCount,
-    tokenUsage: {
-      input: ctx.tokens.input,
-      output: ctx.tokens.output,
-    },
-    cost: ctx.cost,
-    fs: ctx.harness.fs,
-    shell: ctx.harness.shell,
-    tokenize: naiveTokenize,
-    trace: noopTrace,
-    readLayerState: <T>(layerId: string): T | undefined =>
-      ctx.harness.getLayerState<T>(ctx.id, layerId),
-  };
 }
 
 async function collectSpawnItems({
@@ -132,7 +77,18 @@ export async function executeSpawn<TMemory, I, O>(
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
   const layers = resolveLayersForSpawn(step, opts?.parentLayers);
-  const childExecutionCtx = buildChildExecutionContext(baseCtx);
+  const childId = crypto.randomUUID();
+  const childExecutionCtx = contextToExecCtx(baseCtx, {
+    executionId: childId,
+    depth: baseCtx.depth + 1,
+    stepNumber: 0,
+    tokenUsage: {
+      input: 0,
+      output: 0,
+    },
+    cost: 0,
+    readLayerStateId: childId,
+  });
   const layerStore = opts?.layerStore;
   const hasLayers = layers.length > 0 && layerStore !== undefined;
 
@@ -140,7 +96,7 @@ export async function executeSpawn<TMemory, I, O>(
   let childItems: Item[] = [];
   let parentExecutionCtx: ExecutionContext | undefined;
   if (hasLayers) {
-    parentExecutionCtx = buildParentExecutionContext(baseCtx);
+    parentExecutionCtx = contextToExecCtx(baseCtx);
     childItems = await collectSpawnItems({
       layers,
       parentExecutionCtx,

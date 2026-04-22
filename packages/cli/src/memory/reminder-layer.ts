@@ -145,7 +145,7 @@ export function reminderLayer(opts: ReminderLayerOpts): MemoryLayer<ReminderLaye
           items: [
             createDeveloperMessage(body),
           ],
-          tokenCount: Math.ceil(body.length / 4),
+          tokenCount: ctx.tokenize(body),
           state: working,
         };
       },

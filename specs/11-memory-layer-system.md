@@ -612,6 +612,8 @@ interface ExecutionContext {
 
 `readLayerState<T>(layerId)` returns a sibling layer's current state by its `layer.id`, or `undefined` if no such state exists yet. This enables cross-layer coordination (e.g., a reminder layer reading a planning layer's mode flag). Layers MUST treat the returned value as read-only — mutations are not persisted and observability is undefined.
 
+**The generic `T` is an author-assertion — it is NOT runtime-validated.** Any layer may register under the queried id with an arbitrary state shape (including `unknown` where the reader expected a specific object), so callers MUST add a runtime shape guard (e.g. `Array.isArray`, a Zod parse, or a narrow `typeof` check) before dereferencing fields. The canonical pattern is a small type-predicate function (`function hasX(v: unknown): v is { x: ... }`) used immediately after the `readLayerState` call.
+
 Note what is NOT on `ExecutionContext`: no `storage` (captured in `init`), no `itemLog` mutation, no `setRenderingHint()`.
 
 ---

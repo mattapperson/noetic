@@ -137,10 +137,22 @@ describe('composeSystemPrompt', () => {
 });
 
 describe('buildSystemPrompt (back-compat shim)', () => {
-  it('returns a non-empty string that contains the cwd', () => {
-    const out = buildSystemPrompt('/some/workspace');
+  it('returns a non-empty string that contains the cwd', async () => {
+    const out = await buildSystemPrompt('/some/workspace');
     expect(out).toContain('/some/workspace');
     expect(out).toContain('# System');
     expect(out).toContain('# Using your tools');
+  });
+
+  it('detects the git repo and branch of the invoking cwd', async () => {
+    const repoRoot = process.cwd();
+    const out = await buildSystemPrompt(repoRoot);
+    expect(out).toContain('Is a git repository: Yes');
+    expect(out).toMatch(/Current git branch: [^\s]+/);
+  });
+
+  it('reports no git repo for a non-repo path', async () => {
+    const out = await buildSystemPrompt('/definitely/not/a/repo/xyz');
+    expect(out).toContain('Is a git repository: No');
   });
 });

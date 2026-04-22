@@ -2,12 +2,18 @@
  * AGENT.md + rules loader.
  *
  * Discovers user-global and project-local instruction files, resolves
- * `@path.md` imports (cycle-safe, depth-limited), executes embedded
- * `!command` lines via `processSkillContent`, truncates each file to a
- * per-file cap, and renders a combined body with `Contents of <path> (<desc>):`
- * headers matching Claude Code's rendering.
+ * `@path.md` imports (cycle-safe, depth-limited, symlink-canonicalised via
+ * `node:fs/promises.realpath`), executes embedded `!command` lines via
+ * `processSkillContent`, truncates each file to a per-file cap with a
+ * single-pass emitter, and renders a combined body with
+ * `Contents of <path> (<desc>):` headers matching Claude Code's rendering.
+ *
+ * Symlink note: cycle detection canonicalises paths with the real filesystem.
+ * Virtual `FsAdapter` implementations do not participate in symlink
+ * resolution — tests that exercise symlinks must use the real FS.
  */
 
+import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { FsAdapter, ShellAdapter } from '@noetic/core';
@@ -90,6 +96,13 @@ const USER_ROLE = "user's private global instructions for all projects";
 
 const IMPORT_LINE_PATTERN = /^@(\S+\.md)\s*$/gm;
 
+/**
+ * Regex matching both opening and closing forms of the reserved
+ * `<system-reminder>` tag, case-insensitive. Loader-escaped so attacker-
+ * controlled AGENT.md content cannot forge runtime reminders.
+ */
+const SYSTEM_REMINDER_TAG_PATTERN = /<(\/?system-reminder)>/gi;
+
 //#endregion
 
 //#region Path helpers
@@ -154,6 +167,20 @@ async function findRepoRoot(fs: FsAdapter, startDir: string): Promise<string | n
   }
 }
 
+/**
+ * Canonicalise a path by resolving symlinks. Two imports that refer to the
+ * same inode via a symlink and its target must collapse to the same key so
+ * the visited-set cycle guard catches them. Falls back to the input when the
+ * path does not exist (the caller decides what to do with missing files).
+ */
+async function canonicalize(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return path;
+  }
+}
+
 //#endregion
 
 //#region Discovery
@@ -192,7 +219,11 @@ async function collectCandidates(
   for (const p of await listMarkdownFilesSorted(fs, join(cwd, '.agent', 'rules'))) {
     push(p, 'project', 'rule');
   }
-  // 4. Ancestor walk from cwd up to repo root (exclusive of cwd which is already covered).
+  // 4. Ancestor walk from cwd up to repo root (exclusive of cwd which is
+  //    already covered). Dual-bounded: stops at `dirname(repoRoot)` AND at
+  //    `homeDir`. When cwd is outside a git repo (`repoRoot === null`) the
+  //    ancestor walk is skipped entirely — this prevents a `/tmp/AGENT.md`
+  //    or `/AGENT.md` from ever being loaded on a shared host.
   const repoRoot = await findRepoRoot(fs, cwd);
   if (repoRoot !== null && repoRoot !== cwd) {
     let current = dirname(cwd);
@@ -227,85 +258,31 @@ async function collectCandidates(
 
 //#endregion
 
-//#region Import resolution
+//#region Loader context (shared across imports/candidate pipelines)
 
-interface ResolveImportsParams {
-  text: string;
+interface LoaderCtx {
   fs: FsAdapter;
-  importerDir: string;
+  shell: ShellAdapter;
+  cwd: string;
   homeDir: string;
-  maxImportDepth: number;
-  maxBytesPerFile: number;
   maxLinesPerFile: number;
-  visited: Set<string>;
-  depth: number;
-  collected: string[];
+  maxBytesPerFile: number;
+  maxImportDepth: number;
+  trustProjectEmbeddedCommands: boolean;
 }
 
-async function resolveImports(params: ResolveImportsParams): Promise<string> {
-  const { text, fs, importerDir, homeDir, maxImportDepth, visited, depth, collected } = params;
+//#endregion
 
-  if (depth >= maxImportDepth) {
-    return text.replace(IMPORT_LINE_PATTERN, (_match, p1: string) => {
-      return `[@${p1} skipped: import depth limit ${maxImportDepth} reached]`;
-    });
-  }
+//#region Import resolution
 
-  const matches: Array<{
-    full: string;
-    raw: string;
-    absolute: string;
-  }> = [];
-  IMPORT_LINE_PATTERN.lastIndex = 0;
-  for (
-    let match = IMPORT_LINE_PATTERN.exec(text);
-    match !== null;
-    match = IMPORT_LINE_PATTERN.exec(text)
-  ) {
-    const raw = match[1];
-    if (raw === undefined) {
-      continue;
-    }
-    const absolute = resolveImportPath(raw, importerDir, homeDir);
-    matches.push({
-      full: match[0],
-      raw,
-      absolute,
-    });
-  }
-
-  if (matches.length === 0) {
-    return text;
-  }
-
-  let result = text;
-  for (const m of matches) {
-    if (visited.has(m.absolute)) {
-      result = result.split(m.full).join(`[import cycle: @${m.raw}]`);
-      continue;
-    }
-
-    const body = await readIfExists(fs, m.absolute);
-    if (body === null) {
-      result = result.split(m.full).join(`[@${m.raw} not found]`);
-      continue;
-    }
-
-    collected.push(m.absolute);
-    const nextVisited = new Set(visited);
-    nextVisited.add(m.absolute);
-    const truncated = truncateText(body, params.maxLinesPerFile, params.maxBytesPerFile);
-    const resolved = await resolveImports({
-      ...params,
-      text: truncated.content,
-      importerDir: dirname(m.absolute),
-      visited: nextVisited,
-      depth: depth + 1,
-    });
-    result = result.split(m.full).join(resolved);
-  }
-
-  return result;
+/**
+ * Wrap a transcluded body in HTML-comment delimiters so that a truncated
+ * body with an unclosed code fence cannot poison the parent's markdown. The
+ * comments survive CommonMark rendering without opening or closing any
+ * implicit block.
+ */
+function fenceTranscluded(rawPath: string, body: string): string {
+  return `<!-- @import: ${rawPath} begin -->\n${body}\n<!-- @import: ${rawPath} end -->`;
 }
 
 function resolveImportPath(raw: string, importerDir: string, homeDir: string): string {
@@ -318,6 +295,83 @@ function resolveImportPath(raw: string, importerDir: string, homeDir: string): s
   return resolve(importerDir, raw);
 }
 
+interface ResolveImportsState {
+  text: string;
+  importerDir: string;
+  visited: Set<string>;
+  depth: number;
+  collected: string[];
+}
+
+async function resolveImports(ctx: LoaderCtx, st: ResolveImportsState): Promise<string> {
+  if (st.depth >= ctx.maxImportDepth) {
+    return st.text.replace(IMPORT_LINE_PATTERN, (_match, p1: string) => {
+      return `<!-- @import: ${p1} skipped: import depth limit ${ctx.maxImportDepth} reached -->`;
+    });
+  }
+
+  interface MatchHit {
+    full: string;
+    raw: string;
+    absolute: string;
+  }
+  const matches: MatchHit[] = [];
+  IMPORT_LINE_PATTERN.lastIndex = 0;
+  for (
+    let match = IMPORT_LINE_PATTERN.exec(st.text);
+    match !== null;
+    match = IMPORT_LINE_PATTERN.exec(st.text)
+  ) {
+    const raw = match[1];
+    if (raw === undefined) {
+      continue;
+    }
+    matches.push({
+      full: match[0],
+      raw,
+      absolute: resolveImportPath(raw, st.importerDir, ctx.homeDir),
+    });
+  }
+
+  if (matches.length === 0) {
+    return st.text;
+  }
+
+  let result = st.text;
+  for (const m of matches) {
+    const canonical = await canonicalize(m.absolute);
+    if (st.visited.has(canonical)) {
+      result = result.split(m.full).join(`<!-- @import: ${m.raw} cycle -->`);
+      continue;
+    }
+
+    const body = await readIfExists(ctx.fs, m.absolute);
+    if (body === null) {
+      result = result.split(m.full).join(`<!-- @import: ${m.raw} not found -->`);
+      continue;
+    }
+
+    // Record the canonical path before recursing so subsequent sibling
+    // imports that resolve to the same file (e.g. via a symlink alias) hit
+    // the cycle-guard branch above. `visited` is shared by reference across
+    // sibling iterations; descendants get their own branched copy below.
+    st.visited.add(canonical);
+    st.collected.push(canonical);
+    const descendantVisited = new Set(st.visited);
+    const truncated = truncateContent(body, ctx.maxLinesPerFile, ctx.maxBytesPerFile);
+    const resolved = await resolveImports(ctx, {
+      text: truncated.content,
+      importerDir: dirname(m.absolute),
+      visited: descendantVisited,
+      depth: st.depth + 1,
+      collected: st.collected,
+    });
+    result = result.split(m.full).join(fenceTranscluded(m.raw, resolved));
+  }
+
+  return result;
+}
+
 //#endregion
 
 //#region Truncation
@@ -327,23 +381,46 @@ interface TruncateResult {
   truncated: boolean;
 }
 
-function truncateText(body: string, maxLines: number, maxBytes: number): TruncateResult {
+/**
+ * Single-pass truncation: applies the line cap first, then the byte cap on
+ * the already-line-truncated content, and emits at most one marker naming
+ * whichever cap actually triggered (byte cap wins when both would trigger,
+ * since the byte view is the downstream view the model actually sees).
+ */
+function truncateContent(body: string, maxLines: number, maxBytes: number): TruncateResult {
   let content = body;
-  let truncated = false;
+  let cap: 'lines' | 'bytes' | null = null;
+
   const lines = content.split('\n');
   if (lines.length > maxLines) {
-    content = `${lines.slice(0, maxLines).join('\n')}\n[AGENT.md truncated at ${maxLines} lines — content beyond was ignored]`;
-    truncated = true;
+    content = lines.slice(0, maxLines).join('\n');
+    cap = 'lines';
   }
+
   if (Buffer.byteLength(content, 'utf-8') > maxBytes) {
+    // Reserve a conservative tail for the marker so the final rendered size
+    // stays within the cap.
+    const markerReserve = 120;
+    const sliceCap = Math.max(0, maxBytes - markerReserve);
     const buf = Buffer.from(content, 'utf-8');
-    const truncatedBuf = buf.subarray(0, maxBytes);
-    content = `${truncatedBuf.toString('utf-8')}\n[AGENT.md truncated at ${maxBytes} bytes — content beyond was ignored]`;
-    truncated = true;
+    content = buf.subarray(0, sliceCap).toString('utf-8');
+    cap = 'bytes';
   }
+
+  if (cap === null) {
+    return {
+      content,
+      truncated: false,
+    };
+  }
+
+  const marker =
+    cap === 'lines'
+      ? `\n[AGENT.md truncated at ${maxLines} lines — content beyond was ignored]`
+      : `\n[AGENT.md truncated at ${maxBytes} bytes — content beyond was ignored]`;
   return {
-    content,
-    truncated,
+    content: `${content}${marker}`,
+    truncated: true,
   };
 }
 
@@ -361,57 +438,58 @@ function renderAll(sources: ReadonlyArray<AgentInstructionSource>): string {
 
 //#endregion
 
-//#region Processing pipeline per candidate
+//#region Security helpers
 
-interface ProcessCandidateOpts {
-  fs: FsAdapter;
-  shell: ShellAdapter;
-  cwd: string;
-  homeDir: string;
-  maxLinesPerFile: number;
-  maxBytesPerFile: number;
-  maxImportDepth: number;
-  trustProjectEmbeddedCommands: boolean;
+/**
+ * Escape literal `<system-reminder>` / `</system-reminder>` tags in loaded
+ * content so attacker-controlled AGENT.md cannot forge runtime reminders
+ * that the model treats as authoritative. HTML entity escape (rather than
+ * deletion) preserves the author's intent for human readers.
+ */
+function escapeSystemReminderTags(text: string): string {
+  return text.replace(SYSTEM_REMINDER_TAG_PATTERN, (_match, tag: string) => {
+    return `&lt;${tag}&gt;`;
+  });
 }
+
+//#endregion
+
+//#region Processing pipeline per candidate
 
 async function processCandidate(
   candidate: CandidatePath,
-  opts: ProcessCandidateOpts,
+  ctx: LoaderCtx,
 ): Promise<AgentInstructionSource | null> {
-  const raw = await readIfExists(opts.fs, candidate.path);
+  const raw = await readIfExists(ctx.fs, candidate.path);
   if (raw === null) {
     return null;
   }
 
   const resolvedImports: string[] = [];
   const visited = new Set<string>([
-    candidate.path,
+    await canonicalize(candidate.path),
   ]);
-  const afterImports = await resolveImports({
+  const afterImports = await resolveImports(ctx, {
     text: raw,
-    fs: opts.fs,
     importerDir: dirname(candidate.path),
-    homeDir: opts.homeDir,
-    maxImportDepth: opts.maxImportDepth,
-    maxBytesPerFile: opts.maxBytesPerFile,
-    maxLinesPerFile: opts.maxLinesPerFile,
     visited,
     depth: 0,
     collected: resolvedImports,
   });
 
-  const canRunCommands = candidate.origin === 'user' || opts.trustProjectEmbeddedCommands === true;
+  const canRunCommands = candidate.origin === 'user' || ctx.trustProjectEmbeddedCommands === true;
   const afterCommands = canRunCommands
-    ? await processSkillContent(afterImports, opts.cwd, opts.shell)
+    ? await processSkillContent(afterImports, ctx.cwd, ctx.shell)
     : neutralizeEmbeddedCommands(afterImports);
 
-  const { content, truncated } = truncateText(
+  const { content: truncatedContent, truncated } = truncateContent(
     afterCommands,
-    opts.maxLinesPerFile,
-    opts.maxBytesPerFile,
+    ctx.maxLinesPerFile,
+    ctx.maxBytesPerFile,
   );
 
-  const displayPath = toDisplayPath(candidate.path, opts.homeDir);
+  const content = escapeSystemReminderTags(truncatedContent);
+  const displayPath = toDisplayPath(candidate.path, ctx.homeDir);
   const roleDescription = candidate.origin === 'project' ? PROJECT_ROLE : USER_ROLE;
 
   return {
@@ -482,28 +560,23 @@ function enforceTotalCap(
 export async function loadAgentInstructions(
   opts: LoadAgentInstructionsOpts,
 ): Promise<AgentInstructionResult> {
-  const homeDir = opts.homeDir ?? homedir();
-  const shell = opts.shell ?? createLocalShellAdapter();
-  const maxLinesPerFile = opts.maxLinesPerFile ?? DEFAULT_MAX_LINES_PER_FILE;
-  const maxBytesPerFile = opts.maxBytesPerFile ?? DEFAULT_MAX_BYTES_PER_FILE;
+  const ctx: LoaderCtx = {
+    fs: opts.fs,
+    shell: opts.shell ?? createLocalShellAdapter(),
+    cwd: opts.cwd,
+    homeDir: opts.homeDir ?? homedir(),
+    maxLinesPerFile: opts.maxLinesPerFile ?? DEFAULT_MAX_LINES_PER_FILE,
+    maxBytesPerFile: opts.maxBytesPerFile ?? DEFAULT_MAX_BYTES_PER_FILE,
+    maxImportDepth: opts.maxImportDepth ?? DEFAULT_MAX_IMPORT_DEPTH,
+    trustProjectEmbeddedCommands: opts.trustProjectEmbeddedCommands ?? false,
+  };
   const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
-  const maxImportDepth = opts.maxImportDepth ?? DEFAULT_MAX_IMPORT_DEPTH;
-  const trustProjectEmbeddedCommands = opts.trustProjectEmbeddedCommands ?? false;
 
-  const candidates = await collectCandidates(opts.fs, opts.cwd, homeDir);
+  const candidates = await collectCandidates(ctx.fs, ctx.cwd, ctx.homeDir);
 
   const processed: AgentInstructionSource[] = [];
   for (const candidate of candidates) {
-    const src = await processCandidate(candidate, {
-      fs: opts.fs,
-      shell,
-      cwd: opts.cwd,
-      homeDir,
-      maxLinesPerFile,
-      maxBytesPerFile,
-      maxImportDepth,
-      trustProjectEmbeddedCommands,
-    });
+    const src = await processCandidate(candidate, ctx);
     if (src === null) {
       continue;
     }

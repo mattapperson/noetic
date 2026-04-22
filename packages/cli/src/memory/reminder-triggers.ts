@@ -87,6 +87,41 @@ export function createReminderRegistry(): ReminderRegistry {
 
 //#endregion
 
+//#region Shape guards for cross-layer reads
+
+/**
+ * `ExecutionContext.readLayerState<T>` does not validate `T` at runtime — the
+ * generic is a convenience cast. Sibling layers may register under the same
+ * id with an arbitrary state shape, so every cross-layer read must re-check
+ * before dereferencing. These guards centralise the defensive checks.
+ */
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function hasSources(value: unknown): value is {
+  sources: ReadonlyArray<unknown>;
+} {
+  return isRecord(value) && Array.isArray(value.sources);
+}
+
+function extractPlanMode(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const session = value.session;
+  if (isRecord(session) && typeof session.mode === 'string') {
+    return session.mode;
+  }
+  if (typeof value.mode === 'string') {
+    return value.mode;
+  }
+  return null;
+}
+
+//#endregion
+
 //#region Built-in triggers
 
 /** Fires once on turn 0 after AGENT.md has loaded, to flag its presence. */
@@ -98,10 +133,8 @@ const agentMdLoadedTrigger: ReminderTrigger = {
     if (state.assistantTurnCount !== 0) {
       return null;
     }
-    const agentMd = ctx.readLayerState<{
-      sources: ReadonlyArray<unknown>;
-    }>('agent-md');
-    if (agentMd === undefined || agentMd.sources.length === 0) {
+    const agentMd = ctx.readLayerState('agent-md');
+    if (!hasSources(agentMd) || agentMd.sources.length === 0) {
       return null;
     }
     return 'AGENT.md and rules files are loaded into context. Follow the rules and preferences they declare for the duration of this session.';
@@ -114,16 +147,7 @@ const planModeStillActiveTrigger: ReminderTrigger = {
   minTurnsBetweenReminders: 8,
   timing: 'recall',
   shouldFire({ ctx }): string | null {
-    const plan = ctx.readLayerState<{
-      session?: {
-        mode?: string;
-      };
-      mode?: string;
-    }>('plan-memory');
-    if (plan === undefined) {
-      return null;
-    }
-    const mode = plan.session?.mode ?? plan.mode;
+    const mode = extractPlanMode(ctx.readLayerState('plan-memory'));
     if (mode !== 'planning') {
       return null;
     }
