@@ -25,7 +25,12 @@ import {
   parseBashCommand,
   parseSlashCommand,
 } from '../commands/index.js';
-import type { Command, CommandContext } from '../commands/types.js';
+import type {
+  Command,
+  CommandContext,
+  SessionRestartTarget,
+  SessionSnapshot,
+} from '../commands/types.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness } from '../harness/factory.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
@@ -191,12 +196,14 @@ function augmentTextWithPendingBash(text: string, pending: ReadonlyArray<LocalBa
 interface AppProps {
   config: AgentRuntimeConfig;
   plugins: ReadonlyArray<NoeticPlugin>;
-  /** A persisted session to resume. `null` starts fresh. Phase 4 wires this into TUI state. */
+  /** A persisted session to resume. `null` starts fresh. */
   initialSession: SessionFile | null;
   /** When true, session saves are skipped. Resume still works from existing files. */
   disablePersistence: boolean;
   /** From `-n/--name`. Applied as `customTitle` on the next save. */
   nameOverride?: string;
+  /** Called by `/resume` when the user wants to restart against a different session. */
+  onRestart: (target: SessionRestartTarget) => void;
 }
 
 interface ModalState {
@@ -384,6 +391,7 @@ function App({
   initialSession,
   disablePersistence,
   nameOverride,
+  onRestart,
 }: AppProps): ReactNode {
   const initialEntries = useMemo(
     () => (initialSession ? normalizeEntriesForResume(initialSession.entries) : []),
@@ -559,6 +567,62 @@ function App({
   const clearEntries = useCallback(() => {
     setEntries([]);
   }, []);
+
+  const clearSession = useCallback(() => {
+    // Full session reset: everything a `noetic --resume` would rebuild, plus UI.
+    threadIdRef.current = crypto.randomUUID();
+    createdAtRef.current = new Date().toISOString();
+    sessionStartedAtRef.current = Date.now();
+    resumedItemsRef.current = null;
+    customTitleRef.current = undefined;
+    tagRef.current = undefined;
+    cumulativeUsageRef.current = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
+    cumulativeCostRef.current = 0;
+    lastSaveMtimeRef.current = undefined;
+    lastLayerUsageRef.current = undefined;
+    setLastLayerUsage(undefined);
+    harnessRef.current = null;
+    streamWiredHarnessRef.current = null;
+    pendingMessageIdsRef.current.clear();
+    pendingBashOutputsRef.current = [];
+    setEntries([]);
+    setStatus('ready');
+  }, []);
+
+  const setCustomTitle = useCallback((name: string | undefined) => {
+    customTitleRef.current = name;
+  }, []);
+
+  const setTag = useCallback((next: string | undefined) => {
+    tagRef.current = next;
+  }, []);
+
+  const buildSessionSnapshot = useCallback(
+    (currentEntries: ReadonlyArray<ConversationEntry>): SessionSnapshot => ({
+      sessionId: threadIdRef.current,
+      cwd: config.cwd,
+      effectiveCwd: effectiveCwdRef.current,
+      model: harnessModelRef.current,
+      createdAt: createdAtRef.current,
+      customTitle: customTitleRef.current,
+      tag: tagRef.current,
+      firstPrompt: deriveFirstPrompt(currentEntries),
+      messageCount: countUserMessages(currentEntries),
+      cumulativeUsage: {
+        ...cumulativeUsageRef.current,
+      },
+      cumulativeCost: cumulativeCostRef.current,
+      persistenceEnabled: !disablePersistence,
+    }),
+    [
+      config.cwd,
+      disablePersistence,
+    ],
+  );
 
   const handleModalClose = useCallback(() => {
     if (!modal) {
@@ -928,6 +992,11 @@ function App({
               agentMode,
               setAgentMode,
               setModel,
+              sessionSnapshot: buildSessionSnapshot(entriesRef.current),
+              setCustomTitle,
+              setTag,
+              clearSession,
+              restartWithSession: onRestart,
             };
 
             try {
@@ -1053,6 +1122,11 @@ function App({
       model,
       setModel,
       runLocalBash,
+      buildSessionSnapshot,
+      setCustomTitle,
+      setTag,
+      clearSession,
+      onRestart,
     ],
   );
 
@@ -1110,21 +1184,105 @@ export interface RunAgentOptions {
   name?: string;
 }
 
+/**
+ * Run the TUI until the user exits or restarts via `/resume`. Returns once
+ * Ink unmounts for good (either by user Ctrl+D or after an explicit restart
+ * leaves the loop with `initialSession` resolved to the new target).
+ */
 export async function runAgent(
   plugins: ReadonlyArray<NoeticPlugin>,
   config: AgentRuntimeConfig,
   options: RunAgentOptions = {},
 ): Promise<void> {
-  const { waitUntilExit } = render(
-    <App
-      config={config}
-      plugins={plugins}
-      initialSession={options.initialSession ?? null}
-      disablePersistence={options.disablePersistence ?? false}
-      nameOverride={options.name}
-    />,
-  );
-  await waitUntilExit();
+  let currentSession = options.initialSession ?? null;
+  let currentName = options.name;
+
+  // Loop so `/resume` can swap the session without quitting the process.
+  while (true) {
+    const outcome = await runOneSession({
+      plugins,
+      config,
+      disablePersistence: options.disablePersistence ?? false,
+      initialSession: currentSession,
+      name: currentName,
+    });
+    if (outcome.kind === 'exit') {
+      return;
+    }
+    if (outcome.kind === 'restart-file') {
+      currentSession = outcome.file;
+      currentName = undefined;
+      continue;
+    }
+    // 'restart-picker' — render the picker, then loop back with the choice.
+    const picked = await (await import('./run-picker.js')).runPicker(config.cwd);
+    if (picked === null) {
+      return;
+    }
+    currentSession = picked;
+    currentName = undefined;
+  }
+}
+
+type RunOneSessionOutcome =
+  | {
+      kind: 'exit';
+    }
+  | {
+      kind: 'restart-file';
+      file: SessionFile;
+    }
+  | {
+      kind: 'restart-picker';
+    };
+
+interface RunOneSessionOpts {
+  plugins: ReadonlyArray<NoeticPlugin>;
+  config: AgentRuntimeConfig;
+  disablePersistence: boolean;
+  initialSession: SessionFile | null;
+  name: string | undefined;
+}
+
+async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutcome> {
+  return new Promise<RunOneSessionOutcome>((resolve) => {
+    let resolved = false;
+    const resolveOnce = (outcome: RunOneSessionOutcome): void => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(outcome);
+    };
+
+    const instance = render(
+      <App
+        config={opts.config}
+        plugins={opts.plugins}
+        initialSession={opts.initialSession}
+        disablePersistence={opts.disablePersistence}
+        nameOverride={opts.name}
+        onRestart={(target) => {
+          instance.unmount();
+          resolveOnce(
+            target.kind === 'file'
+              ? {
+                  kind: 'restart-file',
+                  file: target.file,
+                }
+              : {
+                  kind: 'restart-picker',
+                },
+          );
+        }}
+      />,
+    );
+    instance.waitUntilExit().then(() => {
+      resolveOnce({
+        kind: 'exit',
+      });
+    });
+  });
 }
 
 //#endregion
