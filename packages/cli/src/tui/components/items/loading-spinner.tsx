@@ -3,7 +3,7 @@
  * Matches Claude Code's SpinnerWithVerb style.
  */
 
-import { Box, Text } from 'ink';
+import { Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useTheme } from '../theme.js';
@@ -104,15 +104,17 @@ export function LoadingSpinner({ mode, message }: LoadingSpinnerProps): ReactNod
   const displayMessage = message ?? `${verb}...`;
   const suffix = mode === 'thinking' ? ' (thinking)' : '';
 
+  // Render as a single top-level <Text> (no flex-row Box) so Ink always sees
+  // exactly one text node of known height. Ghostty is stricter than most
+  // terminals about the cursor-up + erase-line sequences Ink emits between
+  // animation frames: when the dynamic region's measured row count drifts
+  // for even one tick, the previous spinner line is left behind and the
+  // ticks accumulate as a visible column of verbs.
   return (
-    <Box flexDirection="row">
+    <Text>
       <Text color={theme.primary}>{spinnerChar}</Text>
-      <Text> </Text>
-      <Text color={theme.muted}>
-        {displayMessage}
-        {suffix}
-      </Text>
-    </Box>
+      <Text color={theme.muted}>{` ${displayMessage}${suffix}`}</Text>
+    </Text>
   );
 }
 
