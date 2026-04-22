@@ -100,6 +100,30 @@ describe('SessionFileV1Schema', () => {
     };
     expect(() => SessionFileV1Schema.parse(bad)).toThrow();
   });
+
+  it('accepts a well-formed lastLayerUsage object', () => {
+    const withUsage = {
+      ...validSession(),
+      lastLayerUsage: {
+        executionId: 'exec-1',
+        modelId: 'anthropic/claude-sonnet-4',
+        layers: [],
+        systemPromptTokens: 10,
+        toolsTokens: 5,
+        historyTokens: 20,
+        totalUsedTokens: 35,
+      },
+    };
+    expect(() => SessionFileV1Schema.parse(withUsage)).not.toThrow();
+  });
+
+  it('rejects a non-object lastLayerUsage (e.g. a number)', () => {
+    const bad = {
+      ...validSession(),
+      lastLayerUsage: 42,
+    };
+    expect(() => SessionFileV1Schema.parse(bad)).toThrow();
+  });
 });
 
 describe('toSessionMetadata', () => {

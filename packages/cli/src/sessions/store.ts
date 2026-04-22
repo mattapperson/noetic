@@ -45,7 +45,11 @@ export async function saveSession(file: SessionFile, opts?: SaveOptions): Promis
     recursive: true,
   });
   const finalPath = sessionFilePath(file.cwd, file.sessionId);
-  const tmpPath = `${finalPath}.tmp`;
+  // Per-write unique suffix so two overlapping saves for the same session
+  // (e.g. back-to-back `turn_completed` handlers) don't clobber each other's
+  // in-progress tmp file. The suffix is high-entropy to avoid collisions
+  // even across process restarts on the same sessionId.
+  const tmpPath = `${finalPath}.tmp-${crypto.randomUUID()}`;
 
   let conflict = false;
   if (opts?.lastKnownMtimeMs !== undefined) {

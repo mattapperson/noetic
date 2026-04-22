@@ -113,7 +113,40 @@ describe('saveSession + loadSession', () => {
     await saveSession(session);
     const dir = sessionsDirFor(session.cwd);
     const entries = await readdir(dir);
-    expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
+    expect(entries.some((e) => e.includes('.tmp'))).toBe(false);
+  });
+
+  it('survives N concurrent saves for the same session without leaking tmp files', async () => {
+    await makeSessionsRoot();
+    const session = makeSession();
+    const concurrency = 8;
+    const attempts = Array.from(
+      {
+        length: concurrency,
+      },
+      (_, i) =>
+        saveSession({
+          ...session,
+          firstPrompt: `writer-${i}`,
+        }),
+    );
+    const results = await Promise.all(attempts);
+    expect(results).toHaveLength(concurrency);
+    for (const r of results) {
+      expect(r.mtimeMs).toBeGreaterThan(0);
+    }
+
+    const dir = sessionsDirFor(session.cwd);
+    const names = await readdir(dir);
+    expect(names.filter((n) => n.includes('.tmp'))).toEqual([]);
+    const jsonFiles = names.filter((n) => n.endsWith('.json'));
+    expect(jsonFiles).toEqual([
+      `${session.sessionId}.json`,
+    ]);
+
+    const loaded = await loadSession(session.cwd, session.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.sessionId).toBe(session.sessionId);
   });
 
   it('reports conflict=true when on-disk mtime is newer than lastKnownMtimeMs', async () => {
