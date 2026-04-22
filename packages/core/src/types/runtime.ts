@@ -185,6 +185,15 @@ export interface AgentHarnessContract<
   /** Number of messages currently queued on a session. */
   getQueueSize(scope?: SessionScope): number;
 
+  /**
+   * Pre-populate a session's accumulated history with prior items so the next
+   * `execute()` turn sees them as established context. Used by resume flows to
+   * seed a freshly-constructed session from a persisted transcript without
+   * re-running the prior turns. Creates the session lazily if it does not
+   * already exist. Replaces any previously-accumulated items for the session.
+   */
+  seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
+
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(
     step: Step<ContextMemory, I, O>,

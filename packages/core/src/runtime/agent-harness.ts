@@ -436,6 +436,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return session ? session.runner.queue.size : 0;
   }
 
+  seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void {
+    const session = this.getOrCreateSession(threadId);
+    session.accumulatedItems = [
+      ...items,
+    ];
+  }
+
   private getOrCreateSession(threadId: string): Session {
     const existing = this.sessions.get(threadId);
     if (existing) {

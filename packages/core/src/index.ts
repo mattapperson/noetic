@@ -147,6 +147,13 @@ export { AgentHarness } from './runtime/agent-harness';
 
 //#endregion
 
+//#region Schemas
+
+/** @public */
+export { ItemSchema } from './schemas/item';
+
+//#endregion
+
 //#region Types — Channels
 
 /** @public */
