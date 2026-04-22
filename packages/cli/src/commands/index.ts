@@ -8,7 +8,13 @@ export { BUILTIN_COMMANDS, clear, context, skills } from './builtins/index.js';
 export { executeCommand } from './execute.js';
 export type { ParsedSlashCommand } from './parse.js';
 // Parse
-export { isSlashCommand, parseSlashCommand } from './parse.js';
+export {
+  isAutoDetectedShellCommand,
+  isBashCommand,
+  isSlashCommand,
+  parseBashCommand,
+  parseSlashCommand,
+} from './parse.js';
 // Registry
 export { findCommand, getEnabledCommands, getVisibleCommands, hasCommand } from './registry.js';
 

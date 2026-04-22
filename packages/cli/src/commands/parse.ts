@@ -1,5 +1,11 @@
 /**
- * Slash command parsing.
+ * Prompt-input parsing.
+ *
+ * Routes:
+ *   `/foo ...`          -> slash command
+ *   `! <cmd>`           -> local bash command (explicit)
+ *   `<known> [args]`    -> local bash command (auto-detected from a fixed set)
+ *   anything else       -> regular agent message
  */
 
 //#region Types
@@ -13,7 +19,32 @@ interface ParsedSlashCommand {
 
 //#endregion
 
-//#region Parser
+//#region Auto-detect set
+
+/**
+ * First-token allowlist for bare-command auto-detection.
+ * Kept small to avoid colliding with natural-language prompts.
+ */
+const AUTO_DETECT_COMMANDS: ReadonlySet<string> = new Set([
+  'git',
+  'cd',
+  'mv',
+  'cp',
+  'ls',
+  'rm',
+  'pwd',
+  'cat',
+  'grep',
+  'find',
+  'which',
+  'echo',
+]);
+
+const FIRST_TOKEN_RE = /^([A-Za-z][\w.-]*)(?=$|\s)/;
+
+//#endregion
+
+//#region Slash parser
 
 /**
  * Parse user input as a slash command.
@@ -25,12 +56,10 @@ export function parseSlashCommand(input: string): ParsedSlashCommand | null {
     return null;
   }
 
-  // Remove leading slash and split on first whitespace
   const withoutSlash = trimmed.slice(1);
   const spaceIndex = withoutSlash.search(/\s/);
 
   if (spaceIndex === -1) {
-    // No arguments
     return {
       commandName: withoutSlash,
       args: '',
@@ -48,6 +77,56 @@ export function parseSlashCommand(input: string): ParsedSlashCommand | null {
  */
 export function isSlashCommand(input: string): boolean {
   return input.trim().startsWith('/');
+}
+
+//#endregion
+
+//#region Bash parser
+
+/**
+ * True if the first token of `input` is in the auto-detect allowlist,
+ * followed by whitespace or end-of-input (so `lsof`, `github`, `cats`
+ * don't match).
+ */
+export function isAutoDetectedShellCommand(input: string): boolean {
+  const trimmed = input.trimStart();
+  const match = FIRST_TOKEN_RE.exec(trimmed);
+  if (!match) {
+    return false;
+  }
+  return AUTO_DETECT_COMMANDS.has(match[1]);
+}
+
+/**
+ * True if `input` should be routed to the local bash path.
+ * Matches either an explicit `!` prefix with a non-empty command,
+ * or an auto-detected bare command.
+ */
+export function isBashCommand(input: string): boolean {
+  const trimmed = input.trimStart();
+  if (trimmed.startsWith('!')) {
+    return trimmed.slice(1).trim().length > 0;
+  }
+  return isAutoDetectedShellCommand(trimmed);
+}
+
+/**
+ * Parse user input as a local bash command. Returns null for anything else.
+ * `!` alone (or `!` + whitespace) is NOT a bash command — pass it to the agent.
+ */
+export function parseBashCommand(input: string): string | null {
+  const trimmed = input.trimStart();
+
+  if (trimmed.startsWith('!')) {
+    const command = trimmed.slice(1).trim();
+    return command.length === 0 ? null : command;
+  }
+
+  if (isAutoDetectedShellCommand(trimmed)) {
+    return trimmed.trimEnd();
+  }
+
+  return null;
 }
 
 //#endregion

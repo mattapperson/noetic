@@ -7,8 +7,10 @@ import type {
   LastLayerUsage,
   MemoryLayer,
   PlanState,
+  ShellAdapter,
   StreamEvent,
 } from '@noetic/core';
+import { createLocalShellAdapter } from '@noetic/core';
 import { render } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +21,7 @@ import {
   executeCommand,
   findCommand,
   isSlashCommand,
+  parseBashCommand,
   parseSlashCommand,
 } from '../commands/index.js';
 import type { Command, CommandContext } from '../commands/types.js';
@@ -31,6 +34,20 @@ import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
 import { getModelContextLimit } from '../types/model-context.js';
+import type { LocalBashResult } from './bash-command.js';
+import {
+  buildBashCommandEntry,
+  buildCdBashResult,
+  buildCdEntry,
+  buildCdErrorEntry,
+  buildCdSplitNoticeEntry,
+  firstToken,
+  formatLocalStdoutBlock,
+  handleCd,
+  LOCAL_COMMAND_CAVEAT,
+  parseCdArg,
+  runUserShellCommand,
+} from './bash-command.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
@@ -85,6 +102,20 @@ function markUserEntrySent(entries: ConversationEntry[], id: string): Conversati
   ];
   next[idx] = updated;
   return next;
+}
+
+/**
+ * Prepend any pending local-bash outputs (from `!` / auto-detected commands)
+ * as a `<local-command-caveat>` + `<local-command-stdout>` block in front of
+ * the user's text, so the next model turn sees the shell output but treats
+ * it as context rather than a user message.
+ */
+function augmentTextWithPendingBash(text: string, pending: ReadonlyArray<LocalBashResult>): string {
+  if (pending.length === 0) {
+    return text;
+  }
+  const blocks = pending.map(formatLocalStdoutBlock).join('\n');
+  return `${LOCAL_COMMAND_CAVEAT}\n${blocks}\n\n${text}`;
 }
 
 //#endregion
@@ -205,6 +236,7 @@ function App({ config, plugins }: AppProps): ReactNode {
   const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
+  const [effectiveCwd, setEffectiveCwd] = useState<string>(config.cwd);
 
   const buildCtx = useMemo(
     () => createPluginContextBuilder(config),
@@ -223,6 +255,15 @@ function App({ config, plugins }: AppProps): ReactNode {
   const sessionStartedAtRef = useRef<number>(Date.now());
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
+
+  const shellRef = useRef<ShellAdapter | null>(null);
+  if (shellRef.current === null) {
+    shellRef.current = createLocalShellAdapter();
+  }
+  const effectiveCwdRef = useRef<string>(config.cwd);
+  const prevCwdRef = useRef<string | null>(null);
+  const pendingBashOutputsRef = useRef<LocalBashResult[]>([]);
+  const cdNoticeShownRef = useRef<boolean>(false);
 
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -484,8 +525,85 @@ function App({ config, plugins }: AppProps): ReactNode {
     });
   }, []);
 
+  /** Run a `cd` in-process and update the session-scoped `effectiveCwd`. */
+  const runCd = useCallback(
+    (command: string): void => {
+      const result = handleCd({
+        arg: parseCdArg(command),
+        effectiveCwd: effectiveCwdRef.current,
+        prevCwd: prevCwdRef.current,
+      });
+      if (result.kind === 'error') {
+        setEntries((prev) => [
+          ...prev,
+          buildCdErrorEntry(result.message),
+        ]);
+        return;
+      }
+      prevCwdRef.current = result.previousCwd;
+      effectiveCwdRef.current = result.newCwd;
+      setEffectiveCwd(result.newCwd);
+      pendingBashOutputsRef.current.push(buildCdBashResult(command, result.newCwd));
+
+      const extras: SystemEntry[] = [];
+      extras.push(buildCdEntry(result.newCwd));
+      if (!cdNoticeShownRef.current) {
+        cdNoticeShownRef.current = true;
+        extras.push(buildCdSplitNoticeEntry(config.cwd));
+      }
+      setEntries((prev) => [
+        ...prev,
+        ...extras,
+      ]);
+    },
+    [
+      config.cwd,
+    ],
+  );
+
+  /** Execute a `!` or auto-detected command locally, append transcript
+   *  entry, and stash the result for the next agent turn. */
+  const runLocalBash = useCallback(
+    async (command: string): Promise<void> => {
+      if (firstToken(command) === 'cd') {
+        runCd(command);
+        return;
+      }
+      const shell = shellRef.current;
+      if (shell === null) {
+        return;
+      }
+      try {
+        const result = await runUserShellCommand({
+          shell,
+          cwd: effectiveCwdRef.current,
+          command,
+        });
+        pendingBashOutputsRef.current.push(result);
+        setEntries((prev) => [
+          ...prev,
+          buildBashCommandEntry(result),
+        ]);
+      } catch (error) {
+        setEntries((prev) => [
+          ...prev,
+          buildErrorEntry(error),
+        ]);
+      }
+    },
+    [
+      runCd,
+    ],
+  );
+
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
+      const bashCommand = parseBashCommand(text);
+      if (bashCommand !== null) {
+        await runLocalBash(bashCommand);
+        return;
+      }
+
       if (isSlashCommand(text)) {
         const parsed = parseSlashCommand(text);
         if (parsed) {
@@ -575,7 +693,13 @@ function App({ config, plugins }: AppProps): ReactNode {
         return;
       }
 
-      // Regular message — enqueue on the session and let streams drive the UI.
+      // Snapshot pending bash outputs now so any `!cmd` the user runs during
+      // the agent turn falls through to the NEXT flush instead of being
+      // dropped here.
+      const pendingSnapshot: ReadonlyArray<LocalBashResult> = [
+        ...pendingBashOutputsRef.current,
+      ];
+      const augmented = augmentTextWithPendingBash(text, pendingSnapshot);
       try {
         const harness = await getOrCreateHarness(agentMode, model);
         const isBusy =
@@ -599,10 +723,15 @@ function App({ config, plugins }: AppProps): ReactNode {
         }
         setStatus('submitted');
 
-        await harness.execute(text, {
+        await harness.execute(augmented, {
           threadId: threadIdRef.current,
           messageId,
         });
+        // Drop only what we sent — any output appended during the await from
+        // a concurrent `!cmd` must survive to ride the next turn.
+        if (pendingSnapshot.length > 0) {
+          pendingBashOutputsRef.current.splice(0, pendingSnapshot.length);
+        }
       } catch (error) {
         setEntries((prev) => [
           ...prev,
@@ -621,13 +750,14 @@ function App({ config, plugins }: AppProps): ReactNode {
       setAgentMode,
       model,
       setModel,
+      runLocalBash,
     ],
   );
 
   const footerValue = useMemo<FooterContextValue>(
     () => ({
       model,
-      cwd: config.cwd,
+      cwd: effectiveCwd,
       status,
       lastLayerUsage,
       contextLimit: getModelContextLimit(model),
@@ -637,7 +767,7 @@ function App({ config, plugins }: AppProps): ReactNode {
       agentMode,
     }),
     [
-      config.cwd,
+      effectiveCwd,
       status,
       lastLayerUsage,
       entries.length,

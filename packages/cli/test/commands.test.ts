@@ -12,7 +12,10 @@ import {
   getEnabledCommands,
   getVisibleCommands,
   hasCommand,
+  isAutoDetectedShellCommand,
+  isBashCommand,
   isSlashCommand,
+  parseBashCommand,
   parseSlashCommand,
 } from '../src/commands/index.js';
 
@@ -138,6 +141,81 @@ describe('commandsToPromptSuggestions', () => {
       expect(sug.cmd).toMatch(/^\//);
       expect(sug.desc).toBeTruthy();
     }
+  });
+});
+
+describe('isBashCommand', () => {
+  test('returns true for bang prefix with command', () => {
+    expect(isBashCommand('!ls')).toBe(true);
+    expect(isBashCommand('! ls')).toBe(true);
+    expect(isBashCommand('  !ls -la')).toBe(true);
+    expect(isBashCommand('!/foo')).toBe(true);
+  });
+
+  test('returns false for bare bang or bang + whitespace', () => {
+    expect(isBashCommand('!')).toBe(false);
+    expect(isBashCommand('! ')).toBe(false);
+    expect(isBashCommand('!   ')).toBe(false);
+  });
+
+  test('returns true for auto-detected commands', () => {
+    expect(isBashCommand('git status')).toBe(true);
+    expect(isBashCommand('ls')).toBe(true);
+    expect(isBashCommand('cd foo')).toBe(true);
+    expect(isBashCommand('pwd')).toBe(true);
+    expect(isBashCommand('grep -r "x" .')).toBe(true);
+    expect(isBashCommand('echo hi')).toBe(true);
+  });
+
+  test('returns false for natural language with similar prefixes', () => {
+    expect(isBashCommand('lsof')).toBe(false);
+    expect(isBashCommand('cats are great')).toBe(false);
+    expect(isBashCommand('github')).toBe(false);
+    expect(isBashCommand('let x = 1')).toBe(false);
+    expect(isBashCommand('hello world')).toBe(false);
+    expect(isBashCommand('')).toBe(false);
+  });
+});
+
+describe('isAutoDetectedShellCommand', () => {
+  test('matches only exact first-token hits', () => {
+    expect(isAutoDetectedShellCommand('git status')).toBe(true);
+    expect(isAutoDetectedShellCommand('git')).toBe(true);
+    expect(isAutoDetectedShellCommand('github')).toBe(false);
+    expect(isAutoDetectedShellCommand('gitstatus')).toBe(false);
+  });
+
+  test('false for empty/whitespace input', () => {
+    expect(isAutoDetectedShellCommand('')).toBe(false);
+    expect(isAutoDetectedShellCommand('   ')).toBe(false);
+  });
+});
+
+describe('parseBashCommand', () => {
+  test('strips bang prefix', () => {
+    expect(parseBashCommand('!ls')).toBe('ls');
+    expect(parseBashCommand('! ls -la')).toBe('ls -la');
+    expect(parseBashCommand('  !echo hi  ')).toBe('echo hi');
+  });
+
+  test('returns null for bare bang', () => {
+    expect(parseBashCommand('!')).toBeNull();
+    expect(parseBashCommand('!   ')).toBeNull();
+  });
+
+  test('returns the command for allowlist tokens', () => {
+    expect(parseBashCommand('git status')).toBe('git status');
+    expect(parseBashCommand('ls')).toBe('ls');
+  });
+
+  test('returns null for non-matching input', () => {
+    expect(parseBashCommand('hello world')).toBeNull();
+    expect(parseBashCommand('lsof -i')).toBeNull();
+    expect(parseBashCommand('')).toBeNull();
+  });
+
+  test('preserves inner whitespace but trims ends', () => {
+    expect(parseBashCommand('   ls   foo   bar   ')).toBe('ls   foo   bar');
   });
 });
 
