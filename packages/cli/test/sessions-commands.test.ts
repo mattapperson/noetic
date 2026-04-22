@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'bun:test';
 
 import { rename, resume, session, tag } from '../src/commands/builtins/index.js';
-import type { CommandContext, SessionSnapshot } from '../src/commands/types.js';
+import type {
+  Command,
+  CommandContext,
+  LocalCommandCall,
+  SessionSnapshot,
+} from '../src/commands/types.js';
+
+/** Load the local-command call. Tests pass in local-only commands, so the
+ *  JSX branch is unreachable — throw if anyone passes a local-jsx command. */
+async function loadLocalCall(cmd: Command): Promise<LocalCommandCall> {
+  if (cmd.type !== 'local') {
+    throw new Error(`Expected local command, got ${cmd.type}`);
+  }
+  const mod = await cmd.load();
+  return mod.call;
+}
 
 function baseSnapshot(partial: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {
@@ -82,8 +97,8 @@ function makeCtx(partial: Partial<SessionSnapshot> = {}): FakeCtx {
 describe('/session', () => {
   it('prints a multi-line metadata report', async () => {
     const fake = makeCtx();
-    const mod = await session.load();
-    const result = await mod.call('', fake.ctx);
+    const call = await loadLocalCall(session);
+    const result = await call('', fake.ctx);
     expect(result.type).toBe('text');
     if (result.type !== 'text') {
       throw new Error('expected text');
@@ -99,8 +114,8 @@ describe('/session', () => {
     const fake = makeCtx({
       persistenceEnabled: false,
     });
-    const mod = await session.load();
-    const result = await mod.call('', fake.ctx);
+    const call = await loadLocalCall(session);
+    const result = await call('', fake.ctx);
     if (result.type !== 'text') {
       throw new Error('expected text');
     }
@@ -111,8 +126,8 @@ describe('/session', () => {
 describe('/rename', () => {
   it('sets the custom title when given a name', async () => {
     const fake = makeCtx();
-    const mod = await rename.load();
-    const result = await mod.call('bug triage', fake.ctx);
+    const call = await loadLocalCall(rename);
+    const result = await call('bug triage', fake.ctx);
     expect(fake.customTitleSetTo).toEqual([
       'bug triage',
     ]);
@@ -124,8 +139,8 @@ describe('/rename', () => {
 
   it('clears the title when given no argument', async () => {
     const fake = makeCtx();
-    const mod = await rename.load();
-    const result = await mod.call('   ', fake.ctx);
+    const call = await loadLocalCall(rename);
+    const result = await call('   ', fake.ctx);
     expect(fake.customTitleSetTo).toEqual([
       undefined,
     ]);
@@ -139,8 +154,8 @@ describe('/rename', () => {
 describe('/tag', () => {
   it('sets the tag (stripping a leading #)', async () => {
     const fake = makeCtx();
-    const mod = await tag.load();
-    const result = await mod.call('#bugs', fake.ctx);
+    const call = await loadLocalCall(tag);
+    const result = await call('#bugs', fake.ctx);
     expect(fake.tagSetTo).toEqual([
       'bugs',
     ]);
@@ -154,8 +169,8 @@ describe('/tag', () => {
     const fake = makeCtx({
       tag: 'existing',
     });
-    const mod = await tag.load();
-    const result = await mod.call('', fake.ctx);
+    const call = await loadLocalCall(tag);
+    const result = await call('', fake.ctx);
     expect(fake.tagSetTo).toEqual([
       undefined,
     ]);
@@ -167,8 +182,8 @@ describe('/tag', () => {
 
   it('reports no-op when no tag and no argument', async () => {
     const fake = makeCtx();
-    const mod = await tag.load();
-    const result = await mod.call('', fake.ctx);
+    const call = await loadLocalCall(tag);
+    const result = await call('', fake.ctx);
     if (result.type !== 'text') {
       throw new Error('expected text');
     }
@@ -179,16 +194,16 @@ describe('/tag', () => {
 describe('/resume', () => {
   it('requests the picker with no argument', async () => {
     const fake = makeCtx();
-    const mod = await resume.load();
-    await mod.call('', fake.ctx);
+    const call = await loadLocalCall(resume);
+    await call('', fake.ctx);
     expect(fake.restarts).toHaveLength(1);
     expect(fake.restarts[0].kind).toBe('picker');
   });
 
   it('rejects a non-UUID argument', async () => {
     const fake = makeCtx();
-    const mod = await resume.load();
-    const result = await mod.call('not-a-uuid', fake.ctx);
+    const call = await loadLocalCall(resume);
+    const result = await call('not-a-uuid', fake.ctx);
     if (result.type !== 'text') {
       throw new Error('expected text');
     }
@@ -198,8 +213,8 @@ describe('/resume', () => {
 
   it('reports not found for an unknown UUID', async () => {
     const fake = makeCtx();
-    const mod = await resume.load();
-    const result = await mod.call('ffffffff-0000-4000-8000-000000000000', fake.ctx);
+    const call = await loadLocalCall(resume);
+    const result = await call('ffffffff-0000-4000-8000-000000000000', fake.ctx);
     if (result.type !== 'text') {
       throw new Error('expected text');
     }
