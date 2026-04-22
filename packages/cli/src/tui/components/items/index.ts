@@ -5,6 +5,12 @@
 
 export type { AssistantTextProps } from './assistant-text.js';
 export { AssistantText } from './assistant-text.js';
+export type { BashResultProps } from './bash-result.js';
+export { BashResult } from './bash-result.js';
+export type { CollapsedReadGroupViewProps } from './collapsed-read-group.js';
+export { CollapsedReadGroupView } from './collapsed-read-group.js';
+export type { EditResultProps } from './edit-result.js';
+export { EditResult } from './edit-result.js';
 export type { LoadingSpinnerProps, SpinnerMode } from './loading-spinner.js';
 export { LoadingSpinner } from './loading-spinner.js';
 export type { MessageResponseProps } from './message-response.js';

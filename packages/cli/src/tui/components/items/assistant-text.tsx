@@ -5,10 +5,9 @@
 
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
+import { BLACK_CIRCLE } from '../../glyphs.js';
 import { Ansi } from '../ansi.js';
 
-// Claude Code uses ⏺ on macOS, ● on other platforms for assistant text
-const BLACK_CIRCLE = process.platform === 'darwin' ? '⏺' : '●';
 // Glyph (1 col) + trailing space; must match what the dot Box reserves.
 const DOT_COLUMN_WIDTH = 2;
 

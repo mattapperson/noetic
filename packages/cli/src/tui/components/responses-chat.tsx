@@ -9,6 +9,9 @@ import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NoeticPlugin } from '../../plugins/types.js';
+import { collapseReads } from '../grouping/collapse-reads.js';
+import type { CollapsedReadGroup, DisplayEntry } from '../grouping/types.js';
+import { isCollapsedReadGroup } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import {
   extractReasoning,
@@ -21,6 +24,9 @@ import {
 import type { SpinnerMode, ToolCallStatus } from './items/index.js';
 import {
   AssistantText,
+  BashResult,
+  CollapsedReadGroupView,
+  EditResult,
   LoadingSpinner,
   Reasoning,
   SystemMessage,
@@ -30,6 +36,8 @@ import {
 } from './items/index.js';
 import type { ChatStatus } from './prompt-input.js';
 import { PromptInput } from './prompt-input.js';
+import type { CallInfo } from './transcript-view.js';
+import { TranscriptView } from './transcript-view.js';
 
 //#region Types
 
@@ -63,7 +71,7 @@ type EntryCategory =
 
 interface RenderContext {
   chatStatus: ChatStatus;
-  callStatusMap: Map<string, ToolCallStatus>;
+  callInfoMap: Map<string, CallInfo>;
   entryCount: number;
   categories: EntryCategory[];
 }
@@ -85,20 +93,26 @@ function mapItemStatus(status: string | undefined): ToolCallStatus {
   return 'pending';
 }
 
-function buildCallStatusMap(entries: ConversationEntry[]): Map<string, ToolCallStatus> {
-  const statuses = new Map<string, ToolCallStatus>();
+function buildCallInfoMap(entries: ConversationEntry[]): Map<string, CallInfo> {
+  const info = new Map<string, CallInfo>();
   for (const entry of entries) {
     if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
       continue;
     }
     if (entry.type === 'function_call') {
-      statuses.set(entry.callId, mapItemStatus(entry.status));
+      info.set(entry.callId, {
+        name: entry.name,
+        status: mapItemStatus(entry.status),
+      });
     }
   }
-  return statuses;
+  return info;
 }
 
-function categorize(entry: ConversationEntry): EntryCategory {
+function categorize(entry: DisplayEntry): EntryCategory {
+  if (isCollapsedReadGroup(entry)) {
+    return 'tool-result';
+  }
   if (isUserEntry(entry)) {
     return 'user';
   }
@@ -117,7 +131,7 @@ function categorize(entry: ConversationEntry): EntryCategory {
   return 'tool-call';
 }
 
-function computeCategories(entries: ConversationEntry[]): EntryCategory[] {
+function computeCategories(entries: ReadonlyArray<DisplayEntry>): EntryCategory[] {
   return entries.map(categorize);
 }
 
@@ -207,8 +221,32 @@ function previewArgs(raw: string): string {
 
 //#region Entry Dispatch
 
-function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext): ReactNode {
+function renderCollapsedGroup(group: CollapsedReadGroup): ReactNode {
+  return <CollapsedReadGroupView key={group.id} group={group} />;
+}
+
+function staticKeyFor(entry: DisplayEntry, index: number): string {
+  if (isCollapsedReadGroup(entry)) {
+    return entry.id;
+  }
+  if (isUserEntry(entry)) {
+    return `user-${index}`;
+  }
+  if (isErrorEntry(entry)) {
+    return `error-${index}`;
+  }
+  if (isSystemEntry(entry)) {
+    return `system-${index}`;
+  }
+  return getItemId(entry);
+}
+
+function renderEntry(entry: DisplayEntry, index: number, ctx: RenderContext): ReactNode {
   const addMargin = shouldAddMargin(ctx.categories, index);
+
+  if (isCollapsedReadGroup(entry)) {
+    return renderCollapsedGroup(entry);
+  }
 
   if (isUserEntry(entry)) {
     return (
@@ -282,8 +320,15 @@ function renderEntry(entry: ConversationEntry, index: number, ctx: RenderContext
   }
 
   if (entry.type === 'function_call_output') {
-    const callStatus = ctx.callStatusMap.get(entry.callId);
-    return <ToolResult key={key} output={entry.output} isError={callStatus === 'error'} />;
+    const info = ctx.callInfoMap.get(entry.callId);
+    const isError = info?.status === 'error';
+    if (info?.name === 'Edit') {
+      return <EditResult key={key} output={entry.output} />;
+    }
+    if (info?.name === 'Bash') {
+      return <BashResult key={key} output={entry.output} />;
+    }
+    return <ToolResult key={key} output={entry.output} isError={isError} />;
   }
 
   if (entry.type === 'web_search_call') {
@@ -398,18 +443,14 @@ export function ResponsesChat({
     loadingPool,
     turnId,
   ]);
-  const callStatusMap = useMemo(
-    () => buildCallStatusMap(entries),
+  const callInfoMap = useMemo(
+    () => buildCallInfoMap(entries),
     [
       entries,
     ],
   );
-  const categories = useMemo(
-    () => computeCategories(entries),
-    [
-      entries,
-    ],
-  );
+
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
 
   function handleSubmit(msg: { text: string }): void {
     onSubmit(msg.text);
@@ -419,25 +460,53 @@ export function ResponsesChat({
     (_input, key) => {
       if (key.escape && modalContent && onModalClose) {
         onModalClose();
+        return;
+      }
+      if (key.escape && transcriptOpen) {
+        setTranscriptOpen(false);
+        return;
+      }
+      if (key.ctrl && _input === 'o') {
+        setTranscriptOpen((prev) => !prev);
       }
     },
     {
-      isActive: !!modalContent,
+      isActive: !modalContent || transcriptOpen,
     },
   );
-
-  const ctx: RenderContext = {
-    chatStatus: status,
-    callStatusMap,
-    entryCount: entries.length,
-    categories,
-  };
 
   const lastEntry = entries[entries.length - 1];
   const hasStreamingEntry =
     status === 'streaming' && lastEntry !== undefined && !isUserEntry(lastEntry);
   const completedEntries = hasStreamingEntry ? entries.slice(0, -1) : entries;
   const streamingEntry = hasStreamingEntry ? lastEntry : null;
+
+  const collapsedCompleted = useMemo<DisplayEntry[]>(
+    () => collapseReads(completedEntries),
+    [
+      completedEntries,
+    ],
+  );
+
+  const categories = useMemo(() => {
+    const all: DisplayEntry[] = streamingEntry
+      ? [
+          ...collapsedCompleted,
+          streamingEntry,
+        ]
+      : collapsedCompleted;
+    return computeCategories(all);
+  }, [
+    collapsedCompleted,
+    streamingEntry,
+  ]);
+
+  const ctx: RenderContext = {
+    chatStatus: status,
+    callInfoMap,
+    entryCount: collapsedCompleted.length + (streamingEntry ? 1 : 0),
+    categories,
+  };
 
   // Keep the spinner visible for the full lifetime of a streaming turn — even
   // after assistant text starts appearing — so the user sees live progress
@@ -482,19 +551,13 @@ export function ResponsesChat({
 
   const staticItems = useMemo(
     () =>
-      completedEntries.map((entry, i) => ({
-        key: isUserEntry(entry)
-          ? `user-${i}`
-          : isErrorEntry(entry)
-            ? `error-${i}`
-            : isSystemEntry(entry)
-              ? `system-${i}`
-              : getItemId(entry),
+      collapsedCompleted.map((entry, i) => ({
+        key: staticKeyFor(entry, i),
         entry,
         index: i,
       })),
     [
-      completedEntries,
+      collapsedCompleted,
     ],
   );
 
@@ -509,15 +572,34 @@ export function ResponsesChat({
     );
   }
 
+  if (transcriptOpen) {
+    return (
+      <Box flexDirection="column" height="100%">
+        <Box flexDirection="column" flexGrow={1}>
+          <TranscriptView entries={entries} callInfoByCallId={callInfoMap} />
+        </Box>
+        <PromptInput
+          status={status}
+          onSubmit={handleSubmit}
+          onStop={onStop}
+          onModalClose={onModalClose}
+          isModalOpen={!!modalContent}
+          model={model}
+          commands={commands}
+        />
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" height="100%">
       <Box flexDirection="column" flexGrow={1}>
         <Static items={staticItems}>
-          {(item: { key: string; entry: ConversationEntry; index: number }) => (
+          {(item: { key: string; entry: DisplayEntry; index: number }) => (
             <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
           )}
         </Static>
-        {streamingEntry && <Box>{renderEntry(streamingEntry, entries.length - 1, ctx)}</Box>}
+        {streamingEntry && <Box>{renderEntry(streamingEntry, collapsedCompleted.length, ctx)}</Box>}
         {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
       {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
