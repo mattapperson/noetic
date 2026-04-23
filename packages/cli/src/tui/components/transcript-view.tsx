@@ -26,6 +26,7 @@ import {
   AssistantText,
   BashResult,
   EditResult,
+  LspResult,
   MessageResponse,
   Reasoning,
   SystemMessage,
@@ -71,6 +72,16 @@ function renderResultForTool(toolName: string, output: unknown, isError: boolean
   }
   if (toolName === 'Bash') {
     return <BashResult output={output} expanded />;
+  }
+  if (toolName === 'lsp') {
+    return (
+      <LspResult
+        output={output}
+        isError={isError}
+        expanded
+        fallback={<ToolResult output={output} isError={isError} />}
+      />
+    );
   }
   const text = asDisplayString(output);
   if (!text) {

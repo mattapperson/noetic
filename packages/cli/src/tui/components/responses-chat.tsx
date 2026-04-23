@@ -21,6 +21,7 @@ import {
   isSystemEntry,
   isUserEntry,
 } from '../item-utils.js';
+import { previewToolArgs } from '../tool-args-preview.js';
 import type { SpinnerMode, ToolCallStatus } from './items/index.js';
 import {
   AssistantText,
@@ -170,55 +171,6 @@ function isPartOfAssistantTurn(categories: EntryCategory[], index: number): bool
 
 //#endregion
 
-//#region Argument Preview
-
-const MAX_ARGS_PREVIEW = 80;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function truncate(value: string, max: number): string {
-  if (value.length <= max) {
-    return value;
-  }
-  return `${value.slice(0, max)}…`;
-}
-
-function previewArgs(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) {
-    return '';
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (isRecord(parsed)) {
-      const preferred = [
-        'path',
-        'file',
-        'file_path',
-        'command',
-        'pattern',
-        'query',
-      ];
-      for (const key of preferred) {
-        const value = parsed[key];
-        if (typeof value === 'string') {
-          return truncate(value, MAX_ARGS_PREVIEW);
-        }
-      }
-      // Parsed as a record but no preferred key — don't dump raw JSON; better
-      // to show no args than `{"recursive":true,"depth":3}`.
-      return '';
-    }
-  } catch {
-    // Not JSON — fall through to raw truncation.
-  }
-  return truncate(trimmed, MAX_ARGS_PREVIEW);
-}
-
-//#endregion
-
 //#region Entry Dispatch
 
 function renderCollapsedGroup(group: CollapsedReadGroup): ReactNode {
@@ -308,12 +260,13 @@ function renderEntry(entry: DisplayEntry, index: number, ctx: RenderContext): Re
   }
 
   if (entry.type === 'function_call') {
+    const name = entry.name ?? 'tool';
     return (
       <ToolCall
         key={key}
-        name={entry.name ?? 'tool'}
+        name={name}
         status={mapItemStatus(entry.status)}
-        args={previewArgs(entry.arguments ?? '')}
+        args={previewToolArgs(name, entry.arguments ?? '')}
         addMargin={addMargin}
       />
     );
@@ -327,6 +280,16 @@ function renderEntry(entry: DisplayEntry, index: number, ctx: RenderContext): Re
     }
     if (info?.name === 'Bash') {
       return <BashResult key={key} output={entry.output} />;
+    }
+    if (info?.name === 'lsp') {
+      return (
+        <LspResult
+          key={key}
+          output={entry.output}
+          isError={isError}
+          fallback={<ToolResult output={entry.output} isError={isError} />}
+        />
+      );
     }
     return <ToolResult key={key} output={entry.output} isError={isError} />;
   }
