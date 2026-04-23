@@ -190,7 +190,7 @@ function buildInstallManifest(pkg: string, peers: ReadonlyArray<string>): string
     [pkg]: 'latest',
   };
   for (const peer of peers) {
-    dependencies[peer] = 'latest';
+    dependencies[peer] = peer === 'typescript' ? '~5.9.0' : 'latest';
   }
   return JSON.stringify(
     {
