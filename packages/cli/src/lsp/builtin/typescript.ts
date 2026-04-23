@@ -24,5 +24,12 @@ export const typescriptContribution: LspServerContribution = {
     args: [
       '--stdio',
     ],
+    // typescript-language-server spawns tsserver from `typescript` via Node
+    // module resolution. Without listing it here, the server installs solo in
+    // bunx's cache and initialize fails with "Could not find a valid TypeScript
+    // installation."
+    peers: [
+      'typescript',
+    ],
   },
 };

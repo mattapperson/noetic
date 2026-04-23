@@ -19,8 +19,15 @@ export interface PathLaunchSpec {
 }
 
 /**
- * Launch via `bunx <pkg> <bin>`. Appropriate for npm-distributed servers
- * (typescript-language-server, pyright). Zero-install for the user.
+ * Launch via `bunx <bin>` or `npm exec --package=<pkg> ... -- <bin>`.
+ * Appropriate for npm-distributed servers (typescript-language-server, pyright).
+ * Zero-install for the user.
+ *
+ * If `peers` is declared, the runner installs the primary package alongside
+ * each peer in the same ephemeral install so the server can resolve its peer
+ * dependencies at runtime. `typescript-language-server`, for example, needs
+ * `typescript` to be installed beside it — without that, initialize fails with
+ * "Could not find a valid TypeScript installation."
  */
 export interface BunxLaunchSpec {
   strategy: 'bunx';
@@ -29,6 +36,13 @@ export interface BunxLaunchSpec {
   /** Binary name exposed by the package. Often equal to `pkg`. */
   bin: string;
   args: ReadonlyArray<string>;
+  /**
+   * Additional packages to install alongside `pkg`. Servers like
+   * `typescript-language-server` rely on `typescript` being resolvable via
+   * Node module lookup; listing it here guarantees co-installation. When
+   * present, the runner uses `npm exec` (the only robust multi-package runner).
+   */
+  peers?: ReadonlyArray<string>;
 }
 
 /**

@@ -11,13 +11,13 @@
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
-import { chmod, mkdir, rename, unlink } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import type { LaunchSpec, ResolvedCommand } from './types.js';
+import type { BunxLaunchSpec, LaunchSpec, ResolvedCommand } from './types.js';
 
 //#region Schemas
 
@@ -73,6 +73,15 @@ async function resolveViaBunx(launch: LaunchSpec, serverId: string): Promise<Res
   if (launch.strategy !== 'bunx') {
     throw new LspInstallError('resolveViaBunx called with wrong strategy', serverId);
   }
+  // When peers are declared we must install them alongside the primary
+  // package with real sibling `node_modules/` entries so the server can
+  // resolve its peers via Node module lookup. `npm exec --package=<x>` only
+  // exposes the primary package's own deps — not sibling `--package` installs
+  // — which breaks `typescript-language-server`'s `require.resolve('typescript/...')`.
+  // Install into a dedicated cache dir under ~/.noetic/lsp/ instead.
+  if (launch.peers && launch.peers.length > 0) {
+    return resolveViaSharedInstall(launch, serverId);
+  }
   const bunxBin = (await which('bunx')) ?? (await which('npx'));
   if (!bunxBin) {
     throw new LspInstallError(
@@ -88,6 +97,170 @@ async function resolveViaBunx(launch: LaunchSpec, serverId: string): Promise<Res
       ...launch.args,
     ],
   };
+}
+
+/**
+ * Install the primary package + peers as siblings in a dedicated cache
+ * directory, then spawn the bin from there. `npm exec --package=<x> --package=<y>`
+ * only exposes the primary package's own deps to the running bin, so peer
+ * packages aren't resolvable via Node module lookup under that mode. A real
+ * sibling `node_modules/` layout fixes it — `typescript-language-server` finds
+ * `typescript` at `../typescript/lib/tsserver.js` as expected.
+ */
+async function resolveViaSharedInstall(
+  launch: BunxLaunchSpec,
+  serverId: string,
+): Promise<ResolvedCommand> {
+  if (!launch.peers || launch.peers.length === 0) {
+    throw new LspInstallError('resolveViaSharedInstall called without peer packages', serverId);
+  }
+  if (process.env.NOETIC_DISABLE_LSP_DOWNLOAD === '1') {
+    throw new LspInstallError(
+      `LSP auto-install is disabled (NOETIC_DISABLE_LSP_DOWNLOAD=1), cannot install '${launch.pkg}' + peers for server '${serverId}'.`,
+      serverId,
+    );
+  }
+  const safeServerId = assertSafePathComponent(serverId, 'serverId', serverId);
+  const installDir = join(homedir(), '.noetic', 'lsp', `${safeServerId}-peered`);
+  await ensureSharedInstall({
+    dir: installDir,
+    pkg: launch.pkg,
+    peers: launch.peers,
+    serverId,
+  });
+  const binSuffix = process.platform === 'win32' ? '.cmd' : '';
+  const binPath = join(installDir, 'node_modules', '.bin', `${launch.bin}${binSuffix}`);
+  if (!existsSync(binPath)) {
+    throw new LspInstallError(
+      `LSP bin '${launch.bin}' not found at ${binPath} after install — check that '${launch.pkg}' exposes this binary.`,
+      serverId,
+    );
+  }
+  return {
+    executable: binPath,
+    args: [
+      ...launch.args,
+    ],
+  };
+}
+
+interface SharedInstallRequest {
+  dir: string;
+  pkg: string;
+  peers: ReadonlyArray<string>;
+  serverId: string;
+}
+
+/**
+ * Ensure `dir` has a `package.json` listing `pkg` + all `peers` as deps and a
+ * matching `node_modules/` tree. Idempotent: re-reads the manifest and skips
+ * `npm install` when the dep set is unchanged and the primary package is
+ * already on disk.
+ */
+async function ensureSharedInstall(req: SharedInstallRequest): Promise<void> {
+  const manifestPath = join(req.dir, 'package.json');
+  const desired = buildInstallManifest(req.pkg, req.peers);
+  if (
+    await installIsFresh({
+      manifestPath,
+      desired,
+      installDir: req.dir,
+      pkg: req.pkg,
+    })
+  ) {
+    return;
+  }
+  const npmBin = await which('npm');
+  if (!npmBin) {
+    throw new LspInstallError(
+      `'npm' not found on PATH — cannot install peer packages for server '${req.serverId}'.`,
+      req.serverId,
+      'Install Node.js to get `npm`, which is required when a language server declares peer packages.',
+    );
+  }
+  await mkdir(req.dir, {
+    recursive: true,
+  });
+  await writeFile(manifestPath, `${desired}\n`, 'utf8');
+  await runNpmInstall(npmBin, req.dir, req.serverId);
+}
+
+function buildInstallManifest(pkg: string, peers: ReadonlyArray<string>): string {
+  const dependencies: Record<string, string> = {
+    [pkg]: 'latest',
+  };
+  for (const peer of peers) {
+    dependencies[peer] = 'latest';
+  }
+  return JSON.stringify(
+    {
+      name: 'noetic-lsp-install',
+      private: true,
+      dependencies,
+    },
+    null,
+    2,
+  );
+}
+
+interface FreshnessCheck {
+  manifestPath: string;
+  desired: string;
+  installDir: string;
+  pkg: string;
+}
+
+async function installIsFresh(check: FreshnessCheck): Promise<boolean> {
+  let existing: string;
+  try {
+    existing = await readFile(check.manifestPath, 'utf8');
+  } catch {
+    return false;
+  }
+  if (existing.trimEnd() !== check.desired) {
+    return false;
+  }
+  return existsSync(join(check.installDir, 'node_modules', check.pkg));
+}
+
+async function runNpmInstall(npmBin: string, cwd: string, serverId: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(
+      npmBin,
+      [
+        'install',
+        '--silent',
+        '--no-audit',
+        '--no-fund',
+        '--no-progress',
+      ],
+      {
+        cwd,
+        stdio: [
+          'ignore',
+          'ignore',
+          'pipe',
+        ],
+      },
+    );
+    let stderr = '';
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    proc.on('error', (err) => reject(err));
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new LspInstallError(
+          `npm install for server '${serverId}' failed (exit ${code}): ${stderr.trim()}`,
+          serverId,
+        ),
+      );
+    });
+  });
 }
 
 async function resolveViaGithubRelease(

@@ -30,6 +30,7 @@ import {
   CallHierarchyIncomingCallsRequest,
   CallHierarchyOutgoingCallsRequest,
   CallHierarchyPrepareRequest,
+  ConfigurationRequest,
   createProtocolConnection,
   DefinitionRequest,
   DidChangeTextDocumentNotification,
@@ -44,7 +45,11 @@ import {
   InitializeRequest,
   PublishDiagnosticsNotification,
   ReferencesRequest,
+  RegistrationRequest,
   ShutdownRequest,
+  UnregistrationRequest,
+  WorkDoneProgressCreateRequest,
+  WorkspaceFoldersRequest,
   WorkspaceSymbolRequest,
 } from 'vscode-languageserver-protocol/node.js';
 
@@ -224,6 +229,19 @@ export class LspClient implements LspClientApi {
     connection.onNotification(PublishDiagnosticsNotification.type, (params) => {
       this.onPublishDiagnostics?.(params);
     });
+    // Stub common server→client requests so unhandled-method errors don't
+    // surface for every initialize. Servers (typescript-language-server,
+    // pyright) issue these as part of their handshake.
+    connection.onRequest(ConfigurationRequest.type, (params) => params.items.map(() => null));
+    connection.onRequest(WorkspaceFoldersRequest.type, () => [
+      {
+        uri: pathToFileURL(this.root).href,
+        name: this.root,
+      },
+    ]);
+    connection.onRequest(WorkDoneProgressCreateRequest.type, () => null);
+    connection.onRequest(RegistrationRequest.type, () => null);
+    connection.onRequest(UnregistrationRequest.type, () => null);
     connection.listen();
     const rootUri = pathToFileURL(this.root).href;
     await withTimeout(

@@ -27,7 +27,7 @@ describe('resolveLaunchCommand — path strategy', () => {
 });
 
 describe('resolveLaunchCommand — bunx strategy', () => {
-  it('resolves to bunx/npx plus the bin name as first arg', async () => {
+  it('resolves to bunx/npx plus the bin name as first arg when no peers', async () => {
     // This test assumes at least one of bunx/npx is on PATH — both are
     // installed in the dev environment. Skip otherwise.
     const launch: LaunchSpec = {
@@ -42,6 +42,72 @@ describe('resolveLaunchCommand — bunx strategy', () => {
     expect(result.executable.length).toBeGreaterThan(0);
     expect(result.args[0]).toBe('typescript-language-server');
     expect(result.args[1]).toBe('--stdio');
+  });
+
+  it('routes peers through the shared-install path (gated by the disable flag)', async () => {
+    // Setting NOETIC_DISABLE_LSP_DOWNLOAD proves we took the shared-install
+    // branch without actually running `npm install` in the test. The non-peer
+    // branch above ignores this flag, so this is a reliable routing signal.
+    const previous = process.env.NOETIC_DISABLE_LSP_DOWNLOAD;
+    process.env.NOETIC_DISABLE_LSP_DOWNLOAD = '1';
+    try {
+      const launch: LaunchSpec = {
+        strategy: 'bunx',
+        pkg: 'typescript-language-server',
+        bin: 'typescript-language-server',
+        args: [
+          '--stdio',
+        ],
+        peers: [
+          'typescript',
+        ],
+      };
+      await resolveLaunchCommand(launch, 'typescript');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(LspInstallError);
+      if (!(err instanceof LspInstallError)) {
+        throw err;
+      }
+      expect(err.message).toContain('NOETIC_DISABLE_LSP_DOWNLOAD');
+      expect(err.message).toContain('peers');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.NOETIC_DISABLE_LSP_DOWNLOAD;
+      } else {
+        process.env.NOETIC_DISABLE_LSP_DOWNLOAD = previous;
+      }
+    }
+  });
+
+  it('rejects unsafe serverId when routing through shared install', async () => {
+    const previous = process.env.NOETIC_DISABLE_LSP_DOWNLOAD;
+    process.env.NOETIC_DISABLE_LSP_DOWNLOAD = '';
+    try {
+      const launch: LaunchSpec = {
+        strategy: 'bunx',
+        pkg: 'some-server',
+        bin: 'some-server',
+        args: [],
+        peers: [
+          'peer-a',
+        ],
+      };
+      await resolveLaunchCommand(launch, '../evil');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(LspInstallError);
+      if (!(err instanceof LspInstallError)) {
+        throw err;
+      }
+      expect(err.message).toContain('serverId');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.NOETIC_DISABLE_LSP_DOWNLOAD;
+      } else {
+        process.env.NOETIC_DISABLE_LSP_DOWNLOAD = previous;
+      }
+    }
   });
 });
 
