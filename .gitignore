@@ -7,4 +7,5 @@ packages/web/next-env.d.ts
 .vercel
 .superpowers/
 packages/web/.typecheck-snippets/
+*.tsbuildinfo
 examples/skippy/.env
