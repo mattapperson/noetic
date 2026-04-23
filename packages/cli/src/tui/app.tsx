@@ -930,15 +930,30 @@ function App({
     ],
   );
 
-  const handleStop = useCallback(async () => {
+  const handleStop = useCallback(async (): Promise<void> => {
     const harness = harnessRef.current;
     if (!harness) {
       return;
     }
+    const wasGenerating =
+      harness.getStatus({
+        threadId: threadIdRef.current,
+      }).kind === 'generating';
     await harness.abort({
       threadId: threadIdRef.current,
       reason: 'user-requested',
     });
+    if (!wasGenerating) {
+      return;
+    }
+    setEntries((prev) => [
+      ...prev,
+      {
+        role: 'system',
+        type: 'info',
+        content: 'Canceled by user',
+      } satisfies SystemEntry,
+    ]);
   }, []);
 
   /** Run a `cd` in-process and update the session-scoped `effectiveCwd`. */
