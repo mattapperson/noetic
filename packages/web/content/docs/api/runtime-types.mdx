@@ -21,7 +21,12 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
-  detachedSpawn<I, O>(step: Step<ContextMemory, I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
+  detachedSpawn<I, O>(
+    step: Step<ContextMemory, I, O>,
+    input: I,
+    parentCtx: Context,
+    overrides?: { threadId?: string; resourceId?: string },
+  ): DetachedHandle<O>;
   createContext(opts?: CreateContextOpts & { memory?: MemoryLayer[] }): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
@@ -54,7 +59,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `getStatus(scope?)` | Session status snapshot. |
 | `getQueueSize(scope?)` | Messages currently queued on the session. |
 | `run(step, input, ctx)` | Run a step with the given input and context |
-| `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
+| `detachedSpawn(step, input, parentCtx, overrides?)` | Launch a step concurrently, returning a `DetachedHandle`. Optional `overrides.threadId` / `overrides.resourceId` decouple the child's session-scoped item log from the parent's. |
 | `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
 | `send(channel, value, ctx)` | Send a value to a channel |
 | `recv(channel, ctx, opts?)` | Receive from a channel (blocking) |

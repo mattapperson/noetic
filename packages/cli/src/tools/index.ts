@@ -20,7 +20,9 @@ export {
   type ActivateSkillTool,
   createActivateSkillTool,
 } from './activate-skill.js';
+export { createAgentTool } from './agent.js';
 export { type BashOutput, type BashTool, createBashTool } from './bash.js';
+export { createCheckAgentTool } from './check-agent.js';
 export { createEditTool, type EditOutput, type EditTool } from './edit.js';
 export {
   computeEditDiff,
@@ -42,6 +44,7 @@ export {
   type ReadTool,
 } from './read.js';
 export { getRiskDescription, isHighRiskCommand, validateCommand } from './security.js';
+export { createSendMessageTool } from './send-message.js';
 export {
   formatSize,
   type TruncationOptions,

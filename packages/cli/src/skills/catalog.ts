@@ -75,4 +75,35 @@ export async function buildSkillCatalog(args: BuildSkillCatalogArgs): Promise<Sk
   ];
 }
 
+/**
+ * Filter a catalog to skills that declare `agentType` (registerable as
+ * teammates), deduplicated by `agentType` with last-wins precedence (matching
+ * `getAgent`'s behavior). Two skills with different names but the same
+ * agentType — e.g. a built-in being shadowed by a user-provided skill — yield
+ * one entry per agentType.
+ */
+export function listAgents(catalog: ReadonlyArray<SkillDefinition>): SkillDefinition[] {
+  const byAgentType = new Map<string, SkillDefinition>();
+  for (const skill of catalog) {
+    if (skill.agentType === undefined) {
+      continue;
+    }
+    byAgentType.set(skill.agentType, skill);
+  }
+  return [
+    ...byAgentType.values(),
+  ];
+}
+
+/**
+ * Look up a single agent definition by `agentType`. Last-wins on duplicates,
+ * matching the precedence in `buildSkillCatalog`.
+ */
+export function getAgent(
+  catalog: ReadonlyArray<SkillDefinition>,
+  agentType: string,
+): SkillDefinition | undefined {
+  return catalog.findLast((s) => s.agentType === agentType);
+}
+
 //#endregion

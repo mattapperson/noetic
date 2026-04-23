@@ -612,9 +612,15 @@ Subscribe to streams before the first `execute()` if you want to observe the ver
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
 
-// Background execution
+// Background execution (inherits parent's threadId by default)
 const handle = harness.detachedSpawn(step, input, ctx);
 await handle.await();
+
+// Background execution with isolated session log (does NOT pollute parent's
+// `session.accumulatedItems` — use for long-running sub-agents)
+const isolatedHandle = harness.detachedSpawn(step, input, ctx, {
+  threadId: 'background-task-1',
+});
 
 // Channels
 harness.send(channel, value, ctx);

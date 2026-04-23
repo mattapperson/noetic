@@ -15,7 +15,7 @@ import { createLocalShellAdapter } from '@noetic/core';
 import { render } from 'ink';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
+import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
@@ -433,6 +433,7 @@ function App({
     initialSession?.lastLayerUsage,
   );
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
+  const teammatesRef = useRef<TeammateRegistry | null>(null);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
   const threadIdRef = useRef<string>(
     initialSession?.sessionId ?? forcedSessionId ?? crypto.randomUUID(),
@@ -833,6 +834,7 @@ function App({
         skills: resolvedSkills,
         memoryLayers,
         dispose,
+        teammates,
       } = await createAgentHarness({
         config: {
           ...config,
@@ -855,6 +857,7 @@ function App({
       harnessModeRef.current = mode;
       harnessModelRef.current = activeModel;
       memoryLayersRef.current = memoryLayers;
+      teammatesRef.current = teammates;
       setSkills(resolvedSkills);
       if (resumedItemsRef.current !== null) {
         // Seed BEFORE wiring streams — wireStreams triggers lazy session
@@ -877,6 +880,11 @@ function App({
 
   /** Discard the current harness so the next submit recreates it with fresh config. */
   const invalidateHarness = useCallback((): void => {
+    // Drops the registry's references to running teammates. Does NOT abort
+    // in-flight executions — DetachedHandle has no cancel API. Settle notices
+    // posted by the dropped child go via WeakRef and are silently discarded.
+    teammatesRef.current?.dropAll();
+    teammatesRef.current = null;
     const dispose = harnessDisposeRef.current;
     harnessDisposeRef.current = null;
     if (dispose) {

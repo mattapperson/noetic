@@ -17,6 +17,7 @@ import {
   toolMemoryLayer,
   workingMemory,
 } from '@noetic/core';
+import { TeammateRegistry } from '../agents/registry-runtime.js';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
@@ -28,11 +29,15 @@ import { reminderLayer } from '../memory/reminder-layer.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
 import { BUILTIN_TRIGGERS, createReminderRegistry } from '../memory/reminder-triggers.js';
 import { skillsLayer } from '../memory/skills-layer.js';
+import { teammateInboxLayer } from '../memory/teammate-inbox-layer.js';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
+import { createAgentTool } from '../tools/agent.js';
+import { createCheckAgentTool } from '../tools/check-agent.js';
 import { createActivateSkillTool, createCodingTools, createReadOnlyTools } from '../tools/index.js';
+import { createSendMessageTool } from '../tools/send-message.js';
 import type { AgentConfig } from '../types/config.js';
 
 //#region Types
@@ -176,6 +181,13 @@ export interface HarnessWithSkills {
   memoryLayers: ReadonlyArray<MemoryLayer>;
   /** Tears down owned resources (LSP server processes, etc.). Safe to call multiple times. */
   dispose: () => Promise<void>;
+  /**
+   * The per-harness teammate registry. Exposed so callers (TUI, tests) can
+   * call `teammates.dropAll()` during teardown to release detached-handle
+   * references (the underlying executions continue until they settle —
+   * `DetachedHandle` has no cancel API).
+   */
+  teammates: TeammateRegistry;
 }
 
 interface CreateAgentHarnessOpts {
@@ -231,32 +243,75 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
 
   // Build tools including skill activation. In planning mode we hide mutating
   // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
-  const builtinTools =
-    mode === 'planning'
-      ? createReadOnlyTools({
-          cwd: config.cwd,
-          fs,
-          shell,
-          lspService,
-        })
-      : createCodingTools({
-          cwd: config.cwd,
-          fs,
-          shell,
-          lspService,
-        });
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
 
-  const tools = filterTools(
-    [
-      ...builtinTools,
+  /**
+   * Rebuild the base (non-teammate) tool pool rooted at the given cwd.
+   *
+   * Used twice: once at harness construction for the parent's tools (rooted
+   * at `config.cwd`), and once per `agent` tool invocation when worktree
+   * isolation is requested (rooted at the worktree path). The latter is the
+   * only way to actually re-root file/shell tools at the worktree — tools
+   * close over their cwd at construction.
+   */
+  const buildBaseTools = (toolCwd: string): Tool[] => {
+    const builtin =
+      mode === 'planning'
+        ? createReadOnlyTools({
+            cwd: toolCwd,
+            fs,
+            shell,
+            lspService,
+          })
+        : createCodingTools({
+            cwd: toolCwd,
+            fs,
+            shell,
+            lspService,
+          });
+    return [
+      ...builtin,
       ...pluginTools,
       ...(activateSkill
         ? [
             activateSkill,
           ]
         : []),
+    ];
+  };
+
+  // Per-harness teammate registry. Holds detached handles (by id), named
+  // teammate inboxes (for `sendMessage`), and the parent-notice queue
+  // drained by `teammateInboxLayer`.
+  const teammates = new TeammateRegistry();
+
+  const baseTools = buildBaseTools(config.cwd);
+
+  // Sub-agents receive baseTools only (no agent/sendMessage/checkAgent) —
+  // teammates cannot recursively spawn teammates unless a custom skill
+  // allowlist explicitly includes 'agent'.
+  const teammateTools: Tool[] = [
+    createAgentTool({
+      catalog: allSkills,
+      teammates,
+      buildParentTools: buildBaseTools,
+      parentModel: config.model,
+      worktreeConfig: config.worktree,
+      cwd: config.cwd,
+    }),
+    createSendMessageTool({
+      teammates,
+    }),
+    createCheckAgentTool({
+      teammates,
+    }),
+  ];
+
+  const tools = filterTools(
+    [
+      ...baseTools,
+      ...teammateTools,
     ],
     config,
   );
@@ -299,6 +354,9 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     planInstructionBlocks.length > 0 ? planInstructionBlocks.join('\n\n---\n\n') : undefined;
 
   const memory: MemoryLayer[] = [
+    teammateInboxLayer({
+      teammates,
+    }),
     reminderLayer({
       registry: reminderRegistry,
     }),
@@ -363,6 +421,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     // Only dispose the LSP service if we created it — a caller-supplied service
     // is owned by the caller and must outlive the harness.
     dispose: ownedLspService ? () => ownedLspService.dispose() : () => Promise.resolve(),
+    teammates,
   };
 }
 

@@ -170,6 +170,24 @@ const result = await handle.await();         // blocks until done
 const result = await handle.await(5_000);    // throws on timeout
 ```
 
+### Isolating background work from the parent's session
+
+By default, `detachedSpawn` reuses the parent's `threadId` and `resourceId`,
+so any items the child appends land in the parent's `session.accumulatedItems`
+and replay in the parent's next turn. For long-running background sub-agents
+whose work should NOT pollute the parent's history (e.g. a separate research
+teammate), pass an `overrides` argument:
+
+```ts
+const handle = harness.detachedSpawn(subAgentStep, input, ctx, {
+  threadId: `teammate-${agentId}`,
+});
+```
+
+The child runs against a fresh per-teammate session log; the parent's history
+remains uncontaminated. The handle and its `.await()` / `.status` semantics
+are unchanged.
+
 ### DetachedHandle API
 
 | Property | Type | Description |

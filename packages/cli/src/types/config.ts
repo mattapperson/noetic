@@ -30,6 +30,44 @@ export const PluginSpecSchema = z.union([
   }),
 ]);
 
+/**
+ * Hook-command shape: a single command string or a named table of commands.
+ * Mirrors worktrunk's hook value format (https://worktrunk.dev/config/).
+ */
+export const WorktreeHookSchema = z.union([
+  z.string(),
+  z.record(z.string(), z.string()),
+]);
+
+/**
+ * `worktree` namespace: subset of worktrunk's config schema applied when the
+ * `agent` tool is invoked with `isolation: 'worktree'`. noetic interprets these
+ * directly — no `wt` binary dependency.
+ *
+ * Template variables available in `worktree-path`, `branch`, and hook commands:
+ *   `{{ repo }}`, `{{ repo_path }}`, `{{ branch }}`, `{{ worktree_path }}`,
+ *   `{{ worktree_name }}`, `{{ default_branch }}`, `{{ agent_id }}`.
+ * Filters: `sanitize` (replace `/` and `\` with `-`), `hash_port` (deterministic
+ * 10000–19999), matching worktrunk's behavior.
+ */
+export const WorktreeConfigSchema = z.object({
+  'worktree-path': z.string().optional(),
+  branch: z.string().optional(),
+  'pre-start': WorktreeHookSchema.optional(),
+  'post-start': WorktreeHookSchema.optional(),
+  'pre-remove': WorktreeHookSchema.optional(),
+  cleanup: z
+    .enum([
+      'always',
+      'if-clean',
+      'never',
+    ])
+    .optional(),
+});
+
+export type WorktreeHook = z.infer<typeof WorktreeHookSchema>;
+export type WorktreeConfig = z.infer<typeof WorktreeConfigSchema>;
+
 export const AgentConfigSchema = z.object({
   model: z.string(),
   cwd: z.string(),
@@ -62,6 +100,7 @@ export const AgentConfigSchema = z.object({
     })
     .optional(),
   memory: z.array(z.string()).optional(),
+  worktree: WorktreeConfigSchema.optional(),
 });
 
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;

@@ -195,10 +195,29 @@ export interface AgentHarnessContract<
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
 
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  /**
+   * Launch `step` as a fire-and-forget background execution.
+   *
+   * The returned `DetachedHandle` exposes status / result / error and an
+   * `await()` for callers that want to block on settlement. The child runs
+   * concurrently with the caller; pass `overrides.threadId` to give the child
+   * its own session-scoped item log so background work does not pollute the
+   * parent's accumulated turn history.
+   *
+   * @param step Step to execute in a fresh child context.
+   * @param input Initial input passed to `step`.
+   * @param parentCtx Parent context (the child inherits memory layers and,
+   * by default, threadId/resourceId).
+   * @param overrides Optional: override threadId or resourceId on the child.
+   */
   detachedSpawn<I, O>(
     step: Step<ContextMemory, I, O>,
     input: I,
     parentCtx: Context,
+    overrides?: {
+      threadId?: string;
+      resourceId?: string;
+    },
   ): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;

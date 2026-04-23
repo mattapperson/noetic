@@ -891,11 +891,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     s: Step<ContextMemory, I, O>,
     input: I,
     parentCtx: Context,
+    overrides?: {
+      /** Override the child's thread id. Default inherits from `parentCtx.threadId`. */
+      threadId?: string;
+      /** Override the child's resource id. Default inherits from `parentCtx.resourceId`. */
+      resourceId?: string;
+    },
   ): DetachedHandle<O> {
     const childCtx = this.createContext({
       parent: parentCtx,
-      threadId: parentCtx.threadId,
-      resourceId: parentCtx.resourceId,
+      threadId: overrides?.threadId ?? parentCtx.threadId,
+      resourceId: overrides?.resourceId ?? parentCtx.resourceId,
     });
     const promise = this.run(s, input, childCtx);
     return new DetachedHandleImpl<O>(childCtx.id, promise);

@@ -94,9 +94,7 @@ When NOT to use:
 
 //#region Helpers
 
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
-}
+import { shellQuote } from './path-utils.js';
 
 interface ParsedMatch {
   filePath: string;
