@@ -10,37 +10,31 @@ import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 
 const INSTALL_COMMANDS = [
   {
-    prefix: '$ bun add ',
-    package: '@noetic/core',
+    prefix: '$ npm i -g ',
+    package: '@noetic/cli',
   },
   {
-    prefix: '$ npm install ',
-    package: '@noetic/core',
+    prefix: '$ bun add -g ',
+    package: '@noetic/cli',
   },
   {
-    prefix: '$ pnpm add ',
-    package: '@noetic/core',
+    prefix: '$ pnpm add -g ',
+    package: '@noetic/cli',
   },
 ] as const;
 
-const HERO_CODE = `import { react, AgentHarness } from '@noetic/core';
-
-const agent = react({
-  model: 'gpt-4o',
-  tools: [searchTool, calcTool],
-  maxSteps: 10,
-});
-
-const harness = new AgentHarness({
-  name: 'researcher',
-  initialStep: agent,
-  params: {},
-});
-const result = await harness.execute('Find recent AI news');`;
+const HERO_CODE = `$ noetic
+│
+├─ /plan add dark mode toggle
+│    → planner:  claude-sonnet-4
+│    → editor:   claude-opus-4
+│    → reviewer: claude-haiku-4
+│
+└─ 10 memory layers active · 3 background agents running`;
 
 const HIGHLIGHTED_HERO_CODE = highlightCode(HERO_CODE);
 
-export function Hero(): ReactNode {
+export function CodeHero(): ReactNode {
   const { scrollY } = useScroll();
   const opacity = useTransform(
     scrollY,
@@ -108,7 +102,7 @@ export function Hero(): ReactNode {
             marginBottom: '16px',
           }}
         >
-          {'// constrain the agent, not the intelligence'}
+          {'// the coding agent that keeps going'}
         </motion.span>
 
         <motion.h1
@@ -133,7 +127,7 @@ export function Hero(): ReactNode {
             lineHeight: 1.1,
           }}
         >
-          NOETIC
+          NOETIC CODE
         </motion.h1>
 
         <motion.p
@@ -149,12 +143,13 @@ export function Hero(): ReactNode {
           style={{
             fontSize: 'clamp(16px, 2.5vw, 18px)',
             color: 'var(--color-tui-fg)',
-            maxWidth: '560px',
+            maxWidth: '640px',
             marginBottom: '12px',
             lineHeight: 1.5,
           }}
         >
-          Composable primitives. Clean code from 10 lines to 10,000.
+          A coding CLI with a real context manager and background teammates. Consistent quality on
+          long tasks. Never hits a context limit.
         </motion.p>
 
         <motion.p
@@ -170,13 +165,13 @@ export function Hero(): ReactNode {
           style={{
             fontSize: 'clamp(13px, 2vw, 14px)',
             color: 'var(--color-tui-muted)',
-            maxWidth: '560px',
+            maxWidth: '640px',
             marginBottom: '40px',
             lineHeight: 1.7,
           }}
         >
-          Start with pre-built patterns — ReAct, task trees, dual-agent loops. Or compose your own.
-          Reactive memory keeps context windows manageable automatically.
+          Ten memory layers working in concert. Detached agents in isolated worktrees. Per-phase
+          model routing — not married to any provider.
         </motion.p>
 
         <CyclingCommand commands={INSTALL_COMMANDS} />
@@ -212,7 +207,7 @@ export function Hero(): ReactNode {
               letterSpacing: '0.05em',
             }}
           >
-            Build your first agent →
+            Read the docs →
           </Link>
           <a
             href={GITHUB_URL}
@@ -251,7 +246,7 @@ export function Hero(): ReactNode {
             maxWidth: '640px',
           }}
         >
-          <TuiWindow title="react-agent.ts">
+          <TuiWindow title="~/my-project">
             <pre style={CODE_PRE_STYLE}>{HIGHLIGHTED_HERO_CODE}</pre>
           </TuiWindow>
         </motion.div>
