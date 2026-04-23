@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import type { CallModel } from '../ai/plugin-call-model.js';
 import type { Command } from '../commands/types.js';
+import type { LspServerContribution } from '../lsp/types.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
 import type { SubagentPreset } from '../plan/subagents.js';
 import type { SkillDefinition } from '../skills/types.js';
@@ -103,4 +104,14 @@ export interface NoeticPlugin {
   reminderTriggers?: (
     ctx: PluginContext,
   ) => ReadonlyArray<ReminderTrigger> | Promise<ReadonlyArray<ReminderTrigger>>;
+  /**
+   * Optional language-server contributions. Built-in servers (TypeScript,
+   * Python, Go, Swift) ship with the CLI; plugins can register additional
+   * servers here. Contributions with the same `id` as a builtin override the
+   * builtin. See `packages/cli/src/lsp/types.ts` for the `LspServerContribution`
+   * shape and the three `LaunchSpec` strategies (`path`, `bunx`, `githubRelease`).
+   */
+  lspServers?: (
+    ctx: PluginContext,
+  ) => ReadonlyArray<LspServerContribution> | Promise<ReadonlyArray<LspServerContribution>>;
 }

@@ -822,3 +822,53 @@ interface ToolExecutionContext {
 // Or via context: toolCtx.ctx.harness.config.params
 // Filesystem: toolCtx.fs.readFileText('/path')
 ```
+
+## CLI Plugin Hooks
+
+Plugins loaded by `@noetic/cli` implement the `NoeticPlugin` interface
+(`packages/cli/src/plugins/types.ts`). The hooks below aggregate contributions
+from every loaded plugin alongside the CLI's built-ins.
+
+### `lspServers?(ctx): ReadonlyArray<LspServerContribution>`
+
+Register additional language servers beyond the four builtins (TypeScript/JavaScript,
+Python, Go, Swift). Contributions share the same extension index as the
+builtins — a plugin can **override** a builtin by reusing its `id`, or **add**
+a new language by claiming a novel extension.
+
+```typescript
+import type { LspServerContribution } from '@noetic/cli';
+
+export default {
+  name: 'my-rust-lsp',
+  version: '1.0.0',
+  lspServers: () => [
+    {
+      id: 'rust-analyzer',
+      extensions: ['.rs'],
+      rootMarkers: ['Cargo.toml', 'rust-project.json'],
+      launch: {
+        strategy: 'githubRelease',
+        owner: 'rust-lang',
+        repo: 'rust-analyzer',
+        asset: (platform, arch) =>
+          `rust-analyzer-${arch}-${platform === 'darwin' ? 'apple-darwin' : 'unknown-linux-gnu'}.gz`,
+        args: [],
+      },
+    },
+  ],
+} satisfies NoeticPlugin;
+```
+
+**`LaunchSpec` strategies** (pick one per contribution):
+
+| strategy | use for | spawn behavior |
+|---|---|---|
+| `path` | toolchain-distributed binaries (gopls, sourcekit-lsp, rust-analyzer installed via rustup) | `which <bin>`; errors with `installHint` if absent |
+| `bunx` | npm-distributed servers (typescript-language-server, pyright-langserver) | `bunx <bin> <args>` — zero-install |
+| `githubRelease` | standalone prebuilt binaries | download from GitHub release, cache in `~/.noetic/lsp/<id>/<version>/`. Gated by `NOETIC_DISABLE_LSP_DOWNLOAD=1` |
+
+**Conflict policy**: same `id` → plugin overrides builtin. Different `id` but
+overlapping extension → first-registered wins (builtins register before
+plugins). The single model-facing tool (`lsp`) stays constant — the operation
+list, schemas, and output format never change across contributions.

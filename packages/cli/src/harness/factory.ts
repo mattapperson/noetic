@@ -20,6 +20,9 @@ import {
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
+import { createBuiltinLspServers } from '../lsp/builtin/index.js';
+import { LspService } from '../lsp/service.js';
+import type { LspServerContribution } from '../lsp/types.js';
 import { agentMdLayer } from '../memory/agent-md-layer.js';
 import { reminderLayer } from '../memory/reminder-layer.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
@@ -91,6 +94,45 @@ async function collectPluginReminderTriggers(
   return triggers;
 }
 
+async function collectPluginLspServers(
+  plugins: ReadonlyArray<NoeticPlugin>,
+  buildCtx: PluginContextBuilder,
+): Promise<LspServerContribution[]> {
+  const servers: LspServerContribution[] = [];
+  for (const plugin of plugins) {
+    const provided = await plugin.lspServers?.(buildCtx(plugin.name));
+    if (!provided) {
+      continue;
+    }
+    servers.push(...provided);
+  }
+  return servers;
+}
+
+export interface CreateLspServiceOpts {
+  plugins: ReadonlyArray<NoeticPlugin>;
+  buildCtx: PluginContextBuilder;
+  cwd: string;
+  fs: FsAdapter;
+}
+
+/**
+ * Build a ready-to-use `LspService` from builtins + plugin contributions.
+ * Call this once at TUI mount time and pass the result into every
+ * `createAgentHarness` call via `opts.lspService` so language-server processes
+ * survive harness recreations (e.g. `/model`, `/plan` swaps).
+ */
+export async function createLspService(opts: CreateLspServiceOpts): Promise<LspService> {
+  return new LspService({
+    servers: [
+      ...createBuiltinLspServers(),
+      ...(await collectPluginLspServers(opts.plugins, opts.buildCtx)),
+    ],
+    cwd: opts.cwd,
+    fs: opts.fs,
+  });
+}
+
 async function detectIsGitRepo(fs: FsAdapter, cwd: string): Promise<boolean> {
   try {
     await fs.access(`${cwd}/.git`);
@@ -132,6 +174,8 @@ export interface HarnessWithSkills {
   }>;
   skills: ReadonlyArray<SkillDefinition>;
   memoryLayers: ReadonlyArray<MemoryLayer>;
+  /** Tears down owned resources (LSP server processes, etc.). Safe to call multiple times. */
+  dispose: () => Promise<void>;
 }
 
 interface CreateAgentHarnessOpts {
@@ -144,6 +188,13 @@ interface CreateAgentHarnessOpts {
   mode?: AgentMode;
   /** Optional plan-mode lifecycle hooks (session creation, approval gate, extra instructions). */
   planHooks?: PlanHooks;
+  /**
+   * Optional pre-built LSP service to share across harness recreations (e.g.
+   * `/model` or `/plan` swaps). If omitted, a service is created from builtins
+   * + plugin contributions and owned by this harness — its `dispose` is wired
+   * to tear the service down.
+   */
+  lspService?: LspService;
 }
 
 /**
@@ -164,12 +215,36 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     buildCtx: buildContext,
   });
 
+  // If the caller passed an existing LspService, reuse it — language-server
+  // subprocesses should survive harness recreations on /model and /plan swaps.
+  // Otherwise build one and own its teardown.
+  const ownedLspService: LspService | undefined =
+    opts.lspService === undefined
+      ? await createLspService({
+          plugins,
+          buildCtx: buildContext,
+          cwd: config.cwd,
+          fs,
+        })
+      : undefined;
+  const lspService = opts.lspService ?? ownedLspService;
+
   // Build tools including skill activation. In planning mode we hide mutating
   // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
   const builtinTools =
     mode === 'planning'
-      ? createReadOnlyTools(config.cwd, fs, shell)
-      : createCodingTools(config.cwd, fs, shell);
+      ? createReadOnlyTools({
+          cwd: config.cwd,
+          fs,
+          shell,
+          lspService,
+        })
+      : createCodingTools({
+          cwd: config.cwd,
+          fs,
+          shell,
+          lspService,
+        });
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
 
@@ -285,6 +360,9 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     harness,
     skills: allSkills,
     memoryLayers: memory,
+    // Only dispose the LSP service if we created it — a caller-supplied service
+    // is owned by the caller and must outlive the harness.
+    dispose: ownedLspService ? () => ownedLspService.dispose() : () => Promise.resolve(),
   };
 }
 

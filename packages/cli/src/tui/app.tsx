@@ -32,7 +32,8 @@ import type {
   SessionSnapshot,
 } from '../commands/types.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
-import { createAgentHarness } from '../harness/factory.js';
+import { createAgentHarness, createLspService } from '../harness/factory.js';
+import type { LspService } from '../lsp/service.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
@@ -422,6 +423,10 @@ function App({
   );
 
   const harnessRef = useRef<AgentHarness | null>(null);
+  const harnessDisposeRef = useRef<(() => Promise<void>) | null>(null);
+  // Owned by the TUI (not the harness) so language-server subprocesses survive
+  // /model and /plan swaps, which recreate the harness.
+  const lspServiceRef = useRef<LspService | null>(null);
   const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'normal');
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(initialSession?.lastLayerUsage);
   const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(
@@ -815,10 +820,19 @@ function App({
       ) {
         return harnessRef.current;
       }
+      if (lspServiceRef.current === null) {
+        lspServiceRef.current = await createLspService({
+          plugins,
+          buildCtx,
+          cwd: config.cwd,
+          fs: config.fs,
+        });
+      }
       const {
         harness,
         skills: resolvedSkills,
         memoryLayers,
+        dispose,
       } = await createAgentHarness({
         config: {
           ...config,
@@ -829,7 +843,14 @@ function App({
         mode,
         planHooks,
         buildContext: buildCtx,
+        lspService: lspServiceRef.current,
       });
+      // Dispose any previously-held harness resources before swapping.
+      const previousDispose = harnessDisposeRef.current;
+      if (previousDispose) {
+        previousDispose().catch(() => {});
+      }
+      harnessDisposeRef.current = dispose;
       harnessRef.current = harness;
       harnessModeRef.current = mode;
       harnessModelRef.current = activeModel;
@@ -856,9 +877,34 @@ function App({
 
   /** Discard the current harness so the next submit recreates it with fresh config. */
   const invalidateHarness = useCallback((): void => {
+    const dispose = harnessDisposeRef.current;
+    harnessDisposeRef.current = null;
+    if (dispose) {
+      dispose().catch(() => {});
+    }
     harnessRef.current = null;
     streamWiredHarnessRef.current = null;
   }, []);
+
+  // On unmount, tear down LSP server subprocesses. The harness-owned dispose is
+  // a no-op when the TUI owns the service; the service dispose below actually
+  // kills subprocesses. A .catch is fine because the process is exiting — we
+  // just don't want to leak zombies.
+  useEffect(
+    () => () => {
+      const dispose = harnessDisposeRef.current;
+      harnessDisposeRef.current = null;
+      if (dispose) {
+        dispose().catch(() => {});
+      }
+      const service = lspServiceRef.current;
+      lspServiceRef.current = null;
+      if (service) {
+        service.dispose().catch(() => {});
+      }
+    },
+    [],
+  );
 
   const setAgentMode = useCallback(
     async (mode: AgentMode): Promise<void> => {

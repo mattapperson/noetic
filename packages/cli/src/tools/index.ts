@@ -4,11 +4,13 @@
 
 import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import type { LspService } from '../lsp/service.js';
 import { createBashTool } from './bash.js';
 import { createEditTool } from './edit.js';
 import { createFindTool } from './find.js';
 import { createGrepTool } from './grep.js';
 import { createLsTool } from './ls.js';
+import { createLspTool } from './lsp.js';
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 
@@ -58,12 +60,18 @@ export {
 
 //#region Tool Collection Factories
 
-export function createCodingTools(
-  cwd: string,
-  fs: FsAdapter = createLocalFsAdapter(),
-  shell: ShellAdapter = createLocalShellAdapter(),
-): Tool[] {
-  return [
+export interface CreateToolsOptions {
+  cwd: string;
+  fs?: FsAdapter;
+  shell?: ShellAdapter;
+  lspService?: LspService;
+}
+
+export function createCodingTools(opts: CreateToolsOptions): Tool[] {
+  const { cwd, lspService } = opts;
+  const fs = opts.fs ?? createLocalFsAdapter();
+  const shell = opts.shell ?? createLocalShellAdapter();
+  const tools: Tool[] = [
     createReadTool(cwd, fs),
     createWriteTool(cwd, fs),
     createEditTool(cwd, fs),
@@ -72,19 +80,26 @@ export function createCodingTools(
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
   ];
+  if (lspService) {
+    tools.push(createLspTool(lspService, cwd));
+  }
+  return tools;
 }
 
-export function createReadOnlyTools(
-  cwd: string,
-  fs: FsAdapter = createLocalFsAdapter(),
-  shell: ShellAdapter = createLocalShellAdapter(),
-): Tool[] {
-  return [
+export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
+  const { cwd, lspService } = opts;
+  const fs = opts.fs ?? createLocalFsAdapter();
+  const shell = opts.shell ?? createLocalShellAdapter();
+  const tools: Tool[] = [
     createReadTool(cwd, fs),
     createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
   ];
+  if (lspService) {
+    tools.push(createLspTool(lspService, cwd));
+  }
+  return tools;
 }
 
 //#endregion
