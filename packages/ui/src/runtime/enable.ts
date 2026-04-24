@@ -19,10 +19,22 @@
 
 import { clearExporterFactory, registerExporterFactory } from '@noetic/core';
 import { NoeticUITraceExporter } from './exporter';
-import { clearStepDataExtractors, registerBuiltinExtractors } from './step-extractors';
+import {
+  clearStepDataExtractors,
+  registerBuiltinExtractors,
+  resetBuiltinsGuard,
+} from './step-extractors';
 import type { ExporterOptions } from './types';
 
 let enabled = false;
+
+/**
+ * Reset the enabled guard so enableDevUI() can be called again.
+ * For testing only.
+ */
+export function resetEnabledGuard(): void {
+  enabled = false;
+}
 
 /**
  * Enable the Noetic dev UI integration.
@@ -51,6 +63,7 @@ export function enableDevUI(options?: ExporterOptions): {
     disable(): void {
       clearExporterFactory();
       clearStepDataExtractors();
+      resetBuiltinsGuard();
       enabled = false;
     },
   };

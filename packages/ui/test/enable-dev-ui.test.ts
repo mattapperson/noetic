@@ -11,7 +11,7 @@
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
 import { clearExporterFactory, getRegisteredExporter } from '@noetic/core';
-import { enableDevUI } from '../src/runtime/enable';
+import { enableDevUI, resetEnabledGuard } from '../src/runtime/enable';
 import {
   clearStepDataExtractors,
   getRegisteredStepKinds,
@@ -23,6 +23,7 @@ afterEach(() => {
   clearStepDataExtractors();
   clearExporterFactory();
   resetBuiltinsGuard();
+  resetEnabledGuard();
 });
 
 describe('enableDevUI', () => {
