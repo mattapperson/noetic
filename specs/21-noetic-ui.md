@@ -239,15 +239,14 @@ Noetic UI integrates with the core framework through three mechanisms:
 #### 1. TraceExporter (Read-only Observation)
 
 ```typescript
-import { setTraceExporter } from '@noetic/core';
-import { NoeticUITraceExporter } from '@noetic/ui/runtime';
+import { enableDevUI } from '@noetic/ui/runtime/enable';
 
 // In your app entry point when dev mode is enabled
-if (process.env.NOETIC_UI_ENABLED) {
-  const uiExporter = new NoeticUITraceExporter({
-    port: 3333,  // WebSocket port for UI server
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI({
+    port: Number(process.env.NOETIC_UI_WS_PORT) || 3333,
+    host: process.env.NOETIC_UI_HOST || 'localhost',
   });
-  setTraceExporter(uiExporter);
 }
 ```
 
@@ -281,7 +280,7 @@ The exporter uses a **plugin-based architecture** for transforming span attribut
 **Plugin Registration:**
 
 ```typescript
-import { registerStepDataExtractor } from '@noetic/ui/runtime';
+import { registerStepDataExtractor } from '@noetic/ui/runtime/step-extractors';
 
 // Register a custom step extractor
 registerStepDataExtractor('myStep', (spanAttrs, tokenUsage, cost) => {
@@ -402,14 +401,11 @@ When Noetic UI is **not** enabled (default behavior):
 
 **Tree-shaking Compatible:**
 ```typescript
-// Debug imports only loaded when needed
-if (process.env.NOETIC_UI_ENABLED) {
-  const { createDebugHarness } = await import('@noetic/ui/runtime');
-  const { NoeticUITraceExporter } = await import('@noetic/ui/runtime');
-  
-  // Setup debugging
-  const harness = createDebugHarness(config);
-  setTraceExporter(new NoeticUITraceExporter());
+// Explicit opt-in — tree-shakeable when not called
+import { enableDevUI } from '@noetic/ui/runtime/enable';
+
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI();
 }
 ```
 
@@ -1003,7 +999,7 @@ To add a new step kind with full UI support:
 1. **In Core:** Set all required span attributes during execution
 2. **In UI:** Register a step data extractor:
    ```typescript
-   import { registerStepDataExtractor } from '@noetic/ui/runtime';
+   import { registerStepDataExtractor } from '@noetic/ui/runtime/step-extractors';
    
    registerStepDataExtractor('newStep', (spanAttrs, tokenUsage, cost) => ({
      customField: spanAttrs.customField,
