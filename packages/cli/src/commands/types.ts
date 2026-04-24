@@ -114,6 +114,10 @@ type LocalCommandResult =
     }
   | {
       type: 'skip';
+    }
+  | {
+      type: 'prompt';
+      value: string;
     };
 
 /**
@@ -195,22 +199,21 @@ type Command = CommandBase & (LocalCommand | LocalJsxCommand);
 //#region Execution Result
 
 /**
- * Result of executing a command.
+ * Result variant produced only by JSX commands — wraps the rendered node plus
+ * the metadata the TUI needs to open the modal.
  */
-type CommandExecutionResult =
-  | {
-      type: 'text';
-      value: string;
-    }
-  | {
-      type: 'skip';
-    }
-  | {
-      type: 'modal';
-      node: ReactNode;
-      commandName: string;
-      dismissMessage: string;
-    };
+type ModalExecutionResult = {
+  type: 'modal';
+  node: ReactNode;
+  commandName: string;
+  dismissMessage: string;
+};
+
+/**
+ * Result of executing a command. JSX commands may produce a modal; all other
+ * results share `LocalCommandResult`'s variants.
+ */
+type CommandExecutionResult = LocalCommandResult | ModalExecutionResult;
 
 //#endregion
 

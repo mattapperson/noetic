@@ -1037,95 +1037,56 @@ function App({
 
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
-      const bashCommand = parseBashCommand(text);
-      if (bashCommand !== null) {
-        await runLocalBash(bashCommand);
-        return;
-      }
+      const sendUserMessage = async (messageText: string): Promise<void> => {
+        // Snapshot pending bash outputs now so any `!cmd` the user runs during
+        // the agent turn falls through to the NEXT flush instead of being
+        // dropped here.
+        const pendingSnapshot: ReadonlyArray<LocalBashResult> = [
+          ...pendingBashOutputsRef.current,
+        ];
+        const augmented = augmentTextWithPendingBash(messageText, pendingSnapshot);
+        try {
+          const harness = await getOrCreateHarness(agentMode, model);
+          const isBusy =
+            harness.getStatus({
+              threadId: threadIdRef.current,
+            }).kind !== 'idle';
+          const messageId = `msg-${crypto.randomUUID()}`;
+          const userEntry: UserEntry = {
+            role: 'user',
+            content: messageText,
+            id: messageId,
+            deliveryStatus: isBusy ? 'queued' : 'sent',
+          };
+          setEntries((prev) => [
+            ...prev,
+            userEntry,
+          ]);
 
-      if (isSlashCommand(text)) {
-        const parsed = parseSlashCommand(text);
-        if (parsed) {
-          const cmd = findCommand(parsed.commandName, commands);
-          if (cmd) {
-            const activatedSkills = extractActivatedSkills(entriesRef.current);
-            const ctx: CommandContext = {
-              config: {
-                ...config,
-                model,
-              },
-              cwd: config.cwd,
-              entries: entriesRef.current,
-              skills,
-              activatedSkills,
-              commands,
-              clearEntries,
-              lastLayerUsage: lastLayerUsageRef.current,
-              memoryLayers: memoryLayersRef.current,
-              agentMode,
-              setAgentMode,
-              setModel,
-              sessionSnapshot: buildSessionSnapshot(entriesRef.current),
-              setCustomTitle,
-              setTag,
-              clearSession,
-              restartWithSession: onRestart,
-            };
-
-            try {
-              const result = await executeCommand({
-                command: cmd,
-                args: parsed.args,
-                ctx,
-                options: {
-                  onJsxComplete: (summary) => {
-                    if (summary) {
-                      setEntries((prev) => [
-                        ...prev,
-                        {
-                          role: 'system',
-                          type: 'info',
-                          content: summary,
-                        } satisfies SystemEntry,
-                      ]);
-                    }
-                    setModal(null);
-                  },
-                },
-              });
-              if (result.type === 'text') {
-                setEntries((prev) => [
-                  ...prev,
-                  {
-                    role: 'system',
-                    type: 'info',
-                    content: result.value,
-                  } satisfies SystemEntry,
-                ]);
-              } else if (result.type === 'modal') {
-                setEntries((prev) => [
-                  ...prev,
-                  {
-                    role: 'system',
-                    type: 'info',
-                    content: `/${result.commandName}`,
-                  } satisfies SystemEntry,
-                ]);
-                setModal({
-                  content: result.node,
-                  commandName: result.commandName,
-                  dismissMessage: result.dismissMessage,
-                });
-              }
-            } catch (error) {
-              setEntries((prev) => [
-                ...prev,
-                buildErrorEntry(error),
-              ]);
-            }
-            return;
+          if (isBusy) {
+            pendingMessageIdsRef.current.add(messageId);
           }
+          setStatus('submitted');
+
+          await harness.execute(augmented, {
+            threadId: threadIdRef.current,
+            messageId,
+          });
+          // Drop only what we sent — any output appended during the await from
+          // a concurrent `!cmd` must survive to ride the next turn.
+          if (pendingSnapshot.length > 0) {
+            pendingBashOutputsRef.current.splice(0, pendingSnapshot.length);
+          }
+        } catch (error) {
+          setEntries((prev) => [
+            ...prev,
+            buildErrorEntry(error),
+          ]);
+          setStatus('ready');
         }
+      };
+
+      const appendUnknownCommand = (): void => {
         setEntries((prev) => [
           ...prev,
           {
@@ -1134,54 +1095,111 @@ function App({
             content: `Unknown command: ${text}`,
           } satisfies ErrorEntry,
         ]);
+      };
+
+      const bashCommand = parseBashCommand(text);
+      if (bashCommand !== null) {
+        await runLocalBash(bashCommand);
         return;
       }
 
-      // Snapshot pending bash outputs now so any `!cmd` the user runs during
-      // the agent turn falls through to the NEXT flush instead of being
-      // dropped here.
-      const pendingSnapshot: ReadonlyArray<LocalBashResult> = [
-        ...pendingBashOutputsRef.current,
-      ];
-      const augmented = augmentTextWithPendingBash(text, pendingSnapshot);
+      if (!isSlashCommand(text)) {
+        await sendUserMessage(text);
+        return;
+      }
+
+      const parsed = parseSlashCommand(text);
+      if (!parsed) {
+        appendUnknownCommand();
+        return;
+      }
+      const cmd = findCommand(parsed.commandName, commands);
+      if (!cmd) {
+        appendUnknownCommand();
+        return;
+      }
+
+      const activatedSkills = extractActivatedSkills(entriesRef.current);
+      const ctx: CommandContext = {
+        config: {
+          ...config,
+          model,
+        },
+        cwd: config.cwd,
+        entries: entriesRef.current,
+        skills,
+        activatedSkills,
+        commands,
+        clearEntries,
+        lastLayerUsage: lastLayerUsageRef.current,
+        memoryLayers: memoryLayersRef.current,
+        agentMode,
+        setAgentMode,
+        setModel,
+        sessionSnapshot: buildSessionSnapshot(entriesRef.current),
+        setCustomTitle,
+        setTag,
+        clearSession,
+        restartWithSession: onRestart,
+      };
+
       try {
-        const harness = await getOrCreateHarness(agentMode, model);
-        const isBusy =
-          harness.getStatus({
-            threadId: threadIdRef.current,
-          }).kind !== 'idle';
-        const messageId = `msg-${crypto.randomUUID()}`;
-        const userEntry: UserEntry = {
-          role: 'user',
-          content: text,
-          id: messageId,
-          deliveryStatus: isBusy ? 'queued' : 'sent',
-        };
-        setEntries((prev) => [
-          ...prev,
-          userEntry,
-        ]);
-
-        if (isBusy) {
-          pendingMessageIdsRef.current.add(messageId);
-        }
-        setStatus('submitted');
-
-        await harness.execute(augmented, {
-          threadId: threadIdRef.current,
-          messageId,
+        const result = await executeCommand({
+          command: cmd,
+          args: parsed.args,
+          ctx,
+          options: {
+            onJsxComplete: (summary) => {
+              if (summary) {
+                setEntries((prev) => [
+                  ...prev,
+                  {
+                    role: 'system',
+                    type: 'info',
+                    content: summary,
+                  } satisfies SystemEntry,
+                ]);
+              }
+              setModal(null);
+            },
+          },
         });
-        // Drop only what we sent — any output appended during the await from
-        // a concurrent `!cmd` must survive to ride the next turn.
-        if (pendingSnapshot.length > 0) {
-          pendingBashOutputsRef.current.splice(0, pendingSnapshot.length);
+        if (result.type === 'text') {
+          setEntries((prev) => [
+            ...prev,
+            {
+              role: 'system',
+              type: 'info',
+              content: result.value,
+            } satisfies SystemEntry,
+          ]);
+          return;
+        }
+        if (result.type === 'modal') {
+          setEntries((prev) => [
+            ...prev,
+            {
+              role: 'system',
+              type: 'info',
+              content: `/${result.commandName}`,
+            } satisfies SystemEntry,
+          ]);
+          setModal({
+            content: result.node,
+            commandName: result.commandName,
+            dismissMessage: result.dismissMessage,
+          });
+          return;
+        }
+        if (result.type === 'prompt') {
+          await sendUserMessage(result.value);
+          return;
         }
       } catch (error) {
         setEntries((prev) => [
           ...prev,
           buildErrorEntry(error),
         ]);
-        setStatus('ready');
       }
     },
     [

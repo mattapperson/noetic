@@ -3,7 +3,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
 
+import { AGENT_READINESS_PROMPT } from '../src/commands/builtins/agent-readiness.js';
 import {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
@@ -109,12 +111,29 @@ describe('BUILTIN_COMMANDS', () => {
     expect(names).toContain('clear');
     expect(names).toContain('context');
     expect(names).toContain('skills');
+    expect(names).toContain('agent-readiness');
   });
 
   test('all commands have descriptions', () => {
     for (const cmd of BUILTIN_COMMANDS) {
       expect(cmd.description).toBeTruthy();
     }
+  });
+});
+
+describe('/agent-readiness command', () => {
+  test('is registered as a local command', () => {
+    const cmd = findCommand('agent-readiness', BUILTIN_COMMANDS);
+    assert(cmd !== undefined);
+    expect(cmd.type).toBe('local');
+    expect(cmd.description).toBeTruthy();
+  });
+
+  test('prompt starts with expected opener and is substantive', () => {
+    expect(AGENT_READINESS_PROMPT.startsWith('Set up a minimal CLAUDE.md')).toBe(true);
+    expect(AGENT_READINESS_PROMPT.length).toBeGreaterThan(1e3);
+    expect(AGENT_READINESS_PROMPT).toContain('## Phase 1: Ask what to set up');
+    expect(AGENT_READINESS_PROMPT).toContain('## Phase 8: Summary and next steps');
   });
 });
 
