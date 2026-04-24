@@ -2,13 +2,15 @@
  * Tests for step data extractors plugin system
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   clearStepDataExtractors,
   getRegisteredStepKinds,
   getStepDataExtractor,
   hasStepDataExtractor,
+  registerBuiltinExtractors,
   registerStepDataExtractor,
+  resetBuiltinsGuard,
   unregisterStepDataExtractor,
 } from '../src/runtime/step-extractors';
 import type { TokenUsage } from '../src/runtime/types';
@@ -20,6 +22,15 @@ const ZERO_TOKENS: TokenUsage = {
 };
 
 describe('Step Data Extractors', () => {
+  beforeEach(() => {
+    registerBuiltinExtractors();
+  });
+
+  afterEach(() => {
+    clearStepDataExtractors();
+    resetBuiltinsGuard();
+  });
+
   describe('built-in extractors', () => {
     it('has llm extractor registered', () => {
       expect(hasStepDataExtractor('llm')).toBe(true);
@@ -322,81 +333,6 @@ describe('Step Data Extractors', () => {
       clearStepDataExtractors();
       expect(getRegisteredStepKinds()).toHaveLength(0);
       expect(hasStepDataExtractor('llm')).toBe(false);
-
-      // Re-register built-ins matching current implementation
-      registerStepDataExtractor('llm', (attrs, tokens, cost) => {
-        const result: Record<string, unknown> = {
-          model: attrs.model || 'unknown',
-          messages: attrs.messages || [],
-          toolCalls: attrs.toolCalls || [],
-          tokenUsage: tokens,
-          cost,
-        };
-        if (attrs.systemPrompt) {
-          result.systemPrompt = attrs.systemPrompt;
-        }
-        return result;
-      });
-      registerStepDataExtractor('tool', (attrs, tokens, cost) => ({
-        toolName: attrs.toolName || 'unknown',
-        arguments: attrs.toolArguments,
-        result: attrs.toolResult,
-        tokenUsage: tokens,
-        cost,
-      }));
-      registerStepDataExtractor('fork', (attrs, tokens, cost) => {
-        const result: Record<string, unknown> = {
-          mode: attrs.forkMode || 'race',
-          pathCount: attrs.forkPathCount || 0,
-          tokenUsage: tokens,
-          cost,
-        };
-        if (attrs.winnerPath !== undefined) {
-          result.winnerPath = attrs.winnerPath;
-        }
-        return result;
-      });
-      registerStepDataExtractor('loop', (attrs, tokens, cost) => ({
-        iteration: attrs.currentIteration || 0,
-        totalIterations: attrs.totalIterations || 0,
-        maxIterations: attrs.maxIterations || 0,
-        tokenUsage: tokens,
-        cost,
-      }));
-      registerStepDataExtractor('spawn', (attrs, tokens, cost) => ({
-        childStepId: attrs.spawnChildId || 'unknown',
-        childStepKind: attrs.spawnChildKind || 'run',
-        tokenUsage: tokens,
-        cost,
-      }));
-      registerStepDataExtractor('branch', (attrs, tokens, cost) => ({
-        condition: attrs.condition,
-        selectedPath: attrs.selectedPath,
-        tokenUsage: tokens,
-        cost,
-      }));
-      registerStepDataExtractor('run', (attrs, tokens, cost) => {
-        const result: Record<string, unknown> = {
-          tokenUsage: tokens,
-          cost,
-        };
-        if (attrs.stepDescription) {
-          result.description = attrs.stepDescription;
-        }
-        return result;
-      });
-      registerStepDataExtractor('provide', (attrs, tokens, cost) => {
-        const result: Record<string, unknown> = {
-          providerId: attrs.providerId,
-          provides: attrs.provides,
-          tokenUsage: tokens,
-          cost,
-        };
-        if (attrs.stepDescription) {
-          result.description = attrs.stepDescription;
-        }
-        return result;
-      });
     });
 
     it('getStepDataExtractor returns generic fallback for unknown kind', () => {
