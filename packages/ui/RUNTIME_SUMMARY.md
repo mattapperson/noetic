@@ -43,12 +43,12 @@ Execution hooks with zero production overhead:
 - Delegates to debugger for pause/resume and breakpoints
 - Maintains compatibility with standard AgentHarness API
 
-### 6. `packages/ui/src/runtime/index.ts`
-Public API exports:
-- All type definitions
-- Main classes: `NoeticUITraceExporter`, `Debugger`, `DebugAgentHarness`
-- Hook utilities: `HookManager`, `globalHookManager`
-- Factory functions: `createDebugHarness`, `shouldEnableDebug`
+### 6. `packages/ui/src/runtime/enable.ts`
+`enableDevUI()` opt-in entry point:
+- Single function to wire up tracing, exporter, and WebSocket connection
+- Must be called before the first `AgentHarness.run()`
+- Idempotent — second call warns and returns a no-op handle
+- Returns `{ disable(): void }` for test teardown
 
 ### 7. `packages/ui/tsconfig.json`
 TypeScript configuration for the UI package.
@@ -58,9 +58,10 @@ TypeScript configuration for the UI package.
 ### 1. Tree-Shaking Compatibility
 All debug functionality is designed to be tree-shaken when not used:
 ```typescript
-if (process.env.NOETIC_UI_ENABLED) {
-  const { createDebugHarness } = await import('@noetic/ui/runtime');
-  // Debug code only included when needed
+import { enableDevUI } from '@noetic/ui/runtime/enable';
+
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI();
 }
 ```
 
@@ -115,16 +116,12 @@ Supports simple conditional breakpoints:
 
 ### With User Code
 ```typescript
-import { createDebugHarness } from '@noetic/ui/runtime';
+import { enableDevUI } from '@noetic/ui/runtime/enable';
 
-const harness = createDebugHarness({
-  name: 'my-agent',
-  initialStep: myStep,
-  debugger: {
-    breakpoints: ['step-3'],
-    pauseOnError: true,
-  }
-});
+// Enable dev UI before running agents
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI({ port: 3333, agentName: 'my-agent' });
+}
 ```
 
 ## Testing
