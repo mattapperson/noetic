@@ -69,27 +69,20 @@ NOETIC_UI_WS_PORT=3333 NOETIC_UI_API_PORT=3334 noetic-ui serve
 
 ### Connect Your Agent
 
-Add the trace exporter to your agent code:
+Enable the dev UI in your agent's entry point:
 
 ```typescript
-import { NoeticUITraceExporter } from '@noetic/ui/runtime';
-import { setTraceExporter } from '@noetic/core';
+import { enableDevUI } from '@noetic/ui/runtime/enable';
 
-// Enable UI tracing
-setTraceExporter(new NoeticUITraceExporter({
-  agentName: 'my-agent',
-  port: 3333,
-}));
-```
-
-Or with dynamic import for conditional loading:
-```typescript
-if (process.env.NOETIC_UI_ENABLED) {
-  const { NoeticUITraceExporter } = await import('@noetic/ui/runtime');
-  const { setTraceExporter } = await import('@noetic/core');
-  setTraceExporter(new NoeticUITraceExporter());
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI({
+    port: 3333,
+    agentName: 'my-agent',
+  });
 }
 ```
+
+`enableDevUI()` must be called before the first `AgentHarness.run()`. It returns a `{ disable() }` handle for test teardown.
 
 ### Enable UI Connection
 
@@ -141,7 +134,7 @@ The UI consists of three components:
 ### Trace Exporter Options
 
 ```typescript
-import { NoeticUITraceExporter } from '@noetic/ui/runtime';
+import { NoeticUITraceExporter } from '@noetic/ui/runtime/exporter';
 
 const exporter = new NoeticUITraceExporter({
   port: 3333,              // WebSocket service port
@@ -229,6 +222,7 @@ packages/ui/
 │   │   ├── storage.ts     # Trace persistence
 │   │   └── api.ts         # REST API
 │   ├── runtime/           # Agent instrumentation
+│   │   ├── enable.ts      # enableDevUI() opt-in entry point
 │   │   ├── exporter.ts    # TraceExporter implementation
 │   │   ├── step-extractors.ts  # Step data extraction plugins
 │   │   └── types.ts       # Runtime type definitions
