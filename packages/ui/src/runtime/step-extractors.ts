@@ -8,7 +8,7 @@
  * @example
  * ```typescript
  * // Register a custom step extractor
- * import { registerStepDataExtractor } from '@noetic/ui/runtime';
+ * import { registerStepDataExtractor } from '@noetic/ui/runtime/step-extractors';
  *
  * registerStepDataExtractor('myCustomStep', (spanAttrs, tokenUsage, cost) => {
  *   return {
@@ -22,7 +22,7 @@
  * @example
  * ```typescript
  * // Check if an extractor exists before using
- * import { hasStepDataExtractor, getStepDataExtractor } from '@noetic/ui/runtime';
+ * import { hasStepDataExtractor, getStepDataExtractor } from '@noetic/ui/runtime/step-extractors';
  *
  * if (hasStepDataExtractor('llm')) {
  *   const extractor = getStepDataExtractor('llm');
@@ -169,105 +169,126 @@ const genericStepDataExtractor: StepDataExtractor = (spanAttrs, tokenUsage, cost
 // Built-in Step Extractors
 // ============================================================================
 
-/** LLM step - Large Language Model calls */
-registerStepDataExtractor('llm', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    model: spanAttrs.model || 'unknown',
-    messages: spanAttrs.messages || [],
-    toolCalls: spanAttrs.toolCalls || [],
-    tokenUsage,
-    cost,
-  };
+let builtinsRegistered = false;
 
-  if (spanAttrs.systemPrompt) {
-    result.systemPrompt = spanAttrs.systemPrompt;
+/**
+ * Register all built-in step data extractors.
+ * Idempotent — subsequent calls are no-ops.
+ */
+export function registerBuiltinExtractors(): void {
+  if (builtinsRegistered) {
+    return;
   }
+  builtinsRegistered = true;
 
-  return result;
-});
+  /** LLM step - Large Language Model calls */
+  registerStepDataExtractor('llm', (spanAttrs, tokenUsage, cost) => {
+    const result: Record<string, unknown> = {
+      model: spanAttrs.model || 'unknown',
+      messages: spanAttrs.messages || [],
+      toolCalls: spanAttrs.toolCalls || [],
+      tokenUsage,
+      cost,
+    };
 
-/** Tool step - Tool/function invocations */
-registerStepDataExtractor('tool', (spanAttrs, tokenUsage, cost) => ({
-  toolName: spanAttrs.toolName || 'unknown',
-  arguments: spanAttrs.toolArguments,
-  result: spanAttrs.toolResult,
-  tokenUsage,
-  cost,
-}));
+    if (spanAttrs.systemPrompt) {
+      result.systemPrompt = spanAttrs.systemPrompt;
+    }
 
-/** Fork step - Concurrent execution paths */
-registerStepDataExtractor('fork', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    mode: spanAttrs.forkMode || 'race',
-    pathCount: spanAttrs.forkPathCount || 0,
+    return result;
+  });
+
+  /** Tool step - Tool/function invocations */
+  registerStepDataExtractor('tool', (spanAttrs, tokenUsage, cost) => ({
+    toolName: spanAttrs.toolName || 'unknown',
+    arguments: spanAttrs.toolArguments,
+    result: spanAttrs.toolResult,
     tokenUsage,
     cost,
-  };
+  }));
 
-  if (spanAttrs.winnerPath !== undefined) {
-    result.winnerPath = spanAttrs.winnerPath;
-  }
+  /** Fork step - Concurrent execution paths */
+  registerStepDataExtractor('fork', (spanAttrs, tokenUsage, cost) => {
+    const result: Record<string, unknown> = {
+      mode: spanAttrs.forkMode || 'race',
+      pathCount: spanAttrs.forkPathCount || 0,
+      tokenUsage,
+      cost,
+    };
 
-  return result;
-});
+    if (spanAttrs.winnerPath !== undefined) {
+      result.winnerPath = spanAttrs.winnerPath;
+    }
 
-/** Loop step - Iterative execution */
-registerStepDataExtractor('loop', (spanAttrs, tokenUsage, cost) => {
-  return {
-    iteration: spanAttrs.currentIteration || 0,
-    totalIterations: spanAttrs.totalIterations || 0,
-    maxIterations: spanAttrs.maxIterations || 0,
-    tokenUsage,
-    cost,
-  };
-});
+    return result;
+  });
 
-/** Spawn step - Child process/agent spawning */
-registerStepDataExtractor('spawn', (spanAttrs, tokenUsage, cost) => {
-  return {
-    childStepId: spanAttrs.spawnChildId || 'unknown',
-    childStepKind: spanAttrs.spawnChildKind || 'run',
-    tokenUsage,
-    cost,
-  };
-});
+  /** Loop step - Iterative execution */
+  registerStepDataExtractor('loop', (spanAttrs, tokenUsage, cost) => {
+    return {
+      iteration: spanAttrs.currentIteration || 0,
+      totalIterations: spanAttrs.totalIterations || 0,
+      maxIterations: spanAttrs.maxIterations || 0,
+      tokenUsage,
+      cost,
+    };
+  });
 
-/** Branch step - Conditional routing */
-registerStepDataExtractor('branch', (spanAttrs, tokenUsage, cost) => {
-  return {
-    condition: spanAttrs.condition,
-    selectedPath: spanAttrs.selectedPath,
-    tokenUsage,
-    cost,
-  };
-});
+  /** Spawn step - Child process/agent spawning */
+  registerStepDataExtractor('spawn', (spanAttrs, tokenUsage, cost) => {
+    return {
+      childStepId: spanAttrs.spawnChildId || 'unknown',
+      childStepKind: spanAttrs.spawnChildKind || 'run',
+      tokenUsage,
+      cost,
+    };
+  });
 
-/** Run step - Generic execution step */
-registerStepDataExtractor('run', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    tokenUsage,
-    cost,
-  };
+  /** Branch step - Conditional routing */
+  registerStepDataExtractor('branch', (spanAttrs, tokenUsage, cost) => {
+    return {
+      condition: spanAttrs.condition,
+      selectedPath: spanAttrs.selectedPath,
+      tokenUsage,
+      cost,
+    };
+  });
 
-  if (spanAttrs.stepDescription) {
-    result.description = spanAttrs.stepDescription;
-  }
+  /** Run step - Generic execution step */
+  registerStepDataExtractor('run', (spanAttrs, tokenUsage, cost) => {
+    const result: Record<string, unknown> = {
+      tokenUsage,
+      cost,
+    };
 
-  return result;
-});
+    if (spanAttrs.stepDescription) {
+      result.description = spanAttrs.stepDescription;
+    }
 
-/** Provide step - Dependency injection/provisioning */
-registerStepDataExtractor('provide', (spanAttrs, tokenUsage, cost) => {
-  const result: Record<string, unknown> = {
-    providerId: spanAttrs.providerId,
-    provides: spanAttrs.provides,
-    tokenUsage,
-    cost,
-  };
+    return result;
+  });
 
-  if (spanAttrs.stepDescription) {
-    result.description = spanAttrs.stepDescription;
-  }
+  /** Provide step - Dependency injection/provisioning */
+  registerStepDataExtractor('provide', (spanAttrs, tokenUsage, cost) => {
+    const result: Record<string, unknown> = {
+      providerId: spanAttrs.providerId,
+      provides: spanAttrs.provides,
+      tokenUsage,
+      cost,
+    };
 
-  return result;
-});
+    if (spanAttrs.stepDescription) {
+      result.description = spanAttrs.stepDescription;
+    }
+
+    return result;
+  });
+}
+
+/**
+ * Reset the builtins-registered guard.
+ * For test teardown only — allows re-registration after clearStepDataExtractors().
+ */
+export function resetBuiltinsGuard(): void {
+  builtinsRegistered = false;
+}
