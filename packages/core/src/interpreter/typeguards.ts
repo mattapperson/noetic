@@ -1,6 +1,6 @@
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
-import type { ContentPart, MessageItem } from '../types/items';
+import type { FunctionCallItem, Item, MessageItem } from '../types/items';
 import type { ContextMemory } from '../types/memory';
 import type { MutableContext } from '../types/mutable-context';
 
@@ -29,12 +29,14 @@ export function isAssistantMessage(item: unknown): item is MessageItem {
   );
 }
 
-export function isOutputText(part: ContentPart): part is Extract<
-  ContentPart,
-  {
-    type: 'output_text';
-  }
-> {
+export function isFunctionCall(item: Item): item is FunctionCallItem {
+  return item.type === 'function_call' && 'callId' in item && 'name' in item;
+}
+
+export function isOutputText(part: { type: string }): part is {
+  type: 'output_text';
+  text: string;
+} {
   return part.type === 'output_text';
 }
 

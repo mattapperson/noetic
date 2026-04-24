@@ -1,12 +1,14 @@
 import { buildContextMemory } from '../memory/layer-api';
 import type { Channel } from '../types/channel';
-import type { StepMeta, TokenUsage } from '../types/common';
-import type { Context, ItemLog } from '../types/context';
+import type { StepMeta, TokenUsage, Tool } from '../types/common';
+import type { Context, ItemLog, LastLayerUsage } from '../types/context';
+import type { FsAdapter } from '../types/fs-adapter';
 import type { Item } from '../types/items';
 import type { ContextMemory, MemoryLayer } from '../types/memory';
 import type { Span } from '../types/observability';
 import type { AgentHarnessContract } from '../types/runtime';
 import type { ChannelStore } from './channel-store';
+import type { EventBroadcaster } from './event-broadcaster';
 import { ItemLogImpl } from './item-log-impl';
 
 const EMPTY_MEMORY: ContextMemory = Object.freeze({});
@@ -37,8 +39,13 @@ export class ContextImpl implements Context<ContextMemory> {
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
   lastStepMeta: StepMeta | null = null;
+  lastLayerUsage: LastLayerUsage | undefined = undefined;
   readonly harness: AgentHarnessContract;
   readonly layers?: MemoryLayer[];
+  unifiedTools?: ReadonlyArray<Tool>;
+
+  /** @internal Event broadcaster for streaming — not part of public Context interface. */
+  readonly _broadcaster?: EventBroadcaster;
 
   private readonly _createdAt: number;
   private readonly channelStore?: ChannelStore;
@@ -60,6 +67,8 @@ export class ContextImpl implements Context<ContextMemory> {
     channelStore?: ChannelStore;
     checkpointFn?: () => Promise<void>;
     layers?: MemoryLayer[];
+    unifiedTools?: ReadonlyArray<Tool>;
+    _broadcaster?: EventBroadcaster;
   }) {
     this.id = crypto.randomUUID();
     this._createdAt = Date.now();
@@ -73,6 +82,8 @@ export class ContextImpl implements Context<ContextMemory> {
     this.channelStore = opts.channelStore;
     this._checkpointFn = opts.checkpointFn;
     this.layers = opts.layers;
+    this.unifiedTools = opts.unifiedTools;
+    this._broadcaster = opts._broadcaster;
 
     const log = new ItemLogImpl();
     if (opts.items) {
@@ -89,6 +100,14 @@ export class ContextImpl implements Context<ContextMemory> {
 
   get aborted(): boolean {
     return this._aborted;
+  }
+
+  get fs(): FsAdapter {
+    return this.harness.fs;
+  }
+
+  get shell(): AgentHarnessContract['shell'] {
+    return this.harness.shell;
   }
 
   get memory(): ContextMemory {

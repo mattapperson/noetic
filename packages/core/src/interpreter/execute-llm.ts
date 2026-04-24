@@ -1,32 +1,110 @@
 import { ZodError } from 'zod';
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import { resolveLayerTools } from '../memory/layer-api';
+import { commitLayerUsage, computeLayerUsage } from '../memory/layer-usage';
+import { assembleView } from '../memory/projector';
 import type { StepMeta, Tool } from '../types/common';
 import type { Context } from '../types/context';
-import type { FunctionCallItem } from '../types/items';
+import type { FunctionCallItem, Item } from '../types/items';
 import type { ContextMemory, MemoryLayer } from '../types/memory';
+import type { RecallLayerOutput } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 import type { StepLLM } from '../types/step';
 import { frameworkCast } from './framework-cast';
 import { createMessage, extractAssistantText, trackUsage } from './message-helpers';
-import { isMutableContext } from './typeguards';
+import { isFunctionCall, isMutableContext } from './typeguards';
 
 const MAX_STEERING_RETRIES = 3;
+const emptyRecall: ReadonlyArray<RecallLayerOutput> = [];
 
-function mergeTools(
-  stepTools: Tool[] | undefined,
+//#region Tool Resolution
+
+interface ResolvedTools {
+  tools: Tool[] | undefined;
+  allowedToolNames: string[] | undefined;
+}
+
+/**
+ * Resolves which tools to send and what restrictions to apply.
+ *
+ * When a unified tool set exists on the context (collected before execution),
+ * every LLM call sends the full set and step.tools narrows via allowedToolNames.
+ *
+ * Semantics:
+ *   step.tools = undefined → unrestricted (all tools, no allowedToolNames)
+ *   step.tools = []        → no tools at all
+ *   step.tools = [a, b]    → full set sent, restrict to a and b
+ *
+ * Fallback: when no unified set exists (e.g. harness.run() called directly),
+ * merge step tools with layer tools as before.
+ */
+function resolveToolsAndRestrictions(
+  step: StepLLM,
   layers: MemoryLayer[] | undefined,
   ctx: Context,
-): Tool[] | undefined {
-  const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
-  if (layerTools.length === 0) {
-    return stepTools;
+): ResolvedTools {
+  // step.tools = [] → explicit opt-out
+  if (step.tools && step.tools.length === 0) {
+    return {
+      tools: undefined,
+      allowedToolNames: undefined,
+    };
   }
-  return [
-    ...(stepTools ?? []),
+
+  const unified = ctx.unifiedTools;
+  if (unified && unified.length > 0) {
+    const allowedToolNames = step.tools ? step.tools.map((t) => t.name) : undefined;
+    return {
+      tools: [
+        ...unified,
+      ],
+      allowedToolNames,
+    };
+  }
+
+  // Fallback: no unified set (direct harness.run() path)
+  const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
+  if (layerTools.length === 0 && !step.tools) {
+    return {
+      tools: undefined,
+      allowedToolNames: undefined,
+    };
+  }
+  const merged = [
+    ...(step.tools ?? []),
     ...layerTools,
   ];
+  return {
+    tools: merged.length > 0 ? merged : undefined,
+    allowedToolNames: undefined,
+  };
 }
+
+//#endregion
+
+//#region Input Pipeline
+
+interface RunInputPipelineParams {
+  ctx: Context<ContextMemory>;
+  layers: MemoryLayer[];
+  input: string;
+}
+
+async function runInputPipeline({ ctx, layers, input }: RunInputPipelineParams): Promise<void> {
+  const userItem = createMessage(input, 'user');
+  const { items: finalItems } = await ctx.harness.runAppendPipeline(
+    layers,
+    [
+      userItem,
+    ],
+    ctx,
+  );
+  for (const item of finalItems) {
+    ctx.itemLog.append(item);
+  }
+}
+
+//#endregion
 
 export async function executeLLM<TMemory, I, O>(
   step: StepLLM<TMemory, I, O>,
@@ -35,34 +113,75 @@ export async function executeLLM<TMemory, I, O>(
   layers?: MemoryLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const hasLayers = layers !== undefined && layers.length > 0;
 
+  // Append user input — through layer pipeline if layers exist, otherwise direct.
   if (typeof input === 'string' && input.length > 0) {
-    baseCtx.itemLog.append(createMessage(input, 'user'));
+    if (hasLayers) {
+      await runInputPipeline({
+        ctx: baseCtx,
+        layers,
+        input,
+      });
+    } else {
+      baseCtx.itemLog.append(createMessage(input, 'user'));
+    }
   }
 
-  const allTools = mergeTools(step.tools, layers, baseCtx);
+  const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(
+    step,
+    layers,
+    baseCtx,
+  );
+
+  // Recall once per LLM step: every layer with a recall hook contributes its
+  // current view. Results drive both the assembled context window and the
+  // per-layer usage breakdown (ctx.lastLayerUsage). Recall fires before the
+  // steering retry loop because retries replay the same context.
+  const recallQuery = typeof input === 'string' ? input : '';
+  const recallResults = hasLayers
+    ? await baseCtx.harness.recallLayers(layers, recallQuery, baseCtx)
+    : emptyRecall;
+  const layerOutputItems: Item[] = recallResults.flatMap((r) => r.items);
+
   let retries = 0;
 
   while (retries <= MAX_STEERING_RETRIES) {
-    const request = allTools
+    const assembledItems =
+      layerOutputItems.length > 0
+        ? assembleView({
+            systemPromptItems: [],
+            layerOutputItems,
+            historyItems: [
+              ...baseCtx.itemLog.items,
+            ],
+          })
+        : baseCtx.itemLog.items;
+
+    const request = resolvedTools
       ? {
           model: step.model,
-          items: baseCtx.itemLog.items,
-          tools: allTools,
+          items: assembledItems,
+          instructions: step.instructions,
+          tools: resolvedTools,
           params: step.params,
           outputSchema: step.output,
+          emit: step.emit,
           ctx: baseCtx,
           layers,
+          allowedToolNames,
         }
       : {
           model: step.model,
-          items: baseCtx.itemLog.items,
+          items: assembledItems,
+          instructions: step.instructions,
           params: step.params,
           outputSchema: step.output,
+          emit: step.emit,
         };
     const response = await baseCtx.harness.callModel(request);
 
-    if (layers && layers.length > 0) {
+    if (hasLayers) {
       const decision = await baseCtx.harness.afterModelCall(layers, response, baseCtx);
 
       if (decision.action === SteeringAction.Deny) {
@@ -84,7 +203,7 @@ export async function executeLLM<TMemory, I, O>(
     const toolCalls: FunctionCallItem[] = [];
     for (const item of response.items) {
       baseCtx.itemLog.append(item);
-      if (item.type === 'function_call') {
+      if (isFunctionCall(item)) {
         toolCalls.push(item);
       }
     }
@@ -100,6 +219,21 @@ export async function executeLLM<TMemory, I, O>(
       baseCtx.lastStepMeta = meta;
     }
     trackUsage(baseCtx, response);
+
+    commitLayerUsage(
+      baseCtx,
+      computeLayerUsage({
+        ctx: baseCtx,
+        modelId: step.model,
+        instructions: step.instructions,
+        tools: resolvedTools,
+        recallResults,
+      }),
+    );
+
+    if (hasLayers) {
+      await baseCtx.harness.storeLayers(layers, response, baseCtx);
+    }
 
     const lastText = extractAssistantText(response.items);
 

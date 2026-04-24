@@ -8,8 +8,8 @@ import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ToolWithGenerator } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import type { ShellAdapter, Tool } from '@noetic/core';
+import { toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
 import { validateCommand } from './security.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from './truncate.js';
@@ -53,20 +53,6 @@ export type BashEvent = z.infer<typeof BashEventSchema>;
 
 //#region Types
 
-export interface BashOperations {
-  exec: (
-    command: string,
-    cwd: string,
-    options: {
-      onData: (data: Buffer) => void;
-      signal?: AbortSignal;
-      timeout?: number;
-    },
-  ) => Promise<{
-    exitCode: number | null;
-  }>;
-}
-
 interface ExecState {
   result: {
     exitCode: number | null;
@@ -74,56 +60,6 @@ interface ExecState {
   error: Error | null;
   done: boolean;
 }
-
-//#endregion
-
-//#region Default Operations
-
-const defaultBashOperations: BashOperations = {
-  exec: async (command, cwd, { onData, timeout }) => {
-    const proc = Bun.spawn(
-      [
-        'sh',
-        '-c',
-        command,
-      ],
-      {
-        cwd,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-    );
-
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-    if (timeout !== undefined && timeout > 0) {
-      timeoutHandle = setTimeout(() => {
-        proc.kill();
-      }, timeout * 1e3);
-    }
-
-    try {
-      const [stdoutText, stderrText] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-
-      const combined = stdoutText + stderrText;
-      if (combined) {
-        onData(Buffer.from(combined));
-      }
-
-      const exitCode = await proc.exited;
-      return {
-        exitCode,
-      };
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
-  },
-};
 
 //#endregion
 
@@ -247,25 +183,15 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
 
 //#region Public API
 
-export interface BashToolOptions {
-  operations?: BashOperations;
-}
+export type BashTool = Tool<typeof BashInputSchema, typeof BashOutputSchema>;
 
-export type BashTool = ToolWithGenerator<
-  typeof BashInputSchema,
-  typeof BashEventSchema,
-  typeof BashOutputSchema
->;
-
-export function createBashTool(cwd: string, options?: BashToolOptions): BashTool {
-  const ops = options?.operations ?? defaultBashOperations;
-
-  return tool({
+export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
+  return toolWithGenerator({
     name: 'Bash',
     description: BASH_TOOL_DESCRIPTION,
-    inputSchema: BashInputSchema,
-    outputSchema: BashOutputSchema,
-    eventSchema: BashEventSchema,
+    input: BashInputSchema,
+    output: BashOutputSchema,
+    event: BashEventSchema,
     async *execute(params) {
       const { command, timeout: userTimeout } = params;
       const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 6e2);
@@ -296,8 +222,10 @@ export function createBashTool(cwd: string, options?: BashToolOptions): BashTool
         done: false,
       };
 
-      const execPromise = ops
-        .exec(command, cwd, {
+      const execPromise = shell
+        .exec(command, {
+          cwd,
+          timeout,
           onData: (data: Buffer) => {
             if (resolveData) {
               resolveData(data);
@@ -306,10 +234,11 @@ export function createBashTool(cwd: string, options?: BashToolOptions): BashTool
               dataQueue.push(data);
             }
           },
-          timeout,
         })
         .then((r) => {
-          execState.result = r;
+          execState.result = {
+            exitCode: r.exitCode,
+          };
           execState.done = true;
           if (resolveData) {
             resolveData(null);

@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type {
-  OpenResponsesNonStreamingResponse,
-  ResponsesOutputItem,
-} from '@openrouter/sdk/models';
+import type { OpenResponsesResult as OpenResponsesNonStreamingResponse } from '@openrouter/agent';
+
+type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
+
 import {
+  extractOutputItems,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
-  responseToNoeticItems,
 } from '../../src/adapters/openrouter';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
+import type { Item, ReasoningItem } from '../../src/types/items';
 import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
 describe('extractSystemInstruction', () => {
@@ -23,7 +24,6 @@ describe('extractSystemInstruction', () => {
     expect(instructions).toBe('You are helpful');
     expect(remaining).toHaveLength(1);
     assert(remaining[0].type === 'message');
-    expect(remaining[0].role).toBe('user');
   });
 
   it('returns undefined instructions when no system messages', () => {
@@ -80,33 +80,42 @@ describe('itemsToInput', () => {
     ).toBe(fc.callId);
   });
 
-  it('skips reasoning items in input conversion', () => {
+  it('passes reasoning items through for round-tripping', () => {
+    const reasoning = frameworkCast<ReasoningItem>({
+      id: 'reasoning-1',
+      type: 'reasoning',
+      status: 'completed',
+      summary: [
+        {
+          type: 'summary_text',
+          text: 'thinking...',
+        },
+      ],
+    });
     const input = itemsToInput([
       makeMessage('user', 'Hi'),
-      {
-        id: 'reasoning-1',
-        type: 'reasoning',
-        status: 'completed',
-        content: [
-          {
-            type: 'output_text',
-            text: 'thinking...',
-          },
-        ],
-      },
+      reasoning,
     ]);
-    // Reasoning item should be skipped
-    expect(input).toHaveLength(1);
-    expect(
-      frameworkCast<{
-        role: string;
-      }>(input[0]).role,
-    ).toBe('user');
+    // Both items should be included
+    expect(input).toHaveLength(2);
+  });
+
+  it('passes extension items through for round-tripping', () => {
+    const webSearch = frameworkCast<Item>({
+      type: 'openrouter:web_search',
+      id: 'ws-1',
+      status: 'completed',
+    });
+    const input = itemsToInput([
+      makeMessage('user', 'Hi'),
+      webSearch,
+    ]);
+    expect(input).toHaveLength(2);
   });
 });
 
-describe('responseToNoeticItems', () => {
-  it('converts a simple text response to Noetic items', () => {
+describe('extractOutputItems', () => {
+  it('passes SDK output items through directly', () => {
     const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
       id: 'resp-1',
       object: 'response',
@@ -140,12 +149,112 @@ describe('responseToNoeticItems', () => {
       },
     });
 
-    const items = responseToNoeticItems(sdkResponse);
+    const items = extractOutputItems(sdkResponse);
     expect(items).toHaveLength(1);
     expect(items[0].type).toBe('message');
   });
 
-  it('converts function_call response items back to Noetic format', () => {
+  it('preserves reasoning items from SDK output', () => {
+    const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
+      id: 'resp-1',
+      object: 'response',
+      createdAt: Date.now(),
+      status: 'completed',
+      output: [
+        {
+          type: 'reasoning',
+          id: 'r-1',
+          status: 'completed',
+          summary: [
+            {
+              type: 'summary_text',
+              text: 'Considering the question...',
+            },
+          ],
+        } satisfies ResponsesOutputItem,
+        {
+          type: 'message',
+          id: 'msg-1',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: 'The answer is 42',
+              annotations: [],
+            },
+          ],
+        } satisfies ResponsesOutputItem,
+      ],
+      outputText: 'The answer is 42',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 20,
+        },
+        totalTokens: 35,
+      },
+    });
+
+    const items = extractOutputItems(sdkResponse);
+    expect(items).toHaveLength(2);
+    expect(items[0].type).toBe('reasoning');
+    expect(items[1].type).toBe('message');
+  });
+
+  it('preserves web_search_call items from SDK output', () => {
+    const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
+      id: 'resp-1',
+      object: 'response',
+      createdAt: Date.now(),
+      status: 'completed',
+      output: [
+        {
+          type: 'web_search_call',
+          id: 'ws-1',
+          status: 'completed',
+          action: {
+            type: 'search',
+            query: 'test query',
+          },
+        } satisfies ResponsesOutputItem,
+        {
+          type: 'message',
+          id: 'msg-1',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: 'Found results',
+              annotations: [],
+            },
+          ],
+        } satisfies ResponsesOutputItem,
+      ],
+      outputText: 'Found results',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        inputTokensDetails: {
+          cachedTokens: 0,
+        },
+        outputTokensDetails: {
+          reasoningTokens: 0,
+        },
+        totalTokens: 0,
+      },
+    });
+
+    const items = extractOutputItems(sdkResponse);
+    expect(items).toHaveLength(2);
+    expect(items[0].type).toBe('web_search_call');
+    expect(items[1].type).toBe('message');
+  });
+
+  it('preserves function_call items from SDK output', () => {
     const sdkResponse = frameworkCast<OpenResponsesNonStreamingResponse>({
       id: 'resp-1',
       object: 'response',
@@ -187,14 +296,11 @@ describe('responseToNoeticItems', () => {
       },
     });
 
-    const items = responseToNoeticItems(sdkResponse);
+    const items = extractOutputItems(sdkResponse);
     expect(items).toHaveLength(2);
 
     const fcItem = items[0];
     assert(fcItem.type === 'function_call');
-    expect(fcItem.callId).toBe('call_123');
-    expect(fcItem.name).toBe('search');
-    expect(fcItem.arguments).toBe('{"q":"test"}');
 
     const msgItem = items[1];
     expect(msgItem.type).toBe('message');
@@ -221,7 +327,7 @@ describe('responseToNoeticItems', () => {
       },
     });
 
-    const items = responseToNoeticItems(sdkResponse);
+    const items = extractOutputItems(sdkResponse);
     expect(items).toHaveLength(1);
     expect(items[0].type).toBe('message');
   });

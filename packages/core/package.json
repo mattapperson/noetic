@@ -19,26 +19,26 @@
     }
   },
   "devDependencies": {
-    "@openrouter/sdk": "0.10.2",
+    "@openrouter/agent": "0.3.1",
     "bun-types": "latest"
   },
   "peerDependencies": {
-    "@openrouter/sdk": "^0.10.2",
+    "@openrouter/agent": "0.3.1",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
-    "@openrouter/sdk": {
+    "@openrouter/agent": {
       "optional": true
     }
   },
   "dependencies": {
-    "@openrouter/sdk": "0.10.2",
+    "@openrouter/agent": "0.3.1",
     "zod": "^4.0.0"
   },
   "scripts": {
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
-    "test:ci": "bun test --coverage --coverage-reporter=json",
+    "test:ci": "bun test --coverage --coverage-reporter=text",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",

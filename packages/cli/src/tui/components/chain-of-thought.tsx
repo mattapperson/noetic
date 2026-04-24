@@ -1,8 +1,6 @@
-// @ts-nocheck — Gridland registry component; uses custom intrinsic elements
-
+import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { createContext, memo, useContext, useEffect, useMemo, useState } from 'react';
-import { textStyle } from './text-style';
 import type { Theme } from './theme';
 import { useTheme } from './theme';
 
@@ -99,7 +97,7 @@ export const ChainOfThought = memo(
 
     return (
       <ChainOfThoughtContext.Provider value={context}>
-        <box flexDirection="column">{children}</box>
+        <Box flexDirection="column">{children}</Box>
       </ChainOfThoughtContext.Provider>
     );
   },
@@ -121,25 +119,14 @@ export const ChainOfThoughtHeader = memo(
     const arrow = isOpen ? '▼' : '▶';
 
     return (
-      <text>
-        <span
-          style={textStyle({
-            fg: theme.muted,
-          })}
-        >
-          {arrow}
-        </span>
-        <span
-          style={textStyle({
-            dim: true,
-            fg: theme.muted,
-          })}
-        >
-          {''}
+      <Text>
+        <Text color={theme.muted}>{arrow}</Text>
+        <Text dimColor color={theme.muted}>
+          {' '}
           {children}
-          {duration ? '' + duration : ''}
-        </span>
-      </text>
+          {duration ? ' ' + duration : ''}
+        </Text>
+      </Text>
     );
   },
 );
@@ -197,74 +184,35 @@ export const ChainOfThoughtStep = memo(
     const dot = isActive ? DOTS[frame % DOTS.length]! : isPending ? '○' : '●';
 
     return (
-      <box flexDirection="column" marginLeft={1}>
-        <text>
-          <span
-            style={textStyle({
-              fg: color,
-            })}
-          >
-            {dot}
-          </span>
-          <span
-            style={textStyle({
-              fg: theme.foreground,
-            })}
-          >
-            {''}
-          </span>
-          <span
-            style={textStyle({
-              fg: isPending ? theme.muted : color,
-              dim: isPending,
-              bold: isActive,
-            })}
-          >
+      <Box flexDirection="column" marginLeft={1}>
+        <Text>
+          <Text color={color}>{dot}</Text>
+          <Text color={theme.foreground}> </Text>
+          <Text color={isPending ? theme.muted : color} dimColor={isPending} bold={isActive}>
             {label}
-          </span>
+          </Text>
           {description && (
-            <span
-              style={textStyle({
-                dim: true,
-                fg: theme.muted,
-              })}
-            >
-              {'—' + description}
-            </span>
+            <Text dimColor color={theme.muted}>
+              {' — ' + description}
+            </Text>
           )}
-        </text>
+        </Text>
         {children && (
-          <text>
-            <span
-              style={textStyle({
-                fg: color,
-                dim: true,
-              })}
-            >
-              {pipe + ''}
-            </span>
-            <span
-              style={textStyle({
-                fg: status === 'error' ? theme.error : theme.accent,
-              })}
-            >
-              {children}
-            </span>
-          </text>
+          <Text>
+            <Text color={color} dimColor>
+              {pipe + ' '}
+            </Text>
+            <Text color={status === 'error' ? theme.error : theme.accent}>{children}</Text>
+          </Text>
         )}
         {!isLast && (
-          <text>
-            <span
-              style={textStyle({
-                fg: color,
-                dim: true,
-              })}
-            >
+          <Text>
+            <Text color={color} dimColor>
               {pipe}
-            </span>
-          </text>
+            </Text>
+          </Text>
         )}
-      </box>
+      </Box>
     );
   },
 );

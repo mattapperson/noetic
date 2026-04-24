@@ -4,34 +4,17 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import type { FsAdapter, Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { globSync } from 'glob';
 import { z } from 'zod';
-import { pathExists, resolveToCwd } from './path-utils.js';
+import { resolveToCwd } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from './truncate.js';
 
 //#region Constants
 
 const DEFAULT_LIMIT = 1e3;
-
-//#endregion
-
-//#region Types
-
-export interface FindOperations {
-  exists: (absolutePath: string) => Promise<boolean> | boolean;
-  glob: (
-    pattern: string,
-    cwd: string,
-    options: {
-      ignore: string[];
-      limit: number;
-    },
-  ) => Promise<string[]> | string[];
-}
 
 //#endregion
 
@@ -54,47 +37,6 @@ export const FindOutputSchema = z.object({
 });
 
 export type FindOutput = z.infer<typeof FindOutputSchema>;
-
-//#endregion
-
-//#region Default Operations
-
-async function loadGitignorePatterns(searchCwd: string): Promise<string[]> {
-  const patterns: string[] = [];
-  try {
-    const content = await readFile(path.join(searchCwd, '.gitignore'), 'utf-8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) {
-        continue;
-      }
-      patterns.push(trimmed);
-    }
-  } catch {
-    // No .gitignore or can't read
-  }
-  return patterns;
-}
-
-const defaultFindOperations: FindOperations = {
-  exists: pathExists,
-  glob: async (pattern, searchCwd, options) => {
-    const gitignorePatterns = await loadGitignorePatterns(searchCwd);
-    const ignorePatterns = [
-      ...options.ignore,
-      ...gitignorePatterns,
-    ];
-
-    const results = globSync(pattern, {
-      cwd: searchCwd,
-      dot: true,
-      ignore: ignorePatterns,
-      nodir: true,
-    });
-
-    return results.slice(0, options.limit);
-  },
-};
 
 //#endregion
 
@@ -125,39 +67,61 @@ When NOT to use:
 
 //#endregion
 
-//#region Public API
+//#region Helpers
 
-export interface FindToolOptions {
-  operations?: FindOperations;
+async function loadGitignorePatterns(searchCwd: string, fs: FsAdapter): Promise<string[]> {
+  const patterns: string[] = [];
+  try {
+    const content = await fs.readFileText(path.join(searchCwd, '.gitignore'));
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) {
+        continue;
+      }
+      patterns.push(trimmed);
+    }
+  } catch {
+    // No .gitignore or can't read
+  }
+  return patterns;
 }
 
-export type FindTool = ToolWithExecute<typeof FindInputSchema, typeof FindOutputSchema>;
+//#endregion
 
-export function createFindTool(cwd: string, options?: FindToolOptions): FindTool {
-  const customOps = options?.operations ?? defaultFindOperations;
+//#region Public API
 
+export type FindTool = Tool<typeof FindInputSchema, typeof FindOutputSchema>;
+
+export function createFindTool(cwd: string, fs: FsAdapter): FindTool {
   return tool({
     name: 'Find',
     description: FIND_TOOL_DESCRIPTION,
-    inputSchema: FindInputSchema,
-    outputSchema: FindOutputSchema,
+    input: FindInputSchema,
+    output: FindOutputSchema,
     async execute(params) {
       const { pattern, path: searchDir, limit } = params;
       const searchPath = resolveToCwd(searchDir || '.', cwd);
       const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
       try {
-        if (!(await customOps.exists(searchPath))) {
+        const searchStat = await fs.stat(searchPath).catch(() => null);
+        if (!searchStat) {
           throw new Error(`Path not found: ${searchPath}`);
         }
 
-        const results = await customOps.glob(pattern, searchPath, {
-          ignore: [
-            '**/node_modules/**',
-            '**/.git/**',
-          ],
-          limit: effectiveLimit,
-        });
+        const gitignorePatterns = await loadGitignorePatterns(searchPath, fs);
+        const ignorePatterns = [
+          '**/node_modules/**',
+          '**/.git/**',
+          ...gitignorePatterns,
+        ];
+
+        const results = globSync(pattern, {
+          cwd: searchPath,
+          dot: true,
+          ignore: ignorePatterns,
+          nodir: true,
+        }).slice(0, effectiveLimit);
 
         if (results.length === 0) {
           return {

@@ -10,9 +10,19 @@ The core execution engine interface.
 ```ts
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly config: AgentConfig<TParams>;
+  readonly fs: FsAdapter;
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
+  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
+  getTextStream(scope?: SessionScope): AsyncIterable<string>;
+  getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
+  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+  getStatus(scope?: SessionScope): HarnessStatus;
+  getQueueSize(scope?: SessionScope): number;
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(step: Step<ContextMemory, I, O>, input: I, parentCtx: Context): DetachedHandle<O>;
-  createContext(opts?: CreateContextOpts): Context;
+  createContext(opts?: CreateContextOpts & { memory?: MemoryLayer[] }): Context;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
@@ -33,9 +43,19 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | Method | Description |
 |---|---|
 | `config` | The `AgentConfig<TParams>` the harness was constructed with |
+| `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and memory layers — route through this adapter. |
+| `execute(input, options?)` | Enqueue a message on the session identified by `options.threadId`. Resolves once the message is accepted into the queue — not when the model responds. |
+| `getAgentResponse(scope?)` | Resolves with the accumulated response once the session drains. |
+| `getItemStream(scope?)` | Yields cumulative Item snapshots across every turn in the session. |
+| `getTextStream(scope?)` | Yields text deltas across every turn. |
+| `getReasoningStream(scope?)` | Yields reasoning-token deltas. |
+| `getFullStream(scope?)` | Yields all raw SDK + framework events. |
+| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. |
+| `getStatus(scope?)` | Session status snapshot. |
+| `getQueueSize(scope?)` | Messages currently queued on the session. |
 | `run(step, input, ctx)` | Run a step with the given input and context |
 | `detachedSpawn(step, input, parentCtx)` | Launch a step concurrently, returning a `DetachedHandle` |
-| `createContext(opts?)` | Create a new execution context |
+| `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
 | `send(channel, value, ctx)` | Send a value to a channel |
 | `recv(channel, ctx, opts?)` | Receive from a channel (blocking) |
 | `tryRecv(channel, ctx)` | Non-blocking receive |
@@ -49,6 +69,81 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `cancel(ctx, reason?)` | Cancel an execution |
 | `createSpan(name, parent)` | Create an observability span |
 
+## DeliveryMode
+
+```ts
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+```
+
+| Mode | Behaviour |
+|---|---|
+| `next-turn` (default) | Queue and run after the current turn completes. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
+| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
+
+## ExecuteOptions
+
+```ts
+interface ExecuteOptions {
+  threadId?: string;
+  resourceId?: string;
+  state?: unknown;
+  memory?: MemoryLayer[];
+  deliveryMode?: DeliveryMode;
+}
+
+interface SessionScope {
+  threadId?: string;
+}
+```
+
+## HarnessStatus
+
+```ts
+type HarnessStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'aborting'; readonly turnId: string };
+```
+
+## HarnessResponse
+
+```ts
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
+}
+```
+
+## StreamEvent
+
+```ts
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+
+interface SdkStreamEvent {
+  readonly source: 'sdk';
+  readonly type: string;
+  readonly data: Record<string, unknown>;
+  readonly outputIndex?: number;
+  readonly contentIndex?: number;
+}
+
+interface FrameworkStreamEvent {
+  readonly source: 'framework';
+  readonly type: `${string}:${string}`;
+  readonly data: Record<string, unknown>;
+}
+```
+
+## StreamingItem
+
+```ts
+type StreamingItem = Item & { readonly isComplete: boolean };
+```
+
 ## AgentConfig
 
 Declarative configuration for an agent harness. Generic over `TParams`, an arbitrary key-value record accessible via `ctx.harness.config.params`.
@@ -56,6 +151,7 @@ Declarative configuration for an agent harness. Generic over `TParams`, an arbit
 ```ts
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
+  fs?: FsAdapter;
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
@@ -65,6 +161,7 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | yes | Agent name |
+| `fs` | `FsAdapter` | no | Filesystem adapter. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`). Pass a custom adapter for in-memory, sandboxed, or remote filesystem backends. |
 | `storage` | `StorageAdapter` | no | Storage backend for memory persistence |
 | `hooks` | `AgentHooks` | no | Before/after step hooks |
 | `params` | `TParams` | yes | Arbitrary key-value parameters for steps and tools |

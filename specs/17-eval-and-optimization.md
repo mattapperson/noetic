@@ -298,7 +298,7 @@ type OptimizationLevel = (typeof OptimizationLevel)[keyof typeof OptimizationLev
 
 | Level | Scope | What It Mutates | Risk |
 |-------|-------|-----------------|------|
-| L1 | Prompts only | `system`, `instructions`, tool descriptions | Low — behavioral change only |
+| L1 | Prompts only | `instructions`, tool descriptions | Low — behavioral change only |
 | L2 | Flow structure | L1 + `model`, `maxSteps`, `maxIterations`, `tools` array membership | Medium — structural change |
 | L3 | Full | L2 + step composition topology, custom code via pluggable coding agent | High — requires human review |
 
@@ -308,9 +308,9 @@ The optimizer walks the step tree to discover tunable fields.
 
 ```typescript
 interface DiscoveredField {
-  path: string[];                // JSONPath-style path to the field, e.g., ['react-loop', 'body', 'system']
+  path: string[];                // JSONPath-style path to the field, e.g., ['react-loop', 'body', 'instructions']
   stepId: string;                // ID of the containing step
-  fieldName: string;             // 'model' | 'system' | 'tools' | 'maxSteps' | etc.
+  fieldName: string;             // 'model' | 'instructions' | 'tools' | 'maxSteps' | etc.
   currentValue: unknown;         // Current value
   level: OptimizationLevel;      // Minimum optimization level required to mutate this field
 }
@@ -328,7 +328,7 @@ Fields discovered per step kind:
 
 | Step Kind | L1 Fields | L2 Fields | L3 Fields |
 |-----------|-----------|-----------|-----------|
-| `llm` | `system`, `params` | `model`, `tools` | (topology) |
+| `llm` | `instructions`, `params` | `model`, `tools` | (topology) |
 | `loop` | (from body) | `maxIterations` | `until` predicates |
 | `spawn` | (from child) | `timeout` | `memory` layers |
 | `fork` | (from children) | `mode`, `concurrency` | path topology |
@@ -442,7 +442,7 @@ The static analysis module:
 2. Follows imports to find agent/step definition source files using TypeScript module resolution
 3. Parses those imported source files into TypeScript ASTs (the eval file itself is excluded — only imported source modules are analyzed for builder calls)
 4. Walks the AST to find builder calls (`step.llm()`, `tool()`, `react()`, `ralphWiggum()`, `branch()`, `fork()`, `spawn()`, `loop()`)
-5. Extracts string literal values of optimizable fields (`system`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
+5. Extracts string literal values of optimizable fields (`instructions`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
 6. Returns `OptimizableField[]` with populated `sourceLocation`
 
 The CLI optimizer calls `discoverFieldsFromSource()` for each loaded eval file, then enriches runtime-discovered fields with AST-discovered source locations via `enrichWithSourceLocations()`.

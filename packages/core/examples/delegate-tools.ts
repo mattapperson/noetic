@@ -20,7 +20,7 @@ import type { ToolExecutionContext } from '../src/types/tool-context';
 interface SubAgentConfig {
   id: string;
   model: string;
-  system: string;
+  instructions: string;
   tools?: Tool[];
   memory?: MemoryLayer[];
 }
@@ -44,7 +44,7 @@ function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextMemory
   return step.llm<ContextMemory, string, string>({
     id,
     model: 'gpt-4o',
-    system: 'You are a research assistant. Answer concisely.',
+    instructions: 'You are a research assistant. Answer concisely.',
   });
 }
 
@@ -54,14 +54,14 @@ function buildConfiguredSubAgentStep(
   const llmStep = step.llm<ContextMemory, string, string>({
     id: `${config.id}-llm`,
     model: config.model,
-    system: config.system,
+    instructions: config.instructions,
     tools: config.tools,
   });
 
   const body = config.tools?.length
     ? react({
         model: config.model,
-        system: config.system,
+        instructions: config.instructions,
         tools: config.tools,
         maxSteps: 10,
       })

@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Channel } from '../../src/types/channel';
-import type { MessageItem } from '../../src/types/items';
+import type { InputMessageItem } from '../../src/types/items';
 import { makeMockHarness } from '../_helpers';
 
-function makeTestItem(): MessageItem {
+function makeTestItem(): InputMessageItem {
   return {
     id: 'item-1',
     status: 'completed',

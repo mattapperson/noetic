@@ -1,9 +1,9 @@
 import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
-import type { Item, MessageItem } from '../types/items';
+import type { InputMessageItem, Item } from '../types/items';
 import { isAssistantMessage, isMutableContext, isOutputText } from './typeguards';
 
-export function createMessage(text: string, role: 'user' | 'developer'): MessageItem {
+export function createMessage(text: string, role: 'user' | 'developer'): InputMessageItem {
   return {
     id: crypto.randomUUID(),
     status: 'completed',
@@ -28,7 +28,7 @@ export function extractAssistantText(items: ReadonlyArray<Item>): string {
   return (
     lastMsg.content
       ?.filter(isOutputText)
-      ?.map((c) => c.text)
+      ?.map((c: { text: string }) => c.text)
       ?.join('') ?? ''
   );
 }
@@ -46,6 +46,7 @@ export function trackUsage(ctx: Context, response: LLMResponse): void {
   ctx.tokens.input += response.usage.inputTokens;
   ctx.tokens.output += response.usage.outputTokens;
   ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
+  ctx.tokens.cached = (ctx.tokens.cached ?? 0) + (response.usage.cachedTokens ?? 0);
   if (response.cost) {
     ctx.cost = ctx.cost + response.cost;
   }

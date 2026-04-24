@@ -50,34 +50,71 @@ Noetic UI design principles:
 
 - **System theme** as default (auto-switches between light/dark based on OS preference)
 - **Card-based nodes** with subtle borders and status-colored accents
-- **Top-down hierarchical layout** for execution flow
+- **Grid-snapped vertical layout** for execution flow (nodes snapped to a virtual grid, arranged top-to-bottom with parallel paths side-by-side)
 - **Three-panel layout:** left navigation, center canvas, right inspector
 - **Playback timeline** at bottom with transport controls
-- **Status badges** prominently displayed on each node
+- **Status icons** prominently displayed on each node (✓ ▶ ⏸ ✗ ○ ⊘)
 
 ### 1. Execution Visualization
 
-The UI renders the execution tree as an interactive node graph:
+The UI renders execution as a **grid-snapped flow diagram** with orthogonal edge routing and recursive nesting:
 
-- **Nodes** represent steps (run, llm, tool, branch, fork, spawn, loop)
-- **Node cards** display:
-  - Step kind badge (icon + text: LLM, TOOL, FORK, etc.)
-  - Branch/fork indicator (e.g., "BRANCH 3")
-  - Step title
-  - Status badge (DONE, QUEUED, RUNNING, ERROR, PAUSED)
-  - Duration (e.g., "25.5 s", "17m 43s")
-  - Attempt count
-  - Tool/pattern tags as pills
-  - Connection ports (input left, output right)
-- **Edges** show data flow between steps with animated progress indicators
-- **Nested graphs** for spawn/loop children (collapsible)
-- **Parallel lanes** for fork paths with visual grouping
-- **Color coding:**
-  - **Green** - completed/success
-  - **Blue** - active/running/focus
-  - **Yellow/Orange** - warning/paused
-  - **Red** - error
-  - **Gray** - pending/not visited
+- **Grid System:** All node positions snap to a virtual grid (20px cells). This ensures consistent alignment between nodes and edge routing regardless of which routing strategy produces the path.
+
+- **Sequential Layout:** Nodes arranged vertically top-to-bottom in execution order
+  - Each step gets its own node card
+  - Flow moves downward from start to completion
+  - Clear visual hierarchy showing execution sequence
+
+- **Parallel Layout:** Fork and branch children are positioned **horizontally** side-by-side
+  - Fork paths show parallel execution lanes
+  - Branch paths show alternative conditional routes; the selected/active path renders at full opacity while unselected paths are slightly dimmed
+  - Sibling nodes never overlap (collision detection pushes apart horizontally for parallel, vertically for sequential)
+
+- **Nested Container Scaling:**
+  - Container nodes (loop, fork, branch, spawn) render as bounding boxes enclosing their children
+  - The root container is invisible — its children (top-level steps) render at **100%** size
+  - Below the root, children scale to **50%** of parent size at each nesting level (50% → 25% → 12.5%)
+  - Container padding scales proportionally with the scale factor
+  - Clicking a container node triggers an animated zoom transition centering the container so children appear at 100% base size
+  - A breadcrumb trail tracks zoom depth; clicking background or back button animates to the previous zoom level
+  - Nested zoom stacks (click into a loop, then into a fork inside it)
+
+- **Loop Visualization:**
+  - Loop nodes serve as **container nodes** with visual grouping
+  - Steps inside loops are scaled and contained within the loop bounding box
+  - Loop-back edges route orthogonally around child nodes from last child back to first child
+
+- **Node Cards** display:
+  - Step kind badge with icon (LLM 💬, TOOL 🔧, FORK ⫚, etc.)
+  - Step title and ID
+  - Status icon with color coding (✓ completed, ▶ running, ✗ error, etc.)
+  - Duration and execution metrics
+  - Connection edges flowing to next step
+
+- **Edges:**
+  - **Orthogonal routing:** All edges travel in horizontal/vertical segments only (90° increments) with a consistent corner radius at turns
+  - **Connection points:** Edges connect from/to the center point of the top, right, bottom, or left edge of a node. The side with the largest edge-to-edge gap toward the target is preferred. For container→child edges (where one node contains another), vertical anchors aligned to the child's center-x produce clean straight-down connections.
+  - **Obstacle avoidance:** Edges route around nodes, never through them. Simple routes use Z-shaped or L-shaped paths; when these would cross a node, A* pathfinding finds an obstacle-free route.
+  - **Edge spacing:** Parallel edges are offset by several grid cells so they remain easy to follow
+  - **Thin lines:** 1.5px stroke width with unfilled arrowheads at the terminus
+
+- **Edge Visual Language** (color encodes the structural pattern, not the node status):
+
+  | Type | Style | Color | Use Case |
+  |------|-------|-------|----------|
+  | `default` | Solid line | Source node status color | Normal sequential flow |
+  | `conditional` | Dashed line | Yellow (#eab308, branch kind) | Branch condition paths |
+  | `fork` | Solid line | Pink (#ec4899, fork kind) | Parallel execution paths |
+  | `loop` | Dotted line | Teal (#14b8a6, loop kind) | Loop-back iterations |
+  | `spawn` | Dash-dot line | Indigo (#6366f1, spawn kind) | Spawn child connections |
+
+- **Color coding by status:**
+  - **Green** (#10b981) - completed/success
+  - **Blue** (#3b82f6) - active/running/focus
+  - **Yellow/Orange** (#f59e0b) - warning/paused
+  - **Red** (#ef4444) - error
+  - **Gray** (#6b7280) - pending/not visited
 
 ### 2. Data Inspection
 
@@ -86,12 +123,17 @@ Each node can be selected to show details in the right panel:
 - **Tabs:** session | attempt | events
 - **Content areas:**
   - **System prompts** (for LLM steps)
-  - **Input/output data** with syntax highlighting
+  - **Input/output data** with auto-detected content rendering (see below)
   - **Context state** (memory, tokens, cost, depth)
   - **Step metadata** (execution time, retry count, LLM usage)
   - **Item log** (conversation history for LLM steps)
   - **Raw traces** (OpenTelemetry span data)
-- **Text display** with monospace fonts for code/JSON
+- **Content type auto-detection** for input/output values:
+  - **JSON** — Parsed and displayed as a collapsible syntax-highlighted tree
+  - **Markdown** — Rendered with react-markdown (headings, bold, lists, code blocks, links)
+  - **LaTeX math** — Rendered via KaTeX (remark-math + rehype-katex); supports `\(...\)` inline and `\[...\]` display delimiters
+  - **Plain text** — Displayed as preformatted text with word wrap
+- **Copy-to-clipboard button** on both Input and Output sections
 - **Follow/Overview toggle** for different detail levels
 
 ### 3. Debugging Controls
@@ -116,6 +158,8 @@ Debug actions:
 - **Automatic recording** - Every execution is captured in full
 - **Runs are first-class** - Each execution creates a run entry
 - **Persistent storage** - Runs stored locally with configurable retention
+- **Debounced live persistence** - The WebSocket server debounce-saves live trace progress to disk every 500ms, coalescing rapid node events into a single write. Page reload during a live run restores execution state from disk
+- **Disk fallback** - `handleExecutionGet` and `handleExecutionReplay` fall back to disk storage when traces are not in memory (e.g., after a server restart)
 - **Real-time streaming** - Live runs stream to UI as they execute
 - **Retroactive inspection** - Access any historical run from the agent browser
 
@@ -143,26 +187,49 @@ Debug actions:
 
 ```
 packages/ui/
-├── src/
-│   ├── server/           # Dev server & WebSocket API
-│   │   ├── index.ts      # Server entry point
-│   │   ├── websocket.ts  # WebSocket message protocol
-│   │   ├── storage.ts    # Execution trace persistence
-│   │   └── api.ts        # REST API for queries
-│   ├── client/           # Web UI (React/Vue/Svelte)
-│   │   ├── components/   # Node graph, inspectors, controls
-│   │   ├── stores/       # State management
-│   │   ├── types/        # Client-side type definitions
-│   │   └── app.tsx       # Main application
-│   ├── runtime/          # Runtime integration
-│   │   ├── hook.ts       # Execution hooks for capturing events
-│   │   ├── exporter.ts   # TraceExporter implementation
-│   │   └── debugger.ts   # Debug runtime with pause/resume
-│   └── shared/           # Shared types & protocol
-│       ├── protocol.ts   # WebSocket message types
-│       └── types.ts      # Common interfaces
+├── app/                    # Next.js app directory (built UI)
+│   ├── layout.tsx
+│   ├── page.tsx
+│   └── globals.css
+  ├── src/
+  │   ├── service/           # Server-side code (WebSocket + API)
+  │   │   ├── index.ts      # Server entry point
+  │   │   ├── websocket.ts  # WebSocket message protocol
+  │   │   ├── storage.ts    # Execution trace persistence
+  │   │   └── api.ts        # REST API for queries
+  │   ├── client/           # Web UI (React + Next.js)
+  │   │   ├── components/   # Node graph, inspectors, controls
+  │   │   ├── stores/       # Zustand state management
+  │   │   ├── hooks/        # React hooks (WebSocket, execution)
+  │   │   └── lib/          # Client utilities (format.ts, sequential-layout, etc.)
+  │   ├── runtime/          # Runtime integration
+  │   │   ├── exporter.ts   # TraceExporter implementation
+  │   │   ├── debugger.ts   # Debug runtime with pause/resume
+  │   │   ├── hook.ts       # Execution hooks for capturing events
+  │   │   └── step-extractors.ts  # Step data extraction plugins
+  │   └── shared/           # Shared types & protocol
+  │       ├── protocol.ts   # WebSocket message types
+  │       └── types.ts      # Common interfaces
+├── bin/
+│   └── noetic-ui.js      # CLI entry point (runtime detection)
+├── scripts/
+│   ├── build-executables.js  # Cross-platform build automation
+│   └── install.sh           # User install script
+├── .github/workflows/
+│   └── build-executables.yml  # CI/CD for releases
 ├── package.json
 └── README.md
+```
+
+**Distribution Artifacts:**
+
+```
+dist-exe/                           # Built executables (not in repo)
+├── noetic-ui-darwin-arm64         # macOS Apple Silicon
+├── noetic-ui-darwin-x64           # macOS Intel
+├── noetic-ui-linux-arm64          # Linux ARM64
+├── noetic-ui-linux-x64            # Linux x64
+└── noetic-ui-win32-x64.exe        # Windows x64
 ```
 
 ### Integration Points
@@ -172,15 +239,14 @@ Noetic UI integrates with the core framework through three mechanisms:
 #### 1. TraceExporter (Read-only Observation)
 
 ```typescript
-import { setTraceExporter } from '@noetic/core';
-import { NoeticUITraceExporter } from '@noetic/ui/runtime';
+import { enableDevUI } from '@noetic/ui/runtime/enable';
 
 // In your app entry point when dev mode is enabled
-if (process.env.NOETIC_UI_ENABLED) {
-  const uiExporter = new NoeticUITraceExporter({
-    port: 3333,  // WebSocket port for UI server
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI({
+    port: Number(process.env.NOETIC_UI_WS_PORT) || 3333,
+    host: process.env.NOETIC_UI_HOST || 'localhost',
   });
-  setTraceExporter(uiExporter);
 }
 ```
 
@@ -206,6 +272,77 @@ const harness = createDebugHarness({
 ```
 
 The debug harness wraps execution and allows external control.
+
+#### 3. Step Data Extractor Plugins (Extensible Data Transformation)
+
+The exporter uses a **plugin-based architecture** for transforming span attributes into step-specific data for UI rendering. This allows new step kinds to be added without modifying the exporter.
+
+**Plugin Registration:**
+
+```typescript
+import { registerStepDataExtractor } from '@noetic/ui/runtime/step-extractors';
+
+// Register a custom step extractor
+registerStepDataExtractor('myStep', (spanAttrs, tokenUsage, cost) => {
+  return {
+    customField: spanAttrs.customField,
+    tokenUsage,
+    cost,
+  };
+});
+```
+
+**Built-in Extractors:**
+
+The following step kinds have built-in extractors registered by default:
+
+| Step Kind | Data Fields |
+|-----------|-------------|
+| `llm` | model, messages, toolCalls, systemPrompt, tokenUsage, cost |
+| `tool` | toolName, arguments, result |
+| `fork` | mode, pathCount, winnerPath |
+| `loop` | iteration, totalIterations, maxIterations |
+| `spawn` | childStepId, childStepKind |
+| `branch` | condition, selectedPath |
+| `run` | description |
+| `provide` | providerId, provides |
+
+**Plugin API:**
+
+```typescript
+// Check if extractor exists
+hasStepDataExtractor('llm'); // true
+
+// Get extractor for a step kind
+const extractor = getStepDataExtractor('llm');
+const data = extractor(spanAttrs, tokenUsage, cost);
+
+// List all registered kinds
+const kinds = getRegisteredStepKinds(); 
+// ['llm', 'tool', 'fork', 'loop', 'spawn', 'branch', 'run', 'provide']
+
+// Unregister (mainly for testing)
+unregisterStepDataExtractor('myStep');
+
+// Clear all extractors (testing only)
+clearStepDataExtractors();
+```
+
+**How it Works:**
+
+1. The exporter receives span data from the core
+2. It looks up the extractor for the step's `kind` attribute
+3. Falls back to generic extractor if none registered
+4. Calls the extractor with span attributes, token usage, and cost
+5. Result becomes the `stepData` field in the ExecutionNode
+6. UI components render based on stepData contents
+
+**Benefits:**
+
+- **Open/Closed Principle:** New step kinds added without core changes
+- **Single Responsibility:** Each step type owns its data transformation
+- **Testability:** Extractors can be tested in isolation
+- **Extensibility:** Users can add custom extractors for domain-specific steps
 
 ### Debug Mode vs Production Mode
 
@@ -264,14 +401,11 @@ When Noetic UI is **not** enabled (default behavior):
 
 **Tree-shaking Compatible:**
 ```typescript
-// Debug imports only loaded when needed
-if (process.env.NOETIC_UI_ENABLED) {
-  const { createDebugHarness } = await import('@noetic/ui/runtime');
-  const { NoeticUITraceExporter } = await import('@noetic/ui/runtime');
-  
-  // Setup debugging
-  const harness = createDebugHarness(config);
-  setTraceExporter(new NoeticUITraceExporter());
+// Explicit opt-in — tree-shakeable when not called
+import { enableDevUI } from '@noetic/ui/runtime/enable';
+
+if (process.env.NOETIC_UI_ENABLED === 'true') {
+  enableDevUI();
 }
 ```
 
@@ -306,16 +440,273 @@ export function execute(step, input, ctx) {
 
 ### CLI Integration
 
-```bash
-# Start the UI server and run agent with debugging enabled
-npx @noetic/ui serve --port 3333 &
-npx my-agent --noetic-ui-port 3333
+**Distribution Strategy: Standalone Executables**
 
-# Or combined command
-npx @noetic/ui run -- npm start
+Noetic UI is distributed as **standalone executables** to provide zero-dependency installation across all platforms. This approach was chosen to eliminate runtime compatibility issues and provide the best user experience.
+
+**Installation Methods (in order of preference):**
+
+1. **Standalone Executable (Recommended)**
+   ```bash
+   # macOS/Linux - One-line install
+   curl -fsSL https://raw.githubusercontent.com/mattapperson/noetic/main/packages/ui/scripts/install.sh | bash
+   
+   # Or download manually from GitHub releases
+   # https://github.com/mattapperson/noetic/releases
+   ```
+   
+   **Benefits:**
+   - Zero dependencies (includes embedded runtime)
+   - Single binary (~50-110MB depending on platform)
+   - Works immediately after download
+   - No package manager required
+   - Consistent behavior across all systems
+
+2. **Docker**
+   ```bash
+   docker run -p 3333:3333 -p 3334:3334 noetic/ui
+   ```
+   
+   **Benefits:**
+   - Containerized, isolated environment
+   - Perfect for CI/CD pipelines
+   - No local installation needed
+
+3. **Bun/NPX (Development Only)**
+   ```bash
+   # Requires Bun: https://bun.sh
+   bunx @noetic/ui serve
+   ```
+   
+   **Benefits:**
+   - Access to programmatic API
+   - Development and debugging
+   - Integration with existing Bun projects
+   
+   **Limitations:**
+   - Requires Bun runtime
+   - TypeScript source execution
+   - Not recommended for end users
+
+**Why Not Universal Package Manager Support?**
+
+We evaluated supporting npm/yarn/pnpm universally but decided against it because:
+
+1. **Runtime Dependency Hell:** Supporting Node.js + Bun + Deno creates a 2x testing burden
+2. **Bun-Specific APIs:** The server uses Bun's native APIs for optimal performance
+3. **Compilation Complexity:** Transpiling TS→JS for Node introduces maintenance overhead
+4. **Size Trade-off:** Pre-compiled binaries (50-110MB) are actually smaller than node_modules (150-300MB)
+5. **UX Consistency:** A single binary works identically everywhere vs. "works on my machine" issues
+
+**Architecture Decision:**
+- Distribute as **standalone executables** for end users
+- Keep **npm package** for programmatic API access (requires Bun)
+- Provide **Docker image** for containerized environments
+- Build using **Bun's native compile feature** for optimal bundling
+
+**Executable Usage:**
+```bash
+# Start the UI server
+noetic-ui serve
+
+# With environment variables
+NOETIC_UI_WS_PORT=3333 NOETIC_UI_API_PORT=3334 noetic-ui serve
+
+# Check version
+noetic-ui --version
+
+# Show help
+noetic-ui --help
 ```
 
+**Graceful Shutdown:**
+```bash
+# The executable handles SIGINT/SIGTERM properly
+curl -fsSL ... | bash  # Install
+./noetic-ui serve &      # Start in background
+kill -INT %1             # Graceful shutdown
+```
+
+**Supported Platforms:**
+- macOS (Intel & Apple Silicon)
+- Linux (x64 & ARM64)
+- Windows (x64)
+
+**Build Process:**
+Executables are built using Bun's `--compile` feature in CI/CD:
+```bash
+bun build --compile --target bun-darwin-arm64 --outfile noetic-ui-darwin-arm64 src/service/index.ts
+```
+
+This creates a single binary containing:
+- WebSocket server
+- REST API server  
+- Pre-built Next.js UI
+- All dependencies
+- Embedded Bun runtime
+
+**Distribution via GitHub Releases:**
+- Automated builds on tag push via GitHub Actions
+- Cross-platform matrix builds (5 targets)
+- Checksums for integrity verification
+- Install script for one-line setup
+
 ---
+
+## Layout Algorithms
+
+### Grid-Snapped Sequential Layout
+
+The UI uses a **grid-snapped sequential layout algorithm** that arranges execution nodes in execution order, with container nesting, recursive scaling, and orthogonal edge routing.
+
+**Algorithm Overview:**
+
+```typescript
+function calculateSequentialLayout(
+  nodes: Map<string, ExecutionNode>,
+  rootNodeId: string
+): { positions: NodePosition[], edges: NodeEdge[] }
+```
+
+**Grid System:**
+
+All node positions are quantized to a virtual grid with a configurable cell size (default 20px). This ensures:
+- Consistent alignment between nodes regardless of nesting depth
+- Uniform edge routing — both the simple rule-based router and the A* fallback produce visually identical segment alignment
+- Clean visual rhythm across the entire graph
+
+```typescript
+function snapToGrid(value: number, cellSize: number): number {
+  return Math.round(value / cellSize) * cellSize;
+}
+```
+
+**Key Features:**
+
+1. **Execution Order Traversal:**
+   - Depth-first traversal starting from root node
+   - Visits nodes in actual execution order
+   - Builds a linear sequence of execution steps
+
+2. **Sequential Positioning:**
+   - Nodes placed vertically (top-to-bottom) with consistent spacing
+   - Each node gets position: `{ x, y, width, height, scale }`
+   - All coordinates snapped to the virtual grid
+
+3. **Parallel Positioning (Fork & Branch):**
+   - Fork and branch children are laid out **horizontally** (side-by-side)
+   - All parallel paths start at the same Y coordinate
+   - Horizontal spacing between paths prevents overlap
+   - Branch: selected/active path at full opacity, unselected paths dimmed
+
+4. **Recursive Container Scaling:**
+   - Container nodes (loop, fork, branch, spawn) render as bounding boxes
+   - The root container is invisible; its children render at 100% size
+   - Below the root, children scale to **50%** of parent size at each nesting level
+   - Scale compounds recursively from the first visible container: 50% → 25% → 12.5%
+   - Container padding scales proportionally with the scale factor
+   - `NodePosition` includes a `scale` field for rendering
+
+5. **Sibling Overlap Prevention:**
+   - After positioning children, a collision pass checks sibling bounding boxes
+   - Overlapping siblings are pushed apart (horizontally for parallel, vertically for sequential)
+   - Applied recursively at every nesting level
+
+6. **Edge Generation:**
+   - Sequential edges: solid lines from node N to node N+1
+   - Loop edges: dotted teal lines from last child back to first child
+   - Fork edges: solid pink lines to parallel execution paths
+   - Branch edges: dashed yellow lines to conditional paths
+   - Spawn edges: dash-dot indigo lines to child context
+   - All edges animated when source node status is 'running'
+
+**Layout Options:**
+
+```typescript
+interface SequentialLayoutOptions {
+  nodeWidth: 280;           // Base width of node cards
+  nodeHeight: 140;          // Base height of node cards
+  verticalSpacing: 60;      // Vertical distance between nodes
+  horizontalSpacing: 80;    // Horizontal space for parallel paths
+  containerPadTop: 50;      // Top padding inside containers (header room)
+  containerPadSide: 30;     // Side padding inside containers
+  containerPadBottom: 30;   // Bottom padding inside containers
+  gridCellSize: 20;         // Virtual grid cell size for snapping
+  nestingScale: 0.5;        // Scale factor per nesting level
+  startX: 50;               // Initial X position
+  startY: 50;               // Initial Y position
+}
+```
+
+### Orthogonal Edge Router
+
+Edges are rendered as **polylines of horizontal and vertical segments** (90° increments only) with a consistent corner radius at each turn.
+
+**Hybrid Routing Strategy:**
+
+1. **Simple rule-based router** (fast path): Used for the common case where a direct path doesn't cross any node.
+   - Picks the anchor side with the largest edge-to-edge gap toward the target
+   - For container→child edges (containment), uses vertical anchors aligned to the child's center-x
+   - Produces Z-shaped (two turns) or L-shaped (one turn) orthogonal paths depending on anchor sides
+   - Connection points are always the center of a node's top, right, bottom, or left edge
+
+2. **A* grid pathfinder** (fallback): Used when the simple path would cross a node bounding box.
+   - Overlays the snap grid with node bounding boxes marked as blocked (with margin)
+   - Finds shortest orthogonal path avoiding all obstacles
+   - First/last waypoints are pinned to exact anchor coordinates for clean node attachment
+   - Used for loop-back edges, cross-container edges, and any path that would intersect a node
+
+**Edge Rendering:**
+
+```typescript
+interface OrthogonalEdge {
+  /** Ordered waypoints forming the polyline (all grid-snapped) */
+  waypoints: Array<{ x: number; y: number }>;
+  /** Corner radius applied at each turn */
+  cornerRadius: number;
+}
+```
+
+- Corner radius: consistent value (default 6px) applied at every 90° turn via SVG arc commands
+- Parallel edges running along the same corridor are offset by several grid cells
+- Arrowheads: unfilled chevron marker (thin lines matching edge stroke) at the terminus
+- Stroke width: 1.5px for all edge types
+
+**Edge Types:**
+
+| Type | Style | Color | Use Case |
+|------|-------|-------|----------|
+| `default` | Solid line | Source node status color | Normal sequential flow |
+| `conditional` | Dashed (5,5) | Yellow #eab308 | Branch condition paths |
+| `fork` | Solid line | Pink #ec4899 | Parallel execution paths |
+| `loop` | Dotted (3,3) | Teal #14b8a6 | Loop-back iterations |
+| `spawn` | Dash-dot (8,3,3,3) | Indigo #6366f1 | Spawn child connections |
+
+### Click-to-Zoom Navigation
+
+Clicking a container node with children triggers an animated zoom transition:
+
+1. **Zoom in:** Smooth CSS transition (300ms ease-out) centers the container and scales so children appear at 100% base size (`zoom = 1 / scaleAtDepth`)
+2. **Breadcrumb trail:** A breadcrumb bar appears in the controls area showing the zoom path (e.g., "Root > Loop > Fork")
+3. **Zoom out:** Click background or the breadcrumb back button to animate to the previous zoom level
+4. **Nested stacking:** Zoom state is a stack — clicking into a loop, then a fork inside it, pushes two entries. Back pops one at a time.
+
+**Usage:**
+
+```typescript
+import { calculateSequentialLayout } from '@noetic/ui/client/lib/sequential-layout';
+
+const { positions, edges } = calculateSequentialLayout(
+  trace.nodes,
+  trace.rootNodeId,
+  {
+    nodeWidth: 280,
+    nodeHeight: 140,
+    gridCellSize: 20,
+    nestingScale: 0.5,
+  }
+);
+```
 
 ## Data Model
 
@@ -478,29 +869,165 @@ type StepData =
   | SpawnStepData
   | LoopStepData;
 
+interface RunStepData {
+  description?: string;          // Optional step description
+}
+
 interface LLMStepData {
-  model: string;
-  messages: MessageItem[];
-  toolCalls: FunctionCallItem[];
-  tokenUsage: TokenUsage;
-  cost: number;
+  model: string;                 // LLM model identifier (e.g., 'gpt-4', 'claude-3-opus')
+  messages: MessageItem[];         // Conversation history
+  toolCalls: FunctionCallItem[];   // Tool/function calls made by LLM
+  systemPrompt?: string;         // System prompt sent to LLM
+  tokenUsage: TokenUsage;        // Token consumption statistics
+  cost: number;                   // Cost in USD for this LLM call
 }
 
 interface ToolStepData {
-  toolName: string;
-  arguments: unknown;
-  result: unknown;
+  toolName: string;              // Name of the tool being invoked
+  arguments?: unknown;            // Arguments passed to the tool
+  result?: unknown;               // Tool execution result
+}
+
+interface BranchStepData {
+  condition?: string;            // Condition evaluated for branching
+  selectedPath?: number;          // Which branch path was selected (0-indexed)
 }
 
 interface ForkStepData {
-  mode: 'race' | 'all' | 'settle';
-  pathCount: number;
-  winnerPath?: number;  // For race mode
+  mode: 'race' | 'all' | 'settle';  // Fork execution mode
+  pathCount: number;              // Number of parallel paths
+  winnerPath?: number;             // For race mode: which path won
+}
+
+interface SpawnStepData {
+  childStepId: string;           // ID of the spawned child step
+  childStepKind: StepKind;       // Kind of the child step
+}
+
+interface LoopStepData {
+  iteration: number;             // Current iteration number (0-indexed)
+  totalIterations: number;       // Total iterations completed
+  maxIterations: number;         // Maximum iterations configured
+}
+
+interface ProvideStepData {
+  providerId?: string;            // Provider identifier
+  provides?: unknown;             // Value being provided
+  description?: string;           // Optional description
 }
 
 // ... other step data types
 ```
 
+### Step Detail Requirements
+
+Each step rendered in the sequential layout requires comprehensive data for proper visualization. The following span attributes must be set by the core runtime:
+
+**Common Attributes (All Step Types):**
+
+```typescript
+// Required for all steps
+span.setAttribute('stepKind', step.kind);     // Step type identifier
+span.setAttribute('stepId', step.id);        // Unique step ID
+span.setAttribute('input', JSON.stringify(input));  // Input data
+span.setAttribute('depth', ctx.depth);       // Execution depth
+
+// Set at completion
+span.setAttribute('output', JSON.stringify(result));     // Output data
+span.setAttribute('tokenInput', ctx.tokens.input);         // Input tokens
+span.setAttribute('tokenOutput', ctx.tokens.output);     // Output tokens
+span.setAttribute('totalTokens', totalTokens);           // Total tokens
+span.setAttribute('cost', ctx.cost);                     // Cost in USD
+span.setAttribute('state', JSON.stringify(ctx.state));   // Context state
+```
+
+**Step-Specific Attributes:**
+
+| Step Kind | Required Attributes | Optional Attributes |
+|-------------|---------------------|---------------------|
+| **llm** | `model` | `systemPrompt`, `messages`, `toolCalls` |
+| **tool** | `toolName` | `toolArguments`, `toolResult` |
+| **fork** | `forkMode`, `forkPathCount` | `winnerPath` |
+| **loop** | `loopStepCount` | `currentIteration`, `maxIterations` |
+| **spawn** | `spawnChildId` | `spawnChildKind` |
+| **branch** | `branchType` | `selectedPath`, `condition` |
+| **run** | - | `stepDescription` |
+| **provide** | - | `providerId`, `provides`, `stepDescription` |
+
+**Error Handling:**
+
+When steps fail, additional error attributes should be set:
+
+```typescript
+span.setAttribute('error', 'true');
+span.setAttribute('errorMessage', error.message);
+span.setAttribute('errorCode', error.code);  // If available
+```
+
+**Example: LLM Step Setup:**
+
+```typescript
+// At step start
+span.setAttribute('stepKind', 'llm');
+span.setAttribute('stepId', step.id);
+span.setAttribute('input', JSON.stringify(input));
+span.setAttribute('depth', ctx.depth);
+span.setAttribute('model', step.model);
+if (step.system) {
+  span.setAttribute('systemPrompt', step.system);
+}
+
+// At step completion  
+span.setAttribute('output', JSON.stringify(result));
+span.setAttribute('tokenInput', ctx.tokens.input);
+span.setAttribute('tokenOutput', ctx.tokens.output);
+span.setAttribute('cost', ctx.cost);
+```
+
+**Validation:**
+
+The UI exporter validates step data completeness. Missing required fields will result in:
+- Default values (e.g., 'unknown' for model names)
+- Empty arrays (e.g., `messages: []`)
+- Zero values (e.g., `cost: 0`)
+- Warnings in console during development mode
+
+**Extending Step Types:**
+
+To add a new step kind with full UI support:
+
+1. **In Core:** Set all required span attributes during execution
+2. **In UI:** Register a step data extractor:
+   ```typescript
+   import { registerStepDataExtractor } from '@noetic/ui/runtime/step-extractors';
+   
+   registerStepDataExtractor('newStep', (spanAttrs, tokenUsage, cost) => ({
+     customField: spanAttrs.customField,
+     tokenUsage,
+     cost,
+   }));
+   ```
+3. **In UI:** Register a summary renderer for the inspector (optional — `DefaultSummary` handles unregistered kinds):
+   ```typescript
+   import { registerSummaryRenderer } from '@noetic/ui/inspector/summaries/registry';
+   
+   registerSummaryRenderer('newStep', ({ node, nodes, onSelectNode }) => (
+     <div>/* custom inspector card */</div>
+   ));
+   ```
+4. **In UI:** Add a node component for graph rendering (optional)
+
+**Node Rendering:**
+
+The UI uses the step's `kind` field to determine:
+- Which node component to render
+- Color scheme and icon
+- Inspector tabs and content
+- Timeline marker appearance
+
+Default rendering falls back to `RunNode` for unknown step kinds.
+
+---
 ### Context Snapshot
 
 ```typescript
@@ -534,6 +1061,7 @@ interface ExecutionTrace {
 **Storage Model:**
 - **User-controlled deletion** - No automatic cleanup of traces
 - **Raw storage** - Traces stored uncompressed for fast access
+- **Live trace persistence** - Running traces are debounce-saved to disk every 500ms, surviving page reloads and server restarts
 - **Compression** - Future enhancement (marked for v2)
 - **Visual indicators** - Storage usage displayed in UI
 
@@ -575,8 +1103,10 @@ interface StorageMetrics {
 - **Sort by size** - Find largest traces to delete first
 
 **Storage Location:**
-- **Default:** `~/.noetic-ui/traces/` (user home directory)
+- **Default:** `./.noetic/ui/traces/` (in project root)
+- **Detection:** Automatically finds project root by locating `package.json`
 - **Configurable** via `NOETIC_UI_STORAGE_PATH` env var
+- **Fallback:** `~/.noetic-ui/traces/` if no project root found
 - **Storage backend:** File system (memory/redis for future)
 
 ---
@@ -719,15 +1249,10 @@ The left sidebar serves as an agent and execution history browser:
 When an agent is expanded, show its execution runs:
 - **Run entries** showing:
   - Run timestamp (relative: "2 min ago", absolute on hover)
-  - Status badge (RUNNING, COMPLETED, ERROR, PAUSED)
+  - Status icon (🟡 running, 🟢 completed, 🔴 error, 🟠 paused)
   - Duration (e.g., "25.5 s", "17m 43s")
   - Input preview (truncated first 50 chars)
-  - Token count and cost
-  - **Memory indicator** - color-coded chip showing trace size:
-    - 🟢 Green: < 50 MB (healthy)
-    - 🟡 Yellow: 50-200 MB (warning)
-    - 🟠 Orange: 200-500 MB (caution)
-    - 🔴 Red: > 500 MB (high memory usage)
+  - Token counts (input↑ output↓) and cost
 - **Live runs** animate with pulsing border
 - **Click to load** the run's trace into the center canvas
 - **Context menu** (right-click) for actions:
@@ -887,15 +1412,14 @@ registerAgent({
 ```
 
 - **Card styling:**
-  - Rounded corners (8px radius)
+  - Rounded corners (4px radius)
   - Subtle border with color-coded accent
   - Semi-transparent dark background
   - Shadow for depth
   
 - **Header row:**
-  - Step kind icon + label (e.g., "ACP", "ACTION")
-  - Branch/fork identifier (e.g., "BRANCH 2", "BRANCH 3")
-  - Status badge (DONE, QUEUED, FOCUS, ERROR)
+  - Step kind icon + label (e.g., "LLM", "TOOL")
+  - Status icon (✓ ▶ ⏸ ✗ ○ ⊘) with color coding
   
 - **Content:**
   - Bold step title
@@ -912,49 +1436,153 @@ registerAgent({
   - **PAUSED** (yellow accent): #f59e0b border, #92400e background
 
 - **Connection edges:**
-  - Solid lines for normal flow
-  - Dashed lines for conditional/branches
+  - Orthogonal routing (90° segments only) with consistent corner radius
+  - Connect from/to center of top, right, bottom, or left edge of nodes
+  - Thin 1.5px stroke with unfilled arrowheads
+  - Color encodes connection type (kind color), not node status
+  - Edges route around nodes, never through them
+  - Parallel edges offset by grid cells for readability
   - Animated pulse for active execution
-  - Arrowheads showing direction
-  - Color matches source node status
 
 - **Canvas features:**
   - **Pan/Zoom** - Infinite canvas with mouse drag and scroll wheel
   - **Auto-fit** - Fit graph to viewport button
-  - **Mini-map** - Small overview in corner for navigation
-  - **Grid background** - Subtle dot grid pattern
+  - **Click-to-zoom** - Click container nodes to zoom in so children appear at 100% size; breadcrumb trail for navigation back
+  - **Grid background** - Subtle dot grid pattern (also used as snap grid for layout)
 
 ### 3. Right Inspector Panel
+
+**Props:**
+```typescript
+interface NodeInspectorProps {
+  selectedNode: ExecutionNode | null;
+  nodes: Map<string, ExecutionNode>;
+  onSelectNode?: (nodeId: string) => void;
+}
+```
 
 **Tab Navigation:**
 - session | attempt | events
 - Pill-style tabs with active state highlight
 
+**Session Tab — Rendering Order:**
+
+1. **Node Header** — Status indicator, kind badge, step ID, node ID, depth, duration, error, Follow/Overview toggle. Renders for all step kinds.
+2. **Summary Card** — Kind-specific content via the summary renderer registry (see below).
+3. **Input/Output** — Auto-detected rendering for all step kinds.
+4. **Context State** — Depth, step count, tokens, cost, elapsed time.
+5. **Children List** — Rich interactive list when `children.length > 0`. Skipped for loop nodes (LoopSummary embeds its own grouped children list).
+
+**Attempt Tab:**
+- Execution details (started, ended, duration, status) — universal for all kinds.
+- Raw step data as JSON.
+
+**Events Tab:**
+- Raw trace / OpenTelemetry span data.
+
 **Content Display:**
 - **Monospace text** for code/system prompts
-- **JSON tree** for structured data with syntax highlighting
+- **Auto-detected rendering** for input/output values:
+  - **JSON** — Collapsible syntax-highlighted tree
+  - **Markdown** — Rendered via react-markdown (headings, bold, lists, code blocks, links)
+  - **LaTeX math** — Rendered via KaTeX (remark-math + rehype-katex); `\(...\)` inline, `\[...\]` display
+  - **Plain text** — Preformatted with word wrap
+- **Copy-to-clipboard button** on Input and Output sections
 - **Scrollable areas** with custom dark scrollbar
 - **Collapsible sections** for nested data
+
+#### Summary Renderer Registry
+
+A registry maps step kind strings to React components that render kind-specific summary cards. Built-in renderers register at module load. Users register custom renderers for user-defined step kinds.
+
+**Registry API:**
+```typescript
+type SummaryRenderer = React.FC<{
+  node: ExecutionNode;
+  nodes: Map<string, ExecutionNode>;
+  onSelectNode?: (nodeId: string) => void;
+}>;
+
+function registerSummaryRenderer(kind: string, renderer: SummaryRenderer): void;
+function getSummaryRenderer(kind: string): SummaryRenderer; // DefaultSummary if not found
+function unregisterSummaryRenderer(kind: string): void;     // For testing
+function clearSummaryRenderers(): void;                      // For testing — removes all, including built-ins
+```
+
+`getSummaryRenderer` falls back through three levels: registered renderer for the kind, then the `default` renderer, then an inline `FallbackSummary` component that renders `stepData` as JSON. The `FallbackSummary` is defined directly in `registry.tsx` so the registry never returns `undefined`, even after `clearSummaryRenderers()` removes all entries including built-ins.
+
+**File structure:**
+```
+inspector/summaries/
+  registry.tsx
+  BranchSummary.tsx
+  ForkSummary.tsx
+  LoopSummary.tsx
+  SpawnSummary.tsx
+  LLMSummary.tsx
+  ToolSummary.tsx
+  DefaultSummary.tsx
+```
+
+**Built-in Summary Cards:**
+
+| Kind | Card Title | Content |
+|------|-----------|---------|
+| **branch** | Branch Config | Condition string (code block, or "Implicit branch" if absent), selected path as highlighted badge |
+| **fork** | Fork Status | Mode badge (race/all/settle), path count, winner path (race mode only) |
+| **loop** | Loop Progress | Progress bar (`iteration / maxIterations`), total iterations, children grouped by iteration (see Children List). Embeds its own ChildrenList with iteration grouping — the standard Children List section is skipped for loop nodes. |
+| **spawn** | Spawned Step | Child step kind badge + child step ID, clickable to navigate via `onSelectNode` |
+| **llm** | (System Prompt + Tool Calls) | System prompt in monospace code block, tool call names with collapsible JSON arguments |
+| **tool** | (Tool Result) | Tool name header, arguments JSON, result JSON |
+| **run** | — | Uses DefaultSummary (no dedicated file) |
+| **provide** | — | Uses DefaultSummary (no dedicated file) |
+| **default** | Step Details | Structured key/value rendering of `stepData` — strings inline, objects/arrays as collapsible JSON trees. Fallback for any kind without a registered renderer. |
+
+#### Children List
+
+Replaces the basic truncated-ID list. Each child entry shows:
+- Kind badge (colored)
+- Status icon
+- Step ID
+- Duration
+
+Children are clickable — calls `onSelectNode` to navigate to the child in the graph and inspector. Truncated with "Show all N" expand toggle when > 10 children.
+
+**Iteration grouping** (used by LoopSummary): Children organized under collapsible "Iteration 1", "Iteration 2", etc. headers. Each header shows iteration number, aggregate status, and aggregate duration.
+
+**Grouping algorithm:** The loop body has a fixed number of steps per iteration. The group size is `children.length / totalIterations` (integer division). Children are assigned to iterations by their index in the `children` array: children `[0, groupSize)` belong to iteration 1, `[groupSize, 2*groupSize)` to iteration 2, and so on. Any remainder children (from a partial final iteration) form the last group. If `totalIterations` is 0 or `children` is empty, no grouping is applied.
+
+#### Container Node Selection
+
+Clicking a container node in the graph both selects it (populating the inspector) and zooms into it if the container is nested inside another container (scale < 1). Top-level containers at full scale are selected without zooming. This matches the existing leaf-node click behavior.
+
+**Re-click behavior:** Clicking an already-selected container is a no-op — it does not zoom further or deselect. Clicking the canvas background deselects the current node and clears the inspector.
 
 **Example content layout:**
 ```
 ┌────────────────────────────────────┐
 │  session │ attempt │ events      │
 ├────────────────────────────────────┤
+│ ● FORK  fork-classify      [Follow]│
+│ ID: abc123  Depth: 1  Duration: 2s │
 │                                    │
-│  Return exactly one JSON object    │
-│  and nothing else...               │
+│ ┌─ Fork Status ──────────────────┐ │
+│ │ Mode: race   Paths: 3         │ │
+│ │ Winner: Path 1                │ │
+│ └────────────────────────────────┘ │
 │                                    │
-│  {                                   │
-│    "route": "collect_review",      │
-│    "summary": "short..."           │
-│  }                                   │
+│ ▼ Input                           │
+│   { "query": "classify..." }      │
+│ ▼ Output                          │
+│   { "route": "collect_review" }   │
 │                                    │
-│  I'm reading the saved CI state    │
-│  for the current branch head...    │
+│ ▼ Context State                   │
+│   Tokens: 1.2k  Cost: $0.002     │
 │                                    │
-├────────────────────────────────────┤
-│  [Follow] [Overview]              │
+│ ▼ Children (3)                    │
+│   🟣 LLM  classify-a  ✓  0.8s    │
+│   🟣 LLM  classify-b  ✓  1.2s    │
+│   🟠 TOOL validate    ✓  0.3s    │
 └────────────────────────────────────┘
 ```
 
@@ -1151,8 +1779,7 @@ Each step kind has a distinct visual treatment:
 
 **Node Running:**
 - Animated border (pulsing)
-- Status badge shows "RUNNING"
-- Edge animates with traveling dot
+- Status icon shows ▶
 - Duration counter increments live
 
 **Node Paused (Breakpoint):**
@@ -1288,27 +1915,98 @@ npx @noetic/ui replay <trace-file.json>
 
 See `src/shared/protocol.ts` for complete message types.
 
+### REST API
+
+The UI server exposes a REST API for querying agents and runs. All endpoints return JSON with a standard response wrapper:
+
+```typescript
+interface APIResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+```
+
+**Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/agents` | List all registered agents |
+| `DELETE` | `/api/agents/{agentId}` | Delete an agent and all its runs |
+| `GET` | `/api/agents/{agentId}/runs` | List all runs for an agent |
+| `GET` | `/api/agents/{agentId}/runs/{runId}` | Get a specific run with full trace |
+| `DELETE` | `/api/agents/{agentId}/runs/{runId}` | Delete a specific run |
+| `GET` | `/api/metrics` | Get storage metrics (total runs, size, per-agent stats) |
+| `GET` | `/health` | Health check endpoint |
+
+**Examples:**
+
+```bash
+# List all agents
+curl http://localhost:3334/api/agents
+
+# Get runs for an agent
+curl http://localhost:3334/api/agents/my-agent/runs
+
+# Get a specific run with trace
+curl http://localhost:3334/api/agents/my-agent/runs/run-uuid-123
+
+# Get storage metrics
+curl http://localhost:3334/api/metrics
+```
+
+**Note:** Runs are accessed as nested resources under agents (`/api/agents/{agentId}/runs/{runId}`) following REST best practices. The run ID alone is not sufficient to identify a run - it must be qualified by the agent ID.
+
 ---
 
 ## Dependencies
 
-### Production Dependencies
+### Runtime Dependencies (Server)
 
-- `ws` - WebSocket server/client
-- `express` - REST API server (optional, can use pure WS)
-- `zod` - Schema validation (shared with core)
+- `ws` (^8.16.0) - WebSocket server/client for real-time communication
+- `zod` (^4.0.0) - Schema validation (shared with core)
+- `next` (^14.2.0) - Next.js framework for web UI
+- `react` (^18.2.0) / `react-dom` (^18.2.0) - UI framework
+- `zustand` (^5.0.0) - State management
 
-### Dev Dependencies (Client)
+**Note:** These are all bundled into the standalone executable. End users don't need to install them.
 
-- `react` / `react-dom` - UI framework
-- `@tanstack/react-query` or `zustand` - State management
-- `reactflow` or `@xyflow/react` - Node graph (optional, can build custom)
-- `monaco-editor` - JSON/code editing (optional)
-- `tailwindcss` or `styled-components` - Styling
+### Development Dependencies
+
+- `bun-types` - Bun runtime types
+- `typescript` (^6.0.2) - TypeScript compiler
+- `@types/node`, `@types/react`, `@types/react-dom`, `@types/ws` - Type definitions
+- `tailwindcss`, `postcss`, `autoprefixer` - Styling
+
+### Build Tooling
+
+- **Bun** (>=1.0.0) - Required for:
+  - Development and testing
+  - Building standalone executables (`bun build --compile`)
+  - Running from source (`bun src/service/index.ts`)
+  - Cross-platform compilation
 
 ### Peer Dependencies
 
-- `@noetic/core` - The core framework being debugged
+- `@noetic/core` (workspace:*) - The core framework being debugged
+
+### Distribution Strategy
+
+**End Users (Standalone Executable):**
+- Zero dependencies required
+- Single binary (~50-110MB) includes everything
+- No package manager needed
+- No runtime installation required
+
+**Developers (Source):**
+- Bun 1.0+ required
+- `bun install` to fetch dependencies
+- `bun run build:exe` to create executables
+
+**Programmatic API Users:**
+- Bun 1.0+ required
+- `bun add -D @noetic/ui` to install
+- Import from `@noetic/ui/service` or `@noetic/ui/runtime`
 
 ---
 
@@ -1322,17 +2020,50 @@ Minimal configuration needed to get started:
 
 ```bash
 NOETIC_UI_ENABLED=true         # Enable UI integration (required)
-NOETIC_UI_PORT=3333            # WebSocket server port (optional, default: 3333)
+NOETIC_UI_WS_PORT=3333         # WebSocket server port (optional, default: 3333)
+NOETIC_UI_API_PORT=3334        # REST API/Web UI port (optional, default: 3334)
+NOETIC_UI_HOST=127.0.0.1       # Bind address (optional, default: 127.0.0.1)
 NOETIC_UI_THEME=system         # Theme: system, dark, light (optional, default: system)
 ```
+
+**Note on Port Configuration:**
+The UI uses two ports:
+- **WebSocket (3333):** Real-time communication with agents
+- **API/Web UI (3334):** REST API and browser interface
+
+This separation allows independent scaling and firewall configuration.
+
+#### Storage Location
+
+Traces are stored in the project directory by default:
+
+```
+.your-project-root/
+├── .noetic/
+│   └── ui/
+│       ├── traces/          # Execution trace files
+│       └── agents.json      # Agent registry
+├── src/
+└── package.json
+```
+
+**Storage Path Resolution:**
+1. Checks `NOETIC_UI_STORAGE_PATH` environment variable
+2. Detects project root (directory containing `package.json`)
+3. Creates `.noetic/ui/traces/` in project root
+4. Falls back to `~/.noetic-ui/traces/` if no project root found
+
+This ensures traces stay with the project they're debugging.
 
 #### Config File (noetic.ui.json) - Optional
 
 ```json
 {
-  "port": 3333,
+  "wsPort": 3333,
+  "apiPort": 3334,
+  "host": "127.0.0.1",
   "theme": "system",
-  "storagePath": "./.noetic-ui/traces"
+  "storagePath": "./.noetic/ui/traces"
 }
 ```
 
@@ -1340,30 +2071,71 @@ NOETIC_UI_THEME=system         # Theme: system, dark, light (optional, default: 
 
 ---
 
-### Extended Configuration (Future)
+### Extended Configuration
 
 Additional options for advanced use cases:
 
 #### All Environment Variables
 
 ```bash
+# Core
 NOETIC_UI_ENABLED=true         # Enable UI integration
-NOETIC_UI_PORT=3333            # WebSocket server port
-NOETIC_UI_HOST=localhost       # WebSocket server host
-NOETIC_UI_AUTO_OPEN=true       # Auto-open browser on start
-NOETIC_UI_STORAGE=memory       # Storage backend: memory, file, redis
-NOETIC_UI_STORAGE_PATH=./.noetic-ui  # For file storage
+NOETIC_UI_WS_PORT=3333         # WebSocket server port
+NOETIC_UI_API_PORT=3334        # REST API/Web UI port
+NOETIC_UI_HOST=127.0.0.1       # Bind address (use 0.0.0.0 for remote access)
+NOETIC_UI_SHUTDOWN_TIMEOUT=10000  # Graceful shutdown timeout in ms (default: 10000)
+
+# Storage
+NOETIC_UI_STORAGE_PATH=./.noetic/ui/traces  # Trace storage location
+
+# UI
 NOETIC_UI_THEME=system         # Theme: system, dark, light
+NOETIC_UI_AUTO_OPEN=true       # Auto-open browser on start (future)
+
+# Advanced (future)
+NOETIC_UI_STORAGE_BACKEND=file # Storage backend: file, memory, redis
+NOETIC_UI_BUFFER_SIZE=1000     # WebSocket buffer size
 ```
+
+#### Graceful Shutdown
+
+The UI server handles shutdown signals properly:
+
+```bash
+# SIGINT (Ctrl+C) - Graceful shutdown with timeout
+./noetic-ui serve
+Ctrl+C
+# → "Received SIGINT, starting graceful shutdown..."
+# → "Timeout: 10000ms"
+# → "Server stopped gracefully"
+
+# SIGTERM (Docker stop, process manager)
+kill -TERM <pid>
+# → Same graceful shutdown sequence
+
+# Force kill after timeout
+# → "Shutdown timeout exceeded, forcing exit"
+```
+
+**Shutdown Process:**
+1. Stop accepting new WebSocket connections
+2. Stop accepting new HTTP requests
+3. Wait for pending requests to complete (up to timeout)
+4. Close all client connections gracefully
+5. Persist any pending trace data
+6. Exit cleanly
 
 #### Full Config File
 
 ```json
 {
-  "port": 3333,
+  "wsPort": 3333,
+  "apiPort": 3334,
+  "host": "127.0.0.1",
+  "shutdownTimeout": 10000,
   "storage": {
     "type": "file",
-    "path": "./.noetic-ui/traces"
+    "path": "./.noetic/ui/traces"
   },
   "breakpoints": {
     "pauseOnError": true,
@@ -1423,6 +2195,4 @@ For multi-developer or shared environments, consider:
 ## Open Questions
 
 1. Should the UI be a separate process (current plan) or embeddable in the host app?
-2. React Flow vs custom D3 for the node graph? React Flow is easier but less flexible.
-3. Real-time collaboration support needed for v1?
-4. Should traces persist across UI server restarts?
+2. Real-time collaboration support needed for v1?

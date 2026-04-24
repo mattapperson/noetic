@@ -4,10 +4,8 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import { constants } from 'node:fs';
-import { access as fsAccess, readFile } from 'node:fs/promises';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import type { FsAdapter, Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveReadPath } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from './truncate.js';
@@ -15,12 +13,6 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from '
 //#region Types
 
 type ImageMimeType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
-
-export interface ReadOperations {
-  readFile: (absolutePath: string) => Promise<Buffer>;
-  access: (absolutePath: string) => Promise<void>;
-  detectImageMimeType?: (absolutePath: string) => Promise<ImageMimeType | null | undefined>;
-}
 
 //#endregion
 
@@ -46,7 +38,7 @@ export type ReadOutput = z.infer<typeof ReadOutputSchema>;
 
 //#endregion
 
-//#region Default Operations
+//#region Constants
 
 const IMAGE_MIME_MAP: Record<string, ImageMimeType> = {
   jpg: 'image/jpeg',
@@ -56,48 +48,14 @@ const IMAGE_MIME_MAP: Record<string, ImageMimeType> = {
   webp: 'image/webp',
 };
 
+//#endregion
+
+//#region Helpers
+
 function detectImageMimeTypeFromExtension(absolutePath: string): ImageMimeType | null {
   const ext = absolutePath.toLowerCase().split('.').pop();
   return IMAGE_MIME_MAP[ext ?? ''] ?? null;
 }
-
-const defaultReadOperations: ReadOperations = {
-  readFile: (absolutePath) => readFile(absolutePath),
-  access: (absolutePath) => fsAccess(absolutePath, constants.R_OK),
-  detectImageMimeType: async (absolutePath) => detectImageMimeTypeFromExtension(absolutePath),
-};
-
-//#endregion
-
-//#region Tool Description
-
-const READ_TOOL_DESCRIPTION = `Read file contents from the filesystem.
-
-Usage notes:
-- Path can be relative to cwd or absolute
-- Images (jpg, png, gif, webp) are detected and noted
-- Text files return numbered lines for reference in edit tool
-- Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever first)
-- Use offset/limit for large files
-
-Parameters:
-- path: File path (relative or absolute)
-- offset: Start line number (1-indexed, optional)
-- limit: Max lines to read (optional)
-
-When to use:
-- Reading file contents before editing
-- Viewing images
-- Understanding file structure
-
-When NOT to use:
-- Searching within files: Use grep tool
-- Finding files by name: Use find tool
-- Listing directory contents: Use ls tool`;
-
-//#endregion
-
-//#region Helpers
 
 function buildImageResult(path: string, buffer: Buffer, mimeType: ImageMimeType): ReadOutput {
   const base64 = buffer.toString('base64');
@@ -168,46 +126,63 @@ function buildTextResult(params: BuildTextResultParams): ReadOutput {
 
 //#endregion
 
+//#region Tool Description
+
+const READ_TOOL_DESCRIPTION = `Read file contents from the filesystem.
+
+Usage notes:
+- Path can be relative to cwd or absolute
+- Images (jpg, png, gif, webp) are detected and noted
+- Text files return numbered lines for reference in edit tool
+- Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever first)
+- Use offset/limit for large files
+
+Parameters:
+- path: File path (relative or absolute)
+- offset: Start line number (1-indexed, optional)
+- limit: Max lines to read (optional)
+
+When to use:
+- Reading file contents before editing
+- Viewing images
+- Understanding file structure
+
+When NOT to use:
+- Searching within files: Use grep tool
+- Finding files by name: Use find tool
+- Listing directory contents: Use ls tool`;
+
+//#endregion
+
 //#region Public API
 
-export interface ReadToolOptions {
-  operations?: ReadOperations;
-}
+export type ReadTool = Tool<typeof ReadInputSchema, typeof ReadOutputSchema>;
 
-export type ReadTool = ToolWithExecute<typeof ReadInputSchema, typeof ReadOutputSchema>;
-
-export function createReadTool(cwd: string, options?: ReadToolOptions): ReadTool {
-  const ops = options?.operations ?? defaultReadOperations;
-
+export function createReadTool(cwd: string, fs: FsAdapter): ReadTool {
   return tool({
     name: 'Read',
     description: READ_TOOL_DESCRIPTION,
-    inputSchema: ReadInputSchema,
-    outputSchema: ReadOutputSchema,
+    input: ReadInputSchema,
+    output: ReadOutputSchema,
     async execute(params) {
       const { path, offset, limit } = params;
       const absolutePath = resolveReadPath(path, cwd);
 
       try {
-        await ops.access(absolutePath);
+        const mimeType = detectImageMimeTypeFromExtension(absolutePath);
 
-        const mimeType = ops.detectImageMimeType
-          ? await ops.detectImageMimeType(absolutePath)
-          : undefined;
+        const buffer = await fs.readFile(absolutePath);
 
         if (mimeType) {
-          const buffer = await ops.readFile(absolutePath);
           return buildImageResult(path, buffer, mimeType);
         }
-
-        const buffer = await ops.readFile(absolutePath);
         const textContent = buffer.toString('utf-8');
         const allLines = textContent.split('\n');
         const totalLines = allLines.length;
 
-        const startLine = offset ? Math.max(0, offset - 1) : 0;
+        const startLine = offset !== undefined ? Math.max(0, offset - 1) : 0;
         if (startLine >= allLines.length) {
-          return buildOffsetError(path, offset!, totalLines);
+          return buildOffsetError(path, offset ?? 0, totalLines);
         }
 
         const selectedContent =

@@ -10,7 +10,14 @@ export interface Span {
 
 /** @public Backend that receives and persists completed trace spans. */
 export interface TraceExporter {
+  /**
+   * Explicitly start a trace.
+   * Called once at the beginning of agent execution.
+   */
+  startTrace?(traceId: string, input: unknown): void;
   export(spans: Span[]): Promise<void>;
+  /** Called when a trace completes (agent execution finished, with optional error). */
+  completeTrace?(traceId: string, error?: Error): void;
 }
 
 /** @public Diagnostic span recording a single memory layer hook invocation and its outcome. */

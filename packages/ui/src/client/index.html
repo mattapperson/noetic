@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Noetic UI - Agent Debugger</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔮</text></svg>" />
+    <style>
+      /* CSS Variables for Noetic UI */
+      :root {
+        /* Base colors - Dark theme (default) */
+        --noetic-bg: #0f172a;
+        --noetic-sidebar-bg: #1e293b;
+        --noetic-canvas-bg: #0f172a;
+        --noetic-node-bg: #1e293b;
+        --noetic-code-bg: #0f172a;
+        --noetic-border: #334155;
+        --noetic-text: #f1f5f9;
+        --noetic-text-secondary: #94a3b8;
+        --noetic-text-muted: #64748b;
+        --noetic-accent: #3b82f6;
+        --noetic-hover: #334155;
+        --noetic-input-bg: #0f172a;
+        --noetic-button-bg: #334155;
+        --noetic-button-hover: #475569;
+        --noetic-grid-color: #334155;
+        
+        /* JSON Syntax highlighting - Dark */
+        --noetic-json-string: #a5d6ff;
+        --noetic-json-number: #79c0ff;
+        --noetic-json-boolean: #ff7b72;
+        --noetic-json-null: #ff7b72;
+        --noetic-json-array: #d2a8ff;
+        --noetic-json-object: #d2a8ff;
+      }
+
+      /* Light theme */
+      html.light {
+        --noetic-bg: #f8fafc;
+        --noetic-sidebar-bg: #f1f5f9;
+        --noetic-canvas-bg: #f8fafc;
+        --noetic-node-bg: #ffffff;
+        --noetic-code-bg: #f1f5f9;
+        --noetic-border: #e2e8f0;
+        --noetic-text: #0f172a;
+        --noetic-text-secondary: #64748b;
+        --noetic-text-muted: #94a3b8;
+        --noetic-accent: #2563eb;
+        --noetic-hover: #e2e8f0;
+        --noetic-input-bg: #ffffff;
+        --noetic-button-bg: #e2e8f0;
+        --noetic-button-hover: #cbd5e1;
+        --noetic-grid-color: #e2e8f0;
+        
+        /* JSON Syntax highlighting - Light */
+        --noetic-json-string: #0550ae;
+        --noetic-json-number: #0550ae;
+        --noetic-json-boolean: #cf222e;
+        --noetic-json-null: #cf222e;
+        --noetic-json-array: #6639ba;
+        --noetic-json-object: #6639ba;
+      }
+
+      /* Dark theme (explicit) */
+      html.dark {
+        --noetic-bg: #0f172a;
+        --noetic-sidebar-bg: #1e293b;
+        --noetic-canvas-bg: #0f172a;
+        --noetic-node-bg: #1e293b;
+        --noetic-code-bg: #0f172a;
+        --noetic-border: #334155;
+        --noetic-text: #f1f5f9;
+        --noetic-text-secondary: #94a3b8;
+        --noetic-text-muted: #64748b;
+        --noetic-accent: #3b82f6;
+        --noetic-hover: #334155;
+        --noetic-input-bg: #0f172a;
+        --noetic-button-bg: #334155;
+        --noetic-button-hover: #475569;
+        --noetic-grid-color: #334155;
+        
+        /* JSON Syntax highlighting - Dark */
+        --noetic-json-string: #a5d6ff;
+        --noetic-json-number: #79c0ff;
+        --noetic-json-boolean: #ff7b72;
+        --noetic-json-null: #ff7b72;
+        --noetic-json-array: #d2a8ff;
+        --noetic-json-object: #d2a8ff;
+      }
+
+      /* System preference (default) */
+      @media (prefers-color-scheme: light) {
+        :root:not(.dark):not(.light) {
+          --noetic-bg: #f8fafc;
+          --noetic-sidebar-bg: #f1f5f9;
+          --noetic-canvas-bg: #f8fafc;
+          --noetic-node-bg: #ffffff;
+          --noetic-code-bg: #f1f5f9;
+          --noetic-border: #e2e8f0;
+          --noetic-text: #0f172a;
+          --noetic-text-secondary: #64748b;
+          --noetic-text-muted: #94a3b8;
+          --noetic-accent: #2563eb;
+          --noetic-hover: #e2e8f0;
+          --noetic-input-bg: #ffffff;
+          --noetic-button-bg: #e2e8f0;
+          --noetic-button-hover: #cbd5e1;
+          --noetic-grid-color: #e2e8f0;
+          
+          /* JSON Syntax highlighting - Light */
+          --noetic-json-string: #0550ae;
+          --noetic-json-number: #0550ae;
+          --noetic-json-boolean: #cf222e;
+          --noetic-json-null: #cf222e;
+          --noetic-json-array: #6639ba;
+          --noetic-json-object: #6639ba;
+        }
+      }
+    </style>
+    <script>
+      // Prevent flash of incorrect theme
+      // Only use stored theme if explicitly set to 'light' or 'dark'
+      // If 'system' or no preference stored, use system preference
+      const storedTheme = localStorage.getItem('noetic-ui-theme');
+      const theme = (storedTheme === 'light' || storedTheme === 'dark') ? storedTheme : 'system';
+      const isDark = theme === 'dark' || 
+        (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.add('light');
+      }
+    </script>
+  </head>
+  <body class="bg-[var(--noetic-bg)] text-[var(--noetic-text)]">
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+  </body>
+</html>

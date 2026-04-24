@@ -32,11 +32,11 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
 
   switch (step.kind) {
     case 'llm': {
-      const system = candidate[`${path}.system`] ?? step.system;
+      const instructions = candidate[`${path}.instructions`] ?? step.instructions;
       const tools = step.tools ? replaceToolListFields(step.tools, candidate, path) : undefined;
       return {
         ...step,
-        system,
+        instructions,
         tools,
       };
     }
@@ -72,10 +72,19 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         _optimizable: cloneOptimizableChildren(step._optimizable, candidate, path),
       };
+    case 'provide':
+      // Provide steps don't have optimizable fields in their direct structure
+      return {
+        ...step,
+      };
     case 'run':
       return {
         ...step,
       };
+    default: {
+      // Exhaustiveness check - this ensures all Step kinds are handled
+      throw new Error('Unhandled step kind in mutator');
+    }
   }
 }
 

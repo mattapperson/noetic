@@ -1,0 +1,103 @@
+{
+  "name": "@noetic/ui",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "noetic-ui": "./bin/noetic-ui.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/service/index.ts",
+      "default": "./src/service/index.ts"
+    },
+    "./service": {
+      "types": "./src/service/index.ts",
+      "default": "./src/service/index.ts"
+    },
+    "./runtime/enable": {
+      "types": "./src/runtime/enable.ts",
+      "default": "./src/runtime/enable.ts"
+    },
+    "./runtime/exporter": {
+      "types": "./src/runtime/exporter.ts",
+      "default": "./src/runtime/exporter.ts"
+    },
+    "./runtime/step-extractors": {
+      "types": "./src/runtime/step-extractors.ts",
+      "default": "./src/runtime/step-extractors.ts"
+    },
+    "./runtime/types": {
+      "types": "./src/runtime/types.ts",
+      "default": "./src/runtime/types.ts"
+    }
+  },
+  "sideEffects": ["./src/service/index.ts"],
+  "files": [
+    "src/",
+    "dist/",
+    "bin/",
+    "scripts/",
+    "README.md",
+    "next-env.d.ts",
+    "css.d.ts",
+    "next.config.mjs",
+    "postcss.config.js",
+    "tailwind.config.js"
+  ],
+  "dependencies": {
+    "katex": "0.16.45",
+    "next": "16.2.2",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-markdown": "10.1.0",
+    "rehype-katex": "7.0.1",
+    "remark-math": "6.0.0",
+    "ws": "^8.16.0",
+    "zod": "^4.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "19.1.6",
+    "@types/react-dom": "19.1.6",
+    "@types/ws": "^8.5.10",
+    "autoprefixer": "^10.4.16",
+    "bun-types": "latest",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "6.0.2"
+  },
+  "peerDependencies": {
+    "@noetic/core": "workspace:*"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --coverage --coverage-reporter=text",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format .",
+    "check": "bun run typecheck && bun run lint",
+    "check:fix": "bun run typecheck && bun run lint:fix",
+    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev -p 3000",
+    "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
+    "build:exe": "bun scripts/build-executables.js",
+    "start": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next start -p 3334",
+    "serve": "bun src/service/index.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

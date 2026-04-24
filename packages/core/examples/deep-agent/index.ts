@@ -25,7 +25,7 @@ function defaultResolver(model: string): SubAgentResolver {
   return (task) => ({
     id: `sub-agent-${crypto.randomUUID().slice(0, 8)}`,
     model,
-    system: `You are a sub-agent. Complete this task concisely: ${task}`,
+    instructions: `You are a sub-agent. Complete this task concisely: ${task}`,
   });
 }
 
@@ -80,7 +80,7 @@ export function buildDeepAgent(
 
   return react({
     model: config.model,
-    system: config.system,
+    instructions: config.instructions,
     tools: allTools,
     maxSteps: config.maxSteps ?? 25,
     maxCost: config.maxCost,

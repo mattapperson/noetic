@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(wc -l /Users/ian/src/github/mattapperson/noetic/packages/core/test/*.ts /Users/ian/src/github/mattapperson/noetic/packages/eval/test/*.ts)",
+      "Bash(find /Users/ian/src/github/mattapperson/noetic -name *.test.ts -type f)",
+      "Bash(ls:*)",
+      "Bash(cat /Users/ian/src/github/mattapperson/noetic/packages/core/test/examples/*.test.ts)",
+      "Bash(find /Users/ian/src/github/mattapperson/noetic -name *.github -o -name .github -type d)",
+      "Bash(gh auth:*)",
+      "Bash(git -C /Users/ian/src/github/mattapperson/noetic log --oneline -5)",
+      "Bash(git -C /Users/ian/src/github/mattapperson/noetic status)",
+      "Bash(gh run:*)",
+      "Bash(bunx biome:*)",
+      "Bash(git stash:*)",
+      "Bash(find /Users/ian/src/github/mattapperson/noetic -name *.grit)",
+      "Bash(bun run:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(node:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -n \"type Channel\\\\|interface Channel\\\\|Channel<\" /Users/ian/src/github/mattapperson/noetic/packages/core/src/types/*.ts)",
+      "Bash(git -C /Users/ian/src/github/mattapperson/noetic add -A)",
+      "Bash(git -C:*)",
+      "Bash(git -C /Users/ian/src/github/mattapperson/noetic push)",
+      "Bash(gh api:*)",
+      "Skill(claude-md-management:revise-claude-md)",
+      "WebSearch",
+      "WebFetch(domain:www.langchain.com)",
+      "WebFetch(domain:crewai.com)",
+      "WebFetch(domain:mastra.ai)",
+      "WebFetch(domain:ai-sdk.dev)",
+      "WebFetch(domain:docs.phidata.com)",
+      "WebFetch(domain:ai.pydantic.dev)",
+      "Bash(/Users/ian/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.6/skills/brainstorming/scripts/start-server.sh --project-dir /Users/ian/src/github/mattapperson/noetic)",
+      "Bash(git rm:*)"
+    ]
+  }
+}

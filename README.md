@@ -14,6 +14,7 @@ A TypeScript agent framework that decomposes AI agent patterns into seven compos
 | Package | Description |
 |---------|-------------|
 | [`@noetic/core`](packages/core) | Core framework — step primitives, agent harness, memory layers, patterns |
+| [`@noetic/ui`](packages/ui) | Visual debugging UI — real-time execution visualization and time-travel debugging |
 | [`@noetic/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
 | [`@noetic/web`](packages/web) | Documentation site (Next.js + Fumadocs) |
 
@@ -72,6 +73,56 @@ cd packages/web
 bun run dev    # localhost:3000
 bun run build
 ```
+
+### Development UI (Visual Debugger)
+
+The Noetic UI provides a visual debugging interface for inspecting agent execution in real-time.
+
+**Setup:**
+
+```bash
+# Install UI dependencies (from repo root)
+bun install
+
+# Build the UI package
+cd packages/ui && bun run build
+```
+
+**Running the dev UI from source:**
+
+You need to run **both** the WebSocket service and the Next.js dev server (in separate terminals):
+
+```bash
+# Terminal 1: Start the WebSocket service (required for agent connections)
+bun run dev:ui              # or: cd packages/ui && bun run serve
+
+# Terminal 2: Start the Next.js dev UI (client on port 3334)
+cd packages/ui && bun run dev
+
+# Terminal 3: Run your agent with debugging enabled
+NOETIC_UI_ENABLED=true bun run your-agent.ts
+```
+
+**Architecture:**
+- **WebSocket Service**: Runs on port 3333 - handles agent connections and trace streaming
+- **Next.js Dev UI**: Runs on port 3334 - the visual debugger interface
+- **Your Agent**: Connects to WebSocket service when `NOETIC_UI_ENABLED=true`
+
+**Access the UI:**
+Open http://localhost:3334 in your browser to view the three-panel interface:
+- **Left**: Agent browser with execution history
+- **Center**: Interactive node graph of execution flow
+- **Right**: Inspector panel for step details
+
+**Note:** Since Next.js exports static files, the WebSocket connection must be made directly from the browser to ws://localhost:3333.
+
+**Features:**
+- Real-time execution visualization
+- Time-travel debugging (scrub to any point in execution)
+- Data inspection at each step (input, output, context)
+- Zero production impact (only enabled via env var)
+
+See [packages/ui/README.md](packages/ui/README.md) for detailed documentation.
 
 ## Quick Example
 

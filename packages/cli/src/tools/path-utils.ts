@@ -5,7 +5,6 @@
  */
 
 import { accessSync, constants } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import * as os from 'node:os';
 import { isAbsolute, resolve as resolvePath } from 'node:path';
 
@@ -46,15 +45,6 @@ export function resolveToCwd(filePath: string, cwd: string): string {
     return expanded;
   }
   return resolvePath(cwd, expanded);
-}
-
-export async function pathExists(absolutePath: string): Promise<boolean> {
-  try {
-    await stat(absolutePath);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function resolveReadPath(filePath: string, cwd: string): string {

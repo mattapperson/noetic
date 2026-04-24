@@ -19,7 +19,7 @@ const PERSPECTIVES = [
   {
     id: 'historical',
     label: 'Historical Context',
-    system: [
+    instructions: [
       'You are a historian.',
       'Analyze the given topic from a historical perspective.',
       'Cover key events, origins, and evolution over time.',
@@ -29,7 +29,7 @@ const PERSPECTIVES = [
   {
     id: 'technical',
     label: 'Technical Analysis',
-    system: [
+    instructions: [
       'You are a technical expert.',
       'Analyze the given topic from a technical perspective.',
       'Cover mechanisms, implementations, and technical challenges.',
@@ -39,7 +39,7 @@ const PERSPECTIVES = [
   {
     id: 'societal',
     label: 'Societal Impact',
-    system: [
+    instructions: [
       'You are a social scientist.',
       'Analyze the given topic from a societal perspective.',
       'Cover cultural implications, public perception, and future impact.',
@@ -64,7 +64,7 @@ export function buildParallelResearchAgent(): StepForkAll<ContextMemory, string,
           child: step.llm<ContextMemory, string, string>({
             id: `llm-${perspective.id}`,
             model: 'gpt-4o',
-            system: perspective.system,
+            instructions: perspective.instructions,
           }),
         }),
       ),

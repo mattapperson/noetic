@@ -2,6 +2,14 @@ import type { ZodTypeAny, z } from 'zod';
 import type { FunctionCallItem, Item } from './items';
 import type { ToolExecutionContext } from './tool-context';
 
+//#region Tool Execution Types
+
+type ToolExecutionResult<O extends ZodTypeAny> =
+  | Promise<z.infer<O>>
+  | AsyncGenerator<unknown, z.infer<O>>;
+
+//#endregion
+
 /**
  * Policy controlling automatic retry behavior on step failure.
  * @public
@@ -58,19 +66,22 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   input: I;
   /** Zod schema validating tool return value. */
   output: O;
+  /** Optional Zod schema validating streaming events yielded during execution. */
+  event?: ZodTypeAny;
   /** Async function that performs the tool's work. */
-  execute(args: z.infer<I>, toolCtx: ToolExecutionContext): Promise<z.infer<O>>;
+  execute(args: z.infer<I>, toolCtx: ToolExecutionContext): ToolExecutionResult<O>;
   /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
   /** Optional memory declaration — the runtime generates a MemoryLayer from this. */
   memory?: ToolMemoryDeclaration;
 }
 
-/** @public Aggregate token counts for an execution (input, output, total). */
+/** @public Aggregate token counts for an execution (input, output, total, cached). */
 export interface TokenUsage {
   input: number;
   output: number;
   total: number;
+  cached?: number;
 }
 
 /** @public Metadata captured from the most recent step execution. */

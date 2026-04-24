@@ -1,0 +1,16 @@
+name = "skippy-bot"
+main = "src/worker.ts"
+compatibility_date = "2025-03-31"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+WORKER_URL = "https://skippy-bot.workers.dev"
+
+[durable_objects]
+bindings = [
+  { name = "GATEWAY_DURABLE", class_name = "GatewayDurable" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GatewayDurable"]

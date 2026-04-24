@@ -1,0 +1,26 @@
+{
+  "name": "@noetic/chat-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@noetic/core": "workspace:*",
+    "chat": "4.23.0",
+    "typescript": "5.9.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --coverage --coverage-reporter=text",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  }
+}

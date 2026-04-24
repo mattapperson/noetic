@@ -9,7 +9,7 @@ import { react } from '@noetic/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'You are a helpful assistant.',
+  instructions: 'You are a helpful assistant.',
   tools: [searchTool, calculatorTool],
   maxSteps: 10,
 });
@@ -25,7 +25,7 @@ Add memory layers to give the agent persistent context across turns.
 ```typescript
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'You are a coding assistant.',
+  instructions: 'You are a coding assistant.',
   tools: [readFile, writeFile, runTests],
   maxSteps: 25,
   memory: [
@@ -47,7 +47,7 @@ import { react, steering, SteeringAction } from '@noetic/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'You are a helpful assistant.',
+  instructions: 'You are a helpful assistant.',
   tools: [searchTool, deleteTool, writeTool],
   memory: [
     steering({
@@ -93,7 +93,7 @@ const delegateTool = tool({
   execute: async (args, toolCtx) => {
     const subAgent = react({
       model: 'anthropic/claude-sonnet-4-20250514',
-      system: `Complete this task: ${args.task}`,
+      instructions: `Complete this task: ${args.task}`,
       tools: [searchTool],
     });
     const spawnStep = spawn({ id: 'sub-agent', child: subAgent });
@@ -116,7 +116,7 @@ const launchTool = tool({
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
   execute: async (args, toolCtx) => {
-    const subAgent = step.llm({ id: 'bg-agent', model: '...', system: '...' });
+    const subAgent = step.llm({ id: 'bg-agent', model: '...', instructions: '...' });
     const handle = toolCtx.harness.detachedSpawn(subAgent, args.task, toolCtx.ctx);
     handles.set(handle.id, handle);
 
@@ -145,7 +145,7 @@ Outer loop with verification. Each attempt gets a fresh context.
 ```typescript
 const migrator = ralphWiggum({
   model: 'anthropic/claude-sonnet-4-20250514',
-  system: 'Migrate all tests from Jest to Vitest.',
+  instructions: 'Migrate all tests from Jest to Vitest.',
   tools: [shellTool, fileWriteTool, fileReadTool],
   verify: async (output) => {
     const result = await exec('bun test');
@@ -165,9 +165,9 @@ const research = fork<string, string>({
   id: 'parallel-research',
   mode: 'all',
   paths: (input) => [
-    spawn({ id: 'historical', child: step.llm({ id: 'h', model: '...', system: 'Historical perspective' }) }),
-    spawn({ id: 'technical', child: step.llm({ id: 't', model: '...', system: 'Technical perspective' }) }),
-    spawn({ id: 'societal', child: step.llm({ id: 's', model: '...', system: 'Societal perspective' }) }),
+    spawn({ id: 'historical', child: step.llm({ id: 'h', model: '...', instructions: 'Historical perspective' }) }),
+    spawn({ id: 'technical', child: step.llm({ id: 't', model: '...', instructions: 'Technical perspective' }) }),
+    spawn({ id: 'societal', child: step.llm({ id: 's', model: '...', instructions: 'Societal perspective' }) }),
   ],
   merge: (results) => results.map((r, i) => `## Perspective ${i + 1}\n\n${r}`).join('\n\n'),
 });
@@ -389,3 +389,36 @@ const agent = spawn({
   memory: mem,
 });
 ```
+
+## Plan Mode with `planMemory()`
+
+The `planMemory()` layer adds Claude Code-style plan mode to any agent. It restricts tools during planning and injects plan context during execution.
+
+### Basic Usage
+
+```typescript
+import { planMemory, react } from '@noetic/core';
+
+const agent = react({
+  model: 'anthropic/claude-sonnet-4',
+  instructions: 'You are a coding assistant.',
+  tools: codingTools,
+  memory: [planMemory()],
+});
+```
+
+When the model calls `plan/enterPlanMode`, tool calls are restricted to read-only. The model authors a PRD via `plan/updatePrd`, structures a `PlanNode` tree via `plan/setPlanTree`, then calls `plan/exitPlanMode({ action: 'execute' })` to begin execution.
+
+### With Custom Allowed Tools
+
+```typescript
+planMemory({
+  additionalAllowedTools: ['SearchDocs', 'ListIssues'],
+  maxPrdLength: 1e5,
+  maxTreeDepth: 3,
+})
+```
+
+### CLI Integration
+
+The CLI includes `planMemory()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures a plan tree, then exits to execute.

@@ -1,6 +1,12 @@
 //#region Adapters
 
 /** @public */
+export { createLocalFsAdapter } from './adapters/local-fs-adapter';
+
+/** @public */
+export { createLocalShellAdapter } from './adapters/local-shell-adapter';
+
+/** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
 
 //#endregion
@@ -20,11 +26,13 @@ export { loop } from './builders/loop-builder';
 /** @public */
 export { memory } from './builders/memory-builder';
 /** @public */
+export { provide } from './builders/provide-builder';
+/** @public */
 export { spawn } from './builders/spawn-builder';
 /** @public */
 export { step } from './builders/step-builders';
 /** @public */
-export { tool } from './builders/tool-builder';
+export { tool, toolWithGenerator } from './builders/tool-builder';
 
 //#endregion
 
@@ -70,12 +78,24 @@ export type { DurableTaskState, DurableTaskStateConfig } from './memory/layers/d
 /** @public */
 export { durableTaskState } from './memory/layers/durable-task-state';
 /** @public */
+export { fileReference } from './memory/layers/file-reference';
+/** @public */
 export type {
   ObservationalMemoryConfig,
   ObservationalState,
 } from './memory/layers/observational-memory';
 /** @public */
 export { observationalMemory } from './memory/layers/observational-memory';
+/** @public */
+export type {
+  PlanEnterSessionCallback,
+  PlanExecutionEntry,
+  PlanExitCallback,
+  PlanMemoryConfig,
+  PlanState,
+} from './memory/layers/plan';
+/** @public */
+export { PlanPhase, planMemory } from './memory/layers/plan';
 /** @public */
 export { staticContent } from './memory/layers/static-content';
 /** @public */
@@ -92,12 +112,29 @@ export { workingMemory } from './memory/layers/working-memory';
 //#region Observability
 
 /** @public */
+export {
+  clearExporterFactory,
+  getRegisteredExporter,
+  registerExporterFactory,
+} from './observability/exporter-registry';
+/** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 
 //#endregion
 
 //#region Patterns
 
+/** @public */
+export type {
+  FlowNode,
+  ForkFlowNode,
+  LlmFlowNode,
+  SequenceFlowNode,
+  SpawnFlowNode,
+  SubagentFlowNode,
+} from './patterns/flow';
+/** @public */
+export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
 /** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
@@ -142,7 +179,7 @@ export type {
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog } from './types/context';
+export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
 
 //#endregion
 
@@ -175,13 +212,22 @@ export type { NoeticError } from './types/error';
 export type {
   ContentPart,
   ExecuteInput,
-  ExtensionItem,
+  FileSearchItem,
   FunctionCallItem,
   FunctionCallOutputItem,
+  ImageGenerationItem,
+  InputMessageItem,
+  InputTextPart,
   Item,
-  ItemBase,
   MessageItem,
+  OutputItem,
+  OutputTextPart,
   ReasoningItem,
+  ReasoningTextPart,
+  RefusalPart,
+  ServerToolItem,
+  SummaryTextPart,
+  WebSearchItem,
 } from './types/items';
 
 //#endregion
@@ -232,6 +278,19 @@ export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability
 
 //#endregion
 
+//#region Types — Harness Result
+
+/** @public */
+export type {
+  FrameworkStreamEvent,
+  HarnessResponse,
+  SdkStreamEvent,
+  StreamEvent,
+  StreamingItem,
+} from './types/harness-result';
+
+//#endregion
+
 //#region Types — Runtime
 
 /** @public */
@@ -240,8 +299,11 @@ export type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  DeliveryMode,
   ExecuteOptions,
+  HarnessStatus,
   RecallLayerOutput,
+  SessionScope,
 } from './types/runtime';
 
 //#endregion
@@ -280,12 +342,27 @@ export type {
   StepForkSettle,
   StepLLM,
   StepLoop,
+  StepProvide,
   StepRun,
   StepSpawn,
   StepTool,
   Until,
   Verdict,
 } from './types/step';
+
+//#endregion
+
+//#region Types — Filesystem
+
+/** @public */
+export type { FsAdapter, FsStats } from './types/fs-adapter';
+
+//#endregion
+
+//#region Types — Shell
+
+/** @public */
+export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
 
 //#endregion
 
@@ -304,5 +381,26 @@ export { all, any } from './until/combinators';
 export type { ConvergeConfig, VerifyFn } from './until/predicates';
 /** @public */
 export { until } from './until/predicates';
+
+//#endregion
+
+//#region Utilities
+
+/** @public */
+export type {
+  ProjectRootOptions,
+  ProjectRootResult,
+} from './util/project-root';
+/** @public */
+export {
+  detectProjectRoot,
+  detectProjectRootSync,
+  getDefaultBaselinePath,
+  getDefaultBaselinePathSync,
+  getDefaultStoragePath,
+  getNoeticSubdir,
+  getProjectRoot,
+  getProjectRootSync,
+} from './util/project-root';
 
 //#endregion

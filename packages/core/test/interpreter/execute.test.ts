@@ -77,6 +77,45 @@ describe('execute() switch', () => {
     expect(result).toBe('response');
   });
 
+  it('sets messages, toolCalls, and responseItems span attributes for llm steps', async () => {
+    const step: Step<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'llm-span-test',
+      model: 'test-model',
+    };
+    const spanAttrs = new Map<string, string | number | boolean>();
+    const harness = makeMockHarness();
+    harness.callModel = createScriptedCallModel([
+      makeLLMResponse('hello back'),
+    ]);
+    harness.createSpan = (name) => ({
+      traceId: 't',
+      spanId: name,
+      parentSpanId: null,
+      setAttribute(key: string, value: string | number | boolean) {
+        spanAttrs.set(key, value);
+      },
+      addEvent() {},
+      end() {},
+    });
+    const ctx = new ContextImpl({
+      harness,
+    });
+    await execute(step, 'prompt', ctx);
+
+    // messages should contain all itemLog items serialized as JSON
+    const messagesAttr = spanAttrs.get('messages');
+    assert(typeof messagesAttr === 'string');
+    const parsedMessages: unknown[] = JSON.parse(messagesAttr);
+    expect(parsedMessages.length).toBeGreaterThanOrEqual(2); // user + assistant
+
+    // responseItems should contain only the response items
+    const responseAttr = spanAttrs.get('responseItems');
+    assert(typeof responseAttr === 'string');
+    const parsedResponse: unknown[] = JSON.parse(responseAttr);
+    expect(parsedResponse.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('throws when harness has no client configured', async () => {
     const step: Step<ContextMemory, string, string> = {
       kind: 'llm',

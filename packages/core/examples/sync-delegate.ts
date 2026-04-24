@@ -21,7 +21,7 @@ export function buildSyncDelegateAgent():
 
   return react({
     model: 'gpt-4o',
-    system: 'You are an assistant that can delegate research tasks to a sub-agent.',
+    instructions: 'You are an assistant that can delegate research tasks to a sub-agent.',
     tools: [
       delegateTool,
     ],

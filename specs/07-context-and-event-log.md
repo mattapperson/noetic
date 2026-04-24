@@ -1,7 +1,7 @@
 # Context and Item Log
 
 > **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
-> **Exports:** `Context`, `ItemLog`, `Item`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `ExtensionItem`, `ContentPart`, `StepMeta`, `TokenUsage`, `LLMResponse`
+> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
 
 ---
 
@@ -31,6 +31,10 @@ interface Context<TState = unknown> {
 
   // Last step execution metadata (tool calls, token usage, cost)
   readonly lastStepMeta: StepMeta | null;
+
+  // Per-memory-layer breakdown of the context window as of the most recent
+  // callModel in this execution. See "Per-Layer Usage Breakdown" below.
+  readonly lastLayerUsage?: LastLayerUsage;
 
   // Channel operations (thin wrappers over runtime.send/recv, see 06-channels)
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
@@ -63,59 +67,111 @@ interface ItemLog {
 
 ## `Item` Type Hierarchy
 
-Items are the native data format aligned with OpenResponses. They serve as both the record of what happened and the input to the LLM provider, eliminating impedance mismatch between the framework's internal state and the model API.
+Items are the native data format aligned with Open Responses. Output item types are direct type aliases of the `@openrouter/sdk` types (`ResponsesOutputMessage`, `ResponsesOutputItemFunctionCall`, etc.), eliminating impedance mismatch between the framework's internal state and the model API. Framework-owned item types (`InputMessageItem`, `FunctionCallOutputItem`) are Noetic interfaces that follow the same shape conventions.
+
+### Content Parts
 
 ```typescript
-type Item =
+/** Model-generated text with optional annotations and logprobs. */
+type OutputTextPart = ResponseOutputText;
+
+/** Model refusal content. */
+type RefusalPart = OpenAIResponsesRefusalContent;
+
+/** User/developer input text (framework-created). */
+interface InputTextPart {
+  readonly type: 'input_text';
+  readonly text: string;
+}
+
+/** Reasoning trace content. */
+type ReasoningTextPart = ReasoningTextContent;
+
+/** Reasoning summary content. */
+type SummaryTextPart = ReasoningSummaryText;
+
+/** Content part variants for message items. */
+type ContentPart = OutputTextPart | RefusalPart | InputTextPart;
+```
+
+### Output Items (from the model)
+
+These are type aliases of the `@openrouter/sdk` types. The SDK provides `id`, `type`, and `status` fields on each.
+
+```typescript
+/** Assistant message output item (role is always 'assistant'). */
+type MessageItem = ResponsesOutputMessage;
+
+/** Function call requested by the model. */
+type FunctionCallItem = ResponsesOutputItemFunctionCall;
+
+/** Reasoning trace from the model. Uses ReasoningTextPart and SummaryTextPart content. */
+type ReasoningItem = ResponsesOutputItemReasoning;
+
+/** Web search call result. */
+type WebSearchItem = ResponsesWebSearchCallOutput;
+
+/** File search call result. */
+type FileSearchItem = ResponsesOutputItemFileSearchCall;
+
+/** Image generation call result. */
+type ImageGenerationItem = ResponsesImageGenerationCall;
+
+/**
+ * Server tool output (vendor-prefixed type like `openrouter:datetime`).
+ * Constrains the SDK's type field from `string` to `${string}:${string}`
+ * so discriminant narrowing works in Item unions.
+ */
+type ServerToolItem = Omit<ResponsesServerToolOutput, 'type'> & {
+  readonly type: `${string}:${string}`;
+};
+
+type OutputItem =
   | MessageItem
   | FunctionCallItem
-  | FunctionCallOutputItem
   | ReasoningItem
-  | ExtensionItem;
+  | WebSearchItem
+  | FileSearchItem
+  | ImageGenerationItem
+  | ServerToolItem;
+```
 
-interface ItemBase {
-  readonly id: string;           // unique string (UUIDv7)
-  readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
-}
+### Framework Items (created by Noetic)
 
-interface MessageItem extends ItemBase {
+```typescript
+/**
+ * Input message created by the framework (user, system, or developer role).
+ * Status includes `failed` as a Noetic extension beyond the Open Responses spec
+ * (which only defines `in_progress | completed | incomplete` for items).
+ */
+interface InputMessageItem {
+  readonly id: string;
   readonly type: 'message';
-  readonly role: 'user' | 'assistant' | 'system' | 'developer';
-  readonly content: ContentPart[];
+  readonly role: 'user' | 'system' | 'developer';
+  readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
+  readonly content: InputTextPart[];
 }
 
-type ContentPart =
-  | { type: 'output_text'; text: string }
-  | { type: 'input_text'; text: string }
-  | { type: 'refusal'; refusal: string };
-
-interface FunctionCallItem extends ItemBase {
-  readonly type: 'function_call';
-  readonly callId: string;
-  readonly name: string;
-  readonly arguments: string;     // JSON string per OpenResponses
-}
-
-interface FunctionCallOutputItem extends ItemBase {
+/**
+ * Tool execution output created by the harness during the tool loop.
+ * This is an input-only item type in Open Responses (sent by the developer, not the model).
+ */
+interface FunctionCallOutputItem {
+  readonly id: string;
   readonly type: 'function_call_output';
+  readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
   readonly callId: string;
   readonly output: string;
 }
-
-interface ReasoningItem extends ItemBase {
-  readonly type: 'reasoning';
-  readonly content: ContentPart[];
-  readonly summary?: ContentPart[];
-  readonly encryptedContent?: string;
-}
-
-interface ExtensionItem extends ItemBase {
-  readonly type: `${string}:${string}`;  // e.g., 'noetic:analytics', 'openrouter:web_search'
-  readonly data: Record<string, unknown>;
-}
 ```
 
-Extension items use the `prefix:name` convention established by the OpenResponses `ResponsesServerToolOutput` type. The prefix identifies the vendor or domain (e.g., `openrouter`, `noetic`, `myapp`) and the name identifies the specific item kind. None of the standard item types contain a colon, so the presence of `:` in the type string cleanly distinguishes extensions from standard items.
+### Item Union
+
+```typescript
+type Item = OutputItem | InputMessageItem | FunctionCallOutputItem;
+```
+
+Server tool items use the `prefix:name` convention established by the OpenResponses `ResponsesServerToolOutput` type. The prefix identifies the vendor or domain (e.g., `openrouter`, `noetic`, `myapp`) and the name identifies the specific item kind. None of the standard item types contain a colon, so the presence of `:` in the type string cleanly distinguishes server tool outputs from standard items.
 
 ---
 
@@ -162,6 +218,40 @@ interface LLMResponse {
 - **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).
 - **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus memory layer outputs.
 - **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all memory layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-memory-layer-system`.
+
+## Per-Layer Usage Breakdown
+
+After every successful `callModel`, the runtime records a snapshot of how the context window decomposes into its contributors. The snapshot lives on `ctx.lastLayerUsage` and is also surfaced on `HarnessResponse.lastLayerUsage` (see `08-runtime`). It is the data source for introspection tools such as the CLI `/context` command.
+
+```typescript
+interface LayerUsageEntry {
+  readonly layerId: string;       // matches MemoryLayer.id
+  readonly tokenCount: number;    // self-reported by the layer's recall() output
+  readonly items: ReadonlyArray<Item>; // items this layer contributed to the last render
+}
+
+interface LastLayerUsage {
+  readonly executionId: string;   // ctx.id
+  readonly modelId: string;       // step.model
+  readonly layers: ReadonlyArray<LayerUsageEntry>;  // sorted by layerId
+  readonly systemPromptTokens: number;  // estimated from step.instructions
+  readonly toolsTokens: number;         // estimated from the tool definitions
+  readonly historyTokens: number;       // estimated from ctx.itemLog items not owned by a layer
+  readonly totalUsedTokens: number;     // sum of the four buckets
+}
+```
+
+### How the buckets are computed
+
+Layer tokens come from each layer's `recall()` self-reported `tokenCount` (see `11-memory-layer-system`). System-prompt and tools tokens are estimated against a 4-chars-per-token heuristic. History tokens are estimated from `ctx.itemLog.items` — recall output items live in the assembled view but never in the item log, so there is no overlap to deduplicate.
+
+### When the snapshot is taken
+
+`lastLayerUsage` is committed at the end of each `executeLLM` step, after the `afterModelCall` steering decision resolves Allow and the response items are appended to the log. Steering retries replay against the same recall output but only the final accepted call writes the snapshot. The field is `undefined` until the first `callModel` completes.
+
+### Stability
+
+The snapshot reflects the most recent LLM call only; it is overwritten on the next call. Long-lived telemetry should be exported via `Span` attributes on the `ctx.span` (see `10-observability`).
 
 ## Circular Reference with Channels
 

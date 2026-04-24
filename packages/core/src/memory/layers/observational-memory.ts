@@ -87,7 +87,7 @@ export function observationalMemory(config?: ObservationalMemoryConfig) {
           .map((i) =>
             i.content
               .filter(isOutputText)
-              .map((c) => c.text)
+              .map((c: { text: string }) => c.text)
               .join(''),
           )
           .filter((t) => t.length > 0);

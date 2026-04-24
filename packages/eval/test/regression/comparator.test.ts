@@ -70,16 +70,26 @@ function writeBaseline(dir: string, baseline: Baseline): void {
 
 describe('checkRegression', () => {
   let originalCwd: string;
+  let originalBaselinePath: string | undefined;
   let tmpDir: string;
 
   beforeEach(() => {
     originalCwd = process.cwd();
+    originalBaselinePath = process.env.NOETIC_BASELINE_PATH;
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'noetic-comparator-'));
     process.chdir(tmpDir);
+    // Set env var to use tmpDir for baselines
+    process.env.NOETIC_BASELINE_PATH = path.join(tmpDir, '.noetic', 'baselines');
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
+    // Restore original env var
+    if (originalBaselinePath === undefined) {
+      delete process.env.NOETIC_BASELINE_PATH;
+    } else {
+      process.env.NOETIC_BASELINE_PATH = originalBaselinePath;
+    }
     fs.rmSync(tmpDir, {
       recursive: true,
       force: true,

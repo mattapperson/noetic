@@ -49,7 +49,7 @@ export function buildAsyncDelegateAgent(opts: {
       step.llm({
         id: 'async-delegate-llm',
         model: 'gpt-4o',
-        system: 'You are an assistant that can launch background sub-agents.',
+        instructions: 'You are an assistant that can launch background sub-agents.',
         tools: [
           launchTool,
           checkTool,

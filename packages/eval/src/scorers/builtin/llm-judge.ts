@@ -11,7 +11,7 @@ export interface JudgeConfig {
 
 interface JudgeRunConfig<T> {
   id: string;
-  system: string;
+  instructions: string;
   input: string;
   outputSchema: ZodType<T>;
   judge?: JudgeConfig;
@@ -29,7 +29,7 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const judgeStep = step.llm({
     id: config.id,
     model,
-    system: `${config.system}\n\nRespond ONLY with valid JSON matching the required schema.`,
+    instructions: `${config.instructions}\n\nRespond ONLY with valid JSON matching the required schema.`,
   });
 
   const harness = new AgentHarness({

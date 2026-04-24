@@ -4,10 +4,9 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolWithExecute } from '@openrouter/sdk';
-import { tool } from '@openrouter/sdk';
+import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
+import { tool } from '@noetic/core';
 import { z } from 'zod';
 import { normalizeToLf } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';
@@ -22,15 +21,6 @@ import {
 //#region Constants
 
 const DEFAULT_LIMIT = 1e2;
-
-//#endregion
-
-//#region Types
-
-export interface GrepOperations {
-  isDirectory: (absolutePath: string) => Promise<boolean> | boolean;
-  readFile: (absolutePath: string) => Promise<string> | string;
-}
 
 //#endregion
 
@@ -67,18 +57,6 @@ export const GrepOutputSchema = z.object({
 });
 
 export type GrepOutput = z.infer<typeof GrepOutputSchema>;
-
-//#endregion
-
-//#region Default Operations
-
-const defaultGrepOperations: GrepOperations = {
-  isDirectory: async (p) => {
-    const s = await stat(p);
-    return s.isDirectory();
-  },
-  readFile: (p) => readFile(p, 'utf-8'),
-};
 
 //#endregion
 
@@ -178,14 +156,14 @@ interface FormatMatchesParams {
   searchPath: string;
   isDirectory: boolean;
   contextValue: number;
-  ops: GrepOperations;
+  fs: FsAdapter;
 }
 
 async function formatMatches(params: FormatMatchesParams): Promise<{
   outputLines: string[];
   linesTruncated: boolean;
 }> {
-  const { matches, searchPath, isDirectory, contextValue, ops } = params;
+  const { matches, searchPath, isDirectory, contextValue, fs } = params;
   const fileCache = new Map<string, string[]>();
   const outputLines: string[] = [];
   let linesTruncated = false;
@@ -194,7 +172,7 @@ async function formatMatches(params: FormatMatchesParams): Promise<{
     let lines = fileCache.get(filePath);
     if (!lines) {
       try {
-        const content = await ops.readFile(filePath);
+        const content = await fs.readFileText(filePath);
         lines = normalizeToLf(content).split('\n');
       } catch {
         lines = [];
@@ -257,20 +235,14 @@ async function formatMatches(params: FormatMatchesParams): Promise<{
 
 //#region Public API
 
-export interface GrepToolOptions {
-  operations?: GrepOperations;
-}
+export type GrepTool = Tool<typeof GrepInputSchema, typeof GrepOutputSchema>;
 
-export type GrepTool = ToolWithExecute<typeof GrepInputSchema, typeof GrepOutputSchema>;
-
-export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool {
-  const ops = options?.operations ?? defaultGrepOperations;
-
+export function createGrepTool(cwd: string, fs: FsAdapter, shell: ShellAdapter): GrepTool {
   return tool({
     name: 'Grep',
     description: GREP_TOOL_DESCRIPTION,
-    inputSchema: GrepInputSchema,
-    outputSchema: GrepOutputSchema,
+    input: GrepInputSchema,
+    output: GrepOutputSchema,
     async execute(params) {
       const {
         pattern,
@@ -286,12 +258,11 @@ export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool
       const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
 
       try {
-        let isDirectory: boolean;
-        try {
-          isDirectory = await ops.isDirectory(searchPath);
-        } catch {
+        const searchStat = await fs.stat(searchPath).catch(() => null);
+        if (!searchStat) {
           throw new Error(`Path not found: ${searchPath}`);
         }
+        const isDirectory = searchStat.isDirectory();
 
         const cmdParts: string[] = [
           'rg',
@@ -310,26 +281,15 @@ export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool
         }
         cmdParts.push(shellQuote(pattern), shellQuote(searchPath));
 
-        const proc = Bun.spawn(
-          [
-            'sh',
-            '-c',
-            cmdParts.join(' '),
-          ],
-          {
-            cwd: searchPath,
-            stdout: 'pipe',
-            stderr: 'pipe',
-          },
-        );
+        const result = await shell.exec(cmdParts.join(' '), {
+          cwd: searchPath,
+        });
 
-        const stdout = await new Response(proc.stdout).text();
-        const stderr = await new Response(proc.stderr).text();
-        const exitCode = await proc.exited;
+        const { stdout, stderr, exitCode } = result;
 
         const { matches, matchLimitReached } = parseRgOutput(stdout, effectiveLimit);
 
-        if (matches.length === 0 && exitCode <= 1) {
+        if (matches.length === 0 && (exitCode === null || exitCode <= 1)) {
           return {
             matches: 'No matches found',
             pattern,
@@ -339,7 +299,7 @@ export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool
           };
         }
 
-        if (matches.length === 0 && exitCode > 1) {
+        if (matches.length === 0 && exitCode !== null && exitCode > 1) {
           throw new Error(stderr.trim() || `rg exited with code ${exitCode}`);
         }
 
@@ -348,7 +308,7 @@ export function createGrepTool(cwd: string, options?: GrepToolOptions): GrepTool
           searchPath,
           isDirectory,
           contextValue,
-          ops,
+          fs,
         });
 
         const rawOutput = outputLines.join('\n');

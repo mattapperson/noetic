@@ -31,6 +31,34 @@ No user instrumentation needed. The trace tree mirrors the execution tree becaus
 
 ---
 
+## Span Export Lifecycle
+
+The interpreter exports each step's span twice, providing real-time visibility into execution progress:
+
+1. **Start export (fire-and-forget):** When a step begins execution, the interpreter calls `TraceExporter.export()` with the span in an `"in_progress"` status. This call is **not awaited** — it fires immediately so downstream consumers (e.g., a UI node graph) can render the step as running without blocking the interpreter.
+
+2. **End export (awaited):** When a step completes, the interpreter calls `span.end()`, populates final attributes (output, `gen_ai.usage.*`, `gen_ai.cost`, status), and calls `TraceExporter.export()` again. This call **is awaited** to guarantee the completed span is durably recorded before the interpreter moves on.
+
+```
+step begins
+  └─ span created, status = "in_progress"
+  └─ exporter.export([span])          ← fire-and-forget (not awaited)
+  └─ step executes...
+step completes
+  └─ span.end(), final attributes set, status = "ok" | "error"
+  └─ await exporter.export([span])    ← awaited
+```
+
+The two-phase approach ensures that:
+
+- **Liveness:** Consumers see steps appear as soon as execution starts, enabling real-time progress indicators.
+- **Correctness:** The final export is awaited, so completed span data (tokens, cost, output) is never lost even under backpressure.
+- **Non-blocking start:** The fire-and-forget start export cannot stall the interpreter. If the exporter is slow or unavailable, step execution proceeds unimpeded.
+
+Exporters receive the same `Span` object in both calls. They distinguish phases via the span's `status` attribute: `"in_progress"` for the start export, `"ok"` or `"error"` for the end export.
+
+---
+
 ## `Span` Interface
 
 ```typescript

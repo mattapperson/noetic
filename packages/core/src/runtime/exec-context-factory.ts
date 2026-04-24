@@ -21,6 +21,8 @@ export function contextToExecCtx(
       output: ctx.tokens.output,
     },
     cost: ctx.cost,
+    fs: ctx.harness.fs,
+    shell: ctx.harness.shell,
     callModel,
     tokenize: estimateTokens,
     trace: {

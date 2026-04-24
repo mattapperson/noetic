@@ -82,4 +82,37 @@ describe('InMemoryExporter', () => {
     exporter.clear();
     expect(exporter.spans).toHaveLength(0);
   });
+
+  it('records startTrace calls', () => {
+    const exporter = new InMemoryExporter();
+    exporter.startTrace('trace-1', 'hello');
+    expect(exporter.traces).toHaveLength(1);
+    expect(exporter.traces[0].traceId).toBe('trace-1');
+    expect(exporter.traces[0].input).toBe('hello');
+    expect(exporter.traces[0].completed).toBe(false);
+  });
+
+  it('records completeTrace calls', () => {
+    const exporter = new InMemoryExporter();
+    exporter.startTrace('trace-1', 'hello');
+    exporter.completeTrace('trace-1');
+    expect(exporter.traces[0].completed).toBe(true);
+    expect(exporter.traces[0].error).toBeUndefined();
+  });
+
+  it('records completeTrace with error', () => {
+    const exporter = new InMemoryExporter();
+    exporter.startTrace('trace-1', 'hello');
+    const err = new Error('boom');
+    exporter.completeTrace('trace-1', err);
+    expect(exporter.traces[0].completed).toBe(true);
+    expect(exporter.traces[0].error).toBe(err);
+  });
+
+  it('clear resets traces', () => {
+    const exporter = new InMemoryExporter();
+    exporter.startTrace('trace-1', 'hello');
+    exporter.clear();
+    expect(exporter.traces).toHaveLength(0);
+  });
 });

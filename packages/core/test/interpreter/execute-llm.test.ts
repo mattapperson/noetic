@@ -3,9 +3,16 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeLLM } from '../../src/interpreter/execute-llm';
-import type { ContextMemory } from '../../src/types/memory';
+import { ContextImpl } from '../../src/runtime/context-impl';
+import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
+import type { CallModelRequest } from '../../src/types/runtime';
 import type { StepLLM } from '../../src/types/step';
-import { makeLLMResponse, makeMockContextWithClient } from '../_helpers';
+import {
+  makeLLMResponse,
+  makeMockContext,
+  makeMockContextWithClient,
+  makeMockHarness,
+} from '../_helpers';
 
 describe('executeLLM', () => {
   it('calls the client and returns text output', async () => {
@@ -300,6 +307,144 @@ describe('executeLLM', () => {
     ]);
     await executeLLM(step, 'hi', ctx);
     // No error means empty tools were handled gracefully
+    expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  it('passes step.instructions through in the callModel request', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+      instructions: 'You are Skippy',
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('ok');
+    };
+    const ctx = makeMockContext({
+      harness,
+    });
+
+    await executeLLM(step, 'hi', ctx);
+    assert(capturedRequest !== undefined);
+    expect(capturedRequest.instructions).toBe('You are Skippy');
+    expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  it('passes undefined instructions when step has no instructions', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('ok');
+    };
+    const ctx = makeMockContext({
+      harness,
+    });
+
+    await executeLLM(step, 'hi', ctx);
+    assert(capturedRequest !== undefined);
+    expect(capturedRequest.instructions).toBeUndefined();
+    expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  it('populates ctx.lastLayerUsage with per-layer recall token counts', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+      instructions: 'sys',
+    };
+    const harness = makeMockHarness();
+    let capturedRequest: CallModelRequest | undefined;
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('done');
+    };
+    harness.recallLayers = async () => [
+      {
+        layerId: 'planMemory',
+        items: [
+          {
+            id: 'plan-1',
+            type: 'message',
+            role: 'developer',
+            status: 'completed',
+            content: [
+              {
+                type: 'input_text',
+                text: 'plan summary',
+              },
+            ],
+          },
+        ],
+        tokenCount: 42,
+      },
+      {
+        layerId: 'workingMemory',
+        items: [
+          {
+            id: 'wm-1',
+            type: 'message',
+            role: 'developer',
+            status: 'completed',
+            content: [
+              {
+                type: 'input_text',
+                text: 'scratchpad',
+              },
+            ],
+          },
+        ],
+        tokenCount: 17,
+      },
+    ];
+    const ctx = new ContextImpl({
+      harness,
+    });
+    const layers: MemoryLayer[] = [
+      {
+        id: 'planMemory',
+        slot: 100,
+        scope: 'execution',
+        hooks: {},
+      },
+      {
+        id: 'workingMemory',
+        slot: 110,
+        scope: 'execution',
+        hooks: {},
+      },
+    ];
+
+    await executeLLM(step, 'hi', ctx, layers);
+
+    assert(ctx.lastLayerUsage !== undefined);
+    expect(ctx.lastLayerUsage.modelId).toBe('gpt-4');
+    expect(ctx.lastLayerUsage.executionId).toBe(ctx.id);
+    expect(ctx.lastLayerUsage.layers).toHaveLength(2);
+    expect(ctx.lastLayerUsage.layers[0]?.layerId).toBe('planMemory');
+    expect(ctx.lastLayerUsage.layers[0]?.tokenCount).toBe(42);
+    expect(ctx.lastLayerUsage.layers[1]?.layerId).toBe('workingMemory');
+    expect(ctx.lastLayerUsage.layers[1]?.tokenCount).toBe(17);
+
+    // Recall items must reach the model via assembleView, prepended before history.
+    assert(capturedRequest !== undefined);
+    const items = capturedRequest.items;
+    expect(items[0]?.type).toBe('message');
+    const firstItem = items[0];
+    assert(firstItem.type === 'message');
+    expect(firstItem.role).toBe('developer');
+
+    // Side-effect invariant: the user input also lands in the item log.
+    expect(ctx.itemLog.items.some((i) => i.type === 'message' && i.role === 'user')).toBe(true);
     expect(ctx.lastStepMeta).not.toBeNull();
   });
 });

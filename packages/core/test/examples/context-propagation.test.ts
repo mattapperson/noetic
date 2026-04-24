@@ -15,6 +15,8 @@ function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionCon
   return {
     ctx,
     harness,
+    fs: harness.fs,
+    shell: harness.shell,
     memory: {
       get: () => undefined,
       set: () => {},
@@ -42,8 +44,8 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured
-      if (!(err instanceof Error && err.message.includes('callModel'))) {
+      // Expected: no LLM provider configured
+      if (!(err instanceof Error && err.message.includes('No LLM provider'))) {
         throw err;
       }
     }
@@ -77,8 +79,8 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured
-      if (!(err instanceof Error && err.message.includes('callModel'))) {
+      // Expected: no LLM provider configured
+      if (!(err instanceof Error && err.message.includes('No LLM provider'))) {
         throw err;
       }
     }

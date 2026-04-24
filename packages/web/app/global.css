@@ -116,6 +116,37 @@
   grid-column: span 2;
 }
 
+.side-by-side-sections {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.side-by-side-sections > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.side-by-side-sections section {
+  max-width: 100%;
+}
+
+.section-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+}
+
+.section-split > * {
+  min-width: 0;
+}
+
+/* Memory section: swap order on desktop so SVG appears on left */
+.section-split > .memory-visual {
+  order: -1;
+}
+
 .landing-section + .landing-section,
 .side-by-side-sections + .landing-section,
 .landing-section + .side-by-side-sections {
@@ -191,72 +222,7 @@
   .tui-scanlines::after {
     display: none;
   }
-}
 
-.side-by-side-sections {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-}
-
-.side-by-side-sections > * {
-  flex: 1;
-  min-width: 0;
-}
-
-.side-by-side-sections section {
-  max-width: 100%;
-}
-
-.section-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 64px;
-  align-items: center;
-}
-
-.section-split > * {
-  min-width: 0;
-}
-
-/* Memory section: swap order on desktop so SVG appears on left */
-.section-split > .memory-visual {
-  order: -1;
-}
-
-@media (max-width: 1024px) {
-  .side-by-side-sections {
-    flex-direction: column;
-  }
-
-  .section-split {
-    grid-template-columns: 1fr;
-  }
-
-  .section-split > :last-child {
-    order: 2;
-    margin-top: 32px;
-  }
-
-  /* Reset memory section order for single column (content first, then SVG) */
-  .section-split > .memory-visual {
-    order: 0;
-  }
-}
-
-@media (max-width: 480px) {
-  .section-split > :last-child {
-    margin-top: 24px;
-  }
-}
-
-@media (min-width: 1025px) {
-  main section {
-    max-width: 1280px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
   svg * {
     animation-play-state: paused;
   }

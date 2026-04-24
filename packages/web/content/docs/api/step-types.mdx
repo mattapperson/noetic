@@ -15,6 +15,7 @@ type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
   | StepBranch<TMemory, I, O>
   | StepFork<TMemory, I, O>
   | StepSpawn<TMemory, I, O>
+  | StepProvide<TMemory, I, O>
   | StepLoop<TMemory, I, O>;
 ```
 
@@ -38,8 +39,8 @@ type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
 | `kind` | `'llm'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `model` | `string` | yes | Model identifier |
-| `system` | `string` | no | System prompt |
-| `tools` | `Tool[]` | no | Available tools |
+| `instructions` | `string` | no | System prompt / instructions for the model |
+| `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
 | `output` | `ZodType<O>` | no | Structured output schema |
 | `params` | `ModelParams` | no | Sampling parameters |
 
@@ -105,6 +106,17 @@ Fork has three mode variants, each a separate interface.
 | `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
 | `merge` | `(results: SettleResult<O>[], ctx: Context<TMemory>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
+
+## StepProvide
+
+`StepProvide<TMemory, I, O>`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'provide'` | yes | Discriminant |
+| `id` | `string` | yes | Step identifier |
+| `child` | `Step<TMemory, I, O>` | yes | Child step to execute with the provided layers |
+| `memory` | `MemoryConfig \| MemoryLayer[]` | yes | Memory layers available to all descendant steps |
 
 ## StepSpawn
 

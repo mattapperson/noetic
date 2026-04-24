@@ -221,10 +221,6 @@ export function PatternsIsometricSvg(): ReactNode {
     x: llmPos.x,
     y: llmPos.y + NODE_H / 2,
   };
-  const llmTop = {
-    x: llmPos.x + NODE_W / 2,
-    y: llmPos.y,
-  };
   const llmBottom = {
     x: llmPos.x + NODE_W / 2,
     y: llmPos.y + NODE_H,
@@ -244,10 +240,6 @@ export function PatternsIsometricSvg(): ReactNode {
   const memTop = {
     x: memX + memW / 2,
     y: memY,
-  };
-  const memBottom = {
-    x: memX + memW / 2,
-    y: memY + memH,
   };
   const memRight = {
     x: memX + memW,

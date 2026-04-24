@@ -6,23 +6,21 @@
     "useIgnoreFile": false,
     "defaultBranch": "main"
   },
-  "plugins": [
-    ".grit/no-iife.grit",
-    ".grit/use-named-arguments.grit",
-    ".grit/prefer-nullish-over-optional-nullable.grit",
-    ".grit/no-unnecessary-typecast.grit",
-    ".grit/prefer-esm-url-over-dirname.grit",
-    ".grit/no-explicit-unknown.grit"
-  ],
+  "plugins": [],
   "files": {
     "ignoreUnknown": false,
     "includes": [
       "**",
       "!**/*.json",
       "!.grit/tests",
+      "!.superpowers",
       "!packages/web/.source",
       "!packages/web/.next",
+      "!packages/ui/.next",
+      "!packages/ui/dist",
+      "!packages/ui/dist-server",
       "!packages/web/next-env.d.ts",
+      "!packages/ui/next-env.d.ts",
       "!.worktrees",
       "!packages/web/.typecheck-snippets"
     ]
@@ -97,6 +95,21 @@
   "overrides": [
     {
       "includes": [
+        "packages/core/**",
+        "packages/eval/**",
+        "packages/web/**"
+      ],
+      "plugins": [
+        ".grit/no-iife.grit",
+        ".grit/use-named-arguments.grit",
+        ".grit/prefer-nullish-over-optional-nullable.grit",
+        ".grit/no-unnecessary-typecast.grit",
+        ".grit/prefer-esm-url-over-dirname.grit",
+        ".grit/no-explicit-unknown.grit"
+      ]
+    },
+    {
+      "includes": [
         "**/*.test.ts",
         "**/test/**"
       ],
@@ -104,8 +117,7 @@
         ".grit/no-iife.grit",
         ".grit/use-named-arguments.grit",
         ".grit/prefer-nullish-over-optional-nullable.grit",
-        ".grit/prefer-esm-url-over-dirname.grit",
-        ".grit/no-explicit-unknown.grit"
+        ".grit/prefer-esm-url-over-dirname.grit"
       ]
     }
   ],

@@ -1,18 +1,105 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `setHarness()`, `setTraceExporter()`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `setHarness()`, `setTraceExporter()`
+
+---
+
+## Filesystem Abstraction
+
+The `FsAdapter` interface abstracts all filesystem operations used by the agent harness, tools, memory layers, and skill discovery. This enables sandboxed, virtualized, or remote filesystem backends without changing agent code.
+
+```typescript
+interface FsStats {
+  size: number;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFile(): boolean;
+}
+
+interface FsAdapter {
+  readFile(path: string): Promise<Buffer>;
+  readFileText(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(dir: string): Promise<void>;
+  access(path: string, mode?: number): Promise<void>;
+  stat(path: string): Promise<FsStats>;
+  lstat(path: string): Promise<FsStats>;
+  readdir(path: string): Promise<string[]>;
+}
+```
+
+`createLocalFsAdapter()` returns the default implementation backed by Node.js `fs/promises`. The agent harness uses this when no custom adapter is provided.
+
+---
+
+## Shell Abstraction
+
+The `ShellAdapter` interface abstracts all shell command execution used by the agent harness, tools, memory layers, and skill processing. This enables sandboxed or emulated shell backends (e.g., `just-bash`) without changing agent code.
+
+```typescript
+interface ShellExecOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeout?: number;
+  stdin?: string;
+  signal?: AbortSignal;
+  onData?: (data: Buffer) => void;
+}
+
+interface ShellExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+interface ShellAdapter {
+  exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
+}
+```
+
+`createLocalShellAdapter()` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
+
+The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
 
 ---
 
 ## The `AgentHarness` Interface
 
-The agent harness is the engine. It's behind an interface with methods covering execution, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
+The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
 
 ```typescript
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
   // Agent configuration
   readonly config: AgentConfig<TParams>;
+
+  // Filesystem abstraction
+  readonly fs: FsAdapter;
+
+  // Shell abstraction
+  readonly shell: ShellAdapter;
+
+  // Primary execution — enqueues input on the session identified by
+  // options.threadId and returns once the message is accepted. The session
+  // runner processes queued messages and emits events on the session
+  // broadcaster.
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+
+  // Session-scoped accessors. Each session is keyed by threadId (defaulting
+  // to a single built-in thread). Accessors may be subscribed BEFORE execute()
+  // is called; they stay alive across turns.
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
+  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
+  getTextStream(scope?: SessionScope): AsyncIterable<string>;
+  getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
+  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+
+  // Cancel the in-flight turn. Queued messages are preserved.
+  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+
+  // Session observability.
+  getStatus(scope?: SessionScope): HarnessStatus;
+  getQueueSize(scope?: SessionScope): number;
 
   // Core execution
   run<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O>;
@@ -27,6 +114,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     state?: unknown;
     threadId?: string;
     resourceId?: string;
+    memory?: MemoryLayer[];
   }): Context;
 
   // Channel operations (the agent harness owns the backing store)
@@ -90,6 +178,153 @@ interface DetachedHandle<O> {
 
 ---
 
+## Sessions and the Message Queue
+
+`execute()` enqueues a message on a **session** keyed by `options.threadId` (or a default thread when omitted). Each session owns:
+
+- a FIFO `MessageQueue`,
+- a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
+- an `itemLog` snapshot that carries conversation history from turn to turn.
+
+Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter.
+
+A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
+
+1. Drains the queue (combining all queued messages into one turn's input).
+2. Emits `{name}:turn_started` with the drained message IDs.
+3. Invokes the initial step (which ultimately calls `callModel`).
+4. Emits `{name}:turn_completed` (or `{name}:turn_aborted` on failure/cancellation).
+5. Returns to idle. If the queue became non-empty during the turn, the next turn begins immediately.
+
+### Response Shape
+
+```typescript
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
+}
+
+type StreamingItem = Item & { readonly isComplete: boolean };
+```
+
+### Stream Accessors
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
+| `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns in the session. |
+| `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots. Replace, do not append. |
+| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
+
+Stream accessors MAY be subscribed before any `execute()` call; the underlying `EventBroadcaster` replays buffered events so late subscribers observe turn history within the buffer window.
+
+### Delivery Modes
+
+Each queued message carries a `DeliveryMode`:
+
+| Mode | Behaviour |
+|------|-----------|
+| `next-turn` (default) | Message runs as a new turn once the current turn completes. Safe and predictable. |
+| `between-rounds` | Message is injected as an additional user item before the next tool-round LLM call within the currently generating turn. If no turn is active, behaves like `next-turn`. Mirrors Claude Code's inbox-attachment pattern. |
+| `interrupt` | Cancels the in-flight turn (if any), places the message at the head of the queue, and restarts. |
+
+`AgentConfig.defaultDeliveryMode` (default `next-turn`) applies to messages that don't specify a mode. Callers may override per-call via `ExecuteOptions.deliveryMode`.
+
+### StreamEvent
+
+Events have a `source` discriminant: `'sdk'` for raw OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix (e.g., `myagent:step_started`).
+
+```typescript
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+
+interface SdkStreamEvent {
+  readonly source: 'sdk';
+  readonly type: string;  // OpenResponses event type, e.g. 'response.output_text.delta'
+  readonly data: Record<string, unknown>;
+  readonly outputIndex?: number;
+  readonly contentIndex?: number;
+}
+
+interface FrameworkStreamEvent {
+  readonly source: 'framework';
+  readonly type: `${string}:${string}`;  // e.g. 'myagent:step_started'
+  readonly data: Record<string, unknown>;
+}
+```
+
+### Framework Events
+
+| Event | Description |
+|-------|-------------|
+| `{name}:turn_started` | Emitted when the session runner starts a turn. Data: `{ turnId, messageIds }` |
+| `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
+| `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
+| `{name}:inbox_injected` | Emitted between tool rounds when queued `between-rounds` messages are injected into the prompt. Data: `{ round, count, messageIds }` |
+| `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
+| `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
+| `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
+| `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
+| `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
+| `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
+| `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
+
+### Streaming Scope
+
+Events from the entire step composition tree flow through `HarnessResult`. All LLM steps encountered during execution (including within loops, branches, forks, and spawns) emit SDK stream events. Non-LLM steps emit framework lifecycle events only.
+
+### Event Emission Control
+
+LLM steps support an optional `emit` field to control framework event emission:
+
+```typescript
+step.llm({ id: 'quiet', model: '...', emit: false });           // suppress all
+step.llm({ id: 'selective', model: '...', emit: (type) => type === 'step_started' }); // filter
+```
+
+- **`true`** (default): all framework events emitted.
+- **`false`**: no framework events (`step_started`, `step_completed`, `tool_round_*`, `tool_call_*`) for this step.
+- **Filter function**: `(eventType: string, data: Record<string, unknown>) => boolean` — called per event, return `true` to emit.
+
+The `emit` option propagates through `CallModelRequest` to `callModel()`, controlling tool round/call events as well.
+
+### Bounded Buffer
+
+The internal `EventBroadcaster` buffer is capped at 10,000 events. When the buffer exceeds this limit, oldest events are trimmed and active iterator cursors are adjusted. Once all consumers have departed, new events are discarded to prevent unbounded memory growth. Late subscribers receive only the retained window.
+
+### Error Handling
+
+When `execute()` is called on a harness without an `initialStep`, it rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED`. When a turn fails mid-stream, `getAgentResponse()` surfaces the error and the session remains usable for subsequent turns.
+
+### ExecuteOptions
+
+```typescript
+interface ExecuteOptions {
+  threadId?: string;
+  resourceId?: string;
+  state?: unknown;
+  memory?: MemoryLayer[];
+  /** Per-call override of the harness default. */
+  deliveryMode?: DeliveryMode;
+}
+
+interface SessionScope {
+  threadId?: string;
+}
+
+type HarnessStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'aborting'; readonly turnId: string };
+
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+```
+
+---
+
 ## Key Design Points
 
 - **`send`/`recv`/`tryRecv` on the agent harness** means the agent harness controls channel storage. `AgentHarness` uses a `Map`. `DurableAgentHarness` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `harness.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `harness.tryRecv(ch, ctx)`.
@@ -97,7 +332,9 @@ interface DetachedHandle<O> {
 - **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
 - **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
+- **`fs`** exposes the `FsAdapter` that the harness was constructed with (or the default `createLocalFsAdapter()`). All filesystem operations — CLI tools (read, write, edit, ls, grep, find), skill discovery, and memory layers — use `ctx.harness.fs` rather than importing `fs/promises` directly. This enables sandboxed or virtualized filesystems (e.g., in-memory FS for testing, remote FS for cloud execution). `Context` exposes a `readonly fs: FsAdapter` getter that delegates to the harness. `ToolExecutionContext` and memory `ExecutionContext` also expose `readonly fs: FsAdapter`.
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
+- **`memory` on AgentConfig** are default memory layers applied to every context created via `createContext()`. When `createContext` is called with its own `memory` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up memory for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns.
 - **`checkpoint`/`restore`** enable durable execution. `AgentHarness` implements them as no-ops. `DurableAgentHarness` serializes state (including memory layer state) to its backing store.
 - **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
@@ -121,10 +358,12 @@ interface DetachedHandle<O> {
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic/core';
+import { workingMemory, semanticRecall } from '@noetic/core';
 
 setHarness(new AgentHarness({
   name: 'my-agent',
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
+  memory: [workingMemory(), semanticRecall({ embedder })],
 }));
 ```
 
@@ -206,11 +445,20 @@ The top-level configuration for an agent harness. `AgentConfig` is generic over 
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
 
+  /** Filesystem adapter. Defaults to createLocalFsAdapter(). */
+  fs?: FsAdapter;
+
+  /** Shell adapter. Defaults to createLocalShellAdapter(). */
+  shell?: ShellAdapter;
+
   /** Storage backend for memory persistence. See 11-memory-layer-system. */
   storage?: StorageAdapter;
 
   /** Agent-level lifecycle hooks (separate from memory hooks). */
   hooks?: AgentHooks;
+
+  /** Default memory layers applied to every context created via createContext() / execute(). */
+  memory?: MemoryLayer[];
 
   /** Arbitrary key-value parameters accessible via ctx.harness.config.params. */
   params: TParams;

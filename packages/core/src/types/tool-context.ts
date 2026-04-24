@@ -1,8 +1,10 @@
-import type { TurnContext } from '@openrouter/sdk';
+import type { TurnContext } from '@openrouter/agent';
 import type { StepMeta } from './common';
 import type { Context } from './context';
+import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { AgentHarnessContract } from './runtime';
+import type { ShellAdapter } from './shell-adapter';
 
 /** @public Accessor for reading and writing per-layer state from within a tool execution. */
 export interface ToolMemory {
@@ -19,6 +21,10 @@ export interface ToolExecutionContext {
   readonly ctx: Context;
   /** The harness instance executing this tool. */
   readonly harness: AgentHarnessContract;
+  /** Filesystem adapter for virtual or real filesystem access. */
+  readonly fs: FsAdapter;
+  /** Shell adapter for virtual or real shell command execution. */
+  readonly shell: ShellAdapter;
   /** Per-layer memory accessor for reading/writing tool-specific state. */
   readonly memory: ToolMemory;
   /** The fully assembled conversation view at the point of tool invocation. */

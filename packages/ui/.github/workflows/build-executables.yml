@@ -1,0 +1,122 @@
+name: Build and Release Executables
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., v0.1.0)'
+        required: true
+        default: 'v0.0.0-test'
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x64
+          - os: ubuntu-latest
+            platform: linux-x64
+            target: bun-linux-x64
+            artifact: noetic-ui-linux-x64
+          # Linux ARM64
+          - os: ubuntu-latest
+            platform: linux-arm64
+            target: bun-linux-arm64
+            artifact: noetic-ui-linux-arm64
+          # macOS x64 (Intel)
+          - os: macos-latest
+            platform: darwin-x64
+            target: bun-darwin-x64
+            artifact: noetic-ui-darwin-x64
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            platform: darwin-arm64
+            target: bun-darwin-arm64
+            artifact: noetic-ui-darwin-arm64
+          # Windows x64
+          - os: windows-latest
+            platform: win32-x64
+            target: bun-windows-x64
+            artifact: noetic-ui-windows-x64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+        working-directory: packages/ui
+
+      - name: Type check
+        run: bun run typecheck
+        working-directory: packages/ui
+
+      - name: Build executable
+        run: |
+          bun build --compile \
+            --target ${{ matrix.target }} \
+            --outfile ${{ matrix.artifact }} \
+            src/service/index.ts
+        working-directory: packages/ui
+
+      - name: Test executable (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          chmod +x packages/ui/${{ matrix.artifact }}
+          ./packages/ui/${{ matrix.artifact }} --help || true
+
+      - name: Test executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          packages/ui/${{ matrix.artifact }} --help || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: packages/ui/${{ matrix.artifact }}
+          retention-days: 1
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-exe
+          merge-multiple: true
+
+      - name: Display artifacts
+        run: ls -lh dist-exe/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist-exe/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update version in install script
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Latest release: $VERSION"

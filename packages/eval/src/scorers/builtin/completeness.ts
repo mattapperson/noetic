@@ -20,7 +20,7 @@ export function completeness(config?: JudgeConfig): ScorerFn {
   return async (execution: EvalExecution, objective: string): Promise<ScoreResult> => {
     const result = await runJudge({
       id: 'completeness-judge',
-      system: `You are an evaluation judge. Assess whether the output fully addresses all aspects of the objective.
+      instructions: `You are an evaluation judge. Assess whether the output fully addresses all aspects of the objective.
 Score 0.0 = completely incomplete (misses everything), 1.0 = fully complete (addresses all aspects).
 Consider whether all parts of the objective are covered and whether the response is thorough.
 Respond with a completeness score and brief reasoning.`,

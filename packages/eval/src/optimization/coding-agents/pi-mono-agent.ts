@@ -2,6 +2,60 @@ import { spawn as spawnProcess } from 'node:child_process';
 
 import type { ApplyResult, CodingAgent, OptimizationRecommendation } from '../../types/optimizer';
 
+// Type helper for accessing event emitter methods on child process
+interface ChildProcessWithEvents {
+  stdout?: {
+    on: (event: 'data', callback: (data: Buffer) => void) => void;
+  };
+  stderr?: {
+    on: (event: 'data', callback: (data: Buffer) => void) => void;
+  };
+  stdin?: {
+    write: (data: string) => void;
+    end: () => void;
+  };
+  on: (event: string, callback: (arg: unknown) => void) => void;
+}
+
+// Helper to spawn child process with proper event emitter types
+function spawnChildProcess(): ChildProcessWithEvents {
+  // The spawned process has the event methods at runtime, but TypeScript's types don't reflect this
+  const rawChild = spawnProcess(
+    'pi',
+    [
+      '--mode',
+      'rpc',
+    ],
+    {
+      stdio: [
+        'pipe',
+        'pipe',
+        'pipe',
+      ],
+    },
+  );
+
+  // Build the interface by creating a wrapper object
+  return {
+    get stdout() {
+      return Reflect.get(rawChild, 'stdout');
+    },
+    get stderr() {
+      return Reflect.get(rawChild, 'stderr');
+    },
+    get stdin() {
+      return Reflect.get(rawChild, 'stdin');
+    },
+    on: (event: string, callback: (arg: unknown) => void) => {
+      const onFn = Reflect.get(rawChild, 'on');
+      Reflect.apply(onFn, rawChild, [
+        event,
+        callback,
+      ]);
+    },
+  } satisfies ChildProcessWithEvents;
+}
+
 //#region Helper Functions
 
 function parseRpcResponse(stdout: string): ApplyResult {
@@ -53,20 +107,7 @@ export class PiMonoAgent implements CodingAgent {
 
   private sendRpcRequest(recommendation: OptimizationRecommendation): Promise<ApplyResult> {
     return new Promise((resolve, reject) => {
-      const child = spawnProcess(
-        'pi',
-        [
-          '--mode',
-          'rpc',
-        ],
-        {
-          stdio: [
-            'pipe',
-            'pipe',
-            'pipe',
-          ],
-        },
-      );
+      const child = spawnChildProcess();
 
       let stdout = '';
       let stderr = '';
@@ -81,7 +122,7 @@ export class PiMonoAgent implements CodingAgent {
       child.stdin?.write(buildRpcRequest(recommendation));
       child.stdin?.end();
 
-      child.on('close', (code) => {
+      child.on('close', (code: unknown) => {
         if (code !== 0) {
           reject(new Error(`pi-mono exited with code ${code}: ${stderr}`));
           return;
@@ -93,10 +134,12 @@ export class PiMonoAgent implements CodingAgent {
         }
       });
 
-      child.on('error', (err) => {
+      child.on('error', (err: unknown) => {
+        const message =
+          err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);
         reject(
           new Error(
-            `Failed to spawn pi-mono: ${err.message}. Is @mariozechner/pi-coding-agent installed?`,
+            `Failed to spawn pi-mono: ${message}. Is @mariozechner/pi-coding-agent installed?`,
           ),
         );
       });

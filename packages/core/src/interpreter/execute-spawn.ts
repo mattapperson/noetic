@@ -1,3 +1,4 @@
+import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
@@ -6,6 +7,7 @@ import type { Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { ExecuteStepFn, StepSpawn } from '../types/step';
 import { cloneWithGuard } from './clone-guard';
+import { collectAllTools, deduplicateTools } from './collect-tools';
 import { frameworkCast } from './framework-cast';
 
 //#region Types
@@ -70,6 +72,8 @@ function buildChildExecutionContext(ctx: Context): ExecutionContext {
       output: 0,
     },
     cost: 0,
+    fs: ctx.harness.fs,
+    shell: ctx.harness.shell,
     tokenize: naiveTokenize,
     trace: noopTrace,
   };
@@ -87,6 +91,8 @@ function buildParentExecutionContext(ctx: Context): ExecutionContext {
       output: ctx.tokens.output,
     },
     cost: ctx.cost,
+    fs: ctx.harness.fs,
+    shell: ctx.harness.shell,
     tokenize: naiveTokenize,
     trace: noopTrace,
   };
@@ -138,6 +144,15 @@ export async function executeSpawn<TMemory, I, O>(
     });
   }
 
+  // Build unified tool set for child from its step tree + layers
+  const childStepTools = collectAllTools(step.child);
+  const childLayerTools =
+    layers.length > 0 ? resolveLayerTools(layers, baseCtx.harness, baseCtx) : [];
+  const childUnifiedTools = deduplicateTools([
+    ...childStepTools,
+    ...childLayerTools,
+  ]);
+
   // Create child context — empty by default, layers provide items via onSpawn
   const childCtx = new ContextImpl({
     harness: baseCtx.harness,
@@ -146,7 +161,9 @@ export async function executeSpawn<TMemory, I, O>(
     state: cloneWithGuard(baseCtx.state, `Spawn '${step.id}'`),
     threadId: baseCtx.threadId,
     resourceId: baseCtx.resourceId,
+    span: baseCtx.span,
     layers: layers.length > 0 ? layers : undefined,
+    unifiedTools: childUnifiedTools.length > 0 ? childUnifiedTools : undefined,
   });
 
   try {

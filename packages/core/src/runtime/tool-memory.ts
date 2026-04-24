@@ -1,4 +1,4 @@
-import type { TurnContext } from '@openrouter/sdk';
+import type { TurnContext } from '@openrouter/agent';
 import type { Context } from '../types/context';
 import type { AgentHarnessContract } from '../types/runtime';
 import type { ToolExecutionContext, ToolMemory } from '../types/tool-context';
@@ -22,6 +22,8 @@ export function buildToolExecutionContext(
   return {
     ctx,
     harness,
+    fs: harness.fs,
+    shell: harness.shell,
     memory: buildToolMemory(harness, ctx),
     assembledView: ctx.itemLog.items,
     lastStepMeta: ctx.lastStepMeta,

@@ -1,25 +1,8 @@
-// @ts-nocheck — Gridland registry component; uses custom intrinsic elements
+import { Box, Text, useInput, useStdout } from 'ink';
+import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { useKeyboardContext } from './provider';
-import { textStyle } from './text-style';
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { useTheme } from './theme';
-
-interface KeyEvent {
-  name: string;
-  ctrl?: boolean;
-  meta?: boolean;
-  shift?: boolean;
-  preventDefault: () => void;
-}
 
 /** Chat lifecycle status. Compatible with any AI SDK. */
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error';
@@ -146,7 +129,6 @@ export interface PromptInputContextValue {
   theme: ReturnType<typeof useTheme>;
   handleInput: (value: string) => void;
   handleInputSubmit: (value: string) => void;
-  handleInputKeyDown: (key: KeyEvent) => void;
 }
 
 const PromptInputContext = createContext<PromptInputContextValue | null>(null);
@@ -191,6 +173,10 @@ export interface PromptInputProps {
   status?: ChatStatus;
   /** Called when user presses Escape during streaming to stop generation */
   onStop?: () => void;
+  /** Called when user presses Escape to close a modal */
+  onModalClose?: () => void;
+  /** Whether a modal is currently open (changes Escape behavior) */
+  isModalOpen?: boolean;
   /** Text shown when status is "submitted" */
   submittedText?: string;
   /** Text shown when status is "streaming" */
@@ -220,14 +206,10 @@ export interface PromptInputProps {
   focus?: boolean;
   /** Show horizontal dividers above and below the input */
   showDividers?: boolean;
-  /** Auto-focus the input on mount (ensures canvas has keyboard focus in the browser) */
-  autoFocus?: boolean;
   /** Override divider line color (e.g. for focus indicators) */
   dividerColor?: string;
-  /** Use dashed divider lines (╌) instead of solid (─) */
+  /** Use dashed divider lines instead of solid */
   dividerDashed?: boolean;
-  /** Keyboard hook from @opentui/react */
-  useKeyboard?: (handler: (event: KeyEvent) => void) => void;
   /** Compound mode: provide subcomponents as children */
   children?: ReactNode;
 }
@@ -288,67 +270,61 @@ function resolveStatusHintText(options: StatusHintTextOptions): string {
 // Subcomponents
 // ============================================================================
 
-/** Horizontal divider line that extends into parent border gutters. */
+/** Horizontal divider line fills the full terminal width. */
 function PromptInputDivider() {
   const { dividerColor, dividerDashed, theme } = usePromptInput();
+  const { stdout } = useStdout();
+  // Ink's useStdout provides the terminal dimensions
+  const width = stdout?.columns ?? 80;
   const color = dividerColor ?? theme.muted;
-  const char = dividerDashed ? '╌' : '─';
+  const char = dividerDashed ? '\u254C' : '\u2500';
+  const line = char.repeat(width);
   return (
-    <text wrapMode="none" marginLeft={-1} marginRight={-1}>
-      <span
-        style={textStyle({
-          dim: !dividerColor,
-          fg: color,
-        })}
-      >
-        {char.repeat(500)}
-      </span>
-    </text>
+    <Box width="100%">
+      <Text color={color} dimColor={!dividerColor}>
+        {line}
+      </Text>
+    </Box>
   );
 }
 
-/** Autocomplete suggestion list. */
+/** Autocomplete suggestion list - appears below input like Claude Code. */
 function PromptInputSuggestions() {
   const { suggestions, sugIdx, maxSuggestions, theme } = usePromptInput();
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 80;
   const visible = suggestions.slice(0, maxSuggestions);
   if (visible.length === 0) {
     return null;
   }
+  // Calculate column width for command names (longest command + padding)
+  const maxCmdLen = Math.max(...visible.map((s) => s.text.length));
+  const cmdColWidth = Math.min(maxCmdLen + 4, 32);
+
   return (
-    <box flexDirection="column" marginLeft={2}>
+    <Box flexDirection="column">
       {visible.map((sug, i) => {
         const active = i === sugIdx;
+        // Pad command name to fixed width for aligned descriptions
+        const paddedCmd = sug.text.padEnd(cmdColWidth);
+        // Truncate description to fit remaining width
+        const descMaxLen = width - cmdColWidth - 2;
+        const desc = sug.desc
+          ? sug.desc.length > descMaxLen
+            ? sug.desc.slice(0, descMaxLen - 1) + '\u2026'
+            : sug.desc
+          : '';
+
         return (
-          <text key={sug.text}>
-            <span
-              style={textStyle({
-                fg: active ? theme.primary : theme.muted,
-              })}
-            >
-              {active ? '▸' : ''}
-            </span>
-            <span
-              style={textStyle({
-                fg: active ? theme.primary : theme.muted,
-                bold: active,
-              })}
-            >
-              {sug.text}
-            </span>
-            {sug.desc && (
-              <span
-                style={textStyle({
-                  dim: true,
-                  fg: theme.placeholder,
-                })}
-              >
-                {'' + sug.desc}
-              </span>
-            )}
-          </text>
+          <Text key={sug.text}>
+            <Text color={active ? theme.primary : theme.muted}>{paddedCmd}</Text>
+            <Text dimColor color={theme.placeholder}>
+              {desc}
+            </Text>
+          </Text>
         );
       })}
-    </box>
+    </Box>
   );
 }
 
@@ -365,85 +341,52 @@ function PromptInputTextarea() {
     theme,
     handleInput,
     handleInputSubmit,
-    handleInputKeyDown,
   } = usePromptInput();
   return (
-    <box flexDirection="row">
-      <text>
-        <span
-          style={textStyle({
-            fg: promptColor,
-          })}
-        >
-          {prompt}
-        </span>
-      </text>
+    <Box flexDirection="row">
+      <Text color={promptColor}>{prompt}</Text>
       {isFocused ? (
-        <input
+        <TextInput
           value={value}
           placeholder={placeholder}
-          focused
-          onInput={handleInput}
+          onChange={handleInput}
           onSubmit={handleInputSubmit}
-          onKeyDown={handleInputKeyDown}
-          cursorColor={theme.muted}
-          cursorStyle={{
-            style: 'line',
-            blinking: !value,
-          }}
-          placeholderColor={theme.placeholder}
-          textColor={theme.foreground}
         />
       ) : disabled && value.length === 0 ? (
-        <text>
-          <span
-            style={textStyle({
-              dim: true,
-              fg: theme.placeholder,
-            })}
-          >
-            {statusHintText}
-          </span>
-        </text>
+        <Text dimColor color={theme.placeholder}>
+          {statusHintText}
+        </Text>
       ) : (
-        <text>
-          <span
-            style={textStyle({
-              fg: value ? theme.foreground : theme.placeholder,
-              dim: !value,
-            })}
-          >
-            {value || placeholder}
-          </span>
-        </text>
+        <Text color={value ? theme.foreground : theme.placeholder} dimColor={!value}>
+          {value || placeholder}
+        </Text>
       )}
-    </box>
+    </Box>
   );
 }
 
 /**
- * Status indicator: ⏎ ready, ◐ submitted, ■ streaming, ✕ error.
+ * Status indicator: Enter ready, Half-circle submitted, Square streaming, X error.
  * When `status` and `onStop` are provided via context, the streaming icon
  * doubles as a stop button (Escape triggers onStop).
  */
 function PromptInputSubmit(props: { status?: ChatStatus; onStop?: () => void }) {
   const ctx = usePromptInput();
   const status = props.status ?? ctx.status;
-  const onStop = props.onStop ?? ctx.onStop;
   const { disabled, theme } = ctx;
 
   const isGenerating = status === 'submitted' || status === 'streaming';
 
   const icon =
     status === 'submitted'
-      ? '◐'
+      ? '\u25D0'
       : status === 'streaming'
-        ? onStop
-          ? '■'
-          : '◐'
+        ? (props.onStop ?? ctx.onStop)
+          ? '\u25A0'
+          : '\u25D0'
         : status === 'error'
-          ? '✕'
-          : '⏎';
+          ? '\u2715'
+          : '\u23CE';
 
   const color =
     status === 'error'
@@ -454,17 +397,7 @@ function PromptInputSubmit(props: { status?: ChatStatus; onStop?: () => void }) 
           ? theme.muted
           : theme.primary;
 
-  return (
-    <text>
-      <span
-        style={textStyle({
-          fg: color,
-        })}
-      >
-        {'' + icon}
-      </span>
-    </text>
-  );
+  return <Text color={color}>{' ' + icon}</Text>;
 }
 
 /** Error/hint text below input. */
@@ -473,17 +406,7 @@ function PromptInputStatusText() {
   if (status !== 'error') {
     return null;
   }
-  return (
-    <text>
-      <span
-        style={textStyle({
-          fg: theme.error,
-        })}
-      >
-        {errorText}
-      </span>
-    </text>
-  );
+  return <Text color={theme.error}>{errorText}</Text>;
 }
 
 /** Model label shown below the input. */
@@ -493,9 +416,9 @@ function PromptInputModel() {
     return null;
   }
   return (
-    <text dim color={theme.muted}>
+    <Text dimColor color={theme.muted}>
       model: {model}
-    </text>
+    </Text>
   );
 }
 
@@ -509,10 +432,12 @@ export function PromptInput({
   onSubmit,
   onChange,
   placeholder = 'Type a message...',
-  prompt = '❯',
+  prompt = '\u276F',
   promptColor,
   status,
   onStop,
+  onModalClose,
+  isModalOpen = false,
   submittedText = 'Thinking...',
   streamingText: streamingLabel = 'Generating...',
   errorText = 'An error occurred. Try again.',
@@ -526,34 +451,19 @@ export function PromptInput({
   model,
   focus = true,
   showDividers = true,
-  autoFocus = false,
   dividerColor,
   dividerDashed,
-  useKeyboard: useKeyboardProp,
   children,
 }: PromptInputProps) {
   const theme = useTheme();
-  const useKeyboard = useKeyboardContext(useKeyboardProp);
 
-  // Auto-focus: ensure the canvas has DOM focus so keyboard events reach useKeyboard
-  useEffect(() => {
-    if (!autoFocus) {
-      return;
-    }
-    if (typeof document === 'undefined') {
-      return;
-    }
-    const canvas = document.querySelector('canvas');
-    if (canvas && document.activeElement !== canvas) {
-      canvas.focus();
-    }
-  }, [
-    autoFocus,
-  ]);
   const resolvedPromptColor = promptColor ?? theme.muted;
 
-  // Status-driven state
-  const disabled = status ? status === 'submitted' || status === 'streaming' : disabledProp;
+  // Status-driven state. The input stays focused during 'submitted'/'streaming'
+  // so the user can keep typing — submissions made while the agent is working
+  // are enqueued on the harness session and delivered as subsequent turns.
+  // `disabledProp` still hard-disables (used when a modal is open, etc.).
+  const disabled = disabledProp;
   const isFocused = focus && !disabled;
   const statusHintText = resolveStatusHintText({
     status,
@@ -721,11 +631,11 @@ export function PromptInput({
         result.then(
           () => clearInput(),
           () => {
-            /* Don't clear on error — user may want to retry */
+            /* Don't clear on error so user may want to retry */
           },
         );
       } else {
-        // Sync onSubmit completed without throwing — clear
+        // Sync onSubmit completed without throwing, clear
         clearInput();
       }
     },
@@ -735,122 +645,16 @@ export function PromptInput({
     ],
   );
 
-  // ── Input handlers (passed to <input> intrinsic via context) ───────────
+  // ── Input handlers ───────────────────────────────────────────────────
 
-  const handleInputSubmit = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return;
-    }
-    if (enableHistory) {
-      setHist([
-        trimmed,
-        ...historyRef.current,
-      ]);
-    }
-    updateValue('');
-    setHistI(-1);
-    handleSubmit(trimmed);
-  };
-
-  const handleInputKeyDown = (key: KeyEvent) => {
-    // Return with active suggestions: custom submit logic
-    if (key.name === 'return' && suggestionsRef.current.length > 0) {
-      const sel = suggestionsRef.current[sugIdxRef.current];
-      if (sel) {
-        if (valueRef.current.startsWith('/')) {
-          // Slash commands: submit immediately on selection
-          updateValue('');
-          if (enableHistory) {
-            setHist([
-              sel.text,
-              ...historyRef.current,
-            ]);
-          }
-          setHistI(-1);
-          handleSubmit(sel.text);
-        } else {
-          const base = valueRef.current.slice(0, valueRef.current.lastIndexOf('@'));
-          updateValue(base + sel.text + '');
-          setSug([]);
-        }
-      }
-      key.preventDefault();
-      return;
-    }
-
-    // Tab: cycle suggestions
-    if (key.name === 'tab' && suggestionsRef.current.length > 0) {
-      setSugI((sugIdxRef.current + 1) % suggestionsRef.current.length);
-      key.preventDefault();
-      return;
-    }
-
-    // Up: navigate suggestions or history
-    if (key.name === 'up') {
-      if (suggestionsRef.current.length > 0) {
-        setSugI(Math.max(0, sugIdxRef.current - 1));
-      } else if (enableHistory && historyRef.current.length > 0) {
-        const idx = Math.min(historyRef.current.length - 1, histIdxRef.current + 1);
-        setHistI(idx);
-        updateValue(historyRef.current[idx]!);
-      }
-      key.preventDefault();
-      return;
-    }
-
-    // Down: navigate suggestions or history
-    if (key.name === 'down') {
-      if (suggestionsRef.current.length > 0) {
-        setSugI(Math.min(suggestionsRef.current.length - 1, sugIdxRef.current + 1));
-      } else if (enableHistory && histIdxRef.current > 0) {
-        const nextIdx = histIdxRef.current - 1;
-        setHistI(nextIdx);
-        updateValue(historyRef.current[nextIdx]!);
-      } else if (enableHistory && histIdxRef.current === 0) {
-        setHistI(-1);
-        updateValue('');
-      }
-      key.preventDefault();
-      return;
-    }
-
-    // Escape: dismiss suggestions
-    if (key.name === 'escape') {
-      if (suggestionsRef.current.length > 0) {
-        setSug([]);
-        key.preventDefault();
-      }
-      return;
-    }
-  };
-
-  // ── Keyboard handler ───────────────────────────────────────────────────
-  // When focused, <input> handles text input; useKeyboard only handles Escape→onStop.
-  // When not focused (no <input> rendered), useKeyboard provides full keyboard fallback
-  // for character input, suggestions, and history (used in tests and unfocused state).
-
-  useKeyboard?.((event: KeyEvent) => {
-    // Escape during submitted/streaming calls onStop (always active)
-    if (event.name === 'escape' && (status === 'streaming' || status === 'submitted') && onStop) {
-      onStop();
-      return;
-    }
-
-    // When <input> is rendered, it handles everything else
-    if (isFocused) {
-      return;
-    }
-
-    if (disabled) {
-      return;
-    }
-
-    if (event.name === 'return') {
+  const handleInputSubmit = useCallback(
+    (text: string) => {
+      // If there are suggestions and one is selected, handle that
       if (suggestionsRef.current.length > 0) {
         const sel = suggestionsRef.current[sugIdxRef.current];
         if (sel) {
           if (valueRef.current.startsWith('/')) {
+            // Slash commands: submit immediately on selection
             updateValue('');
             if (enableHistory) {
               setHist([
@@ -862,135 +666,184 @@ export function PromptInput({
             handleSubmit(sel.text);
           } else {
             const base = valueRef.current.slice(0, valueRef.current.lastIndexOf('@'));
-            updateValue(base + sel.text + '');
+            updateValue(base + sel.text + ' ');
             setSug([]);
           }
-        }
-      } else {
-        const trimmed = valueRef.current.trim();
-        if (!trimmed) {
           return;
         }
-        if (enableHistory) {
-          setHist([
-            trimmed,
-            ...historyRef.current,
-          ]);
+      }
+
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return;
+      }
+      if (enableHistory) {
+        setHist([
+          trimmed,
+          ...historyRef.current,
+        ]);
+      }
+      updateValue('');
+      setHistI(-1);
+      handleSubmit(trimmed);
+    },
+    [
+      enableHistory,
+      handleSubmit,
+      setHist,
+      setHistI,
+      setSug,
+      updateValue,
+    ],
+  );
+
+  // ── Keyboard handler via useInput ───────────────────────────────────
+  // Always active when focused OR when we need to handle Escape for stopping
+  const isKeyboardActive = focus;
+
+  useInput(
+    (_input, key) => {
+      // Escape: handle modal close first, then streaming stop, then suggestions dismiss
+      if (key.escape) {
+        // Priority 1: Close modal if open
+        if (isModalOpen && onModalClose) {
+          onModalClose();
+          return;
         }
-        updateValue('');
-        setHistI(-1);
-        handleSubmit(trimmed);
+        // Priority 2: Stop streaming
+        if ((status === 'streaming' || status === 'submitted') && onStop) {
+          onStop();
+          return;
+        }
+        // Priority 3: Dismiss suggestions
+        if (suggestionsRef.current.length > 0) {
+          setSug([]);
+        }
+        return;
       }
-      return;
-    }
 
-    if (event.name === 'tab' && suggestionsRef.current.length > 0) {
-      setSugI((sugIdxRef.current + 1) % suggestionsRef.current.length);
-      return;
-    }
-
-    if (event.name === 'up') {
-      if (suggestionsRef.current.length > 0) {
-        setSugI(Math.max(0, sugIdxRef.current - 1));
-      } else if (enableHistory && historyRef.current.length > 0) {
-        const idx = Math.min(historyRef.current.length - 1, histIdxRef.current + 1);
-        setHistI(idx);
-        updateValue(historyRef.current[idx]!);
+      // When disabled, ignore all other keys
+      if (disabled) {
+        return;
       }
-      return;
-    }
 
-    if (event.name === 'down') {
-      if (suggestionsRef.current.length > 0) {
-        setSugI(Math.min(suggestionsRef.current.length - 1, sugIdxRef.current + 1));
-      } else if (enableHistory && histIdxRef.current > 0) {
-        const nextIdx = histIdxRef.current - 1;
-        setHistI(nextIdx);
-        updateValue(historyRef.current[nextIdx]!);
-      } else if (enableHistory && histIdxRef.current === 0) {
-        setHistI(-1);
-        updateValue('');
+      // Tab: cycle suggestions
+      if (key.tab && suggestionsRef.current.length > 0) {
+        setSugI((sugIdxRef.current + 1) % suggestionsRef.current.length);
+        return;
       }
-      return;
-    }
 
-    if (event.name === 'escape') {
-      if (suggestionsRef.current.length > 0) {
-        setSug([]);
+      // Up arrow: navigate suggestions or history
+      if (key.upArrow) {
+        if (suggestionsRef.current.length > 0) {
+          setSugI(Math.max(0, sugIdxRef.current - 1));
+        } else if (enableHistory && historyRef.current.length > 0) {
+          const idx = Math.min(historyRef.current.length - 1, histIdxRef.current + 1);
+          setHistI(idx);
+          updateValue(historyRef.current[idx]!);
+        }
+        return;
       }
-      return;
-    }
 
-    if (event.name === 'backspace' || event.name === 'delete') {
-      updateValue(valueRef.current.slice(0, -1));
-      return;
-    }
-
-    if (event.ctrl || event.meta) {
-      return;
-    }
-
-    if (event.name === 'space') {
-      updateValue(valueRef.current + '');
-      return;
-    }
-
-    if (event.name && event.name.length === 1) {
-      updateValue(valueRef.current + event.name);
-    }
-  });
+      // Down arrow: navigate suggestions or history
+      if (key.downArrow) {
+        if (suggestionsRef.current.length > 0) {
+          setSugI(Math.min(suggestionsRef.current.length - 1, sugIdxRef.current + 1));
+        } else if (enableHistory && histIdxRef.current > 0) {
+          const nextIdx = histIdxRef.current - 1;
+          setHistI(nextIdx);
+          updateValue(historyRef.current[nextIdx]!);
+        } else if (enableHistory && histIdxRef.current === 0) {
+          setHistI(-1);
+          updateValue('');
+        }
+        return;
+      }
+    },
+    {
+      isActive: isKeyboardActive,
+    },
+  );
 
   // ── Build context for subcomponents ────────────────────────────────────
 
-  const visibleSuggestions = suggestions.slice(0, maxSuggestions);
+  const visibleSuggestions = useMemo(
+    () => suggestions.slice(0, maxSuggestions),
+    [
+      suggestions,
+      maxSuggestions,
+    ],
+  );
 
-  const ctxValue: PromptInputContextValue = {
-    value,
-    isFocused,
-    disabled,
-    status,
-    onStop,
-    statusHintText,
-    placeholder,
-    prompt,
-    promptColor: resolvedPromptColor,
-    suggestions: visibleSuggestions,
-    sugIdx,
-    maxSuggestions,
-    errorText,
-    model,
-    dividerColor,
-    dividerDashed,
-    theme,
-    handleInput: updateValue,
-    handleInputSubmit,
-    handleInputKeyDown,
-  };
+  const ctxValue: PromptInputContextValue = useMemo(
+    () => ({
+      value,
+      isFocused,
+      disabled,
+      status,
+      onStop,
+      statusHintText,
+      placeholder,
+      prompt,
+      promptColor: resolvedPromptColor,
+      suggestions: visibleSuggestions,
+      sugIdx,
+      maxSuggestions,
+      errorText,
+      model,
+      dividerColor,
+      dividerDashed,
+      theme,
+      handleInput: updateValue,
+      handleInputSubmit,
+    }),
+    [
+      value,
+      isFocused,
+      disabled,
+      status,
+      onStop,
+      statusHintText,
+      placeholder,
+      prompt,
+      resolvedPromptColor,
+      visibleSuggestions,
+      sugIdx,
+      maxSuggestions,
+      errorText,
+      model,
+      dividerColor,
+      dividerDashed,
+      theme,
+      updateValue,
+      handleInputSubmit,
+    ],
+  );
 
   // ── Render ─────────────────────────────────────────────────────────────
 
   if (children) {
     return (
       <PromptInputContext.Provider value={ctxValue}>
-        <box flexDirection="column" flexShrink={0}>
+        <Box flexDirection="column" flexShrink={0}>
           {children}
-        </box>
+        </Box>
       </PromptInputContext.Provider>
     );
   }
 
   return (
     <PromptInputContext.Provider value={ctxValue}>
-      <box flexDirection="column" flexShrink={0}>
+      <Box flexDirection="column" flexShrink={0}>
         {showDividers && <PromptInputDivider />}
-        <box flexDirection="column" paddingX={1}>
-          <PromptInputSuggestions />
+        <Box flexDirection="column" paddingX={1}>
           <PromptInputTextarea />
           <PromptInputStatusText />
           <PromptInputModel />
-        </box>
+        </Box>
         {showDividers && <PromptInputDivider />}
-      </box>
+        <PromptInputSuggestions />
+      </Box>
     </PromptInputContext.Provider>
   );
 }

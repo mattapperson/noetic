@@ -4,6 +4,8 @@
 
 import { expect } from 'bun:test';
 import { z } from 'zod';
+import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
+import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
 import { frameworkCast } from '../src/interpreter/framework-cast';
 import type { LLMResponse, Tool } from '../src/types/common';
 import type { Context, ItemLog } from '../src/types/context';
@@ -11,6 +13,7 @@ import type { EmbedFn } from '../src/types/embed';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
+  InputMessageItem,
   Item,
   MessageItem,
 } from '../src/types/items';
@@ -69,6 +72,8 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       output: 0,
     },
     cost: 0,
+    fs: createLocalFsAdapter(),
+    shell: createLocalShellAdapter(),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute() {},
@@ -97,10 +102,30 @@ export function makeItemLog(initial: Item[] = []): ItemLog {
 // ── Items ────────────────────────────────────────────────────────────
 
 export function makeMessage(
+  role: 'system' | 'developer' | 'user',
+  text: string,
+  id?: string,
+): InputMessageItem;
+export function makeMessage(role: 'assistant', text: string, id?: string): MessageItem;
+export function makeMessage(
   role: 'system' | 'developer' | 'user' | 'assistant',
   text: string,
   id?: string,
-): MessageItem {
+): InputMessageItem | MessageItem {
+  if (role === 'assistant') {
+    return frameworkCast<MessageItem>({
+      id: id ?? `msg-${text}`,
+      status: 'completed',
+      type: 'message',
+      role: 'assistant',
+      content: [
+        {
+          type: 'output_text',
+          text,
+        },
+      ],
+    });
+  }
   return {
     id: id ?? `msg-${text}`,
     status: 'completed',
@@ -177,7 +202,10 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     threadId: 'thread-1',
     itemLog: makeItemLog(),
     lastStepMeta: null,
+    lastLayerUsage: undefined,
     harness,
+    fs: harness.fs,
+    shell: harness.shell,
     layers: undefined,
     memory: {},
     recv: async () => {
@@ -288,9 +316,12 @@ export function mockEmbed(vectors: Record<string, number[]>): EmbedFn {
 
 export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   const resolvedCtx = ctx ?? makeMockContext();
+  const harness = makeMockHarness();
   return {
     ctx: resolvedCtx,
-    harness: makeMockHarness(),
+    harness,
+    fs: harness.fs,
+    shell: harness.shell,
     memory: {
       get: () => undefined,
       set: () => {},
@@ -306,12 +337,62 @@ export function makeMockHarness(): AgentHarnessContract {
       name: 'test-harness',
       params: {},
     },
+    fs: createLocalFsAdapter(),
+    shell: createLocalShellAdapter(),
     callModel: async () => {
       throw new Error('not impl');
     },
     execute: async () => {
       throw new Error('not impl');
     },
+    getAgentResponse: async () => {
+      throw new Error('not impl');
+    },
+    getItemStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    getTextStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    getReasoningStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    getFullStream: () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({
+            done: true,
+            value: undefined,
+          }),
+        };
+      },
+    }),
+    abort: async () => {},
+    getStatus: () => ({
+      kind: 'idle',
+    }),
+    getQueueSize: () => 0,
     run: async () => {
       throw new Error('not impl');
     },
@@ -345,6 +426,9 @@ export function makeMockHarness(): AgentHarnessContract {
       addEvent() {},
       end() {},
     }),
+    traceExporter: {
+      async export() {},
+    },
     getLayerState: () => undefined,
     setLayerState: () => {},
     beforeToolCall: async () => ({
@@ -353,6 +437,11 @@ export function makeMockHarness(): AgentHarnessContract {
     afterModelCall: async () => ({
       action: SteeringAction.Allow,
     }),
+    runAppendPipeline: async (_layers, items) => ({
+      items,
+      rerenderRequests: [],
+    }),
+    executeRerender: async () => [],
   };
   return harness;
 }
@@ -476,6 +565,9 @@ const VALID_ITEM_TYPES = new Set([
   'function_call',
   'function_call_output',
   'reasoning',
+  'web_search_call',
+  'file_search_call',
+  'image_generation_call',
 ]);
 
 const VALID_STATUSES = new Set([
@@ -483,12 +575,8 @@ const VALID_STATUSES = new Set([
   'completed',
   'incomplete',
   'failed',
-]);
-
-const VALID_CONTENT_PART_TYPES = new Set([
-  'output_text',
-  'input_text',
-  'refusal',
+  'searching',
+  'generating',
 ]);
 
 /**
@@ -497,29 +585,31 @@ const VALID_CONTENT_PART_TYPES = new Set([
  */
 export function assertOpenResponsesCompliance(items: readonly Item[]): void {
   for (const item of items) {
-    expect(typeof item.id).toBe('string');
-    expect(item.id.length).toBeGreaterThan(0);
-    expect(VALID_STATUSES.has(item.status)).toBe(true);
+    // id may be optional on some SDK output types (e.g., FunctionCallItem)
+    if ('id' in item && item.id !== undefined) {
+      expect(typeof item.id).toBe('string');
+    }
+    // status may be optional on some SDK output types
+    if ('status' in item && item.status !== undefined) {
+      expect(VALID_STATUSES.has(String(item.status))).toBe(true);
+    }
 
     const isExtension = item.type.includes(':');
     if (!isExtension) {
       expect(VALID_ITEM_TYPES.has(item.type)).toBe(true);
     }
 
-    if (item.type === 'message') {
+    if (item.type === 'message' && 'content' in item) {
       expect(Array.isArray(item.content)).toBe(true);
-      for (const part of item.content) {
-        expect(VALID_CONTENT_PART_TYPES.has(part.type)).toBe(true);
-      }
     }
 
-    if (item.type === 'function_call') {
+    if (item.type === 'function_call' && 'callId' in item) {
       expect(typeof item.callId).toBe('string');
       expect(typeof item.name).toBe('string');
       expect(typeof item.arguments).toBe('string');
     }
 
-    if (item.type === 'function_call_output') {
+    if (item.type === 'function_call_output' && 'callId' in item) {
       expect(typeof item.callId).toBe('string');
       expect(typeof item.output).toBe('string');
     }

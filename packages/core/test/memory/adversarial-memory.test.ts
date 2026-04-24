@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { allocateBudgets } from '../../src/memory/budget';
 import { findFunctionCall } from '../../src/memory/function-call-utils';
 import {
@@ -17,9 +18,12 @@ import {
   recallLayers,
   storeLayers,
 } from '../../src/memory/layer-lifecycle';
+import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
 import { durableTaskState } from '../../src/memory/layers/durable-task-state';
+import type { ObservationalState } from '../../src/memory/layers/observational-memory';
 import { observationalMemory } from '../../src/memory/layers/observational-memory';
 import { steering } from '../../src/memory/layers/steering';
+import type { WorkingMemoryState } from '../../src/memory/layers/working-memory';
 import { workingMemory } from '../../src/memory/layers/working-memory';
 import type { LLMResponse } from '../../src/types/common';
 import type { Item } from '../../src/types/items';
@@ -448,7 +452,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state,
+      state: frameworkCast<WorkingMemoryState>(state),
       budget: 1e3,
     });
 
@@ -468,7 +472,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: 0,
+      state: frameworkCast<WorkingMemoryState>(0),
       budget: 1e3,
     });
 
@@ -487,7 +491,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: false,
+      state: frameworkCast<WorkingMemoryState>(false),
       budget: 1e3,
     });
 
@@ -530,7 +534,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: frameworkCast<WorkingMemoryState>(store.get(ctx.executionId, layer.id)),
     });
 
     expect(result).toBeDefined();
@@ -572,7 +576,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: frameworkCast<WorkingMemoryState>(store.get(ctx.executionId, layer.id)),
     });
 
     assert(result !== undefined);
@@ -617,7 +621,7 @@ describe('Working Memory: store with string state', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: frameworkCast<WorkingMemoryState>(store.get(ctx.executionId, layer.id)),
     });
 
     // When state is a string, typeof !== 'object', so the else branch runs:
@@ -679,13 +683,13 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: frameworkCast<ObservationalState>(store.get(ctx.executionId, layer.id)),
     });
 
     // The observer should have been called since totalBufferTokens >= 100
     expect(observerCalledWith).not.toBeNull();
-    assert(observerCalledWith !== null);
-    expect(observerCalledWith.length).toBeGreaterThan(0);
+    const observedItems = observerCalledWith ?? [];
+    expect(observedItems.length).toBeGreaterThan(0);
   });
 
   it('default observer produces misleading "Processed 0 items" on empty buffer', async () => {
@@ -712,7 +716,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
         id: 'fc-1',
         type: 'function_call',
         status: 'completed',
-        call_id: 'call_1',
+        callId: 'call_1',
         name: 'test',
         arguments: '{}',
       },
@@ -731,7 +735,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: frameworkCast<ObservationalState>(store.get(ctx.executionId, layer.id)),
     });
 
     // bufferTokens is 0, threshold is 0, so 0 >= 0 triggers compression
@@ -808,7 +812,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
     const result = await layer.hooks.onComplete!({
       log: makeItemLog(),
       ctx,
-      state,
+      state: frameworkCast<DurableTaskState>(state),
       outcome: 'success',
     });
 
@@ -844,7 +848,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: store.get(ctx.executionId, layer.id),
+      state: frameworkCast<DurableTaskState>(store.get(ctx.executionId, layer.id)),
     });
 
     expect(result).toBeDefined();
@@ -1221,6 +1225,7 @@ describe('Cross-layer full lifecycle', () => {
       ctx,
       log,
       store,
+      storage: makeStorage(),
     });
 
     // 4. Recall again — working memory should have data

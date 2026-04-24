@@ -22,14 +22,19 @@ Model call with optional tools and structured output.
 step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   model: string;
-  system?: string;
-  tools?: Tool[];
+  instructions?: string;
+  tools?: Tool[];             // allowed tool subset (undefined = all, [] = none)
   output?: ZodType<O>;
   params?: ModelParams;
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepLLM<TMemory, I, O>
 ```
 
-The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `system` field becomes a `MessageItem` with `role: system`.
+`tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every LLM step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
+
+`emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
+
+The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
 ### step.tool
 
@@ -153,7 +158,7 @@ ReAct loop: LLM with tools, repeat until no tool calls.
 ```typescript
 react({
   model: string;
-  system?: string;
+  instructions?: string;
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
@@ -170,7 +175,7 @@ Outer verify-and-retry loop wrapping inner ReAct. Each iteration gets a fresh co
 ```typescript
 ralphWiggum({
   model: string;
-  system: string;
+  instructions: string;
   tools: Tool[];
   verify: (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
   maxIterations?: number;
@@ -310,6 +315,30 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
+### planMemory
+
+Manages PRD authoring and plan execution lifecycle. Enters a restricted "plan mode" where only read-only tools are allowed, the LLM writes a PRD and structures a PlanNode tree, then exits to execution.
+
+```typescript
+planMemory({
+  scope?: MemoryScope;                    // default 'thread'
+  additionalAllowedTools?: string[];      // extra tools allowed in plan mode
+  maxPrdLength?: number;                  // default 50_000
+  maxTreeDepth?: number;                  // default 5
+}): MemoryLayer<PlanState>
+```
+
+**State:** `{ phase, prd, planTree, executionLog, version }`. Phase transitions: `idle → planning → executing → completed/failed`.
+
+**Provides (auto-exposed as LLM tools):**
+- `plan/enterPlanMode({ goal? })` — transitions idle → planning, optionally seeds PRD
+- `plan/updatePrd({ content })` — replaces PRD content (planning phase only)
+- `plan/setPlanTree(PlanNode)` — sets execution tree (validated against PlanNodeSchema)
+- `plan/exitPlanMode({ action: 'execute' | 'cancel' })` — exits plan mode
+- `status` (layerData) — `{ phase, hasPrd, hasPlanTree, version }`
+
+**Lifecycle hooks:** `init` (load from storage), `recall` (phase-dependent context injection), `beforeToolCall` (restrict to read-only in planning), `onSpawn` (clone state), `onComplete` (record outcome).
+
 ## Layer Provides API
 
 Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.memory['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
@@ -388,31 +417,196 @@ step.run<Mem>({
 
 Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
 
-## AgentHarness
+## FsAdapter
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`.
+Filesystem abstraction used by the harness, tools, memory layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
 
 ```typescript
-// High-level API: pass agent step to constructor, execute with simple inputs
+interface FsStats {
+  size: number;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFile(): boolean;
+}
+
+interface FsAdapter {
+  readFile(path: string): Promise<Buffer>;
+  readFileText(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(dir: string): Promise<void>;
+  access(path: string, mode?: number): Promise<void>;
+  stat(path: string): Promise<FsStats>;
+  lstat(path: string): Promise<FsStats>;
+  readdir(path: string): Promise<string[]>;
+}
+```
+
+Pass a custom adapter to the harness:
+
+```typescript
+import { AgentHarness, createLocalFsAdapter } from '@noetic/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  fs: myCustomFsAdapter,  // optional, defaults to createLocalFsAdapter()
+});
+```
+
+Access from tools and layers:
+
+```typescript
+// In a tool execute function:
+tool({
+  name: 'read-config',
+  execute: async (args, toolCtx) => {
+    const content = await toolCtx.fs.readFileText('/etc/config.json');
+    return JSON.parse(content);
+  },
+});
+
+// In a memory layer hook:
+hooks: {
+  async init({ ctx }) {
+    const data = await ctx.fs.readFileText('./state.json');
+    return { state: JSON.parse(data) };
+  },
+}
+
+// From Context in a step:
+step.run({
+  id: 'load',
+  execute: async (input, ctx) => {
+    return ctx.fs.readFileText('./data.txt');
+  },
+});
+```
+
+## ShellAdapter
+
+Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+
+```typescript
+interface ShellExecOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeout?: number;
+  stdin?: string;
+  signal?: AbortSignal;
+  onData?: (data: Buffer) => void;
+}
+
+interface ShellExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+interface ShellAdapter {
+  exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
+}
+```
+
+Pass a custom adapter to the harness:
+
+```typescript
+import { AgentHarness, createLocalShellAdapter } from '@noetic/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  shell: myCustomShellAdapter,  // optional, defaults to createLocalShellAdapter()
+});
+```
+
+Access from tools and layers:
+
+```typescript
+// In a tool execute function:
+tool({
+  name: 'run-lint',
+  execute: async (args, toolCtx) => {
+    const result = await toolCtx.shell.exec('eslint .', { cwd: '/app' });
+    return result.stdout;
+  },
+});
+
+// In a memory layer hook:
+hooks: {
+  async init({ ctx }) {
+    const result = await ctx.shell.exec('git rev-parse HEAD', { cwd: '.' });
+    return { state: { commitHash: result.stdout.trim() } };
+  },
+}
+```
+
+## AgentHarness
+
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`). The `shell` property exposes the `ShellAdapter` (defaults to `createLocalShellAdapter()`).
+
+### Sessions and the Message Queue
+
+Each `threadId` is a **session**: a long-lived broadcaster + message queue + item log carried across turns. `execute()` enqueues a message on the session identified by `options.threadId` (or a default thread) and returns `Promise<void>` once the message is accepted. Response is observed via session-scoped accessors.
+
+```typescript
 const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
+  defaultDeliveryMode: 'next-turn',
 });
-const result = await harness.execute('Hello');           // string input
-const result = await harness.execute(messageItem);       // single Item
-const result = await harness.execute([item1, item2]);    // Item[]
-const result = await harness.execute('Hello', {          // with options
+
+// Queue a message and wait for the response.
+await harness.execute('Hello');
+const response = await harness.getAgentResponse();
+
+// Stream text deltas across every turn in the session.
+for await (const delta of harness.getTextStream()) {
+  process.stdout.write(delta);
+}
+
+// With options (per-thread routing + delivery mode override).
+await harness.execute('Hello', {
   threadId: 'thread-1',
   resourceId: 'user-1',
+  deliveryMode: 'between-rounds',
 });
 
-// Low-level API: manual context creation + run()
-const ctx = harness.createContext({ threadId: 'thread-1' });
-const result = await harness.run(step, input, ctx);
+// Submit while the agent is generating — the message queues.
+await harness.execute('follow-up', { threadId: 'thread-1' });
 
-// Access config params from context
-// ctx.harness.config.params.model
+// Cancel the in-flight turn. Queued messages stay and drive the next turn.
+await harness.abort({ threadId: 'thread-1', reason: 'user' });
+```
+
+### Delivery Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `next-turn` (default) | Queue and run after the current turn completes. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
+| `interrupt` | Abort the in-flight turn, place message at head of queue, restart. |
+
+### Session Accessors
+
+| Method | Description |
+|--------|-------------|
+| `getAgentResponse(scope?)` | Resolves once the session drains its queue. |
+| `getItemStream(scope?)` | Cumulative item snapshots across every turn. |
+| `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
+| `getFullStream(scope?)` | Raw SDK + framework events. |
+| `abort(scope?)` | Cancel in-flight turn; queued messages preserved. |
+| `getStatus(scope?)` | `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
+| `getQueueSize(scope?)` | Count of queued messages. |
+
+Subscribe to streams before the first `execute()` if you want to observe the very first turn — the session broadcaster replays buffered events to late subscribers within its buffer window.
+
+### Low-Level API
+
+```typescript
+// Manual context creation + run() (bypasses the session queue)
+const ctx = harness.createContext({ threadId: 'thread-1' });
+const runResult = await harness.run(step, input, ctx);
 
 // Background execution
 const handle = harness.detachedSpawn(step, input, ctx);
@@ -421,13 +615,14 @@ await handle.await();
 // Channels
 harness.send(channel, value, ctx);
 const msg = await harness.recv(channel, ctx);
-const msg = harness.tryRecv(channel, ctx);
+const msg2 = harness.tryRecv(channel, ctx);
 ```
 
 ## Slot Constants
 
 ```typescript
 const Slot = {
+  STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
@@ -438,6 +633,123 @@ const Slot = {
 } as const;
 ```
 
+## Memory Layer Hooks
+
+### onItemAppend
+
+Called when input items (user messages, tool outputs) are about to be appended to the ItemLog. Enables middleware-style item transformation and context re-rendering.
+
+```typescript
+interface OnItemAppendParams<TState> {
+  items: Item[];         // Items to be appended (may be transformed by prior layers)
+  log: ItemLog;          // Full log (read-only)
+  ctx: ExecutionContext;
+  state: TState;
+}
+
+interface OnItemAppendResult<TState> {
+  items: Item[];           // Items to append (filter, transform, or inject)
+  state?: TState;          // Updated layer state
+  rerender?: boolean;      // Request context re-render
+  timing?: 'immediate' | 'batched';  // When to apply re-render
+  scope?: RerenderScope;   // Which layers to re-recall
+}
+
+type RerenderScope = 'self' | 'slot-after' | 'all';  // default: 'slot-after'
+```
+
+**Pipeline behavior:** Items flow through layers in slot order. Each layer receives the output of the previous layer. Returning an empty array stops the pipeline.
+
+**Re-render triggers:** When `rerender: true`, the harness re-runs `recall()` for affected layers based on `scope`:
+- `'self'`: Only the triggering layer
+- `'slot-after'`: Triggering layer and all higher-slot layers (default)
+- `'all'`: All layers
+
+**Layer configuration:**
+```typescript
+interface MemoryLayer<TState> {
+  // ... other fields
+  rerenderTiming?: 'immediate' | 'batched';  // default for this layer's re-renders
+}
+```
+
+**Example: Content filtering**
+```typescript
+const contentFilter = {
+  id: 'filter',
+  slot: Slot.STEERING - 10,
+  scope: 'execution',
+  hooks: {
+    async init() { return { state: null }; },
+    async onItemAppend({ items }) {
+      return {
+        items: items.map(item => ({
+          ...item,
+          content: redactSensitive(item.content),
+        })),
+      };
+    },
+  },
+} satisfies MemoryLayer<null>;
+```
+
+**Example: Keyword-triggered context injection**
+```typescript
+const keywordWatcher = {
+  id: 'keyword-watcher',
+  slot: Slot.STEERING + 5,
+  scope: 'execution',
+  rerenderTiming: 'immediate',
+  hooks: {
+    async init() { return { state: { docs: [] } }; },
+    async onItemAppend({ items, state }) {
+      const keywords = extractKeywords(items);
+      if (keywords.length === 0) return { items };
+      
+      const docs = await fetchRelevantDocs(keywords);
+      return {
+        items,  // pass through unchanged
+        state: { docs },
+        rerender: true,
+        scope: 'self',
+      };
+    },
+    async recall({ state }) {
+      return {
+        items: state.docs.map(d => createMessage(d.content, 'developer')),
+        tokenCount: estimateTokens(state.docs),
+      };
+    },
+  },
+} satisfies MemoryLayer<{ docs: Doc[] }>;
+```
+
+## Per-Layer Context Usage (`ctx.lastLayerUsage`)
+
+After every successful `callModel`, the runtime records a snapshot of how the context window decomposed across its contributors and stores it on `ctx.lastLayerUsage`. The same snapshot is mirrored on `HarnessResponse.lastLayerUsage` for callers that have already released the `Context`.
+
+```typescript
+interface LayerUsageEntry {
+  readonly layerId: string;
+  readonly tokenCount: number;
+  readonly items: ReadonlyArray<Item>;
+}
+
+interface LastLayerUsage {
+  readonly executionId: string;
+  readonly modelId: string;
+  readonly layers: ReadonlyArray<LayerUsageEntry>; // sorted by layerId
+  readonly systemPromptTokens: number;
+  readonly toolsTokens: number;
+  readonly historyTokens: number;
+  readonly totalUsedTokens: number;
+}
+```
+
+- `layers[i].tokenCount` comes from each memory layer's own `recall()` `tokenCount`.
+- The other three buckets are estimated via the framework's 4-chars-per-token heuristic.
+- Use this to power introspection UIs (e.g., the CLI `/context` command). The snapshot is overwritten on the next call — export to your span if you need historical retention.
+
 ## ToolExecutionContext
 
 Available inside tool `execute` functions:
@@ -446,10 +758,13 @@ Available inside tool `execute` functions:
 interface ToolExecutionContext {
   ctx: Context;                 // Step execution context (ctx.harness also available)
   harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
+  fs: FsAdapter;                // Filesystem adapter (from harness)
+  shell: ShellAdapter;          // Shell adapter (from harness)
   memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
   assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
 // Access harness params: toolCtx.harness.config.params
 // Or via context: toolCtx.ctx.harness.config.params
+// Filesystem: toolCtx.fs.readFileText('/path')
 ```
