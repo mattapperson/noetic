@@ -99,6 +99,8 @@ export interface FunctionCallItem {
 export interface LLMStepData {
   model: string;
   messages: MessageItem[];
+  /** All messages included in the LLM request payload (full conversation history). */
+  payloadMessages: unknown[];
   toolCalls: FunctionCallItem[];
   tokenUsage: TokenUsage;
   cost: number;

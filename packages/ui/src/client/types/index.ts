@@ -66,6 +66,8 @@ export interface LLMStepData {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
   }>;
+  /** All messages included in the LLM request payload (full conversation history). */
+  payloadMessages: unknown[];
   toolCalls: Array<{
     name: string;
     arguments: Record<string, unknown>;

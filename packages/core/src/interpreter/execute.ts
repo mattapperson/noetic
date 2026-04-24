@@ -178,6 +178,13 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     span.setAttribute('state', JSON.stringify(ctx.state));
     if (step.kind === 'llm') {
       span.setAttribute('model', step.model);
+      span.setAttribute('messages', JSON.stringify(ctx.itemLog.items));
+      if (ctx.lastStepMeta?.toolCalls) {
+        span.setAttribute('toolCalls', JSON.stringify(ctx.lastStepMeta.toolCalls));
+      }
+      if (ctx.lastStepMeta?.responseItems) {
+        span.setAttribute('responseItems', JSON.stringify(ctx.lastStepMeta.responseItems));
+      }
     }
     span.end();
     await ctx.harness.traceExporter.export([

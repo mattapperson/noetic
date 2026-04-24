@@ -183,10 +183,30 @@ export function registerBuiltinExtractors(): void {
 
   /** LLM step - Large Language Model calls */
   registerStepDataExtractor('llm', (spanAttrs, tokenUsage, cost) => {
+    const parseJsonAttr = (attr: unknown): unknown[] => {
+      if (Array.isArray(attr)) {
+        return attr;
+      }
+      if (typeof attr === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(attr);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    };
+
+    const allItems = parseJsonAttr(spanAttrs.messages);
+    const responseItems = parseJsonAttr(spanAttrs.responseItems);
+    const toolCalls = parseJsonAttr(spanAttrs.toolCalls);
+
     const result: Record<string, unknown> = {
       model: spanAttrs.model || 'unknown',
-      messages: spanAttrs.messages || [],
-      toolCalls: spanAttrs.toolCalls || [],
+      messages: responseItems.length > 0 ? responseItems : allItems,
+      payloadMessages: allItems,
+      toolCalls,
       tokenUsage,
       cost,
     };

@@ -88,11 +88,6 @@ describe('Step Data Extractors', () => {
       );
 
       expect(result.model).toBe('gpt-4');
-      expect(result.messages).toEqual([
-        {
-          role: 'user',
-        },
-      ]);
       expect(result.toolCalls).toEqual([]);
       expect(result.tokenUsage).toBe(tokens);
       expect(result.cost).toBe(0.01);
@@ -115,6 +110,196 @@ describe('Step Data Extractors', () => {
       const extractor = getStepDataExtractor('llm');
       const result = extractor({}, ZERO_TOKENS, 0);
       expect(result.model).toBe('unknown');
+    });
+
+    it('populates payloadMessages from messages attribute', () => {
+      const extractor = getStepDataExtractor('llm');
+      const allItems = [
+        {
+          role: 'user',
+          content: 'hi',
+        },
+        {
+          role: 'assistant',
+          content: 'hello',
+        },
+      ];
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: allItems,
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.payloadMessages).toEqual(allItems);
+    });
+
+    it('uses responseItems for messages when available', () => {
+      const extractor = getStepDataExtractor('llm');
+      const allItems = [
+        {
+          role: 'user',
+          content: 'hi',
+        },
+        {
+          role: 'assistant',
+          content: 'hello',
+        },
+      ];
+      const responseItems = [
+        {
+          role: 'assistant',
+          content: 'hello',
+        },
+      ];
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: allItems,
+          responseItems,
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.messages).toEqual(responseItems);
+      expect(result.payloadMessages).toEqual(allItems);
+    });
+
+    it('falls back messages to allItems when responseItems is empty', () => {
+      const extractor = getStepDataExtractor('llm');
+      const allItems = [
+        {
+          role: 'user',
+          content: 'hi',
+        },
+      ];
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: allItems,
+          responseItems: [],
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.messages).toEqual(allItems);
+    });
+
+    it('parses JSON-serialized messages attribute', () => {
+      const extractor = getStepDataExtractor('llm');
+      const allItems = [
+        {
+          role: 'user',
+          content: 'hi',
+        },
+        {
+          role: 'assistant',
+          content: 'hello',
+        },
+      ];
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: JSON.stringify(allItems),
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.payloadMessages).toEqual(allItems);
+    });
+
+    it('parses JSON-serialized responseItems attribute', () => {
+      const extractor = getStepDataExtractor('llm');
+      const responseItems = [
+        {
+          role: 'assistant',
+          content: 'hello',
+        },
+      ];
+      const allItems = [
+        {
+          role: 'user',
+          content: 'hi',
+        },
+        ...responseItems,
+      ];
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: JSON.stringify(allItems),
+          responseItems: JSON.stringify(responseItems),
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.messages).toEqual(responseItems);
+      expect(result.payloadMessages).toEqual(allItems);
+    });
+
+    it('parses JSON-serialized toolCalls attribute', () => {
+      const extractor = getStepDataExtractor('llm');
+      const toolCalls = [
+        {
+          name: 'search',
+          arguments: {
+            q: 'test',
+          },
+        },
+      ];
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          toolCalls: JSON.stringify(toolCalls),
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.toolCalls).toEqual(toolCalls);
+    });
+
+    it('handles invalid JSON strings gracefully', () => {
+      const extractor = getStepDataExtractor('llm');
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: 'not-json',
+          responseItems: '{bad',
+          toolCalls: 'nope',
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.payloadMessages).toEqual([]);
+      expect(result.messages).toEqual([]);
+      expect(result.toolCalls).toEqual([]);
+    });
+
+    it('handles non-array JSON values gracefully', () => {
+      const extractor = getStepDataExtractor('llm');
+      const result = extractor(
+        {
+          model: 'gpt-4',
+          messages: JSON.stringify({
+            not: 'array',
+          }),
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.payloadMessages).toEqual([]);
+    });
+
+    it('defaults payloadMessages to empty array when missing', () => {
+      const extractor = getStepDataExtractor('llm');
+      const result = extractor(
+        {
+          model: 'gpt-4',
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.payloadMessages).toEqual([]);
     });
   });
 
