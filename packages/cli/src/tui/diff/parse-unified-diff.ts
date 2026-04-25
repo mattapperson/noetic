@@ -73,6 +73,44 @@ function tryParsePatch(uniDiff: string): StructuredPatch[] | null {
 
 //#region Public API
 
+/** Flatten all hunk lines into a single sequence in display order. */
+export function flattenHunks(diff: ParsedDiff): DiffLine[] {
+  const out: DiffLine[] = [];
+  for (const hunk of diff.hunks) {
+    for (const line of hunk.lines) {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+/** Width (digit count) of the largest line number across the diff. */
+export function gutterWidth(diff: ParsedDiff): number {
+  let max = 1;
+  for (const hunk of diff.hunks) {
+    for (const line of hunk.lines) {
+      if (line.oldLine !== undefined && line.oldLine > max) {
+        max = line.oldLine;
+      }
+      if (line.newLine !== undefined && line.newLine > max) {
+        max = line.newLine;
+      }
+    }
+  }
+  return String(max).length;
+}
+
+/** Diff line marker character (`+`, `-`, or space). */
+export function markerFor(line: DiffLine): string {
+  if (line.kind === DiffLineKind.Add) {
+    return '+';
+  }
+  if (line.kind === DiffLineKind.Del) {
+    return '-';
+  }
+  return ' ';
+}
+
 /**
  * Parse a unified-diff string and emit hunks with per-line kind + numbering.
  * Only the first patch is rendered (single-file diffs from our `edit` tool).

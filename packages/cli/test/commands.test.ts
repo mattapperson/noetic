@@ -112,12 +112,22 @@ describe('BUILTIN_COMMANDS', () => {
     expect(names).toContain('context');
     expect(names).toContain('skills');
     expect(names).toContain('agent-readiness');
+    expect(names).toContain('diff-review');
   });
 
   test('all commands have descriptions', () => {
     for (const cmd of BUILTIN_COMMANDS) {
       expect(cmd.description).toBeTruthy();
     }
+  });
+});
+
+describe('/diff-review command', () => {
+  test('is registered as a local-jsx command', () => {
+    const cmd = findCommand('diff-review', BUILTIN_COMMANDS);
+    assert(cmd !== undefined);
+    expect(cmd.type).toBe('local-jsx');
+    expect(cmd.description).toBeTruthy();
   });
 });
 

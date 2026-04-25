@@ -23,6 +23,30 @@ declare module 'diff' {
     hunks: Hunk[];
   }
 
+  interface PatchOptions {
+    context?: number;
+    ignoreWhitespace?: boolean;
+    ignoreCase?: boolean;
+    newlineIsToken?: boolean;
+  }
+
   function diffLines(oldStr: string, newStr: string): Change[];
   function parsePatch(uniDiff: string): StructuredPatch[];
+  function createPatch(
+    fileName: string,
+    oldStr: string,
+    newStr: string,
+    oldHeader?: string,
+    newHeader?: string,
+    options?: PatchOptions,
+  ): string;
+  function createTwoFilesPatch(
+    oldFileName: string,
+    newFileName: string,
+    oldStr: string,
+    newStr: string,
+    oldHeader?: string,
+    newHeader?: string,
+    options?: PatchOptions,
+  ): string;
 }

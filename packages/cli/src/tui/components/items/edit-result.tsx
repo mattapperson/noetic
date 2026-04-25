@@ -7,8 +7,14 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { z } from 'zod';
-import type { DiffHunk, DiffLine, ParsedDiff } from '../../diff/parse-unified-diff.js';
-import { DiffLineKind, parseUnifiedDiff } from '../../diff/parse-unified-diff.js';
+import type { DiffLine, ParsedDiff } from '../../diff/parse-unified-diff.js';
+import {
+  DiffLineKind,
+  flattenHunks,
+  gutterWidth,
+  markerFor,
+  parseUnifiedDiff,
+} from '../../diff/parse-unified-diff.js';
 import { ELLIPSIS, EXPAND_HINT_TEXT } from '../../glyphs.js';
 import { relativizeHome } from '../../paths.js';
 import { pluralize } from '../../plural.js';
@@ -39,39 +45,6 @@ const MAX_DIFF_LINES = 1e1;
 
 //#region Helpers
 
-function flattenHunks(hunks: ReadonlyArray<DiffHunk>): DiffLine[] {
-  const flat: DiffLine[] = [];
-  for (const hunk of hunks) {
-    for (const line of hunk.lines) {
-      flat.push(line);
-    }
-  }
-  return flat;
-}
-
-function maxLineNumber(lines: ReadonlyArray<DiffLine>): number {
-  let max = 1;
-  for (const line of lines) {
-    if (line.oldLine && line.oldLine > max) {
-      max = line.oldLine;
-    }
-    if (line.newLine && line.newLine > max) {
-      max = line.newLine;
-    }
-  }
-  return max;
-}
-
-function markerFor(kind: DiffLine['kind']): string {
-  if (kind === DiffLineKind.Add) {
-    return '+';
-  }
-  if (kind === DiffLineKind.Del) {
-    return '-';
-  }
-  return ' ';
-}
-
 function colorFor(kind: DiffLine['kind'], theme: Theme): string | undefined {
   if (kind === DiffLineKind.Add) {
     return theme.success;
@@ -82,10 +55,10 @@ function colorFor(kind: DiffLine['kind'], theme: Theme): string | undefined {
   return undefined;
 }
 
-function gutterFor(line: DiffLine, gutterWidth: number): string {
+function gutterFor(line: DiffLine, gutter: number): string {
   const num = line.newLine ?? line.oldLine;
   const numStr = num === undefined ? '' : String(num);
-  return numStr.padStart(gutterWidth, ' ');
+  return numStr.padStart(gutter, ' ');
 }
 
 //#endregion
@@ -94,13 +67,13 @@ function gutterFor(line: DiffLine, gutterWidth: number): string {
 
 interface DiffRowProps {
   line: DiffLine;
-  gutterWidth: number;
+  lineGutterWidth: number;
 }
 
-function DiffRow({ line, gutterWidth }: DiffRowProps): ReactNode {
+function DiffRow({ line, lineGutterWidth }: DiffRowProps): ReactNode {
   const theme = useTheme();
-  const marker = markerFor(line.kind);
-  const gutter = gutterFor(line, gutterWidth);
+  const marker = markerFor(line);
+  const gutter = gutterFor(line, lineGutterWidth);
   const color = colorFor(line.kind, theme);
   return (
     <Box flexDirection="row">
@@ -122,14 +95,14 @@ function keyFor(line: DiffLine): string {
 }
 
 function DiffBody({ diff, expanded = false }: DiffBodyProps): ReactNode {
-  const flat = flattenHunks(diff.hunks);
+  const flat = flattenHunks(diff);
   const visible = expanded ? flat : flat.slice(0, MAX_DIFF_LINES);
   const hidden = flat.length - visible.length;
-  const gutterWidth = String(maxLineNumber(flat)).length;
+  const gutter = gutterWidth(diff);
   return (
     <Box flexDirection="column">
       {visible.map((line) => (
-        <DiffRow key={keyFor(line)} line={line} gutterWidth={gutterWidth} />
+        <DiffRow key={keyFor(line)} line={line} lineGutterWidth={gutter} />
       ))}
       {hidden > 0 && (
         <Text dimColor>

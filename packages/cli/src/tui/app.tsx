@@ -1263,17 +1263,26 @@ function App({
           ctx,
           options: {
             onJsxComplete: (summary) => {
-              if (summary) {
-                setEntries((prev) => [
-                  ...prev,
-                  {
-                    role: 'system',
-                    type: 'info',
-                    content: summary,
-                  } satisfies SystemEntry,
-                ]);
-              }
               setModal(null);
+              if (summary === undefined) {
+                return;
+              }
+              if (typeof summary === 'string') {
+                if (summary.length > 0) {
+                  setEntries((prev) => [
+                    ...prev,
+                    {
+                      role: 'system',
+                      type: 'info',
+                      content: summary,
+                    } satisfies SystemEntry,
+                  ]);
+                }
+                return;
+              }
+              if (summary.type === 'prompt') {
+                void sendUserMessage(summary.value);
+              }
             },
           },
         });

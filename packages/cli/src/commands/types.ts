@@ -121,9 +121,24 @@ type LocalCommandResult =
     };
 
 /**
+ * Result a JSX command can hand back to the App when its modal closes.
+ *
+ * - `string`: posted to chat as an info entry (existing behaviour).
+ * - `{ type: 'prompt'; value }`: dismisses the modal and submits `value` as
+ *   the next user turn — used by `/diff-review` to send composed feedback to
+ *   the agent without an extra round-trip through the prompt input.
+ */
+type LocalJsxCommandResult =
+  | string
+  | {
+      type: 'prompt';
+      value: string;
+    };
+
+/**
  * Callback when a JSX command completes.
  */
-type LocalJsxCommandOnDone = (result?: string) => void;
+type LocalJsxCommandOnDone = (result?: LocalJsxCommandResult) => void;
 
 /**
  * Call signature for a local command implementation.
@@ -230,4 +245,6 @@ export type {
   LocalJsxCommandCall,
   LocalJsxCommandModule,
   LocalJsxCommandOnDone,
+  LocalJsxCommandResult,
+  ModalExecutionResult,
 };
