@@ -5,6 +5,8 @@
 import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 import type { LspService } from '../lsp/service.js';
+import type { AskUserService } from '../tui/services/ask-user-service.js';
+import { createAskUserTool } from './ask-user.js';
 import { createBashTool } from './bash.js';
 import { createEditTool } from './edit.js';
 import { createFindTool } from './find.js';
@@ -21,6 +23,19 @@ export {
   createActivateSkillTool,
 } from './activate-skill.js';
 export { createAgentTool } from './agent.js';
+export { type AskUserTool, createAskUserTool } from './ask-user.js';
+export {
+  type AskUserAnnotation,
+  AskUserAnnotationSchema,
+  type AskUserInput,
+  AskUserInputSchema,
+  type AskUserOption,
+  AskUserOptionSchema,
+  type AskUserOutput,
+  AskUserOutputSchema,
+  type AskUserQuestion,
+  AskUserQuestionSchema,
+} from './ask-user-types.js';
 export { type BashOutput, type BashTool, createBashTool } from './bash.js';
 export { createCheckAgentTool } from './check-agent.js';
 export { createEditTool, type EditOutput, type EditTool } from './edit.js';
@@ -68,10 +83,16 @@ export interface CreateToolsOptions {
   fs?: FsAdapter;
   shell?: ShellAdapter;
   lspService?: LspService;
+  /**
+   * Optional ask-user service, supplied by the TUI. When present, the
+   * `AskUserQuestion` tool is registered and can pause mid-turn for human
+   * input. Headless harnesses should omit it — asking with no UI would hang.
+   */
+  askUserService?: AskUserService;
 }
 
 export function createCodingTools(opts: CreateToolsOptions): Tool[] {
-  const { cwd, lspService } = opts;
+  const { cwd, lspService, askUserService } = opts;
   const fs = opts.fs ?? createLocalFsAdapter();
   const shell = opts.shell ?? createLocalShellAdapter();
   const tools: Tool[] = [
@@ -86,11 +107,14 @@ export function createCodingTools(opts: CreateToolsOptions): Tool[] {
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
   }
+  if (askUserService) {
+    tools.push(createAskUserTool(askUserService));
+  }
   return tools;
 }
 
 export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
-  const { cwd, lspService } = opts;
+  const { cwd, lspService, askUserService } = opts;
   const fs = opts.fs ?? createLocalFsAdapter();
   const shell = opts.shell ?? createLocalShellAdapter();
   const tools: Tool[] = [
@@ -101,6 +125,9 @@ export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
   ];
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
+  }
+  if (askUserService) {
+    tools.push(createAskUserTool(askUserService));
   }
   return tools;
 }

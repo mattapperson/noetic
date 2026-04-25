@@ -36,13 +36,14 @@ import { createAgentHarness, createLspService } from '../harness/factory.js';
 import type { LspService } from '../lsp/service.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
-import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
+import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
 import type { SaveResult } from '../sessions/store.js';
 import { saveSession } from '../sessions/store.js';
 import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
 import type { SessionFile } from '../sessions/types.js';
 import { buildSkillCatalog } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
+import type { AskUserOutput } from '../tools/ask-user-types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
 import { getModelContextLimit } from '../types/model-context.js';
 import type { LocalBashResult } from './bash-command.js';
@@ -59,6 +60,7 @@ import {
   parseCdArg,
   runUserShellCommand,
 } from './bash-command.js';
+import { AskUserModal } from './components/ask-user/index.js';
 import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
@@ -77,8 +79,11 @@ import {
   getItemId,
   isUserEntry,
 } from './item-utils.js';
+import type { PendingAskUserRequest } from './services/ask-user-service.js';
+import { createAskUserService } from './services/ask-user-service.js';
 import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
 import { StreamMetricsProvider } from './stream-metrics-context.js';
+import { getDefaultImageStore } from './utils/image-store.js';
 
 //#region Helpers
 
@@ -435,6 +440,9 @@ function App({
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
   const teammatesRef = useRef<TeammateRegistry | null>(null);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
+  // Created once per TUI session; survives harness swaps on /model or /plan.
+  const askUserService = useMemo(() => createAskUserService(), []);
+  const [askUserRequest, setAskUserRequest] = useState<PendingAskUserRequest | null>(null);
   const threadIdRef = useRef<string>(
     initialSession?.sessionId ?? forcedSessionId ?? crypto.randomUUID(),
   );
@@ -596,9 +604,13 @@ function App({
     streamWiredHarnessRef.current = null;
     pendingMessageIdsRef.current.clear();
     pendingBashOutputsRef.current = [];
+    askUserService.cancelAll('session cleared');
+    getDefaultImageStore().clear();
     setEntries([]);
     setStatus('ready');
-  }, []);
+  }, [
+    askUserService,
+  ]);
 
   const setCustomTitle = useCallback((name: string | undefined) => {
     customTitleRef.current = name;
@@ -635,7 +647,12 @@ function App({
     if (!modal) {
       return;
     }
-    if (pendingApprovalRef.current) {
+    // Dispatch by command name so the right owner is notified — never fire
+    // both the plan-approval reject and the ask-user cancel for one dismiss.
+    if (modal.commandName === 'ask-user') {
+      askUserService.cancelAll('modal dismissed');
+      installedAskUserIdRef.current = null;
+    } else if (pendingApprovalRef.current) {
       pendingApprovalRef.current(false);
       pendingApprovalRef.current = null;
     }
@@ -650,6 +667,90 @@ function App({
     setModal(null);
   }, [
     modal,
+    askUserService,
+  ]);
+
+  // Subscribe to ask-user requests from the running tool and drive modal state.
+  useEffect(() => {
+    return askUserService.subscribe((pending) => {
+      setAskUserRequest(pending);
+    });
+  }, [
+    askUserService,
+  ]);
+
+  const handleAskUserSubmit = useCallback(
+    (id: string, output: AskUserOutput): void => {
+      askUserService.resolve(id, output);
+      setModal(null);
+    },
+    [
+      askUserService,
+    ],
+  );
+
+  const handleAskUserCancel = useCallback(
+    (id: string, reason: string): void => {
+      askUserService.cancel(id, reason);
+      setModal(null);
+    },
+    [
+      askUserService,
+    ],
+  );
+
+  // Tracks the pending ask-user id currently installed as a modal, so the
+  // effect below is idempotent: if the modal is already ours for the current
+  // request, we don't re-run setModal (which would create a new object each
+  // render and loop).
+  const installedAskUserIdRef = useRef<string | null>(null);
+
+  // Render the ask-user modal whenever a request is pending and no other modal is active.
+  // Also tear down any orphan ask-user modal when the underlying request goes away
+  // (harness swap, programmatic cancelAll, etc.), so the dialog can't outlive
+  // its owner.
+  useEffect(() => {
+    if (askUserRequest === null) {
+      installedAskUserIdRef.current = null;
+      // If our modal is still on screen but the request behind it is gone,
+      // clear it so the user isn't left interacting with a dead dialog.
+      if (modal?.commandName === 'ask-user') {
+        setModal(null);
+      }
+      return;
+    }
+    if (installedAskUserIdRef.current === askUserRequest.id) {
+      return;
+    }
+    if (modal !== null && modal.commandName !== 'ask-user') {
+      // Another modal (e.g. plan approval) already holds the screen; defer.
+      return;
+    }
+    installedAskUserIdRef.current = askUserRequest.id;
+    setModal({
+      commandName: 'ask-user',
+      dismissMessage: 'Ask-user dialog dismissed (treated as cancellation).',
+      content: (
+        <AskUserModal
+          input={askUserRequest.input}
+          isPlanMode={agentMode === 'planning'}
+          onSubmit={(output) => handleAskUserSubmit(askUserRequest.id, output)}
+          onCancel={(reason) => handleAskUserCancel(askUserRequest.id, reason)}
+          onFinishPlanInterview={() => {
+            // In plan mode, short-circuit to ExitPlanMode semantics: cancel the
+            // ask-user request, then let the agent proceed to exitPlanMode on
+            // its next turn.
+            handleAskUserCancel(askUserRequest.id, 'user pressed Finish Interview');
+          }}
+        />
+      ),
+    });
+  }, [
+    askUserRequest,
+    modal,
+    agentMode,
+    handleAskUserSubmit,
+    handleAskUserCancel,
   ]);
 
   const planHooks = useMemo<PlanHooks>(
@@ -846,6 +947,7 @@ function App({
         planHooks,
         buildContext: buildCtx,
         lspService: lspServiceRef.current,
+        askUserService,
       });
       // Dispose any previously-held harness resources before swapping.
       const previousDispose = harnessDisposeRef.current;
@@ -875,6 +977,7 @@ function App({
       planHooks,
       buildCtx,
       wireStreams,
+      askUserService,
     ],
   );
 
@@ -892,7 +995,12 @@ function App({
     }
     harnessRef.current = null;
     streamWiredHarnessRef.current = null;
-  }, []);
+    // Reject any in-flight ask-user request — its owning harness is gone, so
+    // the dialog must close and the model's tool call gets a cancelled error.
+    askUserService.cancelAll('harness invalidated');
+  }, [
+    askUserService,
+  ]);
 
   // On unmount, tear down LSP server subprocesses. The harness-owned dispose is
   // a no-op when the TUI owns the service; the service dispose below actually
@@ -951,6 +1059,9 @@ function App({
       threadId: threadIdRef.current,
       reason: 'user-requested',
     });
+    // If the agent was mid-tool waiting on the user, kill the dialog and let
+    // the abort propagate the cancelled error back to the model.
+    askUserService.cancelAll('user stopped turn');
     if (!wasGenerating) {
       return;
     }
@@ -962,7 +1073,9 @@ function App({
         content: 'Canceled by user',
       } satisfies SystemEntry,
     ]);
-  }, []);
+  }, [
+    askUserService,
+  ]);
 
   /** Run a `cd` in-process and update the session-scoped `effectiveCwd`. */
   const runCd = useCallback(
@@ -1221,7 +1334,7 @@ function App({
     ],
   );
 
-  const footerValue = useMemo<FooterContextValue>(
+  const footerValue = useMemo<FooterContext>(
     () => ({
       model,
       cwd: effectiveCwd,

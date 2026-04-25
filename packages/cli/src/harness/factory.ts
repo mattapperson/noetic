@@ -38,6 +38,7 @@ import { createAgentTool } from '../tools/agent.js';
 import { createCheckAgentTool } from '../tools/check-agent.js';
 import { createActivateSkillTool, createCodingTools, createReadOnlyTools } from '../tools/index.js';
 import { createSendMessageTool } from '../tools/send-message.js';
+import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 
 //#region Types
@@ -207,6 +208,12 @@ interface CreateAgentHarnessOpts {
    * to tear the service down.
    */
   lspService?: LspService;
+  /**
+   * Optional ask-user service, supplied by the TUI. When present, the
+   * `AskUserQuestion` tool is registered and can pause mid-turn for user
+   * input rendered as a modal. Headless harnesses omit it.
+   */
+  askUserService?: AskUserService;
 }
 
 /**
@@ -263,12 +270,14 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
             fs,
             shell,
             lspService,
+            askUserService: opts.askUserService,
           })
         : createCodingTools({
             cwd: toolCwd,
             fs,
             shell,
             lspService,
+            askUserService: opts.askUserService,
           });
     return [
       ...builtin,
