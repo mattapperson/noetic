@@ -1,76 +1,204 @@
-# Hot Reload: AGENT.md, Rules, and Skills
+# Config UI/Command - Tab-Based Interface Plan
 
-## Problem
+## Overview
 
-AGENT.md, `.agent/rules/*.md`, and skill definitions (`.claude/skills/`, `.agent/skills/`, `.noetic/skills/`) are loaded once at harness construction time. The `agentMdLayer` and `skillsLayer` both use `scope: 'execution'`, so their `init()` result is cached for the entire CLI session. Changes to these files require restarting the agent to take effect — a friction point during iterative rule/skill authoring.
+Create a tab-based configuration interface for the `/config` command in the noetic CLI, inspired by droid's `/settings` command. This will provide an intuitive way to view and modify agent configuration settings through a structured TUI.
 
-## Goal
+## Current State Analysis
 
-Detect filesystem changes to instruction and skill files and refresh the corresponding memory layer state automatically, without restarting the CLI session. The next agent turn uses the updated content.
+From examining the codebase:
+- Configuration is defined in `packages/cli/src/types/config.ts` with `AgentConfigSchema`
+- Current commands exist in `packages/cli/src/commands/builtins/`
+- Configuration discovery exists in `packages/cli/src/config/discovery.ts`
+- No existing `/config` command - needs to be built from scratch
 
-## Design
+## Key Configuration Areas
 
-### Architecture
+Based on `AgentConfigSchema`, the main configuration areas are:
 
+1. **Model Settings**
+   - Model selection
+   - API key management
+   - Max turns
+   - System prompt configuration
+
+2. **Tools & Plugins**
+   - Plugin management (install/remove/configure)
+   - Tool inclusion/exclusion
+   - Plugin options
+
+3. **Memory Layers**
+   - Memory layer selection and configuration
+   - Custom layer settings
+
+4. **Runtime Settings**
+   - Working directory
+   - Trust settings for project commands
+   - System prompt mode (replace vs compose)
+
+5. **Worktree Configuration**
+   - Isolation settings
+   - Hook configuration
+   - Cleanup policies
+
+## UI Design (Tab-Based Structure)
+
+### Tab Layout
 ```
-File Watcher (fs.watch) ──▶ HotReloadService ──▶ harness.setLayerState()
-                              (debounced)           (mutates layer state)
+┌─ Model ─┬─ Tools & Plugins ─┬─ Memory ─┬─ Runtime ─┬─ Worktree ─┐
+│         │                   │          │           │            │
+│ Content │                   │          │           │            │ 
+│   Area  │                   │          │           │            │
+│         │                   │          │           │            │
+└─────────┴───────────────────┴──────────┴───────────┴────────────┘
 ```
 
-`AgentHarness` already exposes `getLayerState` / `setLayerState` (used by the layer lifecycle system). The CLI can mutate layer state directly between turns. The next `recall()` naturally picks up the refreshed state.
+### Tab 1: Model Settings
+- **Model Selection**: Dropdown/autocomplete for available models
+- **API Key**: Secure text input with masking
+- **Max Turns**: Numeric input with validation
+- **System Prompt**: Text area with preview
+- **System Prompt Mode**: Radio buttons (compose/replace)
 
-### Watched Paths
+### Tab 2: Tools & Plugins
+- **Installed Plugins**: List with enable/disable toggles
+- **Available Plugins**: Browse and install new plugins
+- **Plugin Configuration**: Per-plugin options editing
+- **Tool Management**: Include/exclude specific tools
+- **Plugin Status**: Health checks and version info
 
-| Category | Paths |
-|----------|-------|
-| AGENT.md + rules | `./AGENT.md`, `./.agent/AGENT.md`, `./.agent/rules/*.md` |
-| Skills | `./.noetic/skills/`, `./.agent/skills/`, `./.claude/skills/` |
+### Tab 3: Memory Layers
+- **Active Layers**: Ordered list with drag-to-reorder
+- **Available Layers**: Browse built-in and custom layers
+- **Layer Configuration**: Per-layer settings
+- **Memory Stats**: Usage and performance metrics
 
-User-global paths (`~/.config/noetic/`, `~/.noetic/`) are **not** watched by default — they change rarely and are shared across sessions. Can be opted in later.
+### Tab 4: Runtime Settings
+- **Working Directory**: Path selector with validation
+- **Trust Settings**: Checkbox for project command execution
+- **Session Persistence**: Toggle and cleanup options
+- **Performance**: Timeout and resource limits
 
-### Debounce
+### Tab 5: Worktree Configuration
+- **Isolation Mode**: Enable/disable worktree isolation
+- **Path Templates**: Configure worktree path patterns
+- **Hook Configuration**: Pre/post hooks for worktree lifecycle
+- **Cleanup Policy**: When to clean up worktrees
 
-300ms trailing debounce per watched path. Rapid saves (e.g. format-on-save + manual save) coalesce into a single reload.
+## Technical Implementation
 
-### Activation
+### Command Structure
+```typescript
+// packages/cli/src/commands/builtins/config.tsx
+export const configCommand: NoeticCommand = {
+  name: 'config',
+  description: 'Configure agent settings',
+  handler: async (ctx) => {
+    const configUI = new ConfigUI(ctx.config);
+    return configUI.render();
+  }
+};
+```
 
-Opt-in via `AgentConfig.hotReload: true` (default `false`). When enabled, `createAgentHarness` instantiates and starts a `HotReloadService` alongside the harness.
+### Component Architecture
+```typescript
+interface ConfigUIState {
+  activeTab: ConfigTab;
+  config: AgentConfig;
+  isDirty: boolean;
+  validationErrors: Record<string, string>;
+}
 
-### Notification
+enum ConfigTab {
+  Model = 'model',
+  ToolsPlugins = 'tools',
+  Memory = 'memory', 
+  Runtime = 'runtime',
+  Worktree = 'worktree'
+}
+```
 
-When a reload succeeds, emit a framework event (`agent_instructions_reloaded` or `skills_reloaded`) via the harness's event broadcaster so the TUI can show an indicator.
+### Key Components
 
-## Changes
+1. **ConfigTabs**: Main container with tab navigation
+2. **ModelConfigPanel**: Model and API key settings
+3. **PluginsPanel**: Plugin management interface
+4. **MemoryPanel**: Memory layer configuration
+5. **RuntimePanel**: Runtime behavior settings
+6. **WorktreePanel**: Worktree isolation configuration
+
+### Navigation & Interaction
+
+- **Tab Switching**: Left/Right arrow keys, Tab key, or mouse clicks
+- **Form Validation**: Real-time validation with error indicators
+- **Save/Cancel**: Explicit save required, with unsaved changes warning
+- **Help Text**: Context-sensitive help for each setting
+- **Reset**: Reset to defaults per tab or globally
+
+### Data Flow
+
+1. **Load**: Read current config from discovery system
+2. **Edit**: Modify settings in-memory with validation
+3. **Preview**: Show impact of changes before saving
+4. **Save**: Write changes back to config file
+5. **Apply**: Restart necessary services if needed
+
+## Implementation Steps
+
+### Phase 1: Core Infrastructure
+1. Create basic `/config` command handler
+2. Implement tab navigation component
+3. Set up config state management
+4. Create validation framework
+
+### Phase 2: Individual Tabs
+1. Model configuration tab (most critical)
+2. Runtime settings tab
+3. Tools & plugins tab
+4. Memory configuration tab
+5. Worktree configuration tab
+
+### Phase 3: Polish & Features
+1. Add help system and tooltips
+2. Implement config validation
+3. Add import/export functionality
+4. Create config templates/presets
+
+### Phase 4: Advanced Features
+1. Plugin marketplace integration
+2. Configuration sharing
+3. Advanced validation and recommendations
+4. Configuration migration tools
+
+## Files to Create/Modify
 
 ### New Files
-
-- `packages/cli/src/hot-reload/service.ts` — `HotReloadService` class
-- `packages/cli/src/hot-reload/watcher.ts` — thin `fs.watch` wrapper with debounce
-- `packages/cli/src/hot-reload/index.ts` — public exports
-- `packages/cli/test/hot-reload.test.ts` — unit tests
+- `packages/cli/src/commands/builtins/config.tsx` - Main command
+- `packages/cli/src/commands/builtins/config/` - Component directory
+  - `config-tabs.tsx` - Tab container
+  - `model-panel.tsx` - Model configuration
+  - `plugins-panel.tsx` - Plugin management
+  - `memory-panel.tsx` - Memory layers
+  - `runtime-panel.tsx` - Runtime settings
+  - `worktree-panel.tsx` - Worktree configuration
+  - `config-types.ts` - UI-specific types
 
 ### Modified Files
+- `packages/cli/src/commands/builtins/index.ts` - Register new command
+- `packages/cli/src/types/config.ts` - Add UI state types if needed
 
-- `packages/cli/src/types/config.ts` — add `hotReload?: boolean` to `AgentConfig`
-- `packages/cli/src/harness/factory.ts` — start `HotReloadService` when `config.hotReload === true`
-- `packages/cli/src/config/agent-md-loader.ts` — export `getWatchedPaths(cwd)` helper
-- `packages/cli/src/skills/discovery.ts` — export `getWatchedSkillDirs(cwd)` helper
-- `packages/cli/src/index.ts` — re-export hot-reload types
-- `specs/12a-cli-memory-layers.md` — document hot-reload behavior
+## Success Metrics
 
-## No Core Changes Required
+1. **Usability**: Users can easily navigate and modify settings
+2. **Completeness**: All `AgentConfig` fields are configurable
+3. **Validation**: Clear error messages for invalid configurations
+4. **Performance**: Responsive UI with minimal lag
+5. **Consistency**: Matches droid's UX patterns and conventions
 
-The feature is purely in `@noetic/cli`. The harness's existing `setLayerState` API is sufficient. No changes to `@noetic/core` memory layer contracts, hooks, or lifecycle.
+## Future Enhancements
 
-## Test Strategy
-
-1. **Unit**: Mock `fs.watch` to simulate file changes; assert `setLayerState` is called with updated content.
-2. **Integration**: Create temp files → start service → mutate files → assert layer state reflects changes.
-3. **Debounce**: Fire two rapid changes → assert loader runs exactly once.
-4. **Cleanup**: Stop service → assert watchers are closed.
-
-## Out of Scope (Future)
-
-- Watching user-global paths (`~/.config/noetic/`, `~/.noetic/`)
-- Pushing a `<system-reminder>` to the model mid-turn (only refreshes on next `recall`)
-- Watchman/chokidar integration (keep zero new dependencies; use `node:fs`)
+1. **Configuration Profiles**: Multiple named configurations
+2. **Team Sharing**: Export/import configurations
+3. **Advanced Validation**: Dependency checking between settings
+4. **Plugin Marketplace**: Browse and install plugins from registry
+5. **Configuration History**: Track and revert configuration changes
