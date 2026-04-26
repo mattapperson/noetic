@@ -44,7 +44,7 @@ describe('presets', () => {
     const segments = resolveSegments(PRESETS[name]);
     expect(segments.length).toBeGreaterThan(0);
     for (const seg of segments) {
-      const result = seg({
+      const result = seg.render({
         ctx,
         theme: DEFAULT_THEME,
         icons,

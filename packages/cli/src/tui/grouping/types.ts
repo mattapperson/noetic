@@ -5,6 +5,7 @@
  */
 
 import type { ConversationEntry } from '../item-utils.js';
+import { getItemId, isErrorEntry, isSystemEntry, isUserEntry } from '../item-utils.js';
 
 //#region Types
 
@@ -50,6 +51,40 @@ export function isCollapsedReadGroup(entry: DisplayEntry): entry is CollapsedRea
 
 export function totalOpCount(group: CollapsedReadGroup): number {
   return group.readPaths.length + group.listPaths.length + group.searchPatterns.length;
+}
+
+//#endregion
+
+//#region Static keys
+
+export interface StaticEntryItem {
+  readonly key: string;
+  readonly entry: DisplayEntry;
+  readonly index: number;
+}
+
+export function staticKeyFor(entry: DisplayEntry, index: number): string {
+  if (isCollapsedReadGroup(entry)) {
+    return entry.id;
+  }
+  if (isUserEntry(entry)) {
+    return `user-${index}`;
+  }
+  if (isErrorEntry(entry)) {
+    return `error-${index}`;
+  }
+  if (isSystemEntry(entry)) {
+    return `system-${index}`;
+  }
+  return getItemId(entry);
+}
+
+export function toStaticEntryItems(entries: ReadonlyArray<DisplayEntry>): StaticEntryItem[] {
+  return entries.map((entry, index) => ({
+    key: staticKeyFor(entry, index),
+    entry,
+    index,
+  }));
 }
 
 //#endregion

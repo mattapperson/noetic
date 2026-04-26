@@ -211,7 +211,7 @@ export function LoadingSpinner({ mode, message }: LoadingSpinnerProps): ReactNod
   // for even one tick, the previous spinner line is left behind and the
   // ticks accumulate as a visible column of verbs.
   return (
-    <Text>
+    <Text wrap="truncate-end">
       <Text color={theme.primary}>{spinnerChar}</Text>
       <Text color={theme.muted}>{` ${displayMessage}${modeSuffix}${metricsSuffix}`}</Text>
     </Text>

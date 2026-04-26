@@ -1,7 +1,9 @@
 import { useFooterContext } from '@noetic/cli';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import stringWidth from 'string-width';
+import { fitSegments } from './fit.js';
 import type { GitStatus } from './git-status.js';
 import { getGitStatus } from './git-status.js';
 import type { IconSet } from './icons.js';
@@ -18,8 +20,69 @@ interface FooterProps {
   useNerdSeparators: boolean;
 }
 
+interface NamedCell {
+  readonly name: string;
+  readonly out: SegmentOutput;
+}
+
+interface SeparatorProps {
+  cell: SegmentOutput;
+  next: SegmentOutput | undefined;
+  useNerdSeparators: boolean;
+  separators: SeparatorSet;
+  separatorColor: string;
+}
+
 const GIT_REFRESH_MS = 1e3;
 const CLOCK_REFRESH_MS = 1e3;
+const FALLBACK_COLUMNS = 80;
+const SAFETY_MARGIN = 1;
+// ASCII separator renders as ` ${sep} ` — one leading + one trailing space.
+const ASCII_SEPARATOR_PADDING = 2;
+const TIME_DEPENDENT_SEGMENTS: ReadonlySet<string> = new Set([
+  'clock',
+  'session_time',
+]);
+
+function hasTimeSegment(segments: ReadonlyArray<string>): boolean {
+  for (const name of segments) {
+    if (TIME_DEPENDENT_SEGMENTS.has(name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function renderSeparator({
+  cell,
+  next,
+  useNerdSeparators,
+  separators,
+  separatorColor,
+}: SeparatorProps): ReactNode {
+  if (next && useNerdSeparators) {
+    return (
+      <Text backgroundColor={next.bg} color={cell.bg} wrap="truncate-end">
+        {separators.main}
+      </Text>
+    );
+  }
+  if (next) {
+    return (
+      <Text color={separatorColor} wrap="truncate-end">
+        {` ${separators.main} `}
+      </Text>
+    );
+  }
+  if (useNerdSeparators) {
+    return (
+      <Text color={cell.bg} wrap="truncate-end">
+        {separators.main}
+      </Text>
+    );
+  }
+  return null;
+}
 
 export function Footer({
   segments,
@@ -29,8 +92,10 @@ export function Footer({
   useNerdSeparators,
 }: FooterProps): ReactNode {
   const ctx = useFooterContext();
+  const { stdout } = useStdout();
   const [git, setGit] = useState<GitStatus | null>(null);
   const [now, setNow] = useState<number>(Date.now());
+  const needsClock = hasTimeSegment(segments);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,14 +118,19 @@ export function Footer({
   ]);
 
   useEffect(() => {
+    if (!needsClock) {
+      return;
+    }
     const interval = setInterval(() => setNow(Date.now()), CLOCK_REFRESH_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [
+    needsClock,
+  ]);
 
   const resolved = resolveSegments(segments);
-  const rendered: SegmentOutput[] = [];
+  const rendered: NamedCell[] = [];
   for (const seg of resolved) {
-    const out = seg({
+    const out = seg.render({
       ctx,
       theme,
       icons,
@@ -68,37 +138,54 @@ export function Footer({
       now,
     });
     if (out !== null) {
-      rendered.push(out);
+      rendered.push({
+        name: seg.name,
+        out,
+      });
     }
   }
   if (rendered.length === 0) {
     return null;
   }
 
+  const columns = stdout?.columns ?? FALLBACK_COLUMNS;
+  const sepMainWidth = stringWidth(separators.main);
+  const sepBetween = useNerdSeparators ? sepMainWidth : sepMainWidth + ASCII_SEPARATOR_PADDING;
+  const sepTrailing = useNerdSeparators ? sepMainWidth : 0;
+  const fitted = fitSegments<NamedCell>({
+    cells: rendered,
+    toText: (c) => c.out.text,
+    withText: (c, text) => ({
+      name: c.name,
+      out: {
+        ...c.out,
+        text,
+      },
+    }),
+    sepBetween,
+    sepTrailing,
+    budget: columns - SAFETY_MARGIN,
+  });
+  if (fitted.length === 0) {
+    return null;
+  }
+
   return (
     <Box flexDirection="row">
-      {rendered.map((cell, idx) => {
-        const next = rendered[idx + 1];
-        return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: segment order is fixed by config
-          <Box key={`${cell.bg}-${cell.text}-${idx}`} flexDirection="row">
-            <Text backgroundColor={cell.bg} color={cell.fg} bold={cell.bold}>
-              {` ${cell.text} `}
-            </Text>
-            {next ? (
-              useNerdSeparators ? (
-                <Text backgroundColor={next.bg} color={cell.bg}>
-                  {separators.main}
-                </Text>
-              ) : (
-                <Text color={theme.separator}>{` ${separators.main} `}</Text>
-              )
-            ) : useNerdSeparators ? (
-              <Text color={cell.bg}>{separators.main}</Text>
-            ) : null}
-          </Box>
-        );
-      })}
+      {fitted.map(({ name, out: cell }, idx) => (
+        <Fragment key={name}>
+          <Text backgroundColor={cell.bg} color={cell.fg} bold={cell.bold} wrap="truncate-end">
+            {` ${cell.text} `}
+          </Text>
+          {renderSeparator({
+            cell,
+            next: fitted[idx + 1]?.out,
+            useNerdSeparators,
+            separators,
+            separatorColor: theme.separator,
+          })}
+        </Fragment>
+      ))}
     </Box>
   );
 }

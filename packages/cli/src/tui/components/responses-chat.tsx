@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
 import type { CollapsedReadGroup, DisplayEntry } from '../grouping/types.js';
-import { isCollapsedReadGroup } from '../grouping/types.js';
+import { isCollapsedReadGroup, toStaticEntryItems } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import {
   extractReasoning,
@@ -175,22 +175,6 @@ function isPartOfAssistantTurn(categories: EntryCategory[], index: number): bool
 
 function renderCollapsedGroup(group: CollapsedReadGroup): ReactNode {
   return <CollapsedReadGroupView key={group.id} group={group} />;
-}
-
-function staticKeyFor(entry: DisplayEntry, index: number): string {
-  if (isCollapsedReadGroup(entry)) {
-    return entry.id;
-  }
-  if (isUserEntry(entry)) {
-    return `user-${index}`;
-  }
-  if (isErrorEntry(entry)) {
-    return `error-${index}`;
-  }
-  if (isSystemEntry(entry)) {
-    return `system-${index}`;
-  }
-  return getItemId(entry);
 }
 
 function renderEntry(entry: DisplayEntry, index: number, ctx: RenderContext): ReactNode {
@@ -513,12 +497,7 @@ export function ResponsesChat({
   ]);
 
   const staticItems = useMemo(
-    () =>
-      collapsedCompleted.map((entry, i) => ({
-        key: staticKeyFor(entry, i),
-        entry,
-        index: i,
-      })),
+    () => toStaticEntryItems(collapsedCompleted),
     [
       collapsedCompleted,
     ],

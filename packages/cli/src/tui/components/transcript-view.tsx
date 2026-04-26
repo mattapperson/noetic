@@ -10,8 +10,10 @@
  * and key handling.
  */
 
-import { Box, Text } from 'ink';
+import { Box, Static, Text } from 'ink';
 import type { ReactNode } from 'react';
+import { useMemo } from 'react';
+import { staticKeyFor } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import {
   extractReasoning,
@@ -46,6 +48,12 @@ export interface CallInfo {
 export interface TranscriptViewProps {
   entries: ReadonlyArray<ConversationEntry>;
   callInfoByCallId: ReadonlyMap<string, CallInfo>;
+}
+
+interface TranscriptItem {
+  readonly key: string;
+  readonly entry: ConversationEntry;
+  readonly index: number;
 }
 
 //#endregion
@@ -89,7 +97,9 @@ function renderResultForTool(toolName: string, output: unknown, isError: boolean
   }
   return (
     <MessageResponse>
-      <Text dimColor={!isError}>{text}</Text>
+      <Text dimColor={!isError} wrap="wrap">
+        {text}
+      </Text>
     </MessageResponse>
   );
 }
@@ -160,6 +170,17 @@ function renderExpandedEntry(entry: ConversationEntry, index: number, ctx: Dispa
 
 export function TranscriptView({ entries, callInfoByCallId }: TranscriptViewProps): ReactNode {
   const theme = useTheme();
+  const items = useMemo<TranscriptItem[]>(
+    () =>
+      entries.map((entry, index) => ({
+        key: staticKeyFor(entry, index),
+        entry,
+        index,
+      })),
+    [
+      entries,
+    ],
+  );
   return (
     <Box flexDirection="column" width="100%">
       <Box flexDirection="row" marginBottom={1}>
@@ -168,28 +189,17 @@ export function TranscriptView({ entries, callInfoByCallId }: TranscriptViewProp
         </Text>
         <Text dimColor> — press ctrl+o or Esc to close</Text>
       </Box>
-      {entries.map((entry, index) => (
-        <Box key={getKey(entry, index)} flexDirection="column">
-          {renderExpandedEntry(entry, index, {
-            callInfoByCallId,
-          })}
-        </Box>
-      ))}
+      <Static items={items}>
+        {(item: TranscriptItem) => (
+          <Box key={item.key} flexDirection="column">
+            {renderExpandedEntry(item.entry, item.index, {
+              callInfoByCallId,
+            })}
+          </Box>
+        )}
+      </Static>
     </Box>
   );
-}
-
-function getKey(entry: ConversationEntry, index: number): string {
-  if (isUserEntry(entry)) {
-    return `user-${entry.id ?? index}`;
-  }
-  if (isErrorEntry(entry)) {
-    return `error-${index}`;
-  }
-  if (isSystemEntry(entry)) {
-    return `system-${index}`;
-  }
-  return getItemId(entry);
 }
 
 //#endregion
