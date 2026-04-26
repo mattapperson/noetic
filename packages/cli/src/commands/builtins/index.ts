@@ -6,6 +6,7 @@ import type { Command } from '../types.js';
 
 import { agentReadiness } from './agent-readiness.js';
 import { clear } from './clear.js';
+import { config } from './config.js';
 import { context } from './context.js';
 import { diffReview } from './diff-review/index.js';
 import { mode } from './mode.js';
@@ -23,6 +24,7 @@ import { tag } from './tag.js';
 export const BUILTIN_COMMANDS: ReadonlyArray<Command> = [
   agentReadiness,
   clear,
+  config,
   context,
   diffReview,
   mode,
@@ -38,6 +40,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<Command> = [
 export {
   agentReadiness,
   clear,
+  config,
   context,
   diffReview,
   mode,
