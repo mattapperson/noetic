@@ -11,6 +11,7 @@ import { createBashTool } from './bash.js';
 import { createEditTool } from './edit.js';
 import { createFindTool } from './find.js';
 import { createGrepTool } from './grep.js';
+import { createInteractiveTerminalTool } from './interactive-terminal.js';
 import { createLsTool } from './ls.js';
 import { createLspTool } from './lsp.js';
 import { createReadTool } from './read.js';
@@ -51,6 +52,15 @@ export {
 } from './edit-diff.js';
 export { createFindTool, type FindOutput, type FindTool } from './find.js';
 export { createGrepTool, type GrepOutput, type GrepTool } from './grep.js';
+export {
+  type CreateInteractiveTerminalOptions,
+  createInteractiveTerminalTool,
+  type InteractiveTerminalInput,
+  InteractiveTerminalInputSchema,
+  type InteractiveTerminalOutput,
+  InteractiveTerminalOutputSchema,
+  type InteractiveTerminalTool,
+} from './interactive-terminal.js';
 export { createLsTool, type LsOutput, type LsTool } from './ls.js';
 export { expandPath, resolveReadPath, resolveToCwd } from './path-utils.js';
 export {
@@ -109,6 +119,7 @@ export function createCodingTools(opts: CreateToolsOptions): Tool[] {
     createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
+    createInteractiveTerminalTool(cwd, shell),
   ];
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
@@ -128,6 +139,9 @@ export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
     createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
+    createInteractiveTerminalTool(cwd, shell, {
+      readonly: true,
+    }),
   ];
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));

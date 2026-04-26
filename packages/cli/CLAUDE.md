@@ -85,6 +85,7 @@ Tools are created with a `cwd` context and return `Tool` type from `@noetic/core
 | `grep` | Search file contents |
 | `find` | Find files by pattern |
 | `ls` | List directory contents |
+| `InteractiveTerminal` | Drive a TUI program through pilotty (spawn / snapshot / key / type / wait-for / kill / list-sessions / click / scroll). In read-only mode (`createReadOnlyTools`), `spawn` rejects mutators (editors, shells, agent CLIs, file managers, mutating git TUIs); other actions are unaffected. |
 | `agent` | Spawn a sub-agent (teammate) sync, background, or named+addressable; optional `isolation: 'worktree'`. Picks skill by `subagent_type`. |
 | `sendMessage` | Write a message to a named teammate's inbound queue; the teammate sees it as `<inbound-message>` on its next turn. |
 | `checkAgent` | Poll status/result/error of a previously-launched teammate by agentId. |
