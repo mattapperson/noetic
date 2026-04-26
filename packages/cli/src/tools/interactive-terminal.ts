@@ -135,7 +135,16 @@ const ScrollSchema = z.object({
   session: SessionRefSchema.optional(),
 });
 
-const InteractiveTerminalInputSchema = z.discriminatedUnion('action', [
+function formatZodIssues(error: z.ZodError): string {
+  return error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ');
+}
+
+// Discriminated union — kept for per-action runtime validation and TS
+// narrowing inside the tool. Not exposed as the LLM-visible schema because
+// `z.toJSONSchema(z.discriminatedUnion(...))` emits a top-level `oneOf`,
+// and OpenAI's function-calling validator rejects any tool whose root
+// parameters schema is not `type: "object"`.
+const InternalInputSchema = z.discriminatedUnion('action', [
   SpawnSchema,
   SnapshotSchema,
   KeySchema,
@@ -146,6 +155,122 @@ const InteractiveTerminalInputSchema = z.discriminatedUnion('action', [
   ClickSchema,
   ScrollSchema,
 ]);
+
+type InternalInput = z.infer<typeof InternalInputSchema>;
+
+// Flat LLM-visible schema. Every variant's fields appear as optional
+// properties on a single object so `z.toJSONSchema` emits
+// `{ type: "object", properties: {...} }` at the root. Per-action required
+// fields are enforced by re-parsing through `InternalInputSchema` inside
+// `execute`.
+const InteractiveTerminalInputSchema = z.object({
+  action: z
+    .enum([
+      'spawn',
+      'snapshot',
+      'key',
+      'type',
+      'wait-for',
+      'kill',
+      'list-sessions',
+      'click',
+      'scroll',
+    ])
+    .describe('Action to perform. Required fields vary by action — see field descriptions.'),
+  command: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('spawn (required): program (and optional args), e.g. "vim file.txt" or "htop".'),
+  name: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'spawn (optional, recommended): human-readable session name so later actions can address it.',
+    ),
+  cwd: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('spawn (optional): working directory for the spawned process.'),
+  session: SessionRefSchema.optional().describe(
+    'snapshot/key/type/wait-for/kill/click/scroll (optional): session name or UUID. Defaults to "default".',
+  ),
+  format: z
+    .enum([
+      'text',
+      'full',
+      'compact',
+    ])
+    .optional()
+    .describe(
+      'snapshot (optional): output format. Default "text" — easiest to read; cursor shown as [_].',
+    ),
+  settleMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      'snapshot (optional): wait until the screen is stable for this many ms before sampling.',
+    ),
+  awaitChange: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'snapshot (optional): content_hash from a previous snapshot — block until the screen differs.',
+    ),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('snapshot/wait-for (optional): total timeout in ms (pilotty default: 30000).'),
+  key: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'key (required): key, combo, or space-separated sequence (e.g. "Enter", "Ctrl+C", "Escape : w q Enter").',
+    ),
+  delayMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(1e4)
+    .optional()
+    .describe('key (optional): delay between keys in a sequence (ms, max 10000).'),
+  text: z
+    .string()
+    .optional()
+    .describe('type (required): text to type at the current cursor. Supports \\n etc.'),
+  pattern: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('wait-for (required): text or regex pattern to wait for.'),
+  regex: z
+    .boolean()
+    .optional()
+    .describe('wait-for (optional): treat pattern as a regex (default: literal match).'),
+  row: z.number().int().min(0).optional().describe('click (required): 0-indexed row.'),
+  col: z.number().int().min(0).optional().describe('click (required): 0-indexed column.'),
+  direction: z
+    .enum([
+      'up',
+      'down',
+    ])
+    .optional()
+    .describe('scroll (required): scroll direction.'),
+  amount: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('scroll (optional): lines to scroll (default: 1).'),
+});
 
 const InteractiveTerminalOutputSchema = z.object({
   output: z.string().describe('Pilotty stdout (and stderr on failure), truncated for snapshots.'),
@@ -374,7 +499,7 @@ function buildScroll(input: z.infer<typeof ScrollSchema>): BuiltCommand {
 // Switch is used instead of a handler registry here because each case
 // requires a narrowed discriminated-union type. A Record<string, Handler>
 // would lose that narrowing and require unsafe casts.
-function dispatchHandler(input: InteractiveTerminalInput): BuiltCommand {
+function dispatchHandler(input: InternalInput): BuiltCommand {
   switch (input.action) {
     case 'spawn':
       return buildSpawn(input);
@@ -423,7 +548,7 @@ function buildShellLine(binary: string, built: BuiltCommand): string {
 
 //#region Output assembly
 
-type InteractiveTerminalAction = InteractiveTerminalInput['action'];
+type InteractiveTerminalAction = InternalInput['action'];
 
 interface BuildOutputParams {
   action: InteractiveTerminalAction;
@@ -476,7 +601,7 @@ function buildOutput(params: BuildOutputParams): InteractiveTerminalOutput {
 
 function rejectSpawn(
   params: Extract<
-    InteractiveTerminalInput,
+    InternalInput,
     {
       action: 'spawn';
     }
@@ -491,7 +616,7 @@ function rejectSpawn(
   };
 }
 
-function missingBinaryResult(params: InteractiveTerminalInput): InteractiveTerminalOutput {
+function missingBinaryResult(params: InternalInput): InteractiveTerminalOutput {
   return {
     output: `Error: ${MISSING_BINARY_MESSAGE}`,
     action: params.action,
@@ -501,7 +626,7 @@ function missingBinaryResult(params: InteractiveTerminalInput): InteractiveTermi
 }
 
 interface RunPilottyArgs {
-  params: InteractiveTerminalInput;
+  params: InternalInput;
   binary: string;
   shell: ShellAdapter;
   cwd: string;
@@ -553,7 +678,17 @@ export function createInteractiveTerminalTool(
     description: INTERACTIVE_TERMINAL_DESCRIPTION,
     input: InteractiveTerminalInputSchema,
     output: InteractiveTerminalOutputSchema,
-    async execute(params): Promise<InteractiveTerminalOutput> {
+    async execute(rawParams): Promise<InteractiveTerminalOutput> {
+      const parsed = InternalInputSchema.safeParse(rawParams);
+      if (!parsed.success) {
+        return {
+          output: `Error: invalid params for action "${rawParams.action}": ${formatZodIssues(parsed.error)}`,
+          action: rawParams.action,
+          session: rawParams.session,
+          truncated: false,
+        };
+      }
+      const params = parsed.data;
       if (params.action === 'spawn') {
         const validation = validateSpawnCommand(params.command, {
           readonly: isReadonly,

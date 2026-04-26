@@ -230,10 +230,6 @@ describe('createInteractiveTerminalTool — argv shape', () => {
   test('key rejects delayMs above 10000 at the schema layer', () => {
     const { shell } = stubShell();
     const tool = createInteractiveTerminalTool(CWD, shell);
-    // Schema rejection surfaces as a thrown validation error from the
-    // tool builder. We accept either rejection (zod-validated) or a
-    // structured "invalid input" path; what matters is the exec call
-    // never happens. Confirm by asserting via parse().
     const parsed = tool.input.safeParse({
       action: 'key',
       key: 'Enter',
@@ -703,22 +699,26 @@ describe('createInteractiveTerminalTool — schema', () => {
     expect(parsed.success).toBe(false);
   });
 
-  test('rejects spawn without command', () => {
-    const { shell } = stubShell();
+  test('rejects spawn without command', async () => {
+    const { shell, calls } = stubShell();
     const tool = createInteractiveTerminalTool(CWD, shell);
-    const parsed = tool.input.safeParse({
+    const out = await runTool(tool, {
       action: 'spawn',
     });
-    expect(parsed.success).toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(out.output).toContain('invalid params for action "spawn"');
+    expect(out.output).toContain('command');
   });
 
-  test('rejects key without key field', () => {
-    const { shell } = stubShell();
+  test('rejects key without key field', async () => {
+    const { shell, calls } = stubShell();
     const tool = createInteractiveTerminalTool(CWD, shell);
-    const parsed = tool.input.safeParse({
+    const out = await runTool(tool, {
       action: 'key',
     });
-    expect(parsed.success).toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(out.output).toContain('invalid params for action "key"');
+    expect(out.output).toContain('key');
   });
 
   test('rejects negative click coordinates', () => {
