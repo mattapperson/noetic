@@ -14,6 +14,55 @@ export const BANNED_COMMANDS = new Set([
   'chgrp',
 ]);
 
+/**
+ * Commands that take over the terminal with a full-screen UI or block
+ * waiting for keyboard input. Running them through this tool will hang
+ * until the timeout fires, so reject upfront with a helpful error.
+ */
+export const INTERACTIVE_TUI_COMMANDS = new Set([
+  'vim',
+  'vi',
+  'nvim',
+  'view',
+  'nano',
+  'pico',
+  'micro',
+  'emacs',
+  'joe',
+  'less',
+  'more',
+  'most',
+  'top',
+  'htop',
+  'btop',
+  'btop++',
+  'atop',
+  'glances',
+  'iotop',
+  'iftop',
+  'nethogs',
+  'tmux',
+  'screen',
+  'zellij',
+  'tig',
+  'lazygit',
+  'gitui',
+  'mc',
+  'ranger',
+  'nnn',
+  'lf',
+  'ncdu',
+  'lynx',
+  'w3m',
+  'links',
+  'elinks',
+  'mutt',
+  'neomutt',
+  'alpine',
+  'irssi',
+  'weechat',
+]);
+
 interface RiskPattern {
   pattern: RegExp;
   description: string;
@@ -93,6 +142,12 @@ export function isBannedCommand(command: string): {
   };
 }
 
+/** Returns the matched interactive command name, or undefined if the command is not interactive. */
+export function isInteractiveCommand(command: string): string | undefined {
+  const firstCmd = getFirstCommand(command);
+  return INTERACTIVE_TUI_COMMANDS.has(firstCmd) ? firstCmd : undefined;
+}
+
 export function validateCommand(command: string): {
   valid: boolean;
   error?: string;
@@ -109,6 +164,14 @@ export function validateCommand(command: string): {
     return {
       valid: false,
       error: banned.reason,
+    };
+  }
+
+  const interactiveName = isInteractiveCommand(command);
+  if (interactiveName) {
+    return {
+      valid: false,
+      error: `'${interactiveName}' is an interactive terminal program and cannot be used through this tool. Use the Read tool to view files, the Edit tool to modify them, or pipe to a non-interactive alternative.`,
     };
   }
 

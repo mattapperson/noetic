@@ -58,7 +58,13 @@ export {
   type ReadOutput,
   type ReadTool,
 } from './read.js';
-export { getRiskDescription, isHighRiskCommand, validateCommand } from './security.js';
+export {
+  getRiskDescription,
+  isBannedCommand,
+  isHighRiskCommand,
+  isInteractiveCommand,
+  validateCommand,
+} from './security.js';
 export { createSendMessageTool } from './send-message.js';
 export {
   formatSize,

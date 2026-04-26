@@ -364,6 +364,8 @@ export type { FsAdapter, FsStats } from './types/fs-adapter';
 
 /** @public */
 export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
+/** @public */
+export { TIMEOUT_ERROR_PREFIX } from './types/shell-adapter';
 
 //#endregion
 

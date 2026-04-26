@@ -1,4 +1,8 @@
-import type { ShellAdapter, ShellExecResult } from '../types/shell-adapter';
+import {
+  type ShellAdapter,
+  type ShellExecResult,
+  TIMEOUT_ERROR_PREFIX,
+} from '../types/shell-adapter';
 
 //#region Helpers
 
@@ -57,11 +61,14 @@ export function createLocalShellAdapter(): ShellAdapter {
         },
       );
 
+      let timedOut = false;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      if (options.timeout !== undefined && options.timeout > 0) {
+      const timeoutSeconds = options.timeout;
+      if (timeoutSeconds !== undefined && timeoutSeconds > 0) {
         timeoutHandle = setTimeout(() => {
+          timedOut = true;
           proc.kill();
-        }, options.timeout * 1e3);
+        }, timeoutSeconds * 1e3);
       }
 
       const abortHandler = (): void => {
@@ -80,6 +87,14 @@ export function createLocalShellAdapter(): ShellAdapter {
         ]);
 
         const exitCode = await proc.exited;
+
+        // Only timeout throws. Signal-driven aborts resolve normally so
+        // callers can decide via their own state whether the result is
+        // a real exit or a cancellation (see runUserShellCommand).
+        if (timedOut) {
+          throw new Error(`${TIMEOUT_ERROR_PREFIX}${timeoutSeconds}`);
+        }
+
         return {
           stdout,
           stderr,

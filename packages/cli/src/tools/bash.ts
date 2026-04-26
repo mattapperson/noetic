@@ -9,7 +9,7 @@ import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ShellAdapter, Tool } from '@noetic/core';
-import { toolWithGenerator } from '@noetic/core';
+import { TIMEOUT_ERROR_PREFIX, toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
 import { validateCommand } from './security.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from './truncate.js';
@@ -17,6 +17,33 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from '
 //#region Constants
 
 const DEFAULT_BASH_TIMEOUT = 12e1;
+
+/**
+ * Pre-encoded byte sequences a TUI emits when entering alternate-screen
+ * mode. If we see any of these in the output stream the command is taking
+ * over the terminal and will hang on input — abort and surface a clear
+ * error to the model. Scanned with `Buffer.indexOf` to avoid decoding the
+ * full chunk to UTF-8 on every callback.
+ *
+ * - 1049: xterm alt-screen + cursor save (vim, htop, less, …)
+ * - 1047: alt-screen only
+ * - 47:   legacy alt-screen
+ */
+const ESC = String.fromCharCode(27);
+const ALT_SCREEN_NEEDLES: ReadonlyArray<Buffer> = [
+  Buffer.from(`${ESC}[?1049h`, 'ascii'),
+  Buffer.from(`${ESC}[?1047h`, 'ascii'),
+  Buffer.from(`${ESC}[?47h`, 'ascii'),
+];
+
+function containsAltScreenEntry(data: Buffer): boolean {
+  for (const needle of ALT_SCREEN_NEEDLES) {
+    if (data.indexOf(needle) !== -1) {
+      return true;
+    }
+  }
+  return false;
+}
 
 //#endregion
 
@@ -190,8 +217,8 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
     };
   }
 
-  if (error.message.startsWith('timeout:')) {
-    const timeoutSecs = error.message.split(':')[1];
+  if (error.message.startsWith(TIMEOUT_ERROR_PREFIX)) {
+    const timeoutSecs = error.message.slice(TIMEOUT_ERROR_PREFIX.length);
     return {
       output: output
         ? `${output}\n\nCommand timed out after ${timeoutSecs} seconds`
@@ -249,11 +276,21 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
         done: false,
       };
 
+      const abortController = new AbortController();
+
       const execPromise = shell
         .exec(command, {
           cwd,
           timeout,
+          signal: abortController.signal,
           onData: (data: Buffer) => {
+            if (abortController.signal.aborted) {
+              return;
+            }
+            if (containsAltScreenEntry(data)) {
+              abortController.abort();
+              return;
+            }
             if (resolveData) {
               resolveData(data);
               resolveData = null;
@@ -296,6 +333,9 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
       };
 
       while (true) {
+        if (abortController.signal.aborted) {
+          break;
+        }
         const data = await getNextChunk();
         if (data === null) {
           break;
@@ -340,6 +380,17 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
       }
 
       const finalExitCode = execState.result ? execState.result.exitCode : null;
+
+      if (abortController.signal.aborted) {
+        return {
+          output:
+            "Command appears to be an interactive TUI program (it tried to enter alternate-screen mode). Interactive programs aren't supported through this tool — use Read/Edit for files, or invoke the program with non-interactive flags (e.g. `git --no-pager`, `<repl> -c '<expr>'`).",
+          command,
+          cancelled: true,
+          truncated: false,
+          timeout,
+        };
+      }
 
       if (execState.error) {
         const errorResult = buildErrorResult({
