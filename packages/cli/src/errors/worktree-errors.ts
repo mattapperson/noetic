@@ -73,7 +73,7 @@ export function worktreeHookFailed(args: { hook: string; detail: string }): Noet
   return new NoeticConfigError({
     code: WorktreeErrorCode.WorktreeHookFailed,
     message: `worktree hook '${args.hook}' failed: ${args.detail}`,
-    hint: 'Fix the hook command in `worktree.{pre-start,post-start,pre-remove}` config, or remove the failing hook.',
+    hint: 'Fix the hook command in `worktree.{pre-start,post-start,post-merge,pre-remove}` config, or remove the failing hook.',
   });
 }
 

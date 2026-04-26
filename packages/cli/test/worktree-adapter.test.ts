@@ -460,3 +460,143 @@ describe('cleanup modes', () => {
     expect(wt.worktreePath).toContain('agent-d');
   });
 });
+
+describe('post-merge hooks', () => {
+  test('runPostMergeHook executes configured hooks', async () => {
+    const { shell, calls } = createMockShell(happyPathProgramming());
+    const wt = await createAgentWorktree({
+      agentId: 'agent-pm',
+      cwd: '/repo',
+      shell,
+      config: {
+        'post-merge': 'bun install && bun run build',
+      },
+    });
+
+    await wt.runPostMergeHook();
+
+    const postMergeCalls = calls.filter((c) => c.command.includes('bun install && bun run build'));
+    expect(postMergeCalls).toHaveLength(1);
+    expect(postMergeCalls[0]?.cwd).toContain('agent-pm');
+  });
+
+  test('runPostMergeHook does nothing when no post-merge config', async () => {
+    const { shell, calls } = createMockShell(happyPathProgramming());
+    const wt = await createAgentWorktree({
+      agentId: 'agent-no-pm',
+      cwd: '/repo',
+      shell,
+      config: undefined,
+    });
+
+    const callCountBefore = calls.length;
+    await wt.runPostMergeHook();
+    const callCountAfter = calls.length;
+
+    expect(callCountAfter).toBe(callCountBefore);
+  });
+});
+
+describe('post-start with dependency installation', () => {
+  test('post-start automatically includes bun install', async () => {
+    const { shell, calls } = createMockShell(happyPathProgramming());
+    await createAgentWorktree({
+      agentId: 'agent-deps',
+      cwd: '/repo',
+      shell,
+      config: {
+        'post-start': 'echo "custom post-start"',
+      },
+    });
+
+    // Should have both custom post-start and default bun install
+    const bunInstallCalls = calls.filter((c) => c.command.includes('bun install'));
+    const customCalls = calls.filter((c) => c.command.includes('echo "custom post-start"'));
+    
+    expect(bunInstallCalls.length).toBeGreaterThan(0);
+    expect(customCalls.length).toBeGreaterThan(0);
+  });
+});
+
+describe('file cloning', () => {
+  function createFileCloneProgramming(): MockShellProgramming {
+    return {
+      rules: [
+        ...happyPathProgramming().rules,
+        // Mock find command to return some files
+        ['find . -path', { stdout: './.env\n./config/.env.local\n', exitCode: 0 }],
+        // Mock mkdir command
+        ['mkdir -p', { exitCode: 0 }],
+        // Mock cp command - match any cp command
+        ['cp ', { exitCode: 0 }],
+      ],
+      default: { exitCode: 0, stdout: '', stderr: '' },
+    };
+  }
+
+  test('clones configured files to worktree', async () => {
+    const { shell, calls } = createMockShell(createFileCloneProgramming());
+    await createAgentWorktree({
+      agentId: 'agent-clone',
+      cwd: '/repo',
+      shell,
+      config: {
+        'clone-files': ['.env*', 'config/.env*'],
+      },
+    });
+
+    // Should have find commands for each pattern
+    const findCalls = calls.filter((c) => c.command.includes('find . -path'));
+    expect(findCalls.length).toBe(2);
+    expect(findCalls.some((c) => c.command.includes('.env*'))).toBe(true);
+    expect(findCalls.some((c) => c.command.includes('config/.env*'))).toBe(true);
+
+    // Should have mkdir and cp commands
+    const mkdirCalls = calls.filter((c) => c.command.includes('mkdir -p'));
+    const cpCalls = calls.filter((c) => c.command.includes('cp '));
+    
+    expect(mkdirCalls.length).toBeGreaterThan(0);
+    expect(cpCalls.length).toBeGreaterThan(0);
+  });
+
+  test('skips file cloning when no files configured', async () => {
+    const { shell, calls } = createMockShell(happyPathProgramming());
+    await createAgentWorktree({
+      agentId: 'agent-no-clone',
+      cwd: '/repo',
+      shell,
+      config: undefined,
+    });
+
+    // Should not have any find/copy commands
+    const findCalls = calls.filter((c) => c.command.includes('find . -path'));
+    const cpCalls = calls.filter((c) => c.command.includes('cp '));
+    
+    expect(findCalls.length).toBe(0);
+    expect(cpCalls.length).toBe(0);
+  });
+
+  test('handles missing files gracefully', async () => {
+    const { shell, calls } = createMockShell({
+      rules: [
+        ...happyPathProgramming().rules,
+        // Mock find command to fail (no files found)
+        ['find . -path', { stdout: '', stderr: 'No files found', exitCode: 1 }],
+      ],
+      default: { exitCode: 0, stdout: '', stderr: '' },
+    });
+
+    // Should not throw, just log warnings
+    await expect(createAgentWorktree({
+      agentId: 'agent-missing-files',
+      cwd: '/repo',
+      shell,
+      config: {
+        'clone-files': ['nonexistent.env'],
+      },
+    })).resolves.toBeDefined();
+
+    const findCalls = calls.filter((c) => c.command.includes('find . -path'));
+    expect(findCalls.length).toBe(1);
+  });
+});

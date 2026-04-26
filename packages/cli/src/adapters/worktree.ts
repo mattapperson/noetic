@@ -43,6 +43,8 @@ interface AgentWorktree {
   worktreePath: string;
   /** Branch name (newly created on top of the repo's default branch). */
   branch: string;
+  /** Run post-merge hooks (e.g., after merging back to main). */
+  runPostMergeHook(): Promise<void>;
   /** Idempotent cleanup — call once when the teammate has settled. */
   cleanup(): Promise<WorktreeCleanupResult>;
 }
@@ -222,6 +224,74 @@ function runHooksBackground(args: RunHooksArgs): void {
 
 //#endregion
 
+//#region File operations
+
+interface CloneConfiguredFilesArgs {
+  files: string[];
+  sourcePath: string;
+  targetPath: string;
+  shell: ShellAdapter;
+}
+
+/**
+ * Clone configured files from the source path to the target path.
+ * Supports glob patterns and creates necessary directories.
+ * Files are copied relative to their source location to maintain directory structure.
+ */
+async function cloneConfiguredFiles(args: CloneConfiguredFilesArgs): Promise<void> {
+  const { files, sourcePath, targetPath, shell } = args;
+  
+  if (files.length === 0) {
+    return;
+  }
+
+  for (const filePattern of files) {
+    // First, find files matching the pattern using find command
+    const findResult = await shell.exec(`find . -path ${shellQuote(filePattern)} -type f`, {
+      cwd: sourcePath,
+      timeout: 10,
+    });
+    
+    if (findResult.exitCode !== 0) {
+      logWarn(`[worktree] Failed to find files matching pattern '${filePattern}': ${findResult.stderr.trim()}`);
+      continue;
+    }
+    
+    const matchedFiles = findResult.stdout.trim().split('\n').filter(f => f.length > 0);
+    
+    for (const file of matchedFiles) {
+      // Remove the leading './' from find output
+      const cleanFile = file.replace(/^\.\//, '');
+      const sourceFile = path.resolve(sourcePath, cleanFile);
+      const targetFile = path.resolve(targetPath, cleanFile);
+      const targetDir = path.dirname(targetFile);
+      
+      // Create target directory structure
+      const mkdirResult = await shell.exec(`mkdir -p ${shellQuote(targetDir)}`, {
+        cwd: targetPath,
+        timeout: 10,
+      });
+      
+      if (mkdirResult.exitCode !== 0) {
+        logWarn(`[worktree] Failed to create directory '${targetDir}': ${mkdirResult.stderr.trim()}`);
+        continue;
+      }
+      
+      // Copy the file
+      const copyResult = await shell.exec(`cp ${shellQuote(sourceFile)} ${shellQuote(targetFile)}`, {
+        cwd: sourcePath,
+        timeout: 10,
+      });
+      
+      if (copyResult.exitCode !== 0) {
+        logWarn(`[worktree] Failed to copy file '${cleanFile}': ${copyResult.stderr.trim()}`);
+      }
+    }
+  }
+}
+
+//#endregion
+
 //#region Git helpers
 
 async function gitDefaultBranch(cwd: string, shell: ShellAdapter): Promise<string> {
@@ -359,9 +429,10 @@ async function isWorktreeClean(args: IsWorktreeCleanArgs): Promise<boolean> {
 //#region Public API
 
 /**
- * Allocate a new git worktree for a teammate, run `pre-start` hooks, kick
- * off `post-start` hooks in the background, and return a handle whose
- * `cleanup()` method tears down per the configured cleanup mode.
+ * Allocate a new git worktree for a teammate, run `pre-start` hooks, clone
+ * configured files, kick off `post-start` hooks (with dependency installation)
+ * in the background, and return a handle whose `cleanup()` method tears down 
+ * per the configured cleanup mode and `runPostMergeHook()` runs post-merge hooks.
  */
 export async function createAgentWorktree(args: CreateAgentWorktreeArgs): Promise<AgentWorktree> {
   const { agentId, cwd, shell, config } = args;
@@ -421,8 +492,23 @@ export async function createAgentWorktree(args: CreateAgentWorktreeArgs): Promis
     throw e;
   }
 
+  // Clone configured files from the main worktree to the new worktree
+  await cloneConfiguredFiles({
+    files: config?.['clone-files'] ?? [],
+    sourcePath: repoPath,
+    targetPath: worktreePath,
+    shell,
+  });
+
+  // Run post-start hooks with default dependency installation
+  const postStartEntries = normalizeHook(config?.['post-start']);
+  const defaultDepInstallEntry: HookEntry = {
+    label: 'install-deps',
+    command: 'bun install',
+  };
+  
   runHooksBackground({
-    entries: normalizeHook(config?.['post-start']),
+    entries: [...postStartEntries, defaultDepInstallEntry],
     cwd: worktreePath,
     shell,
     vars: fullVars,
@@ -434,6 +520,14 @@ export async function createAgentWorktree(args: CreateAgentWorktreeArgs): Promis
   return {
     worktreePath,
     branch,
+    async runPostMergeHook(): Promise<void> {
+      await runHooksSequential({
+        entries: normalizeHook(config?.['post-merge']),
+        cwd: worktreePath,
+        shell,
+        vars: fullVars,
+      });
+    },
     async cleanup(): Promise<WorktreeCleanupResult> {
       if (cleanedUp) {
         return {

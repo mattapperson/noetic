@@ -55,7 +55,9 @@ export const WorktreeConfigSchema = z.object({
   branch: z.string().optional(),
   'pre-start': WorktreeHookSchema.optional(),
   'post-start': WorktreeHookSchema.optional(),
+  'post-merge': WorktreeHookSchema.optional(),
   'pre-remove': WorktreeHookSchema.optional(),
+  'clone-files': z.array(z.string()).optional(),
   cleanup: z
     .enum([
       'always',
