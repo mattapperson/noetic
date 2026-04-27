@@ -1,13 +1,13 @@
-import { basename } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import type { TasksDatabase } from './db/index.js';
 import { openTasksDatabase } from './db/index.js';
 import type * as schema from './db/schema.js';
 import type { TaskRecord } from './db/schema.js';
-import { taskSessions, tasks, taskWorktreeId } from './db/schema.js';
+import { taskSessions, tasks } from './db/schema.js';
 import type { ProjectWorktree } from './git.js';
 import { loadProjectWorktrees } from './git.js';
+import { reconcileTasksForWorktrees } from './reconcile.js';
 
 export interface TaskTableRow {
   id: string;
@@ -19,6 +19,7 @@ export interface TaskTableRow {
   reviewStatus: TaskRecord['reviewStatus'];
   sessionsCount: number;
   current: boolean;
+  status: TaskRecord['status'];
   updatedAt: string;
 }
 
@@ -39,7 +40,8 @@ export function loadTaskTableDataWithWorktrees(
   worktrees: ProjectWorktree[],
   openDatabase: (cwd: string) => TasksDatabase = openTasksDatabase,
 ): TaskTableData {
-  const projectRoot = worktrees[0]?.projectRoot ?? cwd;
+  const reconciled = reconcileTasksForWorktrees(cwd, worktrees, openDatabase);
+  const projectRoot = reconciled.projectRoot;
   const opened = openDatabase(cwd);
   try {
     if (worktrees.length === 0) {
@@ -50,7 +52,6 @@ export function loadTaskTableDataWithWorktrees(
       };
     }
 
-    upsertWorktreeTasks(opened.db, worktrees);
     const currentPaths = new Map(
       worktrees.map((worktree) => [
         worktree.path,
@@ -64,7 +65,9 @@ export function loadTaskTableDataWithWorktrees(
       .where(eq(tasks.projectRoot, projectRoot))
       .orderBy(tasks.worktreePath)
       .all();
-    const activeRecords = records.filter((record) => currentPaths.has(record.worktreePath));
+    const activeRecords = records.filter(
+      (record) => record.status === 'active' && currentPaths.has(record.worktreePath),
+    );
 
     return {
       projectRoot,
@@ -77,6 +80,7 @@ export function loadTaskTableDataWithWorktrees(
         branch: record.branch,
         headSha: record.headSha,
         reviewStatus: record.reviewStatus,
+        status: record.status,
         sessionsCount: sessionCounts.get(record.id) ?? 0,
         current: currentPaths.get(record.worktreePath) ?? false,
         updatedAt: record.updatedAt,
@@ -84,38 +88,6 @@ export function loadTaskTableDataWithWorktrees(
     };
   } finally {
     opened.close();
-  }
-}
-
-function upsertWorktreeTasks(db: TasksDb, worktrees: ProjectWorktree[]): void {
-  const now = new Date().toISOString();
-  for (const worktree of worktrees) {
-    const id = taskWorktreeId(worktree.projectRoot, worktree.path);
-    db.insert(tasks)
-      .values({
-        id,
-        projectRoot: worktree.projectRoot,
-        worktreePath: worktree.path,
-        title: taskTitle(worktree),
-        branch: worktree.branch,
-        headSha: worktree.headSha,
-        reviewStatus: 'not_started',
-        source: 'git-worktree',
-        createdAt: now,
-        updatedAt: now,
-        lastSeenAt: now,
-      })
-      .onConflictDoUpdate({
-        target: tasks.worktreePath,
-        set: {
-          title: taskTitle(worktree),
-          branch: worktree.branch,
-          headSha: worktree.headSha,
-          updatedAt: now,
-          lastSeenAt: now,
-        },
-      })
-      .run();
   }
 }
 
@@ -134,8 +106,4 @@ function getSessionCounts(db: TasksDb): Map<string, number> {
       row.count,
     ]),
   );
-}
-
-function taskTitle(worktree: ProjectWorktree): string {
-  return worktree.branch ?? (basename(worktree.path) || worktree.path);
 }

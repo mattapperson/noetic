@@ -6,6 +6,7 @@
 
 import { createLocalFsAdapter } from '@noetic/core';
 
+import { runTasksDaemon } from '../commands/builtins/tasks/daemon.js';
 import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import { loadPlugins } from '../plugins/loader.js';
@@ -16,6 +17,14 @@ import { runPicker } from '../tui/run-picker.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
+
+if (process.argv[2] === 'tasks-daemon') {
+  const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
+  await runTasksDaemon({
+    cwd: daemonCwd,
+  });
+  process.exit(0);
+}
 
 const { config: argsConfig, flags } = parseArgs(process.argv);
 const discovered = await discoverConfig();
@@ -112,4 +121,12 @@ function forkSession(source: SessionFile, forcedId: string | undefined): Session
     createdAt: nowIso,
     modifiedAt: nowIso,
   };
+}
+
+function daemonCwdFromArgs(argv: string[]): string | null {
+  const idx = argv.indexOf('--cwd');
+  if (idx < 0) {
+    return null;
+  }
+  return argv[idx + 1] ?? null;
 }

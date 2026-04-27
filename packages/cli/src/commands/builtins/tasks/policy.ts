@@ -1,4 +1,4 @@
-import { basename, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { ShellAdapter } from '@noetic/core';
 import { and, eq } from 'drizzle-orm';
 
@@ -9,7 +9,8 @@ import type {
 } from '../../../tools/mutation-policy.js';
 import { ALLOW_MUTATION, isProbablyMutatingShellCommand } from '../../../tools/mutation-policy.js';
 import { openTasksDatabase } from './db/index.js';
-import { tasks, taskWorktreeId } from './db/schema.js';
+import { tasks } from './db/schema.js';
+import { reconcileTasksForProject, upsertWorktreeTask } from './reconcile.js';
 
 interface CreateTaskMutationPolicyArgs {
   sessionCwd: string;
@@ -27,6 +28,7 @@ export function createTaskMutationPolicy(args: CreateTaskMutationPolicyArgs): Mu
       if (!repo.inside) {
         return ALLOW_MUTATION;
       }
+      await reconcileTasksForProject(args.sessionCwd).catch(() => undefined);
       if (!repo.dirty && args.enforceOnCleanRepo !== true) {
         return ALLOW_MUTATION;
       }
@@ -122,33 +124,13 @@ export async function ensureTaskForWorktree(args: {
     const now = new Date().toISOString();
     const worktreePath = resolve(args.worktreePath);
     const projectRoot = resolve(args.projectRoot);
-    const title = args.branch ?? (basename(worktreePath) || worktreePath);
-    const branch = args.branch ?? null;
-    opened.db
-      .insert(tasks)
-      .values({
-        id: taskWorktreeId(projectRoot, worktreePath),
-        projectRoot,
-        worktreePath,
-        title,
-        branch,
-        headSha: null,
-        reviewStatus: 'not_started',
-        source: 'git-worktree',
-        createdAt: now,
-        updatedAt: now,
-        lastSeenAt: now,
-      })
-      .onConflictDoUpdate({
-        target: tasks.worktreePath,
-        set: {
-          title,
-          branch,
-          updatedAt: now,
-          lastSeenAt: now,
-        },
-      })
-      .run();
+    upsertWorktreeTask({
+      db: opened.db,
+      projectRoot,
+      worktreePath,
+      branch: args.branch ?? null,
+      now,
+    });
   } finally {
     opened.close();
   }

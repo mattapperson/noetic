@@ -25,6 +25,7 @@ describe('tasks db', () => {
           branch: 'feature',
           headSha: 'abc123',
           reviewStatus: 'not_started',
+          status: 'active',
           source: 'git-worktree',
           createdAt: now,
           updatedAt: now,
@@ -92,6 +93,7 @@ describe('tasks db', () => {
         branch: 'feature',
         headSha: 'abc123',
         reviewStatus: 'not_started' as const,
+        status: 'active' as const,
         source: 'git-worktree' as const,
         createdAt: now,
         updatedAt: now,
@@ -173,5 +175,90 @@ describe('tasks db', () => {
     expect(second.rows.map((row) => row.worktreePath)).toEqual([
       '/repo',
     ]);
+  });
+
+  test('task table backfills worktrees created outside Noetic', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'noetic-tasks-backfill-'));
+    const dbPath = join(dir, 'tasks.sqlite');
+    openTasksDatabaseAtPath(dbPath).close();
+    const openDatabase = (): TasksDatabase => openTasksDatabaseAtPath(dbPath);
+
+    const data = loadTaskTableDataWithWorktrees(
+      dir,
+      [
+        {
+          projectRoot: '/repo',
+          path: '/repo-external',
+          branch: 'external/tool',
+          headSha: 'bbb',
+          current: false,
+        },
+      ],
+      openDatabase,
+    );
+
+    expect(data.rows).toHaveLength(1);
+    expect(data.rows[0]?.title).toBe('external/tool');
+
+    const opened = openDatabase();
+    try {
+      const stored = opened.db.select().from(tasks).all();
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.worktreePath).toBe('/repo-external');
+    } finally {
+      opened.close();
+    }
+  });
+
+  test('stale worktree rows are marked removed and omitted from active table', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'noetic-tasks-stale-'));
+    const dbPath = join(dir, 'tasks.sqlite');
+    const opened = openTasksDatabaseAtPath(dbPath);
+    const now = new Date().toISOString();
+    opened.db
+      .insert(tasks)
+      .values({
+        id: 'task-stale',
+        projectRoot: '/repo',
+        worktreePath: '/repo-stale',
+        title: 'stale',
+        branch: 'stale',
+        headSha: 'old',
+        reviewStatus: 'not_started',
+        status: 'active',
+        source: 'git-worktree',
+        createdAt: now,
+        updatedAt: now,
+        lastSeenAt: now,
+      })
+      .run();
+    opened.close();
+
+    const openDatabase = (): TasksDatabase => openTasksDatabaseAtPath(dbPath);
+    const data = loadTaskTableDataWithWorktrees(
+      dir,
+      [
+        {
+          projectRoot: '/repo',
+          path: '/repo',
+          branch: 'main',
+          headSha: 'new',
+          current: true,
+        },
+      ],
+      openDatabase,
+    );
+
+    expect(data.rows.map((row) => row.worktreePath)).toEqual([
+      '/repo',
+    ]);
+
+    const after = openDatabase();
+    try {
+      const stale = after.db.select().from(tasks).where(eq(tasks.id, 'task-stale')).get();
+      expect(stale?.status).toBe('removed');
+    } finally {
+      after.close();
+    }
   });
 });

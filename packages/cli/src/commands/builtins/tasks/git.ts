@@ -10,6 +10,8 @@ export interface ProjectWorktree {
   current: boolean;
 }
 
+export type GitCommandRunner = (cwd: string, args: ReadonlyArray<string>) => Promise<string>;
+
 export interface ParsedWorktreeRecord {
   path: string;
   headSha: string | null;
@@ -20,8 +22,15 @@ export interface ParsedWorktreeRecord {
 }
 
 export async function loadProjectWorktrees(cwd: string): Promise<ProjectWorktree[]> {
-  const currentRoot = await getRepoRoot(cwd);
-  const output = await gitOutput(cwd, [
+  return loadProjectWorktreesWithGit(cwd, gitOutput);
+}
+
+export async function loadProjectWorktreesWithGit(
+  cwd: string,
+  git: GitCommandRunner,
+): Promise<ProjectWorktree[]> {
+  const currentRoot = await getRepoRoot(cwd, git);
+  const output = await git(cwd, [
     'worktree',
     'list',
     '--porcelain',
@@ -95,8 +104,8 @@ export function parseWorktreeList(output: string): ParsedWorktreeRecord[] {
   return records;
 }
 
-async function getRepoRoot(cwd: string): Promise<string> {
-  return gitOutput(cwd, [
+async function getRepoRoot(cwd: string, git: GitCommandRunner): Promise<string> {
+  return git(cwd, [
     'rev-parse',
     '--show-toplevel',
   ]);
