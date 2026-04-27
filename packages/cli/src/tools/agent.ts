@@ -24,12 +24,13 @@ import { NoeticConfigError, react, spawn, step, tool } from '@noetic/core';
 import { z } from 'zod';
 import { createAgentWorktree } from '../adapters/worktree.js';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
+import { ensureTaskForWorktree } from '../commands/builtins/tasks/policy.js';
 import { unknownAgentType } from '../errors/worktree-errors.js';
 import { teammateInboundLayer } from '../memory/teammate-inbound-layer.js';
 import { getAgent, listAgents } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { WorktreeConfig } from '../types/config.js';
-import { warn as logWarn } from '../util/log.js';
+import * as log from '../util/log.js';
 
 //#region Constants
 
@@ -255,7 +256,7 @@ interface NotifyOnSettleArgs {
 function notifyOnSettle(args: NotifyOnSettleArgs): void {
   const warnCleanup = (cleanupErr: unknown): undefined => {
     const msg = cleanupErr instanceof Error ? cleanupErr.message : 'unknown error';
-    logWarn(`[agent ${args.handle.id}] worktree cleanup failed: ${msg}`);
+    log.warn(`[agent ${args.handle.id}] worktree cleanup failed: ${msg}`);
     return undefined;
   };
   void args.handle
@@ -280,7 +281,7 @@ function notifyOnSettle(args: NotifyOnSettleArgs): void {
       // (e.g. tokenize failures inside formatComplete). These would otherwise
       // surface as unhandled rejections and crash the process.
       const msg = innerErr instanceof Error ? innerErr.message : 'unknown error';
-      logWarn(`[agent ${args.handle.id}] notifyOnSettle inner error: ${msg}`);
+      log.warn(`[agent ${args.handle.id}] notifyOnSettle inner error: ${msg}`);
     });
 }
 
@@ -326,6 +327,12 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
         });
         worktreePath = wt.worktreePath;
         worktreeCleanup = wt.cleanup;
+        await ensureTaskForWorktree({
+          sessionCwd: args.cwd,
+          projectRoot: wt.projectRoot,
+          worktreePath: wt.worktreePath,
+          branch: wt.branch,
+        });
       }
 
       // Re-root tools at worktreePath when isolated; otherwise use parent cwd.
@@ -356,7 +363,7 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
           // spawn() takes EITHER undefined (inherit) OR an explicit array
           // (replace). We can't have both; document the trade-off and prefer
           // the explicit inbound layer since otherwise sendMessage is dead.
-          logWarn(
+          log.warn(
             `[agent ${agentId}] inherit_context=true with name=${teammateName}: inbound layer requires fresh memory; ignoring inherit_context.`,
           );
         }
@@ -384,7 +391,7 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
           if (worktreeCleanup) {
             await worktreeCleanup().catch((cleanupErr: unknown) => {
               const msg = cleanupErr instanceof Error ? cleanupErr.message : 'unknown error';
-              logWarn(`[agent ${agentId}] worktree cleanup failed: ${msg}`);
+              log.warn(`[agent ${agentId}] worktree cleanup failed: ${msg}`);
             });
           }
         }

@@ -14,6 +14,7 @@ import { createGrepTool } from './grep.js';
 import { createInteractiveTerminalTool } from './interactive-terminal.js';
 import { createLsTool } from './ls.js';
 import { createLspTool } from './lsp.js';
+import type { MutationPolicy } from './mutation-policy.js';
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 
@@ -105,6 +106,7 @@ export interface CreateToolsOptions {
    * input. Headless harnesses should omit it — asking with no UI would hang.
    */
   askUserService?: AskUserService;
+  mutationPolicy?: MutationPolicy;
 }
 
 export function createCodingTools(opts: CreateToolsOptions): Tool[] {
@@ -113,13 +115,15 @@ export function createCodingTools(opts: CreateToolsOptions): Tool[] {
   const shell = opts.shell ?? createLocalShellAdapter();
   const tools: Tool[] = [
     createReadTool(cwd, fs),
-    createWriteTool(cwd, fs),
-    createEditTool(cwd, fs),
-    createBashTool(cwd, shell),
+    createWriteTool(cwd, fs, opts.mutationPolicy),
+    createEditTool(cwd, fs, opts.mutationPolicy),
+    createBashTool(cwd, shell, opts.mutationPolicy),
     createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
-    createInteractiveTerminalTool(cwd, shell),
+    createInteractiveTerminalTool(cwd, shell, {
+      mutationPolicy: opts.mutationPolicy,
+    }),
   ];
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
@@ -141,6 +145,7 @@ export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
     createLsTool(cwd, fs),
     createInteractiveTerminalTool(cwd, shell, {
       readonly: true,
+      mutationPolicy: opts.mutationPolicy,
     }),
   ];
   if (lspService) {

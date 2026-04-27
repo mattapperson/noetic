@@ -15,6 +15,7 @@ import {
   restoreLineEndings,
   stripBom,
 } from './edit-diff.js';
+import type { MutationPolicy } from './mutation-policy.js';
 import { resolveToCwd } from './path-utils.js';
 
 //#region Schemas
@@ -62,7 +63,11 @@ When NOT to use:
 
 export type EditTool = Tool<typeof EditInputSchema, typeof EditOutputSchema>;
 
-export function createEditTool(cwd: string, fs: FsAdapter): EditTool {
+export function createEditTool(
+  cwd: string,
+  fs: FsAdapter,
+  mutationPolicy?: MutationPolicy,
+): EditTool {
   return tool({
     name: 'Edit',
     description: EDIT_TOOL_DESCRIPTION,
@@ -73,6 +78,14 @@ export function createEditTool(cwd: string, fs: FsAdapter): EditTool {
       const absolutePath = resolveToCwd(path, cwd);
 
       try {
+        const decision = await mutationPolicy?.check({
+          kind: 'edit',
+          cwd,
+          path: absolutePath,
+        });
+        if (decision && !decision.allowed) {
+          throw new Error(decision.message);
+        }
         const buffer = await fs.readFile(absolutePath).catch((err: unknown) => {
           const isNotFound = err instanceof Error && 'code' in err && err.code === 'ENOENT';
           throw new Error(`${isNotFound ? 'File not found' : 'Cannot read file'}: ${path}`);

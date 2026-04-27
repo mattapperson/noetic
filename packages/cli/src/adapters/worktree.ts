@@ -20,7 +20,7 @@ import {
 } from '../errors/worktree-errors.js';
 import { shellQuote } from '../tools/path-utils.js';
 import type { WorktreeConfig, WorktreeHook } from '../types/config.js';
-import { warn as logWarn } from '../util/log.js';
+import * as log from '../util/log.js';
 
 //#region Types
 
@@ -39,6 +39,8 @@ interface CreateAgentWorktreeArgs {
 }
 
 interface AgentWorktree {
+  /** Absolute path to the repository's main worktree. */
+  projectRoot: string;
   /** Absolute path to the new worktree's working tree. */
   worktreePath: string;
   /** Branch name (newly created on top of the repo's default branch). */
@@ -217,7 +219,7 @@ function runHooksBackground(args: RunHooksArgs): void {
       // Background hooks are advisory — don't propagate, but warn so the
       // operator can debug a silently-broken `post-start` (e.g. dev server).
       const msg = err instanceof Error ? err.message : 'unknown error';
-      logWarn(`[worktree] background hook '${entry.label}' failed: ${msg}`);
+      log.warn(`[worktree] background hook '${entry.label}' failed: ${msg}`);
     });
   }
 }
@@ -240,7 +242,7 @@ interface CloneConfiguredFilesArgs {
  */
 async function cloneConfiguredFiles(args: CloneConfiguredFilesArgs): Promise<void> {
   const { files, sourcePath, targetPath, shell } = args;
-  
+
   if (files.length === 0) {
     return;
   }
@@ -251,40 +253,50 @@ async function cloneConfiguredFiles(args: CloneConfiguredFilesArgs): Promise<voi
       cwd: sourcePath,
       timeout: 10,
     });
-    
+
     if (findResult.exitCode !== 0) {
-      logWarn(`[worktree] Failed to find files matching pattern '${filePattern}': ${findResult.stderr.trim()}`);
+      log.warn(
+        `[worktree] Failed to find files matching pattern '${filePattern}': ${findResult.stderr.trim()}`,
+      );
       continue;
     }
-    
-    const matchedFiles = findResult.stdout.trim().split('\n').filter(f => f.length > 0);
-    
+
+    const matchedFiles = findResult.stdout
+      .trim()
+      .split('\n')
+      .filter((f) => f.length > 0);
+
     for (const file of matchedFiles) {
       // Remove the leading './' from find output
       const cleanFile = file.replace(/^\.\//, '');
       const sourceFile = path.resolve(sourcePath, cleanFile);
       const targetFile = path.resolve(targetPath, cleanFile);
       const targetDir = path.dirname(targetFile);
-      
+
       // Create target directory structure
       const mkdirResult = await shell.exec(`mkdir -p ${shellQuote(targetDir)}`, {
         cwd: targetPath,
         timeout: 10,
       });
-      
+
       if (mkdirResult.exitCode !== 0) {
-        logWarn(`[worktree] Failed to create directory '${targetDir}': ${mkdirResult.stderr.trim()}`);
+        log.warn(
+          `[worktree] Failed to create directory '${targetDir}': ${mkdirResult.stderr.trim()}`,
+        );
         continue;
       }
-      
+
       // Copy the file
-      const copyResult = await shell.exec(`cp ${shellQuote(sourceFile)} ${shellQuote(targetFile)}`, {
-        cwd: sourcePath,
-        timeout: 10,
-      });
-      
+      const copyResult = await shell.exec(
+        `cp ${shellQuote(sourceFile)} ${shellQuote(targetFile)}`,
+        {
+          cwd: sourcePath,
+          timeout: 10,
+        },
+      );
+
       if (copyResult.exitCode !== 0) {
-        logWarn(`[worktree] Failed to copy file '${cleanFile}': ${copyResult.stderr.trim()}`);
+        log.warn(`[worktree] Failed to copy file '${cleanFile}': ${copyResult.stderr.trim()}`);
       }
     }
   }
@@ -408,20 +420,23 @@ async function isWorktreeClean(args: IsWorktreeCleanArgs): Promise<boolean> {
   if (status.stdout.trim().length > 0) {
     return false;
   }
-  const log = await args.shell.exec(`git rev-list --count HEAD ^${shellQuote(args.baseBranch)}`, {
-    cwd: args.worktreePath,
-    timeout: 10,
-  });
-  if (log.exitCode !== 0) {
+  const logResult = await args.shell.exec(
+    `git rev-list --count HEAD ^${shellQuote(args.baseBranch)}`,
+    {
+      cwd: args.worktreePath,
+      timeout: 10,
+    },
+  );
+  if (logResult.exitCode !== 0) {
     // If we can't count, refuse to delete — better to leave a stale worktree
     // than to discard work. Warn so the operator notices accumulating dirs.
-    logWarn(
+    log.warn(
       `[worktree] Could not count commits at ${args.worktreePath} against ${args.baseBranch}; ` +
-        `keeping worktree to avoid potential data loss. Stderr: ${log.stderr.trim()}`,
+        `keeping worktree to avoid potential data loss. Stderr: ${logResult.stderr.trim()}`,
     );
     return false;
   }
-  return log.stdout.trim() === '0';
+  return logResult.stdout.trim() === '0';
 }
 
 //#endregion
@@ -431,7 +446,7 @@ async function isWorktreeClean(args: IsWorktreeCleanArgs): Promise<boolean> {
 /**
  * Allocate a new git worktree for a teammate, run `pre-start` hooks, clone
  * configured files, kick off `post-start` hooks (with dependency installation)
- * in the background, and return a handle whose `cleanup()` method tears down 
+ * in the background, and return a handle whose `cleanup()` method tears down
  * per the configured cleanup mode and `runPostMergeHook()` runs post-merge hooks.
  */
 export async function createAgentWorktree(args: CreateAgentWorktreeArgs): Promise<AgentWorktree> {
@@ -506,9 +521,12 @@ export async function createAgentWorktree(args: CreateAgentWorktreeArgs): Promis
     label: 'install-deps',
     command: 'bun install',
   };
-  
+
   runHooksBackground({
-    entries: [...postStartEntries, defaultDepInstallEntry],
+    entries: [
+      ...postStartEntries,
+      defaultDepInstallEntry,
+    ],
     cwd: worktreePath,
     shell,
     vars: fullVars,
@@ -518,6 +536,7 @@ export async function createAgentWorktree(args: CreateAgentWorktreeArgs): Promis
   let cleanedUp = false;
 
   return {
+    projectRoot: repoPath,
     worktreePath,
     branch,
     async runPostMergeHook(): Promise<void> {

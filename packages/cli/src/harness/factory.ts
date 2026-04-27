@@ -20,6 +20,7 @@ import {
 import { TeammateRegistry } from '../agents/registry-runtime.js';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
+import { createTaskMutationPolicy } from '../commands/builtins/tasks/policy.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
 import { createBuiltinLspServers } from '../lsp/builtin/index.js';
 import { LspService } from '../lsp/service.js';
@@ -252,6 +253,11 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
+  const parentMutationPolicy = createTaskMutationPolicy({
+    sessionCwd: config.cwd,
+    shell,
+    enforceOnCleanRepo: true,
+  });
 
   /**
    * Rebuild the base (non-teammate) tool pool rooted at the given cwd.
@@ -263,6 +269,14 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
    * close over their cwd at construction.
    */
   const buildBaseTools = (toolCwd: string): Tool[] => {
+    const mutationPolicy =
+      toolCwd === config.cwd
+        ? parentMutationPolicy
+        : createTaskMutationPolicy({
+            sessionCwd: config.cwd,
+            shell,
+            enforceOnCleanRepo: true,
+          });
     const builtin =
       mode === 'planning'
         ? createReadOnlyTools({
@@ -271,6 +285,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
             shell,
             lspService,
             askUserService: opts.askUserService,
+            mutationPolicy,
           })
         : createCodingTools({
             cwd: toolCwd,
@@ -278,6 +293,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
             shell,
             lspService,
             askUserService: opts.askUserService,
+            mutationPolicy,
           });
     return [
       ...builtin,

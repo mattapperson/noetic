@@ -3,7 +3,7 @@
  */
 
 // Built-in commands
-export { BUILTIN_COMMANDS, clear, context, skills } from './builtins/index.js';
+export { BUILTIN_COMMANDS, clear, context, skills, tasks } from './builtins/index.js';
 // Execute
 export { executeCommand } from './execute.js';
 export type { ParsedSlashCommand } from './parse.js';

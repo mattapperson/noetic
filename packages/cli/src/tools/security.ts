@@ -146,7 +146,7 @@ export const HIGH_RISK_PATTERNS: RiskPattern[] = [
     description: 'Recursive force deletion can cause data loss',
   },
   {
-    pattern: /dd\s+/,
+    pattern: /\bdd\s+/,
     description: 'dd can overwrite disk data',
   },
   {

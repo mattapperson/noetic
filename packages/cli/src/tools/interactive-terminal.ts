@@ -17,8 +17,10 @@ import { dirname, join } from 'node:path';
 import type { ShellAdapter, Tool } from '@noetic/core';
 import { tool } from '@noetic/core';
 import { z } from 'zod';
+import type { MutationPolicy } from './mutation-policy.js';
+import { isInteractiveTerminalMutation } from './mutation-policy.js';
 import { shellQuote } from './path-utils.js';
-import { validateSpawnCommand } from './security.js';
+import { READONLY_BANNED_SPAWN_COMMANDS, validateSpawnCommand } from './security.js';
 import { DEFAULT_MAX_BYTES, formatSize, truncateTail } from './truncate.js';
 
 //#region Schemas
@@ -659,6 +661,7 @@ export interface CreateInteractiveTerminalOptions {
    * `READONLY_BANNED_SPAWN_COMMANDS`. Other actions are unaffected.
    */
   readonly?: boolean;
+  mutationPolicy?: MutationPolicy;
 }
 
 export type InteractiveTerminalTool = Tool<
@@ -695,6 +698,29 @@ export function createInteractiveTerminalTool(
         });
         if (!validation.valid) {
           return rejectSpawn(params, validation.error);
+        }
+      }
+      if (
+        options.mutationPolicy &&
+        isInteractiveTerminalMutation({
+          action: params.action,
+          command: 'command' in params ? params.command : undefined,
+          readonlyBannedCommands: READONLY_BANNED_SPAWN_COMMANDS,
+        })
+      ) {
+        const decision = await options.mutationPolicy.check({
+          kind: 'interactive-terminal',
+          cwd,
+          command: 'command' in params ? params.command : undefined,
+          action: params.action,
+        });
+        if (!decision.allowed) {
+          return {
+            output: `Error: ${decision.message}`,
+            action: params.action,
+            session: 'session' in params ? params.session : undefined,
+            truncated: false,
+          };
         }
       }
       if (PILOTTY_BIN === null) {

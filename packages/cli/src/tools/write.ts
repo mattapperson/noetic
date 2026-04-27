@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import type { FsAdapter, Tool } from '@noetic/core';
 import { tool } from '@noetic/core';
 import { z } from 'zod';
+import type { MutationPolicy } from './mutation-policy.js';
 import { resolveToCwd } from './path-utils.js';
 
 //#region Schemas
@@ -54,7 +55,11 @@ When NOT to use:
 
 export type WriteTool = Tool<typeof WriteInputSchema, typeof WriteOutputSchema>;
 
-export function createWriteTool(cwd: string, fs: FsAdapter): WriteTool {
+export function createWriteTool(
+  cwd: string,
+  fs: FsAdapter,
+  mutationPolicy?: MutationPolicy,
+): WriteTool {
   return tool({
     name: 'Write',
     description: WRITE_TOOL_DESCRIPTION,
@@ -66,6 +71,14 @@ export function createWriteTool(cwd: string, fs: FsAdapter): WriteTool {
       const dir = dirname(absolutePath);
 
       try {
+        const decision = await mutationPolicy?.check({
+          kind: 'write',
+          cwd,
+          path: absolutePath,
+        });
+        if (decision && !decision.allowed) {
+          throw new Error(decision.message);
+        }
         await fs.mkdir(dir);
         await fs.writeFile(absolutePath, content);
 

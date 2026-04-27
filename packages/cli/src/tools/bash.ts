@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import type { ShellAdapter, Tool } from '@noetic/core';
 import { TIMEOUT_ERROR_PREFIX, toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
+import type { MutationPolicy } from './mutation-policy.js';
+import { isProbablyMutatingShellCommand } from './mutation-policy.js';
 import { validateCommand } from './security.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from './truncate.js';
 
@@ -239,7 +241,11 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
 
 export type BashTool = Tool<typeof BashInputSchema, typeof BashOutputSchema>;
 
-export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
+export function createBashTool(
+  cwd: string,
+  shell: ShellAdapter,
+  mutationPolicy?: MutationPolicy,
+): BashTool {
   return toolWithGenerator({
     name: 'Bash',
     description: BASH_TOOL_DESCRIPTION,
@@ -254,6 +260,23 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
       if (!validation.valid) {
         return {
           output: `Error: ${validation.error}`,
+          command,
+          cancelled: false,
+          truncated: false,
+          timeout,
+        };
+      }
+
+      const decision = isProbablyMutatingShellCommand(command)
+        ? await mutationPolicy?.check({
+            kind: 'bash',
+            cwd,
+            command,
+          })
+        : undefined;
+      if (decision && !decision.allowed) {
+        return {
+          output: `Error: ${decision.message}`,
           command,
           cancelled: false,
           truncated: false,
