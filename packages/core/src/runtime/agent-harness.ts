@@ -1,3 +1,4 @@
+import type * as OpenRouterAgent from '@openrouter/agent';
 import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
@@ -105,6 +106,8 @@ interface Session {
 //#endregion
 
 const MAX_TOOL_ROUNDS = 32;
+const MAX_RECOVERY_CONTINUATIONS = 3;
+const EPHEMERAL_CONTINUE_INPUT = 'continue';
 const DEFAULT_THREAD_ID = '__default__';
 /** Default idle-timeout for a single model call's streaming response. Chosen to be
  *  long enough that slow models aren't falsely aborted, but short enough that a
@@ -142,6 +145,67 @@ function buildTextFormat(schema: ZodType): {
 
 function isStreamRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+interface ProviderTerminalError {
+  status: string;
+  message: string;
+}
+
+function providerTerminalError(response: unknown): ProviderTerminalError | null {
+  if (!isStreamRecord(response) || response.status === undefined) {
+    return null;
+  }
+  const status = String(response.status);
+  if (status === 'completed') {
+    return null;
+  }
+  if (status === 'incomplete') {
+    const details = response.incompleteDetails;
+    const reason =
+      isStreamRecord(details) && typeof details.reason === 'string' ? `: ${details.reason}` : '';
+    return {
+      status,
+      message: `LLM response incomplete${reason}`,
+    };
+  }
+  if (status === 'failed') {
+    const error = response.error;
+    const message =
+      isStreamRecord(error) && typeof error.message === 'string' ? `: ${error.message}` : '';
+    return {
+      status,
+      message: `LLM response failed${message}`,
+    };
+  }
+  return {
+    status,
+    message: `LLM response ended with status '${status}'`,
+  };
+}
+
+function hasUsableResponseOutput(response: unknown, items: ReadonlyArray<Item>): boolean {
+  if (items.length > 0) {
+    return true;
+  }
+  return (
+    isStreamRecord(response) &&
+    typeof response.outputText === 'string' &&
+    response.outputText.length > 0
+  );
+}
+
+function withEphemeralContinueInput(
+  input: ReturnType<typeof itemsToInput>,
+): OpenRouterAgent.Item[] {
+  return [
+    ...frameworkCast<OpenRouterAgent.Item[]>(input),
+    frameworkCast<OpenRouterAgent.Item>({
+      type: 'message',
+      role: 'user',
+      content: EPHEMERAL_CONTINUE_INPUT,
+    }),
+  ];
 }
 
 /** Race a promise against an AbortSignal so callers (e.g. `SessionRunner.abort`)
@@ -597,10 +661,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const conversationInput = itemsToInput(remaining);
     const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      if (signal?.aborted) {
-        break;
-      }
+    let round = 0;
+    let invalidRecoveryContinuations = 0;
+    let toolLimitRecoveryContinuations = 0;
+    let useEphemeralContinue = false;
+
+    while (!signal?.aborted) {
+      const recoveryContinuation = useEphemeralContinue;
+      useEphemeralContinue = false;
 
       // Inject between-rounds inbox messages (mode: 'between-rounds') before
       // the next LLM call. Mirrors Claude Code's teammate-attachment path.
@@ -662,17 +730,21 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           idleTimeoutMs: this.streamIdleTimeoutMs,
         });
       });
+      const modelInput: OpenRouterAgent.Item[] = recoveryContinuation
+        ? withEphemeralContinueInput(conversationInput)
+        : frameworkCast<OpenRouterAgent.Item[]>(conversationInput);
 
       emitIfAllowed('llm_call_started', {
         round,
-        messageCount: conversationInput.length,
+        messageCount: modelInput.length,
         toolCount: sdkTools?.length ?? 0,
+        recoveryContinuation,
       });
 
       const callResult = this.client.callModel(
         {
           model: request.model,
-          input: conversationInput,
+          input: modelInput,
           instructions,
           tools: sdkTools,
           temperature: request.params?.temperature,
@@ -737,11 +809,54 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       if (signal?.aborted) {
         break;
       }
+      const terminalError = providerTerminalError(sdkResponse);
+      if (terminalError) {
+        emitIfAllowed('llm_call_failed', {
+          round,
+          status: terminalError.status,
+          error: terminalError.message,
+          recoverable: invalidRecoveryContinuations < MAX_RECOVERY_CONTINUATIONS,
+        });
+        if (invalidRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
+          throw new Error(terminalError.message);
+        }
+        invalidRecoveryContinuations += 1;
+        useEphemeralContinue = true;
+        emitIfAllowed('llm_call_recovery_continue', {
+          round,
+          status: terminalError.status,
+          attempt: invalidRecoveryContinuations,
+          maxAttempts: MAX_RECOVERY_CONTINUATIONS,
+        });
+        continue;
+      }
+      const roundItems = extractOutputItems(sdkResponse);
+      if (!hasUsableResponseOutput(sdkResponse, roundItems)) {
+        const message = 'LLM response completed with no output items';
+        emitIfAllowed('llm_call_failed', {
+          round,
+          status: 'completed',
+          error: message,
+          recoverable: invalidRecoveryContinuations < MAX_RECOVERY_CONTINUATIONS,
+        });
+        if (invalidRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
+          throw new Error(message);
+        }
+        invalidRecoveryContinuations += 1;
+        useEphemeralContinue = true;
+        emitIfAllowed('llm_call_recovery_continue', {
+          round,
+          status: 'completed',
+          attempt: invalidRecoveryContinuations,
+          maxAttempts: MAX_RECOVERY_CONTINUATIONS,
+        });
+        continue;
+      }
+      invalidRecoveryContinuations = 0;
       emitIfAllowed('llm_call_completed', {
         round,
         itemCount: sdkResponse.output?.length ?? 0,
       });
-      const roundItems = extractOutputItems(sdkResponse);
       const roundUsage = extractUsage(sdkResponse.usage);
 
       totalUsage.inputTokens += roundUsage.inputTokens;
@@ -838,6 +953,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         round,
         toolCount: functionCalls.length,
       });
+
+      round += 1;
+      if (round >= MAX_TOOL_ROUNDS) {
+        emitIfAllowed('tool_round_limit_exceeded', {
+          maxToolRounds: MAX_TOOL_ROUNDS,
+          attempt: toolLimitRecoveryContinuations + 1,
+          maxAttempts: MAX_RECOVERY_CONTINUATIONS,
+        });
+        if (toolLimitRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
+          throw new Error(`LLM exceeded maximum tool rounds (${MAX_TOOL_ROUNDS})`);
+        }
+        toolLimitRecoveryContinuations += 1;
+        useEphemeralContinue = true;
+      }
     }
 
     return {

@@ -25,5 +25,6 @@
     "@openrouter/sdk": "0.12.0"
   },
   "patchedDependencies": {
+    "@openrouter/agent@0.3.1": "patches/@openrouter%2Fagent@0.3.1.patch"
   }
 }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { z } from 'zod';
+import { tool } from '../../src/builders/tool-builder';
 import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
+import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { AgentHarness } from '../../src/runtime/agent-harness';
 import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import {
@@ -8,10 +11,11 @@ import {
   filterReasoningStream,
   filterTextStream,
 } from '../../src/runtime/session-streams';
+import type { LLMResponse } from '../../src/types/common';
 import type { StreamEvent } from '../../src/types/harness-result';
 import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
-import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
+import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
 
 //#region Helpers
 
@@ -46,6 +50,121 @@ function emitAsync(bc: EventBroadcaster, events: StreamEvent[]): void {
     }
     bc.complete();
   });
+}
+
+type MockModelResponse = LLMResponse & {
+  id: string;
+  output: LLMResponse['items'];
+  outputText?: string;
+  status?: string;
+  incompleteDetails?: Record<string, unknown>;
+};
+
+type RecordedModelInput = Array<Record<string, unknown>>;
+
+function isEphemeralContinueInput(input: RecordedModelInput): boolean {
+  const last = input[input.length - 1];
+  return last?.role === 'user' && last.content === 'continue';
+}
+
+function hasEphemeralContinueInput(input: RecordedModelInput): boolean {
+  return input.some((item) => item.role === 'user' && item.content === 'continue');
+}
+
+function messageResponse(id: string, text: string): MockModelResponse {
+  return frameworkCast<MockModelResponse>({
+    id,
+    status: 'completed',
+    output: [
+      {
+        id: `msg-${id}`,
+        status: 'completed',
+        type: 'message',
+        role: 'assistant',
+        content: [
+          {
+            type: 'output_text',
+            text,
+          },
+        ],
+      },
+    ],
+    usage: {
+      inputTokens: 1,
+      outputTokens: 1,
+    },
+  });
+}
+
+function functionCallResponse(callNumber: number): MockModelResponse {
+  const callId = `call_${callNumber}`;
+  return frameworkCast<MockModelResponse>({
+    id: `resp-${callNumber}`,
+    status: 'completed',
+    output: [
+      {
+        id: `fc-${callNumber}`,
+        status: 'completed',
+        type: 'function_call',
+        callId,
+        name: 'noop',
+        arguments: '{}',
+      },
+    ],
+    usage: {
+      inputTokens: 1,
+      outputTokens: 1,
+    },
+  });
+}
+
+class ToolLimitRecoveryClient {
+  calls = 0;
+  readonly inputs: RecordedModelInput[] = [];
+
+  callModel(request: { input: RecordedModelInput }): {
+    getFullResponsesStream: () => AsyncIterable<unknown>;
+    getResponse: () => Promise<MockModelResponse>;
+  } {
+    const callNumber = this.calls++;
+    this.inputs.push(request.input);
+    return {
+      async *getFullResponsesStream() {},
+      getResponse: async () => {
+        if (callNumber >= 32 && isEphemeralContinueInput(request.input)) {
+          return messageResponse(`resp-final-${callNumber}`, 'finished after continue');
+        }
+        return functionCallResponse(callNumber);
+      },
+    };
+  }
+}
+
+class InvalidStateRecoveryClient {
+  calls = 0;
+  readonly inputs: RecordedModelInput[] = [];
+
+  constructor(private readonly firstResponse: MockModelResponse) {}
+
+  callModel(request: { input: RecordedModelInput }): {
+    getFullResponsesStream: () => AsyncIterable<unknown>;
+    getResponse: () => Promise<MockModelResponse>;
+  } {
+    const callNumber = this.calls++;
+    this.inputs.push(request.input);
+    return {
+      async *getFullResponsesStream() {},
+      getResponse: async () => {
+        if (callNumber === 0) {
+          return this.firstResponse;
+        }
+        if (callNumber === 1 && isEphemeralContinueInput(request.input)) {
+          return functionCallResponse(callNumber);
+        }
+        return messageResponse(`resp-final-${callNumber}`, 'recovered');
+      },
+    };
+  }
 }
 
 //#endregion
@@ -140,6 +259,146 @@ describe('AgentHarness session accessors', () => {
     await harness.execute('hi');
     const response = await harness.getAgentResponse();
     expect(response.text).toBe('multi');
+  });
+
+  it('recovers from the tool-round limit with an ephemeral continue retry', async () => {
+    const fakeClient = new ToolLimitRecoveryClient();
+    const noopTool = tool({
+      name: 'noop',
+      description: 'Always returns ok',
+      input: z.object({}),
+      output: z.object({
+        ok: z.boolean(),
+      }),
+      execute: async () => ({
+        ok: true,
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: ToolLimitRecoveryClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'keep using tools'),
+      ],
+      tools: [
+        noopTool,
+      ],
+      ctx,
+    });
+
+    expect(fakeClient.calls).toBe(33);
+    expect(fakeClient.inputs.slice(0, 32).some(hasEphemeralContinueInput)).toBe(false);
+    expect(hasEphemeralContinueInput(fakeClient.inputs[32] ?? [])).toBe(true);
+    expect(ctx.itemLog.items.some((item) => item.type === 'message' && item.role === 'user')).toBe(
+      false,
+    );
+    expect(response.items.at(-1)).toMatchObject({
+      type: 'message',
+      role: 'assistant',
+    });
+  });
+
+  it('recovers incomplete provider responses without persisting the synthetic continue', async () => {
+    const noopTool = tool({
+      name: 'noop',
+      description: 'Always returns ok',
+      input: z.object({}),
+      output: z.object({
+        ok: z.boolean(),
+      }),
+      execute: async () => ({
+        ok: true,
+      }),
+    });
+    const fakeClient = new InvalidStateRecoveryClient(
+      frameworkCast<MockModelResponse>({
+        id: 'resp-incomplete',
+        status: 'incomplete',
+        incompleteDetails: {
+          reason: 'max_output_tokens',
+        },
+        output: [],
+        usage: {
+          inputTokens: 1,
+          outputTokens: 0,
+        },
+      }),
+    );
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: InvalidStateRecoveryClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'start'),
+      ],
+      tools: [
+        noopTool,
+      ],
+      ctx,
+    });
+
+    expect(fakeClient.calls).toBe(3);
+    expect(hasEphemeralContinueInput(fakeClient.inputs[0] ?? [])).toBe(false);
+    expect(isEphemeralContinueInput(fakeClient.inputs[1] ?? [])).toBe(true);
+    expect(hasEphemeralContinueInput(fakeClient.inputs[2] ?? [])).toBe(false);
+    expect(ctx.itemLog.items.some((item) => item.type === 'message' && item.role === 'user')).toBe(
+      false,
+    );
+    expect(response.items.at(-1)).toMatchObject({
+      type: 'message',
+      role: 'assistant',
+    });
+  });
+
+  it('recovers empty successful provider responses with an ephemeral continue retry', async () => {
+    const fakeClient = new InvalidStateRecoveryClient(
+      frameworkCast<MockModelResponse>({
+        id: 'resp-empty',
+        status: 'completed',
+        output: [],
+        usage: {
+          inputTokens: 1,
+          outputTokens: 0,
+        },
+      }),
+    );
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: InvalidStateRecoveryClient;
+    }>(harness).client = fakeClient;
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'start'),
+      ],
+    });
+
+    expect(fakeClient.calls).toBe(2);
+    expect(hasEphemeralContinueInput(fakeClient.inputs[0] ?? [])).toBe(false);
+    expect(isEphemeralContinueInput(fakeClient.inputs[1] ?? [])).toBe(true);
+    expect(response.items.at(-1)).toMatchObject({
+      type: 'function_call',
+      name: 'noop',
+    });
   });
 });
 
