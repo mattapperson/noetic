@@ -37,6 +37,7 @@ export function openTasksDatabaseAtPath(path: string): TasksDatabase {
   });
   sqlite.exec('PRAGMA foreign_keys = ON;');
   sqlite.exec('PRAGMA journal_mode = WAL;');
+  normalizeBogusMigrationTimestamps(sqlite);
   const db = drizzle(sqlite, {
     schema,
   });
@@ -49,4 +50,35 @@ export function openTasksDatabaseAtPath(path: string): TasksDatabase {
     path,
     close: () => sqlite.close(),
   };
+}
+
+const BOGUS_TIMESTAMP_REWRITES: ReadonlyArray<
+  readonly [
+    bogus: number,
+    sane: number,
+  ]
+> = [
+  [
+    1777948363000,
+    1777314700000,
+  ],
+  [
+    1777948363001,
+    1777325435941,
+  ],
+];
+
+function normalizeBogusMigrationTimestamps(sqlite: Database): void {
+  const tableExists = sqlite
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'")
+    .get();
+  if (!tableExists) {
+    return;
+  }
+  const update = sqlite.prepare(
+    'UPDATE __drizzle_migrations SET created_at = ? WHERE created_at = ?',
+  );
+  for (const [bogus, sane] of BOGUS_TIMESTAMP_REWRITES) {
+    update.run(sane, bogus);
+  }
 }
