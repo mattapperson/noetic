@@ -135,17 +135,17 @@ describe('tasks db', () => {
       [
         {
           projectRoot: '/repo',
-          path: '/repo',
-          branch: 'main',
-          headSha: 'aaa',
-          current: true,
-        },
-        {
-          projectRoot: '/repo',
           path: '/repo-feature',
           branch: 'feature',
           headSha: 'bbb',
           current: false,
+        },
+        {
+          projectRoot: '/repo',
+          path: '/repo-bugfix',
+          branch: 'bugfix',
+          headSha: 'ccc',
+          current: true,
         },
       ],
       openDatabase,
@@ -154,27 +154,13 @@ describe('tasks db', () => {
     expect(first.projectRoot).toBe('/repo');
     expect(first.rows).toHaveLength(2);
     expect(first.rows.map((row) => row.worktreePath)).toEqual([
-      '/repo',
+      '/repo-bugfix',
       '/repo-feature',
     ]);
 
-    const second = loadTaskTableDataWithWorktrees(
-      dir,
-      [
-        {
-          projectRoot: '/repo',
-          path: '/repo',
-          branch: 'main',
-          headSha: 'aaa',
-          current: true,
-        },
-      ],
-      openDatabase,
-    );
+    const second = loadTaskTableDataWithWorktrees(dir, [], openDatabase);
 
-    expect(second.rows.map((row) => row.worktreePath)).toEqual([
-      '/repo',
-    ]);
+    expect(second.rows).toEqual([]);
   });
 
   test('task table backfills worktrees created outside Noetic', () => {
@@ -240,8 +226,8 @@ describe('tasks db', () => {
       [
         {
           projectRoot: '/repo',
-          path: '/repo',
-          branch: 'main',
+          path: '/repo-feature',
+          branch: 'feature',
           headSha: 'new',
           current: true,
         },
@@ -250,7 +236,7 @@ describe('tasks db', () => {
     );
 
     expect(data.rows.map((row) => row.worktreePath)).toEqual([
-      '/repo',
+      '/repo-feature',
     ]);
 
     const after = openDatabase();

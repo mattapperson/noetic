@@ -35,19 +35,23 @@ export async function loadProjectWorktreesWithGit(
     'list',
     '--porcelain',
   ]);
+  // The first porcelain record is always the main worktree; treat it as the project root.
   const records = parseWorktreeList(output).filter((record) => !record.bare && !record.prunable);
   const projectRoot = normalizePath(records[0]?.path ?? currentRoot);
+  const normalizedCurrent = normalizePath(currentRoot);
 
-  return records.map((record) => {
-    const path = normalizePath(record.path);
-    return {
-      projectRoot,
-      path,
-      branch: branchName(record),
-      headSha: record.headSha,
-      current: path === normalizePath(currentRoot),
-    };
-  });
+  return records
+    .filter((record) => normalizePath(record.path) !== projectRoot)
+    .map((record) => {
+      const path = normalizePath(record.path);
+      return {
+        projectRoot,
+        path,
+        branch: branchName(record),
+        headSha: record.headSha,
+        current: path === normalizedCurrent,
+      };
+    });
 }
 
 export function parseWorktreeList(output: string): ParsedWorktreeRecord[] {
