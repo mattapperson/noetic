@@ -1,4 +1,6 @@
 import { buildContextMemory } from '../memory/layer-api';
+import type { ItemSchemaRegistry } from '../schemas/item';
+import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { Channel } from '../types/channel';
 import type { StepMeta, TokenUsage, Tool } from '../types/common';
 import type { Context, ItemLog, LastLayerUsage } from '../types/context';
@@ -43,6 +45,7 @@ export class ContextImpl implements Context<ContextMemory> {
   readonly harness: AgentHarnessContract;
   readonly layers?: MemoryLayer[];
   unifiedTools?: ReadonlyArray<Tool>;
+  readonly itemSchemas?: ItemSchemaRegistry;
 
   /** @internal Event broadcaster for streaming — not part of public Context interface. */
   readonly _broadcaster?: EventBroadcaster;
@@ -68,6 +71,7 @@ export class ContextImpl implements Context<ContextMemory> {
     checkpointFn?: () => Promise<void>;
     layers?: MemoryLayer[];
     unifiedTools?: ReadonlyArray<Tool>;
+    itemSchemas?: ItemSchemaRegistry;
     _broadcaster?: EventBroadcaster;
   }) {
     this.id = crypto.randomUUID();
@@ -83,9 +87,10 @@ export class ContextImpl implements Context<ContextMemory> {
     this._checkpointFn = opts.checkpointFn;
     this.layers = opts.layers;
     this.unifiedTools = opts.unifiedTools;
+    this.itemSchemas = opts.itemSchemas ?? defaultItemSchemaRegistry;
     this._broadcaster = opts._broadcaster;
 
-    const log = new ItemLogImpl();
+    const log = new ItemLogImpl(this.itemSchemas);
     if (opts.items) {
       for (const item of opts.items) {
         log.append(item);

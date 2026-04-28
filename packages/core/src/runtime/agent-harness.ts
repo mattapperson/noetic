@@ -33,13 +33,14 @@ import {
 } from '../memory/layer-lifecycle';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
+import { ItemSchemaRegistry, mergeExtensions } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { FsAdapter } from '../types/fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from '../types/harness-result';
-import type { ExecuteInput, InputMessageItem, Item } from '../types/items';
+import type { ExecuteInput, InputMessageItem, Item, ItemSchemaExtensions } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
 import type {
@@ -84,6 +85,10 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   /** Shell adapter. Defaults to local sh when not provided. */
   shell?: ShellAdapter;
   llm?: LlmProviderConfig;
+  /** Harness-wide item schema extensions. */
+  itemSchemas?: ItemSchemaExtensions;
+  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
+  strictItemSchemas?: boolean;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
   /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
@@ -124,6 +129,85 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   return new OpenRouter({
     apiKey,
   });
+}
+
+function mergeItemSchemaExtensions(
+  extensions: ReadonlyArray<ItemSchemaExtensions | undefined>,
+): ItemSchemaExtensions {
+  let result: ItemSchemaExtensions = {
+    items: [],
+    developerMessages: [],
+    toolCalls: [],
+    toolResults: [],
+  };
+  for (const ext of extensions) {
+    if (ext) {
+      result = mergeExtensions(result, ext);
+    }
+  }
+  return result;
+}
+
+function collectLayerItemSchemaExtensions(layers: ReadonlyArray<MemoryLayer> | undefined) {
+  return mergeItemSchemaExtensions(layers?.map((layer) => layer.itemSchemas) ?? []);
+}
+
+function collectToolItemSchemaExtensions(tools: ReadonlyArray<Tool> | undefined) {
+  return mergeItemSchemaExtensions(tools?.map((tool) => tool.itemSchemas) ?? []);
+}
+
+function buildItemSchemaRegistry({
+  base,
+  layers,
+  tools,
+}: {
+  base: ItemSchemaRegistry;
+  layers?: ReadonlyArray<MemoryLayer>;
+  tools?: ReadonlyArray<Tool>;
+}): ItemSchemaRegistry {
+  return base
+    .extend(collectLayerItemSchemaExtensions(layers))
+    .extend(collectToolItemSchemaExtensions(tools));
+}
+
+function createToolResultItem({
+  output,
+  callId,
+  roundItemSchemas,
+  tool,
+  callItem,
+  args,
+  result,
+  error,
+}: {
+  output: string;
+  callId: string;
+  roundItemSchemas: ItemSchemaRegistry;
+  tool?: Tool;
+  callItem?: Item;
+  args?: unknown;
+  result?: unknown;
+  error?: boolean;
+}): Item {
+  const baseItem = {
+    id: crypto.randomUUID(),
+    status: 'completed',
+    type: 'function_call_output',
+    callId,
+    output,
+  } as const;
+  const decorated =
+    tool?.decorateResultItem && callItem?.type === 'function_call'
+      ? tool.decorateResultItem({
+          baseItem,
+          callItem,
+          args,
+          result,
+          output,
+          error,
+        })
+      : baseItem;
+  return roundItemSchemas.parseWithCategory(decorated, 'toolResults');
 }
 
 function buildTextFormat(schema: ZodType): {
@@ -387,6 +471,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly sessions = new Map<string, Session>();
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
+  private readonly itemSchemas: ItemSchemaRegistry;
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
@@ -396,6 +481,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       storage: opts.storage ?? createInMemoryStorage(),
       hooks: opts.hooks,
       params: validatedParams,
+      itemSchemas: opts.itemSchemas,
+      strictItemSchemas: opts.strictItemSchemas ?? true,
     };
     this.fs = opts.fs ?? createLocalFsAdapter();
     this.shell = opts.shell ?? createLocalShellAdapter();
@@ -408,6 +495,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
     this.streamIdleTimeoutMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+    this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas, {
+      strictUnknownExtensions: opts.strictItemSchemas ?? true,
+    });
   }
 
   //#region Session Accessors
@@ -452,7 +542,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem> {
     const session = this.requireSession(scope);
-    return buildItemStream(session.runner.broadcaster);
+    return buildItemStream(session.runner.broadcaster, this.itemSchemas);
   }
 
   getTextStream(scope?: SessionScope): AsyncIterable<string> {
@@ -599,7 +689,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   async callModel(request: CallModelRequest): Promise<LLMResponse> {
     if (this.callModelOverride) {
-      return this.callModelOverride(request);
+      const response = await this.callModelOverride(request);
+      const itemSchemas = buildItemSchemaRegistry({
+        base: this.itemSchemas,
+        layers: request.layers,
+        tools: request.tools,
+      });
+      return {
+        ...response,
+        items: itemSchemas.parseMany(response.items),
+      };
     }
 
     if (!this.client) {
@@ -830,7 +929,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         });
         continue;
       }
-      const roundItems = extractOutputItems(sdkResponse);
+      const roundItemSchemas = buildItemSchemaRegistry({
+        base: this.itemSchemas,
+        layers: request.layers,
+        tools: request.tools,
+      });
+      const roundItems = roundItemSchemas.parseMany(extractOutputItems(sdkResponse));
       if (!hasUsableResponseOutput(sdkResponse, roundItems)) {
         const message = 'LLM response completed with no output items';
         emitIfAllowed('llm_call_failed', {
@@ -900,13 +1004,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           parsedArgs = JSON.parse(fc.arguments);
         } catch {
           const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
-          allItems.push({
-            id: crypto.randomUUID(),
-            status: 'completed',
-            type: 'function_call_output',
-            callId: fc.callId,
+          const toolForCall = request.tools.find((t) => t.name === fc.name);
+          const outputItem = createToolResultItem({
             output: errorOutput,
+            callId: fc.callId,
+            roundItemSchemas,
+            tool: toolForCall,
+            callItem: fc,
+            error: true,
           });
+          allItems.push(outputItem);
           conversationInput.push({
             type: 'function_call_output',
             callId: fc.callId,
@@ -920,7 +1027,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           continue;
         }
 
-        const output = await executeToolCall({
+        const toolForCall = request.tools.find((t) => t.name === fc.name);
+        const toolResult = await executeToolCall({
           toolName: fc.name,
           args: parsedArgs,
           tools: request.tools,
@@ -928,14 +1036,19 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           harness: this,
           layers: request.layers,
         });
+        const { output } = toolResult;
 
-        allItems.push({
-          id: crypto.randomUUID(),
-          status: 'completed',
-          type: 'function_call_output',
-          callId: fc.callId,
+        const outputItem = createToolResultItem({
           output,
+          callId: fc.callId,
+          roundItemSchemas,
+          tool: toolForCall,
+          callItem: fc,
+          args: parsedArgs,
+          result: toolResult.result,
+          error: toolResult.error,
         });
+        allItems.push(outputItem);
         conversationInput.push({
           type: 'function_call_output',
           callId: fc.callId,
@@ -1046,11 +1159,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     _broadcaster?: EventBroadcaster;
   }): Context {
     const { memory: memoryLayers, ...rest } = opts ?? {};
+    const effectiveMemory = memoryLayers ?? this._memory;
+    const itemSchemas = buildItemSchemaRegistry({
+      base: this.itemSchemas,
+      layers: effectiveMemory,
+    });
     return new ContextImpl({
       ...rest,
       harness: this,
       channelStore: this.channelStore,
-      layers: memoryLayers ?? this._memory,
+      layers: effectiveMemory,
+      itemSchemas,
     });
   }
 
@@ -1119,6 +1238,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       log: ctx.itemLog,
       budgets: resolveLayerBudgets(layers),
       store: this.layerStateStore,
+      itemSchemas: this.itemSchemas,
     });
   }
 
@@ -1260,6 +1380,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       budgets,
       store: this.layerStateStore,
       query,
+      itemSchemas: this.itemSchemas,
     });
   }
 }

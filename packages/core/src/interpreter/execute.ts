@@ -91,7 +91,9 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
       break;
     case 'spawn':
-      result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+      result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), {
+        itemSchemas: baseCtx.itemSchemas,
+      });
       break;
     case 'provide':
       result = await executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));

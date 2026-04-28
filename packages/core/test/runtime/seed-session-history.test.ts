@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { z } from 'zod';
 import { AgentHarness } from '../../src/runtime/agent-harness';
-import { ItemSchema } from '../../src/schemas/item';
+import { ItemSchema, ItemSchemaRegistry } from '../../src/schemas/item';
 import type { LLMResponse } from '../../src/types/common';
 import type { Item } from '../../src/types/items';
 import type { ContextMemory } from '../../src/types/memory';
@@ -171,5 +172,108 @@ describe('ItemSchema', () => {
         type: '',
       }),
     ).toThrow();
+  });
+
+  it('accepts harness extension items through an ItemSchemaRegistry', () => {
+    const CustomItemSchema = z.object({
+      id: z.string(),
+      type: z.literal('custom:notice'),
+      text: z.string(),
+    });
+    const registry = new ItemSchemaRegistry({
+      items: [
+        CustomItemSchema,
+      ],
+    });
+
+    expect(
+      registry.parse({
+        id: 'custom-1',
+        type: 'custom:notice',
+        text: 'hello',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        id: 'custom-1',
+        type: 'custom:notice',
+        text: 'hello',
+      }),
+    );
+  });
+
+  it('strictly rejects unknown extension item types when schemas are registered', () => {
+    const registry = new ItemSchemaRegistry({
+      items: [
+        z.object({
+          type: z.literal('custom:known'),
+        }),
+      ],
+    });
+
+    expect(() =>
+      registry.parse({
+        type: 'custom:unknown',
+      }),
+    ).toThrow();
+  });
+
+  it('can opt out of strict extension item matching', () => {
+    const registry = new ItemSchemaRegistry(
+      {
+        items: [
+          z.object({
+            type: z.literal('custom:known'),
+          }),
+        ],
+      },
+      {
+        strictUnknownExtensions: false,
+      },
+    );
+
+    expect(
+      registry.parse({
+        type: 'custom:unknown',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        type: 'custom:unknown',
+      }),
+    );
+  });
+
+  it('accepts vendor-prefixed server tool items under strict defaults', () => {
+    const registry = new ItemSchemaRegistry();
+
+    expect(() =>
+      registry.parse({
+        type: 'openrouter:datetime',
+        id: 'dt-1',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects category items that miss a registered category schema', () => {
+    const registry = new ItemSchemaRegistry({
+      toolResults: [
+        z.object({
+          type: z.literal('function_call_output'),
+          callId: z.string(),
+          output: z.string(),
+          requiredDecoratedField: z.string(),
+        }),
+      ],
+    });
+
+    expect(() =>
+      registry.parseWithCategory(
+        {
+          type: 'function_call_output',
+          callId: 'call-1',
+          output: '{}',
+        },
+        'toolResults',
+      ),
+    ).toThrow(/toolResults/);
   });
 });

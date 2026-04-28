@@ -583,6 +583,14 @@ const VALID_STATUSES = new Set([
   'generating',
 ]);
 
+/** Returns `item.id` when the variant carries one; `undefined` otherwise. */
+export function getItemId(item: Item): string | undefined {
+  if ('id' in item && typeof item.id === 'string') {
+    return item.id;
+  }
+  return undefined;
+}
+
 /**
  * Asserts that every item in a log conforms to the OpenResponses item shape.
  * Checks id, status, type discriminator, and per-type field presence.

@@ -3,6 +3,8 @@ import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
 import { contextToExecCtx } from '../runtime/exec-context-factory';
+import type { ItemSchemaRegistry } from '../schemas/item';
+import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { Context } from '../types/context';
 import type { Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryConfig, MemoryLayer } from '../types/memory';
@@ -16,6 +18,7 @@ import { frameworkCast } from './framework-cast';
 export interface ExecuteSpawnOpts {
   layerStore?: LayerStateStore;
   parentLayers?: MemoryLayer[];
+  itemSchemas?: ItemSchemaRegistry;
 }
 
 interface CollectSpawnItemsParams {
@@ -23,6 +26,7 @@ interface CollectSpawnItemsParams {
   parentExecutionCtx: ExecutionContext;
   childExecutionCtx: ExecutionContext;
   layerStore: LayerStateStore;
+  itemSchemas?: ItemSchemaRegistry;
 }
 
 //#endregion
@@ -53,12 +57,14 @@ async function collectSpawnItems({
   parentExecutionCtx,
   childExecutionCtx,
   layerStore,
+  itemSchemas = defaultItemSchemaRegistry,
 }: CollectSpawnItemsParams): Promise<Item[]> {
   const spawnResults = await spawnLayers({
     layers,
     parentCtx: parentExecutionCtx,
     childCtx: childExecutionCtx,
     store: layerStore,
+    itemSchemas,
   });
 
   return spawnResults.flatMap((r) => r.items);
@@ -102,6 +108,7 @@ export async function executeSpawn<TMemory, I, O>(
       parentExecutionCtx,
       childExecutionCtx,
       layerStore,
+      itemSchemas: opts?.itemSchemas,
     });
   }
 

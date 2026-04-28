@@ -11,6 +11,7 @@ import {
   filterReasoningStream,
   filterTextStream,
 } from '../../src/runtime/session-streams';
+import { ItemSchemaRegistry } from '../../src/schemas/item';
 import type { LLMResponse } from '../../src/types/common';
 import type { StreamEvent } from '../../src/types/harness-result';
 import type { ContextMemory } from '../../src/types/memory';
@@ -162,6 +163,42 @@ class InvalidStateRecoveryClient {
           return functionCallResponse(callNumber);
         }
         return messageResponse(`resp-final-${callNumber}`, 'recovered');
+      },
+    };
+  }
+}
+
+class DecoratingToolClient {
+  calls = 0;
+
+  callModel(): {
+    getFullResponsesStream: () => AsyncIterable<unknown>;
+    getResponse: () => Promise<MockModelResponse>;
+  } {
+    return {
+      async *getFullResponsesStream() {},
+      getResponse: async () => {
+        this.calls += 1;
+        return this.calls === 1
+          ? frameworkCast<MockModelResponse>({
+              id: 'resp-count-call',
+              status: 'completed',
+              output: [
+                {
+                  id: 'fc-count',
+                  status: 'completed',
+                  type: 'function_call',
+                  callId: 'call-count',
+                  name: 'count',
+                  arguments: '{"count":3}',
+                },
+              ],
+              usage: {
+                inputTokens: 1,
+                outputTokens: 1,
+              },
+            })
+          : messageResponse('count-final', 'done');
       },
     };
   }
@@ -666,6 +703,348 @@ describe('session-streams — buildItemStream', () => {
     assert(last);
     expect(last.isComplete).toBe(true);
     expect(last.type).toBe('message');
+  });
+
+  it('yields custom items registered through an item schema registry', async () => {
+    const bc = new EventBroadcaster();
+    const registry = new ItemSchemaRegistry({
+      items: [
+        z.object({
+          type: z.literal('custom:progress'),
+          id: z.string(),
+          percent: z.number(),
+        }),
+      ],
+    });
+
+    emitAsync(bc, [
+      sdkEvent('response.created', {}, undefined),
+      sdkEvent(
+        'response.output_item.added',
+        {
+          item: {
+            type: 'custom:progress',
+            id: 'progress-1',
+            percent: 50,
+          },
+        },
+        0,
+      ),
+      sdkEvent('response.output_item.done', {}, 0),
+    ]);
+
+    const items = await collect(buildItemStream(bc, registry));
+    const last = items.at(-1);
+    assert(last);
+    expect(last).toMatchObject({
+      type: 'custom:progress',
+      id: 'progress-1',
+      percent: 50,
+      isComplete: true,
+    });
+  });
+
+  it('preserves function_call extension fields in streamed snapshots', async () => {
+    const bc = new EventBroadcaster();
+    const registry = new ItemSchemaRegistry({
+      toolCalls: [
+        z.object({
+          type: z.literal('function_call'),
+          id: z.string(),
+          status: z.string(),
+          callId: z.string(),
+          name: z.string(),
+          arguments: z.string().optional(),
+          display: z.object({
+            label: z.string(),
+          }),
+        }),
+      ],
+    });
+
+    emitAsync(bc, [
+      sdkEvent('response.created', {}, undefined),
+      sdkEvent(
+        'response.output_item.added',
+        {
+          item: {
+            type: 'function_call',
+            id: 'fc-stream',
+            status: 'in_progress',
+            callId: 'call-stream',
+            name: 'search',
+            arguments: '',
+            display: {
+              label: 'Search web',
+            },
+          },
+        },
+        0,
+      ),
+      sdkEvent(
+        'response.function_call_arguments.delta',
+        {
+          delta: '{"q":"noetic"}',
+        },
+        0,
+      ),
+      sdkEvent('response.function_call_arguments.done', {}, 0),
+      sdkEvent('response.output_item.done', {}, 0),
+    ]);
+
+    const items = await collect(buildItemStream(bc, registry));
+    const last = items.at(-1);
+    assert(last);
+    expect(last).toMatchObject({
+      type: 'function_call',
+      id: 'fc-stream',
+      callId: 'call-stream',
+      name: 'search',
+      arguments: '{"q":"noetic"}',
+      display: {
+        label: 'Search web',
+      },
+      isComplete: true,
+    });
+  });
+});
+
+describe('AgentHarness — item schema extensions', () => {
+  it('preserves harness-wide custom response items in getAgentResponse()', async () => {
+    const CustomItemSchema = z.object({
+      type: z.literal('custom:notice'),
+      id: z.string(),
+      text: z.string(),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      initialStep: echoStep,
+      params: {},
+      itemSchemas: {
+        items: [
+          CustomItemSchema,
+        ],
+      },
+      _testCallModel: async () => ({
+        items: [
+          frameworkCast({
+            type: 'custom:notice',
+            id: 'custom-1',
+            text: 'from adapter',
+          }),
+        ],
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      }),
+    });
+
+    await harness.execute('hi');
+    const response = await harness.getAgentResponse();
+
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        type: 'custom:notice',
+        id: 'custom-1',
+        text: 'from adapter',
+      }),
+    );
+  });
+
+  it('decorates harness-created tool result items before returning them', async () => {
+    const ToolResultSchema = z.object({
+      id: z.string(),
+      status: z.literal('completed'),
+      type: z.literal('function_call_output'),
+      callId: z.string(),
+      output: z.string(),
+      card: z.object({
+        title: z.string(),
+        count: z.number(),
+      }),
+    });
+    const countingTool = tool({
+      name: 'count',
+      description: 'Counts items',
+      input: z.object({
+        count: z.number(),
+      }),
+      output: z.object({
+        count: z.number(),
+      }),
+      itemSchemas: {
+        toolResults: [
+          ToolResultSchema,
+        ],
+      },
+      execute: async (args) => ({
+        count: args.count,
+      }),
+      decorateResultItem: ({ baseItem, result }) => ({
+        ...baseItem,
+        card: {
+          title: 'Count complete',
+          count: result?.count ?? 0,
+        },
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const fakeClient = new DecoratingToolClient();
+    frameworkCast<{
+      client: DecoratingToolClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'count'),
+      ],
+      tools: [
+        countingTool,
+      ],
+      ctx,
+    });
+
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function_call_output',
+        callId: 'call-count',
+        card: {
+          title: 'Count complete',
+          count: 3,
+        },
+      }),
+    );
+  });
+
+  it('uses harness-wide schemas for memory recall items', async () => {
+    const CustomMemoryItemSchema = z.object({
+      type: z.literal('custom:memory'),
+      text: z.string(),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      initialStep: echoStep,
+      params: {},
+      itemSchemas: {
+        items: [
+          CustomMemoryItemSchema,
+        ],
+      },
+      memory: [
+        {
+          id: 'custom-memory',
+          slot: 100,
+          scope: 'execution',
+          hooks: {
+            recall: async () => ({
+              tokenCount: 1,
+              items: [
+                frameworkCast({
+                  type: 'custom:memory',
+                  text: 'global schema item',
+                }),
+              ],
+            }),
+          },
+        },
+      ],
+      _testCallModel: async (request) => {
+        expect(request.items).toContainEqual(
+          expect.objectContaining({
+            type: 'custom:memory',
+            text: 'global schema item',
+          }),
+        );
+        return textOnlyResponse('done');
+      },
+    });
+
+    await harness.execute('hi');
+    await expect(harness.getAgentResponse()).resolves.toMatchObject({
+      text: 'done',
+    });
+  });
+
+  it('rejects decorated tool result items that miss the registered schema', async () => {
+    const ToolResultSchema = z.object({
+      id: z.string(),
+      status: z.literal('completed'),
+      type: z.literal('function_call_output'),
+      callId: z.string(),
+      output: z.string(),
+      requiredCard: z.object({
+        title: z.string(),
+      }),
+    });
+    const invalidDecoratingTool = tool({
+      name: 'count',
+      description: 'Counts items',
+      input: z.object({
+        count: z.number(),
+      }),
+      output: z.object({
+        count: z.number(),
+      }),
+      itemSchemas: {
+        toolResults: [
+          ToolResultSchema,
+        ],
+      },
+      execute: async (args) => ({
+        count: args.count,
+      }),
+      decorateResultItem: ({ baseItem }) => baseItem,
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const fakeClient = new DecoratingToolClient();
+    frameworkCast<{
+      client: DecoratingToolClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    await expect(
+      harness.callModel({
+        model: 'test/model',
+        items: [
+          makeMessage('user', 'count'),
+        ],
+        tools: [
+          invalidDecoratingTool,
+        ],
+        ctx,
+      }),
+    ).rejects.toThrow(/toolResults/);
+  });
+
+  it('rejects unregistered extension response items by default', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      initialStep: echoStep,
+      params: {},
+      _testCallModel: async () => ({
+        items: [
+          frameworkCast({
+            type: 'custom:unregistered',
+          }),
+        ],
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      }),
+    });
+
+    await harness.execute('hi');
+    await expect(harness.getAgentResponse()).rejects.toThrow(/registered item extension schema/);
   });
 });
 

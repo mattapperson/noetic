@@ -1,3 +1,4 @@
+import type { ItemSchemaRegistry } from '../schemas/item';
 import type { Channel } from './channel';
 import type { StepMeta, TokenUsage, Tool } from './common';
 import type { FsAdapter } from './fs-adapter';
@@ -59,6 +60,8 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly memory: TMemory;
   /** Unified tool set collected from all LLM steps in the step tree before execution. */
   readonly unifiedTools?: ReadonlyArray<Tool>;
+  /** Runtime item schema registry active for this context. */
+  readonly itemSchemas?: ItemSchemaRegistry;
   recv<T>(
     channel: Channel<T>,
     opts?: {

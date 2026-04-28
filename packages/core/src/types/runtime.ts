@@ -5,7 +5,7 @@ import type { Context } from './context';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
-import type { ExecuteInput, Item } from './items';
+import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { ShellAdapter } from './shell-adapter';
@@ -24,6 +24,10 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
+  /** Harness-wide item schema extensions used to validate emitted and returned items. */
+  itemSchemas?: ItemSchemaExtensions;
+  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
+  strictItemSchemas?: boolean;
 }
 
 //#region Delivery Mode

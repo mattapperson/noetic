@@ -2,7 +2,7 @@ import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
 import type { FsAdapter } from './fs-adapter';
-import type { Item } from './items';
+import type { Item, ItemSchemaExtensions } from './items';
 import type { CallModelRequest } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 import type {
@@ -370,6 +370,8 @@ export interface MemoryLayer<TState = unknown> {
   timeouts?: Partial<LayerTimeouts>;
   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
   provides?: LayerProvides;
+  /** Optional item schemas contributed by this layer, primarily for developer-role memory items. */
+  itemSchemas?: Pick<ItemSchemaExtensions, 'developerMessages' | 'items'>;
   /** Default re-render timing when `onItemAppend` requests a re-render. */
   rerenderTiming?: 'immediate' | 'batched';
 }

@@ -150,7 +150,7 @@ export { AgentHarness } from './runtime/agent-harness';
 //#region Schemas
 
 /** @public */
-export { ItemSchema } from './schemas/item';
+export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from './schemas/item';
 
 //#endregion
 
@@ -212,14 +212,20 @@ export type { NoeticError } from './types/error';
 /** @public */
 export type {
   ContentPart,
+  DeveloperMessageExtensionItem,
   ExecuteInput,
+  ExtendedItem,
+  ExtensionItem,
   FileSearchItem,
   FunctionCallItem,
   FunctionCallOutputItem,
   ImageGenerationItem,
+  InferExtendedItem,
   InputMessageItem,
   InputTextPart,
   Item,
+  ItemBase,
+  ItemSchemaExtensions,
   MessageItem,
   OutputItem,
   OutputTextPart,

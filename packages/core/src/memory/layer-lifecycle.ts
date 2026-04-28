@@ -1,6 +1,8 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { frameworkCast } from '../interpreter/framework-cast';
 import { createMessage, estimateTokens } from '../interpreter/message-helpers';
+import type { ItemSchemaRegistry } from '../schemas/item';
+import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { LLMResponse } from '../types/common';
 import type { ItemLog } from '../types/context';
 import type { Item } from '../types/items';
@@ -32,6 +34,7 @@ interface RecallLayersParams {
   log: ItemLog;
   budgets: Map<string, number>;
   store: LayerStateStore;
+  itemSchemas?: ItemSchemaRegistry;
 }
 
 interface StoreLayersParams {
@@ -48,6 +51,7 @@ interface SpawnLayersParams {
   parentCtx: ExecutionContext;
   childCtx: ExecutionContext;
   store: LayerStateStore;
+  itemSchemas?: ItemSchemaRegistry;
 }
 
 interface ReturnLayersParams<T = unknown> {
@@ -119,6 +123,7 @@ interface ExecuteRerenderParams {
   log: ItemLog;
   budgets: Map<string, number>;
   store: LayerStateStore;
+  itemSchemas?: ItemSchemaRegistry;
   /** Query for context-aware recall (e.g., last user message) */
   query?: string;
   /** Current re-render depth (for loop protection) */
@@ -222,6 +227,13 @@ export function mostRestrictive(decisions: SteeringDecision[]): SteeringDecision
   return result;
 }
 
+function layerItemSchemas(
+  layer: MemoryLayer,
+  base = defaultItemSchemaRegistry,
+): ItemSchemaRegistry {
+  return base.extend(layer.itemSchemas);
+}
+
 //#endregion
 
 //#region Public API
@@ -258,6 +270,7 @@ export async function recallLayers({
   log,
   budgets,
   store,
+  itemSchemas = defaultItemSchemaRegistry,
 }: RecallLayersParams): Promise<
   {
     layerId: string;
@@ -299,11 +312,12 @@ export async function recallLayers({
       if (!result) {
         continue;
       }
+      const layerSchemas = layerItemSchemas(layer, itemSchemas);
       if (typeof result === 'string') {
         results.push({
           layerId: layer.id,
           items: [
-            createMessage(result, 'developer'),
+            layerSchemas.parseWithCategory(createMessage(result, 'developer'), 'developerMessages'),
           ],
           tokenCount: estimateTokens(result),
         });
@@ -311,7 +325,7 @@ export async function recallLayers({
       }
       results.push({
         layerId: layer.id,
-        items: result.items,
+        items: layerSchemas.parseMany(result.items),
         tokenCount: result.tokenCount,
       });
       if (result.state !== undefined) {
@@ -422,6 +436,7 @@ export async function spawnLayers({
   parentCtx,
   childCtx,
   store,
+  itemSchemas = defaultItemSchemaRegistry,
 }: SpawnLayersParams): Promise<
   {
     layerId: string;
@@ -459,7 +474,7 @@ export async function spawnLayers({
         results.push({
           layerId: layer.id,
           childState: result.childState,
-          items: result.items ?? [],
+          items: layerItemSchemas(layer, itemSchemas).parseMany(result.items ?? []),
         });
       }
     } catch (e) {
@@ -735,6 +750,7 @@ export async function executeRerender({
   log,
   budgets,
   store,
+  itemSchemas,
   query = '',
   depth = 0,
 }: ExecuteRerenderParams): Promise<
@@ -794,6 +810,7 @@ export async function executeRerender({
     log,
     budgets,
     store,
+    itemSchemas,
   });
 }
 

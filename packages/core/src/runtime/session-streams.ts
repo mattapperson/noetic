@@ -1,4 +1,7 @@
+import type { ItemSchemaRegistry } from '../schemas/item';
+import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { StreamEvent, StreamingItem } from '../types/harness-result';
+import type { Item } from '../types/items';
 import type { EventBroadcaster } from './event-broadcaster';
 
 //#region Types
@@ -23,7 +26,7 @@ interface MutableFunctionCallItem {
   arguments: string;
 }
 
-type MutableItem = MutableMessageItem | MutableFunctionCallItem;
+type MutableItem = MutableMessageItem | MutableFunctionCallItem | Item;
 
 interface ItemAccumulator {
   id: string;
@@ -39,7 +42,21 @@ function isItemRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && 'type' in value;
 }
 
-function createAccumulatorFromItemAdded(event: StreamEvent): ItemAccumulator | null {
+function appendText(
+  part: {
+    readonly text: string;
+  },
+  delta: string,
+): void {
+  Object.assign(part, {
+    text: part.text + delta,
+  });
+}
+
+function createAccumulatorFromItemAdded(
+  event: StreamEvent,
+  itemSchemas: ItemSchemaRegistry,
+): ItemAccumulator | null {
   if (event.source !== 'sdk' || event.type !== 'response.output_item.added') {
     return null;
   }
@@ -69,9 +86,11 @@ function createAccumulatorFromItemAdded(event: StreamEvent): ItemAccumulator | n
   }
 
   if (itemData.type === 'function_call') {
+    const parsed = itemSchemas.parse(itemData);
     return {
       id,
       item: {
+        ...parsed,
         id,
         type: 'function_call',
         status: 'in_progress',
@@ -83,7 +102,12 @@ function createAccumulatorFromItemAdded(event: StreamEvent): ItemAccumulator | n
     };
   }
 
-  return null;
+  const parsed = itemSchemas.parse(itemData);
+  return {
+    id,
+    item: parsed,
+    isComplete: false,
+  };
 }
 
 function updateMessageAccumulator(acc: ItemAccumulator, event: StreamEvent): void {
@@ -92,12 +116,12 @@ function updateMessageAccumulator(acc: ItemAccumulator, event: StreamEvent): voi
   }
   if (event.type === 'response.output_text.delta' && typeof event.data.delta === 'string') {
     const msg = acc.item;
-    if (msg.type !== 'message') {
+    if (msg.type !== 'message' || !('content' in msg)) {
       return;
     }
     const lastPart = msg.content[msg.content.length - 1];
-    if (lastPart) {
-      lastPart.text += event.data.delta;
+    if (lastPart && 'text' in lastPart && typeof lastPart.text === 'string') {
+      appendText(lastPart, event.data.delta);
     }
   }
   if (event.type === 'response.output_text.done') {
@@ -114,7 +138,7 @@ function updateFunctionCallAccumulator(acc: ItemAccumulator, event: StreamEvent)
     typeof event.data.delta === 'string'
   ) {
     const fc = acc.item;
-    if (fc.type !== 'function_call') {
+    if (fc.type !== 'function_call' || !('arguments' in fc) || typeof fc.arguments !== 'string') {
       return;
     }
     fc.arguments += event.data.delta;
@@ -127,6 +151,22 @@ function updateFunctionCallAccumulator(acc: ItemAccumulator, event: StreamEvent)
 /** Compute a composite key from round offset and output index to avoid collisions across tool rounds. */
 function accumulatorKey(roundOffset: number, outputIndex: number): string {
   return `${roundOffset}:${outputIndex}`;
+}
+
+function completeStreamingItem(item: MutableItem): MutableItem & {
+  isComplete: true;
+} {
+  if ('status' in item) {
+    return {
+      ...item,
+      status: 'completed',
+      isComplete: true,
+    };
+  }
+  return {
+    ...item,
+    isComplete: true,
+  };
 }
 
 //#endregion
@@ -164,6 +204,7 @@ export async function* filterReasoningStream(broadcaster: EventBroadcaster): Asy
  *  multiple turns within a session don't collide. */
 export async function* buildItemStream(
   broadcaster: EventBroadcaster,
+  itemSchemas: ItemSchemaRegistry = defaultItemSchemaRegistry,
 ): AsyncIterable<StreamingItem> {
   const accumulators = new Map<string, ItemAccumulator>();
   let roundOffset = 0;
@@ -182,7 +223,7 @@ export async function* buildItemStream(
       const outputIndex =
         typeof event.outputIndex === 'number' ? event.outputIndex : accumulators.size;
       const key = accumulatorKey(roundOffset, outputIndex);
-      const acc = createAccumulatorFromItemAdded(event);
+      const acc = createAccumulatorFromItemAdded(event, itemSchemas);
       if (acc) {
         accumulators.set(key, acc);
         yield {
@@ -199,11 +240,7 @@ export async function* buildItemStream(
       const acc = accumulators.get(key);
       if (acc) {
         acc.isComplete = true;
-        yield {
-          ...acc.item,
-          status: 'completed',
-          isComplete: true,
-        };
+        yield completeStreamingItem(acc.item);
       }
       continue;
     }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { z } from 'zod';
 import type { SettleResult } from '../../src/index';
 import { Slot } from '../../src/index';
+import type { ExtendedItem } from '../../src/types/items';
 
 describe('Type definitions', () => {
   describe('Memory types', () => {
@@ -34,6 +36,28 @@ describe('Type definitions', () => {
       expect(fulfilled.value).toBe('result');
       expect(rejected.status).toBe('rejected');
       expect(rejected.error!.kind).toBe('cancelled');
+    });
+  });
+
+  describe('ExtendedItem', () => {
+    it('accepts schema-inferred custom items', () => {
+      const CustomItemSchema = z.object({
+        type: z.literal('custom:test'),
+        id: z.string(),
+        payload: z.number(),
+      });
+      const extensions = {
+        items: [
+          CustomItemSchema,
+        ],
+      } as const;
+      const item: ExtendedItem<typeof extensions> = {
+        type: 'custom:test',
+        id: 'custom-1',
+        payload: 1,
+      };
+
+      expect(item.payload).toBe(1);
     });
   });
 });

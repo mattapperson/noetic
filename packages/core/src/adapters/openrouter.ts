@@ -254,10 +254,17 @@ async function consumeGenerator(generator: AsyncGenerator<unknown, unknown>): Pr
 }
 
 /** @internal Execute a single tool call with steering checks. */
-export async function executeToolCall(params: ExecuteToolCallParams): Promise<string> {
+export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
+  output: string;
+  result?: unknown;
+  error?: boolean;
+}> {
   const matchedTool = params.tools.find((t) => t.name === params.toolName);
   if (!matchedTool) {
-    return `Error: unknown tool '${params.toolName}'`;
+    return {
+      output: `Error: unknown tool '${params.toolName}'`,
+      error: true,
+    };
   }
 
   if (params.layers && params.layers.length > 0) {
@@ -268,10 +275,16 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<st
       params.context,
     );
     if (decision.action === SteeringAction.Deny) {
-      return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
+      return {
+        output: `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`,
+        error: true,
+      };
     }
     if (decision.action === SteeringAction.Guide) {
-      return `Tool call redirected: ${decision.guidance}`;
+      return {
+        output: `Tool call redirected: ${decision.guidance}`,
+        error: true,
+      };
     }
   }
 
@@ -282,9 +295,15 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<st
     const result = isAsyncGenerator(executionResult)
       ? await consumeGenerator(executionResult)
       : await executionResult;
-    return typeof result === 'string' ? result : JSON.stringify(result);
+    return {
+      output: typeof result === 'string' ? result : JSON.stringify(result),
+      result,
+    };
   } catch (e) {
-    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+    return {
+      output: `Error: ${e instanceof Error ? e.message : String(e)}`,
+      error: true,
+    };
   }
 }
 
