@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 
 import { relations } from 'drizzle-orm';
-import { index, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export type TaskReviewStatus = 'not_started' | 'reviewing' | 'needs_changes' | 'approved';
 export type TaskLifecycleStatus = 'active' | 'merged' | 'cleanup-blocked' | 'removed';
 export type TaskSource = 'git-worktree';
 export type TaskSessionKind = 'agent_ci_review' | 'local_review' | 'manual';
 export type TaskSessionStatus = 'active' | 'completed' | 'failed' | 'cancelled';
+
+export const AGENT_CI_REVIEW_KIND: TaskSessionKind = 'agent_ci_review';
 
 export function taskWorktreeId(projectRoot: string, worktreePath: string): string {
   return createHash('sha256').update(projectRoot).update('\0').update(worktreePath).digest('hex');
@@ -59,6 +61,9 @@ export const taskSessions = sqliteTable(
     completedAt: text('completed_at'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
+    pid: integer('pid'),
+    pausedAt: text('paused_at'),
+    pidStarttime: text('pid_starttime'),
   },
   (table) => [
     index('task_sessions_task_id_idx').on(table.taskId),
