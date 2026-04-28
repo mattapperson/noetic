@@ -148,7 +148,9 @@ describe('tasks db', () => {
           current: true,
         },
       ],
-      openDatabase,
+      {
+        openDatabase,
+      },
     );
 
     expect(first.projectRoot).toBe('/repo');
@@ -158,7 +160,9 @@ describe('tasks db', () => {
       '/repo-feature',
     ]);
 
-    const second = loadTaskTableDataWithWorktrees(dir, [], openDatabase);
+    const second = loadTaskTableDataWithWorktrees(dir, [], {
+      openDatabase,
+    });
 
     expect(second.rows).toEqual([]);
   });
@@ -180,7 +184,9 @@ describe('tasks db', () => {
           current: false,
         },
       ],
-      openDatabase,
+      {
+        openDatabase,
+      },
     );
 
     expect(data.rows).toHaveLength(1);
@@ -232,7 +238,9 @@ describe('tasks db', () => {
           current: true,
         },
       ],
-      openDatabase,
+      {
+        openDatabase,
+      },
     );
 
     expect(data.rows.map((row) => row.worktreePath)).toEqual([

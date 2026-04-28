@@ -11,19 +11,24 @@ export interface TasksModalProps {
   databasePath: string;
   rows: TaskTableRow[];
   error?: string;
+  lastResult?: string | null;
   onClose: () => void;
+  onCancel?: (row: TaskTableRow) => void;
+  onTogglePause?: (row: TaskTableRow) => void;
 }
 
 const MARKER_WIDTH = 2;
 const SESSIONS_WIDTH = 8;
 const REVIEW_WIDTH = 14;
+const CI_WIDTH = 12;
 const PATH_BREAKPOINT = 100;
 const MIN_TITLE_BASIS = 16;
 const MIN_BRANCH_BASIS = 12;
 const MIN_PATH_BASIS = 18;
 
 export function TasksModal(props: TasksModalProps): ReactNode {
-  const { projectRoot, databasePath, rows, error, onClose } = props;
+  const { projectRoot, databasePath, rows, error, lastResult, onClose, onCancel, onTogglePause } =
+    props;
   const theme = useTheme();
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 100;
@@ -42,10 +47,25 @@ export function TasksModal(props: TasksModalProps): ReactNode {
     }
     if (key.downArrow || input === 'j') {
       setSelectedIndex((current) => Math.min(Math.max(0, rows.length - 1), current + 1));
+      return;
+    }
+    const selected = rows[selectedIndex];
+    if (selected === undefined) {
+      return;
+    }
+    if (selected.agentCiStatus === 'unavailable') {
+      return;
+    }
+    if (input === 'c' && onCancel !== undefined) {
+      onCancel(selected);
+      return;
+    }
+    if (input === 'p' && onTogglePause !== undefined) {
+      onTogglePause(selected);
     }
   });
 
-  const visibleCount = Math.max(1, terminalHeight - 10);
+  const visibleCount = Math.max(1, terminalHeight - 12);
   const start = Math.max(
     0,
     Math.min(
@@ -93,6 +113,18 @@ export function TasksModal(props: TasksModalProps): ReactNode {
       })}
 
       {rows.length === 0 ? <Text dimColor>No worktrees found</Text> : null}
+
+      {lastResult !== undefined && lastResult !== null ? (
+        <Box marginTop={1}>
+          <Text dimColor wrap="truncate-end">
+            {lastResult}
+          </Text>
+        </Box>
+      ) : null}
+
+      <Box marginTop={1}>
+        <Text dimColor>c cancel • p pause/resume • q close</Text>
+      </Box>
     </Box>
   );
 }
@@ -124,6 +156,11 @@ function HeaderRow({ theme, showPath }: HeaderRowProps): ReactNode {
           Review
         </Text>
       </Box>
+      <Box width={CI_WIDTH} flexShrink={0} marginLeft={1}>
+        <Text color={theme.accent} wrap="truncate-end">
+          CI
+        </Text>
+      </Box>
       {showPath ? (
         <Box flexGrow={2} flexShrink={1} flexBasis={MIN_PATH_BASIS} marginLeft={1}>
           <Text color={theme.accent} wrap="truncate-end">
@@ -147,6 +184,7 @@ function TaskRow({ row, selected, theme, showPath }: TaskRowProps): ReactNode {
   const marker = selected ? '>' : row.current ? '*' : ' ';
   const branch = row.branch ?? 'detached';
   const review = row.reviewStatus.replace(/_/g, ' ');
+  const ciLabel = formatAgentCiLabel(row);
 
   return (
     <Box flexDirection="row">
@@ -171,6 +209,11 @@ function TaskRow({ row, selected, theme, showPath }: TaskRowProps): ReactNode {
           {review}
         </Text>
       </Box>
+      <Box width={CI_WIDTH} flexShrink={0} marginLeft={1}>
+        <Text color={color} wrap="truncate-end">
+          {ciLabel}
+        </Text>
+      </Box>
       {showPath ? (
         <Box flexGrow={2} flexShrink={1} flexBasis={MIN_PATH_BASIS} marginLeft={1}>
           <Text color={color} wrap="truncate-start">
@@ -180,4 +223,14 @@ function TaskRow({ row, selected, theme, showPath }: TaskRowProps): ReactNode {
       ) : null}
     </Box>
   );
+}
+
+function formatAgentCiLabel(row: TaskTableRow): string {
+  if (row.agentCiStatus === 'running') {
+    return '▶ running';
+  }
+  if (row.agentCiStatus === 'paused') {
+    return '‖ paused';
+  }
+  return '';
 }

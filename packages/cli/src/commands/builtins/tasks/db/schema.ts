@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { relations } from 'drizzle-orm';
-import { index, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export type TaskReviewStatus = 'not_started' | 'reviewing' | 'needs_changes' | 'approved';
 export type TaskLifecycleStatus = 'active' | 'merged' | 'cleanup-blocked' | 'removed';
@@ -59,6 +59,8 @@ export const taskSessions = sqliteTable(
     completedAt: text('completed_at'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
+    pid: integer('pid'),
+    pausedAt: text('paused_at'),
   },
   (table) => [
     index('task_sessions_task_id_idx').on(table.taskId),

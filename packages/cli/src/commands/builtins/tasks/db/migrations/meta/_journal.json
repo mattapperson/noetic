@@ -29,6 +29,13 @@
       "when": 1777325435941,
       "tag": "0003_motionless_titania",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777384684407,
+      "tag": "0004_add_session_pid_pause",
+      "breakpoints": true
     }
   ]
 }
