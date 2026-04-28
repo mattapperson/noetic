@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process';
+
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 
 import type * as schema from './db/schema.js';
 import type { TaskSessionRecord, TaskSessionStatus } from './db/schema.js';
-import { taskSessions } from './db/schema.js';
+import { AGENT_CI_REVIEW_KIND, taskSessions } from './db/schema.js';
 
 //#region Types
 
@@ -12,8 +14,11 @@ type TasksDb = BunSQLiteDatabase<typeof schema>;
 export type ControlSignal = 'SIGTERM' | 'SIGSTOP' | 'SIGCONT';
 
 export interface Signaller {
-  kill(pid: number, signal: ControlSignal): void;
+  // Caller passes the negative process-group id (with detached spawn, pgid === pid)
+  // to signal the whole tree. Pass a positive pid only for direct control.
+  kill(target: number, signal: ControlSignal): void;
   isAlive(pid: number): boolean;
+  startTime(pid: number): string | null;
 }
 
 export type AgentCiActionResult =
@@ -49,6 +54,7 @@ export type AgentCiActionResult =
 interface ResolvedSession {
   session: TaskSessionRecord;
   pid: number;
+  groupTarget: number;
   now: string;
 }
 
@@ -76,9 +82,34 @@ function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
   return typeof err.code === 'string';
 }
 
+function readPidStartTime(pid: number): string | null {
+  try {
+    const out = execFileSync(
+      'ps',
+      [
+        '-p',
+        String(pid),
+        '-o',
+        'lstart=',
+      ],
+      {
+        stdio: [
+          'ignore',
+          'pipe',
+          'ignore',
+        ],
+        encoding: 'utf8',
+      },
+    ).trim();
+    return out.length === 0 ? null : out;
+  } catch {
+    return null;
+  }
+}
+
 export const defaultSignaller: Signaller = {
-  kill(pid: number, signal: ControlSignal): void {
-    process.kill(pid, signal);
+  kill(target: number, signal: ControlSignal): void {
+    process.kill(target, signal);
   },
   isAlive(pid: number): boolean {
     try {
@@ -90,6 +121,9 @@ export const defaultSignaller: Signaller = {
       }
       return false;
     }
+  },
+  startTime(pid: number): string | null {
+    return readPidStartTime(pid);
   },
 };
 
@@ -104,7 +138,7 @@ export function findActiveAgentCiSession(db: TasksDb, taskId: string): TaskSessi
     .where(
       and(
         eq(taskSessions.taskId, taskId),
-        eq(taskSessions.kind, 'agent_ci_review'),
+        eq(taskSessions.kind, AGENT_CI_REVIEW_KIND),
         eq(taskSessions.status, 'active'),
         isNull(taskSessions.completedAt),
       ),
@@ -159,6 +193,33 @@ function setPausedAt(args: SetPausedAtArgs): void {
 
 //#endregion
 
+//#region Signal Helpers
+
+interface KillOutcome {
+  ok: boolean;
+  alreadyDead: boolean;
+}
+
+function tryKill(signaller: Signaller, target: number, signal: ControlSignal): KillOutcome {
+  try {
+    signaller.kill(target, signal);
+    return {
+      ok: true,
+      alreadyDead: false,
+    };
+  } catch (err) {
+    if (isErrnoException(err) && err.code === 'ESRCH') {
+      return {
+        ok: false,
+        alreadyDead: true,
+      };
+    }
+    throw err;
+  }
+}
+
+//#endregion
+
 //#region Resolution Preamble
 
 const POSIX_AVAILABLE = process.platform !== 'win32';
@@ -185,7 +246,7 @@ function resolveActiveSession(db: TasksDb, taskId: string, signaller: Signaller)
   }
   const pid = session.pid;
   const now = new Date().toISOString();
-  if (!signaller.isAlive(pid)) {
+  if (!verifyPidIdentity(signaller, pid, session.pidStarttime)) {
     markCompleted({
       db,
       sessionId: session.id,
@@ -206,9 +267,29 @@ function resolveActiveSession(db: TasksDb, taskId: string, signaller: Signaller)
     ready: {
       session,
       pid,
+      groupTarget: -pid,
       now,
     },
   };
+}
+
+function verifyPidIdentity(
+  signaller: Signaller,
+  pid: number,
+  storedStartTime: string | null,
+): boolean {
+  if (!signaller.isAlive(pid)) {
+    return false;
+  }
+  if (storedStartTime === null) {
+    // Legacy row without recorded start time — fall back to liveness only.
+    return true;
+  }
+  const current = signaller.startTime(pid);
+  if (current === null) {
+    return false;
+  }
+  return current === storedStartTime;
 }
 
 //#endregion
@@ -224,17 +305,24 @@ export function cancelAgentCiRun(
   if (outcome.kind === 'rejected') {
     return outcome.result;
   }
-  const { session, pid, now } = outcome.ready;
+  const { session, pid, groupTarget, now } = outcome.ready;
   if (session.pausedAt !== null) {
-    signaller.kill(pid, 'SIGCONT');
+    tryKill(signaller, groupTarget, 'SIGCONT');
   }
-  signaller.kill(pid, 'SIGTERM');
+  const term = tryKill(signaller, groupTarget, 'SIGTERM');
   markCompleted({
     db,
     sessionId: session.id,
-    status: 'cancelled',
+    status: term.alreadyDead ? 'failed' : 'cancelled',
     now,
   });
+  if (term.alreadyDead) {
+    return {
+      kind: 'stale_process',
+      sessionId: session.id,
+      pid,
+    };
+  }
   return {
     kind: 'cancelled',
     sessionId: session.id,
@@ -251,32 +339,86 @@ export function togglePauseAgentCiRun(
   if (outcome.kind === 'rejected') {
     return outcome.result;
   }
-  const { session, pid, now } = outcome.ready;
+  const { session, pid, groupTarget, now } = outcome.ready;
   if (session.pausedAt === null) {
-    signaller.kill(pid, 'SIGSTOP');
-    setPausedAt({
+    return doPause({
       db,
-      sessionId: session.id,
-      pausedAt: now,
-      now,
-    });
-    return {
-      kind: 'paused',
-      sessionId: session.id,
+      session,
       pid,
-    };
+      groupTarget,
+      now,
+      signaller,
+    });
   }
-  signaller.kill(pid, 'SIGCONT');
-  setPausedAt({
+  return doResume({
     db,
-    sessionId: session.id,
-    pausedAt: null,
+    session,
+    pid,
+    groupTarget,
     now,
+    signaller,
   });
+}
+
+interface ToggleArgs {
+  db: TasksDb;
+  session: TaskSessionRecord;
+  pid: number;
+  groupTarget: number;
+  now: string;
+  signaller: Signaller;
+}
+
+function doPause(args: ToggleArgs): AgentCiActionResult {
+  // Write DB first so a signal failure can be undone without leaving an
+  // inconsistent (process-stopped, DB-says-running) state.
+  setPausedAt({
+    db: args.db,
+    sessionId: args.session.id,
+    pausedAt: args.now,
+    now: args.now,
+  });
+  try {
+    args.signaller.kill(args.groupTarget, 'SIGSTOP');
+  } catch (err) {
+    setPausedAt({
+      db: args.db,
+      sessionId: args.session.id,
+      pausedAt: null,
+      now: new Date().toISOString(),
+    });
+    throw err;
+  }
+  return {
+    kind: 'paused',
+    sessionId: args.session.id,
+    pid: args.pid,
+  };
+}
+
+function doResume(args: ToggleArgs): AgentCiActionResult {
+  const previousPausedAt = args.session.pausedAt;
+  setPausedAt({
+    db: args.db,
+    sessionId: args.session.id,
+    pausedAt: null,
+    now: args.now,
+  });
+  try {
+    args.signaller.kill(args.groupTarget, 'SIGCONT');
+  } catch (err) {
+    setPausedAt({
+      db: args.db,
+      sessionId: args.session.id,
+      pausedAt: previousPausedAt,
+      now: new Date().toISOString(),
+    });
+    throw err;
+  }
   return {
     kind: 'resumed',
-    sessionId: session.id,
-    pid,
+    sessionId: args.session.id,
+    pid: args.pid,
   };
 }
 

@@ -4,7 +4,12 @@ import { join } from 'node:path';
 
 import type { TasksDatabase } from '../src/commands/builtins/tasks/db/index.js';
 import { openTasksDatabaseAtPath } from '../src/commands/builtins/tasks/db/index.js';
-import { taskSessions, tasks } from '../src/commands/builtins/tasks/db/schema.js';
+import type { TaskSessionStatus } from '../src/commands/builtins/tasks/db/schema.js';
+import {
+  AGENT_CI_REVIEW_KIND,
+  taskSessions,
+  tasks,
+} from '../src/commands/builtins/tasks/db/schema.js';
 
 export function freshTasksDb(prefix: string): TasksDatabase {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -47,8 +52,9 @@ export interface SeedAgentCiSessionArgs {
   taskId: string;
   sessionId: string;
   pid: number | null;
+  pidStarttime?: string | null;
   pausedAt?: string | null;
-  status?: 'active' | 'completed' | 'cancelled' | 'failed';
+  status?: TaskSessionStatus;
   startedAt?: string;
   completedAt?: string | null;
 }
@@ -61,7 +67,7 @@ export function seedAgentCiSession(args: SeedAgentCiSessionArgs): void {
       id: args.sessionId,
       taskId: args.taskId,
       sessionId: args.sessionId,
-      kind: 'agent_ci_review',
+      kind: AGENT_CI_REVIEW_KIND,
       status: args.status ?? 'active',
       title: 'agent-ci review',
       startedAt: now,
@@ -70,6 +76,7 @@ export function seedAgentCiSession(args: SeedAgentCiSessionArgs): void {
       updatedAt: now,
       pid: args.pid,
       pausedAt: args.pausedAt ?? null,
+      pidStarttime: args.pidStarttime ?? null,
     })
     .run();
 }

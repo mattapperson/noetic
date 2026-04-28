@@ -1,0 +1,1 @@
+ALTER TABLE `task_sessions` ADD `pid_starttime` text;

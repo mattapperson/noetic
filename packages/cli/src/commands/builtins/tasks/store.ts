@@ -7,7 +7,7 @@ import type { TasksDatabase } from './db/index.js';
 import { openTasksDatabase } from './db/index.js';
 import type * as schema from './db/schema.js';
 import type { TaskRecord } from './db/schema.js';
-import { taskSessions, tasks } from './db/schema.js';
+import { AGENT_CI_REVIEW_KIND, taskSessions, tasks } from './db/schema.js';
 import type { ProjectWorktree } from './git.js';
 import { loadProjectWorktrees } from './git.js';
 import { reconcileTasksForWorktrees } from './reconcile.js';
@@ -182,7 +182,7 @@ function reconcileAndCollectAgentCiSessions(
     .from(taskSessions)
     .where(
       and(
-        eq(taskSessions.kind, 'agent_ci_review'),
+        eq(taskSessions.kind, AGENT_CI_REVIEW_KIND),
         eq(taskSessions.status, 'active'),
         isNull(taskSessions.completedAt),
       ),

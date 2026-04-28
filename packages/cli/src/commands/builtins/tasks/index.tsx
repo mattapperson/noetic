@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import type { Command, LocalJsxCommandCall } from '../../types.js';
 import type { AgentCiActionResult } from './agent-ci-control.js';
@@ -18,6 +18,7 @@ interface ContainerProps {
 function TasksContainer({ cwd, initial, onClose }: ContainerProps): ReactNode {
   const [data, setData] = useState<TaskTableData>(initial);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
 
   const reload = useCallback(async () => {
     const fresh = await loadTaskTableData(cwd);
@@ -28,6 +29,10 @@ function TasksContainer({ cwd, initial, onClose }: ContainerProps): ReactNode {
 
   const runAction = useCallback(
     (row: TaskTableRow, action: 'cancel' | 'toggle'): void => {
+      if (inFlightRef.current) {
+        return;
+      }
+      inFlightRef.current = true;
       const opened = openTasksDatabase(cwd);
       try {
         const result =
@@ -36,12 +41,15 @@ function TasksContainer({ cwd, initial, onClose }: ContainerProps): ReactNode {
             : togglePauseAgentCiRun(opened.db, row.id);
         setLastResult(formatActionResult(row, result));
       } catch (err) {
+        const verb = action === 'cancel' ? 'cancel' : 'pause/resume';
         const message = err instanceof Error ? err.message : String(err);
-        setLastResult(`${row.title}: agent-ci control failed (${message})`);
+        setLastResult(`${row.title}: ${verb} failed (${message})`);
       } finally {
         opened.close();
       }
-      void reload();
+      void reload().finally(() => {
+        inFlightRef.current = false;
+      });
     },
     [
       cwd,
