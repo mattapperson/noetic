@@ -188,13 +188,9 @@ function getMissionRow(db: TasksDb, id: string): MissionRecord | null {
   return db.select().from(missions).where(eq(missions.id, id)).get() ?? null;
 }
 
-function getFeatureRow(db: TasksDb, id: string): MissionFeatureRecord | null {
-  return db.select().from(missionFeatures).where(eq(missionFeatures.id, id)).get() ?? null;
-}
-
 function requireFeature(db: TasksDb, id: string): MissionFeatureRecord {
-  const row = getFeatureRow(db, id);
-  if (row === null) {
+  const row = db.select().from(missionFeatures).where(eq(missionFeatures.id, id)).get();
+  if (!row) {
     throw new Error(`Feature ${id} not found.`);
   }
   return row;
@@ -208,13 +204,9 @@ function requireMission(db: TasksDb, id: string): MissionRecord {
   return row;
 }
 
-function getSliceRow(db: TasksDb, id: string): SliceRecord | null {
-  return db.select().from(slices).where(eq(slices.id, id)).get() ?? null;
-}
-
 function requireSlice(db: TasksDb, id: string): SliceRecord {
-  const row = getSliceRow(db, id);
-  if (row === null) {
+  const row = db.select().from(slices).where(eq(slices.id, id)).get();
+  if (!row) {
     throw new Error(`Slice ${id} not found.`);
   }
   return row;
@@ -227,11 +219,6 @@ function findMissionIdForSlice(db: TasksDb, sliceId: string): string {
     throw new Error(`Milestone ${slice.milestoneId} not found for slice ${sliceId}.`);
   }
   return milestone.missionId;
-}
-
-function findMissionIdForFeature(db: TasksDb, featureId: string): string {
-  const feature = requireFeature(db, featureId);
-  return findMissionIdForSlice(db, feature.sliceId);
 }
 
 interface ApplyFeatureLoopStateUpdateArgs {
@@ -971,7 +958,7 @@ export function activateSlice(
 ): void {
   const now = nowIso();
   const { shouldTriage } = withDb(cwd, ({ db }) => {
-    const slice = requireSlice(db, sliceId);
+    requireSlice(db, sliceId);
     db.update(slices)
       .set({
         status: 'active',
@@ -981,7 +968,6 @@ export function activateSlice(
       .run();
     const missionId = findMissionIdForSlice(db, sliceId);
     const mission = requireMission(db, missionId);
-    void slice;
     return {
       shouldTriage: opts.triage === true && mission.autopilotEnabled,
     };
@@ -1197,7 +1183,7 @@ export function recordValidatorRun(
   const now = nowIso();
   const completedAt = isTerminalRunStatus(args.status) ? now : null;
   const inserted = withDb(cwd, ({ db }) => {
-    requireFeature(db, args.featureId);
+    const feature = requireFeature(db, args.featureId);
     db.insert(missionValidatorRuns)
       .values({
         id,
@@ -1213,9 +1199,7 @@ export function recordValidatorRun(
       .run();
     db.update(missionFeatures)
       .set({
-        validatorAttemptCount:
-          (db.select().from(missionFeatures).where(eq(missionFeatures.id, args.featureId)).get()
-            ?.validatorAttemptCount ?? 0) + 1,
+        validatorAttemptCount: feature.validatorAttemptCount + 1,
         updatedAt: now,
       })
       .where(eq(missionFeatures.id, args.featureId))
@@ -1345,7 +1329,6 @@ export function markFeaturePassed(cwd: string, featureId: string): void {
       });
       return {
         previousLoopState,
-        missionId: findMissionIdForFeature(tx, featureId),
       };
     }),
   );
