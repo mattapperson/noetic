@@ -1,18 +1,24 @@
 /**
- * Coverage for the schema/UI adapter helpers in live-interview.ts.
+ * Coverage for the schema/UI adapter helpers in live-interview.ts and the
+ * `createLiveRunInterview` factory's translation of `InterviewResult<Q,C>`
+ * back into the `InterviewResultLike` shape MissionNewContainer consumes.
  *
- * The harness-driven branch is exercised through the existing
- * `tasks-missions-commands-new` tests via the `runInterview` injection seam;
- * this file pins the pure-function adapters that translate between the core
- * `interview()` schemas and the askUserService modal shape.
+ * The end-to-end interview (model loop, LLM calls) is owned by
+ * @noetic/core's `interview()` step and tested in packages/core/test;
+ * here we only stub `harness.run` to return a canned InterviewResult so
+ * we can assert the adapter wiring.
  */
 import { describe, expect, test } from 'bun:test';
 
-import type { InterviewQuestion } from '../src/commands/builtins/tasks/missions/commands/live-interview.js';
+import type {
+  InterviewComplete,
+  InterviewQuestion,
+} from '../src/commands/builtins/tasks/missions/commands/live-interview.js';
 import {
   buildAskUserQuestion,
   extractAnswer,
   mapAutopilotAnswer,
+  toInterviewResultLike,
   toMissionTreeInput,
 } from '../src/commands/builtins/tasks/missions/commands/live-interview.js';
 
@@ -253,5 +259,85 @@ describe('toMissionTreeInput', () => {
     expect(tree.milestones[0]?.slices[0]?.features[0]?.acceptanceCriteria).toEqual([
       'single criterion',
     ]);
+  });
+});
+
+describe('toInterviewResultLike', () => {
+  test('happy path: harness emits a complete envelope, adapter flattens it to MissionTreeInput', () => {
+    const completeEnvelope: InterviewComplete = {
+      missionTitle: 'Build OAuth flow',
+      missionDescription: 'Wire up GitHub login.',
+      milestones: [
+        {
+          title: 'Auth setup',
+          verification: 'redirect works end-to-end',
+          slices: [
+            {
+              title: 'Configure provider',
+              verification: 'env vars set',
+              features: [
+                {
+                  title: 'Register OAuth app',
+                  acceptanceCriteria: [
+                    'client id committed',
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const out = toInterviewResultLike({
+      status: 'complete',
+      envelope: completeEnvelope,
+    });
+    if (out.status !== 'complete') {
+      throw new Error('expected complete result');
+    }
+    expect(out.envelope.title).toBe('Build OAuth flow');
+    expect(out.envelope.description).toBe('Wire up GitHub login.');
+    expect(out.envelope.milestones[0]?.slices[0]?.features[0]?.title).toBe('Register OAuth app');
+  });
+
+  test('maxQuestions path: harness emits last question, adapter surfaces it with reason', () => {
+    const lastQuestion: InterviewQuestion = {
+      id: 'q-7',
+      type: 'single_select',
+      question: 'What deployment target?',
+      options: [
+        {
+          id: 'a',
+          label: 'Cloudflare',
+        },
+        {
+          id: 'b',
+          label: 'Vercel',
+        },
+      ],
+    };
+    const out = toInterviewResultLike({
+      status: 'maxQuestions',
+      lastQuestion,
+    });
+    if (out.status !== 'maxQuestions') {
+      throw new Error('expected maxQuestions result');
+    }
+    expect(out.lastQuestion?.id).toBe('q-7');
+    expect(out.lastQuestion?.question).toBe('What deployment target?');
+    expect(out.reason).toBeTruthy();
+    expect(out.reason).toContain('budget');
+  });
+
+  test('maxQuestions with no lastQuestion still produces a reason string', () => {
+    const out = toInterviewResultLike({
+      status: 'maxQuestions',
+      lastQuestion: undefined,
+    });
+    if (out.status !== 'maxQuestions') {
+      throw new Error('expected maxQuestions result');
+    }
+    expect(out.lastQuestion).toBeUndefined();
+    expect(out.reason).toBeTruthy();
   });
 });

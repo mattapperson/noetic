@@ -257,7 +257,7 @@ export function createLiveRunInterview(args: CreateLiveInterviewArgs): RunInterv
   };
 }
 
-function toInterviewResultLike(
+export function toInterviewResultLike(
   result: InterviewResult<InterviewQuestion, InterviewComplete>,
 ): InterviewResultLike {
   if (result.status === 'complete') {
