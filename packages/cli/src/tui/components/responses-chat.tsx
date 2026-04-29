@@ -408,7 +408,8 @@ export function ResponsesChat({
     ],
   );
 
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [overlay, setOverlay] = useState<'none' | 'transcript' | 'request'>('none');
+  const overlayOpen = overlay !== 'none';
 
   function handleSubmit(msg: { text: string }): void {
     onSubmit(msg.text);
@@ -420,16 +421,21 @@ export function ResponsesChat({
         onModalClose();
         return;
       }
-      if (key.escape && transcriptOpen) {
-        setTranscriptOpen(false);
+      if (key.escape && overlayOpen) {
+        setOverlay('none');
         return;
       }
       if (key.ctrl && _input === 'o') {
-        setTranscriptOpen((prev) => !prev);
+        setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
+        return;
+      }
+      if (key.ctrl && _input === 'r') {
+        setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
+        return;
       }
     },
     {
-      isActive: !modalContent || transcriptOpen,
+      isActive: !modalContent || overlayOpen,
     },
   );
 
@@ -525,18 +531,30 @@ export function ResponsesChat({
     );
   }
 
-  if (transcriptOpen) {
+  if (overlayOpen) {
+    const isRequest = overlay === 'request';
     return (
       <Box flexDirection="column" height="100%">
         <Box flexDirection="column" flexGrow={1}>
-          <TranscriptView entries={entries} callInfoByCallId={callInfoMap} />
+          <TranscriptView
+            entries={entries}
+            callInfoByCallId={callInfoMap}
+            title={isRequest ? 'Request Items' : 'Transcript'}
+            closeHint={
+              isRequest ? ' — press ctrl+r or Esc to close' : ' — press ctrl+o or Esc to close'
+            }
+            highlightItems={isRequest}
+          />
         </Box>
         {exitHintArmed ? (
           <Box>
             <Text dimColor>Press Ctrl+C again to exit</Text>
           </Box>
         ) : null}
+        {/* Keyed by overlay so swapping between transcript and request remounts
+            ink-text-input — otherwise the toggling keystroke leaks into the field. */}
         <PromptInput
+          key={overlay}
           status={status}
           onSubmit={handleSubmit}
           onStop={onStop}

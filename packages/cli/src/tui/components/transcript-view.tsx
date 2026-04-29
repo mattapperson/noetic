@@ -1,5 +1,5 @@
 /**
- * Full-screen transcript overlay — rendered when the user presses ctrl+o.
+ * Full-screen overlay used by both ctrl+o (transcript) and ctrl+r (request items).
  *
  * Replaces the main chat tree with every tool result expanded:
  *   - Edit diffs: no 10-line cap
@@ -48,6 +48,12 @@ export interface CallInfo {
 export interface TranscriptViewProps {
   entries: ReadonlyArray<ConversationEntry>;
   callInfoByCallId: ReadonlyMap<string, CallInfo>;
+  /** Header title. Defaults to "Transcript". */
+  title?: string;
+  /** Subtitle hint after the title. Defaults to the ctrl+o close hint. */
+  closeHint?: string;
+  /** When true, every entry row renders on a green background. */
+  highlightItems?: boolean;
 }
 
 interface TranscriptItem {
@@ -168,30 +174,39 @@ function renderExpandedEntry(entry: ConversationEntry, index: number, ctx: Dispa
 
 //#region Component
 
-export function TranscriptView({ entries, callInfoByCallId }: TranscriptViewProps): ReactNode {
+export function TranscriptView({
+  entries,
+  callInfoByCallId,
+  title = 'Transcript',
+  closeHint = ' — press ctrl+o or Esc to close',
+  highlightItems = false,
+}: TranscriptViewProps): ReactNode {
   const theme = useTheme();
-  const items = useMemo<TranscriptItem[]>(
-    () =>
-      entries.map((entry, index) => ({
-        key: staticKeyFor(entry, index),
-        entry,
-        index,
-      })),
-    [
-      entries,
-    ],
-  );
+  // Prefix Static keys when highlighting so Ink treats already-rendered entries
+  // as new on toggle — otherwise prior rows keep stale backgrounds.
+  const items = useMemo<TranscriptItem[]>(() => {
+    const keyPrefix = highlightItems ? 'h:' : '';
+    return entries.map((entry, index) => ({
+      key: `${keyPrefix}${staticKeyFor(entry, index)}`,
+      entry,
+      index,
+    }));
+  }, [
+    entries,
+    highlightItems,
+  ]);
+  const rowBackground = highlightItems ? 'green' : undefined;
   return (
     <Box flexDirection="column" width="100%">
       <Box flexDirection="row" marginBottom={1}>
         <Text color={theme.accent} bold>
-          Transcript
+          {title}
         </Text>
-        <Text dimColor> — press ctrl+o or Esc to close</Text>
+        <Text dimColor>{closeHint}</Text>
       </Box>
       <Static items={items}>
         {(item: TranscriptItem) => (
-          <Box key={item.key} flexDirection="column">
+          <Box key={item.key} flexDirection="column" backgroundColor={rowBackground}>
             {renderExpandedEntry(item.entry, item.index, {
               callInfoByCallId,
             })}
