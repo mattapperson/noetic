@@ -754,9 +754,21 @@ export function PromptInput({
         return;
       }
 
-      // Tab: cycle suggestions
+      // Tab: auto-complete current suggestion
       if (key.tab && !key.shift && suggestionsRef.current.length > 0) {
-        setSugI((sugIdxRef.current + 1) % suggestionsRef.current.length);
+        const sel = suggestionsRef.current[sugIdxRef.current];
+        if (sel) {
+          if (valueRef.current.startsWith('/')) {
+            // For slash commands, complete with the full command
+            updateValue(sel.text);
+            setSug([]);
+          } else {
+            // For @ mentions, complete after the @ symbol
+            const base = valueRef.current.slice(0, valueRef.current.lastIndexOf('@'));
+            updateValue(base + sel.text + ' ');
+            setSug([]);
+          }
+        }
         return;
       }
 
