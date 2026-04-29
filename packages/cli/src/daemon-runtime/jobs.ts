@@ -17,7 +17,7 @@ function errorMessage(err: unknown): string {
 
 export class JobScheduler {
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>();
-  private readonly running = new Map<string, boolean>();
+  private readonly running = new Set<string>();
   private stopped = false;
 
   constructor(
@@ -26,10 +26,8 @@ export class JobScheduler {
   ) {}
 
   async start(): Promise<void> {
+    const onStart: Array<Promise<void>> = [];
     for (const job of this.jobs) {
-      if (job.runOnStart !== false) {
-        await this.runOne(job);
-      }
       if (this.stopped) {
         return;
       }
@@ -37,13 +35,15 @@ export class JobScheduler {
         void this.runOne(job);
       }, job.intervalMs);
       this.timers.set(job.id, timer);
+      if (job.runOnStart !== false) {
+        onStart.push(this.runOne(job));
+      }
     }
+    await Promise.all(onStart);
   }
 
   async runOnce(): Promise<void> {
-    for (const job of this.jobs) {
-      await this.runOne(job);
-    }
+    await Promise.all(this.jobs.map((job) => this.runOne(job)));
   }
 
   stop(): void {
@@ -55,16 +55,16 @@ export class JobScheduler {
   }
 
   private async runOne(job: JobDefinition): Promise<void> {
-    if (this.running.get(job.id) === true) {
+    if (this.running.has(job.id)) {
       return;
     }
-    this.running.set(job.id, true);
+    this.running.add(job.id);
     try {
       await job.run(this.ctx);
     } catch (err) {
       log.warn(`[daemon ${job.id}] tick failed: ${errorMessage(err)}`);
     } finally {
-      this.running.set(job.id, false);
+      this.running.delete(job.id);
     }
   }
 }
