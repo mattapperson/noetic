@@ -136,6 +136,10 @@ export type {
 /** @public */
 export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
 /** @public */
+export type { InterviewOpts, InterviewQuestionAnswer, InterviewResult } from './patterns/interview';
+/** @public */
+export { interview } from './patterns/interview';
+/** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
 export { adaptivePlan, compilePlan, PlanNodeSchema } from './patterns/plans';

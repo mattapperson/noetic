@@ -183,6 +183,36 @@ ralphWiggum({
 }): StepLoop
 ```
 
+### interview
+
+Host-callback-driven structured interview. The model emits a `z.discriminatedUnion('type', [questionEnv, completeEnv])` envelope each turn; the host renders questions via `askQuestion` and answers thread back as the next user message. Terminates on `complete` or `maxQuestions`.
+
+```typescript
+interview<Q, C>({
+  systemPrompt: string;
+  model: string;
+  questionSchema: ZodType<Q>;
+  completeSchema: ZodType<C>;
+  askQuestion: (envelope: Q) => Promise<InterviewQuestionAnswer>;
+  onComplete: (envelope: C) => Promise<void>;
+  maxQuestions?: number;          // default 8
+  formatAnswer?: (a: InterviewQuestionAnswer) => string;
+}): Step<ContextMemory, string, InterviewResult<Q, C>>
+
+type InterviewResult<Q, C> =
+  | { status: 'complete'; envelope: C }
+  | { status: 'maxQuestions'; lastQuestion?: Q };
+
+interface InterviewQuestionAnswer {
+  questionId: string;
+  question: string;
+  answer: string | string[];
+  notes?: string;
+}
+```
+
+`onComplete` fires once when the model emits the completion envelope. The returned step's output mirrors the final state for callers that prefer return-value style over the callback.
+
 ### compilePlan / adaptivePlan
 
 Dynamic multi-agent task trees.
