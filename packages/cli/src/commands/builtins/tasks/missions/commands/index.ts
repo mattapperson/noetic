@@ -112,11 +112,29 @@ const handleDelete: VerbHandler = async ({ cwd, rest, onDone }) => {
   return finishWithText(onDone, text);
 };
 
-const handleNew: VerbHandler = async ({ cwd, onDone }) => {
+const handleNew: VerbHandler = async ({ cwd, ctx, onDone }) => {
   const { renderMissionNew } = await import('./new.js');
+  const harness = ctx.harness;
+  const askUserService = ctx.askUserService;
+  if (harness === undefined || askUserService === undefined) {
+    return finishWithText(
+      onDone,
+      '/mission new requires the chat TUI (harness + askUserService). Try `noetic mission create` from the shell instead.',
+    );
+  }
+  const { createAskAutopilot, createLiveRunInterview } = await import('./live-interview.js');
+  const model = ctx.config.model;
   return renderMissionNew({
     cwd,
     onDone,
+    runInterview: createLiveRunInterview({
+      harness,
+      askUserService,
+      model,
+    }),
+    askAutopilot: createAskAutopilot({
+      askUserService,
+    }),
   });
 };
 

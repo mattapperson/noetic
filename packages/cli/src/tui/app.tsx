@@ -1303,6 +1303,8 @@ function App({
           model,
         },
         cwd: config.cwd,
+        harness: harnessRef.current ?? undefined,
+        askUserService,
         entries: entriesRef.current,
         skills,
         activatedSkills,
@@ -1404,6 +1406,7 @@ function App({
       setTag,
       clearSession,
       onRestart,
+      askUserService,
     ],
   );
 

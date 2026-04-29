@@ -68,7 +68,7 @@ export type RunInterviewFn = () => Promise<InterviewResultLike>;
 
 const defaultRunInterview: RunInterviewFn = async () => ({
   status: 'maxQuestions',
-  reason: 'AI interview not yet wired into the slash-command surface.',
+  reason: 'No interview implementation provided. Wire `runInterview` from `live-interview.ts`.',
 });
 
 export type AutopilotChoice = 'yes' | 'no' | 'first-slice-only';
