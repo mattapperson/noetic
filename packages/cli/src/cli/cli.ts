@@ -6,7 +6,6 @@
 
 import { createLocalFsAdapter } from '@noetic/core';
 
-import { runTasksDaemon } from '../commands/builtins/tasks/daemon.js';
 import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import { loadPlugins } from '../plugins/loader.js';
@@ -19,10 +18,15 @@ import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
 import { installInterruptSafetyNet } from './interrupt-safety-net.js';
 
-if (process.argv[2] === 'tasks-daemon') {
+if (process.argv[2] === 'daemon' || process.argv[2] === 'tasks-daemon') {
   const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
-  await runTasksDaemon({
+  const { runDaemon } = await import('../daemon-runtime/runtime.js');
+  const { tasksReconcileJob } = await import('../daemon-runtime/jobs-tasks.js');
+  await runDaemon({
     cwd: daemonCwd,
+    jobs: [
+      tasksReconcileJob(),
+    ],
   });
   process.exit(0);
 }

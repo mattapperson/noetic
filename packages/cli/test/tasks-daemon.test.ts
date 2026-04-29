@@ -3,14 +3,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import {
-  acquireTasksDaemonLock,
-  reserveTasksDaemonStart,
-} from '../src/commands/builtins/tasks/daemon.js';
+import { acquireDaemonLock, reserveDaemonStart } from '../src/daemon-runtime/lock.js';
 
-describe('tasks daemon', () => {
+describe('daemon-runtime lock', () => {
   test('singleton lock allows only one active daemon', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'noetic-tasks-daemon-'));
+    const dir = mkdtempSync(join(tmpdir(), 'noetic-daemon-'));
     const paths = {
       dir,
       lockPath: join(dir, 'daemon.lock'),
@@ -18,12 +15,12 @@ describe('tasks daemon', () => {
       socketPath: join(dir, 'daemon.sock'),
     };
 
-    expect(acquireTasksDaemonLock(process.pid, paths)).toBe(true);
-    expect(acquireTasksDaemonLock(process.pid, paths)).toBe(false);
+    expect(acquireDaemonLock(process.pid, paths)).toBe(true);
+    expect(acquireDaemonLock(process.pid, paths)).toBe(false);
   });
 
   test('reserved startup blocks a second simulated launcher until child claims lock', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'noetic-tasks-daemon-'));
+    const dir = mkdtempSync(join(tmpdir(), 'noetic-daemon-'));
     const paths = {
       dir,
       lockPath: join(dir, 'daemon.lock'),
@@ -32,10 +29,10 @@ describe('tasks daemon', () => {
     };
     const parentPid = process.pid;
 
-    const token = reserveTasksDaemonStart(parentPid, paths);
+    const token = reserveDaemonStart(parentPid, paths);
     expect(token).toBeTruthy();
-    expect(reserveTasksDaemonStart(parentPid, paths)).toBe(null);
-    expect(acquireTasksDaemonLock(parentPid, paths, token ?? undefined)).toBe(true);
-    expect(acquireTasksDaemonLock(parentPid, paths)).toBe(false);
+    expect(reserveDaemonStart(parentPid, paths)).toBe(null);
+    expect(acquireDaemonLock(parentPid, paths, token ?? undefined)).toBe(true);
+    expect(acquireDaemonLock(parentPid, paths)).toBe(false);
   });
 });
