@@ -288,6 +288,28 @@ Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
 
+### missionMemory (`@noetic/cli`)
+
+Mission-aware memory layer for noetic-cli's `tasks/missions` subsystem. Mounted unconditionally next to `planMemory` (slot `Slot.PROCEDURAL - 5` = 245). When the thread state has both `activeMissionId` and `activeFeatureId`, recall emits a developer-role `<mission_context>` block summarising the active mission, slice, feature, acceptance criteria, and assertions.
+
+```typescript
+import { missionMemory } from '@noetic/cli/src/memory/mission-memory.js';
+
+missionMemory({
+  cwd: string,                    // working dir used to open the tasks SQLite
+  scope?: MemoryScope,            // default 'thread'
+  initial?: { activeMissionId?: string | null; activeFeatureId?: string | null },
+})
+```
+
+Provides (auto-exposed as namespaced LLM tools):
+- `mission/current` — `MissionCurrentSnapshot | null` (mission, slice, feature, assertions)
+- `mission/getFeature` — fetch a feature row by id
+- `mission/markFeatureComplete` — flip a feature to passed and recompute parent mission status
+- `mission/queryAssertions` — list assertions for a feature with each assertion's status
+
+`onSpawn` clones state via `structuredClone`, so detached children (e.g. validator runs spawned inside a mission thread) inherit the active feature pointer. The layer no-ops while `activeFeatureId` is null.
+
 ### ToolMemoryDeclaration
 
 Declared on a `Tool`'s `memory` property. The runtime auto-generates a `MemoryLayer` per unique `id`.
