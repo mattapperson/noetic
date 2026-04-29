@@ -1386,6 +1386,14 @@ function App({
     ],
   );
 
+  const handleToggleAgentMode = useCallback((): void => {
+    const next: AgentMode = agentMode === 'planning' ? 'normal' : 'planning';
+    setAgentMode(next).catch(() => {});
+  }, [
+    agentMode,
+    setAgentMode,
+  ]);
+
   return (
     <InkProvider>
       <FooterContextProvider value={footerValue}>
@@ -1396,6 +1404,8 @@ function App({
             onSubmit={handleSubmit}
             onStop={handleStop}
             model={model}
+            agentMode={agentMode}
+            onToggleMode={handleToggleAgentMode}
             commands={commandSuggestions}
             modalContent={modal?.content}
             onModalClose={handleModalClose}

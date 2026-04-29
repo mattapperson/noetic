@@ -8,6 +8,7 @@
 import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { AgentMode } from '../../harness/factory.js';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
 import type { CollapsedReadGroup, DisplayEntry } from '../grouping/types.js';
@@ -48,6 +49,8 @@ export interface ResponsesChatProps {
   onSubmit: (text: string) => void;
   onStop?: () => void;
   model?: string;
+  agentMode?: AgentMode;
+  onToggleMode?: () => void;
   commands?: Array<{
     cmd: string;
     desc?: string;
@@ -324,6 +327,8 @@ export function ResponsesChat({
   onSubmit,
   onStop,
   model,
+  agentMode,
+  onToggleMode,
   commands,
   modalContent,
   onModalClose,
@@ -527,6 +532,8 @@ export function ResponsesChat({
           onModalClose={onModalClose}
           isModalOpen={!!modalContent}
           model={model}
+          agentMode={agentMode}
+          onToggleMode={onToggleMode}
           commands={commands}
         />
       </Box>
@@ -552,6 +559,8 @@ export function ResponsesChat({
         onModalClose={onModalClose}
         isModalOpen={!!modalContent}
         model={model}
+        agentMode={agentMode}
+        onToggleMode={onToggleMode}
         commands={commands}
       />
     </Box>

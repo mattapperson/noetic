@@ -2,6 +2,7 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import type { AgentMode } from '../../harness/factory.js';
 import { useTheme } from './theme';
 
 /** Chat lifecycle status. Compatible with any AI SDK. */
@@ -124,6 +125,8 @@ export interface PromptInputContextValue {
   maxSuggestions: number;
   errorText: string;
   model?: string;
+  agentMode?: AgentMode;
+  onToggleMode?: () => void;
   dividerColor?: string;
   dividerDashed?: boolean;
   theme: ReturnType<typeof useTheme>;
@@ -202,6 +205,10 @@ export interface PromptInputProps {
   enableHistory?: boolean;
   /** Model name displayed below the input */
   model?: string;
+  /** Current agent mode, shown as a colored pill before the model label */
+  agentMode?: AgentMode;
+  /** Called when the user presses Shift+Tab to cycle the agent mode */
+  onToggleMode?: () => void;
   /** Whether the input is focused and accepting keystrokes */
   focus?: boolean;
   /** Show horizontal dividers above and below the input */
@@ -409,16 +416,28 @@ function PromptInputStatusText() {
   return <Text color={theme.error}>{errorText}</Text>;
 }
 
-/** Model label shown below the input. */
+/** Mode pill + model label shown below the input. */
 function PromptInputModel() {
-  const { model, theme } = usePromptInput();
-  if (!model) {
+  const { model, agentMode, theme } = usePromptInput();
+  if (!model && !agentMode) {
     return null;
   }
+  const isPlan = agentMode === 'planning';
+  const modeColor = isPlan ? theme.warning : theme.success;
+  const modeLabel: 'PLAN' | 'NORMAL' = isPlan ? 'PLAN' : 'NORMAL';
   return (
-    <Text dimColor color={theme.muted}>
-      model: {model}
-    </Text>
+    <Box flexDirection="row">
+      {agentMode ? (
+        <Text bold color={modeColor} marginRight={2}>
+          {modeLabel}
+        </Text>
+      ) : null}
+      {model ? (
+        <Text dimColor color={theme.muted}>
+          model: {model}
+        </Text>
+      ) : null}
+    </Box>
   );
 }
 
@@ -449,6 +468,8 @@ export function PromptInput({
   maxSuggestions = 5,
   enableHistory = true,
   model,
+  agentMode,
+  onToggleMode,
   focus = true,
   showDividers = true,
   dividerColor,
@@ -722,13 +743,19 @@ export function PromptInput({
         return;
       }
 
+      // works even while disabled, e.g. mid-stream
+      if (key.tab && key.shift && onToggleMode) {
+        onToggleMode();
+        return;
+      }
+
       // When disabled, ignore all other keys
       if (disabled) {
         return;
       }
 
       // Tab: cycle suggestions
-      if (key.tab && suggestionsRef.current.length > 0) {
+      if (key.tab && !key.shift && suggestionsRef.current.length > 0) {
         setSugI((sugIdxRef.current + 1) % suggestionsRef.current.length);
         return;
       }
@@ -791,6 +818,8 @@ export function PromptInput({
       maxSuggestions,
       errorText,
       model,
+      agentMode,
+      onToggleMode,
       dividerColor,
       dividerDashed,
       theme,
@@ -812,6 +841,8 @@ export function PromptInput({
       maxSuggestions,
       errorText,
       model,
+      agentMode,
+      onToggleMode,
       dividerColor,
       dividerDashed,
       theme,
