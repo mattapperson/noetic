@@ -66,6 +66,8 @@ import type { ChatStatus } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
 import { FooterContextProvider } from './footer-context.js';
+import type { ExitActionStatus } from './input/exit-action.js';
+import { useExitOnInterrupt } from './input/use-exit-on-interrupt.js';
 import type {
   AssistantEntry,
   ConversationEntry,
@@ -213,6 +215,12 @@ interface AppProps {
   forcedSessionId?: string;
   /** Called by `/resume` when the user wants to restart against a different session. */
   onRestart: (target: SessionRestartTarget) => void;
+  /**
+   * Called when the user explicitly asks to exit the TUI (e.g. via the
+   * Ctrl+C double-press). The runner is responsible for unmounting Ink and
+   * resolving the session promise; the App just signals intent.
+   */
+  onRequestExit: () => void;
 }
 
 interface ModalState {
@@ -402,6 +410,7 @@ function App({
   name,
   forcedSessionId,
   onRestart,
+  onRequestExit,
 }: AppProps): ReactNode {
   useEffect(() => {
     try {
@@ -1100,6 +1109,38 @@ function App({
     askUserService,
   ]);
 
+  const handleGracefulExit = useCallback(async (): Promise<void> => {
+    const harness = harnessRef.current;
+    if (harness) {
+      try {
+        await harness.abort({
+          threadId: threadIdRef.current,
+          reason: 'user-requested',
+        });
+      } catch {
+        // best-effort: harness teardown may already be in progress
+      }
+    }
+    askUserService.cancelAll('user exit');
+    onRequestExit();
+  }, [
+    askUserService,
+    onRequestExit,
+  ]);
+
+  const exitInterruptStatus: ExitActionStatus =
+    modal !== null ? 'modal' : status === 'streaming' || status === 'submitted' ? status : 'idle';
+
+  const { isHintArmed: exitHintArmed } = useExitOnInterrupt({
+    status: exitInterruptStatus,
+    inputBufferEmpty: true,
+    enabledKeys: [
+      'ctrl-c',
+    ],
+    onAbortTurn: handleStop,
+    onExitGracefully: handleGracefulExit,
+  });
+
   /** Run a `cd` in-process and update the session-scoped `effectiveCwd`. */
   const runCd = useCallback((command: string): void => {
     const result = handleCd({
@@ -1410,6 +1451,7 @@ function App({
             modalContent={modal?.content}
             onModalClose={handleModalClose}
             plugins={plugins}
+            exitHintArmed={exitHintArmed}
           />
         </StreamMetricsProvider>
       </FooterContextProvider>
@@ -1505,6 +1547,16 @@ async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutc
       resolve(outcome);
     };
 
+    const requestExit = (): void => {
+      // The Ink instance has a guard so unmount() is idempotent. After
+      // unmount, the waitUntilExit() promise below resolves and we report
+      // a normal exit outcome.
+      try {
+        instance.unmount();
+      } catch {
+        // Already torn down — ignore.
+      }
+    };
     const instance = render(
       <App
         config={opts.config}
@@ -1526,7 +1578,14 @@ async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutc
                 },
           );
         }}
+        onRequestExit={requestExit}
       />,
+      {
+        // Ink's default sends SIGINT and exits on Ctrl+C, which skips our
+        // graceful abort + terminal restore. We own that path via
+        // useExitOnInterrupt instead.
+        exitOnCtrlC: false,
+      },
     );
     instance.waitUntilExit().then(() => {
       resolveOnce({

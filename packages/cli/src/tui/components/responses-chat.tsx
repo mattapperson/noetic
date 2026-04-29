@@ -58,6 +58,11 @@ export interface ResponsesChatProps {
   modalContent?: ReactNode;
   onModalClose?: () => void;
   plugins?: ReadonlyArray<NoeticPlugin>;
+  /**
+   * When true, a "Press Ctrl+C again to exit" hint is rendered above the
+   * prompt for the duration of the double-press window.
+   */
+  exitHintArmed?: boolean;
 }
 
 /**
@@ -333,6 +338,7 @@ export function ResponsesChat({
   modalContent,
   onModalClose,
   plugins,
+  exitHintArmed,
 }: ResponsesChatProps): ReactNode {
   const pluginsList = plugins ?? [];
   const footerPlugin = useMemo(
@@ -525,6 +531,11 @@ export function ResponsesChat({
         <Box flexDirection="column" flexGrow={1}>
           <TranscriptView entries={entries} callInfoByCallId={callInfoMap} />
         </Box>
+        {exitHintArmed ? (
+          <Box>
+            <Text dimColor>Press Ctrl+C again to exit</Text>
+          </Box>
+        ) : null}
         <PromptInput
           status={status}
           onSubmit={handleSubmit}
@@ -552,6 +563,11 @@ export function ResponsesChat({
         {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
       {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
+      {exitHintArmed ? (
+        <Box>
+          <Text dimColor>Press Ctrl+C again to exit</Text>
+        </Box>
+      ) : null}
       <PromptInput
         status={status}
         onSubmit={handleSubmit}
