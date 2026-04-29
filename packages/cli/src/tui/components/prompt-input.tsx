@@ -424,17 +424,19 @@ function PromptInputModel() {
   }
   const isPlan = agentMode === 'planning';
   const modeColor = isPlan ? theme.warning : theme.success;
-  const modeLabel: 'PLAN' | 'NORMAL' = isPlan ? 'PLAN' : 'NORMAL';
+  const modeLabel = isPlan ? 'PLAN' : 'ACT';
   return (
     <Box flexDirection="row">
       {agentMode ? (
-        <Text bold color={modeColor} marginRight={2}>
-          {modeLabel}
-        </Text>
+        <Box marginRight={1}>
+          <Text bold color={modeColor}>
+            {modeLabel}
+          </Text>
+        </Box>
       ) : null}
       {model ? (
         <Text dimColor color={theme.muted}>
-          model: {model}
+          {model}
         </Text>
       ) : null}
     </Box>
