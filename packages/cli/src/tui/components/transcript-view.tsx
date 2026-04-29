@@ -10,7 +10,7 @@
  * and key handling.
  */
 
-import { Box, Static, Text } from 'ink';
+import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { staticKeyFor } from '../grouping/types.js';
@@ -140,6 +140,12 @@ function renderExpandedEntry(entry: ConversationEntry, index: number, ctx: Dispa
     if (!text) {
       return null;
     }
+    if (entry.role === 'user') {
+      return <UserPrompt key={key} text={text} />;
+    }
+    if (entry.role === 'system' || entry.role === 'developer') {
+      return <SystemMessage key={key} text={text} type="info" />;
+    }
     return <AssistantText key={key} text={text} />;
   }
   if (entry.type === 'reasoning') {
@@ -182,19 +188,17 @@ export function TranscriptView({
   highlightItems = false,
 }: TranscriptViewProps): ReactNode {
   const theme = useTheme();
-  // Prefix Static keys when highlighting so Ink treats already-rendered entries
-  // as new on toggle — otherwise prior rows keep stale backgrounds.
-  const items = useMemo<TranscriptItem[]>(() => {
-    const keyPrefix = highlightItems ? 'h:' : '';
-    return entries.map((entry, index) => ({
-      key: `${keyPrefix}${staticKeyFor(entry, index)}`,
-      entry,
-      index,
-    }));
-  }, [
-    entries,
-    highlightItems,
-  ]);
+  const items = useMemo<TranscriptItem[]>(
+    () =>
+      entries.map((entry, index) => ({
+        key: staticKeyFor(entry, index),
+        entry,
+        index,
+      })),
+    [
+      entries,
+    ],
+  );
   const rowBackground = highlightItems ? 'green' : undefined;
   return (
     <Box flexDirection="column" width="100%">
@@ -204,15 +208,13 @@ export function TranscriptView({
         </Text>
         <Text dimColor>{closeHint}</Text>
       </Box>
-      <Static items={items}>
-        {(item: TranscriptItem) => (
-          <Box key={item.key} flexDirection="column" backgroundColor={rowBackground}>
-            {renderExpandedEntry(item.entry, item.index, {
-              callInfoByCallId,
-            })}
-          </Box>
-        )}
-      </Static>
+      {items.map((item) => (
+        <Box key={item.key} flexDirection="column" backgroundColor={rowBackground}>
+          {renderExpandedEntry(item.entry, item.index, {
+            callInfoByCallId,
+          })}
+        </Box>
+      ))}
     </Box>
   );
 }

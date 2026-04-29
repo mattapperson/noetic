@@ -34,6 +34,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;
@@ -67,6 +68,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 | `getChannelHandle(channel, executionId)` | Get external channel handle |
 | `initLayers(layers, ctx, storage)` | Initialize memory layers |
 | `recallLayers(layers, input, ctx)` | Run recall on all layers |
+| `previewRequestItems(scope?)` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs assembled via `assembleView`. Read-mostly; no session is allocated for unknown thread ids. |
 | `storeLayers(layers, response, ctx)` | Run store on all layers |
 | `disposeLayers(layers, ctx)` | Dispose all layers |
 | `checkpoint(ctx)` | Persist current execution state |

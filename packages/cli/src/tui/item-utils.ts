@@ -117,6 +117,15 @@ export function getItemId(item: AssistantEntry): string {
 
 //#region Text Extraction
 
+function isTextPart(part: MessageContentPart): part is Extract<
+  MessageContentPart,
+  {
+    type: 'output_text' | 'input_text';
+  }
+> {
+  return part.type === 'output_text' || part.type === 'input_text';
+}
+
 export function extractTextContent(item: AssistantEntry): string {
   if (item.type !== 'message') {
     return '';
@@ -125,15 +134,8 @@ export function extractTextContent(item: AssistantEntry): string {
     return '';
   }
   return item.content
-    .filter(
-      (
-        part: MessageContentPart,
-      ): part is {
-        type: 'output_text';
-        text: string;
-      } => part.type === 'output_text',
-    )
-    .map((part: { type: 'output_text'; text: string }) => part.text)
+    .filter(isTextPart)
+    .map((part) => part.text)
     .join('');
 }
 

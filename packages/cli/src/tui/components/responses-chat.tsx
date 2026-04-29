@@ -5,6 +5,7 @@
  * Renders each item type with Claude Code-style presentation.
  */
 
+import type { Item } from '@noetic/core';
 import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -63,6 +64,11 @@ export interface ResponsesChatProps {
    * prompt for the duration of the double-press window.
    */
   exitHintArmed?: boolean;
+  /**
+   * Returns the items array that would be sent to the model on the next turn —
+   * fetched on demand when the request-items overlay (Ctrl+R) opens.
+   */
+  getRequestItems?: () => Promise<ReadonlyArray<Item>>;
 }
 
 /**
@@ -339,6 +345,7 @@ export function ResponsesChat({
   onModalClose,
   plugins,
   exitHintArmed,
+  getRequestItems,
 }: ResponsesChatProps): ReactNode {
   const pluginsList = plugins ?? [];
   const footerPlugin = useMemo(
@@ -410,6 +417,40 @@ export function ResponsesChat({
 
   const [overlay, setOverlay] = useState<'none' | 'transcript' | 'request'>('none');
   const overlayOpen = overlay !== 'none';
+  const [requestItems, setRequestItems] = useState<ReadonlyArray<Item> | null>(null);
+  // null means "not yet fetched for this open"; derived loading state avoids a
+  // separate flag that would otherwise always move in lockstep with setRequestItems.
+  const requestItemsLoading = overlay === 'request' && requestItems === null;
+
+  // Fetch request items each time the request overlay opens so the user sees
+  // the live state (memory layers + history that would feed the next callModel)
+  // rather than a stale snapshot from an earlier open.
+  useEffect(() => {
+    if (overlay !== 'request' || !getRequestItems) {
+      return;
+    }
+    let cancelled = false;
+    setRequestItems(null);
+    getRequestItems()
+      .then((items) => {
+        if (cancelled) {
+          return;
+        }
+        setRequestItems(items);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setRequestItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    overlay,
+    getRequestItems,
+  ]);
 
   function handleSubmit(msg: { text: string }): void {
     onSubmit(msg.text);
@@ -533,18 +574,25 @@ export function ResponsesChat({
 
   if (overlayOpen) {
     const isRequest = overlay === 'request';
+    const overlayEntries: ReadonlyArray<ConversationEntry> = isRequest
+      ? (requestItems ?? [])
+      : entries;
     return (
       <Box flexDirection="column" height="100%">
         <Box flexDirection="column" flexGrow={1}>
-          <TranscriptView
-            entries={entries}
-            callInfoByCallId={callInfoMap}
-            title={isRequest ? 'Request Items' : 'Transcript'}
-            closeHint={
-              isRequest ? ' — press ctrl+r or Esc to close' : ' — press ctrl+o or Esc to close'
-            }
-            highlightItems={isRequest}
-          />
+          {isRequest && requestItemsLoading ? (
+            <Text dimColor>Loading request items…</Text>
+          ) : (
+            <TranscriptView
+              entries={overlayEntries}
+              callInfoByCallId={callInfoMap}
+              title={isRequest ? 'Request Items' : 'Transcript'}
+              closeHint={
+                isRequest ? ' — press ctrl+r or Esc to close' : ' — press ctrl+o or Esc to close'
+              }
+              highlightItems={isRequest}
+            />
+          )}
         </Box>
         {exitHintArmed ? (
           <Box>

@@ -1437,6 +1437,16 @@ function App({
     setAgentMode,
   ]);
 
+  // Stable identity so the request-items overlay doesn't refetch on every parent
+  // render while open; reads through the refs each invocation.
+  const getRequestItems = useCallback(
+    async () =>
+      harnessRef.current?.previewRequestItems({
+        threadId: threadIdRef.current,
+      }) ?? [],
+    [],
+  );
+
   return (
     <InkProvider>
       <FooterContextProvider value={footerValue}>
@@ -1454,6 +1464,7 @@ function App({
             onModalClose={handleModalClose}
             plugins={plugins}
             exitHintArmed={exitHintArmed}
+            getRequestItems={getRequestItems}
           />
         </StreamMetricsProvider>
       </FooterContextProvider>

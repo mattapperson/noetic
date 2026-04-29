@@ -606,6 +606,11 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 
 // Cancel the in-flight turn. Queued messages stay and drive the next turn.
 await harness.abort({ threadId: 'thread-1', reason: 'user' });
+
+// Preview the items that would be sent on the next turn — accumulated history
+// plus harness-level memory layer recall outputs. Read-mostly debug helper for
+// inspecting "what the model will see"; safe to call between turns.
+const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 ```
 
 ### Delivery Modes

@@ -199,6 +199,7 @@ The agent harness coordinates [memory layer](/docs/memory) lifecycle hooks:
 |---|---|
 | `initLayers` | Initialize layers at the start of an agent run. Loads persisted state from storage. |
 | `recallLayers` | Query layers for relevant items given an input string. Returns `RecallLayerOutput[]`. |
+| `previewRequestItems` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs assembled via `assembleView`. Read-mostly debug helper; safe to call between turns. |
 | `storeLayers` | Write new items from an LLM response into layers. |
 | `disposeLayers` | Clean up layers at the end of a run. |
 

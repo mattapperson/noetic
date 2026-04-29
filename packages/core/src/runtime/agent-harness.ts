@@ -31,6 +31,7 @@ import {
   runAppendPipeline,
   storeLayers,
 } from '../memory/layer-lifecycle';
+import { assembleView } from '../memory/projector';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import { ItemSchemaRegistry, mergeExtensions } from '../schemas/item';
@@ -1304,6 +1305,46 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       budgets: resolveLayerBudgets(layers),
       store: this.layerStateStore,
       itemSchemas: this.itemSchemas,
+    });
+  }
+
+  /**
+   * Compute the items array that would be sent to the model on the next turn —
+   * the same arrangement `executeLLM` builds: harness-level memory layers'
+   * recall outputs concatenated with the session's accumulated history.
+   *
+   * Read-mostly: `recallLayers` writes layer-state snapshots to
+   * `layerStateStore` exactly as a real turn would, so successive previews
+   * remain consistent with what the next real turn produces.
+   */
+  async previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>> {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    // Read-only: if the session doesn't exist, treat history as empty rather
+    // than allocating a SessionRunner for a debug/preview call.
+    const existingSession = this.sessions.get(threadId);
+    const historyItems: Item[] = existingSession
+      ? [
+          ...existingSession.accumulatedItems,
+        ]
+      : [];
+    const ctx = this.createContext({
+      items: historyItems,
+      threadId,
+      memory: this._memory,
+    });
+    const layers = ctx.layers ?? [];
+    if (layers.length === 0) {
+      return historyItems;
+    }
+    const recallResults = await this.recallLayers(layers, '', ctx);
+    const layerOutputItems = recallResults.flatMap((r) => r.items);
+    if (layerOutputItems.length === 0) {
+      return historyItems;
+    }
+    return assembleView({
+      systemPromptItems: [],
+      layerOutputItems,
+      historyItems,
     });
   }
 
