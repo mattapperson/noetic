@@ -12,12 +12,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic/core';
 
+import { isPlainCdCommand } from '../src/tools/cd-helper.js';
 import {
   buildBashCommandEntry,
   buildCdBashResult,
   buildCdSplitNoticeEntry,
-  firstToken,
   formatLocalStdoutBlock,
+  getFirstCommand,
   handleCd,
   parseCdArg,
   runUserShellCommand,
@@ -86,16 +87,63 @@ function stubShell(opts: StubShellOptions = {}): {
 
 //#endregion
 
-describe('firstToken', () => {
+describe('getFirstCommand', () => {
   test('extracts first whitespace-separated token', () => {
-    expect(firstToken('cd foo')).toBe('cd');
-    expect(firstToken('git   status')).toBe('git');
-    expect(firstToken('  ls -la')).toBe('ls');
+    expect(getFirstCommand('cd foo')).toBe('cd');
+    expect(getFirstCommand('git   status')).toBe('git');
+    expect(getFirstCommand('  ls -la')).toBe('ls');
   });
 
   test('returns empty for empty or whitespace-only input', () => {
-    expect(firstToken('')).toBe('');
-    expect(firstToken('   ')).toBe('');
+    expect(getFirstCommand('')).toBe('');
+    expect(getFirstCommand('   ')).toBe('');
+  });
+});
+
+describe('isPlainCdCommand', () => {
+  test('accepts bare cd and simple cd <path>', () => {
+    expect(isPlainCdCommand('cd')).toBe(true);
+    expect(isPlainCdCommand('cd foo')).toBe(true);
+    expect(isPlainCdCommand('cd /abs/path')).toBe(true);
+    expect(isPlainCdCommand('cd ..')).toBe(true);
+    expect(isPlainCdCommand('cd -')).toBe(true);
+    expect(isPlainCdCommand('cd ~')).toBe(true);
+    expect(isPlainCdCommand('cd ~/foo')).toBe(true);
+  });
+
+  test('accepts quoted path arguments', () => {
+    expect(isPlainCdCommand('cd "foo bar"')).toBe(true);
+    expect(isPlainCdCommand("cd 'foo bar'")).toBe(true);
+  });
+
+  test('rejects compound forms with shell operators', () => {
+    expect(isPlainCdCommand('cd foo && bar')).toBe(false);
+    expect(isPlainCdCommand('cd foo || bar')).toBe(false);
+    expect(isPlainCdCommand('cd foo; bar')).toBe(false);
+    expect(isPlainCdCommand('cd foo | bar')).toBe(false);
+    expect(isPlainCdCommand('cd foo & bar')).toBe(false);
+  });
+
+  test('rejects forms requiring shell expansion', () => {
+    expect(isPlainCdCommand('cd $(pwd)')).toBe(false);
+    expect(isPlainCdCommand('cd `pwd`')).toBe(false);
+    expect(isPlainCdCommand('cd foo > /dev/null')).toBe(false);
+    expect(isPlainCdCommand('cd foo < input')).toBe(false);
+  });
+
+  test('rejects non-cd commands', () => {
+    expect(isPlainCdCommand('ls')).toBe(false);
+    expect(isPlainCdCommand('cdr foo')).toBe(false);
+    expect(isPlainCdCommand('echo cd')).toBe(false);
+  });
+
+  test('rejects unmatched quotes', () => {
+    // Single bare quote: not a matched pair, falls through to metachar test.
+    expect(isPlainCdCommand("cd '")).toBe(false);
+    expect(isPlainCdCommand('cd "')).toBe(false);
+    // Mismatched quote types.
+    expect(isPlainCdCommand('cd \'foo"')).toBe(false);
+    expect(isPlainCdCommand('cd "foo\'')).toBe(false);
   });
 });
 
@@ -430,9 +478,9 @@ describe('entry + model formatting', () => {
     expect(result.command).toBe('cd foo');
   });
 
-  test('buildCdSplitNoticeEntry mentions the launch cwd', () => {
-    const entry = buildCdSplitNoticeEntry('/orig');
-    expect(entry.content).toContain('/orig');
-    expect(entry.content).toContain('local');
+  test('buildCdSplitNoticeEntry communicates that cwd is shared with the agent', () => {
+    const entry = buildCdSplitNoticeEntry();
+    expect(entry.content).toContain('cwd');
+    expect(entry.content).toContain("agent's tools");
   });
 });

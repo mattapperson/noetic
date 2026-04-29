@@ -207,6 +207,9 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     harness,
     fs: harness.fs,
     shell: harness.shell,
+    cwdState: {
+      cwd: process.cwd(),
+    },
     layers: undefined,
     memory: {},
     recv: async () => {
@@ -395,6 +398,10 @@ export function makeMockHarness(): AgentHarnessContract {
     }),
     getQueueSize: () => 0,
     seedSessionHistory: () => {},
+    rootCwdState: {
+      cwd: process.cwd(),
+    },
+    setRootCwd: () => {},
     run: async () => {
       throw new Error('not impl');
     },

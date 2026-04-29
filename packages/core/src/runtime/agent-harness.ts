@@ -36,7 +36,7 @@ import { NoopExporter } from '../observability/trace-exporter';
 import { ItemSchemaRegistry, mergeExtensions } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
-import type { Context } from '../types/context';
+import type { Context, CwdState } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { FsAdapter } from '../types/fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from '../types/harness-result';
@@ -61,6 +61,7 @@ import type { Step } from '../types/step';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
+import { snapshotCwdState } from './cwd-helpers';
 import { DetachedHandleImpl } from './detached-handle';
 import type { EventBroadcaster } from './event-broadcaster';
 import { contextToExecCtx } from './exec-context-factory';
@@ -99,6 +100,12 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
    * Pass `0` or a negative number to disable the watchdog.
    */
   streamIdleTimeoutMs?: number;
+  /**
+   * Initial working directory for the harness. Used as the seed value for the
+   * shared `cwdState.cwd` on every Context this harness creates, including
+   * those produced by spawn/fork. Defaults to `process.cwd()`.
+   */
+  initialCwd?: string;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
 }
@@ -120,6 +127,31 @@ const DEFAULT_THREAD_ID = '__default__';
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120e3;
 
 //#region Helpers
+
+/**
+ * Pick the right `cwdState` for a new Context.
+ *
+ * - `cwdInit` explicitly overrides everything (worktree isolation).
+ * - Parent snapshot if present (snapshot, not shared reference — child `cd`
+ *   does not leak to parent).
+ * - Otherwise share the harness `rootCwdState` reference so successive root
+ *   contexts see TUI/agent `cd`s carry across runs.
+ */
+function resolveContextCwdState(
+  rootCwdState: CwdState,
+  parent: Context | undefined,
+  cwdInit: string | undefined,
+): CwdState {
+  if (cwdInit !== undefined) {
+    return {
+      cwd: cwdInit,
+    };
+  }
+  if (parent) {
+    return snapshotCwdState(parent);
+  }
+  return rootCwdState;
+}
 
 function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   const apiKey = config?.apiKey ?? process.env.OPENROUTER_API_KEY;
@@ -471,6 +503,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly sessions = new Map<string, Session>();
   readonly layerStateStore: LayerStateStore;
   readonly traceExporter: TraceExporter;
+  /**
+   * Long-lived shared cwd state. The same reference is seeded into every
+   * root Context this harness creates, so successive `run()` calls — and the
+   * TUI — observe each other's `cd`s.
+   */
+  readonly rootCwdState: CwdState;
   private readonly itemSchemas: ItemSchemaRegistry;
 
   constructor(opts: AgentHarnessOpts<TParams>) {
@@ -498,6 +536,23 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas, {
       strictUnknownExtensions: opts.strictItemSchemas ?? true,
     });
+    this.rootCwdState = {
+      cwd: opts.initialCwd ?? process.cwd(),
+    };
+  }
+
+  /**
+   * Update the harness-wide root cwd. The TUI calls this in response to a
+   * user-issued `! cd`, so the next root Context (and any tool inspecting
+   * `harness.rootCwdState.cwd`) observes the new value. Caller is responsible
+   * for passing an absolute, validated path.
+   */
+  setRootCwd(nextCwd: string): void {
+    if (nextCwd === this.rootCwdState.cwd) {
+      return;
+    }
+    this.rootCwdState.previousCwd = this.rootCwdState.cwd;
+    this.rootCwdState.cwd = nextCwd;
   }
 
   //#region Session Accessors
@@ -1138,12 +1193,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       threadId?: string;
       /** Override the child's resource id. Default inherits from `parentCtx.resourceId`. */
       resourceId?: string;
+      /** Override the child's initial cwd. Used by worktree isolation to root the child at the worktree path. */
+      cwdInit?: string;
     },
   ): DetachedHandle<O> {
     const childCtx = this.createContext({
       parent: parentCtx,
       threadId: overrides?.threadId ?? parentCtx.threadId,
       resourceId: overrides?.resourceId ?? parentCtx.resourceId,
+      cwdInit: overrides?.cwdInit,
     });
     const promise = this.run(s, input, childCtx);
     return new DetachedHandleImpl<O>(childCtx.id, promise);
@@ -1156,9 +1214,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     threadId?: string;
     resourceId?: string;
     memory?: MemoryLayer[];
+    /**
+     * Initial cwd for the new context. When set, takes precedence over both
+     * the parent snapshot and the harness root cwd — used by worktree
+     * isolation to root a child agent at the worktree path.
+     */
+    cwdInit?: string;
     _broadcaster?: EventBroadcaster;
   }): Context {
-    const { memory: memoryLayers, ...rest } = opts ?? {};
+    const { memory: memoryLayers, cwdInit, ...rest } = opts ?? {};
     const effectiveMemory = memoryLayers ?? this._memory;
     const itemSchemas = buildItemSchemaRegistry({
       base: this.itemSchemas,
@@ -1170,6 +1234,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       channelStore: this.channelStore,
       layers: effectiveMemory,
       itemSchemas,
+      cwdState: resolveContextCwdState(this.rootCwdState, opts?.parent, cwdInit),
     });
   }
 

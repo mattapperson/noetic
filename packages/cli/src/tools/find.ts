@@ -6,7 +6,7 @@
 
 import path from 'node:path';
 import type { FsAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { globSync } from 'glob';
 import { z } from 'zod';
 import { resolveToCwd } from './path-utils.js';
@@ -98,9 +98,10 @@ export function createFindTool(cwd: string, fs: FsAdapter): FindTool {
     description: FIND_TOOL_DESCRIPTION,
     input: FindInputSchema,
     output: FindOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const { pattern, path: searchDir, limit } = params;
-      const searchPath = resolveToCwd(searchDir || '.', cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const searchPath = resolveToCwd(searchDir || '.', liveCwd);
       const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
       try {

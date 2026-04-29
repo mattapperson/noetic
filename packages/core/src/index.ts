@@ -180,7 +180,15 @@ export type {
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
+export { getToolCwd, setToolCwd, snapshotCwdState } from './runtime/cwd-helpers';
+/** @public */
+export type {
+  Context,
+  CwdState,
+  ItemLog,
+  LastLayerUsage,
+  LayerUsageEntry,
+} from './types/context';
 
 //#endregion
 

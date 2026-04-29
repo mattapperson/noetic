@@ -6,7 +6,7 @@
 
 import { dirname } from 'node:path';
 import type { FsAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import type { MutationPolicy } from './mutation-policy.js';
 import { resolveToCwd } from './path-utils.js';
@@ -65,15 +65,16 @@ export function createWriteTool(
     description: WRITE_TOOL_DESCRIPTION,
     input: WriteInputSchema,
     output: WriteOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const { path, content } = params;
-      const absolutePath = resolveToCwd(path, cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const absolutePath = resolveToCwd(path, liveCwd);
       const dir = dirname(absolutePath);
 
       try {
         const decision = await mutationPolicy?.check({
           kind: 'write',
-          cwd,
+          cwd: liveCwd,
           path: absolutePath,
         });
         if (decision && !decision.allowed) {

@@ -6,7 +6,7 @@
  */
 
 import type { Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 
 import {
@@ -257,8 +257,9 @@ export function createLspTool(service: LspService, cwd: string): LspTool {
     description: LSP_TOOL_DESCRIPTION,
     input: LspInputSchema,
     output: LspOutputSchema,
-    async execute(input) {
-      const absolutePath = resolveReadPath(input.filePath, cwd);
+    async execute(input, toolCtx) {
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const absolutePath = resolveReadPath(input.filePath, liveCwd);
       let touch: TouchFileResult | null;
       try {
         touch = await service.touchFile(absolutePath);

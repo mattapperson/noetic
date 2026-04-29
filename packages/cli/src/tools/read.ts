@@ -5,7 +5,7 @@
  */
 
 import type { FsAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveReadPath } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from './truncate.js';
@@ -153,9 +153,10 @@ export function createReadTool(cwd: string, fs: FsAdapter): ReadTool {
     description: READ_TOOL_DESCRIPTION,
     input: ReadInputSchema,
     output: ReadOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const { path, offset, limit } = params;
-      const absolutePath = resolveReadPath(path, cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const absolutePath = resolveReadPath(path, liveCwd);
 
       try {
         const mimeType = detectImageMimeTypeFromExtension(absolutePath);

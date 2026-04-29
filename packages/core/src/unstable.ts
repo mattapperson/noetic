@@ -21,3 +21,9 @@ export { createLayerStateStore } from './memory/layer-lifecycle';
 export { assembleView } from './memory/projector';
 /** @unstable Factory for creating scoped storage wrappers around a StorageAdapter. */
 export { createScopedStorage } from './memory/scope';
+/**
+ * @unstable Internal helper used by sync agent-spawn paths (worktree isolation)
+ * to seed a child's cwd snapshot without touching `previousCwd`. Not part of
+ * the public surface — call sites must hold exclusive use of the parent ctx.
+ */
+export { retargetCwdForSpawn } from './runtime/cwd-helpers';

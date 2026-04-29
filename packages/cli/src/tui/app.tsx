@@ -54,8 +54,8 @@ import {
   buildCdEntry,
   buildCdErrorEntry,
   buildCdSplitNoticeEntry,
-  firstToken,
   formatLocalStdoutBlock,
+  getFirstCommand,
   handleCd,
   LOCAL_COMMAND_CAVEAT,
   parseCdArg,
@@ -916,6 +916,13 @@ function App({
           const cleaned = stripUnresolvedToolCalls(resp.items);
           resumedItemsRef.current = cleaned;
           void persistSession(cleaned);
+          // The agent's Bash `cd` mutates `harness.rootCwdState.cwd`. Mirror
+          // that into the TUI's render state so the prompt path follows.
+          const liveCwd = harnessRef.current?.rootCwdState.cwd;
+          if (liveCwd !== undefined && liveCwd !== effectiveCwdRef.current) {
+            effectiveCwdRef.current = liveCwd;
+            setEffectiveCwd(liveCwd);
+          }
         },
       });
     },
@@ -972,6 +979,10 @@ function App({
       harnessModelRef.current = activeModel;
       memoryLayersRef.current = memoryLayers;
       teammatesRef.current = teammates;
+      // Seed the new harness with any cwd accumulated from `!cd`s issued
+      // before the first turn or during a /model or /plan harness swap.
+      // Without this, the next turn's tools reset to launch-time cwd.
+      harness.setRootCwd(effectiveCwdRef.current);
       setSkills(resolvedSkills);
       if (resumedItemsRef.current !== null) {
         // Seed BEFORE wiring streams — wireStreams triggers lazy session
@@ -1090,46 +1101,44 @@ function App({
   ]);
 
   /** Run a `cd` in-process and update the session-scoped `effectiveCwd`. */
-  const runCd = useCallback(
-    (command: string): void => {
-      const result = handleCd({
-        arg: parseCdArg(command),
-        effectiveCwd: effectiveCwdRef.current,
-        prevCwd: prevCwdRef.current,
-      });
-      if (result.kind === 'error') {
-        setEntries((prev) => [
-          ...prev,
-          buildCdErrorEntry(result.message),
-        ]);
-        return;
-      }
-      prevCwdRef.current = result.previousCwd;
-      effectiveCwdRef.current = result.newCwd;
-      setEffectiveCwd(result.newCwd);
-      pendingBashOutputsRef.current.push(buildCdBashResult(command, result.newCwd));
-
-      const extras: SystemEntry[] = [];
-      extras.push(buildCdEntry(result.newCwd));
-      if (!cdNoticeShownRef.current) {
-        cdNoticeShownRef.current = true;
-        extras.push(buildCdSplitNoticeEntry(config.cwd));
-      }
+  const runCd = useCallback((command: string): void => {
+    const result = handleCd({
+      arg: parseCdArg(command),
+      effectiveCwd: effectiveCwdRef.current,
+      prevCwd: prevCwdRef.current,
+    });
+    if (result.kind === 'error') {
       setEntries((prev) => [
         ...prev,
-        ...extras,
+        buildCdErrorEntry(result.message),
       ]);
-    },
-    [
-      config.cwd,
-    ],
-  );
+      return;
+    }
+    prevCwdRef.current = result.previousCwd;
+    effectiveCwdRef.current = result.newCwd;
+    setEffectiveCwd(result.newCwd);
+    // Single source of truth: the harness's `rootCwdState` is what the
+    // agent's tools (Bash, Read, Write, ...) will read on their next call.
+    harnessRef.current?.setRootCwd(result.newCwd);
+    pendingBashOutputsRef.current.push(buildCdBashResult(command, result.newCwd));
+
+    const extras: SystemEntry[] = [];
+    extras.push(buildCdEntry(result.newCwd));
+    if (!cdNoticeShownRef.current) {
+      cdNoticeShownRef.current = true;
+      extras.push(buildCdSplitNoticeEntry());
+    }
+    setEntries((prev) => [
+      ...prev,
+      ...extras,
+    ]);
+  }, []);
 
   /** Execute a `!` or auto-detected command locally, append transcript
    *  entry, and stash the result for the next agent turn. */
   const runLocalBash = useCallback(
     async (command: string): Promise<void> => {
-      if (firstToken(command) === 'cd') {
+      if (getFirstCommand(command) === 'cd') {
         runCd(command);
         return;
       }

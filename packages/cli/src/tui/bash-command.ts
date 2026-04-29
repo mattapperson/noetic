@@ -9,13 +9,12 @@
  * session-scoped `effectiveCwd` held by the caller.
  */
 
-import { statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
-
 import type { ShellAdapter } from '@noetic/core';
-
 import type { ErrorEntry, SystemEntry } from './item-utils';
+
+export type { CdFailure, CdResult, CdSuccess, HandleCdArgs } from '../tools/cd-helper';
+export { handleCd, parseCdArg } from '../tools/cd-helper';
+export { getFirstCommand } from '../tools/security';
 
 //#region Types
 
@@ -42,27 +41,6 @@ export interface RunUserShellArgs {
   maxBytes?: number;
 }
 
-export interface HandleCdArgs {
-  arg: string | undefined;
-  effectiveCwd: string;
-  prevCwd: string | null;
-  /** Override for tests; defaults to `os.homedir()`. */
-  home?: string;
-}
-
-export interface CdSuccess {
-  kind: 'ok';
-  previousCwd: string;
-  newCwd: string;
-}
-
-export interface CdFailure {
-  kind: 'error';
-  message: string;
-}
-
-export type CdResult = CdSuccess | CdFailure;
-
 //#endregion
 
 //#region Constants
@@ -70,152 +48,6 @@ export type CdResult = CdSuccess | CdFailure;
 const DEFAULT_TIMEOUT_SECONDS = 60;
 const DEFAULT_MAX_BYTES = 32 * 1024;
 const ELISION_MARKER = '\n\n[... output truncated ...]\n\n';
-
-//#endregion
-
-//#region Command splitting
-
-/**
- * Returns the first whitespace-separated token of a trimmed command string.
- * `cd foo bar` → `cd`; `git   status` → `git`; empty → `''`.
- */
-export function firstToken(command: string): string {
-  const trimmed = command.trimStart();
-  const match = /^\S+/.exec(trimmed);
-  return match ? match[0] : '';
-}
-
-/**
- * Extract the single argument to `cd` (everything after `cd` and whitespace).
- * Returns undefined for a bare `cd`. Does NOT shell-unquote — quoted paths
- * with spaces are passed through as-is; we rely on stat to catch bad paths.
- */
-export function parseCdArg(command: string): string | undefined {
-  const trimmed = command.trimStart();
-  if (!/^cd(\s|$)/.test(trimmed)) {
-    return undefined;
-  }
-  const rest = trimmed.slice(2).trim();
-  if (rest.length === 0) {
-    return undefined;
-  }
-  // Strip a single matched pair of surrounding quotes if present.
-  if (
-    (rest.startsWith('"') && rest.endsWith('"')) ||
-    (rest.startsWith("'") && rest.endsWith("'"))
-  ) {
-    return rest.slice(1, -1);
-  }
-  return rest;
-}
-
-//#endregion
-
-//#region cd handler
-
-/**
- * Resolve a `cd` argument against the effective cwd, with ~ expansion,
- * `-` (previous) support, and existence/dir validation.
- */
-export function handleCd(args: HandleCdArgs): CdResult {
-  const { arg, effectiveCwd, prevCwd } = args;
-  const home = args.home ?? homedir();
-
-  const target = resolveCdTarget({
-    arg,
-    effectiveCwd,
-    prevCwd,
-    home,
-  });
-  if (target.kind === 'error') {
-    return target;
-  }
-
-  try {
-    if (!statSync(target.path).isDirectory()) {
-      return {
-        kind: 'error',
-        message: `cd: not a directory: ${target.path}`,
-      };
-    }
-  } catch {
-    return {
-      kind: 'error',
-      message: `cd: no such file or directory: ${target.path}`,
-    };
-  }
-
-  // No-op cd (e.g. `cd .`): preserve OLDPWD by not touching previousCwd.
-  if (target.path === effectiveCwd) {
-    return {
-      kind: 'ok',
-      previousCwd: prevCwd ?? effectiveCwd,
-      newCwd: effectiveCwd,
-    };
-  }
-
-  return {
-    kind: 'ok',
-    previousCwd: effectiveCwd,
-    newCwd: target.path,
-  };
-}
-
-interface CdTargetPath {
-  kind: 'path';
-  path: string;
-}
-
-interface ResolveCdTargetArgs {
-  arg: string | undefined;
-  effectiveCwd: string;
-  prevCwd: string | null;
-  home: string;
-}
-
-function resolveCdTarget(args: ResolveCdTargetArgs): CdTargetPath | CdFailure {
-  const { arg, effectiveCwd, prevCwd, home } = args;
-  if (arg === undefined) {
-    return {
-      kind: 'path',
-      path: home,
-    };
-  }
-  if (arg === '-') {
-    if (prevCwd === null) {
-      return {
-        kind: 'error',
-        message: 'cd: OLDPWD not set',
-      };
-    }
-    return {
-      kind: 'path',
-      path: prevCwd,
-    };
-  }
-  if (arg === '~') {
-    return {
-      kind: 'path',
-      path: home,
-    };
-  }
-  if (arg.startsWith('~/')) {
-    return {
-      kind: 'path',
-      path: resolve(home, arg.slice(2)),
-    };
-  }
-  if (isAbsolute(arg)) {
-    return {
-      kind: 'path',
-      path: resolve(arg),
-    };
-  }
-  return {
-    kind: 'path',
-    path: resolve(effectiveCwd, arg),
-  };
-}
 
 //#endregion
 
@@ -366,17 +198,14 @@ export function buildCdErrorEntry(message: string): ErrorEntry {
 }
 
 /**
- * One-time notice rendered the first time the user runs `cd`, explaining
- * that the agent's own tools still resolve against the launch-time cwd.
+ * One-time notice rendered the first time the user runs `cd`. The cwd is
+ * shared between `!` / shortcut commands and the agent's own tools.
  */
-export function buildCdSplitNoticeEntry(agentCwd: string): SystemEntry {
+export function buildCdSplitNoticeEntry(): SystemEntry {
   return {
     role: 'system',
     type: 'info',
-    content:
-      'Note: cd updates the cwd for your local `!` / shortcut commands only. ' +
-      `The agent's own tools (read, write, bash, ...) continue to resolve paths ` +
-      `against the launch-time cwd: ${agentCwd}`,
+    content: "cd updates cwd for both your local commands and the agent's tools.",
   };
 }
 

@@ -417,6 +417,35 @@ step.run<Mem>({
 
 Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
 
+## CwdState (shared cwd)
+
+Every `Context` carries a mutable `cwdState: CwdState` that tools resolve relative paths against at execution time. The Bash tool intercepts plain `cd <path>` and mutates the shared state via `setToolCwd`; subsequent Read, Write, Edit, Ls, Grep, Find, lsp, and InteractiveTerminal calls see the new cwd. Spawned/forked children get a snapshot (POSIX-fork semantics).
+
+```typescript
+interface CwdState {
+  cwd: string;            // absolute path
+  previousCwd?: string;   // populated on cd; powers `cd -`
+}
+
+// Read live cwd from a tool's execute function. Pass the factory cwd as a
+// fallback for partial test contexts.
+function getToolCwd(ctx: Context | undefined, fallback?: string): string;
+
+// Update the shared cwd. Caller must pass an absolute, validated path.
+function setToolCwd(ctx: Context, nextCwd: string): { previousCwd: string; newCwd: string };
+
+// Internal: temporarily retarget cwd so an immediately-following spawn
+// snapshots the new value. Returns a restore callback. Used by worktree
+// isolation in the sync agent-spawn path.
+function retargetCwdForSpawn(ctx: Context, nextCwd: string): () => void;
+```
+
+`AgentHarness` exposes `rootCwdState` (the shared object seeded into root contexts) and `setRootCwd(nextCwd)` for hosts (e.g. the TUI) to report a user-issued `!cd`.
+
+`AgentHarness` constructor accepts `initialCwd?: string` (default `process.cwd()`), and both `createContext({ cwdInit })` and `detachedSpawn(..., { cwdInit })` accept a per-context override used by worktree isolation.
+
+The mutation policy's `sessionCwd` is anchored to the launch cwd and does NOT follow agent `cd` — `cd` is a UX convenience, not a sandbox-widening mechanism.
+
 ## FsAdapter
 
 Filesystem abstraction used by the harness, tools, memory layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).

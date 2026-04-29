@@ -9,8 +9,9 @@ import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ShellAdapter, Tool } from '@noetic/core';
-import { TIMEOUT_ERROR_PREFIX, toolWithGenerator } from '@noetic/core';
+import { getToolCwd, setToolCwd, TIMEOUT_ERROR_PREFIX, toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
+import { handleCd, isPlainCdCommand, parseCdArg } from './cd-helper.js';
 import type { MutationPolicy } from './mutation-policy.js';
 import { isProbablyMutatingShellCommand } from './mutation-policy.js';
 import { validateCommand } from './security.js';
@@ -19,6 +20,10 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from '
 //#region Constants
 
 const DEFAULT_BASH_TIMEOUT = 12e1;
+
+/** Marker prepended to in-process `cd` interceptor output so the model can
+ *  distinguish a non-shell cwd update from a normal command's stdout. */
+const CD_INTERCEPT_PREFIX = '(cd)';
 
 /**
  * Pre-encoded byte sequences a TUI emits when entering alternate-screen
@@ -109,7 +114,7 @@ IMPORTANT: Avoid using this tool to run \`find\`, \`grep\`, \`cat\`, \`head\`, \
 # Instructions
  - Before creating new directories or files, run \`ls\` first to verify the parent exists.
  - Always quote file paths with spaces using double quotes (e.g., cd "path with spaces/file.txt").
- - Maintain your current working directory throughout the session by using absolute paths and avoiding \`cd\`. Use \`cd\` only if the user explicitly requests it.
+ - Plain \`cd <path>\` is intercepted in-process and persists for the rest of the session — subsequent Bash, Read, Write, etc. calls resolve relative paths from the new cwd. Compound forms like \`cd foo && ls\` run in a transient shell and do NOT persist cwd; use a dedicated \`cd\` call instead when you want the change to stick.
  - Default timeout: ${DEFAULT_BASH_TIMEOUT}s. Max: 600s. Output is truncated to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB; if truncated, the full output is saved to a temp file whose path is returned.
 
 # Issuing multiple commands
@@ -252,9 +257,42 @@ export function createBashTool(
     input: BashInputSchema,
     output: BashOutputSchema,
     event: BashEventSchema,
-    async *execute(params) {
+    async *execute(params, toolCtx) {
       const { command, timeout: userTimeout } = params;
       const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 6e2);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+
+      // Intercept plain `cd <path>` so the cwd persists for subsequent tool
+      // calls. Compound forms (`cd foo && bar`) still go through the shell —
+      // the shell's cwd evaporates with the subprocess (POSIX), matching the
+      // behavior described in the tool description. Skip when the test
+      // scaffold passes an empty toolCtx without a Context.
+      if (isPlainCdCommand(command) && toolCtx.ctx?.cwdState) {
+        const cd = handleCd({
+          arg: parseCdArg(command),
+          effectiveCwd: liveCwd,
+          prevCwd: toolCtx.ctx.cwdState.previousCwd ?? null,
+        });
+        if (cd.kind === 'error') {
+          return {
+            output: `Error: ${cd.message}`,
+            command,
+            exitCode: 1,
+            cancelled: false,
+            truncated: false,
+            timeout,
+          };
+        }
+        setToolCwd(toolCtx.ctx, cd.newCwd);
+        return {
+          output: `${CD_INTERCEPT_PREFIX} cwd is now ${cd.newCwd}`,
+          command,
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+          timeout,
+        };
+      }
 
       const validation = validateCommand(command);
       if (!validation.valid) {
@@ -270,7 +308,7 @@ export function createBashTool(
       const decision = isProbablyMutatingShellCommand(command)
         ? await mutationPolicy?.check({
             kind: 'bash',
-            cwd,
+            cwd: liveCwd,
             command,
           })
         : undefined;
@@ -303,7 +341,7 @@ export function createBashTool(
 
       const execPromise = shell
         .exec(command, {
-          cwd,
+          cwd: liveCwd,
           timeout,
           signal: abortController.signal,
           onData: (data: Buffer) => {

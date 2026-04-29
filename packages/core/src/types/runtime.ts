@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, Tool } from './common';
-import type { Context } from './context';
+import type { Context, CwdState } from './context';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
@@ -221,6 +221,8 @@ export interface AgentHarnessContract<
     overrides?: {
       threadId?: string;
       resourceId?: string;
+      /** Override the child's initial cwd. Used by worktree isolation to root the child at the worktree path. */
+      cwdInit?: string;
     },
   ): DetachedHandle<O>;
   createContext(opts?: {
@@ -230,7 +232,13 @@ export interface AgentHarnessContract<
     threadId?: string;
     resourceId?: string;
     memory?: MemoryLayer[];
+    /** Override the new context's initial cwd. */
+    cwdInit?: string;
   }): Context;
+  /** Long-lived shared cwd state seeded into root contexts created by this harness. */
+  readonly rootCwdState: CwdState;
+  /** Update the harness root cwd. Used by the TUI when the user issues a `! cd`. */
+  setRootCwd(nextCwd: string): void;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(
     channel: Channel<T>,

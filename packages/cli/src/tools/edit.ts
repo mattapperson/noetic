@@ -5,7 +5,7 @@
  */
 
 import type { FsAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import {
   applyReplacement,
@@ -73,14 +73,15 @@ export function createEditTool(
     description: EDIT_TOOL_DESCRIPTION,
     input: EditInputSchema,
     output: EditOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const { path, oldText, newText } = params;
-      const absolutePath = resolveToCwd(path, cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const absolutePath = resolveToCwd(path, liveCwd);
 
       try {
         const decision = await mutationPolicy?.check({
           kind: 'edit',
-          cwd,
+          cwd: liveCwd,
           path: absolutePath,
         });
         if (decision && !decision.allowed) {

@@ -6,7 +6,7 @@
 
 import path from 'node:path';
 import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import { normalizeToLf } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';
@@ -241,7 +241,7 @@ export function createGrepTool(cwd: string, fs: FsAdapter, shell: ShellAdapter):
     description: GREP_TOOL_DESCRIPTION,
     input: GrepInputSchema,
     output: GrepOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const {
         pattern,
         path: searchDir,
@@ -251,7 +251,8 @@ export function createGrepTool(cwd: string, fs: FsAdapter, shell: ShellAdapter):
         context,
         limit,
       } = params;
-      const searchPath = resolveToCwd(searchDir || '.', cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const searchPath = resolveToCwd(searchDir || '.', liveCwd);
       const contextValue = context && context > 0 ? context : 0;
       const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
 

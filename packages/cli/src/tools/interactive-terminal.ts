@@ -15,7 +15,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import type { ShellAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import type { MutationPolicy } from './mutation-policy.js';
 import { isInteractiveTerminalMutation } from './mutation-policy.js';
@@ -681,7 +681,8 @@ export function createInteractiveTerminalTool(
     description: INTERACTIVE_TERMINAL_DESCRIPTION,
     input: InteractiveTerminalInputSchema,
     output: InteractiveTerminalOutputSchema,
-    async execute(rawParams): Promise<InteractiveTerminalOutput> {
+    async execute(rawParams, toolCtx): Promise<InteractiveTerminalOutput> {
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
       const parsed = InternalInputSchema.safeParse(rawParams);
       if (!parsed.success) {
         return {
@@ -710,7 +711,7 @@ export function createInteractiveTerminalTool(
       ) {
         const decision = await options.mutationPolicy.check({
           kind: 'interactive-terminal',
-          cwd,
+          cwd: liveCwd,
           command: 'command' in params ? params.command : undefined,
           action: params.action,
         });
@@ -730,7 +731,7 @@ export function createInteractiveTerminalTool(
         params,
         binary: PILOTTY_BIN,
         shell,
-        cwd,
+        cwd: liveCwd,
       });
     },
   });

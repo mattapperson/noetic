@@ -2,6 +2,7 @@ import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
+import { snapshotCwdState } from '../runtime/cwd-helpers';
 import { contextToExecCtx } from '../runtime/exec-context-factory';
 import type { ItemSchemaRegistry } from '../schemas/item';
 import { defaultItemSchemaRegistry } from '../schemas/item';
@@ -121,7 +122,7 @@ export async function executeSpawn<TMemory, I, O>(
     ...childLayerTools,
   ]);
 
-  // Create child context — empty by default, layers provide items via onSpawn
+  // Create child context — empty by default, layers provide items via onSpawn.
   const childCtx = new ContextImpl({
     harness: baseCtx.harness,
     parent: baseCtx,
@@ -131,6 +132,7 @@ export async function executeSpawn<TMemory, I, O>(
     resourceId: baseCtx.resourceId,
     layers: layers.length > 0 ? layers : undefined,
     unifiedTools: childUnifiedTools.length > 0 ? childUnifiedTools : undefined,
+    cwdState: snapshotCwdState(baseCtx),
   });
 
   try {

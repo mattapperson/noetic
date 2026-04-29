@@ -14,13 +14,16 @@
  *   - named (`name: ...`, implies background): as above plus a per-name
  *     inbound queue addressable via the `sendMessage` tool. The teammate
  *     consumes its inbound queue via `teammateInboundLayer`.
- *   - worktree isolation (`isolation: 'worktree'`): allocate a git worktree
- *     and rebuild the child's tool pool rooted there via `buildParentTools`.
+ *   - worktree isolation (`isolation: 'worktree'`): allocate a git worktree.
+ *     The child's tools are the same instances as the parent's — they resolve
+ *     paths from the live `ctx.cwdState.cwd`, which is initialized to the
+ *     worktree path on the child context. No per-cwd tool rebuilding.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic/core';
 import { NoeticConfigError, react, spawn, step, tool } from '@noetic/core';
+import { retargetCwdForSpawn } from '@noetic/core/unstable';
 import { z } from 'zod';
 import { createAgentWorktree } from '../adapters/worktree.js';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
@@ -51,17 +54,16 @@ export const TEAMMATE_NAME_PATTERN = new RegExp(
 
 //#region Types
 
-/**
- * `buildParentTools(cwd)` rebuilds the child's tool pool rooted at the
- * given cwd. Required so worktree isolation actually re-roots tools at
- * the worktree path instead of inheriting the parent's `config.cwd`.
- */
-type BuildParentTools = (cwd: string) => Tool[];
-
 interface CreateAgentToolArgs {
   catalog: ReadonlyArray<SkillDefinition>;
   teammates: TeammateRegistry;
-  buildParentTools: BuildParentTools;
+  /**
+   * Parent tool pool. Same instances are reused for every child invocation —
+   * tools read live cwd from the executing context's `cwdState`, so
+   * worktree isolation initializes the child's cwdState instead of rebuilding
+   * tools per worktree path.
+   */
+  parentTools: ReadonlyArray<Tool>;
   parentModel: string;
   worktreeConfig: WorktreeConfig | undefined;
   cwd: string;
@@ -335,14 +337,10 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
         });
       }
 
-      // Re-root tools at worktreePath when isolated; otherwise use parent cwd.
-      const childCwd = worktreePath ?? args.cwd;
-      const parentTools = args.buildParentTools(childCwd);
-
       const resolved = resolveAgent({
         input,
         catalog: args.catalog,
-        parentTools,
+        parentTools: args.parentTools,
         parentModel: args.parentModel,
       });
 
@@ -379,6 +377,14 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
       const isAsync = resolved.background || teammateName !== undefined;
 
       if (!isAsync) {
+        // Worktree isolation: the spawned child snapshots `parent.cwdState.cwd`
+        // at spawn-construction time. Briefly retarget the parent's cwd to the
+        // worktree path so the snapshot lands on the worktree, then restore.
+        // Sync spawn awaits, so this short-lived mutation is invisible to
+        // anything else (no concurrent tool calls on this parent context).
+        const restoreCwd = worktreePath
+          ? retargetCwdForSpawn(toolCtx.ctx, worktreePath)
+          : undefined;
         try {
           const result = await toolCtx.harness.run(childStep, input.prompt, toolCtx.ctx);
           return {
@@ -388,6 +394,7 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
             worktreePath,
           };
         } finally {
+          restoreCwd?.();
           if (worktreeCleanup) {
             await worktreeCleanup().catch((cleanupErr: unknown) => {
               const msg = cleanupErr instanceof Error ? cleanupErr.message : 'unknown error';
@@ -399,9 +406,11 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
 
       // Async path: detachedSpawn with overrides.threadId so the child gets
       // its own per-teammate session-scoped item log and does not pollute
-      // the parent's `session.accumulatedItems`.
+      // the parent's `session.accumulatedItems`. `cwdInit` initializes the
+      // detached child's cwdState to the worktree path when isolated.
       const handle = toolCtx.harness.detachedSpawn(childStep, input.prompt, toolCtx.ctx, {
         threadId: `teammate-${agentId}`,
+        cwdInit: worktreePath,
       });
       try {
         if (teammateName !== undefined) {

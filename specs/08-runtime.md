@@ -109,7 +109,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     step: Step<I, O>,
     input: I,
     parentCtx: Context,
-    overrides?: { threadId?: string; resourceId?: string },
+    overrides?: { threadId?: string; resourceId?: string; cwdInit?: string },
   ): DetachedHandle<O>;
 
   // Context management
@@ -120,7 +120,12 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     threadId?: string;
     resourceId?: string;
     memory?: MemoryLayer[];
+    cwdInit?: string;             // override cwdState.cwd for this context
   }): Context;
+
+  // Shared cwd state seeded into root contexts created by this harness
+  readonly rootCwdState: CwdState;
+  setRootCwd(nextCwd: string): void;  // host (e.g. TUI) reports a `! cd`
 
   // Channel operations (the agent harness owns the backing store)
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
@@ -352,6 +357,14 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 - **`checkpoint`/`restore`** enable durable execution. `AgentHarness` implements them as no-ops. `DurableAgentHarness` serializes state (including memory layer state) to its backing store.
 - **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
 - **`createSpan`** lets the agent harness control the tracing backend.
+
+### Shared cwd
+
+`AgentHarness` holds a long-lived `rootCwdState: CwdState`. Every root context (those created without a `parent`) shares the same `CwdState` reference, so successive `run()` calls observe each other's `cd`s. Spawned and forked children get a snapshot (POSIX-fork semantics) — child mutations do not leak to the parent. Worktree-isolated children are seeded via `createContext({ cwdInit: worktreePath })` or `detachedSpawn(..., { cwdInit })`.
+
+The TUI calls `setRootCwd(nextCwd)` when the user issues a `!cd`, so the next agent turn's tools see the new cwd. The agent's Bash tool intercepts plain `cd` and mutates `cwdState` directly via `setToolCwd` — for the root context, this is the same object as `rootCwdState`, so `cd` round-trips into the TUI's prompt display on the next turn settle.
+
+`AgentHarnessOpts` accepts an optional `initialCwd?: string`; when omitted, `rootCwdState` is seeded with `process.cwd()`.
 
 ### What's NOT on the AgentHarness
 

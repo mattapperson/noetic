@@ -253,65 +253,48 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
-  const parentMutationPolicy = createTaskMutationPolicy({
+  const mutationPolicy = createTaskMutationPolicy({
     sessionCwd: config.cwd,
     shell,
     enforceOnCleanRepo: true,
   });
 
-  /**
-   * Rebuild the base (non-teammate) tool pool rooted at the given cwd.
-   *
-   * Used twice: once at harness construction for the parent's tools (rooted
-   * at `config.cwd`), and once per `agent` tool invocation when worktree
-   * isolation is requested (rooted at the worktree path). The latter is the
-   * only way to actually re-root file/shell tools at the worktree — tools
-   * close over their cwd at construction.
-   */
-  const buildBaseTools = (toolCwd: string): Tool[] => {
-    const mutationPolicy =
-      toolCwd === config.cwd
-        ? parentMutationPolicy
-        : createTaskMutationPolicy({
-            sessionCwd: config.cwd,
-            shell,
-            enforceOnCleanRepo: true,
-          });
-    const builtin =
-      mode === 'planning'
-        ? createReadOnlyTools({
-            cwd: toolCwd,
-            fs,
-            shell,
-            lspService,
-            askUserService: opts.askUserService,
-            mutationPolicy,
-          })
-        : createCodingTools({
-            cwd: toolCwd,
-            fs,
-            shell,
-            lspService,
-            askUserService: opts.askUserService,
-            mutationPolicy,
-          });
-    return [
-      ...builtin,
-      ...pluginTools,
-      ...(activateSkill
-        ? [
-            activateSkill,
-          ]
-        : []),
-    ];
-  };
+  // Tools resolve cwd from the executing context's `cwdState` at execution
+  // time, so a single tool pool serves the parent and any worktree-isolated
+  // child. The factory `cwd` here is just the fallback for contexts without
+  // a `cwdState` (test scaffolds).
+  const builtin =
+    mode === 'planning'
+      ? createReadOnlyTools({
+          cwd: config.cwd,
+          fs,
+          shell,
+          lspService,
+          askUserService: opts.askUserService,
+          mutationPolicy,
+        })
+      : createCodingTools({
+          cwd: config.cwd,
+          fs,
+          shell,
+          lspService,
+          askUserService: opts.askUserService,
+          mutationPolicy,
+        });
+  const baseTools: Tool[] = [
+    ...builtin,
+    ...pluginTools,
+    ...(activateSkill
+      ? [
+          activateSkill,
+        ]
+      : []),
+  ];
 
   // Per-harness teammate registry. Holds detached handles (by id), named
   // teammate inboxes (for `sendMessage`), and the parent-notice queue
   // drained by `teammateInboxLayer`.
   const teammates = new TeammateRegistry();
-
-  const baseTools = buildBaseTools(config.cwd);
 
   // Sub-agents receive baseTools only (no agent/sendMessage/checkAgent) —
   // teammates cannot recursively spawn teammates unless a custom skill
@@ -320,7 +303,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     createAgentTool({
       catalog: allSkills,
       teammates,
-      buildParentTools: buildBaseTools,
+      parentTools: baseTools,
       parentModel: config.model,
       worktreeConfig: config.worktree,
       cwd: config.cwd,
@@ -437,6 +420,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       provider: 'openrouter',
       apiKey: config.apiKey,
     },
+    initialCwd: config.cwd,
   });
 
   return {
