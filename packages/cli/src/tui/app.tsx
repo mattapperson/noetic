@@ -16,6 +16,7 @@ import { render } from 'ink';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
+import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
 import { ensureTasksDaemon } from '../commands/builtins/tasks/daemon.js';
 import {
   BUILTIN_COMMANDS,
@@ -1587,7 +1588,35 @@ async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutc
         exitOnCtrlC: false,
       },
     );
+    const disposeSuspend = installSuspendResumeHandlers({
+      on: (signal, handler) => {
+        process.on(signal, handler);
+      },
+      off: (signal, handler) => {
+        process.off(signal, handler);
+      },
+      raise: (signal) => {
+        process.kill(process.pid, signal);
+      },
+      stdout: process.stdout,
+      setRawMode:
+        process.stdin.isTTY && typeof process.stdin.setRawMode === 'function'
+          ? (raw) => process.stdin.setRawMode(raw)
+          : undefined,
+      onResume: () => {
+        // Force Ink to repaint everything from scratch — this re-emits
+        // the enter sequences (raw mode, bracketed paste, etc.) so the
+        // terminal returns to TUI mode after `fg`.
+        try {
+          instance.clear();
+        } catch {
+          // Ink may have unmounted already; nothing to redraw.
+        }
+      },
+    });
+
     instance.waitUntilExit().then(() => {
+      disposeSuspend();
       resolveOnce({
         kind: 'exit',
       });
