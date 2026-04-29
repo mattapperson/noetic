@@ -1135,6 +1135,7 @@ function App({
   const { isHintArmed: exitHintArmed } = useExitOnInterrupt({
     status: exitInterruptStatus,
     inputBufferEmpty: true,
+    doublePressWindowMs: config.ui?.doublePressWindowMs,
     enabledKeys: [
       'ctrl-c',
     ],

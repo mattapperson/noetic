@@ -70,6 +70,22 @@ export const WorktreeConfigSchema = z.object({
 export type WorktreeHook = z.infer<typeof WorktreeHookSchema>;
 export type WorktreeConfig = z.infer<typeof WorktreeConfigSchema>;
 
+/**
+ * Per-CLI UI tuning. Currently exposes only the double-press window for
+ * Ctrl+C / Ctrl+D exit confirmation; new knobs land here as they ship.
+ */
+export const UiConfigSchema = z.object({
+  /**
+   * Milliseconds within which a second Ctrl+C / Ctrl+D press triggers a
+   * graceful exit instead of just re-arming the hint. Default 800 (matches
+   * Claude Code). Range chosen to keep the prompt feeling snappy without
+   * making the second press easy to fat-finger.
+   */
+  doublePressWindowMs: z.number().int().min(100).max(5000).optional(),
+});
+
+export type UiConfig = z.infer<typeof UiConfigSchema>;
+
 export const AgentConfigSchema = z.object({
   model: z.string(),
   cwd: z.string(),
@@ -103,6 +119,7 @@ export const AgentConfigSchema = z.object({
     .optional(),
   memory: z.array(z.string()).optional(),
   worktree: WorktreeConfigSchema.optional(),
+  ui: UiConfigSchema.optional(),
 });
 
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;
