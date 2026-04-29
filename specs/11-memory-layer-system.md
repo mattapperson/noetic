@@ -111,6 +111,7 @@ interface MemoryHooks<TState = unknown> {
   recall?:          (params: RecallParams<TState>)               => Promise<RecallResult<TState> | string | null>;
   store?:           (params: StoreParams<TState>)                => Promise<StoreResult<TState> | void>;
   onItemAppend?:    (params: OnItemAppendParams<TState>)         => Promise<OnItemAppendResult<TState>>;
+  projectHistory?:  (params: ProjectHistoryParams<TState>)       => Promise<ProjectHistoryResult>;
   beforeToolCall?:  (params: BeforeToolCallParams<TState>)       => Promise<BeforeToolCallResult | void>;
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
@@ -120,6 +121,8 @@ interface MemoryHooks<TState = unknown> {
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
 }
 ```
+
+`projectHistory` is a read-side hook: it receives the full historical items from `itemLog` and returns a (possibly narrower) projection used as `historyItems` in the next `assembleView` call. Layers compose in slot order, each receiving the output of the previous layer. Storage (`itemLog`, `accumulatedItems`) is never mutated by this hook — see `historyWindow` in spec 12 for the canonical use case.
 
 ### Lifecycle Sequence
 
@@ -142,7 +145,11 @@ LOOP ITERATION ─────────────────────�
 │
 ├─ recall()            Sequential, SLOT ORDER (ascending). Ties by array index.
 │
-├─ [VIEW ASSEMBLY]     Projector assembles system prompt item + layer output items + history items.
+├─ projectHistory()    Sequential, SLOT ORDER. Each layer receives the previous
+│                      layer's output. Caps/transforms history items only.
+│                      Does NOT mutate itemLog. No-op when no layer registers it.
+│
+├─ [VIEW ASSEMBLY]     Projector assembles system prompt item + layer output items + (projected) history items.
 │
 ├─ [LLM CALL]
 │

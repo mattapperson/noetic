@@ -126,6 +126,15 @@ export const CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
     tab: ConfigTab.Memory,
     description: 'Comma-separated ordered memory layer names',
   },
+  {
+    path: 'history.maxItems',
+    label: 'History Window (items)',
+    kind: FieldKind.Number,
+    tab: ConfigTab.Memory,
+    placeholder: '40',
+    description:
+      'Cap on items projected to the LLM. Storage is unaffected. Leave blank to disable.',
+  },
 ];
 
 const ModelField = CONFIG_FIELDS[0];
@@ -143,6 +152,7 @@ const WorktreeCloneFilesField = CONFIG_FIELDS[11];
 const ToolsIncludeField = CONFIG_FIELDS[12];
 const ToolsExcludeField = CONFIG_FIELDS[13];
 const MemoryField = CONFIG_FIELDS[14];
+const HistoryMaxItemsField = CONFIG_FIELDS[15];
 
 export const CONFIG_FIELDS_BY_PATH: Record<ConfigFieldPath, ConfigFieldDefinition> = {
   model: ModelField,
@@ -160,6 +170,7 @@ export const CONFIG_FIELDS_BY_PATH: Record<ConfigFieldPath, ConfigFieldDefinitio
   'tools.include': ToolsIncludeField,
   'tools.exclude': ToolsExcludeField,
   memory: MemoryField,
+  'history.maxItems': HistoryMaxItemsField,
 };
 
 //#endregion

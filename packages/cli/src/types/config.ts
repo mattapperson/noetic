@@ -86,6 +86,21 @@ export const UiConfigSchema = z.object({
 
 export type UiConfig = z.infer<typeof UiConfigSchema>;
 
+/**
+ * History-window namespace: caps the number of trailing items projected to
+ * the LLM on every turn. Storage (`itemLog`, session JSON) is untouched —
+ * the cap is a read-side projection only. When `maxItems` is unset, the
+ * `historyWindow` layer is not installed and history is uncapped (the
+ * pre-existing default behaviour).
+ */
+export const HistoryConfigSchema = z.object({
+  /** Cap on trailing items sent to the LLM. The minimum-exchange guarantee
+   *  may exceed this temporarily to preserve at least one user/assistant pair. */
+  maxItems: z.number().int().min(2).max(1e4).optional(),
+});
+
+export type HistoryConfig = z.infer<typeof HistoryConfigSchema>;
+
 export const AgentConfigSchema = z.object({
   model: z.string(),
   cwd: z.string(),
@@ -120,6 +135,7 @@ export const AgentConfigSchema = z.object({
   memory: z.array(z.string()).optional(),
   worktree: WorktreeConfigSchema.optional(),
   ui: UiConfigSchema.optional(),
+  history: HistoryConfigSchema.optional(),
 });
 
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;

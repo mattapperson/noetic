@@ -42,7 +42,8 @@ export type ConfigFieldPath =
   | 'worktree.clone-files'
   | 'tools.include'
   | 'tools.exclude'
-  | 'memory';
+  | 'memory'
+  | 'history.maxItems';
 
 export const FieldKind = {
   Text: 'text',

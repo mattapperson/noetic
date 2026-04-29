@@ -481,3 +481,25 @@ Use `ctx.readLayerState<T>(layerId)` to inspect another layer's state before dec
 ### Throttling
 
 `minTurnsBetweenReminders` uses the layer's `assistantTurnCount` clock. The trigger won't fire again until that many assistant turns have elapsed since its last firing. Use `Number.POSITIVE_INFINITY` for "fire once per session."
+
+## Capping LLM history with `historyWindow()`
+
+Long sessions accumulate every assistant message and tool round-trip in `itemLog`. Without intervention, the entire transcript is replayed on every LLM call, eventually blowing the model's context window. `historyWindow` caps the trailing items projected to the LLM **without** mutating storage:
+
+```typescript
+import { historyWindow, observationalMemory, workingMemory } from '@noetic/core';
+
+const memory = [
+  workingMemory(),
+  observationalMemory(),
+  historyWindow({ maxItems: 40 }), // default
+];
+```
+
+Properties of the projection:
+
+- **Storage isolation.** `itemLog`, `accumulatedItems`, session JSON, `getAgentResponse`, and any UI reading the log all see the full transcript. Only the value handed to `assembleView` is narrowed.
+- **Minimum-exchange guarantee.** The projected window always contains at least one user `message` and one assistant `message`. If a small `maxItems` value would otherwise truncate one role away, the layer expands backward until both are present (the cap may be temporarily exceeded).
+- **Pair integrity.** After slicing, `stripUnresolvedToolCalls` runs on the window so no `function_call` is ever sent to the LLM without its matching `function_call_output` (or vice-versa) — the API rejects unpaired tool items.
+- **Mid-round flow uncapped.** Within a single `callModel` invocation's tool loop, that round's own `function_call` / `function_call_output` items keep accumulating in the wire payload. The cap fires at turn boundaries, not mid-call.
+- **Opt-in for the CLI.** When `AgentConfig.history.maxItems` is unset, the layer is not installed and history is uncapped. Set the value via `noetic.config.ts` or the `/config` editor's Memory tab to enable capping.

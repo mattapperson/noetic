@@ -314,6 +314,38 @@ steering({
 
 ---
 
+## `historyWindow()`
+
+Caps the trailing items projected to the LLM on every turn. Slot `275` (after recall-contributing layers), scope `'execution'`. Hook: `projectHistory` only.
+
+```typescript
+function historyWindow(config?: { maxItems?: number }): MemoryLayer<null>
+```
+
+**Default**: `maxItems = 40`.
+
+**Algorithm per LLM call**:
+1. Slice `items.slice(-maxItems)`.
+2. If the slice lacks both a user `message` and an assistant `message`, expand backward until both are present (the cap may temporarily be exceeded — minimum-exchange guarantee).
+3. Run `stripUnresolvedToolCalls(window)` to drop any orphan `function_call` / `function_call_output` left at the slice boundary.
+
+**Storage isolation**: this layer never mutates `itemLog`, `accumulatedItems`, or session JSON. Session save/restore, `getAgentResponse`, and TUI transcript views remain whole. The cap is purely a read-side projection over the value handed to `assembleView`.
+
+**Mid-round flow is uncapped**: within a single `callModel` invocation's tool loop, that round's own `function_call` / `function_call_output` items keep accumulating in `conversationInput`. The cap fires at turn boundaries, not mid-call — the in-flight tool loop is intentionally preserved.
+
+The CLI exposes the cap via `AgentConfig.history.maxItems`. When unset, the layer is not installed and history is uncapped.
+
+```typescript
+// Direct usage in core
+const memory = [
+  workingMemory(),
+  observationalMemory(),
+  historyWindow({ maxItems: 40 }),
+];
+```
+
+---
+
 ## Custom Layer Examples (Informative)
 
 ### RAG Knowledge Base

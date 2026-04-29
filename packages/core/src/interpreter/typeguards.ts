@@ -29,6 +29,17 @@ export function isAssistantMessage(item: unknown): item is MessageItem {
   );
 }
 
+export function isUserMessage(item: unknown): item is MessageItem {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    'type' in item &&
+    item.type === 'message' &&
+    'role' in item &&
+    item.role === 'user'
+  );
+}
+
 export function isFunctionCall(item: Item): item is FunctionCallItem {
   return item.type === 'function_call' && 'callId' in item && 'name' in item;
 }

@@ -40,6 +40,11 @@ function cloneConfig(config: AgentConfig): AgentConfig {
             : undefined,
         }
       : undefined,
+    history: config.history
+      ? {
+          ...config.history,
+        }
+      : undefined,
   };
 }
 
@@ -91,6 +96,7 @@ const fieldGetters: Record<
   'tools.include': (config) => config.tools?.include ?? [],
   'tools.exclude': (config) => config.tools?.exclude ?? [],
   memory: (config) => config.memory ?? [],
+  'history.maxItems': (config) => config.history?.maxItems,
 };
 
 //#endregion
@@ -171,6 +177,20 @@ const fieldSetters: Record<ConfigFieldPath, (config: AgentConfig, rawValue: stri
   memory: (config, rawValue) => {
     const values = splitList(rawValue);
     config.memory = values.length > 0 ? values : undefined;
+  },
+  'history.maxItems': (config, rawValue) => {
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0) {
+      config.history = undefined;
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    config.history = {
+      maxItems: parsed,
+    };
   },
 };
 

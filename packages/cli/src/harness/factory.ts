@@ -11,6 +11,7 @@ import {
   createLocalShellAdapter,
   durableTaskState,
   fileReference,
+  historyWindow,
   observationalMemory,
   planMemory,
   step,
@@ -307,6 +308,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       parentModel: config.model,
       worktreeConfig: config.worktree,
       cwd: config.cwd,
+      historyMaxItems: config.history?.maxItems,
     }),
     createSendMessageTool({
       teammates,
@@ -361,6 +363,8 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   const additionalPlanInstructions =
     planInstructionBlocks.length > 0 ? planInstructionBlocks.join('\n\n---\n\n') : undefined;
 
+  const historyMaxItems = config.history?.maxItems;
+
   const memory: MemoryLayer[] = [
     teammateInboxLayer({
       teammates,
@@ -386,6 +390,13 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       ? [
           skillsLayer(allSkills, {
             cwd: config.cwd,
+          }),
+        ]
+      : []),
+    ...(historyMaxItems !== undefined
+      ? [
+          historyWindow({
+            maxItems: historyMaxItems,
           }),
         ]
       : []),

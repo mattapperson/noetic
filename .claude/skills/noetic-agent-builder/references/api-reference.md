@@ -242,6 +242,14 @@ Loads content at init, injects as tagged XML block in every recall.
 staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 ```
 
+### historyWindow
+
+Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message) and strips orphan `function_call` / `function_call_output` at the slice boundary.
+
+```typescript
+historyWindow({ maxItems?: number })  // default 40
+```
+
 ### toolMemoryLayer
 
 Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state. Defaults to `'execution'` scope.

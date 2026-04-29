@@ -22,7 +22,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic/core';
-import { NoeticConfigError, react, spawn, step, tool } from '@noetic/core';
+import { historyWindow, NoeticConfigError, react, spawn, step, tool } from '@noetic/core';
 import { retargetCwdForSpawn } from '@noetic/core/unstable';
 import { z } from 'zod';
 import { createAgentWorktree } from '../adapters/worktree.js';
@@ -67,6 +67,13 @@ interface CreateAgentToolArgs {
   parentModel: string;
   worktreeConfig: WorktreeConfig | undefined;
   cwd: string;
+  /**
+   * Cap on items projected to the LLM, inherited from the parent's `history.maxItems`.
+   * When set, every spawned teammate also gets a `historyWindow` layer; when
+   * unset, teammates are uncapped. Inheriting teammates pick this up via the
+   * parent's memory stack; non-inheriting ones receive an explicit instance.
+   */
+  historyMaxItems: number | undefined;
 }
 
 interface ResolvedAgent {
@@ -301,6 +308,14 @@ function formatFailure(label: string, message: string): string {
 
 export function createAgentTool(args: CreateAgentToolArgs): Tool {
   const registryRef = new WeakRef(args.teammates);
+  // Build the teammate's history-window layer once per harness; the layer's
+  // state is keyed per-execution so a single instance is safe across spawns.
+  const teammateHistoryLayer =
+    args.historyMaxItems !== undefined
+      ? historyWindow({
+          maxItems: args.historyMaxItems,
+        })
+      : undefined;
   return tool({
     name: 'agent',
     description:
@@ -366,11 +381,18 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
           );
         }
       }
+      // Apply the same history cap to teammates as the parent. Inheriting
+      // teammates already see the parent's `historyWindow` layer; non-
+      // inheriting teammates need an explicit instance here.
+      const willInheritParent = inheritContext && extraMemory.length === 0;
+      if (teammateHistoryLayer && !willInheritParent) {
+        extraMemory.push(teammateHistoryLayer);
+      }
 
       const childStep = buildChildStep({
         agentId,
         resolved,
-        inheritContext: inheritContext && extraMemory.length === 0,
+        inheritContext: willInheritParent,
         extraMemory,
       });
 

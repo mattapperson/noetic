@@ -92,6 +92,13 @@ interface AfterModelCallLayersParams {
   store: LayerStateStore;
 }
 
+interface ProjectHistoryLayersParams {
+  layers: MemoryLayer[];
+  items: ReadonlyArray<Item>;
+  ctx: ExecutionContext;
+  store: LayerStateStore;
+}
+
 /** @public A request to re-render the context window, collected from onItemAppend hooks. */
 export interface RerenderRequest {
   layerId: string;
@@ -657,6 +664,50 @@ export async function afterModelCallLayers({
   }
 
   return mostRestrictive(decisions);
+}
+
+/**
+ * Run history items through every layer's `projectHistory` hook in slot order.
+ * Each layer receives the previous layer's output. Storage (`itemLog`) is
+ * never mutated — this is a pure projection over the input array. Returns
+ * the projected items unchanged when no layer registers the hook.
+ */
+export async function projectHistoryLayers({
+  layers,
+  items,
+  ctx,
+  store,
+}: ProjectHistoryLayersParams): Promise<ReadonlyArray<Item>> {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  let current: ReadonlyArray<Item> = items;
+
+  for (const layer of sorted) {
+    if (!layer.hooks.projectHistory) {
+      continue;
+    }
+    const state = store.get(ctx.executionId, layer.id);
+    if (state === undefined && layer.hooks.init) {
+      continue;
+    }
+    try {
+      const timeout = layer.timeouts?.projectHistory ?? 5e3;
+      const result = await withTimeout(
+        layer.hooks.projectHistory({
+          items: current,
+          ctx,
+          state,
+        }),
+        timeout,
+      );
+      current = result.items;
+    } catch (e) {
+      store.diagnostic(layer.id, 'projectHistory', e);
+    }
+  }
+
+  return current;
 }
 
 const DEFAULT_ON_ITEM_APPEND_TIMEOUT = 5e3;

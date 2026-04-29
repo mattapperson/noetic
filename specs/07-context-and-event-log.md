@@ -81,6 +81,8 @@ interface ItemLog {
 }
 ```
 
+`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by memory layers via the `projectHistory` hook (see `11-memory-layer-system`); the canonical built-in is `historyWindow` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
+
 ---
 
 ## `Item` Type Hierarchy

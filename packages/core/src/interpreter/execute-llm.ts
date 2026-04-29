@@ -147,16 +147,24 @@ export async function executeLLM<TMemory, I, O>(
   let retries = 0;
 
   while (retries <= MAX_STEERING_RETRIES) {
+    const rawHistoryItems: ReadonlyArray<Item> = baseCtx.itemLog.items;
+    const projectedHistoryItems = hasLayers
+      ? await baseCtx.harness.projectHistory(layers, rawHistoryItems, baseCtx)
+      : rawHistoryItems;
     const assembledItems =
       layerOutputItems.length > 0
         ? assembleView({
             systemPromptItems: [],
             layerOutputItems,
             historyItems: [
-              ...baseCtx.itemLog.items,
+              ...projectedHistoryItems,
             ],
           })
-        : baseCtx.itemLog.items;
+        : projectedHistoryItems === rawHistoryItems
+          ? rawHistoryItems
+          : [
+              ...projectedHistoryItems,
+            ];
 
     const request = resolvedTools
       ? {

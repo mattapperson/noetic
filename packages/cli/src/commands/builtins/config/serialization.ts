@@ -31,6 +31,7 @@ function cleanConfig(
     tools: cleanTools(config),
     memory: config.memory,
     worktree: cleanWorktree(config),
+    history: config.history,
   };
 }
 

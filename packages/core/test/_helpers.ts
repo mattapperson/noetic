@@ -444,6 +444,7 @@ export function makeMockHarness(): AgentHarnessContract {
     afterModelCall: async () => ({
       action: SteeringAction.Allow,
     }),
+    projectHistory: async (_layers, items) => items,
     runAppendPipeline: async (_layers, items) => ({
       items,
       rerenderRequests: [],

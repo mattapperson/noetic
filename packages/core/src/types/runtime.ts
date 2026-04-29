@@ -277,6 +277,16 @@ export interface AgentHarnessContract<
     ctx: Context,
   ): Promise<SteeringDecision>;
   /**
+   * Project the history items through every layer's `projectHistory` hook in
+   * slot order. Pure read-side projection — `itemLog` is never mutated.
+   * Returns the input unchanged if no layer registers the hook.
+   */
+  projectHistory(
+    layers: MemoryLayer[],
+    items: ReadonlyArray<Item>,
+    ctx: Context,
+  ): Promise<ReadonlyArray<Item>>;
+  /**
    * Run items through the onItemAppend pipeline before appending.
    * Each layer can filter, transform, or inject items.
    * Returns final items to append and any re-render requests.

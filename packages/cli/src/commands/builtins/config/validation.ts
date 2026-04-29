@@ -25,6 +25,7 @@ const fieldValidators: Record<ConfigFieldPath, (rawValue: string) => string | un
   'tools.include': validateList,
   'tools.exclude': validateList,
   memory: validateList,
+  'history.maxItems': validateOptionalIntInRange(2, 1e4),
 };
 
 function validateRequired(rawValue: string): string | undefined {
@@ -67,6 +68,23 @@ function validateList(rawValue: string): string | undefined {
     return undefined;
   }
   return 'List contains an empty entry';
+}
+
+function validateOptionalIntInRange(
+  min: number,
+  max: number,
+): (rawValue: string) => string | undefined {
+  return (rawValue) => {
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0) {
+      return undefined;
+    }
+    const value = Number(trimmed);
+    if (Number.isInteger(value) && value >= min && value <= max) {
+      return undefined;
+    }
+    return `Must be an integer between ${min} and ${max} (or empty to disable)`;
+  };
 }
 
 //#endregion
@@ -151,6 +169,7 @@ const schemaPathMap: Record<string, ConfigFieldPath> = {
   'tools.include': 'tools.include',
   'tools.exclude': 'tools.exclude',
   memory: 'memory',
+  'history.maxItems': 'history.maxItems',
 };
 
 //#endregion

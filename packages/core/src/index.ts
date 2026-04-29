@@ -80,6 +80,10 @@ export { durableTaskState } from './memory/layers/durable-task-state';
 /** @public */
 export { fileReference } from './memory/layers/file-reference';
 /** @public */
+export type { HistoryWindowConfig } from './memory/layers/history-window';
+/** @public */
+export { historyWindow } from './memory/layers/history-window';
+/** @public */
 export type {
   ObservationalMemoryConfig,
   ObservationalState,
@@ -106,6 +110,8 @@ export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 /** @public */
 export { workingMemory } from './memory/layers/working-memory';
+/** @public */
+export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 //#endregion
 

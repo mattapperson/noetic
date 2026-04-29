@@ -26,6 +26,7 @@ import {
   disposeLayers,
   executeRerender,
   initLayers,
+  projectHistoryLayers,
   recallLayers,
   resolveLayerBudgets,
   runAppendPipeline,
@@ -1426,6 +1427,23 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return afterModelCallLayers({
       layers,
       response,
+      ctx: this.toExecCtx(ctx),
+      store: this.layerStateStore,
+    });
+  }
+
+  async projectHistory(
+    layers: MemoryLayer[],
+    items: ReadonlyArray<Item>,
+    ctx: Context,
+  ): Promise<ReadonlyArray<Item>> {
+    const hasHook = layers.some((l) => l.hooks.projectHistory);
+    if (!hasHook) {
+      return items;
+    }
+    return projectHistoryLayers({
+      layers,
+      items,
       ctx: this.toExecCtx(ctx),
       store: this.layerStateStore,
     });

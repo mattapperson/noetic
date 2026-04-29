@@ -140,6 +140,7 @@ export interface LayerTimeouts {
   beforeToolCall?: number;
   afterModelCall?: number;
   onItemAppend?: number;
+  projectHistory?: number;
 }
 
 /** @public Terminal outcome of an execution run, reported to memory layers on completion. */
@@ -279,6 +280,22 @@ export interface DisposeParams<TState> {
   state: TState;
 }
 
+/** @public Parameters passed to a memory layer's `projectHistory` hook to project the history portion of the LLM context window. */
+export interface ProjectHistoryParams<TState> {
+  /** Full historical items from the item log, uncapped. */
+  items: ReadonlyArray<Item>;
+  /** Current execution context. */
+  ctx: ExecutionContext;
+  /** Layer's current state snapshot. */
+  state: TState;
+}
+
+/** @public Value returned by a memory layer's `projectHistory` hook, carrying the projected items. */
+export interface ProjectHistoryResult {
+  /** Items to send to the LLM as history. Typically a subset of the input. */
+  items: ReadonlyArray<Item>;
+}
+
 //#region onItemAppend Hook
 
 /** @public Controls which layers re-run recall() when a re-render is triggered. */
@@ -347,6 +364,15 @@ export interface MemoryHooks<TState = unknown> {
    * NOT called for LLM response items — use `store()` for those.
    */
   onItemAppend?(params: OnItemAppendParams<TState>): Promise<OnItemAppendResult<TState>>;
+  /**
+   * Called once per LLM step to project (cap, transform) the history portion
+   * of the context window before assembleView. Layers compose in slot order:
+   * each receives the output of the previous layer. Storage (`itemLog`) is
+   * NOT mutated — this is a read-side projection only.
+   *
+   * Use for: capping history, summarising old turns, redacting items.
+   */
+  projectHistory?(params: ProjectHistoryParams<TState>): Promise<ProjectHistoryResult>;
 }
 
 /**
