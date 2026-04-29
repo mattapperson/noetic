@@ -17,6 +17,7 @@ import { runPicker } from '../tui/run-picker.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
+import { installInterruptSafetyNet } from './interrupt-safety-net.js';
 
 if (process.argv[2] === 'tasks-daemon') {
   const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
@@ -51,6 +52,21 @@ const runtimeConfig: AgentRuntimeConfig = {
     configFileModel: discovered?.config.model,
   }),
 };
+
+installInterruptSafetyNet({
+  on: (signal, handler) => {
+    process.on(signal, handler);
+  },
+  off: (signal, handler) => {
+    process.off(signal, handler);
+  },
+  exit: (code) => process.exit(code),
+  stdout: process.stdout,
+  setRawMode:
+    process.stdin.isTTY && typeof process.stdin.setRawMode === 'function'
+      ? (raw) => process.stdin.setRawMode(raw)
+      : undefined,
+});
 
 await runAgent(plugins, runtimeConfig, {
   initialSession,

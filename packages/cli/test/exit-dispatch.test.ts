@@ -1,26 +1,12 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { ExitCallbacks, ExitState } from '../src/tui/input/exit-dispatch.js';
+import { describe, expect, test } from 'bun:test';
+import type { ExitState } from '../src/tui/input/exit-dispatch.js';
 import { applyExitDecision, isExitArmedExpired } from '../src/tui/input/exit-dispatch.js';
 
 const NOW = 1_000_000;
 
-function callbacks(): ExitCallbacks {
-  return {
-    onAbortTurn: mock(() => {}),
-    onShowHint: mock(() => {}),
-    onExitGracefully: mock(() => {}),
-  };
-}
-
 describe('applyExitDecision', () => {
-  let cb: ExitCallbacks;
-
-  beforeEach(() => {
-    cb = callbacks();
-  });
-
-  test('abort-turn calls onAbortTurn and clears any armed hint', () => {
-    const next = applyExitDecision({
+  test('abort-turn → fire: abort-turn, clears armed hint', () => {
+    const result = applyExitDecision({
       decision: {
         kind: 'abort-turn',
       },
@@ -28,18 +14,15 @@ describe('applyExitDecision', () => {
         pendingExitArmedAt: NOW - 100,
       },
       now: NOW,
-      callbacks: cb,
     });
-    expect(cb.onAbortTurn).toHaveBeenCalledTimes(1);
-    expect(cb.onShowHint).not.toHaveBeenCalled();
-    expect(cb.onExitGracefully).not.toHaveBeenCalled();
-    expect(next).toEqual({
+    expect(result.fire).toBe('abort-turn');
+    expect(result.nextState).toEqual({
       pendingExitArmedAt: null,
     });
   });
 
-  test('show-exit-hint calls onShowHint and arms timer at now', () => {
-    const next = applyExitDecision({
+  test('show-exit-hint → fire: show-exit-hint, arms timer at now', () => {
+    const result = applyExitDecision({
       decision: {
         kind: 'show-exit-hint',
       },
@@ -47,18 +30,15 @@ describe('applyExitDecision', () => {
         pendingExitArmedAt: null,
       },
       now: NOW,
-      callbacks: cb,
     });
-    expect(cb.onShowHint).toHaveBeenCalledTimes(1);
-    expect(cb.onAbortTurn).not.toHaveBeenCalled();
-    expect(cb.onExitGracefully).not.toHaveBeenCalled();
-    expect(next).toEqual({
+    expect(result.fire).toBe('show-exit-hint');
+    expect(result.nextState).toEqual({
       pendingExitArmedAt: NOW,
     });
   });
 
-  test('exit-now calls onExitGracefully and clears armed timer', () => {
-    const next = applyExitDecision({
+  test('exit-now → fire: exit-now, clears armed timer', () => {
+    const result = applyExitDecision({
       decision: {
         kind: 'exit-now',
       },
@@ -66,33 +46,27 @@ describe('applyExitDecision', () => {
         pendingExitArmedAt: NOW - 200,
       },
       now: NOW,
-      callbacks: cb,
     });
-    expect(cb.onExitGracefully).toHaveBeenCalledTimes(1);
-    expect(cb.onAbortTurn).not.toHaveBeenCalled();
-    expect(cb.onShowHint).not.toHaveBeenCalled();
-    expect(next).toEqual({
+    expect(result.fire).toBe('exit-now');
+    expect(result.nextState).toEqual({
       pendingExitArmedAt: null,
     });
   });
 
-  test('noop fires no callbacks and preserves state', () => {
+  test('noop → fire: noop, preserves state', () => {
     const state: ExitState = {
       pendingExitArmedAt: NOW - 50,
     };
-    const next = applyExitDecision({
+    const result = applyExitDecision({
       decision: {
         kind: 'noop',
       },
       state,
       now: NOW,
-      callbacks: cb,
     });
-    expect(cb.onAbortTurn).not.toHaveBeenCalled();
-    expect(cb.onShowHint).not.toHaveBeenCalled();
-    expect(cb.onExitGracefully).not.toHaveBeenCalled();
-    expect(next).toEqual(state);
-    expect(next).not.toBe(state);
+    expect(result.fire).toBe('noop');
+    expect(result.nextState).toEqual(state);
+    expect(result.nextState).not.toBe(state);
   });
 });
 

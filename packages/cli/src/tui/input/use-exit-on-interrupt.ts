@@ -1,6 +1,6 @@
 import type { Key } from 'ink';
 import { useInput } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ExitActionKey, ExitActionStatus } from './exit-action.js';
 import { DOUBLE_PRESS_WINDOW_MS, decideExitAction } from './exit-action.js';
 import type { ExitState } from './exit-dispatch.js';
@@ -57,33 +57,40 @@ export function useExitOnInterrupt(opts: UseExitOnInterruptOptions): UseExitOnIn
   const [state, setState] = useState<ExitState>({
     pendingExitArmedAt: null,
   });
+  // We read the live state synchronously inside the input handler (not via
+  // setState's updater function) so the side-effect callback dispatch
+  // happens *outside* React's state-update phase — calling setState from
+  // inside an updater function is forbidden.
+  const stateRef = useRef<ExitState>(state);
+  stateRef.current = state;
 
   useInput((input, key) => {
     const exitKey = mapInkKeyToExitKey(input, key, opts.enabledKeys);
     if (!exitKey) {
       return;
     }
-    setState((prev) => {
-      const now = Date.now();
-      const decision = decideExitAction({
-        key: exitKey,
-        status: opts.status,
-        inputBufferEmpty: opts.inputBufferEmpty,
-        pendingExitArmedAt: prev.pendingExitArmedAt,
-        now,
-        doublePressWindowMs: windowMs,
-      });
-      return applyExitDecision({
-        decision,
-        state: prev,
-        now,
-        callbacks: {
-          onAbortTurn: opts.onAbortTurn,
-          onExitGracefully: opts.onExitGracefully,
-          onShowHint: () => {},
-        },
-      });
+    const now = Date.now();
+    const decision = decideExitAction({
+      key: exitKey,
+      status: opts.status,
+      inputBufferEmpty: opts.inputBufferEmpty,
+      pendingExitArmedAt: stateRef.current.pendingExitArmedAt,
+      now,
+      doublePressWindowMs: windowMs,
     });
+    const { nextState, fire } = applyExitDecision({
+      decision,
+      state: stateRef.current,
+      now,
+    });
+    setState(nextState);
+    if (fire === 'abort-turn') {
+      opts.onAbortTurn();
+      return;
+    }
+    if (fire === 'exit-now') {
+      opts.onExitGracefully();
+    }
   });
 
   useEffect(() => {

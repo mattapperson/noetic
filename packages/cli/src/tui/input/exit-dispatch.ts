@@ -1,51 +1,47 @@
-import type { ExitAction } from './exit-action.ts';
+import type { ExitAction } from './exit-action.js';
 
 export type ExitState = {
   pendingExitArmedAt: number | null;
-};
-
-export type ExitCallbacks = {
-  onAbortTurn: () => void;
-  onShowHint: () => void;
-  onExitGracefully: () => void;
 };
 
 export type ApplyExitDecisionInput = {
   decision: ExitAction;
   state: ExitState;
   now: number;
-  callbacks: ExitCallbacks;
+};
+
+export type DispatchResult = {
+  nextState: ExitState;
+  /**
+   * The action kind to fire as a side effect. Callers wire this to their
+   * own callbacks (`onAbortTurn`, `onExitGracefully`) — keeping it out of
+   * this reducer makes the function pure and safe to call inside React's
+   * state-updater path.
+   */
+  fire: ExitAction['kind'];
 };
 
 const HANDLERS: Record<ExitAction['kind'], (input: ApplyExitDecisionInput) => ExitState> = {
-  'abort-turn': ({ callbacks }) => {
-    callbacks.onAbortTurn();
-    return {
-      pendingExitArmedAt: null,
-    };
-  },
-  'show-exit-hint': ({ callbacks, now }) => {
-    callbacks.onShowHint();
-    return {
-      pendingExitArmedAt: now,
-    };
-  },
-  'exit-now': ({ callbacks }) => {
-    callbacks.onExitGracefully();
-    return {
-      pendingExitArmedAt: null,
-    };
-  },
-  noop: ({ state }) => {
-    return {
-      ...state,
-    };
-  },
+  'abort-turn': () => ({
+    pendingExitArmedAt: null,
+  }),
+  'show-exit-hint': ({ now }) => ({
+    pendingExitArmedAt: now,
+  }),
+  'exit-now': () => ({
+    pendingExitArmedAt: null,
+  }),
+  noop: ({ state }) => ({
+    ...state,
+  }),
 };
 
-export function applyExitDecision(input: ApplyExitDecisionInput): ExitState {
+export function applyExitDecision(input: ApplyExitDecisionInput): DispatchResult {
   const handler = HANDLERS[input.decision.kind];
-  return handler(input);
+  return {
+    nextState: handler(input),
+    fire: input.decision.kind,
+  };
 }
 
 export function isExitArmedExpired(state: ExitState, now: number, windowMs: number): boolean {
