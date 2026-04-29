@@ -18,7 +18,7 @@ import { resume } from './resume.js';
 import { session } from './session.js';
 import { skills } from './skills.js';
 import { tag } from './tag.js';
-import { tasks } from './tasks/index.js';
+import { mission, tasks } from './tasks/index.js';
 
 /**
  * All built-in commands.
@@ -30,6 +30,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<Command> = [
   config,
   context,
   diffReview,
+  mission,
   mode,
   model,
   plan,
@@ -48,6 +49,7 @@ export {
   config,
   context,
   diffReview,
+  mission,
   mode,
   model,
   plan,

@@ -18,6 +18,12 @@ import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
 import { installInterruptSafetyNet } from './interrupt-safety-net.js';
 
+if (process.argv[2] === 'mission') {
+  const { dispatchMissionVerb } = await import('../commands/builtins/tasks/missions/cli.js');
+  await dispatchMissionVerb(process.argv.slice(3), process.cwd());
+  process.exit(process.exitCode ?? 0);
+}
+
 if (process.argv[2] === 'daemon' || process.argv[2] === 'tasks-daemon') {
   const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
   const { runDaemon } = await import('../daemon-runtime/runtime.js');
