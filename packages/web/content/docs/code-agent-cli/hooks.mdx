@@ -49,12 +49,15 @@ export default {
 A hook can be either a single command string or a named table of commands.
 
 ```ts
-'pre-start': 'git fetch origin',                              // single command
+import type { AgentConfig } from '@noetic/cli';
 
-'post-start': {                                               // named table
-  'setup-env': 'cp .env.example .env',
-  'install-playwright': 'bunx playwright install --with-deps',
-},
+const hooks = {
+  'pre-start': 'git fetch origin',
+  'post-start': {
+    'setup-env': 'cp .env.example .env',
+    'install-playwright': 'bunx playwright install --with-deps',
+  },
+} satisfies Pick<NonNullable<AgentConfig['worktree']>, 'pre-start' | 'post-start'>;
 ```
 
 Use the named-table form when you have multiple independent setup steps — names appear in the CLI's status output so you can tell which hook is currently running. Commands within a table run sequentially in object-key order.
@@ -89,12 +92,14 @@ These match worktrunk's filter semantics.
 A list of glob patterns. Matching files are copied from the parent worktree into the new worktree right after `post-start`. Use this for files that aren't in git but the sub-agent needs to run:
 
 ```ts
-'clone-files': [
-  '.env*',              // all .env, .env.local, .env.test, ...
+import type { AgentConfig } from '@noetic/cli';
+
+const cloneFiles: NonNullable<AgentConfig['worktree']>['clone-files'] = [
+  '.env*',
   'config/.env*',
   '*.local',
   'certificates/*',
-],
+];
 ```
 
 Globs are evaluated relative to the parent worktree.

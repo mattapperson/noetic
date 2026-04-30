@@ -30,7 +30,15 @@ The return value becomes the output of the step, passed to whatever comes next.
 ## Type Signature
 
 ```ts
-step.run<TMemory, I, O>(opts: RunStepOptions<TMemory, I, O>): StepRun<TMemory, I, O>
+type RunStepOptions<TMemory, I, O> = {
+  id: string;
+  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
+  retry?: RetryPolicy;
+};
+
+declare const stepRun: <TMemory, I, O>(
+  opts: RunStepOptions<TMemory, I, O>,
+) => StepRun<TMemory, I, O>;
 ```
 
 `TMemory` is the typed memory shape (from `InferMemory`), `I` is the input type, and `O` is the output type.

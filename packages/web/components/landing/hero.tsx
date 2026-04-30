@@ -23,7 +23,7 @@ const INSTALL_COMMANDS = [
   },
 ] as const;
 
-const HERO_CODE = `import { react, AgentHarness } from '@noetic/core';
+const HERO_CODE = `import { AgentHarness, react } from '@noetic/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -36,7 +36,9 @@ const harness = new AgentHarness({
   initialStep: agent,
   params: {},
 });
-const result = await harness.execute('Find recent AI news');`;
+
+await harness.execute('Find recent AI news');
+const { text } = await harness.getAgentResponse();`;
 
 const HIGHLIGHTED_HERO_CODE = highlightCode(HERO_CODE);
 

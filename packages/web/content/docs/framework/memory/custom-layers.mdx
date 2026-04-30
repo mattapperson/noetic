@@ -60,14 +60,13 @@ Scope controls when state is shared or isolated:
 The budget controls how many tokens your layer can inject during `recall`:
 
 ```ts
-// Fixed budget
-budget: 500
+import type { BudgetConfig } from '@noetic/core';
 
-// Range budget -- allocator distributes spare tokens
-budget: { min: 200, max: 1500 }
+const fixedBudget: BudgetConfig = 500;
 
-// Let the runtime decide
-budget: 'auto'
+const rangeBudget: BudgetConfig = { min: 200, max: 1500 };
+
+const autoBudget: BudgetConfig = 'auto';
 ```
 
 ## Step 5: Implement Hooks
@@ -147,10 +146,12 @@ function myCustomLayer(): MemoryLayer<MyLayerState> {
 If any hook makes network calls or runs LLM inference, set a timeout to prevent hangs:
 
 ```ts
-timeouts: {
-  store: 30_000,   // 30 seconds for store
-  recall: 10_000,  // 10 seconds for recall
-}
+import type { LayerTimeouts } from '@noetic/core';
+
+const timeouts: Partial<LayerTimeouts> = {
+  store: 30_000,
+  recall: 10_000,
+};
 ```
 
 ## Step 7: Register with the Agent

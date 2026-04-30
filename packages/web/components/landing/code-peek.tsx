@@ -22,47 +22,55 @@ const TAB_FILES: Record<Tab, string> = {
 };
 
 const TAB_CODE: Record<Tab, string> = {
-  'ReAct reasoning loop': `import { loop, llm, tool, until } from '@noetic/core';
+  'ReAct reasoning loop': `import { any, loop, step, until } from '@noetic/core';
 
-const react = loop([
-  llm({ model: 'gpt-4o', tools: [searchTool, calcTool] }),
-  tool('search', searchSchema, searchFn),
-  tool('calc', calcSchema, calcFn),
-], until.toolCallStop());
-
-const result = await execute(react, runtime);
+const reasonAndAct = loop({
+  id: 'react-loop',
+  steps: [
+    step.llm({
+      id: 'think',
+      model: 'gpt-4o',
+      tools: [searchTool, calcTool],
+    }),
+  ],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
+});
 // Observe → Think → Act — just primitives composed`,
 
-  '5-layer memory in 10 lines': `import { InMemoryRuntime } from '@noetic/core';
-import {
-  WorkingMemoryLayer,
-  ObservationalLayer,
-  SemanticRecallLayer,
-  EpisodicLayer,
-  DurableStateLayer,
-} from '@noetic/core/memory';
+  '5-layer memory in 10 lines': `import {
+  AgentHarness,
+  durableTaskState,
+  observationalMemory,
+  planMemory,
+  workingMemory,
+} from '@noetic/core';
 
-const runtime = new InMemoryRuntime({
+const harness = new AgentHarness({
+  name: 'agent',
+  initialStep: agent,
+  params: {},
   memory: [
-    new WorkingMemoryLayer(),
-    new ObservationalLayer(),
-    new SemanticRecallLayer({ embed }),
-    new EpisodicLayer(),
-    new DurableStateLayer({ store }),
+    workingMemory({ scope: 'thread' }),
+    observationalMemory({ bufferThreshold: 4_000, observer }),
+    planMemory({ maxTreeDepth: 3 }),
+    durableTaskState({ baseDir: '.noetic/tasks' }),
+    semanticRecall,
   ],
 });`,
 
-  'Extend any primitive': `import { run } from '@noetic/core';
+  'Extend any primitive': `import { step } from '@noetic/core';
 import type { Context } from '@noetic/core';
 
-interface MyCtx extends Context {
+interface SessionMemory {
   userId: string;
   sessionId: string;
 }
 
-// Custom step: wraps run with your typed context
-const logStep = run<MyCtx>((ctx) => {
-  ctx.log(\`[\${ctx.sessionId}] user=\${ctx.userId}\`);
+const logStep = step.run<SessionMemory, string, void>({
+  id: 'audit-log',
+  execute: async (input, ctx: Context<SessionMemory>) => {
+    console.log(\`[\${ctx.memory.sessionId}] user=\${ctx.memory.userId} msg=\${input}\`);
+  },
 });`,
 };
 

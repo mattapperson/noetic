@@ -27,7 +27,7 @@ Routes input to the most semantically similar case using cosine similarity on em
 import { branch, semanticSwitch, step } from '@noetic/core';
 import type { EmbedFn } from '@noetic/core';
 
-const embed: EmbedFn = /* your embedding function */;
+declare const embed: EmbedFn;
 
 const router = branch({
   id: 'semantic-router',

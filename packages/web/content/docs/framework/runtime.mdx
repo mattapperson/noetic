@@ -46,13 +46,19 @@ const harness = new AgentHarness({
 | `initialStep` | `Step<TMemory, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TMemory` defaults to `ContextMemory`. |
 | `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
 | `memory` | `MemoryLayer[]` | `undefined` | Default memory layers applied to every context created via `createContext()` / `execute()`. |
-| `storage` | `StorageAdapter` | `undefined` | Storage backend for memory persistence. |
+| `storage` | `StorageAdapter` | in-memory | Storage backend for memory persistence. |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
+| `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Memory layers, tools, and skill discovery all route through this adapter. |
+| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. |
 | `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
+| `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. |
+| `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
+| `streamIdleTimeoutMs` | `number` | `120_000` | Abort the in-flight model call if the provider stream emits no events for this many milliseconds. Pass `0` or a negative number to disable. |
+| `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
 
 ## execute()
 
