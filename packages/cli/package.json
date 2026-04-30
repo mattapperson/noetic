@@ -13,7 +13,6 @@
     "chalk": "5.6.2",
     "cli-highlight": "2.1.11",
     "diff": "7.0.0",
-    "drizzle-orm": "^0.45.2",
     "figures": "6.1.0",
     "glob": "11.0.3",
     "html-to-text": "9.0.5",
@@ -36,11 +35,9 @@
     "@types/diff": "^8.0.0",
     "@types/html-to-text": "9.0.4",
     "@types/react": "^19.2.14",
-    "bun-types": "latest",
-    "drizzle-kit": "^0.31.10"
+    "bun-types": "latest"
   },
   "scripts": {
-    "db:tasks:generate": "drizzle-kit generate --config drizzle.tasks.config.ts",
     "dev": "bun run src/cli/cli.ts",
     "test": "bun test --preload ./test/setup.ts test/*.test.ts",
     "test:coverage": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=text --coverage-reporter=json",
