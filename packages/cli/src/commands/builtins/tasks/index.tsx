@@ -114,3 +114,5 @@ export const tasks: Command = {
     call,
   }),
 };
+
+export { mission } from './missions/commands/index.js';

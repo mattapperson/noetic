@@ -5,11 +5,12 @@
  * distinct from skills which are instruction prompts for the model.
  */
 
-import type { LastLayerUsage, MemoryLayer } from '@noetic/core';
+import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic/core';
 import type { ReactNode } from 'react';
 
 import type { SkillDefinition } from '../skills/types.js';
 import type { ConversationEntry } from '../tui/item-utils.js';
+import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 
 //#region Command Context
@@ -22,6 +23,19 @@ interface CommandContext {
   config: AgentConfig;
   /** Current working directory */
   cwd: string;
+  /**
+   * Active agent harness, when this command is invoked from the chat TUI.
+   * Undefined in headless contexts (e.g. tests, the resume picker, or
+   * commands invoked before any harness exists). Commands that require
+   * the harness MUST guard for `undefined` and degrade gracefully.
+   */
+  harness?: AgentHarness;
+  /**
+   * Service for asking the user structured questions via the chat TUI's
+   * modal. Undefined outside the chat-TUI context. Commands that require
+   * interactive prompts MUST guard for `undefined`.
+   */
+  askUserService?: AskUserService;
   /** Current conversation history */
   entries: ReadonlyArray<ConversationEntry>;
   /** All discovered skills */

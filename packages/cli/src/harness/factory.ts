@@ -27,6 +27,7 @@ import { createBuiltinLspServers } from '../lsp/builtin/index.js';
 import { LspService } from '../lsp/service.js';
 import type { LspServerContribution } from '../lsp/types.js';
 import { agentMdLayer } from '../memory/agent-md-layer.js';
+import { missionMemory } from '../memory/mission-memory.js';
 import { reminderLayer } from '../memory/reminder-layer.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
 import { BUILTIN_TRIGGERS, createReminderRegistry } from '../memory/reminder-triggers.js';
@@ -376,6 +377,9 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       additionalPlanInstructions,
       onEnterSession: planHooks?.onEnterSession,
       onExit: planHooks?.onExit,
+    }),
+    missionMemory({
+      cwd: config.cwd,
     }),
     workingMemory(),
     agentMdLayer({
