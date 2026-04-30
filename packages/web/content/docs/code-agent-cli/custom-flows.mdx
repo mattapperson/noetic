@@ -1,0 +1,266 @@
+---
+title: Custom Flows
+description: Two ways to build long-running, branching agent workflows — plan-mode JSON flows and programmatic Step compositions.
+---
+
+A **flow** is a state machine of agent work composed from the framework's primitives — `every`, `fork`, `spawn`, `branch`, `step.run`, `step.llm`, `step.tool`. Flows are how the CLI's daemon does background work (autopilot, validator, health, reconcile), and they're how you can extend the CLI with your own background or planned workflows.
+
+There are two ways to author a flow:
+
+1. **Plan-mode JSON flows** — the LLM emits a JSON tree describing the flow during plan mode; the runtime expands each node into a concrete `Step`. Good for "I want the agent to design the flow, then execute it."
+2. **Programmatic Step compositions** — TypeScript code in a plugin or in your config. Good for long-running infrastructure (daemons, reactive workers, periodic jobs) you control directly.
+
+If you're new to the primitives, read [Operators](/docs/framework/operators) and the [Patterns](/docs/framework/patterns) section first.
+
+---
+
+## Plan-mode JSON flows
+
+When the agent is in **plan mode** (`/plan` or `/mode plan`), it can emit a JSON object that conforms to the `FlowSchema`. The runtime validates it with Zod and expands each node into a `Step` via the framework's builders at execute time.
+
+### Node kinds
+
+```ts
+type FlowNode =
+  | LlmFlowNode
+  | SubagentFlowNode
+  | ForkFlowNode
+  | SpawnFlowNode
+  | SequenceFlowNode;
+```
+
+| Kind | Purpose | Maps to |
+|---|---|---|
+| `llm` | One LLM call with optional tool list. | `step.llm` |
+| `subagent` | Spawn a teammate by registered preset name. | `agent` tool with `subagent_type` |
+| `fork` | Parallel paths with mode `'all'` / `'race'` / `'settle'`. | `fork` |
+| `spawn` | Child execution in an isolated memory scope. | `spawn` |
+| `sequence` | Linear list of child nodes. | `step` chain |
+
+Every node has `id` (string) and optional `subPlanRef` (links the node back to a section of the PRD).
+
+```ts
+interface LlmFlowNode {
+  kind: 'llm';
+  id: string;
+  model?: string;        // override session model
+  instructions: string;  // system prompt for this turn
+  tools?: string[];      // names — resolved against the harness's tool registry
+}
+
+interface SubagentFlowNode {
+  kind: 'subagent';
+  id: string;
+  preset: string;        // see plugin `subagentPresets` or skills with `agent-type`
+  prompt: string;        // user-shaped brief for the teammate
+}
+
+interface ForkFlowNode {
+  kind: 'fork';
+  id: string;
+  mode: 'all' | 'race' | 'settle';
+  paths: FlowNode[];
+}
+
+interface SpawnFlowNode {
+  kind: 'spawn';
+  id: string;
+  child: FlowNode;
+}
+
+interface SequenceFlowNode {
+  kind: 'sequence';
+  id: string;
+  steps: FlowNode[];
+}
+```
+
+### Example
+
+A plan-mode flow that researches and reports in parallel, then summarises:
+
+```json
+{
+  "kind": "sequence",
+  "id": "audit",
+  "steps": [
+    {
+      "kind": "fork",
+      "id": "audit.gather",
+      "mode": "all",
+      "paths": [
+        { "kind": "subagent", "id": "audit.deps",   "preset": "explore", "prompt": "List runtime dependencies in package.json with their versions." },
+        { "kind": "subagent", "id": "audit.tests",  "preset": "explore", "prompt": "Find all test files and report coverage gaps." },
+        { "kind": "subagent", "id": "audit.routes", "preset": "explore", "prompt": "List every HTTP route handler under src/." }
+      ]
+    },
+    {
+      "kind": "llm",
+      "id": "audit.summarise",
+      "instructions": "You received three exploration reports. Write a one-page audit summary with risk callouts.",
+      "tools": []
+    }
+  ]
+}
+```
+
+### Tool & preset resolution
+
+- `tools: ['read', 'grep']` — names are matched against the harness's live tool registry. Unknown names error at expand time.
+- `preset: 'explore'` — matched against the registered subagent presets: built-in skills with `agent-type`, plugin-contributed `subagentPresets`, and skills discovered from the project / user / plugin sources.
+
+### Authoring presets for plan-mode
+
+Two ways to register a preset:
+
+1. **As a [skill](/docs/code-agent-cli/skills)** — set `agent-type: <name>` in frontmatter. The skill body is the system prompt; `allowed-tools` is the tool pool.
+2. **As a plugin contribution** — implement `subagentPresets` on a [plugin](/docs/code-agent-cli/plugins).
+
+Once registered, the LLM can reference the preset by name in `subagent` flow nodes.
+
+---
+
+## Programmatic flows
+
+For long-running infrastructure, write the flow in TypeScript. The CLI's task daemon does this — the `every` / `fork` / `spawn` / `branch` / `step.run` builders compose into a tree that runs forever (or until the harness shuts down).
+
+### The shape
+
+```ts
+import type { ContextMemory, Step } from '@noetic/core';
+import { every, fork, spawn, step, workingMemory } from '@noetic/core';
+
+export function buildMyFlow(deps: MyFlowDeps): Step<ContextMemory, void, void> {
+  const tickEvery = every<ContextMemory, void, void>({
+    id: 'my-flow.tick',
+    step: step.run<ContextMemory, void, void>({
+      id: 'my-flow.iter',
+      execute: async (_in, ctx) => {
+        // do work; ctx.send(channel, value), ctx.tryRecv(channel), etc.
+      },
+    }),
+    ms: 30_000,
+    onError: 'continue',
+  });
+
+  return spawn<ContextMemory, void, void>({
+    id: 'my-flow',
+    child: tickEvery,
+    memory: [workingMemory({ scope: 'thread', schema: MyMemorySchema })],
+  });
+}
+```
+
+The harness drives the returned `Step` via `harness.run(...)` (sync) or `harness.detachedSpawn(...)` (background, no parent block). Memory-layer lifecycle, abort, observability, and cost tracking come for free.
+
+### Channels and `wakeOn`
+
+`every` runs on an interval but can also wake immediately on a channel send. The validator flow uses this:
+
+```ts
+every({
+  id: 'validator.every',
+  step: validatorIterationStep,
+  ms: 30_000,
+  wakeOn: validatorRequestChan,   // send → tick now, don't wait 30s
+  onError: 'continue',
+});
+```
+
+`wakeOn` is essential for queue-driven workers — interactive sub-agent requests don't have to wait an interval before running.
+
+### Worked example: a slimmed-down validator
+
+The CLI's real validator drains a channel of `ValidatorRequest`s, runs tests for each requested feature, persists the run, and emits an outcome. Stripped to the bones:
+
+```ts
+import type { ContextMemory, Step } from '@noetic/core';
+import { every, step } from '@noetic/core';
+
+import { validatorRequestChan, validatorOutcomeChan } from './channels.js';
+
+interface ValidatorDeps {
+  runTests: (featureId: string) => Promise<{ status: 'pass' | 'fail'; result: unknown }>;
+}
+
+function buildIteration(deps: ValidatorDeps): Step<ContextMemory, void, void> {
+  return step.run<ContextMemory, void, void>({
+    id: 'validator.iteration',
+    execute: async (_in, ctx) => {
+      while (true) {
+        const req = ctx.tryRecv(validatorRequestChan);
+        if (req === null) return;             // queue drained
+
+        const outcome = await deps.runTests(req.featureId);
+        ctx.send(validatorOutcomeChan, {
+          taskId: req.taskId,
+          featureId: req.featureId,
+          status: outcome.status,
+          result: outcome.result,
+        });
+      }
+    },
+  });
+}
+
+export function buildValidatorEvery(deps: ValidatorDeps) {
+  return every<ContextMemory, void, void>({
+    id: 'validator.every',
+    step: buildIteration(deps),
+    ms: 30_000,
+    wakeOn: validatorRequestChan,
+    onError: 'continue',
+  });
+}
+```
+
+This is the same shape as the production flow at `packages/cli/src/commands/builtins/tasks/hierarchy/validator-flow.ts`, just with the lifecycle persistence and per-task lookup omitted.
+
+### Composing several flows in a daemon
+
+The CLI's daemon roots all four periodic flows in a `fork({ mode: 'all' })` wrapped in a `spawn`:
+
+```ts
+import { every, fork, spawn, workingMemory } from '@noetic/core';
+
+const daemonInner = fork<ContextMemory, void, void>({
+  id: 'tasks.daemon-fork',
+  mode: 'all',
+  paths: () => [
+    buildAutopilotEvery(deps.autopilot),
+    buildValidatorEvery(deps.validator),
+    buildHealthEvery(deps.health),
+    buildReconcileEvery(deps.reconcile),
+    buildEventsBridgeEvery(deps.eventsBridge),
+  ],
+  merge: () => undefined,
+});
+
+export const daemonFlow = spawn<ContextMemory, void, void>({
+  id: 'tasks.daemon',
+  child: daemonInner,
+  memory: [
+    createSteeringFileLayer(),
+    workingMemory({ scope: 'thread', schema: DaemonMemorySchema }),
+  ],
+});
+```
+
+`fork({ mode: 'all' })` runs all five `every`s in parallel; the spawn isolates them in their own memory scope (steering files, working memory) so they don't pollute the user's interactive session.
+
+### Wiring a custom flow into the CLI
+
+Today, programmatic flows live alongside the CLI's built-in ones — there is no `flows: []` array in `noetic.config.ts`. Two ways to surface yours:
+
+1. **Plugin sub-agent preset** — register a preset via `subagentPresets` on a [plugin](/docs/code-agent-cli/plugins). The plan-mode JSON flow can spawn it.
+2. **Plugin command** — register a slash command via `commands` that calls `harness.run(myFlow, ...)` (or `harness.detachedSpawn` for background).
+
+If you need to author a daemon-style background flow, drive it from plugin `initialize` using the `callModel` and runtime APIs, and make sure to clean up in `dispose`.
+
+## Where to read more
+
+- [Steps](/docs/framework/steps) — `step.run`, `step.llm`, `step.tool`.
+- [Operators](/docs/framework/operators) — `branch`, `fork`, `spawn`, `loop`, `every`.
+- [Channels](/docs/framework/operators/channels) — `ctx.send` / `ctx.tryRecv` / `wakeOn`.
+- [Patterns](/docs/framework/patterns) — composed agents (ReAct, dual-agent, task trees).
+- [Runtime](/docs/framework/runtime) — `harness.run`, `harness.detachedSpawn`, abort, span creation.

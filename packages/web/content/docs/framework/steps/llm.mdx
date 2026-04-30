@@ -1,0 +1,134 @@
+---
+title: step.llm
+description: Call a language model with tools, structured output, and system prompts.
+---
+
+## Quick Example
+
+```ts
+import { step } from '@noetic/core';
+
+const chat = step.llm({
+  id: 'chat',
+  model: 'gpt-4o',
+  instructions: 'You are a helpful assistant.',
+});
+```
+
+## What It Does
+
+`step.llm` calls a language model. You provide the model name and optionally a system prompt, tools, structured output schema, and generation parameters. The interpreter handles message formatting, tool execution loops, and response parsing.
+
+## API Reference
+
+### Options
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `model` | `string` | Yes | Model identifier (e.g. `'gpt-4o'`, `'claude-sonnet-4-20250514'`) |
+| `instructions` | `string` | No | System prompt prepended to the conversation |
+| `tools` | `Tool[]` | No | Allowed tool subset (`undefined` = all, `[]` = none) |
+| `output` | `ZodType<O>` | No | Zod schema for structured output |
+| `params` | `ModelParams` | No | Generation parameters |
+
+### ModelParams
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `temperature` | `number` | Sampling temperature |
+| `topP` | `number` | Nucleus sampling threshold |
+| `maxTokens` | `number` | Maximum tokens to generate |
+| `stopSequences` | `string[]` | Stop sequences |
+
+### Tool Interface
+
+Tools passed to `step.llm` follow the standard Noetic `Tool` interface. See [step.tool](/docs/framework/steps/tool) for the full definition.
+
+## Structured Output
+
+Provide a Zod schema to `output` and the model response will be parsed and validated at runtime.
+
+```ts
+import { z } from 'zod';
+import { step } from '@noetic/core';
+
+const extract = step.llm({
+  id: 'extract-entities',
+  model: 'gpt-4o',
+  instructions: 'Extract named entities from the text.',
+  output: z.object({
+    people: z.array(z.string()),
+    places: z.array(z.string()),
+    organizations: z.array(z.string()),
+  }),
+});
+```
+
+If the model response does not match the schema, a validation error is thrown.
+
+## With Tools
+
+```ts
+import { z } from 'zod';
+import { step } from '@noetic/core';
+
+const searchTool = {
+  name: 'search',
+  description: 'Search the knowledge base',
+  input: z.object({
+    query: z.string(),
+  }),
+  output: z.object({
+    results: z.array(z.string()),
+  }),
+  execute: async (args) => {
+    return {
+      results: ['Result 1', 'Result 2'],
+    };
+  },
+};
+
+const researcher = step.llm({
+  id: 'research',
+  model: 'gpt-4o',
+  instructions: 'Answer the question using the search tool.',
+  tools: [searchTool],
+});
+```
+
+When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
+
+### Unified Tool Set
+
+Before execution, the harness collects all tools from every LLM step in the step tree plus layer-provided tools into a single unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` on each step narrows which tools the model may actually invoke.
+
+- **`tools: undefined`** (or omitted) -- the model may call any tool in the unified set.
+- **`tools: [searchTool]`** -- the model may only call `searchTool`.
+- **`tools: []`** -- no tools are available for this step.
+
+### Auto-Injected Layer Tools
+
+Functions declared in a memory layer's `provides` field are automatically included in the unified tool set. These tools are namespaced as `layerId/fnName` (e.g., `working-memory/update`). You do not need to pass them in the `tools` array -- the runtime resolves them from the active memory layers.
+
+## Tuning Generation
+
+```ts
+import { step } from '@noetic/core';
+
+const creative = step.llm({
+  id: 'brainstorm',
+  model: 'gpt-4o',
+  instructions: 'Generate creative ideas.',
+  params: {
+    temperature: 0.9,
+    maxTokens: 2e3,
+  },
+});
+```
+
+## Related
+
+- [step.run](/docs/framework/steps/run) -- custom async logic.
+- [step.tool](/docs/framework/steps/tool) -- invoke a tool directly without an LLM.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- wrap an LLM step in a ReAct-style loop.

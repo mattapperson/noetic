@@ -1,0 +1,161 @@
+---
+title: Skills
+description: Markdown + YAML personas — load focused instructions on demand, expose them as slash commands, register them as sub-agent presets.
+---
+
+A **skill** is a markdown file with YAML frontmatter that the agent can activate to load focused instructions for a specific workflow. Skills are the third tier of context after [AGENT.md](/docs/code-agent-cli/agent-md) and [Rules](/docs/code-agent-cli/rules):
+
+- **AGENT.md / rules** — always loaded, repo-wide policy.
+- **Skills** — loaded on demand, scoped to a workflow.
+
+Skills can also register as **sub-agent (teammate) presets** — the parent agent invokes the `agent` tool with `subagent_type: <name>` and the skill becomes the child's full system prompt.
+
+## File layout
+
+A skill lives in a directory with at least a `SKILL.md`:
+
+```
+.agent/skills/                                # or .claude/skills/
+├── review-pr/
+│   ├── SKILL.md
+│   └── references/
+│       └── pr-checklist.md
+└── security-review/
+    └── SKILL.md
+```
+
+Discovery walks these locations:
+
+| Origin | Path |
+|---|---|
+| Project | `<cwd>/.agent/skills/*/SKILL.md` |
+| User | `~/.config/noetic/skills/*/SKILL.md` |
+| Plugin | Contributed via the `skills` hook on a `NoeticPlugin` |
+| Built-in | Ships with the CLI (see below) |
+
+## Frontmatter
+
+```yaml
+---
+name: review-pr
+description: Review a pull request — pull the diff, run the test plan, summarize risk.
+when-to-use: Use when the user asks to review a PR or asks for a second opinion on a change set.
+user-invocable: true
+model-invocable: true
+allowed-tools:
+  - read
+  - grep
+  - find
+  - bash
+agent-type: pr-reviewer
+agent-model: inherit
+agent-background: false
+agent-max-steps: 25
+agent-omit-claude-md: false
+---
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | `string` | Unique identifier. Becomes the slash-command name (`/review-pr`) and the `subagent_type` value. |
+| `description` | `string` | Short blurb shown to the model when discovering skills. Keep under 200 chars. |
+| `when-to-use` | `string` | Optional trigger guidance — when *should* the model pick this skill? |
+| `user-invocable` | `boolean` | If `true`, the user can run `/skill-name` from the prompt. |
+| `model-invocable` | `boolean` | If `true`, the model can call the `activate_skill` tool to load it mid-turn. |
+| `allowed-tools` | `string[]` | Optional tool whitelist when this skill is active. Restricts the parent's tool pool. |
+| `agent-type` | `string` | Optional. When set, this skill is also a teammate preset. The parent uses `subagent_type: <agent-type>` on the `agent` tool to spawn it. |
+| `agent-model` | `'inherit' \| 'haiku' \| 'sonnet' \| 'opus' \| string` | Override the model for the spawned teammate. `inherit` (default) reuses the parent's model. |
+| `agent-background` | `boolean` | Force background-mode spawning (the parent doesn't block waiting for a result). |
+| `agent-max-steps` | `number` | Cap reasoning steps for tool-bearing teammates (passed through to the `react` pattern). |
+| `agent-omit-claude-md` | `boolean` | Skip injecting AGENT.md / CLAUDE.md into the teammate's context — saves tokens for read-only research agents. |
+
+The body of `SKILL.md` (everything after the frontmatter) is the **instructions**. When the skill activates, the body is processed (`@import`s resolved, trusted `!command` lines executed) and rendered into context.
+
+## How activation works
+
+A skill goes from "discovered" to "activated" in three ways:
+
+1. **User**: types `/skill-name` (only when `user-invocable: true`).
+2. **Model**: calls the `activate_skill` tool (only when `model-invocable: true`).
+3. **Spawn**: parent calls the `agent` tool with `subagent_type: <agent-type>` — the skill body becomes the child's system prompt and `allowed-tools` becomes the child's tool pool.
+
+Activation is per-thread. The `skills` memory layer tracks which skills are active and renders their processed instructions on every recall.
+
+## Built-in skills
+
+Four skills ship with the CLI:
+
+| Skill | Purpose |
+|---|---|
+| `general-purpose` | Default sub-agent preset for delegated work. Has access to the parent's full tool pool. Use as the default `subagent_type` when work shouldn't pollute the parent's context. |
+| `explore` | Read-only research sub-agent — restricted to `read` / `grep` / `find` / `ls`. Ideal for "find files matching X", "trace the call graph from Z", "how does Y work" without write access leaking into a delegate. |
+| `plan-mode` | Auto-injected when the agent enters plan mode. Explains the plan-mode JSON flow schema and the PRD-authoring contract. |
+| `plan` | Earlier plan-mode skill variant, retained for backward compat. |
+
+## Authoring a skill
+
+Pick a focused workflow that triggers on intent. Good signals:
+- "Whenever the user asks to do X, do these steps in this order."
+- "When the model is researching Y, restrict to read-only tools and emit a summary in this shape."
+- "When delegating Z, spawn a teammate with this system prompt and these tools."
+
+Bad signals:
+- "Always remember to..." — that's [AGENT.md](/docs/code-agent-cli/agent-md) or a [rule](/docs/code-agent-cli/rules).
+- "Run this on every commit." — that's a [hook](/docs/code-agent-cli/hooks) or CI.
+
+### Worked example: a `security-review` skill
+
+```markdown
+---
+name: security-review
+description: Scan the current branch's diff for security regressions — auth, input validation, secrets handling.
+when-to-use: Use when the user asks for a security review of the pending changes.
+user-invocable: true
+model-invocable: false
+allowed-tools:
+  - read
+  - grep
+  - find
+  - bash
+---
+
+# Security review
+
+You are reviewing the pending diff on the current branch for security regressions.
+
+## Scope
+
+Focus on:
+1. Authentication / authorization — new endpoints, role checks, session handling.
+2. Input validation — Zod schemas at boundaries, no `as` casts on untrusted input.
+3. Secrets handling — no `console.log` of tokens, no commit of `.env` values.
+4. Injection vectors — SQL string interpolation, shell command construction, `dangerouslySetInnerHTML`.
+
+## Process
+
+1. `bash: git diff main...HEAD --stat` to scope.
+2. `bash: git diff main...HEAD` to read the change set.
+3. For each modified file, `read` the surrounding context (the function or class, not just the diff hunk).
+4. Cross-reference against `.agent/rules/type-safety.md` and `.agent/rules/frontend-patterns.md`.
+
+## Output
+
+A bullet list of findings, each with severity (critical / high / medium / low), file:line, and the one-line fix.
+```
+
+Drop that at `.agent/skills/security-review/SKILL.md`. Now the user can run `/security-review` and the agent loads this skill into context, restricted to the listed tools.
+
+## Skills vs sub-agents
+
+A skill *with* `agent-type` is two things at once:
+1. A persona the parent agent can adopt by activating it.
+2. A teammate preset the parent can spawn via the `agent` tool.
+
+The `explore` built-in is the canonical example: `agent-type: explore`, `allowed-tools: [read, grep, find, ls]`, `agent-omit-claude-md: true`. The parent uses `subagent_type: 'explore'` on the `agent` tool and gets a fresh, read-only research process — no parent-context pollution, no edit risk.
+
+A skill *without* `agent-type` is parent-side only: it modifies the parent's prompt and toolset but doesn't spawn anything new.
+
+## Inspecting
+
+- `/skills` — list all discovered skills (project, user, plugin, built-in) with their frontmatter summary.
+- `/context` — show the rendered context window, including the active-skills section.

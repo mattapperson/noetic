@@ -25,7 +25,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(params: ModelParams) => Step',
     color: 'green',
     colSpan: 2,
-    href: '/docs/steps/llm',
+    href: '/docs/framework/steps/llm',
   },
   {
     name: 'tool',
@@ -33,7 +33,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(name, input, fn) => Step',
     color: 'green',
     colSpan: 1,
-    href: '/docs/steps/tool',
+    href: '/docs/framework/steps/tool',
   },
   {
     name: 'run',
@@ -41,7 +41,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(fn: (ctx) => T) => Step',
     color: 'green',
     colSpan: 1,
-    href: '/docs/steps/run',
+    href: '/docs/framework/steps/run',
   },
   // operators
   {
@@ -50,7 +50,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(agentConfig) => Step',
     color: 'cyan',
     colSpan: 1,
-    href: '/docs/operators/spawn',
+    href: '/docs/framework/operators/spawn',
   },
   {
     name: 'fork',
@@ -58,7 +58,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(steps[], strategy) => Step',
     color: 'cyan',
     colSpan: 1,
-    href: '/docs/operators/fork',
+    href: '/docs/framework/operators/fork',
   },
   {
     name: 'branch',
@@ -66,7 +66,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(condition, then, else) => Step',
     color: 'cyan',
     colSpan: 1,
-    href: '/docs/operators/branch',
+    href: '/docs/framework/operators/branch',
   },
   {
     name: 'loop',
@@ -74,7 +74,7 @@ const PRIMITIVES: Primitive[] = [
     signature: '(steps[], until) => Step',
     color: 'cyan',
     colSpan: 2,
-    href: '/docs/operators/loop-and-until',
+    href: '/docs/framework/operators/loop-and-until',
   },
 ];
 
