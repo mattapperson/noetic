@@ -18,37 +18,21 @@ import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
 import { installInterruptSafetyNet } from './interrupt-safety-net.js';
 
-if (process.argv[2] === 'mission') {
-  const { dispatchMissionVerb } = await import('../commands/builtins/tasks/missions/cli.js');
-  await dispatchMissionVerb(process.argv.slice(3), process.cwd());
-  process.exit(process.exitCode ?? 0);
+if (process.argv[2] === 'tasks') {
+  const { runTasksCli } = await import('../commands/builtins/tasks/cli.js');
+  const exitCode = await runTasksCli(process.argv.slice(3));
+  process.exit(exitCode);
 }
 
 if (process.argv[2] === 'daemon' || process.argv[2] === 'tasks-daemon') {
   const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
   const { runDaemon } = await import('../daemon-runtime/runtime.js');
   const { tasksReconcileJob } = await import('../daemon-runtime/jobs-tasks.js');
-  const { buildMissionDaemonDeps } = await import(
-    '../commands/builtins/tasks/missions/daemon-bootstrap.js'
-  );
-  const { missionsAutopilotPollJob } = await import(
-    '../commands/builtins/tasks/missions/autopilot-job.js'
-  );
-  const { missionsValidatorPollJob } = await import(
-    '../commands/builtins/tasks/missions/validator-job.js'
-  );
-  const { missionsHealthReconcileJob } = await import(
-    '../commands/builtins/tasks/missions/health-job.js'
-  );
 
-  const missionDeps = await buildMissionDaemonDeps(daemonCwd);
   await runDaemon({
     cwd: daemonCwd,
     jobs: [
       tasksReconcileJob(),
-      missionsAutopilotPollJob(missionDeps),
-      missionsValidatorPollJob(missionDeps),
-      missionsHealthReconcileJob(missionDeps),
     ],
   });
   process.exit(0);

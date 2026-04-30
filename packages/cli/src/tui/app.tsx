@@ -17,7 +17,6 @@ import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
-import { ensureTasksDaemon } from '../commands/builtins/tasks/daemon.js';
 import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
 import {
   BUILTIN_COMMANDS,
@@ -417,7 +416,7 @@ function App({
 }: AppProps): ReactNode {
   useEffect(() => {
     try {
-      ensureTasksDaemon(config.cwd);
+      ensureDaemon(config.cwd);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[warn] [tasks daemon] startup failed: ${message}\n`);
