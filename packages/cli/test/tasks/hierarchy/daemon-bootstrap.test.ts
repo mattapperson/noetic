@@ -3,19 +3,19 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildHierarchyDaemonDeps } from '../../../src/commands/builtins/tasks/hierarchy/daemon-bootstrap.js';
+import { buildHierarchyDaemonHarness } from '../../../src/commands/builtins/tasks/hierarchy/daemon-bootstrap.js';
 
-describe('buildHierarchyDaemonDeps', () => {
-  it('binds the project root to a fresh local fs adapter and the default signaller', async () => {
+describe('buildHierarchyDaemonHarness', () => {
+  it('builds an AgentHarness, the composed flow, and the channel triple', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'noetic-bootstrap-'));
     try {
-      const deps = buildHierarchyDaemonDeps(projectRoot);
-      expect(deps.ctx.projectRoot).toBe(projectRoot);
-      expect(deps.signaller).toBeDefined();
-      // Smoke-test the FsAdapter is a real one — it can write/read.
-      const file = join(projectRoot, 'probe.txt');
-      await deps.ctx.fs.writeFile(file, 'ok');
-      expect(await deps.ctx.fs.readFileText(file)).toBe('ok');
+      const bundle = buildHierarchyDaemonHarness(projectRoot);
+      expect(bundle.harness).toBeDefined();
+      expect(bundle.flow.kind).toBe('spawn');
+      expect(bundle.channels.validatorRequestChan.name).toBe('tasks.validator-request');
+      expect(bundle.channels.validatorOutcomeChan.name).toBe('tasks.validator-outcome');
+      expect(bundle.channels.featureLoopStateChan.name).toBe('tasks.feature-loop-state');
+      expect(bundle.channels.externalTaskEventsChan.name).toBe('tasks.events');
     } finally {
       await rm(projectRoot, {
         recursive: true,
@@ -24,11 +24,10 @@ describe('buildHierarchyDaemonDeps', () => {
     }
   });
 
-  it('returns a different signaller-less binding for distinct project roots', () => {
-    const a = buildHierarchyDaemonDeps('/tmp/a');
-    const b = buildHierarchyDaemonDeps('/tmp/b');
-    expect(a.ctx.projectRoot).toBe('/tmp/a');
-    expect(b.ctx.projectRoot).toBe('/tmp/b');
+  it('returns a fresh harness for each project root', () => {
+    const a = buildHierarchyDaemonHarness('/tmp/a');
+    const b = buildHierarchyDaemonHarness('/tmp/b');
     expect(a).not.toBe(b);
+    expect(a.harness).not.toBe(b.harness);
   });
 });
