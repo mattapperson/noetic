@@ -22,7 +22,7 @@ import { TeammateRegistry } from '../agents/registry-runtime.js';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
 import type { TaskStoreContext } from '../commands/builtins/tasks/fs-store.js';
-import { createTaskMutationPolicy } from '../commands/builtins/tasks/policy.js';
+import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-policy.js';
 import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
 import { createBuiltinLspServers } from '../lsp/builtin/index.js';
@@ -257,10 +257,15 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
+  const taskCtx: TaskStoreContext = {
+    fs,
+    projectRoot: config.cwd,
+  };
   const mutationPolicy = createTaskMutationPolicy({
     sessionCwd: config.cwd,
     shell,
     enforceOnCleanRepo: true,
+    ctx: taskCtx,
   });
 
   // Tools resolve cwd from the executing context's `cwdState` at execution
@@ -290,10 +295,6 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // hand the read-only subset (`task_show`, `task_list`, `task_logs`) so
   // the model can still observe the kanban without mutating it.
   const tasksOptIn = config.tools?.tasks !== false;
-  const taskCtx: TaskStoreContext = {
-    fs,
-    projectRoot: config.cwd,
-  };
   const builtinTaskTools: ReadonlyArray<Tool> = tasksOptIn
     ? taskTools({
         ctx: taskCtx,
