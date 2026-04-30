@@ -34,6 +34,7 @@ import type {
   SessionSnapshot,
   ViewMode,
 } from '../commands/types.js';
+import { ensureDaemon } from '../daemon-runtime/runtime.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness, createLspService } from '../harness/factory.js';
 import type { LspService } from '../lsp/service.js';

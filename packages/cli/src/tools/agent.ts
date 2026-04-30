@@ -22,12 +22,21 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic/core';
-import { historyWindow, NoeticConfigError, react, spawn, step, tool } from '@noetic/core';
+import {
+  createLocalFsAdapter,
+  historyWindow,
+  NoeticConfigError,
+  react,
+  spawn,
+  step,
+  tool,
+} from '@noetic/core';
 import { retargetCwdForSpawn } from '@noetic/core/unstable';
 import { z } from 'zod';
 
 import { createAgentWorktree } from '../adapters/worktree.js';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
+import { ensureWorktreeTask } from '../commands/builtins/tasks/worktree-tasks.js';
 import { unknownAgentType } from '../errors/worktree-errors.js';
 import { teammateInboundLayer } from '../memory/teammate-inbound-layer.js';
 import { getAgent, listAgents } from '../skills/catalog.js';
