@@ -2,6 +2,8 @@
 
 import { motion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
+import type { PowerlineSegment } from '@/lib/noetic-tui-snapshots.generated';
+import { HERO_CHROME } from '@/lib/noetic-tui-snapshots.generated';
 
 const VAPOR = {
   bg: '#0D0B10',
@@ -239,34 +241,19 @@ const lineRowStyle: CSSProperties = {
   gap: '0',
 };
 
-interface PowerlineSegment {
-  glyph: string;
-  text: string;
-  color: string;
-}
+// Map powerline roles (captured from the live CLI by sync-tui) to the
+// vaporwave palette the marketing-page renders with.
+const POWERLINE_COLOR: Record<PowerlineSegment['role'], string> = {
+  agent: VAPOR.primary,
+  model: VAPOR.accent,
+  cwd: VAPOR.secondary,
+  branch: VAPOR.success,
+  tokens: VAPOR.warning,
+  percent: VAPOR.muted,
+  unknown: VAPOR.muted,
+};
 
-const POWERLINE: PowerlineSegment[] = [
-  {
-    glyph: 'N',
-    text: '',
-    color: VAPOR.primary,
-  },
-  {
-    glyph: '*',
-    text: 'claude-sonnet-4',
-    color: VAPOR.accent,
-  },
-  {
-    glyph: '~',
-    text: '~/my-project',
-    color: VAPOR.secondary,
-  },
-  {
-    glyph: '±',
-    text: 'main*',
-    color: VAPOR.success,
-  },
-];
+const POWERLINE = HERO_CHROME.powerline;
 
 function PowerlineBar(): ReactNode {
   return (
@@ -302,7 +289,7 @@ function PowerlineBar(): ReactNode {
           )}
           <span
             style={{
-              color: seg.color,
+              color: POWERLINE_COLOR[seg.role],
               fontWeight: 700,
             }}
           >
@@ -465,7 +452,7 @@ export function NoeticTuiPreview({
               color: VAPOR.placeholder,
             }}
           >
-            Type a message…
+            {HERO_CHROME.promptPlaceholder}
           </span>
           <span
             className="tui-cursor"
@@ -498,14 +485,14 @@ export function NoeticTuiPreview({
               fontWeight: 700,
             }}
           >
-            ACT
+            {HERO_CHROME.modeLabel}
           </span>
           <span
             style={{
               color: VAPOR.muted,
             }}
           >
-            anthropic/claude-sonnet-4
+            {HERO_CHROME.modelId}
           </span>
         </div>
       </div>

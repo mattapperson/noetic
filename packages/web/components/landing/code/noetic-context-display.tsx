@@ -2,6 +2,8 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { useState } from 'react';
+import type { ContextRow } from '@/lib/noetic-tui-snapshots.generated';
+import { CONTEXT_SNAPSHOT } from '@/lib/noetic-tui-snapshots.generated';
 
 const VAPOR = {
   bg: '#0D0B10',
@@ -27,13 +29,6 @@ const ROW_COLOR: Record<RowColor, string> = {
   green: VAPOR.success,
 };
 
-interface BreakdownRow {
-  label: string;
-  tokens: string;
-  pct: number;
-  color: RowColor;
-}
-
 interface LayerInfo {
   id: string;
   state: 'active' | 'inactive';
@@ -42,123 +37,58 @@ interface LayerInfo {
   preview?: string;
 }
 
-const TOTAL_USED = '21.7k';
-const TOTAL_LIMIT = '200.0k';
-const TOTAL_PCT = 10.9;
-const MODEL_ID = 'anthropic/claude-sonnet-4';
+const MODEL_ID = CONTEXT_SNAPSHOT.modelId;
+const TOTAL_USED = CONTEXT_SNAPSHOT.totalUsed;
+const TOTAL_LIMIT = CONTEXT_SNAPSHOT.totalLimit;
+const TOTAL_PCT = CONTEXT_SNAPSHOT.totalPct;
+const ROWS: ReadonlyArray<ContextRow> = CONTEXT_SNAPSHOT.overviewRows;
 
-const ROWS: BreakdownRow[] = [
-  {
-    label: 'System prompt',
-    tokens: '2.8k',
-    pct: 1.4,
-    color: 'magenta',
-  },
-  {
-    label: 'Tools',
-    tokens: '12.9k',
-    pct: 6.5,
-    color: 'blue',
-  },
-  {
-    label: 'agent-md',
-    tokens: '5.3k',
-    pct: 2.6,
-    color: 'cyan',
-  },
-  {
-    label: 'skills-memory',
-    tokens: '532',
-    pct: 0.3,
-    color: 'cyan',
-  },
-  {
-    label: 'reminder',
-    tokens: '42',
-    pct: 0.0,
-    color: 'cyan',
-  },
-  {
-    label: 'durable-task-state',
-    tokens: '20',
-    pct: 0.0,
-    color: 'cyan',
-  },
-  {
-    label: 'file-reference',
-    tokens: '0',
-    pct: 0.0,
-    color: 'cyan',
-  },
-  {
-    label: 'Messages',
-    tokens: '83',
-    pct: 0.0,
-    color: 'green',
-  },
-];
-
-const LAYERS: LayerInfo[] = [
-  {
-    id: 'agent-md',
+// Per-layer illustrative content. The set of layer ids displayed comes from
+// the live CLI capture in CONTEXT_SNAPSHOT.layerIds — anything missing here
+// falls back to "inactive on last run", matching the real CLI's empty state.
+const LAYER_DETAILS: Record<string, Omit<LayerInfo, 'id'>> = {
+  'agent-md': {
     state: 'active',
     tokens: '5.3k',
     itemCount: 1,
     preview:
       '[developer] # Project & User Instructions (AGENT.md) Contents of ~/my-project/AGENT.md…',
   },
-  {
-    id: 'skills-memory',
+  'skills-memory': {
     state: 'active',
     tokens: '532',
     itemCount: 3,
     preview: '[message] noetic-eval · noetic-agent-builder · branch-safe',
   },
-  {
-    id: 'working-memory',
-    state: 'inactive',
-  },
-  {
-    id: 'observational-memory',
-    state: 'inactive',
-  },
-  {
-    id: 'file-reference',
-    state: 'inactive',
-  },
-  {
-    id: 'plan',
-    state: 'inactive',
-  },
-  {
-    id: 'reminder',
+  reminder: {
     state: 'active',
     tokens: '42',
     itemCount: 1,
     preview: '[reminder] Daily standup pings due 9am UTC.',
   },
-  {
-    id: 'mission-memory',
-    state: 'inactive',
-  },
-  {
-    id: 'durable-task-state',
+  'durable-task-state': {
     state: 'active',
     tokens: '20',
     itemCount: 1,
     preview: '[task] dark-mode-toggle · status: routing',
   },
-  {
-    id: 'teammate-inbox',
-    state: 'inactive',
-  },
-];
+};
 
-const TAB_IDS = [
+const LAYERS: LayerInfo[] = CONTEXT_SNAPSHOT.layerIds.map((id) => {
+  const details = LAYER_DETAILS[id] ?? {
+    state: 'inactive' as const,
+  };
+  return {
+    id,
+    ...details,
+  };
+});
+
+const TAB_IDS: ReadonlyArray<string> = [
   '__overview',
-  ...LAYERS.map((l) => l.id),
-] as const;
-type TabId = (typeof TAB_IDS)[number];
+  ...CONTEXT_SNAPSHOT.layerIds,
+];
+type TabId = string;
 
 const BAR_WIDTH = 24;
 
