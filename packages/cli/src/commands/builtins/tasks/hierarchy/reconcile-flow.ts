@@ -9,7 +9,7 @@
  * driven by `harness.detachedSpawn(...)` from the daemon entry.
  */
 
-import type { ContextMemory, Step, StepEvery } from '@noetic/core';
+import type { ContextMemory, Step } from '@noetic/core';
 import { every, step } from '@noetic/core';
 
 import type { TaskStoreContext } from '../fs-store.js';
@@ -76,7 +76,7 @@ export function buildReconcileTickStep(
  */
 export function buildReconcileEvery(
   deps: ReconcileFlowDeps,
-): StepEvery<ContextMemory, void, ReconcileTasksFsResult> {
+): ReturnType<typeof every<ContextMemory, void, ReconcileTasksFsResult>> {
   return every<ContextMemory, void, ReconcileTasksFsResult>({
     id: 'reconcile.every',
     step: buildReconcileTickStep(deps),

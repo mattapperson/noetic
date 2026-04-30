@@ -76,7 +76,7 @@ function emptyReport(): AutopilotTickReport {
   };
 }
 
-function groupFeaturesByLoopState(features: ReadonlyArray<Feature>): FeatureGroups {
+export function groupFeaturesByLoopState(features: ReadonlyArray<Feature>): FeatureGroups {
   const groups: FeatureGroups = {
     idle: [],
     implementing: [],
@@ -238,11 +238,13 @@ function _milestoneIsFullyComplete(milestone: MilestoneWithChildren): boolean {
 
 //#region Slice classification
 
-interface SliceCompletionDecision {
+export interface SliceCompletionDecision {
   readonly kind: 'all_passed' | 'any_blocked' | 'in_progress' | 'empty';
 }
 
-function classifySliceCompletion(groups: FeatureGroups): SliceCompletionDecision {
+export type { FeatureGroups };
+
+export function classifySliceCompletion(groups: FeatureGroups): SliceCompletionDecision {
   const total =
     groups.idle.length +
     groups.implementing.length +

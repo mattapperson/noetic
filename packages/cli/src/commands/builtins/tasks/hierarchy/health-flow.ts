@@ -10,7 +10,7 @@
  * driven by `harness.detachedSpawn(...)` from the daemon entry.
  */
 
-import type { ContextMemory, Step, StepEvery } from '@noetic/core';
+import type { ContextMemory, Step } from '@noetic/core';
 import { every, step } from '@noetic/core';
 
 import type { HealthJobDeps } from './health-job.js';
@@ -54,7 +54,9 @@ export function buildHealthTickStep(deps: HealthFlowDeps): Step<ContextMemory, v
  * `300_000` ms (5 min); `onError: 'continue'` keeps the daemon up across
  * transient FS failures (the next tick reconciles whatever was missed).
  */
-export function buildHealthEvery(deps: HealthFlowDeps): StepEvery<ContextMemory, void, void> {
+export function buildHealthEvery(
+  deps: HealthFlowDeps,
+): ReturnType<typeof every<ContextMemory, void, void>> {
   return every<ContextMemory, void, void>({
     id: 'health.every',
     step: buildHealthTickStep(deps),
