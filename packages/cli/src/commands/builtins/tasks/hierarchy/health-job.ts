@@ -161,7 +161,16 @@ async function reconcileFeatureLinkageDrift(deps: HealthJobDeps): Promise<number
   return reconciled;
 }
 
-async function runHealthTick(deps: HealthJobDeps): Promise<void> {
+/**
+ * Drive a single health tick: reap stale validator runs whose pids are no
+ * longer alive (or whose start-time changed indicating pid recycling) and
+ * mark in-flight features whose linked leaf task was deleted as blocked.
+ *
+ * Exported so the daemon's health flow (`health-flow.ts`) can drive a single
+ * pass through `harness.run(healthTickStep, ...)` while preserving the
+ * `_testRunHealthTick` surface used by existing tests.
+ */
+export async function runHealthTick(deps: HealthJobDeps): Promise<void> {
   const reapedRuns = await reapStaleValidatorRuns(deps);
   const reconciledFeatures = await reconcileFeatureLinkageDrift(deps);
   if (reapedRuns > 0 || reconciledFeatures > 0) {
