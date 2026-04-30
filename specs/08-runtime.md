@@ -21,6 +21,7 @@ interface FsAdapter {
   readFile(path: string): Promise<Buffer>;
   readFileText(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  appendFile(path: string, content: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
   access(path: string, mode?: number): Promise<void>;
   stat(path: string): Promise<FsStats>;
@@ -30,6 +31,8 @@ interface FsAdapter {
 ```
 
 `createLocalFsAdapter()` returns the default implementation backed by Node.js `fs/promises`. The agent harness uses this when no custom adapter is provided.
+
+`appendFile` is required to support append-only audit/event logs without read-then-write race windows. On POSIX, the local adapter opens the file with `O_APPEND`, which guarantees atomic placement at end-of-file for sub-`PIPE_BUF` writes (4 KiB on Linux/macOS) — concurrent writers see no interleaving as long as each call's payload stays under that ceiling.
 
 ---
 

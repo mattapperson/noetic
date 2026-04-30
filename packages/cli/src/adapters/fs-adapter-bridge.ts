@@ -15,20 +15,6 @@ import path from 'node:path';
 import type { FsAdapter } from '@noetic/core';
 import type { IFileSystem } from 'just-bash';
 
-//#region Helpers
-
-function hasCode(err: unknown): err is Error & {
-  code: string;
-} {
-  return err instanceof Error && 'code' in err && typeof err.code === 'string';
-}
-
-function isEnoent(err: unknown): boolean {
-  return hasCode(err) && err.code === 'ENOENT';
-}
-
-//#endregion
-
 //#region Public API
 
 /** Create a just-bash IFileSystem backed by a Noetic FsAdapter. */
@@ -49,17 +35,8 @@ export function createBridgedFs(fs: FsAdapter): IFileSystem {
     },
 
     async appendFile(p, content) {
-      let existing = '';
-      try {
-        existing = await fs.readFileText(p);
-      } catch (err: unknown) {
-        if (!isEnoent(err)) {
-          throw err;
-        }
-        // file doesn't exist yet — will be created
-      }
-      const addition = typeof content === 'string' ? content : new TextDecoder().decode(content);
-      await fs.writeFile(p, existing + addition);
+      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      await fs.appendFile(p, text);
     },
 
     async exists(p) {

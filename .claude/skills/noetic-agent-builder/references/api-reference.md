@@ -522,6 +522,7 @@ interface FsAdapter {
   readFile(path: string): Promise<Buffer>;
   readFileText(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  appendFile(path: string, content: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
   access(path: string, mode?: number): Promise<void>;
   stat(path: string): Promise<FsStats>;

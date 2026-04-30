@@ -16,6 +16,14 @@ export interface FsAdapter {
   readFileText(path: string): Promise<string>;
   /** Write string content to a file (UTF-8). */
   writeFile(path: string, content: string): Promise<void>;
+  /**
+   * Append string content to a file (UTF-8). Creates the file if it does
+   * not exist. On POSIX, the underlying write uses `O_APPEND`, which is
+   * atomic for sub-`PIPE_BUF` writes — multiple concurrent writers can
+   * append without interleaving as long as each call's payload stays
+   * under that ceiling (4 KiB on Linux/macOS).
+   */
+  appendFile(path: string, content: string): Promise<void>;
   /** Create directories recursively. */
   mkdir(dir: string): Promise<void>;
   /** Check file accessibility (throws on failure). */
