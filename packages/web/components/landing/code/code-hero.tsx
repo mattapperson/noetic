@@ -4,8 +4,8 @@ import { motion, useScroll, useTransform } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { LiveDot } from '@/components/landing/code/live-dot';
+import { NoeticTuiPreview } from '@/components/landing/code/noetic-tui-preview';
 import { CyclingCommand } from '@/components/landing/cycling-command';
-import { highlightCode } from '@/lib/syntax-highlight';
 import { GITHUB_URL } from '@/lib/tui-theme';
 
 const INSTALL_COMMANDS = [
@@ -22,19 +22,6 @@ const INSTALL_COMMANDS = [
     package: '@noetic/cli',
   },
 ] as const;
-
-const HERO_CODE = `noetic@host:~/repo $ noetic /plan add dark-mode toggle
-  ├─ planner    claude-sonnet-4         queued
-  ├─ editor     claude-opus-4           routing
-  └─ reviewer   claude-haiku-4          standby
-
-[memory] 10 layers active   working 1842/2400 · semantic 4021/8000
-[team]   3 detached agents   researcher · refactor-bot · test-writer
-[budget] 9756/17400 tokens (56%)   no context pressure
-
-> _`;
-
-const HIGHLIGHTED_HERO_CODE = highlightCode(HERO_CODE);
 
 const STATUS_PILLS = [
   {
@@ -383,73 +370,7 @@ export function CodeHero(): ReactNode {
                 opacity: 0.6,
               }}
             />
-            <div
-              style={{
-                background: 'var(--color-tui-bg-deep)',
-                border: '1px solid var(--color-tui-border-bright)',
-                borderRadius: '6px',
-                overflow: 'hidden',
-                boxShadow:
-                  '0 0 0 1px rgba(57, 255, 20, 0.06), 0 24px 80px -32px rgba(57, 255, 20, 0.25), 0 8px 32px rgba(0, 0, 0, 0.6)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '10px 14px',
-                  borderBottom: '1px solid var(--color-tui-border)',
-                  background:
-                    'linear-gradient(180deg, var(--color-tui-surface-2) 0%, var(--color-tui-bg-deep) 100%)',
-                }}
-              >
-                <LiveDot state="running" size={6} />
-                <span
-                  style={{
-                    fontSize: '11px',
-                    color: 'var(--color-tui-secondary)',
-                    letterSpacing: '0.06em',
-                  }}
-                >
-                  ~/my-project — noetic
-                </span>
-                <span
-                  style={{
-                    marginLeft: 'auto',
-                    fontSize: '10px',
-                    color: 'var(--color-tui-muted)',
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  detached · 47m
-                </span>
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: 'clamp(14px, 3vw, 20px) clamp(14px, 3.2vw, 22px)',
-                  fontSize: 'clamp(10px, 1.6vw, 12.5px)',
-                  lineHeight: 1.75,
-                  color: 'var(--color-tui-secondary)',
-                  fontFamily: 'var(--font-mono), monospace',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre',
-                }}
-              >
-                {HIGHLIGHTED_HERO_CODE}
-                <span
-                  className="tui-cursor"
-                  style={{
-                    color: 'var(--color-tui-green)',
-                    marginLeft: '2px',
-                  }}
-                >
-                  █
-                </span>
-              </pre>
-            </div>
+            <NoeticTuiPreview />
           </motion.div>
         </div>
       </motion.div>
