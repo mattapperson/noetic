@@ -1,0 +1,230 @@
+---
+title: Context Types
+description: Type definitions for Context, ItemLog, Item variants, and content parts in Noetic.
+---
+
+## Context
+
+The execution context threaded through every step.
+
+```ts
+interface Context<TMemory = ContextMemory, TState = unknown> {
+  readonly id: string;
+  readonly stepCount: number;
+  readonly tokens: TokenUsage;
+  readonly elapsed: number;
+  readonly cost: number;
+  readonly memory: TMemory;
+  state: TState;
+  readonly parent: Context | null;
+  readonly depth: number;
+  readonly span: Span;
+  readonly threadId: string;
+  readonly resourceId?: string;
+  readonly harness: AgentHarness;
+  readonly fs: FsAdapter;
+  readonly itemLog: ItemLog;
+  readonly lastStepMeta: StepMeta | null;
+  readonly lastLayerUsage?: LastLayerUsage;
+  recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
+  send<T>(channel: Channel<T>, value: T): void;
+  tryRecv<T>(channel: Channel<T>): T | null;
+  checkpoint(): Promise<void>;
+  complete<T>(value: T): void;
+  readonly completed: boolean;
+  readonly completionValue: unknown;
+  readonly aborted: boolean;
+  readonly abortReason?: string;
+  abort(reason?: string): void;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique execution identifier |
+| `stepCount` | `number` | Number of steps executed so far |
+| `tokens` | `TokenUsage` | Accumulated token usage |
+| `elapsed` | `number` | Elapsed time in milliseconds |
+| `cost` | `number` | Accumulated cost in USD |
+| `memory` | `TMemory` | Typed memory object. Access layer data via `ctx.memory['layerId'].prop`. Defaults to `ContextMemory` when no `MemoryConfig` is provided. |
+| `state` | `TState` | Mutable user state |
+| `parent` | `Context \| null` | Parent context (for spawned agents) |
+| `depth` | `number` | Nesting depth (0 for root) |
+| `span` | `Span` | Observability span |
+| `threadId` | `string` | Thread identifier for memory scoping |
+| `resourceId` | `string` | Resource identifier for memory scoping (optional) |
+| `harness` | `AgentHarness` | Reference to the owning agent harness. Access params via `ctx.harness.config.params`. |
+| `fs` | `FsAdapter` | Filesystem adapter delegated from `ctx.harness.fs`. Use for all filesystem operations inside steps and tools. |
+| `itemLog` | `ItemLog` | Conversation history |
+| `lastStepMeta` | `StepMeta \| null` | Metadata from the last executed step |
+| `lastLayerUsage` | `LastLayerUsage \| undefined` | Per-memory-layer breakdown of the context window from the most recent `callModel`. Undefined until the first LLM call completes. |
+| `completed` | `boolean` | Whether `complete()` has been called |
+| `completionValue` | `unknown` | Value passed to `complete()` |
+| `aborted` | `boolean` | Whether `abort()` has been called |
+| `abortReason` | `string` | Reason passed to `abort()` (optional) |
+
+### Context Methods
+
+| Method | Signature | Description |
+|---|---|---|
+| `recv` | `<T>(channel, opts?) => Promise<T>` | Receive from a channel (blocking) |
+| `send` | `<T>(channel, value) => void` | Send to a channel |
+| `tryRecv` | `<T>(channel) => T \| null` | Non-blocking receive |
+| `checkpoint` | `() => Promise<void>` | Persist current state |
+| `complete` | `<T>(value) => void` | Signal completion with a value |
+| `abort` | `(reason?) => void` | Signal abort |
+
+## ItemLog
+
+An append-only log of conversation items.
+
+```ts
+interface ItemLog {
+  readonly items: ReadonlyArray<Item>;
+  append(item: Item): void;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `items` | `ReadonlyArray<Item>` | All items in the log |
+| `append` | `(item: Item) => void` | Append a new item |
+
+## Item
+
+The `Item` type is a discriminated union over the `type` field:
+
+```ts
+type Item =
+  | MessageItem
+  | FunctionCallItem
+  | FunctionCallOutputItem
+  | ReasoningItem
+  | ExtensionItem;
+```
+
+### ItemBase
+
+All items share this base:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique item identifier |
+| `status` | `'in_progress' \| 'completed' \| 'incomplete' \| 'failed'` | Item status |
+
+### MessageItem
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `'message'` | Discriminant |
+| `role` | `'user' \| 'assistant' \| 'system' \| 'developer'` | Message author |
+| `content` | `ContentPart[]` | Message content parts |
+
+### FunctionCallItem
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `'function_call'` | Discriminant |
+| `callId` | `string` | Unique call identifier |
+| `name` | `string` | Function name |
+| `arguments` | `string` | JSON-encoded arguments |
+
+### FunctionCallOutputItem
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `'function_call_output'` | Discriminant |
+| `callId` | `string` | Matching call identifier |
+| `output` | `string` | JSON-encoded output |
+
+### ReasoningItem
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `'reasoning'` | Discriminant |
+| `content` | `ContentPart[]` | Reasoning content |
+| `summary` | `ContentPart[]` | Summary of reasoning (optional) |
+| `encryptedContent` | `string` | Encrypted reasoning content (optional) |
+
+### ExtensionItem
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `` `${string}:${string}` `` | Namespaced type using `prefix:name` convention (e.g., `openrouter:web_search`, `noetic:analytics`) |
+| `data` | `Record<string, unknown>` | Arbitrary structured data |
+
+See [Items & Events](/docs/framework/api/items-and-events) for the complete reference including built-in extended items, streaming events, and the adapter flow.
+
+## ContentPart
+
+```ts
+type ContentPart =
+  | { type: 'output_text'; text: string }
+  | { type: 'input_text'; text: string }
+  | { type: 'refusal'; refusal: string };
+```
+
+| Variant | Fields | Description |
+|---|---|---|
+| `output_text` | `text: string` | Text generated by the model |
+| `input_text` | `text: string` | Text from the user or system |
+| `refusal` | `refusal: string` | Model refusal message |
+
+## TokenUsage
+
+| Field | Type | Description |
+|---|---|---|
+| `input` | `number` | Input tokens consumed |
+| `output` | `number` | Output tokens generated |
+| `total` | `number` | Total tokens |
+
+## StepMeta
+
+| Field | Type | Description |
+|---|---|---|
+| `toolCalls` | `FunctionCallItem[]` | Tool calls made in this step (optional) |
+| `usage` | `{ inputTokens, outputTokens, cachedTokens? }` | Token usage (optional) |
+| `cost` | `number` | Step cost in USD (optional) |
+| `responseItems` | `ReadonlyArray<Item>` | Items produced by this step (optional) |
+
+## LayerUsageEntry
+
+```ts
+interface LayerUsageEntry {
+  readonly layerId: string;
+  readonly tokenCount: number;
+  readonly items: ReadonlyArray<Item>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `layerId` | `string` | The contributing memory layer's id |
+| `tokenCount` | `number` | Self-reported token count from the layer's `recall()` output |
+| `items` | `ReadonlyArray<Item>` | Items this layer contributed to the context view for the last LLM call |
+
+## LastLayerUsage
+
+```ts
+interface LastLayerUsage {
+  readonly executionId: string;
+  readonly modelId: string;
+  readonly layers: ReadonlyArray<LayerUsageEntry>;
+  readonly systemPromptTokens: number;
+  readonly toolsTokens: number;
+  readonly historyTokens: number;
+  readonly totalUsedTokens: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `executionId` | `string` | The owning `Context.id` |
+| `modelId` | `string` | Model id from the step that triggered the snapshot |
+| `layers` | `ReadonlyArray<LayerUsageEntry>` | Per-memory-layer contributions, sorted by `layerId` |
+| `systemPromptTokens` | `number` | Estimated tokens from `step.instructions` |
+| `toolsTokens` | `number` | Estimated tokens from the tool definitions sent to the model |
+| `historyTokens` | `number` | Estimated tokens for `itemLog` items not owned by a layer |
+| `totalUsedTokens` | `number` | Sum of all four buckets |
+
+`LastLayerUsage` is captured by the runtime after each successful `callModel` and surfaced on `Context.lastLayerUsage` and `HarnessResponse.lastLayerUsage`. Use it for context-window introspection (e.g., the CLI `/context` command). The snapshot is overwritten on the next call; export to your observability span if you need historical retention.

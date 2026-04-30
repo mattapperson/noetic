@@ -22,6 +22,10 @@ type SkillSource = (typeof SkillSource)[keyof typeof SkillSource];
 
 /**
  * A discovered skill definition parsed from SKILL.md or provided by a plugin.
+ *
+ * A skill with `agentType` set is also a registerable sub-agent (teammate)
+ * — its `instructions` become the child's system prompt and `allowedTools`
+ * defines the child's tool pool. See `agents/` runtime registry.
  */
 interface SkillDefinition {
   /** Unique identifier (derived from directory name) */
@@ -50,6 +54,24 @@ interface SkillDefinition {
 
   /** Optional tool restrictions when skill is active */
   allowedTools?: ReadonlyArray<string>;
+
+  /**
+   * Subagent type identifier. When set, this skill is registerable as a
+   * teammate via the `agent` tool with `subagent_type: <agentType>`.
+   */
+  agentType?: string;
+
+  /** Model override for the spawned teammate. `inherit` uses the parent's model. */
+  agentModel?: 'inherit' | 'haiku' | 'sonnet' | 'opus' | string;
+
+  /** Force the teammate to run in the background. */
+  agentBackground?: boolean;
+
+  /** Maximum reasoning steps for tool-bearing teammates (passed to `react`). */
+  agentMaxSteps?: number;
+
+  /** Skip injecting CLAUDE.md into the teammate's context (saves tokens for read-only agents). */
+  agentOmitClaudeMd?: boolean;
 }
 
 //#endregion
@@ -86,14 +108,27 @@ interface SkillsLayerState {
 
 /**
  * Expected shape of SKILL.md YAML frontmatter.
+ *
+ * Optional `agent-*` fields include `null` because YAML produces `null` for
+ * empty values like `agent-type:` (no value). Consumers should normalize via
+ * `mapFrontmatterToAgentFields` (which collapses null → undefined) rather
+ * than reading these fields directly.
  */
 interface SkillFrontmatter {
   name: string;
-  description?: string;
-  'when-to-use'?: string;
-  'user-invocable'?: boolean;
-  'model-invocable'?: boolean;
-  'allowed-tools'?: string[];
+  // YAML produces `null` for empty values (e.g. `description:` with no value).
+  // All optional fields accept null + undefined; consumers normalize via the
+  // `nullToUndefined` helper in `frontmatter.ts`.
+  description?: string | null;
+  'when-to-use'?: string | null;
+  'user-invocable'?: boolean | null;
+  'model-invocable'?: boolean | null;
+  'allowed-tools'?: string[] | null;
+  'agent-type'?: string | null;
+  'agent-model'?: 'inherit' | 'haiku' | 'sonnet' | 'opus' | string | null;
+  'agent-background'?: boolean | null;
+  'agent-max-steps'?: number | null;
+  'agent-omit-claude-md'?: boolean | null;
 }
 
 //#endregion

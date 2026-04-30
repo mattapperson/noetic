@@ -2,6 +2,10 @@ import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
+import { snapshotCwdState } from '../runtime/cwd-helpers';
+import { contextToExecCtx } from '../runtime/exec-context-factory';
+import type { ItemSchemaRegistry } from '../schemas/item';
+import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { Context } from '../types/context';
 import type { Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryConfig, MemoryLayer } from '../types/memory';
@@ -15,6 +19,7 @@ import { frameworkCast } from './framework-cast';
 export interface ExecuteSpawnOpts {
   layerStore?: LayerStateStore;
   parentLayers?: MemoryLayer[];
+  itemSchemas?: ItemSchemaRegistry;
 }
 
 interface CollectSpawnItemsParams {
@@ -22,20 +27,8 @@ interface CollectSpawnItemsParams {
   parentExecutionCtx: ExecutionContext;
   childExecutionCtx: ExecutionContext;
   layerStore: LayerStateStore;
+  itemSchemas?: ItemSchemaRegistry;
 }
-
-//#endregion
-
-//#region Constants
-
-/** Naive token estimate shared across all spawn execution contexts. */
-const naiveTokenize = (text: string): number => Math.ceil(text.length / 4);
-
-/** No-op trace shared across all spawn execution contexts. */
-const noopTrace = {
-  setAttribute(): void {},
-  addEvent(): void {},
-} satisfies ExecutionContext['trace'];
 
 //#endregion
 
@@ -60,55 +53,19 @@ function resolveLayersForSpawn<TMemory, I, O>(
   return step.memory;
 }
 
-function buildChildExecutionContext(ctx: Context): ExecutionContext {
-  return {
-    executionId: crypto.randomUUID(),
-    threadId: ctx.threadId,
-    resourceId: ctx.resourceId,
-    depth: ctx.depth + 1,
-    stepNumber: 0,
-    tokenUsage: {
-      input: 0,
-      output: 0,
-    },
-    cost: 0,
-    fs: ctx.harness.fs,
-    shell: ctx.harness.shell,
-    tokenize: naiveTokenize,
-    trace: noopTrace,
-  };
-}
-
-function buildParentExecutionContext(ctx: Context): ExecutionContext {
-  return {
-    executionId: ctx.id,
-    threadId: ctx.threadId,
-    resourceId: ctx.resourceId,
-    depth: ctx.depth,
-    stepNumber: ctx.stepCount,
-    tokenUsage: {
-      input: ctx.tokens.input,
-      output: ctx.tokens.output,
-    },
-    cost: ctx.cost,
-    fs: ctx.harness.fs,
-    shell: ctx.harness.shell,
-    tokenize: naiveTokenize,
-    trace: noopTrace,
-  };
-}
-
 async function collectSpawnItems({
   layers,
   parentExecutionCtx,
   childExecutionCtx,
   layerStore,
+  itemSchemas = defaultItemSchemaRegistry,
 }: CollectSpawnItemsParams): Promise<Item[]> {
   const spawnResults = await spawnLayers({
     layers,
     parentCtx: parentExecutionCtx,
     childCtx: childExecutionCtx,
     store: layerStore,
+    itemSchemas,
   });
 
   return spawnResults.flatMap((r) => r.items);
@@ -127,7 +84,18 @@ export async function executeSpawn<TMemory, I, O>(
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
   const layers = resolveLayersForSpawn(step, opts?.parentLayers);
-  const childExecutionCtx = buildChildExecutionContext(baseCtx);
+  const childId = crypto.randomUUID();
+  const childExecutionCtx = contextToExecCtx(baseCtx, {
+    executionId: childId,
+    depth: baseCtx.depth + 1,
+    stepNumber: 0,
+    tokenUsage: {
+      input: 0,
+      output: 0,
+    },
+    cost: 0,
+    readLayerStateId: childId,
+  });
   const layerStore = opts?.layerStore;
   const hasLayers = layers.length > 0 && layerStore !== undefined;
 
@@ -135,12 +103,13 @@ export async function executeSpawn<TMemory, I, O>(
   let childItems: Item[] = [];
   let parentExecutionCtx: ExecutionContext | undefined;
   if (hasLayers) {
-    parentExecutionCtx = buildParentExecutionContext(baseCtx);
+    parentExecutionCtx = contextToExecCtx(baseCtx);
     childItems = await collectSpawnItems({
       layers,
       parentExecutionCtx,
       childExecutionCtx,
       layerStore,
+      itemSchemas: opts?.itemSchemas,
     });
   }
 
@@ -153,7 +122,7 @@ export async function executeSpawn<TMemory, I, O>(
     ...childLayerTools,
   ]);
 
-  // Create child context — empty by default, layers provide items via onSpawn
+  // Create child context — empty by default, layers provide items via onSpawn.
   const childCtx = new ContextImpl({
     harness: baseCtx.harness,
     parent: baseCtx,
@@ -164,6 +133,7 @@ export async function executeSpawn<TMemory, I, O>(
     span: baseCtx.span,
     layers: layers.length > 0 ? layers : undefined,
     unifiedTools: childUnifiedTools.length > 0 ? childUnifiedTools : undefined,
+    cwdState: snapshotCwdState(baseCtx),
   });
 
   try {

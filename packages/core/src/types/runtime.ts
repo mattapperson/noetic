@@ -1,11 +1,11 @@
 import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, Tool } from './common';
-import type { Context } from './context';
+import type { Context, CwdState } from './context';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
-import type { ExecuteInput, Item } from './items';
+import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
@@ -24,6 +24,10 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
+  /** Harness-wide item schema extensions used to validate emitted and returned items. */
+  itemSchemas?: ItemSchemaExtensions;
+  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
+  strictItemSchemas?: boolean;
 }
 
 //#region Delivery Mode
@@ -187,11 +191,41 @@ export interface AgentHarnessContract<
   /** Number of messages currently queued on a session. */
   getQueueSize(scope?: SessionScope): number;
 
+  /**
+   * Pre-populate a session's accumulated history with prior items so the next
+   * `execute()` turn sees them as established context. Used by resume flows to
+   * seed a freshly-constructed session from a persisted transcript without
+   * re-running the prior turns. Creates the session lazily if it does not
+   * already exist. Replaces any previously-accumulated items for the session.
+   */
+  seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
+
   run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  /**
+   * Launch `step` as a fire-and-forget background execution.
+   *
+   * The returned `DetachedHandle` exposes status / result / error and an
+   * `await()` for callers that want to block on settlement. The child runs
+   * concurrently with the caller; pass `overrides.threadId` to give the child
+   * its own session-scoped item log so background work does not pollute the
+   * parent's accumulated turn history.
+   *
+   * @param step Step to execute in a fresh child context.
+   * @param input Initial input passed to `step`.
+   * @param parentCtx Parent context (the child inherits memory layers and,
+   * by default, threadId/resourceId).
+   * @param overrides Optional: override threadId or resourceId on the child.
+   */
   detachedSpawn<I, O>(
     step: Step<ContextMemory, I, O>,
     input: I,
     parentCtx: Context,
+    overrides?: {
+      threadId?: string;
+      resourceId?: string;
+      /** Override the child's initial cwd. Used by worktree isolation to root the child at the worktree path. */
+      cwdInit?: string;
+    },
   ): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;
@@ -200,7 +234,13 @@ export interface AgentHarnessContract<
     threadId?: string;
     resourceId?: string;
     memory?: MemoryLayer[];
+    /** Override the new context's initial cwd. */
+    cwdInit?: string;
   }): Context;
+  /** Long-lived shared cwd state seeded into root contexts created by this harness. */
+  readonly rootCwdState: CwdState;
+  /** Update the harness root cwd. Used by the TUI when the user issues a `! cd`. */
+  setRootCwd(nextCwd: string): void;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
   recv<T>(
     channel: Channel<T>,
@@ -213,6 +253,12 @@ export interface AgentHarnessContract<
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  /**
+   * Compute the items that would be sent to the model on the next turn for a
+   * session — its accumulated history plus the harness's memory-layer recall
+   * outputs assembled in the same order `executeLLM` produces.
+   */
+  previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;
@@ -232,6 +278,16 @@ export interface AgentHarnessContract<
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
+  /**
+   * Project the history items through every layer's `projectHistory` hook in
+   * slot order. Pure read-side projection — `itemLog` is never mutated.
+   * Returns the input unchanged if no layer registers the hook.
+   */
+  projectHistory(
+    layers: MemoryLayer[],
+    items: ReadonlyArray<Item>,
+    ctx: Context,
+  ): Promise<ReadonlyArray<Item>>;
   /**
    * Run items through the onItemAppend pipeline before appending.
    * Each layer can filter, transform, or inject items.

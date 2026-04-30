@@ -48,6 +48,11 @@ export const NODE_KIND_COLORS: Record<
     bg: 'rgba(20, 184, 166, 0.1)',
     text: '#14b8a6',
   }, // teal
+  every: {
+    border: '#22d3ee',
+    bg: 'rgba(34, 211, 238, 0.1)',
+    text: '#22d3ee',
+  }, // cyan-light (distinct from run's cyan)
 };
 
 export const STATUS_COLORS: Record<
@@ -116,6 +121,7 @@ export const STEP_KIND_ICONS: Record<StepKind, string> = {
   fork: '⫚',
   spawn: '📦',
   loop: '🔄',
+  every: '⏱',
 };
 
 export const STEP_KIND_LABELS: Record<StepKind, string> = {
@@ -126,6 +132,7 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   fork: 'FORK',
   spawn: 'SPAWN',
   loop: 'LOOP',
+  every: 'EVERY',
 };
 
 export function formatDuration(ms: number | null): string {

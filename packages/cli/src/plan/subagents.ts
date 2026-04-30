@@ -77,7 +77,11 @@ function buildSubagent(
   args: SubagentArgs,
 ): Step<unknown, string, string> {
   const id = args.id ?? nextId(prefix);
-  const tools = createReadOnlyTools(args.cwd, args.fs, args.shell);
+  const tools = createReadOnlyTools({
+    cwd: args.cwd,
+    fs: args.fs,
+    shell: args.shell,
+  });
   const instructions = [
     baseInstructions,
     '',

@@ -6,10 +6,11 @@
 
 import { Text } from 'ink';
 import type { ReactNode } from 'react';
+import { ELLIPSIS } from '../../glyphs.js';
 import { useTheme } from '../theme.js';
 import { MessageResponse } from './message-response.js';
 
-const MAX_RESULT_PREVIEW_CHARS = 200;
+const MAX_RESULT_PREVIEW_CHARS = 2e2;
 
 export interface ToolResultProps {
   /** Raw tool output; will be coerced to a displayable string. */
@@ -45,7 +46,7 @@ export function ToolResult({ output, isError = false }: ToolResultProps): ReactN
 
   const truncated =
     preview.length > MAX_RESULT_PREVIEW_CHARS
-      ? `${preview.slice(0, MAX_RESULT_PREVIEW_CHARS)}…`
+      ? `${preview.slice(0, MAX_RESULT_PREVIEW_CHARS)}${ELLIPSIS}`
       : preview;
 
   return (

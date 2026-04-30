@@ -270,6 +270,7 @@ export function getStepKindColor(kind: StepKind): string {
     fork: '#ec4899', // Pink
     spawn: '#6366f1', // Indigo
     loop: '#14b8a6', // Teal
+    every: '#22d3ee', // Cyan-light
   };
   return colors[kind] ?? '#6b7280';
 }

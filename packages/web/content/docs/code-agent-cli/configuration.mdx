@@ -1,0 +1,123 @@
+---
+title: Configuration
+description: noetic.config.ts schema, discovery order, environment variables, and the built-in command and tool registries.
+---
+
+## Discovery
+
+The CLI looks for a config file in this order and uses the first one it finds:
+
+1. `./noetic.config.ts`
+2. `./.noetic/config.ts`
+3. `~/.config/noetic/config.ts`
+4. `~/.noetic/config.ts`
+
+If none of those exist, the CLI falls back to CLI-arg defaults: `model: 'anthropic/claude-sonnet-4'`, `maxTurns: 50`, and the API key from `NOETIC_API_KEY` or `OPENROUTER_API_KEY`.
+
+## Schema
+
+```ts
+import type { AgentConfig } from '@noetic/cli';
+
+export default {
+  // Required
+  model: 'anthropic/claude-sonnet-4',
+  apiKey: process.env.NOETIC_API_KEY!,
+  cwd: process.cwd(),
+  maxTurns: 100,
+
+  // Optional
+  systemPrompt: 'You are a senior TypeScript engineer working on this codebase.',
+  systemPromptMode: 'compose',
+  trustProjectEmbeddedCommands: false,
+  plugins: [],
+  tools: { include: [], exclude: [], tasks: true },
+  memory: [],
+  ui: { doublePressWindowMs: 800 },
+  history: { maxItems: 200 },
+  worktree: { /* see Hooks */ },
+} satisfies AgentConfig;
+```
+
+### Required fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `model` | `string` | OpenRouter model slug (e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`). |
+| `apiKey` | `string` | OpenRouter API key. Don't hard-code — pull from `process.env.NOETIC_API_KEY` or `process.env.OPENROUTER_API_KEY`. |
+| `cwd` | `string` | Working directory the agent operates in. Usually `process.cwd()`. |
+| `maxTurns` | `number` (positive int) | Maximum LLM turns per session before the harness halts. |
+
+### Optional fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `systemPrompt` | `string` | — | Custom system prompt. See `systemPromptMode` for how it combines with built-ins. |
+| `systemPromptMode` | `'compose' \| 'replace'` | `'compose'` | `compose` replaces only the intro section; cyber-risk, doing-tasks, tone/style, and env-info sections are still appended. `replace` fully replaces the built-in prompt. |
+| `trustProjectEmbeddedCommands` | `boolean` | `false` | If `true`, project-origin AGENT.md and rules files execute `!command` lines at session start. User-origin files (`~/...`) always execute commands. Off by default for supply-chain safety. |
+| `plugins` | `PluginSpec[]` | `[]` | See [Plugins](/docs/code-agent-cli/plugins). |
+| `tools.include` | `string[]` | — | Whitelist of tool names. When set, only these register. |
+| `tools.exclude` | `string[]` | — | Blacklist of tool names. Applied after `include`. |
+| `tools.tasks` | `boolean` | `true` | Register the built-in `task_*` tools. Set `false` to opt out entirely. |
+| `memory` | `string[]` | — | Identifiers for additional memory layers to install (advanced). |
+| `worktree` | `WorktreeConfig` | — | Sub-agent isolation config — see [Hooks](/docs/code-agent-cli/hooks). |
+| `ui.doublePressWindowMs` | `int` 100–5000 | `800` | Window in ms within which a second `Ctrl+C` / `Ctrl+D` press triggers a graceful exit. |
+| `history.maxItems` | `int` 2–10000 | — | Cap on trailing items projected to the LLM each turn. Storage is untouched — this is a read-side projection only. When unset, history is uncapped. |
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `NOETIC_API_KEY` | Primary key. Falls back to `OPENROUTER_API_KEY` if unset. |
+| `OPENROUTER_API_KEY` | Recognised as an alias when `NOETIC_API_KEY` is missing. |
+
+CLI flags `--api-key`, `--model`, `--cwd`, `--max-turns`, `-c` / `--continue`, `-r` / `--resume`, `--session-id`, `--fork-session`, `--no-session-persistence`, and `-n` / `--name` override the equivalent config values for a single run.
+
+## Built-in slash commands
+
+All built-in commands are available to every session. Plugin commands appear after built-ins (a plugin can't shadow `/help` or `/context`).
+
+| Command | What it does |
+|---|---|
+| `/clear` | Clear history and start a fresh session |
+| `/config` | View and edit agent configuration |
+| `/context` | Show context window breakdown by memory layer (from last run) |
+| `/diff-review` | Open a diff review window with branch / per-commit / all-files scopes |
+| `/init` | Initialize CLAUDE.md (and optional skills/hooks) with codebase documentation |
+| `/mode` | Toggle agent mode between `normal` and `planning` |
+| `/model` | Select the active OpenRouter model |
+| `/plan` | Enter plan mode (alias for `/mode plan`) |
+| `/rename` | Set a custom title for this session |
+| `/resume` | Reload a prior session (opens picker, or loads by UUID) |
+| `/session` | Show metadata for the current session |
+| `/skills` | List available skills |
+| `/tag` | Tag or untag this session |
+| `/tasks` | Open the kanban board view (see also `noetic tasks` CLI) |
+| `/agent-ci` | Launch a tracked agent-ci review for the current worktree |
+| `/agent-readiness` | Audit your repo for AI-agent readiness |
+
+User-invocable skills and plugin-contributed commands also appear as `/skill-name` and `/plugin-command`.
+
+## Built-in tools
+
+The harness ships with a default tool pool. Filter with `tools.include` / `tools.exclude` in config.
+
+| Tool | Description |
+|---|---|
+| `read` | Read file contents with line offsets |
+| `write` | Create or overwrite files |
+| `edit` | Apply diff-based edits |
+| `bash` | Execute shell commands (with security validation) |
+| `grep` | Search file contents |
+| `find` | Find files by pattern |
+| `ls` | List directory contents |
+| `lsp` | Language-server operations (hover, references, definition) |
+| `interactive_terminal` | Drive a TUI program through pilotty (`spawn` / `snapshot` / `key` / `type` / `wait-for` / `kill`) |
+| `agent` | Spawn a sub-agent (teammate) sync, background, or named+addressable; optional `isolation: 'worktree'` |
+| `send_message` | Write a message to a named teammate's inbound queue |
+| `check_agent` | Poll status / result / error of a previously-launched teammate by `agentId` |
+| `AskUserQuestion` | Pause mid-turn to pose 1–4 multiple-choice questions; only registered when running under the TUI |
+
+In **plan mode** (`/mode plan` or `/plan`), the read-only subset is registered (no `write`, `edit`, `bash`, mutating `interactive_terminal` actions, or sub-agent spawning that produces edits).
+
+Pass `tools: { include: ['read', 'grep', 'find'] }` to a custom session for a tighter sandbox, or `tools: { exclude: ['bash'] }` to drop a single capability.

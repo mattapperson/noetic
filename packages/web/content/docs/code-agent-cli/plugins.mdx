@@ -1,0 +1,255 @@
+---
+title: Plugins
+description: Extend the noetic CLI with custom tools, memory layers, skills, slash commands, footer UI, sub-agent presets, reminder triggers, and language servers.
+---
+
+A **plugin** is an npm-publishable extension that contributes to the CLI's runtime. Plugins are first-class — every extension point the built-in CLI uses is available to a plugin. You can publish a plugin, install it, register it in `noetic.config.ts`, and your sessions inherit its behavior.
+
+## The `NoeticPlugin` interface
+
+```ts
+import type { NoeticPlugin, PluginContext } from '@noetic/cli';
+
+interface NoeticPlugin {
+  name: string;
+  version: string;
+
+  // Extension points (all optional)
+  tools?: (ctx: PluginContext) => ReadonlyArray<Tool> | Promise<ReadonlyArray<Tool>>;
+  memoryLayers?: (ctx: PluginContext) => ReadonlyArray<MemoryLayer> | Promise<ReadonlyArray<MemoryLayer>>;
+  skills?: (ctx: PluginContext) => ReadonlyArray<SkillDefinition> | Promise<ReadonlyArray<SkillDefinition>>;
+  commands?: (ctx: PluginContext) => ReadonlyArray<Command> | Promise<ReadonlyArray<Command>>;
+  subagentPresets?: () => Record<string, SubagentPreset> | Promise<Record<string, SubagentPreset>>;
+  reminderTriggers?: (ctx: PluginContext) => ReadonlyArray<ReminderTrigger> | Promise<ReadonlyArray<ReminderTrigger>>;
+  lspServers?: (ctx: PluginContext) => ReadonlyArray<LspServerContribution> | Promise<ReadonlyArray<LspServerContribution>>;
+  footer?: () => ReactNode;
+  loadingMessages?: () => ReadonlyArray<string> | Promise<ReadonlyArray<string>>;
+  initialize?: (ctx: PluginContext) => Promise<void>;
+  dispose?: () => Promise<void>;
+}
+```
+
+Pick the hooks that fit your contribution; leave the rest off. Adding fields to `NoeticPlugin` is additive — existing plugins keep compiling.
+
+## Plugin context
+
+Every hook receives a `PluginContext`:
+
+```ts
+interface PluginContext {
+  config: AgentConfig;                  // parsed agent config
+  callModel: CallModel;                 // one-shot LLM generation (no tool loops)
+  dataDir: (scope: 'project' | 'user') => string;
+}
+```
+
+- `config` — the parsed `noetic.config.ts` (model, apiKey, cwd, ...).
+- `callModel` — issue a one-shot LLM call. Plugins that need tool loops should register tools instead and let the harness drive the turn.
+- `dataDir('project')` returns `<cwd>/.noetic/<plugin-name>/`; `dataDir('user')` returns `~/.noetic/<plugin-name>/`. Created on first call.
+
+## Extension points
+
+### `tools`
+
+Contribute new tools to the harness. Tools follow the framework's [Tool API](/docs/framework/api/step-types):
+
+```ts
+import { z } from 'zod';
+import type { Tool } from '@noetic/core';
+
+const weatherTool: Tool = {
+  name: 'get_weather',
+  description: 'Look up current weather for a city.',
+  input: z.object({ city: z.string() }),
+  output: z.object({ tempC: z.number(), summary: z.string() }),
+  execute: async (args) => {
+    const res = await fetch(`https://wttr.in/${args.city}?format=j1`);
+    const json = await res.json();
+    return { tempC: json.current_condition[0].temp_C, summary: json.current_condition[0].weatherDesc[0].value };
+  },
+};
+```
+
+### `memoryLayers`
+
+Contribute custom [memory layers](/docs/framework/memory/custom-layers). Layers participate in budget allocation and recall just like the built-ins.
+
+### `skills`
+
+Contribute [skills](/docs/code-agent-cli/skills) programmatically — useful when your skill content is generated rather than file-backed. Plugin-contributed skills appear in `/skills` with `source: 'plugin'`.
+
+### `commands`
+
+Contribute slash commands. Plugin commands merge into the CLI's built-in registry **after** built-ins, so a plugin can't shadow `/help`, `/context`, or `/clear`.
+
+```ts
+commands: (ctx) => [{
+  name: 'deploy-preview',
+  description: 'Build and deploy a preview environment for the current branch.',
+  execute: async (input, session) => {
+    // ... read from ctx.config, write to ctx.dataDir('project'), call shell, etc.
+  },
+}],
+```
+
+### `subagentPresets`
+
+Register named sub-agent presets the model can invoke via plan-mode flow JSON `subagent` nodes (see [Custom flows](/docs/code-agent-cli/custom-flows)). Presets carry a system prompt, allowed tools, model override, and step caps.
+
+### `reminderTriggers`
+
+Contribute developer-style reminders that emit `<system-reminder>`-wrapped messages based on session state or cadence. Used by built-ins for hints like "you haven't run tests in N turns".
+
+### `lspServers`
+
+Contribute language servers for the `lsp` tool. Built-in servers (TypeScript, Python, Go, Swift) ship with the CLI; plugins can add more or override a built-in by reusing its `id`. Three launch strategies are supported: `path` (binary on `$PATH`), `bunx` (npm package), and `githubRelease` (download a tagged release artifact).
+
+### `footer`
+
+Render a React/Ink component between the chat area and the prompt. The component reads live session state via `useFooterContext()`:
+
+```ts
+import { useFooterContext } from '@noetic/cli';
+
+const StatusFooter = () => {
+  const { model, status, lastLayerUsage, contextLimit } = useFooterContext();
+  // ... render an Ink Box
+};
+```
+
+If multiple plugins provide a footer, the first one wins.
+
+### `loadingMessages`
+
+Provide a pool of strings the spinner cycles through instead of the default verb.
+
+### `initialize` / `dispose`
+
+Run once at plugin load (after the context is built, before the TUI mounts) and once at session shutdown. Use `initialize` to cache `callModel` results, warm caches, or seed `dataDir` files.
+
+## Registration
+
+In `noetic.config.ts`:
+
+```ts
+import designDeck from '@noetic/plugin-design-deck';
+import powerline from '@noetic/plugin-powerline';
+
+export default {
+  // ...
+  plugins: [
+    designDeck({ generateCount: 3 }),                      // factory call → NoeticPlugin object
+    '@noetic/plugin-powerline',                            // string → dynamic import
+    { name: 'my-plugin', path: './local/plugin.ts' },      // path spec → resolve + import
+  ],
+} satisfies AgentConfig;
+```
+
+Three valid forms:
+
+| Form | Behavior |
+|---|---|
+| String (`'@scope/pkg'` or `'./local.ts'`) | Dynamically imported. Default export must be a `NoeticPlugin` object or a factory returning one. |
+| Inline `NoeticPlugin` object | Used directly. Detected by presence of `name`, `version`, and at least one hook. |
+| `{ name, path?, options? }` spec | `path` is resolved (relative to the config file dir) and imported; `options` is passed to the factory. |
+
+Initialization runs in array order. Disposal runs in reverse order at session shutdown.
+
+## Walkthrough: the shipped plugins
+
+Two reference plugins ship in this repo:
+
+### `@noetic/plugin-powerline`
+
+Adds a powerline-style footer + themed working-vibes loading messages.
+
+```ts
+import type { NoeticPlugin } from '@noetic/cli';
+
+export default function powerline(userInput = {}): NoeticPlugin {
+  const options = parseOptions(userInput);
+  let vibes: ReadonlyArray<string> = [];
+
+  return {
+    name: '@noetic/plugin-powerline',
+    version: '0.1.0',
+    initialize: async (ctx) => {
+      vibes = await resolveVibes({ options: options.vibe, apiKey: ctx.config.apiKey });
+    },
+    loadingMessages: () => vibes,
+    footer: () => <Footer segments={options.segments} theme={loadTheme(options.theme)} />,
+  };
+}
+```
+
+Demonstrates `initialize`, `loadingMessages`, and `footer`.
+
+### `@noetic/plugin-design-deck`
+
+Adds an interactive visual-decision modal as a slash command.
+
+```ts
+import type { NoeticPlugin } from '@noetic/cli';
+
+export default function designDeck(userInput = {}): NoeticPlugin {
+  const options = parseOptions(userInput);
+  return {
+    name: '@noetic/plugin-design-deck',
+    version: '0.1.0',
+    commands: (ctx) => [
+      deckCommand({ ctx, options }),
+      deckDiscoverCommand({ ctx, options }),
+    ],
+  };
+}
+```
+
+Demonstrates `commands`.
+
+## Building your own plugin
+
+A minimal plugin that contributes one tool and one slash command:
+
+```ts
+// my-plugin/src/index.ts
+import type { NoeticPlugin } from '@noetic/cli';
+import { z } from 'zod';
+
+export default function myPlugin(): NoeticPlugin {
+  return {
+    name: 'my-plugin',
+    version: '0.1.0',
+    tools: () => [{
+      name: 'word_count',
+      description: 'Count words in a string.',
+      input: z.object({ text: z.string() }),
+      output: z.object({ count: z.number() }),
+      execute: async ({ text }) => ({ count: text.trim().split(/\s+/).length }),
+    }],
+    commands: (ctx) => [{
+      name: 'tell-joke',
+      description: 'Have the model tell a joke about the current cwd.',
+      execute: async () => {
+        const joke = await ctx.callModel({
+          system: 'You tell terse, dry developer jokes.',
+          user: `Tell a joke about working in ${ctx.config.cwd}.`,
+        });
+        return { kind: 'message', content: joke };
+      },
+    }],
+  };
+}
+```
+
+Then in your `noetic.config.ts`:
+
+```ts
+import myPlugin from './my-plugin/src/index.ts';
+
+export default {
+  // ...
+  plugins: [myPlugin()],
+} satisfies AgentConfig;
+```
+
+The new tool appears in the agent's tool pool; `/tell-joke` appears in the slash-command palette.

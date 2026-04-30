@@ -1,5 +1,6 @@
 import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import { ContextImpl } from '../runtime/context-impl';
+import { snapshotCwdState } from '../runtime/cwd-helpers';
 import type { Context } from '../types/context';
 import type { NoeticError } from '../types/error';
 import type { ContextMemory } from '../types/memory';
@@ -35,6 +36,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         threadId,
         resourceId,
         span: ctx.span,
+        cwdState: snapshotCwdState(ctx),
       }),
   );
 }

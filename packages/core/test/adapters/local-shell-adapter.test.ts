@@ -65,4 +65,33 @@ describe('createLocalShellAdapter', () => {
 
     expect(result.stdout.trim()).toBe('adapter-works');
   });
+
+  it('throws timeout:N when the timeout fires', async () => {
+    const start = Date.now();
+    let caught: Error | undefined;
+    try {
+      await shell.exec('sleep 5', {
+        cwd: process.cwd(),
+        timeout: 0.1,
+      });
+    } catch (err) {
+      caught = err instanceof Error ? err : undefined;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe('timeout:0.1');
+    // Should abort well under the 5s sleep.
+    expect(Date.now() - start).toBeLessThan(2e3);
+  });
+
+  it('resolves normally (does not throw) on signal abort', async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 5e1);
+    // Should not throw — callers track aborts via their own state.
+    const result = await shell.exec('sleep 5', {
+      cwd: process.cwd(),
+      signal: controller.signal,
+    });
+    // Killed process; exit code is null or non-zero.
+    expect(result.exitCode === null || result.exitCode !== 0).toBe(true);
+  });
 });

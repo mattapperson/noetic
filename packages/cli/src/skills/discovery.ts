@@ -11,7 +11,7 @@
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { FsAdapter } from '@noetic/core';
-import { parseFrontmatter } from './frontmatter.js';
+import { mapFrontmatterToAgentFields, parseFrontmatter } from './frontmatter.js';
 import type { SkillDefinition } from './types.js';
 import { SkillSource } from './types.js';
 
@@ -59,13 +59,14 @@ async function loadSkillFile(params: LoadSkillFileParams): Promise<SkillDefiniti
   return {
     name,
     description: frontmatter.description ?? '',
-    whenToUse: frontmatter['when-to-use'],
+    whenToUse: frontmatter['when-to-use'] ?? undefined,
     instructions: body.trim(),
     source,
     filePath,
     userInvocable: frontmatter['user-invocable'] ?? true,
     modelInvocable: frontmatter['model-invocable'] ?? true,
-    allowedTools: frontmatter['allowed-tools'],
+    allowedTools: frontmatter['allowed-tools'] ?? undefined,
+    ...mapFrontmatterToAgentFields(frontmatter),
   };
 }
 

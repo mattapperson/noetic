@@ -64,6 +64,7 @@ export function registerBuiltInSummaries(): void {
   require('./BranchSummary');
   require('./ForkSummary');
   require('./LoopSummary');
+  require('./EverySummary');
   require('./SpawnSummary');
   require('./LLMSummary');
   require('./ToolSummary');

@@ -1,3 +1,4 @@
+import type { ItemSchemaRegistry } from '../schemas/item';
 import type { Channel } from './channel';
 import type { StepMeta, TokenUsage, Tool } from './common';
 import type { FsAdapter } from './fs-adapter';
@@ -11,6 +12,18 @@ import type { ShellAdapter } from './shell-adapter';
 export interface ItemLog {
   readonly items: ReadonlyArray<Item>;
   append(item: Item): void;
+}
+
+/**
+ * @public Mutable working-directory state shared among the tools attached to a
+ * single Context. The reference is fixed for the Context's lifetime; mutate
+ * via `setToolCwd` so that all tools observe the new value at execution time.
+ *
+ * Spawned children receive a snapshot — child mutations do not affect the parent.
+ */
+export interface CwdState {
+  cwd: string;
+  previousCwd?: string;
 }
 
 /** @public Per-layer contribution to the context window on the most recent LLM call. */
@@ -54,11 +67,19 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly fs: FsAdapter;
   /** Shell adapter for virtual or real shell command execution. */
   readonly shell: ShellAdapter;
+  /**
+   * Mutable cwd state shared with the tools bound to this context. Tools
+   * resolve relative paths from `cwdState.cwd` at execution time so that an
+   * agent `cd` propagates to subsequent tool calls.
+   */
+  readonly cwdState: CwdState;
   readonly layers?: MemoryLayer[];
   /** Layer provides keyed by layer ID. Access data/functions via `ctx.memory['layerId'].prop`. */
   readonly memory: TMemory;
   /** Unified tool set collected from all LLM steps in the step tree before execution. */
   readonly unifiedTools?: ReadonlyArray<Tool>;
+  /** Runtime item schema registry active for this context. */
+  readonly itemSchemas?: ItemSchemaRegistry;
   recv<T>(
     channel: Channel<T>,
     opts?: {

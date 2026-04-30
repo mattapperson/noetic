@@ -10,7 +10,16 @@ import { routeEdge } from '../lib/edge-router';
 import { calculateSequentialLayout, fitToViewport } from '../lib/sequential-layout';
 import { ensureMap } from '../lib/serialization';
 import type { ExecutionNode, ExecutionTrace, NodeEdge, NodePosition, Waypoint } from '../types';
-import { BranchNode, ForkNode, LLMNode, LoopNode, RunNode, SpawnNode, ToolNode } from './nodes';
+import {
+  BranchNode,
+  EveryNode,
+  ForkNode,
+  LLMNode,
+  LoopNode,
+  RunNode,
+  SpawnNode,
+  ToolNode,
+} from './nodes';
 import {
   EDGE_CORNER_RADIUS,
   EDGE_STYLES,
@@ -649,6 +658,9 @@ export const NodeGraph: React.FC<NodeGraphProps> = ({
       }
       case 'loop': {
         return <LoopNode {...commonProps} />;
+      }
+      case 'every': {
+        return <EveryNode {...commonProps} />;
       }
       default: {
         return <RunNode {...commonProps} />;

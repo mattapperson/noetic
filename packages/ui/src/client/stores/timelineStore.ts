@@ -86,6 +86,7 @@ export const STEP_KIND_COLORS: Record<StepKind, string> = {
   fork: '#ec4899', // Pink
   spawn: '#6366f1', // Indigo
   loop: '#14b8a6', // Teal
+  every: '#22d3ee', // Cyan-light
 };
 
 // Calculate marker position based on wall clock time

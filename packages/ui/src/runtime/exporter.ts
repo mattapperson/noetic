@@ -567,7 +567,7 @@ export class NoeticUITraceExporter implements TraceExporter {
   private inferStepKind(
     spanName: string,
     spanAttrs?: Record<string, unknown>,
-  ): 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' {
+  ): 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'every' {
     const attrKind = spanAttrs?.kind ?? spanAttrs?.stepKind;
     if (
       attrKind === 'run' ||
@@ -576,7 +576,8 @@ export class NoeticUITraceExporter implements TraceExporter {
       attrKind === 'branch' ||
       attrKind === 'fork' ||
       attrKind === 'spawn' ||
-      attrKind === 'loop'
+      attrKind === 'loop' ||
+      attrKind === 'every'
     ) {
       return attrKind;
     }
@@ -596,6 +597,9 @@ export class NoeticUITraceExporter implements TraceExporter {
     }
     if (name.includes('spawn')) {
       return 'spawn';
+    }
+    if (name.includes('every')) {
+      return 'every';
     }
     if (name.includes('loop')) {
       return 'loop';

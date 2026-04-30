@@ -1,5 +1,11 @@
 import type { ZodTypeAny, z } from 'zod';
-import type { FunctionCallItem, Item } from './items';
+import type {
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  Item,
+  ItemSchemaExtensions,
+  ToolResultExtensionItem,
+} from './items';
 import type { ToolExecutionContext } from './tool-context';
 
 //#region Tool Execution Types
@@ -68,6 +74,17 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   output: O;
   /** Optional Zod schema validating streaming events yielded during execution. */
   event?: ZodTypeAny;
+  /** Optional item schemas contributed by this tool for tool call/result extensions. */
+  itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
+  /** Decorate the harness-created tool result item before it is appended/emitted. */
+  decorateResultItem?(params: {
+    baseItem: FunctionCallOutputItem;
+    callItem: FunctionCallItem;
+    args: z.infer<I>;
+    result: z.infer<O> | undefined;
+    output: string;
+    error?: boolean;
+  }): Item | ToolResultExtensionItem;
   /** Async function that performs the tool's work. */
   execute(args: z.infer<I>, toolCtx: ToolExecutionContext): ToolExecutionResult<O>;
   /** When true, execution pauses for human approval before running. */

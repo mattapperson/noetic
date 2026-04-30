@@ -32,6 +32,12 @@ interface Context<TState = unknown> {
   // Last step execution metadata (tool calls, token usage, cost)
   readonly lastStepMeta: StepMeta | null;
 
+  // Mutable cwd state shared with the tools bound to this context. Tools
+  // resolve relative paths from `cwdState.cwd` at execution time so that an
+  // agent `cd` propagates to subsequent tool calls. The reference is fixed
+  // for the Context's lifetime; mutate via `setToolCwd`.
+  readonly cwdState: CwdState;
+
   // Per-memory-layer breakdown of the context window as of the most recent
   // callModel in this execution. See "Per-Layer Usage Breakdown" below.
   readonly lastLayerUsage?: LastLayerUsage;
@@ -48,7 +54,19 @@ interface Context<TState = unknown> {
   complete<T>(value: T): void;
   abort(reason?: string): void;
 }
+
+interface CwdState {
+  cwd: string;            // absolute path; tools resolve relative input against this
+  previousCwd?: string;   // populated on `cd`; enables `cd -`
+}
 ```
+
+### `cwdState` semantics
+
+- The Bash tool intercepts plain `cd <path>` and mutates `cwdState` via `setToolCwd`. Compound forms (`cd foo && bar`) still go through the shell and do not persist cwd, matching POSIX.
+- Other path-using tools (Read, Write, Edit, Ls, Grep, Find, lsp, InteractiveTerminal) resolve paths from `cwdState.cwd` at execution time via the `getToolCwd(ctx, fallback)` helper. Their factory `cwd` becomes a fallback used only when `cwdState` is absent (e.g. partial test contexts).
+- Spawned and forked children receive a snapshot of the parent's `cwdState`; child mutations do not propagate to the parent (POSIX-fork semantics).
+- The mutation policy's `sessionCwd` stays anchored to the harness launch cwd. `cd` does not widen the sandbox.
 
 ---
 
@@ -62,6 +80,8 @@ interface ItemLog {
   append(item: Item): void;
 }
 ```
+
+`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by memory layers via the `projectHistory` hook (see `11-memory-layer-system`); the canonical built-in is `historyWindow` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
 
 ---
 

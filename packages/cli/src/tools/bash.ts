@@ -9,14 +9,48 @@ import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ShellAdapter, Tool } from '@noetic/core';
-import { toolWithGenerator } from '@noetic/core';
+import { getToolCwd, setToolCwd, TIMEOUT_ERROR_PREFIX, toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
+import { handleCd, isPlainCdCommand, parseCdArg } from './cd-helper.js';
+import type { MutationPolicy } from './mutation-policy.js';
+import { isProbablyMutatingShellCommand } from './mutation-policy.js';
 import { validateCommand } from './security.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from './truncate.js';
 
 //#region Constants
 
 const DEFAULT_BASH_TIMEOUT = 12e1;
+
+/** Marker prepended to in-process `cd` interceptor output so the model can
+ *  distinguish a non-shell cwd update from a normal command's stdout. */
+const CD_INTERCEPT_PREFIX = '(cd)';
+
+/**
+ * Pre-encoded byte sequences a TUI emits when entering alternate-screen
+ * mode. If we see any of these in the output stream the command is taking
+ * over the terminal and will hang on input — abort and surface a clear
+ * error to the model. Scanned with `Buffer.indexOf` to avoid decoding the
+ * full chunk to UTF-8 on every callback.
+ *
+ * - 1049: xterm alt-screen + cursor save (vim, htop, less, …)
+ * - 1047: alt-screen only
+ * - 47:   legacy alt-screen
+ */
+const ESC = String.fromCharCode(27);
+const ALT_SCREEN_NEEDLES: ReadonlyArray<Buffer> = [
+  Buffer.from(`${ESC}[?1049h`, 'ascii'),
+  Buffer.from(`${ESC}[?1047h`, 'ascii'),
+  Buffer.from(`${ESC}[?47h`, 'ascii'),
+];
+
+function containsAltScreenEntry(data: Buffer): boolean {
+  for (const needle of ALT_SCREEN_NEEDLES) {
+    if (data.indexOf(needle) !== -1) {
+      return true;
+    }
+  }
+  return false;
+}
 
 //#endregion
 
@@ -65,25 +99,52 @@ interface ExecState {
 
 //#region Tool Description
 
-const BASH_TOOL_DESCRIPTION = `Execute bash commands in the shell.
+const BASH_TOOL_DESCRIPTION = `Execute a bash command and return its output.
 
-Usage notes:
-- ALWAYS quote file paths containing spaces with double quotes
-- NEVER use interactive flags (-i) like 'git rebase -i' or 'git add -i'
-- Prefer dedicated tools over bash: read (not cat), write (not echo >), edit (not sed), grep (not grep/rg)
-- Output truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. If truncated, full output saved to temp file.
+The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's profile (bash or zsh).
 
-Parameters:
-- command: The bash command to execute
-- timeout: Timeout in seconds (default: ${DEFAULT_BASH_TIMEOUT}s, max: 600s)
+IMPORTANT: Avoid using this tool to run \`find\`, \`grep\`, \`cat\`, \`head\`, \`tail\`, \`sed\`, \`awk\`, or \`echo\` commands unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Use the dedicated tool instead:
+ - File search: Use Find (NOT find or ls)
+ - Content search: Use Grep (NOT grep or rg)
+ - Read files: Use Read (NOT cat/head/tail)
+ - Edit files: Use Edit (NOT sed/awk)
+ - Write files: Use Write (NOT echo >/cat <<EOF)
+ - Communication: Output text directly (NOT echo/printf)
 
-When NOT to use:
-- File reading: Use the read tool instead of cat/head/tail
-- File writing: Use the write tool instead of echo/cat heredoc
-- File editing: Use the edit tool instead of sed/awk
-- Code search: Use the grep tool instead of grep/rg
-- File search: Use the find tool instead of find command
-- Directory listing: Use the ls tool instead of ls command`;
+# Instructions
+ - Before creating new directories or files, run \`ls\` first to verify the parent exists.
+ - Always quote file paths with spaces using double quotes (e.g., cd "path with spaces/file.txt").
+ - Plain \`cd <path>\` is intercepted in-process and persists for the rest of the session — subsequent Bash, Read, Write, etc. calls resolve relative paths from the new cwd. Compound forms like \`cd foo && ls\` run in a transient shell and do NOT persist cwd; use a dedicated \`cd\` call instead when you want the change to stick.
+ - Default timeout: ${DEFAULT_BASH_TIMEOUT}s. Max: 600s. Output is truncated to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB; if truncated, the full output is saved to a temp file whose path is returned.
+
+# Issuing multiple commands
+ - Independent commands that can run in parallel: make multiple Bash calls in a single message.
+ - Commands that depend on each other: use a single Bash call with '&&'.
+ - Use ';' only when ordering matters but earlier failures are acceptable.
+ - Do NOT use newlines to separate commands (newlines are OK inside quoted strings).
+
+# Git safety protocol
+ - NEVER update the git config.
+ - NEVER run destructive git commands (push --force, reset --hard, checkout ., restore ., clean -f, branch -D) unless the user explicitly requests them. Destructive actions can result in lost work — only run them when given direct instructions.
+ - NEVER skip hooks (--no-verify, --no-gpg-sign) unless the user explicitly requests it. If a hook fails, investigate and fix the underlying issue.
+ - NEVER force-push to main/master. Warn the user if they request it.
+ - CRITICAL: Always create NEW commits rather than amending, unless the user explicitly requests an amend. When a pre-commit hook fails the commit did NOT happen — so --amend would modify the PREVIOUS commit, which may destroy work.
+ - Prefer adding specific files by name over \`git add -A\` / \`git add .\`, which can accidentally include secrets (.env, credentials) or large binaries.
+ - NEVER commit changes unless the user explicitly asks you to.
+ - Never use \`-i\` flags (git rebase -i, git add -i) — they require interactive input that is not supported.
+ - Never use \`--no-edit\` with \`git rebase\` — it is not a valid rebase option.
+ - Always pass commit messages via HEREDOC to preserve formatting.
+
+# Committing (only when the user explicitly asks)
+ 1. In parallel: \`git status\` (never with -uall — can cause memory issues on large repos), \`git diff\`, and \`git log\` to match the repo's commit-message style.
+ 2. Draft a concise 1-2 sentence message focused on *why*, not *what* — the diff already shows what changed.
+ 3. In parallel: stage specific files by name, run the commit using a HEREDOC-passed message, then run \`git status\` to verify success.
+ 4. If the commit fails due to a pre-commit hook: fix the issue, re-stage, and create a NEW commit — never amend.
+
+# Sleep hygiene
+ - Do not sleep between commands that can run immediately.
+ - For long-running commands, run the command synchronously if it's under 2 minutes, or ask the user how to proceed for longer jobs.
+ - Never retry failing commands in a sleep loop — diagnose the root cause.`;
 
 //#endregion
 
@@ -163,8 +224,8 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
     };
   }
 
-  if (error.message.startsWith('timeout:')) {
-    const timeoutSecs = error.message.split(':')[1];
+  if (error.message.startsWith(TIMEOUT_ERROR_PREFIX)) {
+    const timeoutSecs = error.message.slice(TIMEOUT_ERROR_PREFIX.length);
     return {
       output: output
         ? `${output}\n\nCommand timed out after ${timeoutSecs} seconds`
@@ -185,21 +246,75 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
 
 export type BashTool = Tool<typeof BashInputSchema, typeof BashOutputSchema>;
 
-export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
+export function createBashTool(
+  cwd: string,
+  shell: ShellAdapter,
+  mutationPolicy?: MutationPolicy,
+): BashTool {
   return toolWithGenerator({
     name: 'Bash',
     description: BASH_TOOL_DESCRIPTION,
     input: BashInputSchema,
     output: BashOutputSchema,
     event: BashEventSchema,
-    async *execute(params) {
+    async *execute(params, toolCtx) {
       const { command, timeout: userTimeout } = params;
       const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 6e2);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+
+      // Intercept plain `cd <path>` so the cwd persists for subsequent tool
+      // calls. Compound forms (`cd foo && bar`) still go through the shell —
+      // the shell's cwd evaporates with the subprocess (POSIX), matching the
+      // behavior described in the tool description. Skip when the test
+      // scaffold passes an empty toolCtx without a Context.
+      if (isPlainCdCommand(command) && toolCtx.ctx?.cwdState) {
+        const cd = handleCd({
+          arg: parseCdArg(command),
+          effectiveCwd: liveCwd,
+          prevCwd: toolCtx.ctx.cwdState.previousCwd ?? null,
+        });
+        if (cd.kind === 'error') {
+          return {
+            output: `Error: ${cd.message}`,
+            command,
+            exitCode: 1,
+            cancelled: false,
+            truncated: false,
+            timeout,
+          };
+        }
+        setToolCwd(toolCtx.ctx, cd.newCwd);
+        return {
+          output: `${CD_INTERCEPT_PREFIX} cwd is now ${cd.newCwd}`,
+          command,
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+          timeout,
+        };
+      }
 
       const validation = validateCommand(command);
       if (!validation.valid) {
         return {
           output: `Error: ${validation.error}`,
+          command,
+          cancelled: false,
+          truncated: false,
+          timeout,
+        };
+      }
+
+      const decision = isProbablyMutatingShellCommand(command)
+        ? await mutationPolicy?.check({
+            kind: 'bash',
+            cwd: liveCwd,
+            command,
+          })
+        : undefined;
+      if (decision && !decision.allowed) {
+        return {
+          output: `Error: ${decision.message}`,
           command,
           cancelled: false,
           truncated: false,
@@ -222,11 +337,21 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
         done: false,
       };
 
+      const abortController = new AbortController();
+
       const execPromise = shell
         .exec(command, {
-          cwd,
+          cwd: liveCwd,
           timeout,
+          signal: abortController.signal,
           onData: (data: Buffer) => {
+            if (abortController.signal.aborted) {
+              return;
+            }
+            if (containsAltScreenEntry(data)) {
+              abortController.abort();
+              return;
+            }
             if (resolveData) {
               resolveData(data);
               resolveData = null;
@@ -269,6 +394,9 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
       };
 
       while (true) {
+        if (abortController.signal.aborted) {
+          break;
+        }
         const data = await getNextChunk();
         if (data === null) {
           break;
@@ -313,6 +441,17 @@ export function createBashTool(cwd: string, shell: ShellAdapter): BashTool {
       }
 
       const finalExitCode = execState.result ? execState.result.exitCode : null;
+
+      if (abortController.signal.aborted) {
+        return {
+          output:
+            "Command appears to be an interactive TUI program (it tried to enter alternate-screen mode). Interactive programs aren't supported through this tool — use Read/Edit for files, or invoke the program with non-interactive flags (e.g. `git --no-pager`, `<repl> -c '<expr>'`).",
+          command,
+          cancelled: true,
+          truncated: false,
+          timeout,
+        };
+      }
 
       if (execState.error) {
         const errorResult = buildErrorResult({

@@ -1,0 +1,54 @@
+diff --git a/esm/lib/model-result.d.ts b/esm/lib/model-result.d.ts
+index b85b515..14f0154 100644
+--- a/esm/lib/model-result.d.ts
++++ b/esm/lib/model-result.d.ts
+@@ -146,7 +146,7 @@ export declare class ModelResult<TTools extends readonly Tool[], TShared extends
+      * Returns true if execution should stop.
+      *
+      * @remarks
+-     * Default: stepCountIs(DEFAULT_MAX_STEPS) if no stopWhen is specified.
++     * Default: no implicit step limit if no stopWhen is specified.
+      * This evaluates stop conditions against the complete step history.
+      */
+     private shouldStopExecution;
+diff --git a/esm/lib/model-result.js b/esm/lib/model-result.js
+index eb73410..8d46a0c 100644
+--- a/esm/lib/model-result.js
++++ b/esm/lib/model-result.js
+@@ -3,18 +3,13 @@ import { hasAsyncFunctions, resolveAsyncFunctions } from './async-params.js';
+ import { appendToMessages, createInitialState, createRejectedResult, createUnsentResult, extractTextFromResponse as extractTextFromResponseState, partitionToolCalls, unsentResultsToAPIFormat, updateState, } from './conversation-state.js';
+ import { applyNextTurnParamsToRequest, executeNextTurnParamsFunctions, } from './next-turn-params.js';
+ import { ReusableReadableStream } from './reusable-stream.js';
+-import { isStopConditionMet, stepCountIs } from './stop-conditions.js';
++import { isStopConditionMet } from './stop-conditions.js';
+ import { buildItemsStream, buildResponsesMessageStream, buildToolCallStream, consumeStreamForCompletion, extractReasoningDeltas, extractResponsesMessageFromResponse, extractTextDeltas, extractTextFromResponse, extractToolCallsFromResponse, extractToolDeltas, itemsStreamHandlers, streamTerminationEvents, } from './stream-transformers.js';
+ import { hasTypeProperty, isFunctionCallItem, isOutputTextDeltaEvent, isReasoningDeltaEvent, isResponseCompletedEvent, isResponseFailedEvent, isResponseIncompleteEvent, } from './stream-type-guards.js';
+ import { resolveContext, ToolContextStore } from './tool-context.js';
+ import { ToolEventBroadcaster } from './tool-event-broadcaster.js';
+ import { executeTool } from './tool-executor.js';
+ import { hasExecuteFunction, isToolCallOutputEvent } from './tool-types.js';
+-/**
+- * Default maximum number of tool execution steps if no stopWhen is specified.
+- * This prevents infinite loops in tool execution.
+- */
+-const DEFAULT_MAX_STEPS = 5;
+ /**
+  * Type guard for stream event with toReadableStream method
+  * Checks constructor name, prototype, and method availability
+@@ -340,11 +335,14 @@ export class ModelResult {
+      * Returns true if execution should stop.
+      *
+      * @remarks
+-     * Default: stepCountIs(DEFAULT_MAX_STEPS) if no stopWhen is specified.
++     * Default: no implicit step limit if no stopWhen is specified.
+      * This evaluates stop conditions against the complete step history.
+      */
+     async shouldStopExecution() {
+-        const stopWhen = this.options.stopWhen ?? stepCountIs(DEFAULT_MAX_STEPS);
++        const stopWhen = this.options.stopWhen;
++        if (!stopWhen) {
++            return false;
++        }
+         const stopConditions = Array.isArray(stopWhen)
+             ? stopWhen
+             : [

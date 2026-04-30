@@ -24,6 +24,12 @@ if [ -z "$GIT_ROOT" ] || [ ! -f "$GIT_ROOT/biome.json" ]; then
   exit 0
 fi
 
+# Skip during an in-progress merge — conflict markers break biome's parser and
+# its --fix --unsafe pass mangles the file (renames vars, drops syntax).
+if [ -f "$GIT_ROOT/.git/MERGE_HEAD" ]; then
+  exit 0
+fi
+
 BIOME="$GIT_ROOT/node_modules/.bin/biome"
 if [ ! -x "$BIOME" ]; then
   # Fallback if local binary missing

@@ -2,7 +2,7 @@ import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context';
 import type { FsAdapter } from './fs-adapter';
-import type { Item } from './items';
+import type { Item, ItemSchemaExtensions } from './items';
 import type { CallModelRequest } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 import type {
@@ -105,6 +105,7 @@ export type InferMemory<T extends MemoryConfig> = T['_shape'];
 
 /** @public Well-known ordering slots for positioning memory layers in the recall/store pipeline. */
 export const Slot = {
+  REMINDER: 80,
   STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
@@ -139,6 +140,7 @@ export interface LayerTimeouts {
   beforeToolCall?: number;
   afterModelCall?: number;
   onItemAppend?: number;
+  projectHistory?: number;
 }
 
 /** @public Terminal outcome of an execution run, reported to memory layers on completion. */
@@ -166,6 +168,19 @@ export interface ExecutionContext {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
   };
+  /**
+   * Snapshot a sibling memory layer's state by its `layer.id`.
+   * Returns `undefined` if no layer with that ID has stored state in this execution.
+   * Enables cross-layer coordination (e.g., a reminder layer reading a planning layer's mode flag).
+   *
+   * **Type safety:** The generic `T` is an author-assertion — it is NOT
+   * runtime-validated. Any layer may register under the queried id with an
+   * arbitrary state shape, so callers MUST add a runtime shape guard (e.g.
+   * `Array.isArray`, a Zod parse, or a narrow `typeof` check) before
+   * dereferencing fields. See `reminder-triggers.ts` (`hasSources`) in
+   * `@noetic/cli` for the canonical pattern.
+   */
+  readLayerState<T>(layerId: string): T | undefined;
 }
 
 /** @public Low-level key-value persistence backend used by scoped storage and memory layers. */
@@ -265,6 +280,22 @@ export interface DisposeParams<TState> {
   state: TState;
 }
 
+/** @public Parameters passed to a memory layer's `projectHistory` hook to project the history portion of the LLM context window. */
+export interface ProjectHistoryParams<TState> {
+  /** Full historical items from the item log, uncapped. */
+  items: ReadonlyArray<Item>;
+  /** Current execution context. */
+  ctx: ExecutionContext;
+  /** Layer's current state snapshot. */
+  state: TState;
+}
+
+/** @public Value returned by a memory layer's `projectHistory` hook, carrying the projected items. */
+export interface ProjectHistoryResult {
+  /** Items to send to the LLM as history. Typically a subset of the input. */
+  items: ReadonlyArray<Item>;
+}
+
 //#region onItemAppend Hook
 
 /** @public Controls which layers re-run recall() when a re-render is triggered. */
@@ -333,6 +364,15 @@ export interface MemoryHooks<TState = unknown> {
    * NOT called for LLM response items — use `store()` for those.
    */
   onItemAppend?(params: OnItemAppendParams<TState>): Promise<OnItemAppendResult<TState>>;
+  /**
+   * Called once per LLM step to project (cap, transform) the history portion
+   * of the context window before assembleView. Layers compose in slot order:
+   * each receives the output of the previous layer. Storage (`itemLog`) is
+   * NOT mutated — this is a read-side projection only.
+   *
+   * Use for: capping history, summarising old turns, redacting items.
+   */
+  projectHistory?(params: ProjectHistoryParams<TState>): Promise<ProjectHistoryResult>;
 }
 
 /**
@@ -356,6 +396,8 @@ export interface MemoryLayer<TState = unknown> {
   timeouts?: Partial<LayerTimeouts>;
   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
   provides?: LayerProvides;
+  /** Optional item schemas contributed by this layer, primarily for developer-role memory items. */
+  itemSchemas?: Pick<ItemSchemaExtensions, 'developerMessages' | 'items'>;
   /** Default re-render timing when `onItemAppend` requests a re-render. */
   rerenderTiming?: 'immediate' | 'batched';
 }

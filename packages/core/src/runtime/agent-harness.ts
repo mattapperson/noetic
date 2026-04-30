@@ -1,3 +1,4 @@
+import type * as OpenRouterAgent from '@openrouter/agent';
 import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
@@ -25,21 +26,24 @@ import {
   disposeLayers,
   executeRerender,
   initLayers,
+  projectHistoryLayers,
   recallLayers,
   resolveLayerBudgets,
   runAppendPipeline,
   storeLayers,
 } from '../memory/layer-lifecycle';
+import { assembleView } from '../memory/projector';
 import { getRegisteredExporter } from '../observability/exporter-registry';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
+import { ItemSchemaRegistry, mergeExtensions } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
 import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
-import type { Context } from '../types/context';
+import type { Context, CwdState } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { FsAdapter } from '../types/fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from '../types/harness-result';
-import type { ExecuteInput, InputMessageItem, Item } from '../types/items';
+import type { ExecuteInput, InputMessageItem, Item, ItemSchemaExtensions } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { Span, TraceExporter } from '../types/observability';
 import type {
@@ -60,6 +64,7 @@ import type { Step } from '../types/step';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
+import { snapshotCwdState } from './cwd-helpers';
 import { DetachedHandleImpl } from './detached-handle';
 import type { EventBroadcaster } from './event-broadcaster';
 import { contextToExecCtx } from './exec-context-factory';
@@ -84,10 +89,26 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   /** Shell adapter. Defaults to local sh when not provided. */
   shell?: ShellAdapter;
   llm?: LlmProviderConfig;
+  /** Harness-wide item schema extensions. */
+  itemSchemas?: ItemSchemaExtensions;
+  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
+  strictItemSchemas?: boolean;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
   /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
   defaultDeliveryMode?: DeliveryMode;
+  /**
+   * Abort the in-flight model call if the provider stream emits no events for this
+   * many milliseconds. Defaults to `DEFAULT_STREAM_IDLE_TIMEOUT_MS` (120s).
+   * Pass `0` or a negative number to disable the watchdog.
+   */
+  streamIdleTimeoutMs?: number;
+  /**
+   * Initial working directory for the harness. Used as the seed value for the
+   * shared `cwdState.cwd` on every Context this harness creates, including
+   * those produced by spawn/fork. Defaults to `process.cwd()`.
+   */
+  initialCwd?: string;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
 }
@@ -100,9 +121,40 @@ interface Session {
 //#endregion
 
 const MAX_TOOL_ROUNDS = 32;
+const MAX_RECOVERY_CONTINUATIONS = 3;
+const EPHEMERAL_CONTINUE_INPUT = 'continue';
 const DEFAULT_THREAD_ID = '__default__';
+/** Default idle-timeout for a single model call's streaming response. Chosen to be
+ *  long enough that slow models aren't falsely aborted, but short enough that a
+ *  stalled SSE becomes a visible error rather than a silent hang. */
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120e3;
 
 //#region Helpers
+
+/**
+ * Pick the right `cwdState` for a new Context.
+ *
+ * - `cwdInit` explicitly overrides everything (worktree isolation).
+ * - Parent snapshot if present (snapshot, not shared reference — child `cd`
+ *   does not leak to parent).
+ * - Otherwise share the harness `rootCwdState` reference so successive root
+ *   contexts see TUI/agent `cd`s carry across runs.
+ */
+function resolveContextCwdState(
+  rootCwdState: CwdState,
+  parent: Context | undefined,
+  cwdInit: string | undefined,
+): CwdState {
+  if (cwdInit !== undefined) {
+    return {
+      cwd: cwdInit,
+    };
+  }
+  if (parent) {
+    return snapshotCwdState(parent);
+  }
+  return rootCwdState;
+}
 
 function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   const apiKey = config?.apiKey ?? process.env.OPENROUTER_API_KEY;
@@ -112,6 +164,85 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   return new OpenRouter({
     apiKey,
   });
+}
+
+function mergeItemSchemaExtensions(
+  extensions: ReadonlyArray<ItemSchemaExtensions | undefined>,
+): ItemSchemaExtensions {
+  let result: ItemSchemaExtensions = {
+    items: [],
+    developerMessages: [],
+    toolCalls: [],
+    toolResults: [],
+  };
+  for (const ext of extensions) {
+    if (ext) {
+      result = mergeExtensions(result, ext);
+    }
+  }
+  return result;
+}
+
+function collectLayerItemSchemaExtensions(layers: ReadonlyArray<MemoryLayer> | undefined) {
+  return mergeItemSchemaExtensions(layers?.map((layer) => layer.itemSchemas) ?? []);
+}
+
+function collectToolItemSchemaExtensions(tools: ReadonlyArray<Tool> | undefined) {
+  return mergeItemSchemaExtensions(tools?.map((tool) => tool.itemSchemas) ?? []);
+}
+
+function buildItemSchemaRegistry({
+  base,
+  layers,
+  tools,
+}: {
+  base: ItemSchemaRegistry;
+  layers?: ReadonlyArray<MemoryLayer>;
+  tools?: ReadonlyArray<Tool>;
+}): ItemSchemaRegistry {
+  return base
+    .extend(collectLayerItemSchemaExtensions(layers))
+    .extend(collectToolItemSchemaExtensions(tools));
+}
+
+function createToolResultItem({
+  output,
+  callId,
+  roundItemSchemas,
+  tool,
+  callItem,
+  args,
+  result,
+  error,
+}: {
+  output: string;
+  callId: string;
+  roundItemSchemas: ItemSchemaRegistry;
+  tool?: Tool;
+  callItem?: Item;
+  args?: unknown;
+  result?: unknown;
+  error?: boolean;
+}): Item {
+  const baseItem = {
+    id: crypto.randomUUID(),
+    status: 'completed',
+    type: 'function_call_output',
+    callId,
+    output,
+  } as const;
+  const decorated =
+    tool?.decorateResultItem && callItem?.type === 'function_call'
+      ? tool.decorateResultItem({
+          baseItem,
+          callItem,
+          args,
+          result,
+          output,
+          error,
+        })
+      : baseItem;
+  return roundItemSchemas.parseWithCategory(decorated, 'toolResults');
 }
 
 function buildTextFormat(schema: ZodType): {
@@ -133,6 +264,67 @@ function buildTextFormat(schema: ZodType): {
 
 function isStreamRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+interface ProviderTerminalError {
+  status: string;
+  message: string;
+}
+
+function providerTerminalError(response: unknown): ProviderTerminalError | null {
+  if (!isStreamRecord(response) || response.status === undefined) {
+    return null;
+  }
+  const status = String(response.status);
+  if (status === 'completed') {
+    return null;
+  }
+  if (status === 'incomplete') {
+    const details = response.incompleteDetails;
+    const reason =
+      isStreamRecord(details) && typeof details.reason === 'string' ? `: ${details.reason}` : '';
+    return {
+      status,
+      message: `LLM response incomplete${reason}`,
+    };
+  }
+  if (status === 'failed') {
+    const error = response.error;
+    const message =
+      isStreamRecord(error) && typeof error.message === 'string' ? `: ${error.message}` : '';
+    return {
+      status,
+      message: `LLM response failed${message}`,
+    };
+  }
+  return {
+    status,
+    message: `LLM response ended with status '${status}'`,
+  };
+}
+
+function hasUsableResponseOutput(response: unknown, items: ReadonlyArray<Item>): boolean {
+  if (items.length > 0) {
+    return true;
+  }
+  return (
+    isStreamRecord(response) &&
+    typeof response.outputText === 'string' &&
+    response.outputText.length > 0
+  );
+}
+
+function withEphemeralContinueInput(
+  input: ReturnType<typeof itemsToInput>,
+): OpenRouterAgent.Item[] {
+  return [
+    ...frameworkCast<OpenRouterAgent.Item[]>(input),
+    frameworkCast<OpenRouterAgent.Item>({
+      type: 'message',
+      role: 'user',
+      content: EPHEMERAL_CONTINUE_INPUT,
+    }),
+  ];
 }
 
 /** Race a promise against an AbortSignal so callers (e.g. `SessionRunner.abort`)
@@ -168,22 +360,28 @@ function awaitWithAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Prom
 
 interface PipeStreamOpts {
   stream: AsyncIterable<unknown>;
-  broadcaster: EventBroadcaster;
+  /** Optional: when provided, each SDK event is emitted into it. Absent in
+   *  headless/test harness runs that still need the idle watchdog to reset. */
+  broadcaster?: EventBroadcaster;
   agentName: string;
   signal?: AbortSignal;
+  /** Invoked once per SDK event received — used by the idle watchdog to bump
+   *  its deadline so a still-streaming response isn't aborted. */
+  onEvent?: () => void;
 }
 
 async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void> {
-  const { stream, broadcaster, agentName, signal } = opts;
+  const { stream, broadcaster, agentName, signal, onEvent } = opts;
   try {
     for await (const event of stream) {
       if (signal?.aborted) {
         return;
       }
+      onEvent?.();
       if (!isStreamRecord(event)) {
         continue;
       }
-      broadcaster.emit({
+      broadcaster?.emit({
         source: 'sdk',
         type: typeof event.type === 'string' ? event.type : 'unknown',
         data: event,
@@ -192,16 +390,73 @@ async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void
       });
     }
   } catch (err: unknown) {
-    emitFrameworkEvent({
-      broadcaster,
-      agentName,
-      eventType: 'stream_pipe_error',
-      data: {
-        error: err instanceof Error ? err.message : String(err),
-      },
-    });
+    if (broadcaster) {
+      emitFrameworkEvent({
+        broadcaster,
+        agentName,
+        eventType: 'stream_pipe_error',
+        data: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
     throw err;
   }
+}
+
+interface StreamIdleWatchdog {
+  /** Bump the deadline because a stream event just arrived. */
+  reset: () => void;
+  /** Clear the pending timer. Safe to call multiple times. */
+  stop: () => void;
+}
+
+/** @internal Create a watchdog that aborts `controller` when no
+ *  {@link StreamIdleWatchdog.reset reset} is called within `timeoutMs`. When
+ *  `timeoutMs <= 0`, returns an inert no-op so callers can always call `.reset()`
+ *  / `.stop()` without a branch. Starts armed: the caller is responsible for
+ *  `.stop()` in a `finally`. `onTimeout` runs before the abort so observers can
+ *  emit a framework event with the original cause. Exported only for unit tests. */
+export function createStreamIdleWatchdog(
+  timeoutMs: number,
+  controller: AbortController,
+  onTimeout?: () => void,
+): StreamIdleWatchdog {
+  if (timeoutMs <= 0) {
+    return {
+      reset: () => {},
+      stop: () => {},
+    };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const arm = (): void => {
+    timer = setTimeout(() => {
+      if (stopped) {
+        return;
+      }
+      const reason = new Error(`llm stream idle timeout after ${timeoutMs}ms`);
+      onTimeout?.();
+      controller.abort(reason);
+    }, timeoutMs);
+  };
+  arm();
+  return {
+    reset: () => {
+      if (stopped || !timer) {
+        return;
+      }
+      clearTimeout(timer);
+      arm();
+    },
+    stop: () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }
 
 /** @internal Context carries the session queue reference so callModel can
@@ -247,6 +502,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
+  private readonly streamIdleTimeoutMs: number;
   private readonly sessions = new Map<string, Session>();
   readonly layerStateStore: LayerStateStore;
   private _traceExporter: TraceExporter | null;
@@ -257,6 +513,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     }
     return this._traceExporter;
   }
+  /**
+   * Long-lived shared cwd state. The same reference is seeded into every
+   * root Context this harness creates, so successive `run()` calls — and the
+   * TUI — observe each other's `cd`s.
+   */
+  readonly rootCwdState: CwdState;
+  private readonly itemSchemas: ItemSchemaRegistry;
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
@@ -266,6 +529,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       storage: opts.storage ?? createInMemoryStorage(),
       hooks: opts.hooks,
       params: validatedParams,
+      itemSchemas: opts.itemSchemas,
+      strictItemSchemas: opts.strictItemSchemas ?? true,
     };
     this.fs = opts.fs ?? createLocalFsAdapter();
     this.shell = opts.shell ?? createLocalShellAdapter();
@@ -277,6 +542,27 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this._traceExporter = opts.traceExporter ?? null;
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
+    this.streamIdleTimeoutMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+    this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas, {
+      strictUnknownExtensions: opts.strictItemSchemas ?? true,
+    });
+    this.rootCwdState = {
+      cwd: opts.initialCwd ?? process.cwd(),
+    };
+  }
+
+  /**
+   * Update the harness-wide root cwd. The TUI calls this in response to a
+   * user-issued `! cd`, so the next root Context (and any tool inspecting
+   * `harness.rootCwdState.cwd`) observes the new value. Caller is responsible
+   * for passing an absolute, validated path.
+   */
+  setRootCwd(nextCwd: string): void {
+    if (nextCwd === this.rootCwdState.cwd) {
+      return;
+    }
+    this.rootCwdState.previousCwd = this.rootCwdState.cwd;
+    this.rootCwdState.cwd = nextCwd;
   }
 
   //#region Session Accessors
@@ -321,7 +607,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem> {
     const session = this.requireSession(scope);
-    return buildItemStream(session.runner.broadcaster);
+    return buildItemStream(session.runner.broadcaster, this.itemSchemas);
   }
 
   getTextStream(scope?: SessionScope): AsyncIterable<string> {
@@ -367,6 +653,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
     const session = this.sessions.get(threadId);
     return session ? session.runner.queue.size : 0;
+  }
+
+  seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void {
+    const session = this.getOrCreateSession(threadId);
+    session.accumulatedItems = [
+      ...items,
+    ];
   }
 
   private getOrCreateSession(threadId: string): Session {
@@ -498,7 +791,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   async callModel(request: CallModelRequest): Promise<LLMResponse> {
     if (this.callModelOverride) {
-      return this.callModelOverride(request);
+      const response = await this.callModelOverride(request);
+      const itemSchemas = buildItemSchemaRegistry({
+        base: this.itemSchemas,
+        layers: request.layers,
+        tools: request.tools,
+      });
+      return {
+        ...response,
+        items: itemSchemas.parseMany(response.items),
+      };
     }
 
     if (!this.client) {
@@ -560,10 +862,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const conversationInput = itemsToInput(remaining);
     const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      if (signal?.aborted) {
-        break;
-      }
+    let round = 0;
+    let invalidRecoveryContinuations = 0;
+    let toolLimitRecoveryContinuations = 0;
+    let useEphemeralContinue = false;
+
+    while (!signal?.aborted) {
+      const recoveryContinuation = useEphemeralContinue;
+      useEphemeralContinue = false;
 
       // Inject between-rounds inbox messages (mode: 'between-rounds') before
       // the next LLM call. Mirrors Claude Code's teammate-attachment path.
@@ -606,10 +912,40 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         }
       }
 
+      // Build a round-scoped controller that also aborts when the caller's
+      // signal fires — `AbortSignal.any` handles listener lifecycle for us
+      // (no manual cleanup required on normal completion).
+      const roundController = new AbortController();
+      const roundSignal = signal
+        ? AbortSignal.any([
+            signal,
+            roundController.signal,
+          ])
+        : roundController.signal;
+      let firstEventSeen = false;
+      let idleStalled = false;
+      const watchdog = createStreamIdleWatchdog(this.streamIdleTimeoutMs, roundController, () => {
+        idleStalled = true;
+        emitIfAllowed('llm_call_stalled', {
+          round,
+          idleTimeoutMs: this.streamIdleTimeoutMs,
+        });
+      });
+      const modelInput: OpenRouterAgent.Item[] = recoveryContinuation
+        ? withEphemeralContinueInput(conversationInput)
+        : frameworkCast<OpenRouterAgent.Item[]>(conversationInput);
+
+      emitIfAllowed('llm_call_started', {
+        round,
+        messageCount: modelInput.length,
+        toolCount: sdkTools?.length ?? 0,
+        recoveryContinuation,
+      });
+
       const callResult = this.client.callModel(
         {
           model: request.model,
-          input: frameworkCast(conversationInput),
+          input: modelInput,
           instructions,
           tools: sdkTools,
           temperature: request.params?.temperature,
@@ -621,30 +957,112 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               }
             : {}),
         },
-        signal
-          ? {
-              signal,
-            }
-          : undefined,
+        {
+          signal: roundSignal,
+        },
       );
 
-      const pipePromise = broadcaster
-        ? pipeStreamEventsToBroadcaster({
-            stream: callResult.getFullResponsesStream(),
-            broadcaster,
-            agentName,
-            signal,
-          })
-        : undefined;
+      const onStreamEvent = (): void => {
+        watchdog.reset();
+        if (!firstEventSeen) {
+          firstEventSeen = true;
+          emitIfAllowed('llm_call_first_event', {
+            round,
+          });
+        }
+      };
 
-      const sdkResponse = await awaitWithAbort(callResult.getResponse(), signal);
-      if (pipePromise) {
-        await awaitWithAbort(pipePromise, signal);
+      // Always consume the SDK stream so the watchdog gets reset per event
+      // even when no broadcaster is attached (headless / test harness runs).
+      // Emission into the broadcaster is optional inside the pipe function.
+      const pipePromise = pipeStreamEventsToBroadcaster({
+        stream: callResult.getFullResponsesStream(),
+        broadcaster,
+        agentName,
+        signal: roundSignal,
+        onEvent: onStreamEvent,
+      });
+
+      let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>>;
+      try {
+        sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
+        // Stop the watchdog synchronously the instant the response resolves,
+        // closing the race where a pending setTimeout could fire in the
+        // microtask gap between this await and the `finally` below.
+        watchdog.stop();
+        await awaitWithAbort(pipePromise, roundSignal);
+      } catch (err: unknown) {
+        if (idleStalled) {
+          // roundSignal.reason is the Error the watchdog passed to controller.abort().
+          throw roundSignal.reason instanceof Error
+            ? roundSignal.reason
+            : new Error(`llm stream idle timeout after ${this.streamIdleTimeoutMs}ms`);
+        }
+        // Parent signal cancelled the round — exit gracefully rather than
+        // propagating the abort error as an exception.
+        if (signal?.aborted) {
+          break;
+        }
+        throw err;
+      } finally {
+        watchdog.stop();
       }
       if (signal?.aborted) {
         break;
       }
-      const roundItems = extractOutputItems(sdkResponse);
+      const terminalError = providerTerminalError(sdkResponse);
+      if (terminalError) {
+        emitIfAllowed('llm_call_failed', {
+          round,
+          status: terminalError.status,
+          error: terminalError.message,
+          recoverable: invalidRecoveryContinuations < MAX_RECOVERY_CONTINUATIONS,
+        });
+        if (invalidRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
+          throw new Error(terminalError.message);
+        }
+        invalidRecoveryContinuations += 1;
+        useEphemeralContinue = true;
+        emitIfAllowed('llm_call_recovery_continue', {
+          round,
+          status: terminalError.status,
+          attempt: invalidRecoveryContinuations,
+          maxAttempts: MAX_RECOVERY_CONTINUATIONS,
+        });
+        continue;
+      }
+      const roundItemSchemas = buildItemSchemaRegistry({
+        base: this.itemSchemas,
+        layers: request.layers,
+        tools: request.tools,
+      });
+      const roundItems = roundItemSchemas.parseMany(extractOutputItems(sdkResponse));
+      if (!hasUsableResponseOutput(sdkResponse, roundItems)) {
+        const message = 'LLM response completed with no output items';
+        emitIfAllowed('llm_call_failed', {
+          round,
+          status: 'completed',
+          error: message,
+          recoverable: invalidRecoveryContinuations < MAX_RECOVERY_CONTINUATIONS,
+        });
+        if (invalidRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
+          throw new Error(message);
+        }
+        invalidRecoveryContinuations += 1;
+        useEphemeralContinue = true;
+        emitIfAllowed('llm_call_recovery_continue', {
+          round,
+          status: 'completed',
+          attempt: invalidRecoveryContinuations,
+          maxAttempts: MAX_RECOVERY_CONTINUATIONS,
+        });
+        continue;
+      }
+      invalidRecoveryContinuations = 0;
+      emitIfAllowed('llm_call_completed', {
+        round,
+        itemCount: sdkResponse.output?.length ?? 0,
+      });
       const roundUsage = extractUsage(sdkResponse.usage);
 
       totalUsage.inputTokens += roundUsage.inputTokens;
@@ -688,13 +1106,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           parsedArgs = JSON.parse(fc.arguments);
         } catch {
           const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
-          allItems.push({
-            id: crypto.randomUUID(),
-            status: 'completed',
-            type: 'function_call_output',
-            callId: fc.callId,
+          const toolForCall = request.tools.find((t) => t.name === fc.name);
+          const outputItem = createToolResultItem({
             output: errorOutput,
+            callId: fc.callId,
+            roundItemSchemas,
+            tool: toolForCall,
+            callItem: fc,
+            error: true,
           });
+          allItems.push(outputItem);
           conversationInput.push({
             type: 'function_call_output',
             callId: fc.callId,
@@ -708,7 +1129,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           continue;
         }
 
-        const output = await executeToolCall({
+        const toolForCall = request.tools.find((t) => t.name === fc.name);
+        const toolResult = await executeToolCall({
           toolName: fc.name,
           args: parsedArgs,
           tools: request.tools,
@@ -716,14 +1138,19 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           harness: this,
           layers: request.layers,
         });
+        const { output } = toolResult;
 
-        allItems.push({
-          id: crypto.randomUUID(),
-          status: 'completed',
-          type: 'function_call_output',
-          callId: fc.callId,
+        const outputItem = createToolResultItem({
           output,
+          callId: fc.callId,
+          roundItemSchemas,
+          tool: toolForCall,
+          callItem: fc,
+          args: parsedArgs,
+          result: toolResult.result,
+          error: toolResult.error,
         });
+        allItems.push(outputItem);
         conversationInput.push({
           type: 'function_call_output',
           callId: fc.callId,
@@ -741,6 +1168,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         round,
         toolCount: functionCalls.length,
       });
+
+      round += 1;
+      if (round >= MAX_TOOL_ROUNDS) {
+        emitIfAllowed('tool_round_limit_exceeded', {
+          maxToolRounds: MAX_TOOL_ROUNDS,
+          attempt: toolLimitRecoveryContinuations + 1,
+          maxAttempts: MAX_RECOVERY_CONTINUATIONS,
+        });
+        if (toolLimitRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
+          throw new Error(`LLM exceeded maximum tool rounds (${MAX_TOOL_ROUNDS})`);
+        }
+        toolLimitRecoveryContinuations += 1;
+        useEphemeralContinue = true;
+      }
     }
 
     return {
@@ -835,11 +1276,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     s: Step<ContextMemory, I, O>,
     input: I,
     parentCtx: Context,
+    overrides?: {
+      /** Override the child's thread id. Default inherits from `parentCtx.threadId`. */
+      threadId?: string;
+      /** Override the child's resource id. Default inherits from `parentCtx.resourceId`. */
+      resourceId?: string;
+      /** Override the child's initial cwd. Used by worktree isolation to root the child at the worktree path. */
+      cwdInit?: string;
+    },
   ): DetachedHandle<O> {
     const childCtx = this.createContext({
       parent: parentCtx,
-      threadId: parentCtx.threadId,
-      resourceId: parentCtx.resourceId,
+      threadId: overrides?.threadId ?? parentCtx.threadId,
+      resourceId: overrides?.resourceId ?? parentCtx.resourceId,
+      cwdInit: overrides?.cwdInit,
     });
     const promise = this.run(s, input, childCtx);
     return new DetachedHandleImpl<O>(childCtx.id, promise);
@@ -852,9 +1302,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     threadId?: string;
     resourceId?: string;
     memory?: MemoryLayer[];
+    /**
+     * Initial cwd for the new context. When set, takes precedence over both
+     * the parent snapshot and the harness root cwd — used by worktree
+     * isolation to root a child agent at the worktree path.
+     */
+    cwdInit?: string;
     _broadcaster?: EventBroadcaster;
   }): Context {
-    const { memory: memoryLayers, ...rest } = opts ?? {};
+    const { memory: memoryLayers, cwdInit, ...rest } = opts ?? {};
+    const effectiveMemory = memoryLayers ?? this._memory;
+    const itemSchemas = buildItemSchemaRegistry({
+      base: this.itemSchemas,
+      layers: effectiveMemory,
+    });
 
     // Create or inherit span
     const parentSpan = opts?.parent?.span;
@@ -865,7 +1326,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       harness: this,
       channelStore: this.channelStore,
       span,
-      layers: memoryLayers ?? this._memory,
+      layers: effectiveMemory,
+      itemSchemas,
+      cwdState: resolveContextCwdState(this.rootCwdState, opts?.parent, cwdInit),
     });
   }
 
@@ -908,7 +1371,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   private toExecCtx(ctx: Context): ExecutionContext {
-    return contextToExecCtx(ctx, (request) => this.callModel(request));
+    return contextToExecCtx(ctx, {
+      callModel: (request) => this.callModel(request),
+    });
   }
 
   async initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {
@@ -932,6 +1397,47 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       log: ctx.itemLog,
       budgets: resolveLayerBudgets(layers),
       store: this.layerStateStore,
+      itemSchemas: this.itemSchemas,
+    });
+  }
+
+  /**
+   * Compute the items array that would be sent to the model on the next turn —
+   * the same arrangement `executeLLM` builds: harness-level memory layers'
+   * recall outputs concatenated with the session's accumulated history.
+   *
+   * Read-mostly: `recallLayers` writes layer-state snapshots to
+   * `layerStateStore` exactly as a real turn would, so successive previews
+   * remain consistent with what the next real turn produces.
+   */
+  async previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>> {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    // Read-only: if the session doesn't exist, treat history as empty rather
+    // than allocating a SessionRunner for a debug/preview call.
+    const existingSession = this.sessions.get(threadId);
+    const historyItems: Item[] = existingSession
+      ? [
+          ...existingSession.accumulatedItems,
+        ]
+      : [];
+    const ctx = this.createContext({
+      items: historyItems,
+      threadId,
+      memory: this._memory,
+    });
+    const layers = ctx.layers ?? [];
+    if (layers.length === 0) {
+      return historyItems;
+    }
+    const recallResults = await this.recallLayers(layers, '', ctx);
+    const layerOutputItems = recallResults.flatMap((r) => r.items);
+    if (layerOutputItems.length === 0) {
+      return historyItems;
+    }
+    return assembleView({
+      systemPromptItems: [],
+      layerOutputItems,
+      historyItems,
     });
   }
 
@@ -1018,6 +1524,23 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
+  async projectHistory(
+    layers: MemoryLayer[],
+    items: ReadonlyArray<Item>,
+    ctx: Context,
+  ): Promise<ReadonlyArray<Item>> {
+    const hasHook = layers.some((l) => l.hooks.projectHistory);
+    if (!hasHook) {
+      return items;
+    }
+    return projectHistoryLayers({
+      layers,
+      items,
+      ctx: this.toExecCtx(ctx),
+      store: this.layerStateStore,
+    });
+  }
+
   async runAppendPipeline(
     layers: MemoryLayer[],
     items: Item[],
@@ -1073,6 +1596,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       budgets,
       store: this.layerStateStore,
       query,
+      itemSchemas: this.itemSchemas,
     });
   }
 }

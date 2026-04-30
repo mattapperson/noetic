@@ -4,6 +4,7 @@ import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
+import { executeEvery } from './execute-every';
 import { executeFork } from './execute-fork';
 import { executeLLM } from './execute-llm';
 import { executeLoop } from './execute-loop';
@@ -69,6 +70,16 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       break;
     case 'branch':
       span.setAttribute('branchType', 'dynamic');
+      break;
+    case 'every':
+      span.setAttribute('everyMs', step.ms);
+      span.setAttribute('everyJitter', step.jitter ?? 0);
+      span.setAttribute('everyOnError', step.onError ?? 'continue');
+      span.setAttribute('everyBodyStepId', step.step.id);
+      span.setAttribute('everyBodyStepKind', step.step.kind);
+      if (step.wakeOn) {
+        span.setAttribute('everyWakeOn', step.wakeOn.name);
+      }
       break;
   }
 
@@ -150,13 +161,18 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
         result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
       case 'spawn':
-        result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
+        result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), {
+          itemSchemas: baseCtx.itemSchemas,
+        });
         break;
       case 'provide':
         result = await executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
       case 'loop':
         result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'every':
+        result = await executeEvery(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
       default: {
         const _exhaustive: never = step;

@@ -28,10 +28,15 @@ export function createLocalFsAdapter(): FsAdapter {
     readFile: (p) => fs.readFile(p),
     readFileText: (p) => fs.readFile(p, 'utf-8'),
     writeFile: (p, content) => fs.writeFile(p, content, 'utf-8'),
+    appendFile: (p, content) => fs.appendFile(p, content, 'utf-8'),
     mkdir: async (dir) => {
       await fs.mkdir(dir, {
         recursive: true,
       });
+    },
+    rename: (oldPath, newPath) => fs.rename(oldPath, newPath),
+    rm: async (p, options) => {
+      await fs.rm(p, options);
     },
     access: (p, mode) => fs.access(p, mode ?? constants.R_OK),
     stat: async (p) => toFsStats(await fs.stat(p)),

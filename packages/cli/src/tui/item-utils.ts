@@ -3,6 +3,8 @@
  */
 
 import type { Item, StreamingItem } from '@noetic/core';
+import { ItemSchema } from '@noetic/core';
+import { z } from 'zod';
 
 //#region Types
 
@@ -32,12 +34,52 @@ export interface SystemEntry {
 
 export type AssistantEntry = Item | StreamingItem;
 export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry | SystemEntry;
+
 type MessageContentPart = Extract<
   AssistantEntry,
   {
     type: 'message';
   }
 >['content'][number];
+
+//#endregion
+
+//#region Schemas
+
+const UserEntrySchema = z.object({
+  role: z.literal('user'),
+  content: z.string(),
+  id: z.string().optional(),
+  deliveryStatus: z
+    .enum([
+      'queued',
+      'sent',
+    ])
+    .optional(),
+});
+
+const SystemEntrySchema = z.object({
+  role: z.literal('system'),
+  type: z.literal('info'),
+  content: z.string(),
+});
+
+const ErrorEntrySchema = z.object({
+  role: z.literal('system'),
+  type: z.literal('error'),
+  content: z.string(),
+});
+
+/** Runtime schema for {@link ConversationEntry}. Trust-boundary validation for
+ *  persisted session entries. The assistant branch delegates to ItemSchema,
+ *  which only structurally validates the `type` discriminant — provider-shaped
+ *  items aren't deeply re-validated. */
+export const ConversationEntrySchema: z.ZodType<ConversationEntry> = z.union([
+  UserEntrySchema,
+  SystemEntrySchema,
+  ErrorEntrySchema,
+  ItemSchema,
+]);
 
 //#endregion
 
@@ -75,6 +117,15 @@ export function getItemId(item: AssistantEntry): string {
 
 //#region Text Extraction
 
+function isTextPart(part: MessageContentPart): part is Extract<
+  MessageContentPart,
+  {
+    type: 'output_text' | 'input_text';
+  }
+> {
+  return part.type === 'output_text' || part.type === 'input_text';
+}
+
 export function extractTextContent(item: AssistantEntry): string {
   if (item.type !== 'message') {
     return '';
@@ -83,15 +134,8 @@ export function extractTextContent(item: AssistantEntry): string {
     return '';
   }
   return item.content
-    .filter(
-      (
-        part: MessageContentPart,
-      ): part is {
-        type: 'output_text';
-        text: string;
-      } => part.type === 'output_text',
-    )
-    .map((part: { type: 'output_text'; text: string }) => part.text)
+    .filter(isTextPart)
+    .map((part) => part.text)
     .join('');
 }
 

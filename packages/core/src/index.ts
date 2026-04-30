@@ -18,6 +18,10 @@ export { channel } from './builders/channel-builder';
 /** @public */
 export { branch, fork } from './builders/control-flow-builders';
 /** @public */
+export type { EveryOptions } from './builders/every';
+/** @public */
+export { every } from './builders/every';
+/** @public */
 export { layerData, layerFn } from './builders/layer-provides-builders';
 /** @public */
 export type { LoopConfig } from './builders/loop-builder';
@@ -80,6 +84,10 @@ export { durableTaskState } from './memory/layers/durable-task-state';
 /** @public */
 export { fileReference } from './memory/layers/file-reference';
 /** @public */
+export type { HistoryWindowConfig } from './memory/layers/history-window';
+/** @public */
+export { historyWindow } from './memory/layers/history-window';
+/** @public */
 export type {
   ObservationalMemoryConfig,
   ObservationalState,
@@ -106,6 +114,8 @@ export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 /** @public */
 export { workingMemory } from './memory/layers/working-memory';
+/** @public */
+export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 //#endregion
 
@@ -136,6 +146,10 @@ export type {
 /** @public */
 export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
 /** @public */
+export type { InterviewOpts, InterviewQuestionAnswer, InterviewResult } from './patterns/interview';
+/** @public */
+export { interview } from './patterns/interview';
+/** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
 export { adaptivePlan, compilePlan, PlanNodeSchema } from './patterns/plans';
@@ -150,6 +164,13 @@ export { react } from './patterns/react';
 
 /** @public */
 export { AgentHarness } from './runtime/agent-harness';
+
+//#endregion
+
+//#region Schemas
+
+/** @public */
+export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from './schemas/item';
 
 //#endregion
 
@@ -179,7 +200,15 @@ export type {
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
+export { getToolCwd, setToolCwd, snapshotCwdState } from './runtime/cwd-helpers';
+/** @public */
+export type {
+  Context,
+  CwdState,
+  ItemLog,
+  LastLayerUsage,
+  LayerUsageEntry,
+} from './types/context';
 
 //#endregion
 
@@ -211,14 +240,20 @@ export type { NoeticError } from './types/error';
 /** @public */
 export type {
   ContentPart,
+  DeveloperMessageExtensionItem,
   ExecuteInput,
+  ExtendedItem,
+  ExtensionItem,
   FileSearchItem,
   FunctionCallItem,
   FunctionCallOutputItem,
   ImageGenerationItem,
+  InferExtendedItem,
   InputMessageItem,
   InputTextPart,
   Item,
+  ItemBase,
+  ItemSchemaExtensions,
   MessageItem,
   OutputItem,
   OutputTextPart,
@@ -363,6 +398,8 @@ export type { FsAdapter, FsStats } from './types/fs-adapter';
 
 /** @public */
 export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
+/** @public */
+export { TIMEOUT_ERROR_PREFIX } from './types/shell-adapter';
 
 //#endregion
 

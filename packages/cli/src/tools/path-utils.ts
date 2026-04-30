@@ -47,6 +47,14 @@ export function resolveToCwd(filePath: string, cwd: string): string {
   return resolvePath(cwd, expanded);
 }
 
+/**
+ * Quote a value for inclusion as a single shell argument. Wraps in single
+ * quotes and escapes any embedded single quotes via the standard `'\''` idiom.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export function resolveReadPath(filePath: string, cwd: string): string {
   const resolved = resolveToCwd(filePath, cwd);
 

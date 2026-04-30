@@ -6,7 +6,7 @@
 
 import nodePath from 'node:path';
 import type { FsAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import { resolveToCwd } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from './truncate.js';
@@ -112,9 +112,10 @@ export function createLsTool(cwd: string, fs: FsAdapter): LsTool {
     description: LS_TOOL_DESCRIPTION,
     input: LsInputSchema,
     output: LsOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const { path, limit } = params;
-      const dirPath = resolveToCwd(path || '.', cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const dirPath = resolveToCwd(path || '.', liveCwd);
       const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
       try {

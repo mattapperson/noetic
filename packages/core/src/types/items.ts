@@ -1,4 +1,5 @@
 import type * as OpenRouterAgent from '@openrouter/agent';
+import type { ZodTypeAny, z } from 'zod';
 
 //#region Provider Types
 
@@ -99,6 +100,11 @@ export type ServerToolItem = Omit<ResponsesServerToolOutput, 'type'> & {
 
 //#region Framework Items (created by Noetic, not from provider)
 
+/** @public Base shape required for framework and extension items. */
+export interface ItemBase {
+  readonly type: string;
+}
+
 /**
  * @public Input message created by the framework (user, system, or developer role).
  * Status includes `failed` as a Noetic extension beyond the Open Responses spec
@@ -123,6 +129,55 @@ export interface FunctionCallOutputItem {
   readonly callId: string;
   readonly output: string;
 }
+
+/** @public Item produced by an extension schema registered by a tool, memory layer, or harness. */
+export type ExtensionItem = ItemBase & Record<string, unknown>;
+
+/** @public Developer-role message item refined by a memory-layer extension schema. */
+export type DeveloperMessageExtensionItem = InputMessageItem & {
+  readonly role: 'developer';
+} & Record<string, unknown>;
+
+/** @public Function-call item refined by a tool extension schema. */
+export type ToolCallExtensionItem = FunctionCallItem & Record<string, unknown>;
+
+/** @public Function-call output item refined by a tool extension schema. */
+export type ToolResultExtensionItem = FunctionCallOutputItem & Record<string, unknown>;
+
+/** @public Zod schemas that extend the runtime `Item` union. */
+export interface ItemSchemaExtensions {
+  /** Harness-wide schemas. Any item matching one of these schemas is accepted. */
+  readonly items?: ReadonlyArray<ZodTypeAny>;
+  /** Schemas for memory-layer developer message items. */
+  readonly developerMessages?: ReadonlyArray<ZodTypeAny>;
+  /** Schemas for tool call items emitted by the model or a harness adapter. */
+  readonly toolCalls?: ReadonlyArray<ZodTypeAny>;
+  /** Schemas for tool result items emitted by the harness or a tool adapter. */
+  readonly toolResults?: ReadonlyArray<ZodTypeAny>;
+}
+
+/** @public Type inferred from an `ItemSchemaExtensions` declaration. */
+export type InferExtendedItem<TExtensions extends ItemSchemaExtensions | undefined> =
+  TExtensions extends ItemSchemaExtensions
+    ?
+        | (TExtensions['items'] extends ReadonlyArray<infer S extends ZodTypeAny>
+            ? z.infer<S>
+            : never)
+        | (TExtensions['developerMessages'] extends ReadonlyArray<infer S extends ZodTypeAny>
+            ? z.infer<S>
+            : never)
+        | (TExtensions['toolCalls'] extends ReadonlyArray<infer S extends ZodTypeAny>
+            ? z.infer<S>
+            : never)
+        | (TExtensions['toolResults'] extends ReadonlyArray<infer S extends ZodTypeAny>
+            ? z.infer<S>
+            : never)
+    : never;
+
+/** @public Item union extended by a concrete `ItemSchemaExtensions` declaration. */
+export type ExtendedItem<TExtensions extends ItemSchemaExtensions | undefined> =
+  | Item
+  | InferExtendedItem<TExtensions>;
 
 //#endregion
 

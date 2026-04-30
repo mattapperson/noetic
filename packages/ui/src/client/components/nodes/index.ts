@@ -3,6 +3,7 @@
  */
 
 export { BranchNode } from './BranchNode';
+export { EveryNode } from './EveryNode';
 export { ForkNode } from './ForkNode';
 export { LLMNode } from './LLMNode';
 export { LoopNode } from './LoopNode';

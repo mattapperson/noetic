@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { z } from 'zod';
 import {
   completeLayers,
   createLayerStateStore,
@@ -14,7 +15,7 @@ import {
 import type { LLMResponse } from '../../src/types/common';
 import type { Item } from '../../src/types/items';
 import type { MemoryLayer } from '../../src/types/memory';
-import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
+import { getItemId, makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 describe('layer-lifecycle', () => {
   it('init sequential, sets state', async () => {
@@ -1011,7 +1012,7 @@ describe('runAppendPipeline', () => {
           onItemAppend: async ({ items }) => {
             const transformed = items.map((item) => ({
               ...item,
-              id: `transformed-${item.id}`,
+              id: `transformed-${getItemId(item) ?? ''}`,
             }));
             return {
               items: transformed,
@@ -1037,7 +1038,7 @@ describe('runAppendPipeline', () => {
     });
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].id).toMatch(/^transformed-/);
+    expect(getItemId(result.items[0])).toMatch(/^transformed-/);
   });
 
   it('injects additional items', async () => {
@@ -1754,6 +1755,78 @@ describe('executeRerender', () => {
       expect(budgets.get('auto')).toBeGreaterThan(0);
       expect(budgets.get('unset')).toBeGreaterThan(0);
       expect(budgets.get('auto')).toBe(budgets.get('unset'));
+    });
+  });
+
+  it('validates memory-layer developer message extensions during recall', async () => {
+    const store = createLayerStateStore();
+    const layer: MemoryLayer = {
+      id: 'typed-memory',
+      slot: 100,
+      scope: 'execution',
+      itemSchemas: {
+        developerMessages: [
+          z.object({
+            id: z.string(),
+            type: z.literal('message'),
+            role: z.literal('developer'),
+            status: z.literal('completed'),
+            content: z.array(
+              z.object({
+                type: z.literal('input_text'),
+                text: z.string(),
+              }),
+            ),
+            memoryLayerId: z.literal('typed-memory'),
+          }),
+        ],
+      },
+      hooks: {
+        recall: async () => ({
+          tokenCount: 1,
+          items: [
+            Object.assign(
+              {
+                id: 'memory-item-1',
+                type: 'message' as const,
+                role: 'developer' as const,
+                status: 'completed' as const,
+                content: [
+                  {
+                    type: 'input_text' as const,
+                    text: 'remember this',
+                  },
+                ],
+              } satisfies Item,
+              {
+                memoryLayerId: 'typed-memory',
+              },
+            ),
+          ],
+        }),
+      },
+    };
+
+    const results = await recallLayers({
+      layers: [
+        layer,
+      ],
+      query: '',
+      ctx: makeCtx(),
+      log: makeItemLog(),
+      budgets: new Map([
+        [
+          'typed-memory',
+          100,
+        ],
+      ]),
+      store,
+    });
+
+    expect(results[0]?.items[0]).toMatchObject({
+      type: 'message',
+      role: 'developer',
+      memoryLayerId: 'typed-memory',
     });
   });
 });

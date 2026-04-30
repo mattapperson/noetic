@@ -41,6 +41,9 @@ export function Nav(): ReactNode {
           alignItems: 'center',
         }}
       >
+        <Link href="/code" style={NAV_LINK_STYLE}>
+          Code
+        </Link>
         <Link href="/docs" style={NAV_LINK_STYLE}>
           Docs
         </Link>

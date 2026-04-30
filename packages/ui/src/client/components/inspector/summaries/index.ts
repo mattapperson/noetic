@@ -1,5 +1,6 @@
 export { BranchSummary } from './BranchSummary';
 export { DefaultSummary } from './DefaultSummary';
+export { EverySummary } from './EverySummary';
 export { ForkSummary } from './ForkSummary';
 export { LLMSummary } from './LLMSummary';
 export { LoopSummary } from './LoopSummary';

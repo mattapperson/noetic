@@ -54,7 +54,7 @@ const clientMessageTypes = z.enum([
 // Core Types
 // ============================================================================
 
-export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop';
+export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'every';
 
 export type NodeStatus = 'pending' | 'running' | 'paused' | 'completed' | 'error' | 'cancelled';
 

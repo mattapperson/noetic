@@ -4,7 +4,12 @@
  * Dispatches command execution based on command type.
  */
 
-import type { Command, CommandContext, CommandExecutionResult } from './types.js';
+import type {
+  Command,
+  CommandContext,
+  CommandExecutionResult,
+  LocalJsxCommandResult,
+} from './types.js';
 
 //#region Execute
 
@@ -14,8 +19,12 @@ export interface ExecuteCommandOptions {
    * opened — e.g. a deck submit that should post a summary to chat and
    * dismiss the modal. The App owns this handler so it can mutate chat +
    * modal state directly; `executeCommand` has no access to React state.
+   *
+   * The result variant `{ type: 'prompt', value }` lets a modal hand back a
+   * fully-formed prompt to be submitted as the next user turn (used by
+   * `/diff-review`).
    */
-  onJsxComplete?: (result: string | undefined) => void;
+  onJsxComplete?: (result: LocalJsxCommandResult | undefined) => void;
 }
 
 export interface ExecuteCommandArgs {
@@ -47,7 +56,7 @@ export async function executeCommand(input: ExecuteCommandArgs): Promise<Command
   if (command.type === 'local-jsx') {
     const mod = await command.load();
     let modalOpened = false;
-    const onDone = (result?: string): void => {
+    const onDone = (result?: LocalJsxCommandResult): void => {
       // Before the modal opens, onDone isn't yet meaningful — the command
       // should return its node synchronously. After the modal opens, this
       // forwards completion to the App so chat + modal state can update.

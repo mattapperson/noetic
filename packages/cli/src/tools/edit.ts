@@ -5,7 +5,7 @@
  */
 
 import type { FsAdapter, Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { getToolCwd, tool } from '@noetic/core';
 import { z } from 'zod';
 import {
   applyReplacement,
@@ -15,6 +15,7 @@ import {
   restoreLineEndings,
   stripBom,
 } from './edit-diff.js';
+import type { MutationPolicy } from './mutation-policy.js';
 import { resolveToCwd } from './path-utils.js';
 
 //#region Schemas
@@ -41,28 +42,20 @@ export type EditOutput = z.infer<typeof EditOutputSchema>;
 
 const EDIT_TOOL_DESCRIPTION = `Replace exact text in a file with new text.
 
-IMPORTANT: You must use the read tool first to view the file before editing.
+CRITICAL: You MUST use the Read tool to view the file before editing. Edits will fail or produce wrong results if the file hasn't been read in the current session.
 
 Usage notes:
-- The oldText must match EXACTLY, including whitespace and indentation
-- When copying text from read output, preserve exact indentation after line numbers
-- The line number prefix format is: spaces + line number + tab - don't include this in oldText
-- If oldText appears multiple times, provide more context to make it unique
-
-Parameters:
-- path: File path to edit
-- oldText: Exact text to find (must be unique in file)
-- newText: Replacement text (must be different from oldText)
-
-When to use:
-- Making targeted changes to existing files
-- Fixing bugs in specific code sections
-- Updating configuration values
+ - \`oldText\` must match EXACTLY, including whitespace and indentation.
+ - When copying text from Read output, strip the line-number prefix (leading spaces + line number + tab) and preserve the exact indentation that follows it.
+ - If \`oldText\` appears more than once in the file, add surrounding context lines until the match is unique.
+ - \`newText\` must differ from \`oldText\`; otherwise the tool errors.
+ - Line endings (LF / CRLF) and BOM are preserved from the original file.
+ - This tool performs a single replacement per call. For multiple locations, issue multiple Edit calls.
 
 When NOT to use:
-- Creating new files: Use write tool
-- Moving files: Use bash with mv
-- Large rewrites: Consider write tool instead`;
+ - Creating a net-new file: use Write.
+ - Moving or renaming a file: use Bash (\`mv\`).
+ - Large structural rewrites: prefer Write over many Edits.`;
 
 //#endregion
 
@@ -70,17 +63,30 @@ When NOT to use:
 
 export type EditTool = Tool<typeof EditInputSchema, typeof EditOutputSchema>;
 
-export function createEditTool(cwd: string, fs: FsAdapter): EditTool {
+export function createEditTool(
+  cwd: string,
+  fs: FsAdapter,
+  mutationPolicy?: MutationPolicy,
+): EditTool {
   return tool({
     name: 'Edit',
     description: EDIT_TOOL_DESCRIPTION,
     input: EditInputSchema,
     output: EditOutputSchema,
-    async execute(params) {
+    async execute(params, toolCtx) {
       const { path, oldText, newText } = params;
-      const absolutePath = resolveToCwd(path, cwd);
+      const liveCwd = getToolCwd(toolCtx.ctx, cwd);
+      const absolutePath = resolveToCwd(path, liveCwd);
 
       try {
+        const decision = await mutationPolicy?.check({
+          kind: 'edit',
+          cwd: liveCwd,
+          path: absolutePath,
+        });
+        if (decision && !decision.allowed) {
+          throw new Error(decision.message);
+        }
         const buffer = await fs.readFile(absolutePath).catch((err: unknown) => {
           const isNotFound = err instanceof Error && 'code' in err && err.code === 'ENOENT';
           throw new Error(`${isNotFound ? 'File not found' : 'Cannot read file'}: ${path}`);

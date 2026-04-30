@@ -1,0 +1,97 @@
+---
+title: Rules
+description: Granular instruction files in .agent/rules — split AGENT.md into focused, reusable pieces.
+---
+
+A **rule** is a markdown file in `.agent/rules/` (project) or `~/.config/noetic/rules/` (user). Rules are loaded by the same `agent-md` memory layer that loads [AGENT.md](/docs/code-agent-cli/agent-md), in alphabetical order, with the same byte and line caps.
+
+Use rules when AGENT.md is getting too long, or when a concern (testing, frontend, type safety) deserves its own file you can lint, version, and share independently.
+
+## Layout
+
+```
+.agent/                       # or .claude/, via symlink
+├── AGENT.md                  # high-level project guidance
+└── rules/
+    ├── code-structure.md
+    ├── frontend-patterns.md
+    ├── naming-conventions.md
+    ├── spec-guidelines.md
+    ├── sync-spec-code-docs.md
+    ├── testing.md
+    └── type-safety.md
+```
+
+The `.agent/` and `.claude/` directories are interchangeable — most repos symlink one to the other:
+
+```bash
+ln -s .claude .agent
+```
+
+## Discovery
+
+Rules are discovered as part of the AGENT.md walk:
+
+| Origin | Path | Loaded |
+|---|---|---|
+| Project | `<cwd>/.agent/rules/*.md` | Always |
+| User (XDG) | `~/.config/noetic/rules/*.md` | Always |
+| User (home) | `~/.noetic/rules/*.md` | Always |
+
+Files are rendered with a header like:
+
+```
+Contents of /path/to/.agent/rules/testing.md (project instructions, checked into the codebase):
+```
+
+so the model can distinguish project rules from your personal ones.
+
+## When to use a rule vs AGENT.md vs a skill
+
+| If you want the agent to… | Use… |
+|---|---|
+| Always know X about your repo (architecture, build commands, conventions) | [AGENT.md](/docs/code-agent-cli/agent-md) |
+| Always follow a specific scoped policy (testing rules, type-safety rules) | A rule under `.agent/rules/` |
+| Activate a workflow on demand (review a PR, init a project, run security review) | A [skill](/docs/code-agent-cli/skills) |
+
+Rules and AGENT.md are **always loaded**. Skills are **conditionally activated** by the user (`/skill-name`) or the model (`activate_skill` tool). If your guidance only matters when a particular task starts, prefer a skill.
+
+## Embedded commands
+
+Rules support the same `!command` lines AGENT.md does. Project-origin rules require `trustProjectEmbeddedCommands: true` in `noetic.config.ts`; user-origin rules always execute commands. See [AGENT.md → Embedded `!command` lines](/docs/code-agent-cli/agent-md#embedded-command-lines) for the supply-chain rationale.
+
+## `@import`
+
+Rules support the same `@path.md` transclusion AGENT.md does. Useful when several rules share boilerplate:
+
+```markdown
+# testing.md
+@./_test-conventions.md
+
+## Coverage
+- Branches threshold: 85%
+- Lines: 80%
+```
+
+## Worked example: a `testing.md` rule
+
+```markdown
+# Testing Rules
+
+## Setup
+- Framework: `bun test`
+- Tests live in `test/` directory, extension `.test.ts`
+- Run: `bun test`
+
+## Required Test Invariants
+1. **Error kinds**: Every NoeticError kind a function can throw must have a negative test.
+2. **Side effects**: Tests calling functions with Context side effects must assert on
+   `ctx.itemLog.items`, `ctx.tokens`, `ctx.cost`, or `ctx.lastStepMeta`.
+3. **Predicate boundaries**: Numeric threshold predicates need boundary tests at N-1, N, N+1.
+```
+
+Drop that file in `.agent/rules/testing.md` and every session in this repo will receive it as part of context, with the recall-budget trimming applied.
+
+## Inspecting which rules loaded
+
+Run `/context` inside the TUI to see the AGENT.md memory layer's full payload for the last turn — rules appear as headed sections after `AGENT.md`.

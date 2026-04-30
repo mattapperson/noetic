@@ -3,7 +3,7 @@
  * Based on spec sections from 21-noetic-ui.md
  */
 
-export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop';
+export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'every';
 
 export type ExecutionStatus =
   | 'pending'
@@ -58,6 +58,7 @@ export type StepData =
   | ForkStepData
   | SpawnStepData
   | LoopStepData
+  | EveryStepData
   | RunStepData;
 
 export interface LLMStepData {
@@ -108,6 +109,23 @@ export interface LoopStepData {
   maxIterations: number;
 }
 
+export interface EveryStepData {
+  /** Park duration between iterations (ms). */
+  ms: number;
+  /** Random jitter applied to the park duration (ms). */
+  jitter: number;
+  /** Behavior when body throws: continue (default) or fail. */
+  onError: 'continue' | 'fail';
+  /** Body step id. */
+  bodyStepId: string;
+  /** Body step kind. */
+  bodyStepKind: StepKind;
+  /** Optional channel name that wakes the parking interval. */
+  wakeOn?: string;
+  /** Number of completed iterations so far (derived from child span count). */
+  iteration?: number;
+}
+
 export interface RunStepData {
   description?: string;
 }
@@ -138,7 +156,22 @@ export function isSpawnStepData(data: StepData | undefined): data is SpawnStepDa
 }
 
 export function isLoopStepData(data: StepData | undefined): data is LoopStepData {
-  return data !== undefined && 'iteration' in data && typeof data.iteration === 'number';
+  return (
+    data !== undefined &&
+    'iteration' in data &&
+    typeof data.iteration === 'number' &&
+    'maxIterations' in data
+  );
+}
+
+export function isEveryStepData(data: StepData | undefined): data is EveryStepData {
+  return (
+    data !== undefined &&
+    'ms' in data &&
+    typeof data.ms === 'number' &&
+    'bodyStepId' in data &&
+    typeof data.bodyStepId === 'string'
+  );
 }
 
 export function isRunStepData(data: StepData | undefined): data is RunStepData {

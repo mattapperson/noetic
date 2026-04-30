@@ -74,6 +74,10 @@ function walkStep(step: Step, out: Tool[]): void {
       }
       return;
 
+    case 'every':
+      walkStep(step.step, out);
+      return;
+
     default:
       step satisfies never;
       return;

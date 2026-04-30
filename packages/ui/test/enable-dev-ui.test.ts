@@ -38,18 +38,19 @@ describe('enableDevUI', () => {
   });
 
   describe('registration', () => {
-    it('registers all 8 built-in step extractors', () => {
+    it('registers all 9 built-in step extractors', () => {
       enableDevUI();
       const kinds = getRegisteredStepKinds();
       expect(kinds).toContain('llm');
       expect(kinds).toContain('tool');
       expect(kinds).toContain('fork');
       expect(kinds).toContain('loop');
+      expect(kinds).toContain('every');
       expect(kinds).toContain('spawn');
       expect(kinds).toContain('branch');
       expect(kinds).toContain('run');
       expect(kinds).toContain('provide');
-      expect(kinds).toHaveLength(8);
+      expect(kinds).toHaveLength(9);
     });
 
     it('registers an exporter factory that produces NoeticUITraceExporter', () => {
@@ -103,7 +104,7 @@ describe('enableDevUI', () => {
       expect(getRegisteredStepKinds()).toHaveLength(0);
 
       const second = enableDevUI();
-      expect(getRegisteredStepKinds()).toHaveLength(8);
+      expect(getRegisteredStepKinds()).toHaveLength(9);
       expect(getRegisteredExporter()).not.toBeNull();
 
       second.disable();

@@ -277,8 +277,8 @@ function layoutSequentialContainer(
     }
   }
 
-  // For loops, add a loop-back edge from last child to first child
-  if (node.kind === 'loop' && children.length > 1) {
+  // For loops and every, add a loop-back edge from last child to first child
+  if ((node.kind === 'loop' || node.kind === 'every') && children.length > 1) {
     ctx.edges.push({
       id: `${children[children.length - 1]}-${children[0]}-loop`,
       source: children[children.length - 1],

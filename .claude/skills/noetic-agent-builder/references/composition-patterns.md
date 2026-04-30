@@ -422,3 +422,84 @@ planMemory({
 ### CLI Integration
 
 The CLI includes `planMemory()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures a plan tree, then exits to execute.
+
+---
+
+## Pattern: Custom Reminder Triggers
+
+The CLI's `reminderLayer()` emits `<system-reminder>`-wrapped developer messages based on a registry of triggers. You can contribute triggers from a plugin via the `reminderTriggers` hook.
+
+### Registering a trigger from a plugin
+
+```typescript
+import type { NoeticPlugin } from '@noetic/cli';
+import type { ReminderTrigger } from '@noetic/cli';
+
+const myPlugin: NoeticPlugin = {
+  name: 'my-plugin',
+  version: '1.0.0',
+  reminderTriggers: async () => [
+    {
+      id: 'long-bash-streak',
+      minTurnsBetweenReminders: 6,
+      timing: 'recall',
+      shouldFire: ({ state }) => {
+        const bashCount = state.toolUsageCounts.get('Bash') ?? 0;
+        if (bashCount < 20) {
+          return null;
+        }
+        return 'You have called Bash 20+ times this session. Consider whether a dedicated tool would be cleaner.';
+      },
+    } satisfies ReminderTrigger,
+  ],
+};
+```
+
+### Reading sibling layer state from a trigger
+
+Use `ctx.readLayerState<T>(layerId)` to inspect another layer's state before deciding to fire:
+
+```typescript
+{
+  id: 'agent-md-reminder',
+  minTurnsBetweenReminders: 15,
+  timing: 'recall',
+  shouldFire: ({ ctx, state }) => {
+    if (state.assistantTurnCount < 15) return null;
+    const agentMd = ctx.readLayerState<{ sources: ReadonlyArray<unknown> }>('agent-md');
+    if (agentMd === undefined || agentMd.sources.length === 0) return null;
+    return 'Remember: AGENT.md rules still apply — re-check the loaded instructions before continuing.';
+  },
+}
+```
+
+### Choosing timing
+
+- `'recall'` — the reminder appears in the next turn's assembled context. Best for periodic nags.
+- `'immediate'` — the reminder is injected via `onItemAppend` alongside an incoming tool output. Best for error-recovery reminders that need to appear before the next model call.
+
+### Throttling
+
+`minTurnsBetweenReminders` uses the layer's `assistantTurnCount` clock. The trigger won't fire again until that many assistant turns have elapsed since its last firing. Use `Number.POSITIVE_INFINITY` for "fire once per session."
+
+## Capping LLM history with `historyWindow()`
+
+Long sessions accumulate every assistant message and tool round-trip in `itemLog`. Without intervention, the entire transcript is replayed on every LLM call, eventually blowing the model's context window. `historyWindow` caps the trailing items projected to the LLM **without** mutating storage:
+
+```typescript
+import { historyWindow, observationalMemory, workingMemory } from '@noetic/core';
+
+const memory = [
+  workingMemory(),
+  observationalMemory(),
+  historyWindow({ maxItems: 40 }), // default
+];
+```
+
+Properties of the projection:
+
+- **Storage isolation.** `itemLog`, `accumulatedItems`, session JSON, `getAgentResponse`, and any UI reading the log all see the full transcript. Only the value handed to `assembleView` is narrowed.
+- **Minimum-exchange guarantee.** The projected window always contains at least one user `message` and one assistant `message`. If a small `maxItems` value would otherwise truncate one role away, the layer expands backward until both are present (the cap may be temporarily exceeded).
+- **Pair integrity.** After slicing, `stripUnresolvedToolCalls` runs on the window so no `function_call` is ever sent to the LLM without its matching `function_call_output` (or vice-versa) — the API rejects unpaired tool items.
+- **Mid-round flow uncapped.** Within a single `callModel` invocation's tool loop, that round's own `function_call` / `function_call_output` items keep accumulating in the wire payload. The cap fires at turn boundaries, not mid-call.
+- **Opt-in for the CLI.** When `AgentConfig.history.maxItems` is unset, the layer is not installed and history is uncapped. Set the value via `noetic.config.ts` or the `/config` editor's Memory tab to enable capping.

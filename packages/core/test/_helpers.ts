@@ -79,6 +79,7 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       setAttribute() {},
       addEvent() {},
     },
+    readLayerState: <T>(_layerId: string): T | undefined => undefined,
     ...overrides,
   };
 }
@@ -206,6 +207,9 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     harness,
     fs: harness.fs,
     shell: harness.shell,
+    cwdState: {
+      cwd: process.cwd(),
+    },
     layers: undefined,
     memory: {},
     recv: async () => {
@@ -393,6 +397,11 @@ export function makeMockHarness(): AgentHarnessContract {
       kind: 'idle',
     }),
     getQueueSize: () => 0,
+    seedSessionHistory: () => {},
+    rootCwdState: {
+      cwd: process.cwd(),
+    },
+    setRootCwd: () => {},
     run: async () => {
       throw new Error('not impl');
     },
@@ -413,6 +422,7 @@ export function makeMockHarness(): AgentHarnessContract {
     },
     initLayers: async () => {},
     recallLayers: async () => [],
+    previewRequestItems: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},
     checkpoint: async () => {},
@@ -437,6 +447,7 @@ export function makeMockHarness(): AgentHarnessContract {
     afterModelCall: async () => ({
       action: SteeringAction.Allow,
     }),
+    projectHistory: async (_layers, items) => items,
     runAppendPipeline: async (_layers, items) => ({
       items,
       rerenderRequests: [],
@@ -456,6 +467,11 @@ export function makeMockContextWithClient(script: LLMResponse[]): Context {
   return makeMockContext({
     harness,
   });
+}
+
+/** Wall-clock sleep for tests that exercise real timers. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -578,6 +594,14 @@ const VALID_STATUSES = new Set([
   'searching',
   'generating',
 ]);
+
+/** Returns `item.id` when the variant carries one; `undefined` otherwise. */
+export function getItemId(item: Item): string | undefined {
+  if ('id' in item && typeof item.id === 'string') {
+    return item.id;
+  }
+  return undefined;
+}
 
 /**
  * Asserts that every item in a log conforms to the OpenResponses item shape.

@@ -9,7 +9,7 @@ import type { Item } from '../../src/types/items';
 import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
 import type { StepSpawn } from '../../src/types/step';
-import { makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
+import { getItemId, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
@@ -197,7 +197,7 @@ describe('executeSpawn', () => {
       expect(childItems).toHaveLength(1);
       const firstItem = childItems[0];
       assert(firstItem !== undefined);
-      expect(firstItem.id).toBe('spawn-1');
+      expect(getItemId(firstItem)).toBe('spawn-1');
     });
   });
 
@@ -303,7 +303,7 @@ describe('executeSpawn', () => {
       expect(childItems).toHaveLength(1);
       const item = childItems[0];
       assert(item !== undefined);
-      expect(item.id).toBe('spawn-item');
+      expect(getItemId(item)).toBe('spawn-item');
     });
   });
 
@@ -367,8 +367,8 @@ describe('executeSpawn', () => {
       assert(first !== undefined);
       assert(second !== undefined);
       // Lower slot (WORKING_MEMORY=100) should come before higher slot (EPISODIC=300)
-      expect(first.id).toBe('low-item');
-      expect(second.id).toBe('high-item');
+      expect(getItemId(first)).toBe('low-item');
+      expect(getItemId(second)).toBe('high-item');
     });
   });
 });

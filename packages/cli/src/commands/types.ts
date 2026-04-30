@@ -5,11 +5,12 @@
  * distinct from skills which are instruction prompts for the model.
  */
 
-import type { LastLayerUsage, MemoryLayer } from '@noetic/core';
+import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic/core';
 import type { ReactNode } from 'react';
 
 import type { SkillDefinition } from '../skills/types.js';
 import type { ConversationEntry } from '../tui/item-utils.js';
+import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 
 //#region Command Context
@@ -22,6 +23,19 @@ interface CommandContext {
   config: AgentConfig;
   /** Current working directory */
   cwd: string;
+  /**
+   * Active agent harness, when this command is invoked from the chat TUI.
+   * Undefined in headless contexts (e.g. tests, the resume picker, or
+   * commands invoked before any harness exists). Commands that require
+   * the harness MUST guard for `undefined` and degrade gracefully.
+   */
+  harness?: AgentHarness;
+  /**
+   * Service for asking the user structured questions via the chat TUI's
+   * modal. Undefined outside the chat-TUI context. Commands that require
+   * interactive prompts MUST guard for `undefined`.
+   */
+  askUserService?: AskUserService;
   /** Current conversation history */
   entries: ReadonlyArray<ConversationEntry>;
   /** All discovered skills */
@@ -43,7 +57,71 @@ interface CommandContext {
    * sees the correct toolset (full vs read-only) on the next turn.
    */
   setAgentMode: (mode: 'normal' | 'planning') => Promise<void>;
+  /**
+   * Switch the active LLM to the given OpenRouter model slug (e.g.
+   * `anthropic/claude-sonnet-4`). Triggers harness recreation so the next
+   * turn runs against the new model.
+   */
+  setModel: (model: string) => Promise<void>;
+  /**
+   * A read-only snapshot of session-level metadata the TUI currently tracks.
+   * Used by `/session` to print a status report; updated live as turns complete.
+   */
+  sessionSnapshot: SessionSnapshot;
+  /** Set the session's `customTitle`. Applied on the next save. */
+  setCustomTitle: (name: string | undefined) => void;
+  /** Set the session's `tag`. Applied on the next save. */
+  setTag: (tag: string | undefined) => void;
+  /**
+   * Reset session state and start fresh: new sessionId, empty entries,
+   * zero cumulative counters, forget any resumed history. Use by `/clear`
+   * and (optionally) by `/resume` when the user cancels the picker.
+   */
+  clearSession: () => void;
+  /**
+   * Restart the TUI against a different session. Pass `null` to open the
+   * resume picker. Used by `/resume`.
+   */
+  restartWithSession: (target: SessionRestartTarget) => void;
+  /**
+   * Switch the TUI's primary view mode. The chat view ('chat') is the
+   * default; 'taskBoard' renders the kanban board fullscreen instead of
+   * the chat. Undefined in headless contexts (tests, picker, etc.).
+   */
+  setViewMode?: (mode: ViewMode) => void;
 }
+
+/** Top-level views the TUI can render. */
+export type ViewMode = 'chat' | 'taskBoard';
+
+export interface SessionSnapshot {
+  sessionId: string;
+  cwd: string;
+  effectiveCwd: string;
+  model: string;
+  createdAt: string;
+  customTitle?: string;
+  tag?: string;
+  firstPrompt: string;
+  messageCount: number;
+  cumulativeUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+  };
+  cumulativeCost: number;
+  persistenceEnabled: boolean;
+}
+
+/** What `restartWithSession` targets: a specific session file, or `null` meaning "open the picker". */
+export type SessionRestartTarget =
+  | {
+      kind: 'file';
+      file: import('../sessions/types.js').SessionFile;
+    }
+  | {
+      kind: 'picker';
+    };
 
 //#endregion
 
@@ -59,12 +137,31 @@ type LocalCommandResult =
     }
   | {
       type: 'skip';
+    }
+  | {
+      type: 'prompt';
+      value: string;
+    };
+
+/**
+ * Result a JSX command can hand back to the App when its modal closes.
+ *
+ * - `string`: posted to chat as an info entry (existing behaviour).
+ * - `{ type: 'prompt'; value }`: dismisses the modal and submits `value` as
+ *   the next user turn — used by `/diff-review` to send composed feedback to
+ *   the agent without an extra round-trip through the prompt input.
+ */
+type LocalJsxCommandResult =
+  | string
+  | {
+      type: 'prompt';
+      value: string;
     };
 
 /**
  * Callback when a JSX command completes.
  */
-type LocalJsxCommandOnDone = (result?: string) => void;
+type LocalJsxCommandOnDone = (result?: LocalJsxCommandResult) => void;
 
 /**
  * Call signature for a local command implementation.
@@ -140,22 +237,21 @@ type Command = CommandBase & (LocalCommand | LocalJsxCommand);
 //#region Execution Result
 
 /**
- * Result of executing a command.
+ * Result variant produced only by JSX commands — wraps the rendered node plus
+ * the metadata the TUI needs to open the modal.
  */
-type CommandExecutionResult =
-  | {
-      type: 'text';
-      value: string;
-    }
-  | {
-      type: 'skip';
-    }
-  | {
-      type: 'modal';
-      node: ReactNode;
-      commandName: string;
-      dismissMessage: string;
-    };
+type ModalExecutionResult = {
+  type: 'modal';
+  node: ReactNode;
+  commandName: string;
+  dismissMessage: string;
+};
+
+/**
+ * Result of executing a command. JSX commands may produce a modal; all other
+ * results share `LocalCommandResult`'s variants.
+ */
+type CommandExecutionResult = LocalCommandResult | ModalExecutionResult;
 
 //#endregion
 
@@ -172,4 +268,6 @@ export type {
   LocalJsxCommandCall,
   LocalJsxCommandModule,
   LocalJsxCommandOnDone,
+  LocalJsxCommandResult,
+  ModalExecutionResult,
 };

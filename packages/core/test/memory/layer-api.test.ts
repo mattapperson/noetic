@@ -471,6 +471,7 @@ describe('workingMemory provides', () => {
           setAttribute() {},
           addEvent() {},
         },
+        readLayerState: () => undefined,
       },
     );
     expect(result.result).toBeUndefined();

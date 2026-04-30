@@ -8,7 +8,16 @@
 import type { ExecutionSummary } from '../shared/protocol';
 
 /** Step kinds supported by the UI visualization */
-export type StepKind = 'run' | 'llm' | 'tool' | 'branch' | 'fork' | 'spawn' | 'loop' | 'provide';
+export type StepKind =
+  | 'run'
+  | 'llm'
+  | 'tool'
+  | 'branch'
+  | 'fork'
+  | 'spawn'
+  | 'loop'
+  | 'every'
+  | 'provide';
 
 /** Execution status for nodes in the debug UI */
 export type ExecutionStatus =

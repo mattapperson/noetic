@@ -105,6 +105,23 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
+### every
+
+Schedule a step on a fixed interval, optionally woken sooner by a channel message. The operator runs forever until the executing context is aborted; cancellation flows through `harness.abort` and interrupts the parking promise immediately.
+
+```typescript
+every<I, O>({
+  id: string;
+  step: Step<I, O>;
+  ms: number;                          // period, start-to-start
+  wakeOn?: Channel<unknown>;           // any message cuts the wait short
+  onError?: 'continue' | 'fail';       // default 'continue'
+  jitter?: number;                     // default 0; ms ± randomized
+}): StepEvery<I, O>
+```
+
+`onError: 'continue'` (default) emits an `every.iteration.error` span event with the caught error attached, then re-loops — daemon-friendly. `onError: 'fail'` propagates and terminates the operator (and any enclosing `fork`). Returns `Step<I, void>` so it composes into `fork({ paths })` and `spawn({ child })` for orchestrating long-running scheduled work.
+
 ### tool
 
 Typed tool factory with Zod validation.
@@ -142,6 +159,7 @@ until.maxCost(n)         // Stop when cumulative cost exceeds n
 until.maxDuration(ms)    // Stop after ms milliseconds
 until.noToolCalls()      // Stop when LLM doesn't call any tools
 until.verified(fn)       // Stop when verification passes
+until.never()            // Never stop (for `every` / forever-loops with external abort)
 until.converged(opts)    // Stop when output stabilizes
 
 // Combinators
@@ -182,6 +200,36 @@ ralphWiggum({
   innerMaxSteps?: number;
 }): StepLoop
 ```
+
+### interview
+
+Host-callback-driven structured interview. The model emits a `z.discriminatedUnion('type', [questionEnv, completeEnv])` envelope each turn; the host renders questions via `askQuestion` and answers thread back as the next user message. Terminates on `complete` or `maxQuestions`.
+
+```typescript
+interview<Q, C>({
+  systemPrompt: string;
+  model: string;
+  questionSchema: ZodType<Q>;
+  completeSchema: ZodType<C>;
+  askQuestion: (envelope: Q) => Promise<InterviewQuestionAnswer>;
+  onComplete: (envelope: C) => Promise<void>;
+  maxQuestions?: number;          // default 8
+  formatAnswer?: (a: InterviewQuestionAnswer) => string;
+}): Step<ContextMemory, string, InterviewResult<Q, C>>
+
+type InterviewResult<Q, C> =
+  | { status: 'complete'; envelope: C }
+  | { status: 'maxQuestions'; lastQuestion?: Q };
+
+interface InterviewQuestionAnswer {
+  questionId: string;
+  question: string;
+  answer: string | string[];
+  notes?: string;
+}
+```
+
+`onComplete` fires once when the model emits the completion envelope. The returned step's output mirrors the final state for callers that prefer return-value style over the callback.
 
 ### compilePlan / adaptivePlan
 
@@ -242,6 +290,14 @@ Loads content at init, injects as tagged XML block in every recall.
 staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 ```
 
+### historyWindow
+
+Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message) and strips orphan `function_call` / `function_call_output` at the slice boundary.
+
+```typescript
+historyWindow({ maxItems?: number })  // default 40
+```
+
 ### toolMemoryLayer
 
 Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state. Defaults to `'execution'` scope.
@@ -249,6 +305,27 @@ Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `
 ```typescript
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
+
+### createSteeringFileLayer (`@noetic/cli`)
+
+Surfaces a per-task `steering.md` file to the agent run servicing that task. The harness factory mounts it unconditionally; activation is gated by the `NOETIC_TASK_DIR` env var that the task launcher sets when spawning agent-ci for a specific task. Non-task agent runs see no steering content.
+
+```typescript
+import { createSteeringFileLayer } from '@noetic/cli/src/memory/steering-file-layer.js';
+
+const layer = createSteeringFileLayer();
+// slot:  Slot.STEERING (90) — ahead of working memory and observations
+// scope: 'execution'
+// budget: { min: 0, max: 8000 }
+```
+
+Behaviour:
+
+- When `process.env.NOETIC_TASK_DIR` is unset or empty, `recall()` returns `null` and the layer is dormant.
+- When set, `recall()` reads `<NOETIC_TASK_DIR>/steering.md` via `ctx.fs.readFileText`. ENOENT and empty content both yield `null` (no steering content).
+- A non-empty `steering.md` is wrapped in a `# Task Steering` heading and emitted as a developer-role block.
+
+The layer carries no state (`state: null`); everything is resolved at recall time, so a steering file edited mid-session takes effect on the next recall. See `specs/21-tasks.md` for the full task-system contract.
 
 ### ToolMemoryDeclaration
 
@@ -417,6 +494,35 @@ step.run<Mem>({
 
 Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
 
+## CwdState (shared cwd)
+
+Every `Context` carries a mutable `cwdState: CwdState` that tools resolve relative paths against at execution time. The Bash tool intercepts plain `cd <path>` and mutates the shared state via `setToolCwd`; subsequent Read, Write, Edit, Ls, Grep, Find, lsp, and InteractiveTerminal calls see the new cwd. Spawned/forked children get a snapshot (POSIX-fork semantics).
+
+```typescript
+interface CwdState {
+  cwd: string;            // absolute path
+  previousCwd?: string;   // populated on cd; powers `cd -`
+}
+
+// Read live cwd from a tool's execute function. Pass the factory cwd as a
+// fallback for partial test contexts.
+function getToolCwd(ctx: Context | undefined, fallback?: string): string;
+
+// Update the shared cwd. Caller must pass an absolute, validated path.
+function setToolCwd(ctx: Context, nextCwd: string): { previousCwd: string; newCwd: string };
+
+// Internal: temporarily retarget cwd so an immediately-following spawn
+// snapshots the new value. Returns a restore callback. Used by worktree
+// isolation in the sync agent-spawn path.
+function retargetCwdForSpawn(ctx: Context, nextCwd: string): () => void;
+```
+
+`AgentHarness` exposes `rootCwdState` (the shared object seeded into root contexts) and `setRootCwd(nextCwd)` for hosts (e.g. the TUI) to report a user-issued `!cd`.
+
+`AgentHarness` constructor accepts `initialCwd?: string` (default `process.cwd()`), and both `createContext({ cwdInit })` and `detachedSpawn(..., { cwdInit })` accept a per-context override used by worktree isolation.
+
+The mutation policy's `sessionCwd` is anchored to the launch cwd and does NOT follow agent `cd` — `cd` is a UX convenience, not a sandbox-widening mechanism.
+
 ## FsAdapter
 
 Filesystem abstraction used by the harness, tools, memory layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
@@ -433,7 +539,10 @@ interface FsAdapter {
   readFile(path: string): Promise<Buffer>;
   readFileText(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  appendFile(path: string, content: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+  rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   access(path: string, mode?: number): Promise<void>;
   stat(path: string): Promise<FsStats>;
   lstat(path: string): Promise<FsStats>;
@@ -577,6 +686,11 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 
 // Cancel the in-flight turn. Queued messages stay and drive the next turn.
 await harness.abort({ threadId: 'thread-1', reason: 'user' });
+
+// Preview the items that would be sent on the next turn — accumulated history
+// plus harness-level memory layer recall outputs. Read-mostly debug helper for
+// inspecting "what the model will see"; safe to call between turns.
+const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 ```
 
 ### Delivery Modes
@@ -586,6 +700,10 @@ await harness.abort({ threadId: 'thread-1', reason: 'user' });
 | `next-turn` (default) | Queue and run after the current turn completes. |
 | `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
 | `interrupt` | Abort the in-flight turn, place message at head of queue, restart. |
+
+### Stream Idle Timeout
+
+`AgentHarnessOpts.streamIdleTimeoutMs` (default `120_000`; set `0` or negative to disable) aborts an in-flight provider call if its SSE stream emits no events for that many milliseconds. On timeout, the harness emits `{name}:llm_call_stalled` and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`. Use a smaller value for snappier recovery in interactive UIs, a larger value for long-running batch runs with slow models.
 
 ### Session Accessors
 
@@ -608,9 +726,15 @@ Subscribe to streams before the first `execute()` if you want to observe the ver
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
 
-// Background execution
+// Background execution (inherits parent's threadId by default)
 const handle = harness.detachedSpawn(step, input, ctx);
 await handle.await();
+
+// Background execution with isolated session log (does NOT pollute parent's
+// `session.accumulatedItems` — use for long-running sub-agents)
+const isolatedHandle = harness.detachedSpawn(step, input, ctx, {
+  threadId: 'background-task-1',
+});
 
 // Channels
 harness.send(channel, value, ctx);
@@ -622,6 +746,7 @@ const msg2 = harness.tryRecv(channel, ctx);
 
 ```typescript
 const Slot = {
+  REMINDER: 80,
   STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
@@ -632,6 +757,196 @@ const Slot = {
   SEMANTIC_RECALL: 400,
 } as const;
 ```
+
+**`Slot.REMINDER` (80)** is reserved for layers that inject `<system-reminder>`-wrapped developer messages (turn-counter-throttled nags, plan-mode reminders, error-recovery hints). Reminder-slot layers maintain their own state and emit before any steering guidance.
+
+## Cross-layer state reads
+
+`ExecutionContext.readLayerState<T>(layerId)` returns a sibling layer's current state (or `undefined`). Used when a layer needs to inspect another layer's progress — e.g. the CLI reminder layer reads `plan-memory` to know whether plan mode is active:
+
+```typescript
+const plan = ctx.readLayerState<{ session?: { mode?: string } }>('plan-memory');
+if (plan?.session?.mode === 'planning') {
+  // emit a plan-mode reminder
+}
+```
+
+Treat returned values as read-only.
+
+## CLI-specific memory layers
+
+These are shipped by `@noetic/cli` on top of the core framework:
+
+### `reminderLayer(opts)`
+
+```typescript
+import { reminderLayer, createReminderRegistry, BUILTIN_TRIGGERS } from '@noetic/cli';
+
+const registry = createReminderRegistry();
+for (const t of BUILTIN_TRIGGERS) registry.register(t);
+registry.register({
+  id: 'my-custom',
+  minTurnsBetweenReminders: 10,
+  timing: 'recall',
+  shouldFire: ({ state }) => state.toolUsageCounts.get('Bash')! > 15 ? 'heavy Bash usage — consider dedicated tools' : null,
+});
+
+const layer = reminderLayer({ registry });
+```
+
+Emits `<system-reminder>`-wrapped developer messages based on registered triggers. `timing: 'recall'` fires on next turn; `timing: 'immediate'` fires via `onItemAppend` for faster reactivity.
+
+### `agentMdLayer(opts)`
+
+```typescript
+import { agentMdLayer, loadAgentInstructions } from '@noetic/cli';
+
+const instructions = await loadAgentInstructions({ cwd, fs });
+const layer = agentMdLayer({ loader: () => Promise.resolve(instructions) });
+```
+
+Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction files. Supports `@path.md` imports and skills-style `!command` inline execution (user-origin always; project-origin gated by `config.trustProjectEmbeddedCommands`). See `specs/12a-cli-memory-layers.md` for full discovery order.
+
+## CLI-specific tools
+
+These are shipped by `@noetic/cli` on top of the core framework.
+
+### `taskTools(opts)` — Task management
+
+The `task_*` tool prefix gives agents 1:1 parity with the `noetic tasks <verb>` CLI. Tools are registered by the harness factory and are **default-on**; opt out via `tools.tasks: false` in `noetic.config.ts`. A read-only variant exposes only `task_show`, `task_list`, and `task_logs` — used in planning mode and other contexts where the agent must observe but not mutate.
+
+```typescript
+import { taskTools } from '@noetic/cli/src/commands/builtins/tasks/tools.js';
+import type { TaskStoreContext } from '@noetic/cli/src/commands/builtins/tasks/fs-store.js';
+
+const ctx: TaskStoreContext = { fs, projectRoot };
+
+// Full task surface (mutators + queries).
+const tools = taskTools({ ctx });
+
+// Read-only — only task_show, task_list, task_logs.
+const ro = taskTools({ ctx, readOnly: true });
+```
+
+All tools resolve tasks by their `T-<10 chars>` id and return JSON-shaped objects. Each tool delegates to the same handler the CLI verb uses, so behaviour is identical across surfaces. Storage layout, atomicity guarantees, and lifecycle semantics are spelled out in `specs/21-tasks.md`.
+
+#### Identity & state types
+
+```typescript
+type TaskSource = 'manual' | 'worktree';
+type TaskReviewStatus = 'not_started' | 'reviewing' | 'needs_changes' | 'approved';
+type TaskLifecycleStatus = 'active' | 'merged' | 'cleanup-blocked' | 'removed';
+type KanbanColumn =
+  | 'triage' | 'in_progress' | 'needs_changes' | 'ready_to_merge'
+  | 'done' | 'cleanup_blocked' | 'removed' | 'archived';
+```
+
+Hierarchy entities use the same `<prefix>-<10 chars>` shape with prefixes `ML` (milestone), `SL` (slice), `F` (feature), `A` (assertion), `V` (validator run), `FX` (fix lineage), `IV` (interview session).
+
+#### Mutating tools
+
+```typescript
+// task_create — create a manual task. Optional description seeds description.md.
+input:  { title: string; description?: string }
+output: { task: Task }
+
+// task_move — atomic kanban move. Computes the minimum patch across
+// archivedAt / lifecycleStatus / reviewStatus.
+input:  { taskId: string; column: KanbanColumn }
+output: { task: Task }
+
+// task_merge — try `wt merge <branch>`; fall back to `git merge` if `wt`
+// is missing. Both paths emit task:reviewStatusChanged on success.
+input:  { taskId: string; branch?: string }
+output: { task: Task; via: 'wt' | 'git' }
+
+// task_log / task_comment / task_steer — append to log.jsonl. `task_steer`
+// also writes/appends steering.md (read by the steering memory layer when
+// NOETIC_TASK_DIR points at this task).
+input:  { taskId: string; message: string }
+output: { entry: LogEntry }     // task_log, task_comment
+output: { entry: LogEntry; steeringPath: string }  // task_steer
+
+// task_attach — copy a file into <taskDir>/attachments/.
+input:  { taskId: string; sourcePath: string }
+output: { taskId: string; destinationPath: string }
+
+// task_pause / task_unpause — toggle pause on the active agent-ci runner.
+input:  { taskId: string }
+output: { outcome: 'paused' | 'already_paused' | 'no_runner' | 'resumed' | 'already_running' }
+
+// task_archive / task_unarchive — set/clear archivedAt.
+input:  { taskId: string }
+output: { task: Task }
+
+// task_delete — hard-delete the task directory; emits task:archived
+// before the rm -rf.
+input:  { taskId: string }
+output: { taskId: string; deleted: true }
+
+// task_duplicate — copy task.json + description.md + attachments under a new id.
+input:  { taskId: string; title?: string }
+output: { task: Task }
+```
+
+#### Hierarchy tools
+
+```typescript
+// task_plan — run the live AI-driven interview to build a hierarchy.
+// TUI-only; throws in headless contexts because the interview asks the
+// user multiple-choice questions through AskUserService.
+input:  { taskId: string; description?: string }
+output: { taskId: string; hierarchy: TaskHierarchy }
+
+// task_add_milestone — append a milestone.
+input:  { taskId: string; title: string; verification: string; description?: string }
+output: { milestone: Milestone }
+
+// task_add_slice — append a slice under a milestone.
+input:  { taskId: string; milestoneId: string; title: string; verification: string; description?: string }
+output: { slice: Slice }
+
+// task_add_feature — append a feature under a slice.
+input:  { taskId: string; sliceId: string; title: string; acceptanceCriteria: string; description?: string }
+output: { feature: Feature }
+
+// task_add_assertion — append an assertion under a milestone, optionally
+// covering specific feature ids.
+input:  { taskId: string; milestoneId: string; title: string; assertion: string; featureIds?: string[] }
+output: { assertion: Assertion }
+
+// task_activate_slice — mark a slice 'active'; with triage:true, also
+// triages every defined feature into a leaf task under the same parent.
+input:  { taskId: string; sliceId: string; triage?: boolean }
+output: { outcome: { sliceId: string; triagedFeatureIds: string[] } }
+
+// task_autopilot — toggle the autopilot flag for a structured task.
+input:  { taskId: string; enabled: boolean }
+output: { task: Task }
+```
+
+#### Read-only tools
+
+```typescript
+// task_show — full record + recent log + hierarchy summary if present.
+input:  { taskId: string; logTail?: number }
+output: { task: Task; recentLog: LogEntry[]; hierarchy: TaskHierarchy | null }
+
+// task_list — filterable list. Without filters, returns active tasks for
+// the current project; --all surfaces archived too.
+input:  {
+  column?: KanbanColumn;
+  source?: TaskSource;
+  all?: boolean;
+}
+output: { tasks: Task[] }
+
+// task_logs — tail of the most recent log entries.
+input:  { taskId: string; n?: number }   // default n=50
+output: { entries: LogEntry[] }
+```
+
+The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything except `--help`). See `specs/21-tasks.md` for the verb table and the complete `Task` / `Milestone` / `Slice` / `Feature` / `Assertion` / `ValidatorRun` / `FixLineage` / `InterviewSession` schemas.
 
 ## Memory Layer Hooks
 
@@ -768,3 +1083,53 @@ interface ToolExecutionContext {
 // Or via context: toolCtx.ctx.harness.config.params
 // Filesystem: toolCtx.fs.readFileText('/path')
 ```
+
+## CLI Plugin Hooks
+
+Plugins loaded by `@noetic/cli` implement the `NoeticPlugin` interface
+(`packages/cli/src/plugins/types.ts`). The hooks below aggregate contributions
+from every loaded plugin alongside the CLI's built-ins.
+
+### `lspServers?(ctx): ReadonlyArray<LspServerContribution>`
+
+Register additional language servers beyond the four builtins (TypeScript/JavaScript,
+Python, Go, Swift). Contributions share the same extension index as the
+builtins — a plugin can **override** a builtin by reusing its `id`, or **add**
+a new language by claiming a novel extension.
+
+```typescript
+import type { LspServerContribution } from '@noetic/cli';
+
+export default {
+  name: 'my-rust-lsp',
+  version: '1.0.0',
+  lspServers: () => [
+    {
+      id: 'rust-analyzer',
+      extensions: ['.rs'],
+      rootMarkers: ['Cargo.toml', 'rust-project.json'],
+      launch: {
+        strategy: 'githubRelease',
+        owner: 'rust-lang',
+        repo: 'rust-analyzer',
+        asset: (platform, arch) =>
+          `rust-analyzer-${arch}-${platform === 'darwin' ? 'apple-darwin' : 'unknown-linux-gnu'}.gz`,
+        args: [],
+      },
+    },
+  ],
+} satisfies NoeticPlugin;
+```
+
+**`LaunchSpec` strategies** (pick one per contribution):
+
+| strategy | use for | spawn behavior |
+|---|---|---|
+| `path` | toolchain-distributed binaries (gopls, sourcekit-lsp, rust-analyzer installed via rustup) | `which <bin>`; errors with `installHint` if absent |
+| `bunx` | npm-distributed servers (typescript-language-server, pyright-langserver) | `bunx <bin> <args>` — zero-install |
+| `githubRelease` | standalone prebuilt binaries | download from GitHub release, cache in `~/.noetic/lsp/<id>/<version>/`. Gated by `NOETIC_DISABLE_LSP_DOWNLOAD=1` |
+
+**Conflict policy**: same `id` → plugin overrides builtin. Different `id` but
+overlapping extension → first-registered wins (builtins register before
+plugins). The single model-facing tool (`lsp`) stays constant — the operation
+list, schemas, and output format never change across contributions.

@@ -254,6 +254,26 @@ export function registerBuiltinExtractors(): void {
     };
   });
 
+  /** Every step - Recurring execution paced by ms ± jitter */
+  registerStepDataExtractor('every', (spanAttrs, tokenUsage, cost) => {
+    const result: Record<string, unknown> = {
+      ms: typeof spanAttrs.everyMs === 'number' ? spanAttrs.everyMs : 0,
+      jitter: typeof spanAttrs.everyJitter === 'number' ? spanAttrs.everyJitter : 0,
+      onError: spanAttrs.everyOnError === 'fail' ? 'fail' : 'continue',
+      bodyStepId: typeof spanAttrs.everyBodyStepId === 'string' ? spanAttrs.everyBodyStepId : '',
+      bodyStepKind:
+        typeof spanAttrs.everyBodyStepKind === 'string' ? spanAttrs.everyBodyStepKind : 'run',
+      tokenUsage,
+      cost,
+    };
+
+    if (typeof spanAttrs.everyWakeOn === 'string') {
+      result.wakeOn = spanAttrs.everyWakeOn;
+    }
+
+    return result;
+  });
+
   /** Spawn step - Child process/agent spawning */
   registerStepDataExtractor('spawn', (spanAttrs, tokenUsage, cost) => {
     return {

@@ -1,29 +1,22 @@
 /**
- * /clear command - Clears the conversation history.
+ * /clear command — wipe conversation history and start a fresh session
+ * (new sessionId, zero cumulative counters, no seeded history).
  */
 
 import type { Command, LocalCommandCall } from '../types.js';
 
-//#region Implementation
-
 const call: LocalCommandCall = async (_args, ctx) => {
-  ctx.clearEntries();
+  ctx.clearSession();
   return {
     type: 'skip',
   };
 };
 
-//#endregion
-
-//#region Command Definition
-
 export const clear: Command = {
   type: 'local',
   name: 'clear',
-  description: 'Clear conversation history',
+  description: 'Clear history and start a fresh session',
   load: async () => ({
     call,
   }),
 };
-
-//#endregion
