@@ -126,7 +126,7 @@ describe('fixFeatureFlow', () => {
     expect(lineage[0]?.validatorRunId).toBe(run.id);
   });
 
-  it('exhausted path: throws BudgetExhaustedError and marks the source feature blocked', async () => {
+  it('exhausted path: throws BudgetExhaustedError without mutating the source feature', async () => {
     const store = makeStoreContext();
     const ctx = {
       ...store,
@@ -165,13 +165,14 @@ describe('fixFeatureFlow', () => {
       expect(inner.budget).toBe(DEFAULT_IMPLEMENTATION_RETRY_BUDGET);
     }
 
-    // The terminal step should have flipped the source feature to Blocked
-    // before throwing. Behavior is identical for the imperative fallback
-    // path — Wave 5 cross-checks both paths produce the same disk state.
+    // The flow step intentionally does NOT mutate the source feature on
+    // budget exhaustion — the caller (validator-job's catch handler) owns
+    // the markFeatureBlocked side effect so the corresponding
+    // feature:loopStateChanged event is emitted alongside the budget
+    // verdict. The source feature should be unchanged from its seed.
     const reloaded = await loadFeature(ctx, TASK_ID, source.id);
-    expect(reloaded?.loopState).toBe(FeatureLoopState.Blocked);
-    expect(reloaded?.status).toBe(FeatureStatus.Blocked);
-    expect(reloaded?.blockedReason).toMatch(/budget exhausted/);
+    expect(reloaded?.loopState).toBe(FeatureLoopState.Validating);
+    expect(reloaded?.implementationAttemptCount).toBe(DEFAULT_IMPLEMENTATION_RETRY_BUDGET);
   });
 
   it('respects a custom budget override at the boundary', async () => {
