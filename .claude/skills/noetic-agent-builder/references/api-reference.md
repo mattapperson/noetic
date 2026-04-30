@@ -105,6 +105,23 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
+### every
+
+Schedule a step on a fixed interval, optionally woken sooner by a channel message. The operator runs forever until the executing context is aborted; cancellation flows through `harness.abort` and interrupts the parking promise immediately.
+
+```typescript
+every<I, O>({
+  id: string;
+  step: Step<I, O>;
+  ms: number;                          // period, start-to-start
+  wakeOn?: Channel<unknown>;           // any message cuts the wait short
+  onError?: 'continue' | 'fail';       // default 'continue'
+  jitter?: number;                     // default 0; ms ± randomized
+}): StepEvery<I, O>
+```
+
+`onError: 'continue'` (default) emits an `every.iteration.error` span event with the caught error attached, then re-loops — daemon-friendly. `onError: 'fail'` propagates and terminates the operator (and any enclosing `fork`). Returns `Step<I, void>` so it composes into `fork({ paths })` and `spawn({ child })` for orchestrating long-running scheduled work.
+
 ### tool
 
 Typed tool factory with Zod validation.
@@ -142,6 +159,7 @@ until.maxCost(n)         // Stop when cumulative cost exceeds n
 until.maxDuration(ms)    // Stop after ms milliseconds
 until.noToolCalls()      // Stop when LLM doesn't call any tools
 until.verified(fn)       // Stop when verification passes
+until.never()            // Never stop (for `every` / forever-loops with external abort)
 until.converged(opts)    // Stop when output stabilizes
 
 // Combinators
