@@ -72,9 +72,9 @@ Always respond with valid JSON. For a question:
 {"type": "question", "data": {"id": "q-...", "type": "single_select|multi_select|confirm|text", "question": "...", "description": "...", "options": [{"id": "...", "label": "...", "description": "..."}]}}
 
 For completion:
-{"type": "complete", "data": {"missionTitle": "...", "missionDescription": "...", "milestones": [{"title": "...", "description": "...", "verification": "...", "slices": [{"title": "...", "description": "...", "verification": "...", "features": [{"title": "...", "description": "...", "acceptanceCriteria": "..."}]}]}]}}
+{"type": "complete", "data": {"title": "...", "description": "...", "milestones": [{"title": "...", "description": "...", "verification": "...", "slices": [{"title": "...", "description": "...", "verification": "...", "features": [{"title": "...", "description": "...", "acceptanceCriteria": ["...", "..."]}]}]}]}}
 
-Aim for 2-4 milestones, 1-3 slices per milestone, 2-5 features per slice.`;
+The "acceptanceCriteria" field is an array of one or more concrete, testable strings. Aim for 2-4 milestones, 1-3 slices per milestone, 2-5 features per slice.`;
 
 //#endregion
 

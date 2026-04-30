@@ -78,8 +78,8 @@ const MilestoneSchema = z.object({
 });
 
 const CompleteSchema = z.object({
-  missionTitle: z.string(),
-  missionDescription: z.string().optional(),
+  title: z.string(),
+  description: z.string().optional(),
   milestones: z.array(MilestoneSchema),
 });
 
@@ -171,25 +171,12 @@ export function extractAnswer(
 }
 
 export function toMissionTreeInput(envelope: InterviewComplete): MissionTreeInput {
-  return {
-    title: envelope.missionTitle,
-    description: envelope.missionDescription,
-    milestones: envelope.milestones.map((milestone) => ({
-      title: milestone.title,
-      description: milestone.description,
-      verification: milestone.verification,
-      slices: milestone.slices.map((slice) => ({
-        title: slice.title,
-        description: slice.description,
-        verification: slice.verification,
-        features: slice.features.map((feature) => ({
-          title: feature.title,
-          description: feature.description,
-          acceptanceCriteria: feature.acceptanceCriteria,
-        })),
-      })),
-    })),
-  };
+  // The interview prompt instructs the model to emit the canonical
+  // MissionTreeInput shape directly. CompleteSchema mirrors that shape
+  // (z.union normalises acceptanceCriteria to string[]), so this is a
+  // structural identity. Kept as a named export so the contract is stable
+  // if the shapes ever diverge again.
+  return envelope;
 }
 
 function toMaxQuestionsEnvelope(

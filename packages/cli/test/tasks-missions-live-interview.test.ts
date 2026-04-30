@@ -198,10 +198,10 @@ describe('mapAutopilotAnswer', () => {
 });
 
 describe('toMissionTreeInput', () => {
-  test('flattens optional descriptions into the tree shape', () => {
+  test('preserves the canonical mission tree shape', () => {
     const tree = toMissionTreeInput({
-      missionTitle: 'Build login',
-      missionDescription: 'wire OAuth',
+      title: 'Build login',
+      description: 'wire OAuth',
       milestones: [
         {
           title: 'Discovery',
@@ -231,7 +231,7 @@ describe('toMissionTreeInput', () => {
 
   test('coerces a stringly-typed acceptanceCriteria into a single-element array', () => {
     const tree = toMissionTreeInput({
-      missionTitle: 'M',
+      title: 'M',
       milestones: [
         {
           title: 'X',
@@ -265,8 +265,8 @@ describe('toMissionTreeInput', () => {
 describe('toInterviewResultLike', () => {
   test('happy path: harness emits a complete envelope, adapter flattens it to MissionTreeInput', () => {
     const completeEnvelope: InterviewComplete = {
-      missionTitle: 'Build OAuth flow',
-      missionDescription: 'Wire up GitHub login.',
+      title: 'Build OAuth flow',
+      description: 'Wire up GitHub login.',
       milestones: [
         {
           title: 'Auth setup',
