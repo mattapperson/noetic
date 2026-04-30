@@ -1,21 +1,43 @@
+/**
+ * Pause / resume / cancel surfaces for the agent-ci runner. Reads the
+ * sidecar `<taskDir>/_runner.json` written by the launcher, verifies the
+ * pid is alive (and that the kernel-reported `lstart` matches the value
+ * captured at spawn — defends against pid reuse), then sends the
+ * appropriate POSIX signal to the runner's process group.
+ *
+ * Public surface:
+ *  - `Signaller` — pluggable kill/probe interface (test seam).
+ *  - `defaultSignaller` — `process.kill` + `ps -o lstart=` implementation.
+ *  - `findActiveAgentCiRunner` — non-mutating lookup; replaces the legacy
+ *    `findActiveAgentCiSession` query.
+ *  - `cancelAgentCiRun` — SIGTERM the group, mark the task lifecycle
+ *    appropriately, and clear the sidecar.
+ *  - `togglePauseAgentCiRun` — SIGSTOP / SIGCONT, persisting `pausedAt`
+ *    on the sidecar (NOT on `task.json` so volatile state never leaks
+ *    into the canonical record).
+ */
+
 import { execFileSync } from 'node:child_process';
 
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
-
-import type * as schema from './db/schema.js';
-import type { TaskSessionRecord, TaskSessionStatus } from './db/schema.js';
-import { AGENT_CI_REVIEW_KIND, taskSessions } from './db/schema.js';
+import { emitTaskEvent } from './events.js';
+import type { TaskStoreContext } from './fs-store.js';
+import { appendEvent, appendLog, loadTask, saveTask } from './fs-store.js';
+import type { RunnerState } from './runner-state.js';
+import { clearRunner, loadRunner, saveRunner } from './runner-state.js';
+import type { Task } from './schemas.js';
+import { EventKind, LogEntryKind, TaskReviewStatus } from './schemas.js';
 
 //#region Types
 
-type TasksDb = BunSQLiteDatabase<typeof schema>;
-
 export type ControlSignal = 'SIGTERM' | 'SIGSTOP' | 'SIGCONT';
 
+/** Pluggable signal interface; tests inject a recording mock. */
 export interface Signaller {
-  // Caller passes the negative process-group id (with detached spawn, pgid === pid)
-  // to signal the whole tree. Pass a positive pid only for direct control.
+  /**
+   * Caller passes the negative process-group id (with detached spawn,
+   * pgid === pid) to signal the whole tree. Pass a positive pid only for
+   * direct control.
+   */
   kill(target: number, signal: ControlSignal): void;
   isAlive(pid: number): boolean;
   startTime(pid: number): string | null;
@@ -42,26 +64,22 @@ export type AgentCiActionResult =
       taskId: string;
     }
   | {
-      kind: 'pid_unavailable';
-      sessionId: string;
-    }
-  | {
       kind: 'stale_process';
       sessionId: string;
       pid: number;
     };
 
-interface ResolvedSession {
-  session: TaskSessionRecord;
-  pid: number;
-  groupTarget: number;
-  now: string;
+interface ResolvedRunner {
+  readonly runner: RunnerState;
+  readonly pid: number;
+  readonly groupTarget: number;
+  readonly now: string;
 }
 
 type ResolveOutcome =
   | {
       kind: 'ready';
-      ready: ResolvedSession;
+      ready: ResolvedRunner;
     }
   | {
       kind: 'rejected';
@@ -131,64 +149,17 @@ export const defaultSignaller: Signaller = {
 
 //#region Queries
 
-export function findActiveAgentCiSession(db: TasksDb, taskId: string): TaskSessionRecord | null {
-  const rows = db
-    .select()
-    .from(taskSessions)
-    .where(
-      and(
-        eq(taskSessions.taskId, taskId),
-        eq(taskSessions.kind, AGENT_CI_REVIEW_KIND),
-        eq(taskSessions.status, 'active'),
-        isNull(taskSessions.completedAt),
-      ),
-    )
-    .orderBy(desc(taskSessions.startedAt))
-    .limit(1)
-    .all();
-  return rows[0] ?? null;
-}
-
-//#endregion
-
-//#region DB Mutations
-
-interface MarkCompletedArgs {
-  db: TasksDb;
-  sessionId: string;
-  status: Extract<TaskSessionStatus, 'cancelled' | 'failed' | 'completed'>;
-  now: string;
-}
-
-function markCompleted(args: MarkCompletedArgs): void {
-  args.db
-    .update(taskSessions)
-    .set({
-      status: args.status,
-      completedAt: args.now,
-      pausedAt: null,
-      updatedAt: args.now,
-    })
-    .where(eq(taskSessions.id, args.sessionId))
-    .run();
-}
-
-interface SetPausedAtArgs {
-  db: TasksDb;
-  sessionId: string;
-  pausedAt: string | null;
-  now: string;
-}
-
-function setPausedAt(args: SetPausedAtArgs): void {
-  args.db
-    .update(taskSessions)
-    .set({
-      pausedAt: args.pausedAt,
-      updatedAt: args.now,
-    })
-    .where(eq(taskSessions.id, args.sessionId))
-    .run();
+/**
+ * Loads the runner sidecar for `taskId`, returning `null` when no
+ * runner is recorded. Does not verify pid liveness — callers wanting
+ * "is the runner actually alive" should follow up with
+ * `signaller.isAlive(runner.pid)`.
+ */
+export async function findActiveAgentCiRunner(
+  ctx: TaskStoreContext,
+  taskId: string,
+): Promise<RunnerState | null> {
+  return loadRunner(ctx, taskId);
 }
 
 //#endregion
@@ -220,54 +191,59 @@ function tryKill(signaller: Signaller, target: number, signal: ControlSignal): K
 
 //#endregion
 
-//#region Resolution Preamble
+//#region Resolution
 
 const POSIX_AVAILABLE = process.platform !== 'win32';
 
-function resolveActiveSession(db: TasksDb, taskId: string, signaller: Signaller): ResolveOutcome {
-  const session = findActiveAgentCiSession(db, taskId);
-  if (session === null) {
+interface ResolveArgs {
+  readonly ctx: TaskStoreContext;
+  readonly taskId: string;
+  readonly signaller: Signaller;
+}
+
+async function resolveActiveRunner(args: ResolveArgs): Promise<ResolveOutcome> {
+  if (!POSIX_AVAILABLE) {
     return {
       kind: 'rejected',
       result: {
         kind: 'no_active_run',
-        taskId,
+        taskId: args.taskId,
       },
     };
   }
-  if (session.pid === null || !POSIX_AVAILABLE) {
+  const runner = await loadRunner(args.ctx, args.taskId);
+  if (runner === null) {
     return {
       kind: 'rejected',
       result: {
-        kind: 'pid_unavailable',
-        sessionId: session.id,
+        kind: 'no_active_run',
+        taskId: args.taskId,
       },
     };
   }
-  const pid = session.pid;
   const now = new Date().toISOString();
-  if (!verifyPidIdentity(signaller, pid, session.pidStarttime)) {
-    markCompleted({
-      db,
-      sessionId: session.id,
-      status: 'failed',
+  if (!verifyPidIdentity(args.signaller, runner.pid, runner.pidStarttime)) {
+    await markRunnerStale({
+      ctx: args.ctx,
+      taskId: args.taskId,
+      runner,
       now,
     });
     return {
       kind: 'rejected',
       result: {
         kind: 'stale_process',
-        sessionId: session.id,
-        pid,
+        sessionId: runner.sessionId,
+        pid: runner.pid,
       },
     };
   }
   return {
     kind: 'ready',
     ready: {
-      session,
-      pid,
-      groupTarget: -pid,
+      runner,
+      pid: runner.pid,
+      groupTarget: -runner.pid,
       now,
     },
   };
@@ -282,7 +258,7 @@ function verifyPidIdentity(
     return false;
   }
   if (storedStartTime === null) {
-    // Legacy row without recorded start time — fall back to liveness only.
+    // No stored snapshot — fall back to liveness only.
     return true;
   }
   const current = signaller.startTime(pid);
@@ -294,56 +270,148 @@ function verifyPidIdentity(
 
 //#endregion
 
+//#region State helpers
+
+interface MarkRunnerStaleArgs {
+  readonly ctx: TaskStoreContext;
+  readonly taskId: string;
+  readonly runner: RunnerState;
+  readonly now: string;
+}
+
+/**
+ * The recorded pid is dead or has been recycled. Drop the sidecar and
+ * bounce the task into `needs_changes` so the operator knows the run
+ * never completed cleanly.
+ */
+async function markRunnerStale(args: MarkRunnerStaleArgs): Promise<void> {
+  await clearRunner(args.ctx, args.taskId);
+  await appendLog(args.ctx, {
+    taskId: args.taskId,
+    entry: {
+      kind: LogEntryKind.System,
+      ts: args.now,
+      message: `agent-ci runner pid=${args.runner.pid} no longer alive — clearing stale sidecar`,
+    },
+  });
+  const task = await loadTask(args.ctx, args.taskId);
+  // Leave terminal statuses (approved) alone; bounce reviewing → needs_changes.
+  if (task.reviewStatus !== TaskReviewStatus.Reviewing) {
+    return;
+  }
+  const next: Task = {
+    ...task,
+    reviewStatus: TaskReviewStatus.NeedsChanges,
+    paused: false,
+    updatedAt: args.now,
+    lastSeenAt: args.now,
+  };
+  await saveTask(args.ctx, next);
+  const event = await appendEvent(args.ctx, {
+    taskId: args.taskId,
+    kind: EventKind.TaskReviewStatusChanged,
+    payload: {
+      previousReviewStatus: TaskReviewStatus.Reviewing,
+      reviewStatus: TaskReviewStatus.NeedsChanges,
+      reason: 'stale_runner',
+      pid: args.runner.pid,
+    },
+    ts: args.now,
+  });
+  emitTaskEvent(event);
+}
+
+interface AppendCancelLogArgs {
+  readonly ctx: TaskStoreContext;
+  readonly taskId: string;
+  readonly runner: RunnerState;
+  readonly now: string;
+}
+
+async function appendCancelLog(args: AppendCancelLogArgs): Promise<void> {
+  await appendLog(args.ctx, {
+    taskId: args.taskId,
+    entry: {
+      kind: LogEntryKind.System,
+      ts: args.now,
+      message: `agent-ci runner pid=${args.runner.pid} cancelled (SIGTERM sent to process group)`,
+    },
+  });
+}
+
+//#endregion
+
 //#region Public API
 
-export function cancelAgentCiRun(
-  db: TasksDb,
+/**
+ * Send SIGTERM to the runner's process group. Resumes a paused runner
+ * first so SIGTERM lands. The sidecar is cleared on success so the next
+ * launch starts from a clean slate.
+ */
+export async function cancelAgentCiRun(
+  ctx: TaskStoreContext,
   taskId: string,
   signaller: Signaller = defaultSignaller,
-): AgentCiActionResult {
-  const outcome = resolveActiveSession(db, taskId, signaller);
+): Promise<AgentCiActionResult> {
+  const outcome = await resolveActiveRunner({
+    ctx,
+    taskId,
+    signaller,
+  });
   if (outcome.kind === 'rejected') {
     return outcome.result;
   }
-  const { session, pid, groupTarget, now } = outcome.ready;
-  if (session.pausedAt !== null) {
+  const { runner, pid, groupTarget, now } = outcome.ready;
+  if (runner.pausedAt !== null) {
     tryKill(signaller, groupTarget, 'SIGCONT');
   }
   const term = tryKill(signaller, groupTarget, 'SIGTERM');
-  markCompleted({
-    db,
-    sessionId: session.id,
-    status: term.alreadyDead ? 'failed' : 'cancelled',
+  await appendCancelLog({
+    ctx,
+    taskId,
+    runner,
     now,
   });
+  await clearRunner(ctx, taskId);
   if (term.alreadyDead) {
     return {
       kind: 'stale_process',
-      sessionId: session.id,
+      sessionId: runner.sessionId,
       pid,
     };
   }
   return {
     kind: 'cancelled',
-    sessionId: session.id,
+    sessionId: runner.sessionId,
     pid,
   };
 }
 
-export function togglePauseAgentCiRun(
-  db: TasksDb,
+/**
+ * Toggle SIGSTOP / SIGCONT on the runner's process group. Records
+ * `pausedAt` in the sidecar before sending SIGSTOP (so a signal failure
+ * leaves the sidecar in a consistent state); clears `pausedAt` before
+ * sending SIGCONT for the same reason. Both branches roll back on signal
+ * failure.
+ */
+export async function togglePauseAgentCiRun(
+  ctx: TaskStoreContext,
   taskId: string,
   signaller: Signaller = defaultSignaller,
-): AgentCiActionResult {
-  const outcome = resolveActiveSession(db, taskId, signaller);
+): Promise<AgentCiActionResult> {
+  const outcome = await resolveActiveRunner({
+    ctx,
+    taskId,
+    signaller,
+  });
   if (outcome.kind === 'rejected') {
     return outcome.result;
   }
-  const { session, pid, groupTarget, now } = outcome.ready;
-  if (session.pausedAt === null) {
+  const { runner, pid, groupTarget, now } = outcome.ready;
+  if (runner.pausedAt === null) {
     return doPause({
-      db,
-      session,
+      ctx,
+      runner,
       pid,
       groupTarget,
       now,
@@ -351,8 +419,8 @@ export function togglePauseAgentCiRun(
     });
   }
   return doResume({
-    db,
-    session,
+    ctx,
+    runner,
     pid,
     groupTarget,
     now,
@@ -361,63 +429,56 @@ export function togglePauseAgentCiRun(
 }
 
 interface ToggleArgs {
-  db: TasksDb;
-  session: TaskSessionRecord;
-  pid: number;
-  groupTarget: number;
-  now: string;
-  signaller: Signaller;
+  readonly ctx: TaskStoreContext;
+  readonly runner: RunnerState;
+  readonly pid: number;
+  readonly groupTarget: number;
+  readonly now: string;
+  readonly signaller: Signaller;
 }
 
-function doPause(args: ToggleArgs): AgentCiActionResult {
-  // Write DB first so a signal failure can be undone without leaving an
-  // inconsistent (process-stopped, DB-says-running) state.
-  setPausedAt({
-    db: args.db,
-    sessionId: args.session.id,
-    pausedAt: args.now,
-    now: args.now,
-  });
+async function persistPausedAt(
+  ctx: TaskStoreContext,
+  runner: RunnerState,
+  pausedAt: string | null,
+): Promise<RunnerState> {
+  const next: RunnerState = {
+    ...runner,
+    pausedAt,
+  };
+  await saveRunner(ctx, next);
+  return next;
+}
+
+async function doPause(args: ToggleArgs): Promise<AgentCiActionResult> {
+  // Persist sidecar first so a failed signal is rolled back; never leave
+  // a stopped child without a record of why.
+  await persistPausedAt(args.ctx, args.runner, args.now);
   try {
     args.signaller.kill(args.groupTarget, 'SIGSTOP');
   } catch (err) {
-    setPausedAt({
-      db: args.db,
-      sessionId: args.session.id,
-      pausedAt: null,
-      now: new Date().toISOString(),
-    });
+    await persistPausedAt(args.ctx, args.runner, null);
     throw err;
   }
   return {
     kind: 'paused',
-    sessionId: args.session.id,
+    sessionId: args.runner.sessionId,
     pid: args.pid,
   };
 }
 
-function doResume(args: ToggleArgs): AgentCiActionResult {
-  const previousPausedAt = args.session.pausedAt;
-  setPausedAt({
-    db: args.db,
-    sessionId: args.session.id,
-    pausedAt: null,
-    now: args.now,
-  });
+async function doResume(args: ToggleArgs): Promise<AgentCiActionResult> {
+  const previousPausedAt = args.runner.pausedAt;
+  await persistPausedAt(args.ctx, args.runner, null);
   try {
     args.signaller.kill(args.groupTarget, 'SIGCONT');
   } catch (err) {
-    setPausedAt({
-      db: args.db,
-      sessionId: args.session.id,
-      pausedAt: previousPausedAt,
-      now: new Date().toISOString(),
-    });
+    await persistPausedAt(args.ctx, args.runner, previousPausedAt);
     throw err;
   }
   return {
     kind: 'resumed',
-    sessionId: args.session.id,
+    sessionId: args.runner.sessionId,
     pid: args.pid,
   };
 }

@@ -1,10 +1,11 @@
+import { createLocalFsAdapter } from '@noetic/core';
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
 
 import type { Command, LocalJsxCommandCall } from '../../types.js';
 import type { AgentCiActionResult } from './agent-ci-control.js';
 import { cancelAgentCiRun, togglePauseAgentCiRun } from './agent-ci-control.js';
-import { openTasksDatabase } from './db/index.js';
+import type { TaskStoreContext } from './fs-store.js';
 import type { TaskTableData, TaskTableRow } from './store.js';
 import { loadTaskTableData } from './store.js';
 import { TasksModal } from './ui/tasks-modal.js';
@@ -33,26 +34,31 @@ function TasksContainer({ cwd, initial, onClose }: ContainerProps): ReactNode {
         return;
       }
       inFlightRef.current = true;
-      const opened = openTasksDatabase(cwd);
-      try {
-        const result =
-          action === 'cancel'
-            ? cancelAgentCiRun(opened.db, row.id)
-            : togglePauseAgentCiRun(opened.db, row.id);
-        setLastResult(formatActionResult(row, result));
-      } catch (err) {
-        const verb = action === 'cancel' ? 'cancel' : 'pause/resume';
-        const message = err instanceof Error ? err.message : String(err);
-        setLastResult(`${row.title}: ${verb} failed (${message})`);
-      } finally {
-        opened.close();
-      }
-      void reload().finally(() => {
-        inFlightRef.current = false;
-      });
+      // The control surface is FS-backed; build a context rooted on the
+      // current task's projectRoot so writes land alongside `task.json`.
+      const ctx: TaskStoreContext = {
+        fs: createLocalFsAdapter(),
+        projectRoot: data.projectRoot,
+      };
+      const op =
+        action === 'cancel' ? cancelAgentCiRun(ctx, row.id) : togglePauseAgentCiRun(ctx, row.id);
+      void op
+        .then((result) => {
+          setLastResult(formatActionResult(row, result));
+        })
+        .catch((err: unknown) => {
+          const verb = action === 'cancel' ? 'cancel' : 'pause/resume';
+          const message = err instanceof Error ? err.message : String(err);
+          setLastResult(`${row.title}: ${verb} failed (${message})`);
+        })
+        .finally(() => {
+          void reload().finally(() => {
+            inFlightRef.current = false;
+          });
+        });
     },
     [
-      cwd,
+      data.projectRoot,
       reload,
     ],
   );
@@ -84,8 +90,6 @@ function formatActionResult(row: TaskTableRow, result: AgentCiActionResult): str
       return `Resumed agent-ci on ${row.title} (pid=${result.pid})`;
     case 'no_active_run':
       return `${row.title}: no active agent-ci run`;
-    case 'pid_unavailable':
-      return `${row.title}: agent-ci run has no tracked PID`;
     case 'stale_process':
       return `${row.title}: agent-ci process pid=${result.pid} no longer running`;
   }
