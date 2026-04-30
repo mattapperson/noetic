@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import { hierarchyPaths } from '../hierarchy/paths.js';
@@ -55,7 +54,7 @@ export async function addMilestoneHandler(
     updatedAt: now,
   };
   await saveMilestone(ctx, args.taskId, milestone);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: args.taskId,
     kind: EventKind.MilestoneCreated,
     payload: {
@@ -63,7 +62,6 @@ export async function addMilestoneHandler(
     },
     ts: now,
   });
-  emitTaskEvent(event);
   return {
     milestone,
   };

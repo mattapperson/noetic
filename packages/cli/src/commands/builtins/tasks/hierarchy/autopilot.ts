@@ -1,5 +1,4 @@
 import type { Signaller } from '../agent-ci-control.js';
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, listTasks, saveTask, tryLoadTask } from '../fs-store.js';
 import type { Task } from '../schemas.js';
@@ -162,7 +161,7 @@ async function setTaskHierarchyStatus(
   const updated = await patchTaskAutopilot(ctx, task, {
     hierarchyStatus: next,
   });
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     kind: EventKind.HierarchyStatusChanged,
     taskId: task.id,
     payload: {
@@ -170,7 +169,6 @@ async function setTaskHierarchyStatus(
     },
     ts: nowIso(),
   });
-  emitTaskEvent(event);
   return updated;
 }
 

@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { offTaskEvent, onTaskEvent } from '../../../src/commands/builtins/tasks/events.js';
-import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { loadState, saveTask, tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
 import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
 import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
@@ -142,38 +141,35 @@ function makeDeps(seed: SeededTask, runValidator: RunValidatorFn): ValidatorJobD
   };
 }
 
-const eventListeners: Array<
-  [
-    EventKind,
-    (e: Event) => void,
-  ]
-> = [];
-
-function captureEvents(kind: EventKind): Event[] {
-  const out: Event[] = [];
-  const listener = (event: Event): void => {
-    out.push(event);
+/**
+ * Snapshot the current event-log watermark so callers can ask
+ * "which events of `kind` were appended since the snapshot?". The
+ * return value is a thunk that re-tails the durable `_events.jsonl`
+ * via `tailEvents` and filters by `kind`.
+ */
+async function captureEventsSince(
+  ctx: {
+    fs: MemFs;
+    projectRoot: string;
+  },
+  kind: EventKind,
+): Promise<() => Promise<Event[]>> {
+  const start = await loadState(ctx);
+  return async () => {
+    const tail = await tailEvents(ctx, start.lastEventId);
+    return tail.filter((e) => e.kind === kind);
   };
-  onTaskEvent(kind, listener);
-  eventListeners.push([
-    kind,
-    listener,
-  ]);
-  return out;
 }
-
-afterEach(() => {
-  for (const [kind, listener] of eventListeners) {
-    offTaskEvent(kind, listener);
-  }
-  eventListeners.length = 0;
-});
 
 describe('_testRunValidatorTick (pass result)', () => {
   it('records a passing run and marks the feature done', async () => {
     const seed = await seedStructuredTask('T-pass000000');
-    const recorded = captureEvents(EventKind.ValidatorRunRecorded);
-    const loopChanges = captureEvents(EventKind.FeatureLoopStateChanged);
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+    };
+    const drainRecorded = await captureEventsSince(ctx, EventKind.ValidatorRunRecorded);
+    const drainLoopChanges = await captureEventsSince(ctx, EventKind.FeatureLoopStateChanged);
     await _testRunValidatorTick(
       makeDeps(seed, async () => ({
         status: 'pass',
@@ -182,39 +178,36 @@ describe('_testRunValidatorTick (pass result)', () => {
     );
     const runs = await listValidatorRuns(
       {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
+        ...ctx,
         taskId: seed.taskId,
       },
       seed.featureId,
     );
     expect(runs).toHaveLength(1);
     expect(runs[0]?.status).toBe(ValidatorRunStatus.Pass);
-    const reloaded = await loadFeature(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
-      seed.taskId,
-      seed.featureId,
-    );
+    const reloaded = await loadFeature(ctx, seed.taskId, seed.featureId);
     expect(reloaded?.loopState).toBe(FeatureLoopState.Passed);
     expect(reloaded?.status).toBe(FeatureStatus.Done);
-    expect(recorded).toHaveLength(1);
-    expect(loopChanges).toHaveLength(1);
+    expect(await drainRecorded()).toHaveLength(1);
+    expect(await drainLoopChanges()).toHaveLength(1);
   });
 });
 
 describe('_testRunValidatorTick (fail result)', () => {
   it('generates a fix feature and emits feature:fixGenerated', async () => {
     const seed = await seedStructuredTask('T-fail000000');
-    const fixEvents = captureEvents(EventKind.FeatureFixGenerated);
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+    };
+    const drainFixEvents = await captureEventsSince(ctx, EventKind.FeatureFixGenerated);
     await _testRunValidatorTick(
       makeDeps(seed, async () => ({
         status: 'fail',
         summary: 'broken',
       })),
     );
+    const fixEvents = await drainFixEvents();
     expect(fixEvents).toHaveLength(1);
     expect(fixEvents[0]?.payload?.['sourceFeatureId']).toBe(seed.featureId);
   });
@@ -235,14 +228,16 @@ describe('_testRunValidatorTick (fail result)', () => {
       ...existing,
       implementationAttemptCount: 3,
     });
-    const exhausted = captureEvents(EventKind.FeatureBudgetExhausted);
-    const loopChanges = captureEvents(EventKind.FeatureLoopStateChanged);
+    const drainExhausted = await captureEventsSince(ctx, EventKind.FeatureBudgetExhausted);
+    const drainLoopChanges = await captureEventsSince(ctx, EventKind.FeatureLoopStateChanged);
     await _testRunValidatorTick(
       makeDeps(seed, async () => ({
         status: 'fail',
         summary: 'still broken',
       })),
     );
+    const exhausted = await drainExhausted();
+    const loopChanges = await drainLoopChanges();
     expect(exhausted).toHaveLength(1);
     expect(loopChanges).toHaveLength(1);
     expect(loopChanges[0]?.payload?.['loopState']).toBe(FeatureLoopState.Blocked);
@@ -254,7 +249,11 @@ describe('_testRunValidatorTick (fail result)', () => {
 describe('_testRunValidatorTick (validator throws)', () => {
   it('marks the run as error without dispatching a result handler', async () => {
     const seed = await seedStructuredTask('T-error00000');
-    const exhausted = captureEvents(EventKind.FeatureBudgetExhausted);
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+    };
+    const drainExhausted = await captureEventsSince(ctx, EventKind.FeatureBudgetExhausted);
     await _testRunValidatorTick(
       makeDeps(seed, async () => {
         throw new Error('boom');
@@ -262,14 +261,13 @@ describe('_testRunValidatorTick (validator throws)', () => {
     );
     const runs = await listValidatorRuns(
       {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
+        ...ctx,
         taskId: seed.taskId,
       },
       seed.featureId,
     );
     expect(runs).toHaveLength(1);
     expect(runs[0]?.status).toBe(ValidatorRunStatus.Error);
-    expect(exhausted).toHaveLength(0);
+    expect(await drainExhausted()).toHaveLength(0);
   });
 });

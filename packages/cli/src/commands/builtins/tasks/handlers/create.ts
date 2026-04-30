@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import { taskDirPaths } from '../paths.js';
@@ -68,7 +67,7 @@ export async function createTaskHandler(
     await ctx.fs.mkdir(paths.dir);
     await ctx.fs.writeFile(paths.description, args.description);
   }
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: task.id,
     kind: EventKind.TaskCreated,
     payload: {
@@ -77,7 +76,6 @@ export async function createTaskHandler(
     },
     ts: now,
   });
-  emitTaskEvent(event);
   return {
     task,
   };

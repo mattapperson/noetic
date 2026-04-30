@@ -32,7 +32,6 @@ import { fileURLToPath } from 'node:url';
 
 import type { Signaller } from './agent-ci-control.js';
 import { defaultSignaller } from './agent-ci-control.js';
-import { emitTaskEvent } from './events.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendEvent, loadTask, saveTask } from './fs-store.js';
 import { taskDirPaths } from './paths.js';
@@ -274,7 +273,7 @@ interface EmitReviewEventArgs {
 }
 
 async function emitReviewEvent(args: EmitReviewEventArgs): Promise<void> {
-  const event = await appendEvent(args.ctx, {
+  await appendEvent(args.ctx, {
     taskId: args.taskId,
     kind: EventKind.TaskReviewStatusChanged,
     payload: {
@@ -287,7 +286,6 @@ async function emitReviewEvent(args: EmitReviewEventArgs): Promise<void> {
     },
     ts: args.now,
   });
-  emitTaskEvent(event);
 }
 
 interface AbortChildArgs {

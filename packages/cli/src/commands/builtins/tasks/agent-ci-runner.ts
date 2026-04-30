@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 import { basename, dirname } from 'node:path';
 
 import { createLocalFsAdapter } from '@noetic/core';
-import { emitTaskEvent } from './events.js';
+
 import type { TaskStoreContext } from './fs-store.js';
 import { appendEvent, appendLog, loadTask, saveTask } from './fs-store.js';
 import { clearRunner, loadRunner } from './runner-state.js';
@@ -163,9 +163,10 @@ interface CommitWritesResult {
 
 /**
  * Commits the three on-exit writes in order: audit (log) → state (task.json)
- * → event (_events.jsonl + in-process bus). Each write is independently
- * recoverable; failures bubble up and the caller decides whether to exit
- * non-zero.
+ * → event (_events.jsonl). Each write is independently recoverable;
+ * failures bubble up and the caller decides whether to exit non-zero.
+ * Out-of-process consumers tail `_events.jsonl` (or subscribe through the
+ * external `tasks.events` channel) for a durable, replayable feed.
  */
 async function commitExitWrites(args: CommitWritesArgs): Promise<CommitWritesResult> {
   const ts = nowIso();
@@ -193,8 +194,10 @@ async function commitExitWrites(args: CommitWritesArgs): Promise<CommitWritesRes
   };
   await saveTask(args.ctx, next);
 
-  // 3) Event: append _events.jsonl, then fan out in-process.
-  const event = await appendEvent(args.ctx, {
+  // 3) Event: append _events.jsonl. The append is the durable record;
+  // tailers (TUI, daemon flow via the external `tasks.events` channel)
+  // observe the row at the rename boundary.
+  await appendEvent(args.ctx, {
     taskId: args.taskId,
     kind: EventKind.TaskReviewStatusChanged,
     payload: {
@@ -204,7 +207,6 @@ async function commitExitWrites(args: CommitWritesArgs): Promise<CommitWritesRes
     },
     ts,
   });
-  emitTaskEvent(event);
 
   // Best-effort: the runner is dead; clear the runner-state file so the
   // next launch starts from a clean slate. Failure here is non-fatal — a

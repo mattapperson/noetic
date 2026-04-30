@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import type { KanbanColumn } from '../kanban.js';
@@ -39,7 +38,7 @@ export async function moveTaskHandler(
     taskId: args.taskId,
     column: args.column,
   });
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: updated.id,
     kind: EventKind.TaskMoved,
     payload: {
@@ -48,7 +47,6 @@ export async function moveTaskHandler(
     },
     ts: nowIso(),
   });
-  emitTaskEvent(event);
   return {
     task: updated,
     previousColumn,

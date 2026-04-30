@@ -11,7 +11,6 @@ import type React from 'react';
 import { useCallback, useState } from 'react';
 
 import { useTheme } from '../../../../tui/components/theme.js';
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import type { KanbanColumn } from '../kanban.js';
@@ -52,7 +51,7 @@ export async function commitMove(input: CommitMoveInput): Promise<Task> {
     taskId: input.taskId,
     column: input.column,
   });
-  const event = await appendEvent(input.ctx, {
+  await appendEvent(input.ctx, {
     taskId: next.id,
     kind: 'task:moved',
     ts: new Date().toISOString(),
@@ -60,7 +59,6 @@ export async function commitMove(input: CommitMoveInput): Promise<Task> {
       column: input.column,
     },
   });
-  emitTaskEvent(event);
   return next;
 }
 

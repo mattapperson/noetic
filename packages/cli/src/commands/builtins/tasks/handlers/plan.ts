@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import type {
@@ -49,7 +48,7 @@ async function markPlanning(ctx: TaskStoreContext, task: Task, ts: string): Prom
     updatedAt: ts,
   };
   await saveTask(ctx, next);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: next.id,
     kind: EventKind.HierarchyStatusChanged,
     payload: {
@@ -57,7 +56,6 @@ async function markPlanning(ctx: TaskStoreContext, task: Task, ts: string): Prom
     },
     ts,
   });
-  emitTaskEvent(event);
   return next;
 }
 
@@ -68,7 +66,7 @@ async function markActive(ctx: TaskStoreContext, task: Task, ts: string): Promis
     updatedAt: ts,
   };
   await saveTask(ctx, next);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: next.id,
     kind: EventKind.HierarchyStatusChanged,
     payload: {
@@ -76,7 +74,6 @@ async function markActive(ctx: TaskStoreContext, task: Task, ts: string): Promis
     },
     ts,
   });
-  emitTaskEvent(event);
   return next;
 }
 

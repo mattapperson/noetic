@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import type { Feature } from '../hierarchy/schemas.js';
@@ -61,7 +60,7 @@ export async function addFeatureHandler(
     updatedAt: now,
   };
   await saveFeature(ctx, args.taskId, feature);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: args.taskId,
     kind: EventKind.FeatureCreated,
     payload: {
@@ -70,7 +69,6 @@ export async function addFeatureHandler(
     },
     ts: now,
   });
-  emitTaskEvent(event);
   return {
     feature,
   };

@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type { SpawnOptions } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { RunnerSpawn } from '../../src/commands/builtins/tasks/agent-ci-runner.js';
 import { runAgentCi } from '../../src/commands/builtins/tasks/agent-ci-runner.js';
-import { taskEvents } from '../../src/commands/builtins/tasks/events.js';
 import type { TaskStoreContext } from '../../src/commands/builtins/tasks/fs-store.js';
 import {
   loadTask,
@@ -13,7 +12,7 @@ import {
 } from '../../src/commands/builtins/tasks/fs-store.js';
 import { taskDirPaths } from '../../src/commands/builtins/tasks/paths.js';
 import { saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
-import type { Event, Task } from '../../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '../../src/commands/builtins/tasks/schemas.js';
 import {
   AutopilotState,
   EventKind,
@@ -130,10 +129,6 @@ async function seedTaskDir(
   };
 }
 
-afterEach(() => {
-  taskEvents.removeAllListeners();
-});
-
 //#endregion
 
 //#region Env validation
@@ -214,27 +209,6 @@ describe('runAgentCi exit 0', () => {
       reviewStatus: TaskReviewStatus.Approved,
       exitCode: 0,
     });
-  });
-
-  it('emits the TaskReviewStatusChanged event on the in-process bus', async () => {
-    const seeded = await seedTaskDir();
-    const received: Event[] = [];
-    taskEvents.on(EventKind.TaskReviewStatusChanged, (event: Event) => {
-      received.push(event);
-    });
-    await runAgentCi({
-      ctx: seeded.ctx,
-      spawnFn: makeSpawn({
-        exitCode: 0,
-      }),
-      taskDir: seeded.taskDir,
-      workflow: 'foo.yml',
-      cwd: '/repo',
-    });
-    expect(received.length).toBeGreaterThanOrEqual(1);
-    const last = received[received.length - 1];
-    expect(last?.taskId).toBe(seeded.task.id);
-    expect(last?.payload?.exitCode).toBe(0);
   });
 });
 

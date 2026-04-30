@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { SpawnOptions } from 'node:child_process';
 import type { Signaller } from '../../src/commands/builtins/tasks/agent-ci-control.js';
 import type {
@@ -9,12 +9,11 @@ import {
   AgentCiSpawnError,
   startAgentCiRun,
 } from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
-import { taskEvents } from '../../src/commands/builtins/tasks/events.js';
 import type { TaskStoreContext } from '../../src/commands/builtins/tasks/fs-store.js';
 import { saveTask, tailEvents } from '../../src/commands/builtins/tasks/fs-store.js';
 import { taskDirPaths } from '../../src/commands/builtins/tasks/paths.js';
 import { loadRunner, saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
-import type { Event, Task } from '../../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '../../src/commands/builtins/tasks/schemas.js';
 import {
   AutopilotState,
   EventKind,
@@ -157,10 +156,6 @@ async function seed(
   };
 }
 
-afterEach(() => {
-  taskEvents.removeAllListeners();
-});
-
 const RUNNER_SCRIPT = '/fake/agent-ci-runner.ts';
 
 //#endregion
@@ -181,11 +176,6 @@ describe('startAgentCiRun (happy path)', () => {
           STARTTIME_A,
         ],
       ]),
-    });
-
-    const received: Event[] = [];
-    taskEvents.on(EventKind.TaskReviewStatusChanged, (event: Event) => {
-      received.push(event);
     });
 
     const result = await startAgentCiRun({
@@ -238,10 +228,6 @@ describe('startAgentCiRun (happy path)', () => {
     expect(reviewChange?.payload?.previousReviewStatus).toBe(TaskReviewStatus.NotStarted);
     expect(reviewChange?.payload?.reviewStatus).toBe(TaskReviewStatus.Reviewing);
     expect(reviewChange?.payload?.phase).toBe('spawn');
-
-    // In-process bus also fired.
-    expect(received).toHaveLength(1);
-    expect(received[0]?.kind).toBe(EventKind.TaskReviewStatusChanged);
   });
 
   test('keeps approved status terminal across re-spawn', async () => {

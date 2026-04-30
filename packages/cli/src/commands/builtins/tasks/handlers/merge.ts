@@ -1,7 +1,6 @@
 import type { ShellAdapter, ShellExecResult } from '@noetic/core';
 import { createLocalShellAdapter } from '@noetic/core';
 
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import type { Task } from '../schemas.js';
@@ -137,7 +136,7 @@ export async function mergeTaskHandler(
     updatedAt: ts,
   };
   await saveTask(ctx, next);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: next.id,
     kind: EventKind.TaskReviewStatusChanged,
     payload: {
@@ -148,7 +147,6 @@ export async function mergeTaskHandler(
     },
     ts,
   });
-  emitTaskEvent(event);
   return {
     task: next,
     tool,

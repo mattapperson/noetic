@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import type { Assertion } from '../hierarchy/schemas.js';
@@ -56,7 +55,7 @@ export async function addAssertionHandler(
     updatedAt: now,
   };
   await saveAssertion(ctx, args.taskId, assertion);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: args.taskId,
     kind: EventKind.AssertionCreated,
     payload: {
@@ -65,7 +64,6 @@ export async function addAssertionHandler(
     },
     ts: now,
   });
-  emitTaskEvent(event);
   return {
     assertion,
   };

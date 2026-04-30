@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import { taskDirPaths } from '../paths.js';
@@ -110,7 +109,7 @@ export async function duplicateTaskHandler(
   await copyOptionalFile(ctx, sourcePaths.description, destPaths.description);
   await copyAttachments(ctx, sourcePaths.attachments, destPaths.attachments);
 
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: newTask.id,
     kind: EventKind.TaskCreated,
     payload: {
@@ -120,7 +119,6 @@ export async function duplicateTaskHandler(
     },
     ts: now,
   });
-  emitTaskEvent(event);
   return {
     task: newTask,
   };

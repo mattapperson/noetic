@@ -1,26 +1,25 @@
 /**
  * React hook that signals when the task event log changes.
  *
- * Combines two signals:
+ * The hook polls `_events.jsonl` once per second; whenever the file size
+ * grows, it bumps the returned `revision` counter. This catches every
+ * `appendEvent` call regardless of which process produced it (chat TUI,
+ * agent-ci runner, daemon flow, etc.) — the on-disk file is the durable,
+ * cross-process record.
  *
- * 1. **Polling**: stat the project's `_events.jsonl` once per second; bump
- *    the returned counter when the file size grows. This catches writes
- *    made by daemons / other processes — anyone that appends an event via
- *    `appendEvent` from `fs-store.ts`.
- * 2. **In-process bus**: subscribe to `taskEvents` for instant updates
- *    when the same process writes events (the chat TUI, agent-ci runner,
- *    etc.).
+ * Out-of-process daemon code reacts to runner outcomes through the
+ * external `tasks.events` channel (`channels.ts`); the TUI hook keeps
+ * its single, simple file-tail signal so it doesn't need a harness in
+ * scope to render.
  *
- * The returned `revision` number monotonically increases. Consumers depend
- * on it as a re-fetch trigger (e.g. inside a `useEffect`).
+ * The returned `revision` number monotonically increases. Consumers
+ * depend on it as a re-fetch trigger (e.g. inside a `useEffect`).
  */
 
 import type { FsAdapter } from '@noetic/core';
 import { useEffect, useState } from 'react';
 
-import { taskEvents } from '../events.js';
 import { taskRootPaths } from '../paths.js';
-import type { Event, EventKind } from '../schemas.js';
 
 //#region Types
 
@@ -29,7 +28,7 @@ export interface UseEventsTailOptions {
   readonly projectRoot: string;
   /** FS adapter used to stat the events file. */
   readonly fs: FsAdapter;
-  /** When false, polling and subscriptions are paused. Defaults to true. */
+  /** When false, polling is paused. Defaults to true. */
   readonly enabled?: boolean;
   /** Polling interval in milliseconds. Defaults to 1000 (1 Hz). */
   readonly pollIntervalMs?: number;
@@ -72,46 +71,21 @@ export function shouldBumpRevision(prev: number, next: number): boolean {
   return next > prev;
 }
 
-/** Set of every `EventKind` so listeners are wired exhaustively. */
-const ALL_EVENT_KINDS: ReadonlyArray<EventKind> = [
-  'task:created',
-  'task:updated',
-  'task:moved',
-  'task:archived',
-  'task:reviewStatusChanged',
-  'session:finished',
-  'log:appended',
-  'milestone:created',
-  'slice:created',
-  'feature:created',
-  'assertion:created',
-  'feature:loopStateChanged',
-  'feature:linkedToTask',
-  'feature:fixGenerated',
-  'feature:budgetExhausted',
-  'validator:runRecorded',
-  'mission:statusChanged',
-];
-
 //#endregion
 
 //#region Public hook
 
 /**
  * Subscribe to task-event activity. Returns a `revision` number whose
- * value changes (always increasing) every time fresh events appear, and
- * `lastEvent` — the most recent in-process event observed via
- * `taskEvents`. `lastEvent` is `null` until the first in-process emission;
- * out-of-process events bump `revision` without populating `lastEvent`.
+ * value increases every time the on-disk events file grows. Consumers
+ * use the counter as a re-fetch trigger.
  */
 export function useEventsTail(options: UseEventsTailOptions): {
   revision: number;
-  lastEvent: Event | null;
 } {
   const enabled = options.enabled ?? true;
   const pollIntervalMs = options.pollIntervalMs ?? 1e3;
   const [revision, setRevision] = useState(0);
-  const [lastEvent, setLastEvent] = useState<Event | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -139,20 +113,9 @@ export function useEventsTail(options: UseEventsTailOptions): {
       void poll();
     }, pollIntervalMs);
 
-    const onEvent = (event: Event): void => {
-      setLastEvent(event);
-      setRevision((r) => r + 1);
-    };
-    for (const kind of ALL_EVENT_KINDS) {
-      taskEvents.on(kind, onEvent);
-    }
-
     return () => {
       cancelled = true;
       clearInterval(interval);
-      for (const kind of ALL_EVENT_KINDS) {
-        taskEvents.off(kind, onEvent);
-      }
     };
   }, [
     enabled,
@@ -163,7 +126,6 @@ export function useEventsTail(options: UseEventsTailOptions): {
 
   return {
     revision,
-    lastEvent,
   };
 }
 

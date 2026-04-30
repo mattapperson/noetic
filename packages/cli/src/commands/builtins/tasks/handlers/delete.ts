@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, deleteTaskDir } from '../fs-store.js';
 import { EventKind } from '../schemas.js';
@@ -29,7 +28,7 @@ export async function deleteTaskHandler(
 ): Promise<DeleteTaskResult> {
   const existing = await resolveTask(ctx, args.taskId);
   const ts = nowIso();
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: existing.id,
     kind: EventKind.TaskArchived,
     payload: {
@@ -37,7 +36,6 @@ export async function deleteTaskHandler(
     },
     ts,
   });
-  emitTaskEvent(event);
   await deleteTaskDir(ctx, existing.id);
   return {
     taskId: existing.id,

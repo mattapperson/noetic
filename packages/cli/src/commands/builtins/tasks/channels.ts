@@ -104,8 +104,8 @@ export const featureLoopStateChan = channel('tasks.feature-loop-state', {
 /**
  * External — the agent-ci runner subprocess publishes here on exit so
  * the in-process daemon flow can react to runner outcomes without
- * polling `_events.jsonl`. Replaces the in-process `taskEvents`
- * EventEmitter; the durable record stays on disk.
+ * polling `_events.jsonl`. The durable record stays on disk; the
+ * channel is a low-latency cross-process tap on top of it.
  */
 export const externalTaskEventsChan = channel('tasks.events', {
   schema: EventSchema,

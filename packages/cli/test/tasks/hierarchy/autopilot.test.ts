@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { offTaskEvent, onTaskEvent } from '../../../src/commands/builtins/tasks/events.js';
-import { saveTask, tryLoadTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import {
+  loadState,
+  saveTask,
+  tailEvents,
+  tryLoadTask,
+} from '../../../src/commands/builtins/tasks/fs-store.js';
 import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
 import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
@@ -122,32 +126,25 @@ function makeDeps(seed: SeededTask): AutopilotDeps {
   };
 }
 
-const eventListeners: Array<
-  [
-    EventKind,
-    (e: Event) => void,
-  ]
-> = [];
-
-function captureEvents(kind: EventKind): Event[] {
-  const out: Event[] = [];
-  const listener = (event: Event): void => {
-    out.push(event);
+/**
+ * Snapshot the current event-log watermark so callers can ask
+ * "which events of `kind` were appended since the snapshot?". The
+ * return value is a thunk that re-tails the durable `_events.jsonl`
+ * via `tailEvents` and filters by `kind`.
+ */
+async function captureEventsSince(
+  ctx: {
+    fs: MemFs;
+    projectRoot: string;
+  },
+  kind: EventKind,
+): Promise<() => Promise<Event[]>> {
+  const start = await loadState(ctx);
+  return async () => {
+    const tail = await tailEvents(ctx, start.lastEventId);
+    return tail.filter((e) => e.kind === kind);
   };
-  onTaskEvent(kind, listener);
-  eventListeners.push([
-    kind,
-    listener,
-  ]);
-  return out;
 }
-
-afterEach(() => {
-  for (const [kind, listener] of eventListeners) {
-    offTaskEvent(kind, listener);
-  }
-  eventListeners.length = 0;
-});
 
 describe('runAutopilotTick (no active slice)', () => {
   it('activates the first pending slice and triages its features', async () => {
@@ -254,7 +251,7 @@ describe('runAutopilotTick (no slices left)', () => {
         },
       ],
     });
-    const events = captureEvents(EventKind.HierarchyStatusChanged);
+    const drainEvents = await captureEventsSince(ctx, EventKind.HierarchyStatusChanged);
     const seed: SeededTask = {
       fs: ctx.fs,
       projectRoot: ctx.projectRoot,
@@ -266,6 +263,7 @@ describe('runAutopilotTick (no slices left)', () => {
     expect(reloaded?.hierarchyStatus).toBe(HierarchyStatus.Complete);
     expect(reloaded?.lifecycleStatus).toBe(TaskLifecycleStatus.Merged);
     expect(reloaded?.autopilotState).toBe(AutopilotState.Inactive);
+    const events = await drainEvents();
     expect(events.length).toBeGreaterThan(0);
   });
 });
@@ -298,9 +296,10 @@ describe('runAutopilotTick (slice fully blocked)', () => {
         blockedReason: 'broken env',
       },
     );
-    const events = captureEvents(EventKind.HierarchyStatusChanged);
+    const drainEvents = await captureEventsSince(ctx, EventKind.HierarchyStatusChanged);
     const report = await runAutopilotTick(makeDeps(seed));
     expect(report.tasksBlocked).toBe(1);
+    const events = await drainEvents();
     expect(events.length).toBeGreaterThan(0);
     const reloaded = await tryLoadTask(ctx, seed.taskId);
     expect(reloaded?.hierarchyStatus).toBe(HierarchyStatus.Blocked);

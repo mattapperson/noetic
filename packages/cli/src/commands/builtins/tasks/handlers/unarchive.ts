@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import type { Task } from '../schemas.js';
@@ -32,7 +31,7 @@ export async function unarchiveTaskHandler(
     updatedAt: ts,
   };
   await saveTask(ctx, next);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: next.id,
     kind: EventKind.TaskArchived,
     payload: {
@@ -40,7 +39,6 @@ export async function unarchiveTaskHandler(
     },
     ts,
   });
-  emitTaskEvent(event);
   return {
     task: next,
   };

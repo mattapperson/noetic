@@ -1,7 +1,6 @@
 import type { JobDefinition } from '../../../../daemon-runtime/jobs.js';
 import * as log from '../../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, listTasks, tryLoadTask } from '../fs-store.js';
 import { EventKind } from '../schemas.js';
@@ -125,7 +124,7 @@ async function emitValidatorRunRecorded(
   taskId: string,
   run: ValidatorRun,
 ): Promise<void> {
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     kind: EventKind.ValidatorRunRecorded,
     taskId,
     payload: {
@@ -135,7 +134,6 @@ async function emitValidatorRunRecorded(
     },
     ts: nowIso(),
   });
-  emitTaskEvent(event);
 }
 
 async function emitFeatureLoopStateChanged(
@@ -147,13 +145,12 @@ async function emitFeatureLoopStateChanged(
     readonly loopState: FeatureLoopState;
   },
 ): Promise<void> {
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     kind: EventKind.FeatureLoopStateChanged,
     taskId,
     payload,
     ts: nowIso(),
   });
-  emitTaskEvent(event);
 }
 
 async function emitFeatureFixGenerated(
@@ -165,13 +162,12 @@ async function emitFeatureFixGenerated(
     readonly validatorRunId: string;
   },
 ): Promise<void> {
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     kind: EventKind.FeatureFixGenerated,
     taskId,
     payload,
     ts: nowIso(),
   });
-  emitTaskEvent(event);
 }
 
 async function emitFeatureBudgetExhausted(
@@ -183,13 +179,12 @@ async function emitFeatureBudgetExhausted(
     readonly budget: number;
   },
 ): Promise<void> {
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     kind: EventKind.FeatureBudgetExhausted,
     taskId,
     payload,
     ts: nowIso(),
   });
-  emitTaskEvent(event);
 }
 
 //#endregion

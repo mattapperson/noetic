@@ -19,7 +19,6 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 
 import { useTheme } from '../../../../tui/components/theme.js';
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import type { InterviewResultLike } from '../hierarchy/live-interview.js';
@@ -179,7 +178,7 @@ export function InterviewPanel(props: InterviewPanelProps): React.ReactElement {
       runInterview: props.runInterview,
       persist: async (result) => {
         await persistTaskHierarchy(props.ctx, props.taskId, result.envelope);
-        const event = await appendEvent(props.ctx, {
+        await appendEvent(props.ctx, {
           taskId: props.taskId,
           kind: 'mission:statusChanged',
           ts: new Date().toISOString(),
@@ -187,7 +186,6 @@ export function InterviewPanel(props: InterviewPanelProps): React.ReactElement {
             status: 'planning-complete',
           },
         });
-        emitTaskEvent(event);
       },
       setPhase,
       onDone: props.onDone,

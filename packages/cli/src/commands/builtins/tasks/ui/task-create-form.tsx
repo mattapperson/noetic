@@ -4,12 +4,12 @@
  * description, Enter on the description submits, Esc cancels.
  *
  * On submit, the form persists `task.json`, optionally writes
- * `description.md`, appends a `task:created` event to `_events.jsonl`,
- * and fans the event out on the in-process bus so the kanban refreshes
- * instantly.
+ * `description.md`, and appends a `task:created` event to
+ * `_events.jsonl`. The kanban hook tails the events file (and watches
+ * its size watermark) and re-renders when it grows.
  *
- * The persistence/emit logic is exposed as `submitNewTask` so unit
- * tests can drive it without rendering Ink.
+ * The persistence logic is exposed as `submitNewTask` so unit tests
+ * can drive it without rendering Ink.
  */
 
 import type { FsAdapter } from '@noetic/core';
@@ -19,7 +19,6 @@ import type React from 'react';
 import { useCallback, useState } from 'react';
 
 import { useTheme } from '../../../../tui/components/theme.js';
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import { taskDirPaths } from '../paths.js';
@@ -106,12 +105,11 @@ export async function submitNewTask(input: SubmitNewTaskInput): Promise<Task> {
     await input.ctx.fs.mkdir(paths.dir);
     await input.ctx.fs.writeFile(paths.description, input.description);
   }
-  const event = await appendEvent(input.ctx, {
+  await appendEvent(input.ctx, {
     taskId: task.id,
     kind: 'task:created',
     ts: new Date().toISOString(),
   });
-  emitTaskEvent(event);
   return task;
 }
 

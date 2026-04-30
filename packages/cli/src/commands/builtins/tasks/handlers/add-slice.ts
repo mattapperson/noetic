@@ -1,4 +1,3 @@
-import { emitTaskEvent } from '../events.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent } from '../fs-store.js';
 import type { Slice } from '../hierarchy/schemas.js';
@@ -58,7 +57,7 @@ export async function addSliceHandler(
     updatedAt: now,
   };
   await saveSlice(ctx, args.taskId, slice);
-  const event = await appendEvent(ctx, {
+  await appendEvent(ctx, {
     taskId: args.taskId,
     kind: EventKind.SliceCreated,
     payload: {
@@ -67,7 +66,6 @@ export async function addSliceHandler(
     },
     ts: now,
   });
-  emitTaskEvent(event);
   return {
     slice,
   };

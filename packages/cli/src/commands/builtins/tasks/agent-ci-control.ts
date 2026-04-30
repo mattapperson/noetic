@@ -19,7 +19,6 @@
 
 import { execFileSync } from 'node:child_process';
 
-import { emitTaskEvent } from './events.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendEvent, appendLog, loadTask, saveTask } from './fs-store.js';
 import type { RunnerState } from './runner-state.js';
@@ -307,7 +306,7 @@ async function markRunnerStale(args: MarkRunnerStaleArgs): Promise<void> {
     lastSeenAt: args.now,
   };
   await saveTask(args.ctx, next);
-  const event = await appendEvent(args.ctx, {
+  await appendEvent(args.ctx, {
     taskId: args.taskId,
     kind: EventKind.TaskReviewStatusChanged,
     payload: {
@@ -318,7 +317,6 @@ async function markRunnerStale(args: MarkRunnerStaleArgs): Promise<void> {
     },
     ts: args.now,
   });
-  emitTaskEvent(event);
 }
 
 interface AppendCancelLogArgs {

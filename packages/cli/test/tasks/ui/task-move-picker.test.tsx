@@ -9,10 +9,9 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { offTaskEvent, onTaskEvent } from '../../../src/commands/builtins/tasks/events.js';
-import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { saveTask, tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
 import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
-import type { Event, Task } from '../../../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '../../../src/commands/builtins/tasks/schemas.js';
 import { TaskSource } from '../../../src/commands/builtins/tasks/schemas.js';
 import {
   clampCursor,
@@ -69,30 +68,23 @@ describe('clampCursor', () => {
 });
 
 describe('commitMove', () => {
-  test('moves a task to InProgress and emits task:moved', async () => {
+  test('moves a task to InProgress and appends task:moved', async () => {
     const ctx = makeStoreContext('/repo');
     const task = makeTask('T-aaaaaaaaaa');
     await saveTask(ctx, task);
 
-    const seen: Event[] = [];
-    const listener = (e: Event): void => {
-      seen.push(e);
-    };
-    onTaskEvent('task:moved', listener);
-    try {
-      const next = await commitMove({
-        ctx,
-        taskId: task.id,
-        column: KanbanColumn.InProgress,
-      });
-      expect(next.reviewStatus).toBe('reviewing');
-      expect(seen).toHaveLength(1);
-      expect(seen[0]?.kind).toBe('task:moved');
-      expect(seen[0]?.taskId).toBe(task.id);
-      expect(seen[0]?.payload?.column).toBe(KanbanColumn.InProgress);
-    } finally {
-      offTaskEvent('task:moved', listener);
-    }
+    const next = await commitMove({
+      ctx,
+      taskId: task.id,
+      column: KanbanColumn.InProgress,
+    });
+    expect(next.reviewStatus).toBe('reviewing');
+
+    const events = await tailEvents(ctx);
+    const moved = events.filter((e) => e.kind === 'task:moved');
+    expect(moved).toHaveLength(1);
+    expect(moved[0]?.taskId).toBe(task.id);
+    expect(moved[0]?.payload?.column).toBe(KanbanColumn.InProgress);
   });
 
   test('moving to Archived stamps archivedAt', async () => {

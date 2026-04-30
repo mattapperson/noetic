@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 import type {
   AgentCiActionResult,
@@ -10,7 +10,6 @@ import {
   findActiveAgentCiRunner,
   togglePauseAgentCiRun,
 } from '../src/commands/builtins/tasks/agent-ci-control.js';
-import { taskEvents } from '../src/commands/builtins/tasks/events.js';
 import type { TaskStoreContext } from '../src/commands/builtins/tasks/fs-store.js';
 import { loadTask, saveTask } from '../src/commands/builtins/tasks/fs-store.js';
 import { loadRunner, saveRunner } from '../src/commands/builtins/tasks/runner-state.js';
@@ -152,10 +151,6 @@ async function seed(args: SeedArgs): Promise<SeedResult> {
     sessionId,
   };
 }
-
-afterEach(() => {
-  taskEvents.removeAllListeners();
-});
 
 //#endregion
 
