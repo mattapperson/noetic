@@ -17,6 +17,8 @@
     "patterns",
     "---Examples---",
     "examples",
+    "---CLI---",
+    "cli",
     "---Reference---",
     "design-decisions",
     "api"
