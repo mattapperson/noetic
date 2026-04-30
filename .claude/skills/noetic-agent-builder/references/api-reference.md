@@ -288,27 +288,26 @@ Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
 
-### missionMemory (`@noetic/cli`)
+### createSteeringFileLayer (`@noetic/cli`)
 
-Mission-aware memory layer for noetic-cli's `tasks/missions` subsystem. Mounted unconditionally next to `planMemory` (slot `Slot.PROCEDURAL - 5` = 245). When the thread state has both `activeMissionId` and `activeFeatureId`, recall emits a developer-role `<mission_context>` block summarising the active mission, slice, feature, acceptance criteria, and assertions.
+Surfaces a per-task `steering.md` file to the agent run servicing that task. The harness factory mounts it unconditionally; activation is gated by the `NOETIC_TASK_DIR` env var that the task launcher sets when spawning agent-ci for a specific task. Non-task agent runs see no steering content.
 
 ```typescript
-import { missionMemory } from '@noetic/cli/src/memory/mission-memory.js';
+import { createSteeringFileLayer } from '@noetic/cli/src/memory/steering-file-layer.js';
 
-missionMemory({
-  cwd: string,                    // working dir used to open the tasks SQLite
-  scope?: MemoryScope,            // default 'thread'
-  initial?: { activeMissionId?: string | null; activeFeatureId?: string | null },
-})
+const layer = createSteeringFileLayer();
+// slot:  Slot.STEERING (90) — ahead of working memory and observations
+// scope: 'execution'
+// budget: { min: 0, max: 8000 }
 ```
 
-Provides (auto-exposed as namespaced LLM tools):
-- `mission/current` — `MissionCurrentSnapshot | null` (mission, slice, feature, assertions)
-- `mission/getFeature` — fetch a feature row by id
-- `mission/markFeatureComplete` — flip a feature to passed and recompute parent mission status
-- `mission/queryAssertions` — list assertions for a feature with each assertion's status
+Behaviour:
 
-`onSpawn` clones state via `structuredClone`, so detached children (e.g. validator runs spawned inside a mission thread) inherit the active feature pointer. The layer no-ops while `activeFeatureId` is null.
+- When `process.env.NOETIC_TASK_DIR` is unset or empty, `recall()` returns `null` and the layer is dormant.
+- When set, `recall()` reads `<NOETIC_TASK_DIR>/steering.md` via `ctx.fs.readFileText`. ENOENT and empty content both yield `null` (no steering content).
+- A non-empty `steering.md` is wrapped in a `# Task Steering` heading and emitted as a developer-role block.
+
+The layer carries no state (`state: null`); everything is resolved at recall time, so a steering file edited mid-session takes effect on the next recall. See `specs/21-tasks.md` for the full task-system contract.
 
 ### ToolMemoryDeclaration
 
@@ -789,6 +788,147 @@ const layer = agentMdLayer({ loader: () => Promise.resolve(instructions) });
 ```
 
 Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction files. Supports `@path.md` imports and skills-style `!command` inline execution (user-origin always; project-origin gated by `config.trustProjectEmbeddedCommands`). See `specs/12a-cli-memory-layers.md` for full discovery order.
+
+## CLI-specific tools
+
+These are shipped by `@noetic/cli` on top of the core framework.
+
+### `taskTools(opts)` — Task management
+
+The `task_*` tool prefix gives agents 1:1 parity with the `noetic tasks <verb>` CLI. Tools are registered by the harness factory and are **default-on**; opt out via `tools.tasks: false` in `noetic.config.ts`. A read-only variant exposes only `task_show`, `task_list`, and `task_logs` — used in planning mode and other contexts where the agent must observe but not mutate.
+
+```typescript
+import { taskTools } from '@noetic/cli/src/commands/builtins/tasks/tools.js';
+import type { TaskStoreContext } from '@noetic/cli/src/commands/builtins/tasks/fs-store.js';
+
+const ctx: TaskStoreContext = { fs, projectRoot };
+
+// Full task surface (mutators + queries).
+const tools = taskTools({ ctx });
+
+// Read-only — only task_show, task_list, task_logs.
+const ro = taskTools({ ctx, readOnly: true });
+```
+
+All tools resolve tasks by their `T-<10 chars>` id and return JSON-shaped objects. Each tool delegates to the same handler the CLI verb uses, so behaviour is identical across surfaces. Storage layout, atomicity guarantees, and lifecycle semantics are spelled out in `specs/21-tasks.md`.
+
+#### Identity & state types
+
+```typescript
+type TaskSource = 'manual' | 'worktree';
+type TaskReviewStatus = 'not_started' | 'reviewing' | 'needs_changes' | 'approved';
+type TaskLifecycleStatus = 'active' | 'merged' | 'cleanup-blocked' | 'removed';
+type KanbanColumn =
+  | 'triage' | 'in_progress' | 'needs_changes' | 'ready_to_merge'
+  | 'done' | 'cleanup_blocked' | 'removed' | 'archived';
+```
+
+Hierarchy entities use the same `<prefix>-<10 chars>` shape with prefixes `ML` (milestone), `SL` (slice), `F` (feature), `A` (assertion), `V` (validator run), `FX` (fix lineage), `IV` (interview session).
+
+#### Mutating tools
+
+```typescript
+// task_create — create a manual task. Optional description seeds description.md.
+input:  { title: string; description?: string }
+output: { task: Task }
+
+// task_move — atomic kanban move. Computes the minimum patch across
+// archivedAt / lifecycleStatus / reviewStatus.
+input:  { taskId: string; column: KanbanColumn }
+output: { task: Task }
+
+// task_merge — try `wt merge <branch>`; fall back to `git merge` if `wt`
+// is missing. Both paths emit task:reviewStatusChanged on success.
+input:  { taskId: string; branch?: string }
+output: { task: Task; via: 'wt' | 'git' }
+
+// task_log / task_comment / task_steer — append to log.jsonl. `task_steer`
+// also writes/appends steering.md (read by the steering memory layer when
+// NOETIC_TASK_DIR points at this task).
+input:  { taskId: string; message: string }
+output: { entry: LogEntry }     // task_log, task_comment
+output: { entry: LogEntry; steeringPath: string }  // task_steer
+
+// task_attach — copy a file into <taskDir>/attachments/.
+input:  { taskId: string; sourcePath: string }
+output: { taskId: string; destinationPath: string }
+
+// task_pause / task_unpause — toggle pause on the active agent-ci runner.
+input:  { taskId: string }
+output: { outcome: 'paused' | 'already_paused' | 'no_runner' | 'resumed' | 'already_running' }
+
+// task_archive / task_unarchive — set/clear archivedAt.
+input:  { taskId: string }
+output: { task: Task }
+
+// task_delete — hard-delete the task directory; emits task:archived
+// before the rm -rf.
+input:  { taskId: string }
+output: { taskId: string; deleted: true }
+
+// task_duplicate — copy task.json + description.md + attachments under a new id.
+input:  { taskId: string; title?: string }
+output: { task: Task }
+```
+
+#### Hierarchy tools
+
+```typescript
+// task_plan — run the live AI-driven interview to build a hierarchy.
+// TUI-only; throws in headless contexts because the interview asks the
+// user multiple-choice questions through AskUserService.
+input:  { taskId: string; description?: string }
+output: { taskId: string; hierarchy: TaskHierarchy }
+
+// task_add_milestone — append a milestone.
+input:  { taskId: string; title: string; verification: string; description?: string }
+output: { milestone: Milestone }
+
+// task_add_slice — append a slice under a milestone.
+input:  { taskId: string; milestoneId: string; title: string; verification: string; description?: string }
+output: { slice: Slice }
+
+// task_add_feature — append a feature under a slice.
+input:  { taskId: string; sliceId: string; title: string; acceptanceCriteria: string; description?: string }
+output: { feature: Feature }
+
+// task_add_assertion — append an assertion under a milestone, optionally
+// covering specific feature ids.
+input:  { taskId: string; milestoneId: string; title: string; assertion: string; featureIds?: string[] }
+output: { assertion: Assertion }
+
+// task_activate_slice — mark a slice 'active'; with triage:true, also
+// triages every defined feature into a leaf task under the same parent.
+input:  { taskId: string; sliceId: string; triage?: boolean }
+output: { outcome: { sliceId: string; triagedFeatureIds: string[] } }
+
+// task_autopilot — toggle the autopilot flag for a structured task.
+input:  { taskId: string; enabled: boolean }
+output: { task: Task }
+```
+
+#### Read-only tools
+
+```typescript
+// task_show — full record + recent log + hierarchy summary if present.
+input:  { taskId: string; logTail?: number }
+output: { task: Task; recentLog: LogEntry[]; hierarchy: TaskHierarchy | null }
+
+// task_list — filterable list. Without filters, returns active tasks for
+// the current project; --all surfaces archived too.
+input:  {
+  column?: KanbanColumn;
+  source?: TaskSource;
+  all?: boolean;
+}
+output: { tasks: Task[] }
+
+// task_logs — tail of the most recent log entries.
+input:  { taskId: string; n?: number }   // default n=50
+output: { entries: LogEntry[] }
+```
+
+The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything except `--help`). See `specs/21-tasks.md` for the verb table and the complete `Task` / `Milestone` / `Slice` / `Feature` / `Assertion` / `ValidatorRun` / `FixLineage` / `InterviewSession` schemas.
 
 ## Memory Layer Hooks
 
