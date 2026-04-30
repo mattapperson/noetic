@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { FsAdapter } from '@noetic/core';
 
+import { isEnoent } from './_fs-errors.js';
 import { taskDirPaths, taskRootPaths, tempPath } from './paths.js';
 import type { Event, LogEntry, State, Task } from './schemas.js';
 import {
@@ -41,22 +42,6 @@ export interface AppendLogOptions {
 //#endregion
 
 //#region Helpers
-
-function isErrorWithCode(value: unknown): value is Error & {
-  code: string;
-} {
-  if (!(value instanceof Error)) {
-    return false;
-  }
-  if (!('code' in value)) {
-    return false;
-  }
-  return typeof value.code === 'string';
-}
-
-function isEnoent(err: unknown): boolean {
-  return isErrorWithCode(err) && err.code === 'ENOENT';
-}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

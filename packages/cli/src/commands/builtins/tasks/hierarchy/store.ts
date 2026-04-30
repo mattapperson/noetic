@@ -1,6 +1,8 @@
 import path from 'node:path';
 
 import type { z } from 'zod';
+
+import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { tempPath } from '../paths.js';
 import {
@@ -26,22 +28,6 @@ import {
 } from './schemas.js';
 
 //#region Helpers
-
-function isErrorWithCode(value: unknown): value is Error & {
-  code: string;
-} {
-  if (!(value instanceof Error)) {
-    return false;
-  }
-  if (!('code' in value)) {
-    return false;
-  }
-  return typeof value.code === 'string';
-}
-
-function isEnoent(err: unknown): boolean {
-  return isErrorWithCode(err) && err.code === 'ENOENT';
-}
 
 function randomSalt(): string {
   return Math.random().toString(36).slice(2, 12);

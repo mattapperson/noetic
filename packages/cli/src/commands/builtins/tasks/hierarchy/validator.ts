@@ -1,4 +1,6 @@
 import path from 'node:path';
+
+import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { tempPath } from '../paths.js';
 import { featureDirPaths, validatorRunPath } from './paths.js';
@@ -52,22 +54,6 @@ function isTerminal(status: ValidatorRunStatus): boolean {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function isErrorWithCode(value: unknown): value is Error & {
-  code: string;
-} {
-  if (!(value instanceof Error)) {
-    return false;
-  }
-  if (!('code' in value)) {
-    return false;
-  }
-  return typeof value.code === 'string';
-}
-
-function isEnoent(err: unknown): boolean {
-  return isErrorWithCode(err) && err.code === 'ENOENT';
 }
 
 function randomSalt(): string {
