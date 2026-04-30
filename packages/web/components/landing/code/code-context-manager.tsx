@@ -2,6 +2,7 @@
 
 import { motion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
+import { NoeticContextDisplay } from '@/components/landing/code/noetic-context-display';
 
 type LayerTone = 'working' | 'retrieval' | 'persistence' | 'control';
 
@@ -9,13 +10,6 @@ interface LayerCard {
   index: string;
   name: string;
   description: string;
-  tone: LayerTone;
-}
-
-interface MeterRow {
-  label: string;
-  used: number;
-  budget: number;
   tone: LayerTone;
 }
 
@@ -96,59 +90,7 @@ const LAYERS: LayerCard[] = [
   },
 ];
 
-const METERS: MeterRow[] = [
-  {
-    label: 'working',
-    used: 1842,
-    budget: 2400,
-    tone: 'working',
-  },
-  {
-    label: 'observations',
-    used: 612,
-    budget: 2000,
-    tone: 'working',
-  },
-  {
-    label: 'semantic',
-    used: 4021,
-    budget: 8000,
-    tone: 'retrieval',
-  },
-  {
-    label: 'episodic',
-    used: 401,
-    budget: 2000,
-    tone: 'retrieval',
-  },
-  {
-    label: 'plan',
-    used: 2880,
-    budget: 3000,
-    tone: 'persistence',
-  },
-];
-
-const TOTAL_USED = METERS.reduce((sum, m) => sum + m.used, 0);
-const TOTAL_BUDGET = METERS.reduce((sum, m) => sum + m.budget, 0);
-const TOTAL_PCT = Math.round((TOTAL_USED / TOTAL_BUDGET) * 100);
-
-function formatTokens(n: number): string {
-  return n.toLocaleString();
-}
-
 type CssWithVars = CSSProperties & Record<`--${string}`, string | number>;
-
-function meterStyle(used: number, budget: number): CssWithVars {
-  const fill = Math.min(used / budget, 1);
-  return {
-    background: 'currentColor',
-    transformOrigin: 'left center',
-    transform: 'scaleX(0)',
-    animation: 'fill-bar 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
-    '--bar-fill': String(fill),
-  };
-}
 
 function stackAccentStyle(color: string): CssWithVars {
   return {
@@ -289,157 +231,8 @@ export function CodeContextManager(): ReactNode {
             once: true,
           }}
           className="ctx-sticky"
-          style={{
-            background: 'var(--color-tui-bg-deep)',
-            border: '1px solid var(--color-tui-border-bright)',
-            borderRadius: '6px',
-            overflow: 'hidden',
-            boxShadow: '0 24px 60px -32px rgba(57, 255, 20, 0.18)',
-          }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 14px',
-              borderBottom: '1px solid var(--color-tui-border)',
-              background: 'var(--color-tui-surface-2)',
-            }}
-          >
-            <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: 'var(--color-tui-green)',
-                boxShadow: '0 0 8px var(--color-tui-green)',
-              }}
-            />
-            <span
-              style={{
-                fontSize: '11px',
-                color: 'var(--color-tui-secondary)',
-                letterSpacing: '0.06em',
-              }}
-            >
-              $ noetic --memory-budget
-            </span>
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontSize: '10px',
-                color: 'var(--color-tui-muted)',
-              }}
-            >
-              live
-            </span>
-          </div>
-
-          <div
-            style={{
-              padding: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-              fontSize: '12px',
-            }}
-          >
-            {METERS.map((m) => {
-              const pct = Math.round((m.used / m.budget) * 100);
-              return (
-                <div key={m.label}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      marginBottom: '6px',
-                      color: 'var(--color-tui-secondary)',
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: TONE_COLOR[m.tone],
-                      }}
-                    >
-                      {m.label}
-                    </span>
-                    <span
-                      style={{
-                        color: 'var(--color-tui-muted)',
-                      }}
-                    >
-                      {`${formatTokens(m.used)} / ${formatTokens(m.budget)} · ${pct}%`}
-                    </span>
-                  </div>
-                  <div className="code-meter-track">
-                    <div
-                      className="code-meter-fill"
-                      style={{
-                        ...meterStyle(m.used, m.budget),
-                        color: TONE_COLOR[m.tone],
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-
-            <div
-              style={{
-                marginTop: '8px',
-                paddingTop: '14px',
-                borderTop: '1px dashed var(--color-tui-border)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginBottom: '6px',
-                  color: 'var(--color-tui-fg)',
-                  fontWeight: 700,
-                }}
-              >
-                <span>total</span>
-                <span
-                  style={{
-                    color: 'var(--color-tui-green)',
-                  }}
-                >
-                  {`${formatTokens(TOTAL_USED)} / ${formatTokens(TOTAL_BUDGET)} · ${TOTAL_PCT}%`}
-                </span>
-              </div>
-              <div
-                className="code-meter-track"
-                style={{
-                  height: '10px',
-                }}
-              >
-                <div
-                  className="code-meter-fill"
-                  style={{
-                    ...meterStyle(TOTAL_USED, TOTAL_BUDGET),
-                    color: 'var(--color-tui-green)',
-                    boxShadow: '0 0 12px var(--color-tui-green)',
-                  }}
-                />
-              </div>
-            </div>
-
-            <div
-              style={{
-                marginTop: '4px',
-                fontSize: '11px',
-                color: 'var(--color-tui-muted)',
-                lineHeight: 1.5,
-              }}
-            >
-              {'// Each layer is independently budgeted. Hit a ceiling? Only that layer'}
-              <br />
-              {'// gets compacted — the rest stays sharp.'}
-            </div>
-          </div>
+          <NoeticContextDisplay />
         </motion.div>
       </div>
     </section>
