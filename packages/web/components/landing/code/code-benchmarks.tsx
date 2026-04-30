@@ -21,7 +21,7 @@ const BENCHMARKS: BenchmarkCard[] = [
     detail: 'Measures the full loop: read, edit, run, recover. Not just code completion.',
     score: 78,
     baseline: 54,
-    baselineLabel: 'next-best',
+    baselineLabel: 'baseline',
   },
   {
     rank: '#1',
@@ -30,7 +30,7 @@ const BENCHMARKS: BenchmarkCard[] = [
     detail: 'Tests whether an agent still remembers turn 3 when it reaches turn 300.',
     score: 91,
     baseline: 47,
-    baselineLabel: 'next-best',
+    baselineLabel: 'baseline',
   },
 ];
 
@@ -93,14 +93,7 @@ export function CodeBenchmarks(): ReactNode {
             viewport={{
               once: true,
             }}
-            style={{
-              background: 'var(--color-tui-surface)',
-              padding: '36px 36px 32px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '24px',
-              position: 'relative',
-            }}
+            className="code-bench-card"
           >
             <div
               style={{
@@ -120,13 +113,14 @@ export function CodeBenchmarks(): ReactNode {
               style={{
                 display: 'flex',
                 alignItems: 'flex-end',
-                gap: '20px',
+                gap: 'clamp(12px, 3vw, 20px)',
+                flexWrap: 'wrap',
               }}
             >
               <span
                 className="tui-glow"
                 style={{
-                  fontSize: 'clamp(72px, 9vw, 112px)',
+                  fontSize: 'clamp(56px, 13vw, 112px)',
                   fontWeight: 800,
                   color: 'var(--color-tui-green)',
                   lineHeight: 0.85,

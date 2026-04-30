@@ -197,15 +197,7 @@ export function CodeContextManager(): ReactNode {
         </p>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)',
-          gap: '32px',
-          alignItems: 'start',
-        }}
-        className="ctx-grid"
-      >
+      <div className="ctx-grid">
         <div className="code-stack-grid">
           {LAYERS.map((layer, i) => (
             <motion.div
@@ -296,9 +288,8 @@ export function CodeContextManager(): ReactNode {
           viewport={{
             once: true,
           }}
+          className="ctx-sticky"
           style={{
-            position: 'sticky',
-            top: '96px',
             background: 'var(--color-tui-bg-deep)',
             border: '1px solid var(--color-tui-border-bright)',
             borderRadius: '6px',

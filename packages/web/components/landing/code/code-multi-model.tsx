@@ -119,15 +119,7 @@ export function CodeMultiModel(): ReactNode {
         </p>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-          gap: '32px',
-          alignItems: 'start',
-        }}
-        className="ctx-grid"
-      >
+      <div className="ctx-grid-mm">
         <div
           style={{
             border: '1px solid var(--color-tui-border-bright)',
@@ -217,7 +209,6 @@ export function CodeMultiModel(): ReactNode {
                   gap: '6px',
                   fontSize: '12px',
                   fontFamily: 'var(--font-mono)',
-                  justifySelf: 'end',
                 }}
               >
                 <span
@@ -262,9 +253,8 @@ export function CodeMultiModel(): ReactNode {
           viewport={{
             once: true,
           }}
+          className="ctx-sticky"
           style={{
-            position: 'sticky',
-            top: '96px',
             display: 'flex',
             flexDirection: 'column',
             gap: '16px',
@@ -294,10 +284,12 @@ export function CodeMultiModel(): ReactNode {
               style={{
                 margin: 0,
                 padding: '20px',
-                fontSize: '12.5px',
+                fontSize: '12px',
                 lineHeight: 1.7,
                 color: 'var(--color-tui-secondary)',
                 fontFamily: 'var(--font-mono), monospace',
+                overflowX: 'auto',
+                whiteSpace: 'pre',
               }}
             >
               <span

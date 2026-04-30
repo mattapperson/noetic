@@ -174,7 +174,7 @@ export function CodeBackgroundAgents(): ReactNode {
 
         <div>
           <div
-            className="code-roster-row"
+            className="code-roster-row code-roster-header"
             style={{
               fontSize: '10px',
               color: 'var(--color-tui-muted)',

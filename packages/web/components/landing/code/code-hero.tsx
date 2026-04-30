@@ -77,21 +77,7 @@ export function CodeHero(): ReactNode {
   );
 
   return (
-    <section
-      style={{
-        position: 'sticky',
-        inset: '64px 0px 0px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-        padding: '24px 24px 48px',
-        textAlign: 'left',
-        zIndex: 0,
-        margin: 'auto',
-        height: '100vh',
-      }}
-    >
+    <section className="code-hero-section">
       <motion.div
         style={{
           display: 'flex',
@@ -146,15 +132,7 @@ export function CodeHero(): ReactNode {
           </span>
         </motion.div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-            gap: '56px',
-            alignItems: 'start',
-          }}
-          className="hero-grid"
-        >
+        <div className="hero-grid">
           <div
             style={{
               display: 'flex',
@@ -207,7 +185,7 @@ export function CodeHero(): ReactNode {
               }}
               className="tui-phosphor"
               style={{
-                fontSize: 'clamp(56px, 9vw, 132px)',
+                fontSize: 'clamp(44px, 11vw, 132px)',
                 fontWeight: 800,
                 color: 'var(--color-tui-green)',
                 margin: 0,
@@ -451,13 +429,13 @@ export function CodeHero(): ReactNode {
               <pre
                 style={{
                   margin: 0,
-                  padding: '20px 22px',
-                  fontSize: '12.5px',
+                  padding: 'clamp(14px, 3vw, 20px) clamp(14px, 3.2vw, 22px)',
+                  fontSize: 'clamp(10px, 1.6vw, 12.5px)',
                   lineHeight: 1.75,
                   color: 'var(--color-tui-secondary)',
                   fontFamily: 'var(--font-mono), monospace',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
+                  overflowX: 'auto',
+                  whiteSpace: 'pre',
                 }}
               >
                 {HIGHLIGHTED_HERO_CODE}
