@@ -172,6 +172,17 @@ function withDb<R>(cwd: string, fn: (opened: TasksDatabase) => R): R {
   }
 }
 
+/**
+ * @public
+ * Public wrapper around the (test-seam aware) DB opener. Daemon jobs that
+ * read the missions schema directly (autopilot/validator/health) must route
+ * through this helper so the test seam from {@link setOpenMissionsDatabase}
+ * applies to them too.
+ */
+export function withMissionsDb<R>(cwd: string, fn: (opened: TasksDatabase) => R): R {
+  return withDb(cwd, fn);
+}
+
 function parseAcceptanceCriteria(raw: string): string[] {
   return AcceptanceCriteriaSchema.parse(JSON.parse(raw));
 }
