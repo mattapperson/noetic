@@ -83,13 +83,18 @@ Contribute [skills](/docs/code-agent-cli/skills) programmatically — useful whe
 Contribute slash commands. Plugin commands merge into the CLI's built-in registry **after** built-ins, so a plugin can't shadow `/help`, `/context`, or `/clear`.
 
 ```ts
-commands: (ctx) => [{
-  name: 'deploy-preview',
-  description: 'Build and deploy a preview environment for the current branch.',
-  execute: async (input, session) => {
-    // ... read from ctx.config, write to ctx.dataDir('project'), call shell, etc.
+import type { NoeticPlugin } from '@noetic/cli';
+
+const commands: NoeticPlugin['commands'] = (ctx) => [
+  {
+    name: 'deploy-preview',
+    description: 'Build and deploy a preview environment for the current branch.',
+    execute: async (_input, _session) => {
+      // read from ctx.config, write to ctx.dataDir('project'), call shell, etc.
+      void ctx;
+    },
   },
-}],
+];
 ```
 
 ### `subagentPresets`
@@ -163,10 +168,20 @@ Two reference plugins ship in this repo:
 
 Adds a powerline-style footer + themed working-vibes loading messages.
 
-```ts
+```tsx
+import type { ReactNode } from 'react';
 import type { NoeticPlugin } from '@noetic/cli';
 
-export default function powerline(userInput = {}): NoeticPlugin {
+declare const Footer: (props: { segments: unknown; theme: unknown }) => ReactNode;
+declare function parseOptions(input: unknown): {
+  segments: unknown;
+  theme: unknown;
+  vibe: unknown;
+};
+declare function resolveVibes(args: { options: unknown; apiKey: string }): Promise<string[]>;
+declare function loadTheme(theme: unknown): unknown;
+
+export default function powerline(userInput: unknown = {}): NoeticPlugin {
   const options = parseOptions(userInput);
   let vibes: ReadonlyArray<string> = [];
 

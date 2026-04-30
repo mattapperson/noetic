@@ -8,7 +8,19 @@ description: Type definitions for all step variants in Noetic's discriminated un
 The `Step` type is a discriminated union over the `kind` field:
 
 ```ts
-type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
+import type {
+  Step,
+  StepBranch,
+  StepFork,
+  StepLLM,
+  StepLoop,
+  StepProvide,
+  StepRun,
+  StepSpawn,
+  StepTool,
+} from '@noetic/core';
+
+type _AssertShape<TMemory, I, O> =
   | StepRun<TMemory, I, O>
   | StepLLM<TMemory, I, O>
   | StepTool<TMemory, I, O>
@@ -17,7 +29,13 @@ type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
   | StepSpawn<TMemory, I, O>
   | StepProvide<TMemory, I, O>
   | StepLoop<TMemory, I, O>;
+
+type _AssertSubset<TMemory, I, O> = _AssertShape<TMemory, I, O> extends Step<TMemory, I, O>
+  ? true
+  : false;
 ```
+
+The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fixed-interval scheduling.
 
 ## StepRun
 
@@ -43,6 +61,7 @@ type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
 | `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
 | `output` | `ZodType<O>` | no | Structured output schema |
 | `params` | `ModelParams` | no | Sampling parameters |
+| `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step. Defaults to `true`. Pass `false` to suppress all framework events, or a filter function to allow specific events through. |
 
 ## StepTool
 
@@ -147,6 +166,22 @@ Fork has three mode variants, each a separate interface.
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TMemory>) => I` | no | Transform output to next input |
 | `onError` | `(error: NoeticError, ctx: Context<TMemory>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
 
+## StepEvery
+
+`StepEvery<TMemory, I, O>`
+
+A step that runs a body step on a fixed-interval schedule, optionally woken sooner by a wake channel. Runs forever until the executing context is cancelled. The operator output is `void` — `every` does not accumulate iteration outputs.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'every'` | yes | Discriminant |
+| `id` | `string` | yes | Step identifier |
+| `step` | `Step<TMemory, I, O>` | yes | Body step executed on each iteration |
+| `ms` | `number` | yes | Park duration between iterations in milliseconds. Must be `>= 0`. |
+| `wakeOn` | `Channel<unknown>` | no | Channel that wakes the parking interval when any value arrives |
+| `onError` | `'continue' \| 'fail'` | no | Behavior when `step` throws. Defaults to `'continue'` (record the error and keep parking). |
+| `jitter` | `number` | no | Random jitter applied to the park duration in milliseconds. Must be `>= 0`. Defaults to `0`. |
+
 ## Supporting Types
 
 ### SettleResult
@@ -180,15 +215,23 @@ Fork has three mode variants, each a separate interface.
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | `string` | Tool name |
-| `description` | `string` | Tool description for the LLM |
-| `input` | `ZodType` | Input schema |
-| `output` | `ZodType` | Output schema |
-| `execute` | `(args: I, ctx: Context) => Promise<O>` | Execution function |
-| `needsApproval` | `boolean` | Whether the tool requires human approval (optional) |
+| `name` | `string` | Tool name (used by the LLM for selection). |
+| `description` | `string` | Tool description shown to the LLM. |
+| `input` | `ZodType<I>` | Zod schema validating tool input arguments. |
+| `output` | `ZodType<O>` | Zod schema validating tool return value. |
+| `event` | `ZodType` | Optional Zod schema validating streaming events yielded during execution. |
+| `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. |
+| `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. |
+| `execute` | `(args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>> \| AsyncGenerator<unknown, z.infer<O>>` | Async function (or generator) that performs the tool's work. |
+| `needsApproval` | `boolean` | Optional. When `true`, execution pauses for human approval before running. |
+| `memory` | `ToolMemoryDeclaration` | Optional. Declares tool-owned memory the runtime materializes into a `MemoryLayer`. |
 
 ### ExecuteStepFn
 
 ```ts
-type ExecuteStepFn = <TMemory, I, O>(step: Step<TMemory, I, O>, input: I, ctx: Context<TMemory>) => Promise<O>;
+declare const executeStepShape: <TMemory, I, O>(
+  step: Step<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
+) => Promise<O>;
 ```

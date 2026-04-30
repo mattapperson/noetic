@@ -30,7 +30,7 @@ Every step in Noetic receives a `Context` object as its second argument. The con
 ## Context Interface
 
 ```ts
-interface Context<TMemory = ContextMemory, TState = unknown>
+type ContextShape<TMemory = ContextMemory, TState = unknown> = Context<TMemory, TState>;
 ```
 
 The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `InferMemory<typeof config>` to supply a fully typed shape.
@@ -57,10 +57,10 @@ The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `Infe
 The `ctx.memory` property is a readonly object keyed by layer ID. Each key maps to a handle containing the data projections and callable functions that the layer declared in its `provides` field.
 
 ```ts
-// Data access -- read a value projected from layer state
+declare const ctx: Context<Record<string, { snapshot: unknown; update: (next: unknown) => Promise<void> }>>;
+
 const snap = ctx.memory['working-memory'].snapshot;
 
-// Function call -- invokes the layer function, may update layer state
 await ctx.memory['working-memory'].update({ key: 'value' });
 ```
 
@@ -113,6 +113,7 @@ Context exposes three methods for communicating over [Channels](/docs/framework/
 
 ```ts
 import { channel } from '@noetic/core';
+import type { Context } from '@noetic/core';
 import { z } from 'zod';
 
 const approvals = channel('approvals', {
@@ -120,10 +121,10 @@ const approvals = channel('approvals', {
   mode: 'queue',
 });
 
-// Inside a step:
+declare const ctx: Context;
 ctx.send(approvals, true);
 const approved = await ctx.recv(approvals, { timeout: 5_000 });
-const maybe = ctx.tryRecv(approvals); // null if empty
+const maybe = ctx.tryRecv(approvals);
 ```
 
 ## Lifecycle Controls
@@ -131,6 +132,7 @@ const maybe = ctx.tryRecv(approvals); // null if empty
 ### Checkpoint
 
 ```ts
+declare const ctx: Context;
 await ctx.checkpoint();
 ```
 
@@ -139,6 +141,8 @@ Persists the current execution state so it can be restored later. In the `AgentH
 ### Complete
 
 ```ts
+declare const ctx: Context;
+declare const finalValue: unknown;
 ctx.complete(finalValue);
 ```
 
@@ -152,6 +156,7 @@ Signals that the execution has a result and should stop. After calling `complete
 ### Abort
 
 ```ts
+declare const ctx: Context;
 ctx.abort('user cancelled');
 ```
 
@@ -245,6 +250,7 @@ Content arrays use these discriminated variants:
 `ctx.lastLayerUsage` exposes how the most recent `callModel` decomposed the context window across its contributors. The runtime captures this snapshot after every successful LLM step and overwrites it on the next call.
 
 ```ts
+declare const ctx: Context;
 const usage = ctx.lastLayerUsage;
 if (usage) {
   for (const layer of usage.layers) {

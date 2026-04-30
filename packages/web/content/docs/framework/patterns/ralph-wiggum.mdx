@@ -12,14 +12,14 @@ The name is a playful reference -- like Ralph Wiggum, it keeps trying until it g
 ## Signature
 
 ```ts
-function ralphWiggum(opts: {
+declare function ralphWiggum(opts: {
   model: string;
   instructions: string;
   tools: Tool[];
   verify: VerifyFn;
   maxIterations?: number;
   innerMaxSteps?: number;
-}): StepLoop<string, string>
+}): StepLoop<ContextMemory, string, string>;
 ```
 
 | Parameter | Type | Default | Purpose |
@@ -46,6 +46,9 @@ The `feedback` string is prepended to the next iteration's input, giving the age
 
 ```ts
 import { ralphWiggum } from '@noetic/core';
+import type { Tool } from '@noetic/core';
+
+declare const codeExecutionTool: Tool;
 
 const agent = ralphWiggum({
   model: 'gpt-4o',
@@ -77,7 +80,17 @@ const agent = ralphWiggum({
 6. This repeats until `verify` returns `{ pass: true }` or `maxIterations` is reached.
 
 ```ts
-function ralphWiggum(opts) {
+import { any, react, spawn, until } from '@noetic/core';
+import type { Tool, VerifyFn } from '@noetic/core';
+
+function ralphWiggumImpl(opts: {
+  model: string;
+  instructions: string;
+  tools: Tool[];
+  verify: VerifyFn;
+  maxIterations?: number;
+  innerMaxSteps?: number;
+}) {
   const inner = react({
     model: opts.model,
     instructions: opts.instructions,
@@ -86,17 +99,16 @@ function ralphWiggum(opts) {
   });
 
   return {
-    kind: 'loop',
+    kind: 'loop' as const,
     id: 'ralph-wiggum-loop',
-    steps: [spawn({
-      id: 'ralph-iteration',
-      child: inner,
-    })],
-    until: any(
-      until.verified(opts.verify),
-      until.maxSteps(opts.maxIterations ?? 50),
-    ),
-    prepareNext: (_output, verdict) => {
+    steps: [
+      spawn({
+        id: 'ralph-iteration',
+        child: inner,
+      }),
+    ],
+    until: any(until.verified(opts.verify), until.maxSteps(opts.maxIterations ?? 50)),
+    prepareNext: (_output: string, verdict: { feedback?: string }) => {
       if (verdict.feedback) {
         return `Previous attempt feedback: ${verdict.feedback}\nContinue working.`;
       }

@@ -8,28 +8,32 @@ description: Type definitions for memory layers, hooks, storage adapters, and pr
 The core memory layer interface.
 
 ```ts
-interface MemoryLayer<TState = unknown> {
+declare interface MemoryLayerShape<TState = unknown> {
   id: string;
   name?: string;
   slot: number;
   scope: MemoryScope;
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
-  provides?: LayerProvides;
   timeouts?: Partial<LayerTimeouts>;
+  provides?: unknown;
+  itemSchemas?: unknown;
+  rerenderTiming?: 'immediate' | 'batched';
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `id` | `string` | yes | Unique layer identifier |
-| `name` | `string` | no | Human-readable name for debugging |
-| `slot` | `number` | yes | Ordering priority (lower = earlier in prompt) |
-| `scope` | `MemoryScope` | yes | Persistence boundary |
-| `budget` | `BudgetConfig` | no | Token budget allocation |
-| `hooks` | `MemoryHooks<TState>` | yes | Lifecycle callbacks |
-| `provides` | `LayerProvides` | no | Typed data and function declarations exposed on `ctx.memory` |
-| `timeouts` | `Partial<LayerTimeouts>` | no | Per-hook timeout overrides (ms) |
+| `id` | `string` | yes | Unique layer identifier. |
+| `name` | `string` | no | Human-readable name for debugging and trace output. |
+| `slot` | `number` | yes | Ordering slot (lower = recalled first). Use the [`Slot`](#slot-constants) constants for well-known positions. |
+| `scope` | `MemoryScope` | yes | Persistence boundary. |
+| `budget` | `BudgetConfig` | no | Token budget allocation: a fixed number, a `{ min, max }` range, or `'auto'`. |
+| `hooks` | `MemoryHooks<TState>` | yes | Lifecycle callbacks. |
+| `timeouts` | `Partial<LayerTimeouts>` | no | Per-hook timeout overrides (ms). |
+| `provides` | `LayerProvides` | no | Typed data and function declarations exposed on `ctx.memory['layerId']`. Function entries are also auto-injected as LLM tools. |
+| `itemSchemas` | `Pick<ItemSchemaExtensions, 'developerMessages' \| 'items'>` | no | Optional item schemas contributed by this layer, primarily for developer-role memory items. |
+| `rerenderTiming` | `'immediate' \| 'batched'` | no | Default re-render timing when `onItemAppend` requests a re-render. |
 
 ## MemoryScope
 
@@ -49,7 +53,9 @@ type BudgetConfig =
 ## Slot Constants
 
 ```ts
-const Slot = {
+const SlotShape = {
+  REMINDER: 80,
+  STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
@@ -57,8 +63,10 @@ const Slot = {
   EPISODIC: 300,
   RAG: 350,
   SEMANTIC_RECALL: 400,
-} as const;
+} as const satisfies Record<string, number>;
 ```
+
+The runtime exports the `Slot` constant from `@noetic/core` with these values; pass any of them as a layer's `slot` field to position it consistently with built-in layers.
 
 ## MemoryHooks
 

@@ -136,20 +136,35 @@ observationalMemory({
 The `buildDeepAgent` function composes everything using `react()` with `memory`:
 
 ```ts
-export function buildDeepAgent(config): StepLoop | StepSpawn {
+import { observationalMemory, react, staticContent, toolMemoryLayer } from '@noetic/core';
+import type { MemoryLayer, StepLoop, StepSpawn, Tool } from '@noetic/core';
+
+interface DeepAgentConfig {
+  model: string;
+  instructions: string;
+}
+
+declare const fsTools: Tool[];
+declare const todoTools: Tool[];
+declare const delegateTool: Tool;
+declare function skillsLayer(opts: unknown): MemoryLayer;
+declare function loadInstructions(): Promise<string>;
+declare const observer: (buffer: ReadonlyArray<unknown>) => Promise<string[]>;
+
+export function buildDeepAgent(config: DeepAgentConfig): StepLoop | StepSpawn {
   const allTools = [...fsTools, ...todoTools, delegateTool];
-  const layers = [
-    staticContent({ load: ..., tag: 'instructions' }),
+  const layers: MemoryLayer[] = [
+    staticContent({ load: loadInstructions, tag: 'instructions' }),
     ...toolMemoryLayer(allTools),
-    skillsLayer(...),
-    observationalMemory(...),
+    skillsLayer({}),
+    observationalMemory({ bufferThreshold: 4_000, observer }),
   ];
 
   return react({
     model: config.model,
     instructions: config.instructions,
     tools: allTools,
-    memory: layers, // auto-wraps in spawn
+    memory: layers,
   });
 }
 ```

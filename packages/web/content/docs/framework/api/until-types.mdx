@@ -74,7 +74,7 @@ The `until` object provides factory functions for common predicates:
 Stops after `n` iterations.
 
 ```ts
-until.maxSteps(n: number): Until
+const stop: Until = until.maxSteps(10);
 ```
 
 ### until.maxCost(usd)
@@ -82,7 +82,7 @@ until.maxSteps(n: number): Until
 Stops when accumulated cost reaches the USD limit.
 
 ```ts
-until.maxCost(usd: number): Until
+const stop: Until = until.maxCost(1.0);
 ```
 
 ### until.maxDuration(ms)
@@ -90,7 +90,7 @@ until.maxCost(usd: number): Until
 Stops when elapsed time reaches the millisecond limit.
 
 ```ts
-until.maxDuration(ms: number): Until
+const stop: Until = until.maxDuration(60_000);
 ```
 
 ### until.noToolCalls()
@@ -98,7 +98,7 @@ until.maxDuration(ms: number): Until
 Stops when the LLM responds without making any tool calls. Skips the first iteration (step count < 1).
 
 ```ts
-until.noToolCalls(): Until
+const stop: Until = until.noToolCalls();
 ```
 
 ### until.verified(fn)
@@ -106,7 +106,8 @@ until.noToolCalls(): Until
 Stops when the verify function returns `{ pass: true }`. Feedback from failed verification is available in the verdict.
 
 ```ts
-until.verified(fn: VerifyFn): Until
+declare const verify: VerifyFn;
+const stop: Until = until.verified(verify);
 ```
 
 ### until.converged(opts)
@@ -114,7 +115,7 @@ until.verified(fn: VerifyFn): Until
 Stops when the output text is identical to the previous iteration's output.
 
 ```ts
-until.converged(opts: ConvergeConfig): Until
+const stop: Until = until.converged({ threshold: 1 });
 ```
 
 ### until.outputContains(marker)
@@ -122,7 +123,7 @@ until.converged(opts: ConvergeConfig): Until
 Stops when the output text contains the given marker string.
 
 ```ts
-until.outputContains(marker: string): Until
+const stop: Until = until.outputContains('DONE');
 ```
 
 ### until.custom(fn)
@@ -130,7 +131,8 @@ until.outputContains(marker: string): Until
 Wraps any `Until` function (identity passthrough for documentation purposes).
 
 ```ts
-until.custom(fn: Until): Until
+declare const fn: Until;
+const stop: Until = until.custom(fn);
 ```
 
 ## VerifyFn
@@ -172,7 +174,7 @@ interface ConvergeConfig {
 Returns an `Until` that stops when **any** predicate returns `{ stop: true }`.
 
 ```ts
-function any(...predicates: Until[]): Until
+declare function anySig(...predicates: Until[]): Until;
 ```
 
 ### all(...predicates)
@@ -180,24 +182,18 @@ function any(...predicates: Until[]): Until
 Returns an `Until` that stops when **all** predicates return `{ stop: true }`. Reasons from all predicates are joined with `'; '`.
 
 ```ts
-function all(...predicates: Until[]): Until
+declare function allSig(...predicates: Until[]): Until;
 ```
 
 ## Example: Combining Predicates
 
 ```ts
-import { until, any, all } from '@noetic/core';
+import { all, any, until } from '@noetic/core';
+import type { VerifyFn } from '@noetic/core';
 
-// Stop on any condition
-const stopEarly = any(
-  until.maxSteps(10),
-  until.maxCost(1.00),
-  until.noToolCalls(),
-);
+declare const myVerifyFn: VerifyFn;
 
-// Stop only when all conditions are met
-const strictStop = all(
-  until.verified(myVerifyFn),
-  until.maxSteps(3),
-);
+const stopEarly = any(until.maxSteps(10), until.maxCost(1.0), until.noToolCalls());
+
+const strictStop = all(until.verified(myVerifyFn), until.maxSteps(3));
 ```
