@@ -13,14 +13,14 @@ Every pattern returns a `Step` (usually a `StepLoop`), which means you can nest 
 
 | Pattern | Function | What It Does |
 |---|---|---|
-| [ReAct](/docs/patterns/react) | `react()` | Observe-Think-Act loop with tools |
-| [Ralph Wiggum](/docs/patterns/ralph-wiggum) | `ralphWiggum()` | Self-refining agent with verification |
-| [Task Trees](/docs/patterns/task-trees) | `compilePlan()` | Tree-structured multi-agent workflows |
-| [Adaptive Plans](/docs/patterns/adaptive-plans) | `adaptivePlan()` | Dynamic planning with error-driven revision |
-| [Recursive LLM](/docs/patterns/recursive-llm) | `spawn()` with `contextIn: 'fresh'` | Recursive sub-task delegation |
-| [Thread Weaving](/docs/patterns/thread-weaving) | `fork(mode: 'all')` | Parallel analysis with merged results |
-| [Dual Agent](/docs/patterns/dual-agent) | `spawn()` + `channel()` | Two agents communicating via channels |
-| [A2A Remote](/docs/patterns/a2a-remote) | `ExternalChannel` | Inter-process agent communication |
+| [ReAct](/docs/framework/patterns/react) | `react()` | Observe-Think-Act loop with tools |
+| [Ralph Wiggum](/docs/framework/patterns/ralph-wiggum) | `ralphWiggum()` | Self-refining agent with verification |
+| [Task Trees](/docs/framework/patterns/task-trees) | `compilePlan()` | Tree-structured multi-agent workflows |
+| [Adaptive Plans](/docs/framework/patterns/adaptive-plans) | `adaptivePlan()` | Dynamic planning with error-driven revision |
+| [Recursive LLM](/docs/framework/patterns/recursive-llm) | `spawn()` with `contextIn: 'fresh'` | Recursive sub-task delegation |
+| [Thread Weaving](/docs/framework/patterns/thread-weaving) | `fork(mode: 'all')` | Parallel analysis with merged results |
+| [Dual Agent](/docs/framework/patterns/dual-agent) | `spawn()` + `channel()` | Two agents communicating via channels |
+| [A2A Remote](/docs/framework/patterns/a2a-remote) | `ExternalChannel` | Inter-process agent communication |
 
 ## How Patterns Compose
 
@@ -54,9 +54,9 @@ const verified = ralphWiggum({
 
 ## Choosing a Pattern
 
-- **Single task with tools**: Start with [ReAct](/docs/patterns/react).
-- **Quality matters**: Use [Ralph Wiggum](/docs/patterns/ralph-wiggum) to add self-verification.
-- **Multi-step plan**: Use [Task Trees](/docs/patterns/task-trees) for static plans or [Adaptive Plans](/docs/patterns/adaptive-plans) for dynamic ones.
-- **Parallel work**: Use [Thread Weaving](/docs/patterns/thread-weaving) via `fork`.
-- **Sub-tasks**: Use [Recursive LLM](/docs/patterns/recursive-llm) via `spawn`.
-- **Agent collaboration**: Use [Dual Agent](/docs/patterns/dual-agent) for in-process or [A2A Remote](/docs/patterns/a2a-remote) for cross-process.
+- **Single task with tools**: Start with [ReAct](/docs/framework/patterns/react).
+- **Quality matters**: Use [Ralph Wiggum](/docs/framework/patterns/ralph-wiggum) to add self-verification.
+- **Multi-step plan**: Use [Task Trees](/docs/framework/patterns/task-trees) for static plans or [Adaptive Plans](/docs/framework/patterns/adaptive-plans) for dynamic ones.
+- **Parallel work**: Use [Thread Weaving](/docs/framework/patterns/thread-weaving) via `fork`.
+- **Sub-tasks**: Use [Recursive LLM](/docs/framework/patterns/recursive-llm) via `spawn`.
+- **Agent collaboration**: Use [Dual Agent](/docs/framework/patterns/dual-agent) for in-process or [A2A Remote](/docs/framework/patterns/a2a-remote) for cross-process.

@@ -23,7 +23,7 @@ const fetchUser = step.run({
 
 `execute` receives the step input and a `Context` object. Return whatever your downstream steps need.
 
-See [step.run deep dive](/docs/steps/run).
+See [step.run deep dive](/docs/framework/steps/run).
 
 ## step.llm -- Language Model Call
 
@@ -49,7 +49,7 @@ const classify = step.llm({
 
 When you provide an `output` Zod schema, the framework requests structured output from the model and validates the response at runtime.
 
-See [step.llm deep dive](/docs/steps/llm).
+See [step.llm deep dive](/docs/framework/steps/llm).
 
 ## step.tool -- Direct Tool Invocation
 
@@ -88,7 +88,7 @@ const getWeather = step.tool({
 
 The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input.
 
-See [step.tool deep dive](/docs/steps/tool).
+See [step.tool deep dive](/docs/framework/steps/tool).
 
 ## Comparison
 
@@ -102,6 +102,6 @@ See [step.tool deep dive](/docs/steps/tool).
 
 ## Next Steps
 
-- [Control Flow](/docs/operators) -- route between steps with `branch` and `fork`.
-- [Loop & Until](/docs/operators/loop-and-until) -- repeat steps with termination conditions.
-- [Spawn](/docs/operators/spawn) -- run steps in isolated child contexts.
+- [Control Flow](/docs/framework/operators) -- route between steps with `branch` and `fork`.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- repeat steps with termination conditions.
+- [Spawn](/docs/framework/operators/spawn) -- run steps in isolated child contexts.

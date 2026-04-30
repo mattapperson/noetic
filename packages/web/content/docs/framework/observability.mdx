@@ -50,7 +50,7 @@ interface Span {
 | `addEvent(name, attributes?)` | Record a point-in-time event within the span. |
 | `end()` | Mark the span as complete and record its end time. |
 
-Every [Context](/docs/context) has a `span` property. You can add custom attributes from within any step:
+Every [Context](/docs/framework/context) has a `span` property. You can add custom attributes from within any step:
 
 ```ts
 const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) => {
@@ -203,6 +203,6 @@ const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
 
 ## Related Pages
 
-- [Context & Event Log](/docs/context) -- every context carries a `span`.
-- [AgentHarness](/docs/runtime) -- `createSpan` and trace exporter configuration.
-- [Memory](/docs/memory) -- memory layer operations produce `MemoryTraceSpan` records.
+- [Context & Event Log](/docs/framework/context) -- every context carries a `span`.
+- [AgentHarness](/docs/framework/runtime) -- `createSpan` and trace exporter configuration.
+- [Memory](/docs/framework/memory) -- memory layer operations produce `MemoryTraceSpan` records.

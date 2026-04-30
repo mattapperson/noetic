@@ -200,7 +200,7 @@ are unchanged.
 
 ### Async Sub-Agent Pattern
 
-Combine detached spawn with the [loop inbox channel](/docs/operators/loop-and-until#inbox-channel) for a full async delegation workflow:
+Combine detached spawn with the [loop inbox channel](/docs/framework/operators/loop-and-until#inbox-channel) for a full async delegation workflow:
 
 ```ts
 import { channel } from '@noetic/core';
@@ -295,7 +295,7 @@ When a background agent finishes, its result arrives via the inbox channel as a 
 
 ## provide vs spawn
 
-Use [`provide`](/docs/operators/provide) when you want to attach memory layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
+Use [`provide`](/docs/framework/operators/provide) when you want to attach memory layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
 
 Use `spawn` when you need full context isolation. The child starts with an empty `ItemLog`, and `onSpawn` / `onReturn` hooks control data flow across the boundary.
 
@@ -307,7 +307,7 @@ Use `spawn` when you need full context isolation. The child starts with an empty
 
 ## Related
 
-- [provide](/docs/operators/provide) -- attach memory layers without context isolation.
-- [fork](/docs/operators/fork) -- parallel execution without context isolation.
-- [Loop & Until](/docs/operators/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
-- [Overview](/docs/overview) -- how spawn fits into the seven primitives.
+- [provide](/docs/framework/operators/provide) -- attach memory layers without context isolation.
+- [fork](/docs/framework/operators/fork) -- parallel execution without context isolation.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
+- [Overview](/docs/framework/overview) -- how spawn fits into the seven primitives.

@@ -177,7 +177,7 @@ Both `writeTodos` and `updateTodo` declare `memory: todoMemory` with the same `i
 
 ### Scope and Lifetime
 
-`toolMemoryLayer()` defaults to `'execution'` scope -- state lives only for the current agent run and is discarded afterward. If you need persistence across runs, write a [custom memory layer](/docs/memory/custom-layers) with `'thread'` or `'resource'` scope instead.
+`toolMemoryLayer()` defaults to `'execution'` scope -- state lives only for the current agent run and is discarded afterward. If you need persistence across runs, write a [custom memory layer](/docs/framework/memory/custom-layers) with `'thread'` or `'resource'` scope instead.
 
 ## Function-Call Memory
 

@@ -250,7 +250,7 @@ const agent = loop({
 
 When a background sub-agent completes, its result is sent to the inbox channel. The loop wakes, the LLM sees the result as a developer message, and can incorporate it in its next response.
 
-See [Detached Spawn](/docs/operators/spawn#detached-spawn) for the full async delegation pattern.
+See [Detached Spawn](/docs/framework/operators/spawn#detached-spawn) for the full async delegation pattern.
 
 ## Error Handling
 
@@ -319,6 +319,6 @@ const agent = loop({
 
 ## Related
 
-- [Steps](/docs/steps) -- the step types you can use in a loop.
-- [Spawn](/docs/operators/spawn) -- run a loop in an isolated child context.
-- [Control Flow](/docs/operators) -- branch and fork for non-iterative operations.
+- [Steps](/docs/framework/steps) -- the step types you can use in a loop.
+- [Spawn](/docs/framework/operators/spawn) -- run a loop in an isolated child context.
+- [Control Flow](/docs/framework/operators) -- branch and fork for non-iterative operations.

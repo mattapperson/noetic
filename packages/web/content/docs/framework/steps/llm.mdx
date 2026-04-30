@@ -43,7 +43,7 @@ const chat = step.llm({
 
 ### Tool Interface
 
-Tools passed to `step.llm` follow the standard Noetic `Tool` interface. See [step.tool](/docs/steps/tool) for the full definition.
+Tools passed to `step.llm` follow the standard Noetic `Tool` interface. See [step.tool](/docs/framework/steps/tool) for the full definition.
 
 ## Structured Output
 
@@ -97,7 +97,7 @@ const researcher = step.llm({
 });
 ```
 
-When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/operators/loop-and-until) with `until.noToolCalls()`.
+When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the LLM step in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
 
 ### Unified Tool Set
 
@@ -129,6 +129,6 @@ const creative = step.llm({
 
 ## Related
 
-- [step.run](/docs/steps/run) -- custom async logic.
-- [step.tool](/docs/steps/tool) -- invoke a tool directly without an LLM.
-- [Loop & Until](/docs/operators/loop-and-until) -- wrap an LLM step in a ReAct-style loop.
+- [step.run](/docs/framework/steps/run) -- custom async logic.
+- [step.tool](/docs/framework/steps/tool) -- invoke a tool directly without an LLM.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- wrap an LLM step in a ReAct-style loop.

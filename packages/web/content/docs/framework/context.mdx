@@ -46,7 +46,7 @@ The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `Infe
 | `memory` | `TMemory` | Layer provides keyed by layer ID. See [Memory](#memory) below. |
 | `parent` | `Context \| null` | Parent context when running inside a spawn. |
 | `depth` | `number` | Nesting depth (0 for root). |
-| `span` | [`Span`](/docs/observability) | The active tracing span for this execution. |
+| `span` | [`Span`](/docs/framework/observability) | The active tracing span for this execution. |
 | `threadId` | `string` | Conversation thread identifier. |
 | `resourceId` | `string \| undefined` | Optional resource identifier (e.g., a user or tenant ID). |
 | `itemLog` | [`ItemLog`](#itemlog) | The conversation event log. |
@@ -103,7 +103,7 @@ interface ItemLog {
 
 ## Channel Methods
 
-Context exposes three methods for communicating over [Channels](/docs/operators/channels):
+Context exposes three methods for communicating over [Channels](/docs/framework/operators/channels):
 
 | Method | Signature | Description |
 |---|---|---|
@@ -228,7 +228,7 @@ interface ExtensionItem extends ItemBase {
 }
 ```
 
-For the complete reference of all item shapes, streaming events, and how they map to the OpenResponses specification, see [Items & Events](/docs/api/items-and-events).
+For the complete reference of all item shapes, streaming events, and how they map to the OpenResponses specification, see [Items & Events](/docs/framework/api/items-and-events).
 
 ### ContentPart
 
@@ -256,11 +256,11 @@ if (usage) {
 
 Each entry's `tokenCount` is self-reported by the layer's `recall()` output; `systemPromptTokens`, `toolsTokens`, and `historyTokens` are estimates derived from the rendered request. The sum is `totalUsedTokens`. The same snapshot is also surfaced on `HarnessResponse.lastLayerUsage` so external callers (CLIs, dashboards) can read it after the run completes without holding a Context reference.
 
-See [Context Types](/docs/api/context-types) for the `LastLayerUsage` and `LayerUsageEntry` interfaces.
+See [Context Types](/docs/framework/api/context-types) for the `LastLayerUsage` and `LayerUsageEntry` interfaces.
 
 ## Related Pages
 
-- [AgentHarness](/docs/runtime) -- creates and manages contexts.
-- [Channels](/docs/operators/channels) -- typed messaging between steps.
-- [Observability](/docs/observability) -- the `span` property and tracing.
-- [Error Model](/docs/errors) -- errors thrown when abort or timeout occurs.
+- [AgentHarness](/docs/framework/runtime) -- creates and manages contexts.
+- [Channels](/docs/framework/operators/channels) -- typed messaging between steps.
+- [Observability](/docs/framework/observability) -- the `span` property and tracing.
+- [Error Model](/docs/framework/errors) -- errors thrown when abort or timeout occurs.

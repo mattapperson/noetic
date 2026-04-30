@@ -189,11 +189,11 @@ const result = await harness.run(myStep, input, ctx);
 | `send(channel, value, ctx)` | Push a value into a channel. |
 | `recv(channel, ctx, opts?)` | Wait for a value from a channel. Supports `timeout`. |
 | `tryRecv(channel, ctx)` | Non-blocking read. Returns `null` if nothing is available. |
-| `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
+| `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/framework/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
 
 ## Memory Methods
 
-The agent harness coordinates [memory layer](/docs/memory) lifecycle hooks:
+The agent harness coordinates [memory layer](/docs/framework/memory) lifecycle hooks:
 
 | Method | Description |
 |---|---|
@@ -225,7 +225,7 @@ interface RecallLayerOutput {
 
 | Method | Description |
 |---|---|
-| `createSpan(name, parent)` | Create a new [tracing span](/docs/observability). Links to a parent span when provided. |
+| `createSpan(name, parent)` | Create a new [tracing span](/docs/framework/observability). Links to a parent span when provided. |
 
 ## AgentConfig
 
@@ -279,7 +279,7 @@ const harness = new AgentHarness({
 
 ## Related Pages
 
-- [Context & Event Log](/docs/context) -- the context object the agent harness creates.
-- [Channels](/docs/operators/channels) -- channel send/recv methods on the agent harness.
-- [Memory](/docs/memory) -- memory layers managed by the agent harness.
-- [Observability](/docs/observability) -- tracing spans created by `createSpan`.
+- [Context & Event Log](/docs/framework/context) -- the context object the agent harness creates.
+- [Channels](/docs/framework/operators/channels) -- channel send/recv methods on the agent harness.
+- [Memory](/docs/framework/memory) -- memory layers managed by the agent harness.
+- [Observability](/docs/framework/observability) -- tracing spans created by `createSpan`.
