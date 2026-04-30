@@ -8,7 +8,8 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '../schemas.js';
-import type { Feature, FeatureLoopStateChanged } from './schemas.js';
+import type { FeatureLoopStateChanged } from './feature-lifecycle.js';
+import type { Feature } from './schemas.js';
 import { FeatureLoopState, FeatureStatus } from './schemas.js';
 import { listFeatures, loadFeature, loadSlice, saveFeature } from './store.js';
 
