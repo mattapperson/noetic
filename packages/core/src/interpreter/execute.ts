@@ -4,6 +4,7 @@ import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
 import { executeBranch } from './execute-branch';
+import { executeEvery } from './execute-every';
 import { executeFork } from './execute-fork';
 import { executeLLM } from './execute-llm';
 import { executeLoop } from './execute-loop';
@@ -100,6 +101,9 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
       break;
     case 'loop':
       result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+      break;
+    case 'every':
+      result = await executeEvery(step, input, ctx, (s, i, c) => execute(s, i, c));
       break;
     default: {
       const _exhaustive: never = step;

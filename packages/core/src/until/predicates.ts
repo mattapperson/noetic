@@ -2,6 +2,7 @@ import { cosineSimilarity } from '../conditions/cosine-similarity';
 import type { EmbedFn } from '../types/embed';
 import type { StorageAdapter } from '../types/memory';
 import type { Snapshot, Until, Verdict } from '../types/step';
+import { never } from './never';
 
 /** @public Async verification function that checks loop output and optionally returns feedback. */
 export type VerifyFn = (output: unknown) => Promise<{
@@ -66,6 +67,9 @@ export const until = {
       };
     };
   },
+
+  /** Never stops the loop — pairs with operators like `every` that rely on cancellation. @public */
+  never,
 
   /** Stops the loop when the verify function returns `{ pass: true }`. @public */
   verified(fn: VerifyFn): Until {

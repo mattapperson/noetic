@@ -21,17 +21,19 @@ import {
 import { TeammateRegistry } from '../agents/registry-runtime.js';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
-import { createTaskMutationPolicy } from '../commands/builtins/tasks/policy.js';
+import type { TaskStoreContext } from '../commands/builtins/tasks/fs-store.js';
+import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-policy.js';
+import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
 import { createBuiltinLspServers } from '../lsp/builtin/index.js';
 import { LspService } from '../lsp/service.js';
 import type { LspServerContribution } from '../lsp/types.js';
 import { agentMdLayer } from '../memory/agent-md-layer.js';
-import { missionMemory } from '../memory/mission-memory.js';
 import { reminderLayer } from '../memory/reminder-layer.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
 import { BUILTIN_TRIGGERS, createReminderRegistry } from '../memory/reminder-triggers.js';
 import { skillsLayer } from '../memory/skills-layer.js';
+import { createSteeringFileLayer } from '../memory/steering-file-layer.js';
 import { teammateInboxLayer } from '../memory/teammate-inbox-layer.js';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
@@ -255,10 +257,15 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   // tools from the model entirely; planMemory.beforeToolCall remains as defense-in-depth.
   const pluginTools = await collectPluginTools(plugins, buildContext);
   const activateSkill = allSkills.length > 0 ? createActivateSkillTool(allSkills) : null;
+  const taskCtx: TaskStoreContext = {
+    fs,
+    projectRoot: config.cwd,
+  };
   const mutationPolicy = createTaskMutationPolicy({
     sessionCwd: config.cwd,
     shell,
     enforceOnCleanRepo: true,
+    ctx: taskCtx,
   });
 
   // Tools resolve cwd from the executing context's `cwdState` at execution
@@ -283,8 +290,21 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
           askUserService: opts.askUserService,
           mutationPolicy,
         });
+  // Built-in `task_*` tools are default-on. Users opt out via
+  // `tools.tasks: false` in their noetic.config.ts. In planning mode we
+  // hand the read-only subset (`task_show`, `task_list`, `task_logs`) so
+  // the model can still observe the kanban without mutating it.
+  const tasksOptIn = config.tools?.tasks !== false;
+  const builtinTaskTools: ReadonlyArray<Tool> = tasksOptIn
+    ? taskTools({
+        ctx: taskCtx,
+        readOnly: mode === 'planning',
+      })
+    : [];
+
   const baseTools: Tool[] = [
     ...builtin,
+    ...builtinTaskTools,
     ...pluginTools,
     ...(activateSkill
       ? [
@@ -366,6 +386,12 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
 
   const historyMaxItems = config.history?.maxItems;
 
+  // Steering-file layer is gated on the `NOETIC_TASK_DIR` env var, which the
+  // task launcher sets when spawning agent-ci for a specific task. Non-task
+  // agent runs leave the env unset, so we omit the layer entirely rather than
+  // mounting a dormant one — keeps the layer list lean for the common case.
+  const isTaskRun = (process.env.NOETIC_TASK_DIR ?? '').length > 0;
+
   const memory: MemoryLayer[] = [
     teammateInboxLayer({
       teammates,
@@ -378,9 +404,11 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       onEnterSession: planHooks?.onEnterSession,
       onExit: planHooks?.onExit,
     }),
-    missionMemory({
-      cwd: config.cwd,
-    }),
+    ...(isTaskRun
+      ? [
+          createSteeringFileLayer(),
+        ]
+      : []),
     workingMemory(),
     agentMdLayer({
       loader: () => Promise.resolve(agentInstructions),

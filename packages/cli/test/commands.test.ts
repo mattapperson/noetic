@@ -133,10 +133,10 @@ describe('/diff-review command', () => {
 });
 
 describe('/tasks command', () => {
-  test('is registered as a local-jsx command', () => {
+  test('is registered as a local command', () => {
     const cmd = findCommand('tasks', BUILTIN_COMMANDS);
     assert(cmd !== undefined);
-    expect(cmd.type).toBe('local-jsx');
+    expect(cmd.type).toBe('local');
     expect(cmd.description).toBeTruthy();
   });
 });

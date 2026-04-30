@@ -60,8 +60,26 @@ class MemFs implements FsAdapter {
     throw new Error('write not supported in test');
   }
 
+  async appendFile(_path: string, _content: string): Promise<void> {
+    throw new Error('append not supported in test');
+  }
+
   async mkdir(_dir: string): Promise<void> {
     throw new Error('mkdir not supported in test');
+  }
+
+  async rename(_oldPath: string, _newPath: string): Promise<void> {
+    throw new Error('rename not supported in test');
+  }
+
+  async rm(
+    _path: string,
+    _options?: {
+      recursive?: boolean;
+      force?: boolean;
+    },
+  ): Promise<void> {
+    throw new Error('rm not supported in test');
   }
 
   async access(path: string): Promise<void> {

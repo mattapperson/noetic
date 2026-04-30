@@ -83,7 +83,16 @@ interface CommandContext {
    * resume picker. Used by `/resume`.
    */
   restartWithSession: (target: SessionRestartTarget) => void;
+  /**
+   * Switch the TUI's primary view mode. The chat view ('chat') is the
+   * default; 'taskBoard' renders the kanban board fullscreen instead of
+   * the chat. Undefined in headless contexts (tests, picker, etc.).
+   */
+  setViewMode?: (mode: ViewMode) => void;
 }
+
+/** Top-level views the TUI can render. */
+export type ViewMode = 'chat' | 'taskBoard';
 
 export interface SessionSnapshot {
   sessionId: string;

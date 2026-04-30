@@ -1,0 +1,173 @@
+---
+title: noetic tasks
+description: One concept, one verb namespace, one slash command — the unified task system replaces both the legacy worktree-modal `tasks` and the legacy strategic `mission` flows.
+---
+
+## What is a task?
+
+A **task** is the top-level unit of work. It has an immutable id (`T-<10 chars>`), a source (`manual` or `worktree`), state axes (`reviewStatus × lifecycleStatus × archivedAt × paused`), and an optional `hierarchy/` subdirectory that turns a leaf task into a "structured" task (milestones → slices → features → assertions, with validator runs and fix lineage).
+
+Single concept. Single verb namespace (`noetic tasks`). Single agent-tool prefix (`task_*`). Single slash command (`/tasks`).
+
+Storage lives at `<projectRoot>/.noetic/tasks/` and is FS-only — JSON for canonical records, append-only `*.jsonl` for audit and event feeds. The full storage layout, atomicity guarantees, and runner contract are documented in `specs/21-tasks.md` in the source repo.
+
+## CLI verbs
+
+`noetic tasks <verb>` dispatches to a small handler per verb. Run `noetic tasks --help` for the live verb table.
+
+| Verb | What it does |
+|---|---|
+| `create` | Create a manual task (`--title`, optional `--description`). |
+| `show` | Print a task with recent log + hierarchy summary (`--tail n`). |
+| `list` | List tasks. Filter with `--column` / `--source`; include archived with `--all`. |
+| `move` | Move a task to another kanban column (`--column`). |
+| `merge` | Merge the task branch via `wt merge`; falls back to `git merge`. |
+| `log` | Append a `kind='log'` entry to the audit. |
+| `logs` | Tail the `--n` most recent log entries. |
+| `attach` | Copy a file into `<taskDir>/attachments/`. |
+| `comment` | Append a `kind='comment'` log entry. |
+| `steer` | Append a `kind='steer'` entry and write/append `steering.md`. |
+| `pause` | Pause the active agent-ci runner. |
+| `unpause` | Resume a paused runner. |
+| `archive` | Set `archivedAt`. |
+| `unarchive` | Clear `archivedAt`. |
+| `delete` | Hard-delete the task directory. |
+| `duplicate` | Copy `task.json` + `description.md` + attachments under a new id. |
+| `plan` | Run the live AI-driven interview to build a hierarchy. **TUI-only.** |
+| `add-milestone` | Append a milestone (`--title`, `--verification`). |
+| `add-slice` | Append a slice (`--milestone`, `--title`, `--verification`). |
+| `add-feature` | Append a feature (`--slice`, `--title`, `--acceptance`). |
+| `add-assertion` | Append an assertion (`--milestone`, `--title`, `--assertion`, `--features`). |
+| `activate-slice` | Mark a slice `active` and (optionally) triage its features into leaf tasks. |
+| `autopilot` | Toggle the autopilot flag for a structured task (`<on\|off>`). |
+
+Output is JSON on stdout for scriptability. Errors land on stderr; unknown verbs exit 1.
+
+## Common flows
+
+### Create and inspect a leaf task
+
+```bash
+noetic tasks create --title "Refactor auth middleware"
+# → prints the new Task JSON, including its T-<id>
+
+noetic tasks list
+# → array of tasks; each has a derived kanban column
+
+noetic tasks show <T-id>
+# → full record + recent log entries + hierarchy summary if present
+
+noetic tasks log <T-id> "Tried approach A — too brittle"
+noetic tasks logs <T-id> --n 20
+```
+
+### Plan a structured task
+
+`tasks plan` opens the live interview. It runs **inside the TUI** (the headless CLI surfaces a "use the TUI" error) because the interview asks the user multiple-choice questions through the harness's `AskUserService`.
+
+```bash
+noetic tasks create --title "Migrate billing to Stripe Tax"
+# → returns T-<id>
+
+# In the TUI:
+/tasks                       # flips to kanban view
+# focus the new card → press p (plan)
+# answer the interview → hierarchy is persisted under
+#   <projectRoot>/.noetic/tasks/T-<id>/hierarchy/
+```
+
+After planning, the task carries milestones, slices, features and assertions you can inspect with:
+
+```bash
+noetic tasks show <T-id>
+```
+
+### Run autopilot on a structured task
+
+Autopilot is a per-task flag the daemons consult to decide whether to triage features, spawn validator runs, and generate fix features automatically.
+
+```bash
+noetic tasks autopilot on <T-id>
+# → flips autopilotEnabled=true; the daemon attaches on its next health tick
+
+noetic tasks activate-slice --task <T-id> --slice <SL-id>
+# → marks the slice 'active' and triages its features into leaf tasks under
+#   the same parent T-id, each labelled [w] in the kanban
+```
+
+Flip it back off any time:
+
+```bash
+noetic tasks autopilot off <T-id>
+```
+
+### Move and merge
+
+```bash
+noetic tasks move <T-id> --column ready_to_merge
+noetic tasks merge <T-id>
+# → tries `wt merge <branch>`; falls back to `git merge` if `wt` is missing.
+#   On success the task lands in the `done` column.
+```
+
+## Slash command
+
+`/tasks` flips the TUI's view mode to the kanban board. Inside the board:
+
+- The board renders all eight derived columns: `triage`, `in_progress`, `needs_changes`, `ready_to_merge`, `done`, `cleanup_blocked`, `removed`, `archived`.
+- Each card shows a source badge: `[m]` for manual, `[w]` for worktree-backed.
+- Structured tasks (those with a `hierarchy/` directory) show a `▾` glyph after the title.
+- `Enter` on a focused card drills in: structured → hierarchy view (milestones → slices → features tree); leaf → detail (description, log tail, attachments).
+- `c` opens the create form. `m` opens the move picker on the focused card. `Escape` returns to the board.
+
+There is no `/mission` command. There is no alias.
+
+## Agent tools
+
+The `task_*` tool prefix mirrors the CLI verb table 1:1. Tools are registered by the harness factory and are default-on; opt out via `tools.tasks: false` in `noetic.config.ts`.
+
+```typescript
+// noetic.config.ts
+export default {
+  tools: {
+    tasks: false, // opt out of all task_* tools
+  },
+};
+```
+
+A read-only variant exposes only `task_show`, `task_list`, `task_logs` — used in planning mode and other contexts where the agent should observe the kanban without mutating it.
+
+The 23 tools are: `task_create`, `task_show`, `task_list`, `task_move`, `task_merge`, `task_log`, `task_logs`, `task_attach`, `task_comment`, `task_steer`, `task_pause`, `task_unpause`, `task_archive`, `task_unarchive`, `task_delete`, `task_duplicate`, `task_plan`, `task_add_milestone`, `task_add_slice`, `task_add_feature`, `task_add_assertion`, `task_activate_slice`, `task_autopilot`.
+
+See the agent-builder skill reference for full input schemas.
+
+## Storage at a glance
+
+```
+<projectRoot>/.noetic/tasks/
+├── _events.jsonl                ← cross-process change feed
+├── _state.json                  ← {schemaVersion, lastEventId}
+└── T-<id>/
+    ├── task.json                ← canonical record
+    ├── description.md
+    ├── log.jsonl                ← append-only audit
+    ├── steering.md              ← optional, surfaced to in-task agent runs
+    ├── _runner.json             ← agent-ci runner sidecar
+    ├── attachments/
+    └── hierarchy/               ← only on structured tasks
+        ├── milestones/ML-<id>.json
+        ├── slices/SL-<id>.json
+        ├── features/F-<id>/feature.json
+        ├── features/F-<id>/validator-runs/V-<id>.json
+        ├── features/F-<id>/fix-lineage.jsonl
+        ├── assertions/A-<id>.json
+        └── interview-sessions/IV-<id>.json
+```
+
+Every mutable JSON is written via temp+rename (atomic on POSIX). Every append-only `*.jsonl` uses `O_APPEND` with a 3 KiB per-line cap so a single `write()` syscall publishes the entry atomically. Multi-step writes are ordered audit → state → event.
+
+## Migration from the legacy systems
+
+Both the legacy worktree-only `tasks` modal and the legacy `mission`/`/mission` strategic-task system are gone. There are no aliases, no shims. Any scripts that called `noetic mission ...` should be ported to `noetic tasks ...`. Any UI that opened the old `tasks-modal.tsx` should switch to `/tasks` to flip into the kanban board.
+
+The on-disk format is a clean break — there is no migration path from the legacy SQLite. Existing local task data is discarded.
