@@ -65,7 +65,7 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-interface StructuredTask {
+export interface StructuredTask {
   readonly taskId: string;
   readonly features: ReadonlyArray<Feature>;
   readonly assertionsByMilestone: ReadonlyMap<string, ReadonlyArray<Assertion>>;
@@ -73,7 +73,7 @@ interface StructuredTask {
   readonly featureMilestone: ReadonlyMap<string, string>;
 }
 
-async function gatherStructuredTasks(ctx: TaskStoreContext): Promise<StructuredTask[]> {
+export async function gatherStructuredTasks(ctx: TaskStoreContext): Promise<StructuredTask[]> {
   const out: StructuredTask[] = [];
   const tasks = await listTasks(ctx);
   for (const task of tasks) {
@@ -336,13 +336,13 @@ async function reapStaleRunForFeature(
   }
 }
 
-interface RunFeatureValidationArgs {
+export interface RunFeatureValidationArgs {
   readonly deps: ValidatorJobDeps;
   readonly structured: StructuredTask;
   readonly feature: Feature;
 }
 
-async function runFeatureValidation(args: RunFeatureValidationArgs): Promise<void> {
+export async function runFeatureValidation(args: RunFeatureValidationArgs): Promise<void> {
   const { deps, structured, feature } = args;
   if (feature.taskId === null) {
     log.warn(
