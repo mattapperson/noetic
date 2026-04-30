@@ -32,6 +32,7 @@ import { reminderLayer } from '../memory/reminder-layer.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
 import { BUILTIN_TRIGGERS, createReminderRegistry } from '../memory/reminder-triggers.js';
 import { skillsLayer } from '../memory/skills-layer.js';
+import { createSteeringFileLayer } from '../memory/steering-file-layer.js';
 import { teammateInboxLayer } from '../memory/teammate-inbox-layer.js';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
@@ -366,6 +367,12 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
 
   const historyMaxItems = config.history?.maxItems;
 
+  // Steering-file layer is gated on the `NOETIC_TASK_DIR` env var, which the
+  // task launcher sets when spawning agent-ci for a specific task. Non-task
+  // agent runs leave the env unset, so we omit the layer entirely rather than
+  // mounting a dormant one — keeps the layer list lean for the common case.
+  const isTaskRun = (process.env.NOETIC_TASK_DIR ?? '').length > 0;
+
   const memory: MemoryLayer[] = [
     teammateInboxLayer({
       teammates,
@@ -381,6 +388,11 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     missionMemory({
       cwd: config.cwd,
     }),
+    ...(isTaskRun
+      ? [
+          createSteeringFileLayer(),
+        ]
+      : []),
     workingMemory(),
     agentMdLayer({
       loader: () => Promise.resolve(agentInstructions),
