@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
 import { ensureTasksDaemon } from '../commands/builtins/tasks/daemon.js';
+import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
 import {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
@@ -32,6 +33,7 @@ import type {
   CommandContext,
   SessionRestartTarget,
   SessionSnapshot,
+  ViewMode,
 } from '../commands/types.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness, createLspService } from '../harness/factory.js';
@@ -436,6 +438,7 @@ function App({
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
   const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'normal');
+  const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
   const [effectiveCwd, setEffectiveCwd] = useState<string>(
@@ -1320,6 +1323,7 @@ function App({
         setTag,
         clearSession,
         restartWithSession: onRestart,
+        setViewMode,
       };
 
       try {
@@ -1450,25 +1454,34 @@ function App({
     [],
   );
 
+  const showTaskBoard = viewMode === 'taskBoard';
+  const exitTaskBoard = useCallback((): void => {
+    setViewMode('chat');
+  }, []);
+
   return (
     <InkProvider>
       <FooterContextProvider value={footerValue}>
         <StreamMetricsProvider value={streamMetrics}>
-          <ResponsesChat
-            entries={entries}
-            status={status}
-            onSubmit={handleSubmit}
-            onStop={handleStop}
-            model={model}
-            agentMode={agentMode}
-            onToggleMode={handleToggleAgentMode}
-            commands={commandSuggestions}
-            modalContent={modal?.content}
-            onModalClose={handleModalClose}
-            plugins={plugins}
-            exitHintArmed={exitHintArmed}
-            getRequestItems={getRequestItems}
-          />
+          {showTaskBoard ? (
+            <TaskBoard fs={config.fs} projectRoot={config.cwd} onExit={exitTaskBoard} />
+          ) : (
+            <ResponsesChat
+              entries={entries}
+              status={status}
+              onSubmit={handleSubmit}
+              onStop={handleStop}
+              model={model}
+              agentMode={agentMode}
+              onToggleMode={handleToggleAgentMode}
+              commands={commandSuggestions}
+              modalContent={modal?.content}
+              onModalClose={handleModalClose}
+              plugins={plugins}
+              exitHintArmed={exitHintArmed}
+              getRequestItems={getRequestItems}
+            />
+          )}
         </StreamMetricsProvider>
       </FooterContextProvider>
     </InkProvider>
