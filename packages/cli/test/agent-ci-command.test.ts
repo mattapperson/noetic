@@ -4,29 +4,35 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import { runAgentCiCommand } from '../src/commands/builtins/agent-ci/index.js';
+import type {
+  StartAgentCiRunArgs,
+  StartAgentCiRunResult,
+} from '../src/commands/builtins/tasks/agent-ci-launcher.js';
 import type { ProjectWorktree } from '../src/commands/builtins/tasks/git.js';
+import { TaskReviewStatus } from '../src/commands/builtins/tasks/schemas.js';
+import { makeStoreContext } from './tasks/_helpers.js';
 
 interface MockHarness {
   loadProjectWorktreesFn: ReturnType<typeof mock<(cwd: string) => Promise<ProjectWorktree[]>>>;
   startAgentCiRunFn: ReturnType<
-    typeof mock<
-      (args: { taskId: string; workflow: string; cwd: string }) => {
-        sessionId: string;
-        pid: number;
-        workflow: string;
-      }
-    >
+    typeof mock<(args: StartAgentCiRunArgs) => Promise<StartAgentCiRunResult>>
   >;
 }
 
 function makeHarness(worktrees: ProjectWorktree[]): MockHarness {
   return {
     loadProjectWorktreesFn: mock(async (_cwd: string) => worktrees),
-    startAgentCiRunFn: mock((args) => ({
-      sessionId: `${args.taskId}-deadbeef`,
-      pid: 4242,
-      workflow: args.workflow,
-    })),
+    startAgentCiRunFn: mock(async (args: StartAgentCiRunArgs) => {
+      const result: StartAgentCiRunResult = {
+        sessionId: `${args.taskId}-deadbeef`,
+        pid: 4242,
+        workflow: args.workflow,
+        taskId: args.taskId,
+        previousReviewStatus: TaskReviewStatus.NotStarted,
+        reviewStatus: TaskReviewStatus.Reviewing,
+      };
+      return result;
+    }),
   };
 }
 
@@ -131,7 +137,7 @@ describe('runAgentCiCommand', () => {
     expect(out).toContain('not a file');
   });
 
-  test('happy path: spawns and reports pid', async () => {
+  test('happy path: creates task on disk and reports pid', async () => {
     const wt = mkdtempSync(join(tmpdir(), 'noetic-agent-ci-cmd-ok-'));
     const workflow = join(wt, '.github/workflows/test.yml');
     mkdirSync(dirname(workflow), {
@@ -150,6 +156,7 @@ describe('runAgentCiCommand', () => {
     const out = await runAgentCiCommand({
       rawArg: '.github/workflows/test.yml',
       cwd: resolve(wt),
+      ctx: makeStoreContext(wt),
       loadProjectWorktreesFn: harness.loadProjectWorktreesFn,
       startAgentCiRunFn: harness.startAgentCiRunFn,
     });
@@ -159,5 +166,45 @@ describe('runAgentCiCommand', () => {
     const callArgs = harness.startAgentCiRunFn.mock.calls[0]?.[0];
     expect(callArgs?.workflow).toBe('.github/workflows/test.yml');
     expect(callArgs?.cwd).toBe(wt);
+    // The taskId should be a deterministic FS-shaped id.
+    expect(callArgs?.taskId).toMatch(/^T-/);
+  });
+
+  test('idempotent: re-run on the same worktree reuses the deterministic taskId', async () => {
+    const wt = mkdtempSync(join(tmpdir(), 'noetic-agent-ci-cmd-idem-'));
+    const workflow = join(wt, '.github/workflows/test.yml');
+    mkdirSync(dirname(workflow), {
+      recursive: true,
+    });
+    writeFileSync(workflow, 'name: test\n');
+    const harness = makeHarness([
+      {
+        projectRoot: wt,
+        path: wt,
+        branch: 'feature',
+        headSha: null,
+        current: true,
+      },
+    ]);
+    const ctx = makeStoreContext(wt);
+    await runAgentCiCommand({
+      rawArg: '.github/workflows/test.yml',
+      cwd: resolve(wt),
+      ctx,
+      loadProjectWorktreesFn: harness.loadProjectWorktreesFn,
+      startAgentCiRunFn: harness.startAgentCiRunFn,
+    });
+    await runAgentCiCommand({
+      rawArg: '.github/workflows/test.yml',
+      cwd: resolve(wt),
+      ctx,
+      loadProjectWorktreesFn: harness.loadProjectWorktreesFn,
+      startAgentCiRunFn: harness.startAgentCiRunFn,
+    });
+    expect(harness.startAgentCiRunFn).toHaveBeenCalledTimes(2);
+    const firstId = harness.startAgentCiRunFn.mock.calls[0]?.[0]?.taskId;
+    const secondId = harness.startAgentCiRunFn.mock.calls[1]?.[0]?.taskId;
+    expect(firstId).toBeDefined();
+    expect(firstId).toBe(secondId);
   });
 });
