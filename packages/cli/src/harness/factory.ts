@@ -21,7 +21,9 @@ import {
 import { TeammateRegistry } from '../agents/registry-runtime.js';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
+import type { TaskStoreContext } from '../commands/builtins/tasks/fs-store.js';
 import { createTaskMutationPolicy } from '../commands/builtins/tasks/policy.js';
+import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
 import { createBuiltinLspServers } from '../lsp/builtin/index.js';
 import { LspService } from '../lsp/service.js';
@@ -284,8 +286,25 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
           askUserService: opts.askUserService,
           mutationPolicy,
         });
+  // Built-in `task_*` tools are default-on. Users opt out via
+  // `tools.tasks: false` in their noetic.config.ts. In planning mode we
+  // hand the read-only subset (`task_show`, `task_list`, `task_logs`) so
+  // the model can still observe the kanban without mutating it.
+  const tasksOptIn = config.tools?.tasks !== false;
+  const taskCtx: TaskStoreContext = {
+    fs,
+    projectRoot: config.cwd,
+  };
+  const builtinTaskTools: ReadonlyArray<Tool> = tasksOptIn
+    ? taskTools({
+        ctx: taskCtx,
+        readOnly: mode === 'planning',
+      })
+    : [];
+
   const baseTools: Tool[] = [
     ...builtin,
+    ...builtinTaskTools,
     ...pluginTools,
     ...(activateSkill
       ? [

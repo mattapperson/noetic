@@ -130,6 +130,13 @@ export const AgentConfigSchema = z.object({
     .object({
       include: z.array(z.string()).optional(),
       exclude: z.array(z.string()).optional(),
+      /**
+       * Default-on registration of the built-in `task_*` tools (see
+       * `commands/builtins/tasks/tools.ts`). Set `false` to opt out
+       * entirely; otherwise the read/write subset is wired automatically
+       * (read-only when the harness is in plan mode).
+       */
+      tasks: z.boolean().optional(),
     })
     .optional(),
   memory: z.array(z.string()).optional(),
