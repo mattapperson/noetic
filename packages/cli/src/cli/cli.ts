@@ -27,14 +27,8 @@ if (process.argv[2] === 'tasks') {
 if (process.argv[2] === 'daemon' || process.argv[2] === 'tasks-daemon') {
   const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
   const { runDaemon } = await import('../daemon-runtime/runtime.js');
-  const { tasksReconcileJob } = await import('../daemon-runtime/jobs-tasks.js');
 
-  await runDaemon({
-    cwd: daemonCwd,
-    jobs: [
-      tasksReconcileJob(),
-    ],
-  });
+  await runDaemon(daemonCwd);
   process.exit(0);
 }
 

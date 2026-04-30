@@ -1,9 +1,20 @@
+/**
+ * Daemon entry — the long-lived background process that drives the
+ * task-system orchestration. The daemon is one Step graph (autopilot,
+ * validator, health, reconcile, events bridge) constructed by
+ * {@link buildHierarchyDaemonHarness} and dispatched via
+ * `harness.detachedSpawn(flow, ...)`.
+ *
+ * Cancellation flows through `harness.abort({ reason })` on SIGTERM/SIGINT
+ * — the daemon's `every` operators are abort-aware, so the parking promise
+ * resolves promptly and the fork settles.
+ */
+
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 
+import { buildHierarchyDaemonHarness } from '../commands/builtins/tasks/hierarchy/daemon-bootstrap.js';
 import * as log from '../util/log.js';
-import type { JobDefinition } from './jobs.js';
-import { JobScheduler } from './jobs.js';
 import {
   acquireDaemonLock,
   DAEMON_START_TOKEN_ENV,
@@ -15,13 +26,14 @@ import {
 } from './lock.js';
 import { daemonRuntimePaths } from './paths.js';
 
-export interface RunDaemonOptions {
-  cwd: string;
-  jobs: ReadonlyArray<JobDefinition>;
-  runOnce?: boolean;
-}
+//#region Public API
 
-export async function runDaemon(opts: RunDaemonOptions): Promise<void> {
+/**
+ * Acquire the singleton lock, build the daemon harness + flow, and drive the
+ * whole tree to completion. SIGTERM and SIGINT trigger a graceful abort; the
+ * lock is released in the `finally`.
+ */
+export async function runDaemon(cwd: string): Promise<void> {
   const paths = daemonRuntimePaths();
   if (!acquireDaemonLock(process.pid, paths)) {
     return;
@@ -33,9 +45,11 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<void> {
     return null;
   });
 
-  const scheduler = new JobScheduler(opts.jobs, {
-    cwd: opts.cwd,
+  const { harness, flow } = buildHierarchyDaemonHarness(cwd);
+  const ctx = harness.createContext({
+    resourceId: 'tasks-daemon',
   });
+  const handle = harness.detachedSpawn(flow, undefined, ctx);
 
   let cleaned = false;
   const cleanup = (): void => {
@@ -43,33 +57,37 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<void> {
       return;
     }
     cleaned = true;
-    scheduler.stop();
     socket?.close();
     tryUnlink(paths.socketPath);
     releaseDaemonLock(process.pid, paths);
   };
   process.on('exit', cleanup);
   process.on('SIGINT', () => {
-    cleanup();
-    process.exit(0);
+    void harness.abort({
+      reason: 'sigint',
+    });
   });
   process.on('SIGTERM', () => {
-    cleanup();
-    process.exit(0);
+    void harness.abort({
+      reason: 'sigterm',
+    });
   });
 
-  if (opts.runOnce === true) {
-    await scheduler.runOnce();
+  try {
+    await handle.await();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`[daemon] flow terminated: ${message}`);
+  } finally {
     cleanup();
-    return;
   }
-
-  await scheduler.start();
-  await new Promise<never>(() => {
-    // Run forever — the scheduler owns its own intervals; signal handlers cleanup.
-  });
 }
 
+/**
+ * Spawn the daemon as a detached child process if one isn't already running.
+ * Used by interactive sessions to opportunistically warm up the background
+ * task orchestrator without blocking the foreground TUI.
+ */
 export function ensureDaemon(cwd: string): void {
   const paths = daemonRuntimePaths();
   mkdirSync(paths.dir, {
@@ -116,3 +134,5 @@ export function ensureDaemon(cwd: string): void {
   });
   child.unref();
 }
+
+//#endregion
