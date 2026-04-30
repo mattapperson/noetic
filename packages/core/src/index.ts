@@ -18,6 +18,10 @@ export { channel } from './builders/channel-builder';
 /** @public */
 export { branch, fork } from './builders/control-flow-builders';
 /** @public */
+export type { EveryOptions } from './builders/every';
+/** @public */
+export { every } from './builders/every';
+/** @public */
 export { layerData, layerFn } from './builders/layer-provides-builders';
 /** @public */
 export type { LoopConfig } from './builders/loop-builder';

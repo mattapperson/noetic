@@ -74,7 +74,8 @@ export type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
   | StepFork<TMemory, I, O>
   | StepSpawn<TMemory, I, O>
   | StepProvide<TMemory, I, O>
-  | StepLoop<TMemory, I, O>;
+  | StepLoop<TMemory, I, O>
+  | StepEvery<TMemory, I, O>;
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
 export interface StepRun<TMemory = ContextMemory, I = unknown, O = unknown> {
@@ -200,6 +201,39 @@ export interface StepLoop<TMemory = ContextMemory, I = unknown, O = unknown> {
   prepareNext?: (output: O, verdict: Verdict, ctx: Context<TMemory>) => I;
   /** Per-iteration error handler: retry the iteration, skip it, or abort the loop. */
   onError?: (error: NoeticError, ctx: Context<TMemory>) => 'retry' | 'skip' | 'abort';
+}
+
+/**
+ * Error policy for the `every` operator when its body step throws.
+ * - `'continue'` (default): emit a span event recording the error and continue parking.
+ * - `'fail'`: re-throw, terminating the operator.
+ * @public
+ */
+export type EveryErrorPolicy = 'continue' | 'fail';
+
+/**
+ * A step that runs a body step on a fixed-interval schedule, optionally woken
+ * sooner by a wake channel. Runs forever until the executing context is cancelled.
+ *
+ * The operator output is `void` — `every` does not accumulate iteration outputs.
+ * The `O` type parameter exists only to anchor the body step's output type.
+ *
+ * @public
+ */
+export interface StepEvery<TMemory = ContextMemory, I = unknown, O = unknown> {
+  kind: 'every';
+  /** Unique step identifier used in traces and error messages. */
+  id: string;
+  /** Body step executed on each iteration. */
+  step: Step<TMemory, I, O>;
+  /** Park duration between iterations in milliseconds. Must be >= 0. */
+  ms: number;
+  /** Optional channel that wakes the parking interval when any value arrives. */
+  wakeOn?: Channel<unknown>;
+  /** Behavior when `step` throws. Defaults to `'continue'`. */
+  onError?: EveryErrorPolicy;
+  /** Random jitter applied to the park duration in milliseconds. Must be >= 0. Default 0. */
+  jitter?: number;
 }
 
 /** @public Function signature used by the interpreter to recursively execute a step. */
