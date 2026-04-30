@@ -76,10 +76,17 @@ export function buildReconcileTickStep(
  */
 export function buildReconcileEvery(
   deps: ReconcileFlowDeps,
-): ReturnType<typeof every<ContextMemory, void, ReconcileTasksFsResult>> {
-  return every<ContextMemory, void, ReconcileTasksFsResult>({
+): ReturnType<typeof every<ContextMemory, void, void>> {
+  const tickWithReport = buildReconcileTickStep(deps);
+  const tickVoid = step.run<ContextMemory, void, void>({
+    id: 'reconcile.tick.void',
+    execute: async (_input, ctx): Promise<void> => {
+      await ctx.harness.run(tickWithReport, undefined, ctx);
+    },
+  });
+  return every<ContextMemory, void, void>({
     id: 'reconcile.every',
-    step: buildReconcileTickStep(deps),
+    step: tickVoid,
     ms: RECONCILE_TICK_INTERVAL_MS,
     onError: 'continue',
   });

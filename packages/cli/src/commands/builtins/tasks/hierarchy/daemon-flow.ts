@@ -14,10 +14,11 @@
  * disk is the cross-process transport; this bridge step taps it for daemon
  * subscribers.
  *
- * Each sub-flow exports its own `buildXEvery` factory typed by its tick step's
- * output. The fork composition here re-wraps the autopilot and reconcile tick
- * steps in `every({...})` directly so all five paths share the `void, void`
- * shape that `fork({ mode: 'all' })` requires.
+ * Each sub-flow exports its own `buildXEvery` factory typed `Step<void, void>`
+ * (the autopilot and reconcile factories absorb a `discardOutput` adapter
+ * internally so their tick reports don't leak into the fork's path types).
+ * The composition here just imports those factories — no duplicated `every({...})`
+ * blocks.
  */
 
 import type { ContextMemory, Step } from '@noetic/core';
@@ -25,24 +26,20 @@ import { every, fork, spawn, step, workingMemory } from '@noetic/core';
 import { z } from 'zod';
 
 import { createSteeringFileLayer } from '../../../../memory/steering-file-layer.js';
-import { externalTaskEventsChan, featureLoopStateChan, validatorRequestChan } from '../channels.js';
+import { externalTaskEventsChan } from '../channels.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { tailEvents } from '../fs-store.js';
 import type { AutopilotFlowDeps } from './autopilot-flow.js';
-import { buildAutopilotTickStep } from './autopilot-flow.js';
+import { buildAutopilotEvery } from './autopilot-flow.js';
 import type { HealthFlowDeps } from './health-flow.js';
-import { buildHealthTickStep } from './health-flow.js';
+import { buildHealthEvery } from './health-flow.js';
 import type { ReconcileFlowDeps } from './reconcile-flow.js';
-import { buildReconcileTickStep } from './reconcile-flow.js';
+import { buildReconcileEvery } from './reconcile-flow.js';
 import type { ValidatorFlowDeps } from './validator-flow.js';
-import { buildValidatorIterationStep } from './validator-flow.js';
+import { buildValidatorEvery } from './validator-flow.js';
 
 //#region Constants
 
-const AUTOPILOT_TICK_INTERVAL_MS = 60_000;
-const VALIDATOR_TICK_INTERVAL_MS = 30_000;
-const HEALTH_TICK_INTERVAL_MS = 5 * 60_000;
-const RECONCILE_TICK_INTERVAL_MS = 60_000;
 const EVENTS_BRIDGE_INTERVAL_MS = 1_000;
 
 //#endregion
@@ -68,28 +65,6 @@ export interface TaskDaemonFlowDeps {
 const DaemonWorkingMemorySchema = z.object({
   recentWarnings: z.array(z.string()).default([]),
 });
-
-//#endregion
-
-//#region Helpers
-
-/**
- * Wrap a body step that returns a non-void payload (e.g. an autopilot report)
- * with a void-returning adapter so the daemon-fork's `paths` array stays
- * uniform at `Step<M, void, void>`. The original output is run for its
- * side-effects only.
- */
-function discardOutput<O>(
-  inner: Step<ContextMemory, void, O>,
-  id: string,
-): Step<ContextMemory, void, void> {
-  return step.run<ContextMemory, void, void>({
-    id,
-    execute: async (_input, ctx): Promise<void> => {
-      await ctx.harness.run(inner, undefined, ctx);
-    },
-  });
-}
 
 //#endregion
 
@@ -134,41 +109,10 @@ export function buildEventsBridgeTickStep(ctx: TaskStoreContext): Step<ContextMe
  * isolated child context.
  */
 export function buildTaskDaemonFlow(deps: TaskDaemonFlowDeps): Step<ContextMemory, void, void> {
-  const autopilotTick = discardOutput(
-    buildAutopilotTickStep(deps.autopilot),
-    'autopilot.tick.void',
-  );
-  const reconcileTick = discardOutput(
-    buildReconcileTickStep(deps.reconcile),
-    'reconcile.tick.void',
-  );
-
-  const autopilotEvery = every<ContextMemory, void, void>({
-    id: 'autopilot.every',
-    step: autopilotTick,
-    ms: AUTOPILOT_TICK_INTERVAL_MS,
-    wakeOn: featureLoopStateChan,
-    onError: 'continue',
-  });
-  const validatorEvery = every<ContextMemory, void, void>({
-    id: 'validator.every',
-    step: buildValidatorIterationStep(deps.validator),
-    ms: VALIDATOR_TICK_INTERVAL_MS,
-    wakeOn: validatorRequestChan,
-    onError: 'continue',
-  });
-  const healthEvery = every<ContextMemory, void, void>({
-    id: 'health.every',
-    step: buildHealthTickStep(deps.health),
-    ms: HEALTH_TICK_INTERVAL_MS,
-    onError: 'continue',
-  });
-  const reconcileEvery = every<ContextMemory, void, void>({
-    id: 'reconcile.every',
-    step: reconcileTick,
-    ms: RECONCILE_TICK_INTERVAL_MS,
-    onError: 'continue',
-  });
+  const autopilotEvery = buildAutopilotEvery(deps.autopilot);
+  const validatorEvery = buildValidatorEvery(deps.validator);
+  const healthEvery = buildHealthEvery(deps.health);
+  const reconcileEvery = buildReconcileEvery(deps.reconcile);
   const eventsBridgeEvery = every<ContextMemory, void, void>({
     id: 'tasks.events-bridge.every',
     step: buildEventsBridgeTickStep(deps.autopilot.ctx),

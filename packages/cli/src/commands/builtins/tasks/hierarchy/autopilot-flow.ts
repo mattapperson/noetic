@@ -305,13 +305,24 @@ export function buildAutopilotTickStep(
  * Build the autopilot `every` for the daemon flow. Period is `60_000` ms
  * with `wakeOn: featureLoopStateChan` so the autopilot ticks immediately on
  * any loop-state transition. `onError: 'continue'` keeps the daemon up.
+ *
+ * The tick step's `AutopilotTickReport` payload is dropped at this layer
+ * via a thin `step.run` adapter so the result composes cleanly into a
+ * `fork({ mode: 'all' })` whose paths must be uniformly typed `Step<void, void>`.
  */
 export function buildAutopilotEvery(
   deps: AutopilotFlowDeps,
-): ReturnType<typeof every<ContextMemory, void, AutopilotTickReport>> {
-  return every<ContextMemory, void, AutopilotTickReport>({
+): ReturnType<typeof every<ContextMemory, void, void>> {
+  const tickWithReport = buildAutopilotTickStep(deps);
+  const tickVoid = step.run<ContextMemory, void, void>({
+    id: 'autopilot.scan-and-tick.void',
+    execute: async (_input, ctx): Promise<void> => {
+      await ctx.harness.run(tickWithReport, undefined, ctx);
+    },
+  });
+  return every<ContextMemory, void, void>({
     id: 'autopilot.every',
-    step: buildAutopilotTickStep(deps),
+    step: tickVoid,
     ms: AUTOPILOT_TICK_INTERVAL_MS,
     wakeOn: featureLoopStateChan,
     onError: 'continue',

@@ -380,7 +380,7 @@ describe('buildAutopilotEvery', () => {
     expect(everyStep.ms).toBe(60_000);
     expect(everyStep.onError).toBe('continue');
     expect(everyStep.wakeOn?.name).toBe('tasks.feature-loop-state');
-    expect(everyStep.step.id).toBe('autopilot.scan-and-tick');
+    expect(everyStep.step.id).toBe('autopilot.scan-and-tick.void');
   });
 });
 

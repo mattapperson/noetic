@@ -159,8 +159,9 @@ describe('buildReconcileEvery', () => {
     expect(everyStep.id).toBe('reconcile.every');
     expect(everyStep.ms).toBe(60_000);
     expect(everyStep.onError).toBe('continue');
-    // Body step has stable id for trace correlation.
-    expect(everyStep.step.id).toBe('reconcile.tick');
+    // Body step has stable id for trace correlation. Wrapped in a void
+    // adapter so the daemon-fork's path types stay uniform `Step<void, void>`.
+    expect(everyStep.step.id).toBe('reconcile.tick.void');
   });
 });
 
