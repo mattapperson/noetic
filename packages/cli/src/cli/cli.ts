@@ -24,6 +24,10 @@ if (process.argv[2] === 'tasks') {
   process.exit(exitCode);
 }
 
+// Internal re-exec target for `ensureDaemon` — NOT a user-facing
+// command. Users never type `noetic daemon` directly; the interactive
+// TUI and `noetic tasks <verb>` both spawn it transparently. Kept
+// undocumented (no help-output entry) on purpose.
 if (process.argv[2] === 'daemon' || process.argv[2] === 'tasks-daemon') {
   const daemonCwd = daemonCwdFromArgs(process.argv) ?? process.cwd();
   const { runDaemon } = await import('../daemon-runtime/runtime.js');

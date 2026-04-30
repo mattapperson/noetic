@@ -20,7 +20,7 @@
 import type { ContextMemory, Step, StepBranch } from '@noetic/core';
 import { branch, every, step } from '@noetic/core';
 
-import type { FeatureLoopStateChangedMessage, ValidatorRequest } from '../channels.js';
+import type { ValidatorRequest } from '../channels.js';
 import { featureLoopStateChan, validatorRequestChan } from '../channels.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { listTasks } from '../fs-store.js';
@@ -267,8 +267,14 @@ async function gatherValidatingFeatures(
 /**
  * Build the per-tick `step.run` that drives one full autopilot scan. The
  * body delegates to the imperative {@link runAutopilotTick} for the FS state
- * transitions, then announces every currently-validating feature on the
- * inter-step channels so the validator flow wakes immediately.
+ * transitions, then signals the validator flow for every currently-validating
+ * feature so it processes them immediately rather than waiting for its 30s
+ * safety interval.
+ *
+ * Note: this step does NOT publish on `featureLoopStateChan` — autopilot is
+ * the consumer (`wakeOn`), not the publisher. Loop-state publication is the
+ * validator-flow's job (it owns the actual transitions from `validating`
+ * onward; see `validator-flow.ts`).
  */
 export function buildAutopilotTickStep(
   deps: AutopilotFlowDeps,
@@ -284,13 +290,6 @@ export function buildAutopilotTickStep(
           featureId: entry.feature.id,
         };
         ctx.send(validatorRequestChan, request);
-        const message: FeatureLoopStateChangedMessage = {
-          taskId: entry.taskId,
-          featureId: entry.feature.id,
-          previousLoopState: entry.feature.loopState,
-          loopState: entry.feature.loopState,
-        };
-        ctx.send(featureLoopStateChan, message);
       }
       return report;
     },

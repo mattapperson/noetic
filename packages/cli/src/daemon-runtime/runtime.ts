@@ -62,16 +62,26 @@ export async function runDaemon(cwd: string): Promise<void> {
     releaseDaemonLock(process.pid, paths);
   };
   process.on('exit', cleanup);
-  process.on('SIGINT', () => {
-    void harness.abort({
-      reason: 'sigint',
+
+  /**
+   * Bound the abort + handle drain so a wedged FS call inside a tick
+   * can't hang the daemon process forever. After 30s, force-exit so
+   * the parent CLI's worktree / lock state is released.
+   */
+  const SHUTDOWN_BUDGET_MS = 30_000;
+  const handleShutdownSignal = (reason: 'sigint' | 'sigterm'): void => {
+    void Promise.race([
+      harness.abort({
+        reason,
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_BUDGET_MS)),
+    ]).then(() => {
+      cleanup();
+      process.exit(0);
     });
-  });
-  process.on('SIGTERM', () => {
-    void harness.abort({
-      reason: 'sigterm',
-    });
-  });
+  };
+  process.on('SIGINT', () => handleShutdownSignal('sigint'));
+  process.on('SIGTERM', () => handleShutdownSignal('sigterm'));
 
   try {
     await handle.await();

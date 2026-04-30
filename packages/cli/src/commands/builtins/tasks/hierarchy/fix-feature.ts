@@ -6,8 +6,9 @@ import { branch, step } from '@noetic/core';
 import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { featureDirPaths } from './paths.js';
-import type { Feature, FixLineage } from './schemas.js';
+import type { Feature, FixLineage, ValidatorRun } from './schemas.js';
 import {
+  AssertionStatus,
   DEFAULT_IMPLEMENTATION_RETRY_BUDGET,
   FeatureLoopState,
   FeatureStatus,
@@ -17,6 +18,17 @@ import {
 } from './schemas.js';
 import { listFeatures, loadFeature, saveFeature } from './store.js';
 import { loadValidatorRun } from './validator.js';
+
+/** Project the failing-assertion ids out of a validator run for the lineage record. */
+function failedAssertionIdsFromRun(run: ValidatorRun): string[] {
+  const out: string[] = [];
+  for (const outcome of run.assertionOutcomes) {
+    if (outcome.status === AssertionStatus.Failed) {
+      out.push(outcome.assertionId);
+    }
+  }
+  return out;
+}
 
 //#region Errors
 
@@ -58,6 +70,8 @@ export interface FixFeatureChange {
   readonly sourceUpdated: Feature;
   /** How many implementation retries remain after this attempt. */
   readonly budgetRemaining: number;
+  /** Failing assertion ids carried from the triggering validator run. */
+  readonly failedAssertionIds: ReadonlyArray<string>;
 }
 
 /** Bundle the imperative store context with the flow args so steps can share it. */
@@ -163,11 +177,13 @@ async function applyCreateFixFeature(args: ApplyCreateFixFeatureArgs): Promise<F
   };
   await saveFeature(ctx, ctx.taskId, sourceUpdated);
 
+  const failedAssertionIds = failedAssertionIdsFromRun(validatorRun);
   const lineage: FixLineage = FixLineageSchema.parse({
     id: generateFixLineageId(),
     sourceFeatureId: source.id,
     fixFeatureId,
     validatorRunId,
+    failedAssertionIds,
     createdAt: now,
   });
   await appendFixLineage(ctx, source.id, lineage);
@@ -177,6 +193,7 @@ async function applyCreateFixFeature(args: ApplyCreateFixFeatureArgs): Promise<F
     sourcePreviousLoopState: source.loopState,
     sourceUpdated,
     budgetRemaining: Math.max(0, budget - nextAttemptCount),
+    failedAssertionIds,
   };
 }
 

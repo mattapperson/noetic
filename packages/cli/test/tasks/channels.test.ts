@@ -4,10 +4,7 @@ import {
   externalTaskEventsChan,
   FeatureLoopStateChangedMessageSchema,
   featureLoopStateChan,
-  ValidatorOutcomeSchema,
-  ValidatorOutcomeStatus,
   ValidatorRequestSchema,
-  validatorOutcomeChan,
   validatorRequestChan,
 } from '../../src/commands/builtins/tasks/channels.js';
 import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
@@ -47,74 +44,6 @@ describe('validatorRequestChan', () => {
 
   test('is internal (no external marker)', () => {
     expect('external' in validatorRequestChan).toBe(false);
-  });
-});
-
-//#endregion
-
-//#region validatorOutcomeChan
-
-describe('validatorOutcomeChan', () => {
-  test('declares the canonical name, queue mode, and capacity 1024', () => {
-    expect(validatorOutcomeChan.name).toBe('tasks.validator-outcome');
-    expect(validatorOutcomeChan.mode).toBe('queue');
-    expect(validatorOutcomeChan.capacity).toBe(1024);
-  });
-
-  test('schema accepts pass/fail/blocked statuses', () => {
-    for (const status of [
-      ValidatorOutcomeStatus.Pass,
-      ValidatorOutcomeStatus.Fail,
-      ValidatorOutcomeStatus.Blocked,
-    ]) {
-      const parsed = ValidatorOutcomeSchema.safeParse({
-        taskId: 'T-aaaaaaaaaa',
-        featureId: 'F-bbbbbbbbbb',
-        runId: 'V-cccccccccc',
-        status,
-        result: null,
-      });
-      expect(parsed.success).toBe(true);
-    }
-  });
-
-  test('schema rejects unknown statuses', () => {
-    const bad = ValidatorOutcomeSchema.safeParse({
-      taskId: 'T-aaaaaaaaaa',
-      featureId: 'F-bbbbbbbbbb',
-      runId: 'V-cccccccccc',
-      status: 'pending',
-      result: null,
-    });
-    expect(bad.success).toBe(false);
-  });
-
-  test('schema accepts a structured result payload', () => {
-    const parsed = ValidatorOutcomeSchema.safeParse({
-      taskId: 'T-aaaaaaaaaa',
-      featureId: 'F-bbbbbbbbbb',
-      runId: 'V-cccccccccc',
-      status: ValidatorOutcomeStatus.Pass,
-      result: {
-        summary: 'all good',
-        passes: 12,
-      },
-    });
-    expect(parsed.success).toBe(true);
-  });
-
-  test('schema rejects a missing result field (must be explicit null)', () => {
-    const bad = ValidatorOutcomeSchema.safeParse({
-      taskId: 'T-aaaaaaaaaa',
-      featureId: 'F-bbbbbbbbbb',
-      runId: 'V-cccccccccc',
-      status: ValidatorOutcomeStatus.Pass,
-    });
-    expect(bad.success).toBe(false);
-  });
-
-  test('is internal (no external marker)', () => {
-    expect('external' in validatorOutcomeChan).toBe(false);
   });
 });
 
@@ -199,14 +128,13 @@ describe('externalTaskEventsChan', () => {
 //#region Surface
 
 describe('channels module surface', () => {
-  test('exports four distinct channels under unique names', () => {
+  test('exports three distinct channels under unique names', () => {
     const names = new Set([
       validatorRequestChan.name,
-      validatorOutcomeChan.name,
       featureLoopStateChan.name,
       externalTaskEventsChan.name,
     ]);
-    expect(names.size).toBe(4);
+    expect(names.size).toBe(3);
   });
 });
 

@@ -4,7 +4,7 @@ import { AgentHarness } from '@noetic/core';
 
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
 import {
-  validatorOutcomeChan,
+  featureLoopStateChan,
   validatorRequestChan,
 } from '../../../src/commands/builtins/tasks/channels.js';
 import { loadState, saveTask, tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
@@ -173,7 +173,7 @@ async function captureEventsSince(
 //#region Tests — pass / fail / blocked / budget-exhausted
 
 describe('validatorIterationStep — pass result', () => {
-  it('records a passing run, marks the feature done, publishes outcome to validatorOutcomeChan', async () => {
+  it('records a passing run, marks the feature done, and publishes the loop-state change on featureLoopStateChan', async () => {
     const seed = await seedStructuredTask('T-flowpass00');
     const ctx = {
       fs: seed.fs,
@@ -190,6 +190,10 @@ describe('validatorIterationStep — pass result', () => {
     }));
     const iterStep = buildValidatorIterationStep(deps);
 
+    // Subscribe BEFORE the publish so the topic dispatch finds us.
+    const recvPromise = childCtx.recv(featureLoopStateChan, {
+      timeout: 5_000,
+    });
     childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
@@ -211,11 +215,11 @@ describe('validatorIterationStep — pass result', () => {
     expect(await drainRecorded()).toHaveLength(1);
     expect(await drainLoopChanges()).toHaveLength(1);
 
-    const published = childCtx.tryRecv(validatorOutcomeChan);
-    expect(published).not.toBeNull();
-    expect(published?.status).toBe('pass');
-    expect(published?.taskId).toBe(seed.taskId);
-    expect(published?.featureId).toBe(seed.featureId);
+    const published = await recvPromise;
+    expect(published.taskId).toBe(seed.taskId);
+    expect(published.featureId).toBe(seed.featureId);
+    expect(published.previousLoopState).toBe(FeatureLoopState.Validating);
+    expect(published.loopState).toBe(FeatureLoopState.Passed);
   });
 });
 
@@ -246,8 +250,6 @@ describe('validatorIterationStep — fail result', () => {
     const fixEvents = await drainFixEvents();
     expect(fixEvents).toHaveLength(1);
     expect(fixEvents[0]?.payload?.['sourceFeatureId']).toBe(seed.featureId);
-    const published = childCtx.tryRecv(validatorOutcomeChan);
-    expect(published?.status).toBe('fail');
   });
 
   it('falls back to feature:budgetExhausted when retry budget is hit', async () => {
@@ -293,7 +295,7 @@ describe('validatorIterationStep — fail result', () => {
 });
 
 describe('validatorIterationStep — blocked result', () => {
-  it('marks the feature blocked when the validator reports blocked', async () => {
+  it('marks the feature blocked when the validator reports blocked and publishes the loop-state change', async () => {
     const seed = await seedStructuredTask('T-flowblck00');
     const ctx = {
       fs: seed.fs,
@@ -311,6 +313,9 @@ describe('validatorIterationStep — blocked result', () => {
       })),
     );
 
+    const recvPromise = childCtx.recv(featureLoopStateChan, {
+      timeout: 5_000,
+    });
     childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
@@ -322,8 +327,9 @@ describe('validatorIterationStep — blocked result', () => {
     expect(loopChanges[0]?.payload?.['loopState']).toBe(FeatureLoopState.Blocked);
     const reloaded = await loadFeature(ctx, seed.taskId, seed.featureId);
     expect(reloaded?.loopState).toBe(FeatureLoopState.Blocked);
-    const published = childCtx.tryRecv(validatorOutcomeChan);
-    expect(published?.status).toBe('blocked');
+    const published = await recvPromise;
+    expect(published.loopState).toBe(FeatureLoopState.Blocked);
+    expect(published.previousLoopState).toBe(FeatureLoopState.Validating);
   });
 });
 
@@ -360,8 +366,6 @@ describe('validatorIterationStep — validator throws', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]?.status).toBe(ValidatorRunStatus.Error);
     expect(await drainExhausted()).toHaveLength(0);
-    // Error runs are not surfaced as outcomes — only pass / fail / blocked.
-    expect(childCtx.tryRecv(validatorOutcomeChan)).toBeNull();
   });
 });
 

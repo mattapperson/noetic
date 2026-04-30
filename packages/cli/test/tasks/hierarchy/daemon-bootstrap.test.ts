@@ -13,7 +13,6 @@ describe('buildHierarchyDaemonHarness', () => {
       expect(bundle.harness).toBeDefined();
       expect(bundle.flow.kind).toBe('spawn');
       expect(bundle.channels.validatorRequestChan.name).toBe('tasks.validator-request');
-      expect(bundle.channels.validatorOutcomeChan.name).toBe('tasks.validator-outcome');
       expect(bundle.channels.featureLoopStateChan.name).toBe('tasks.feature-loop-state');
       expect(bundle.channels.externalTaskEventsChan.name).toBe('tasks.events');
     } finally {

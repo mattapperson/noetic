@@ -181,10 +181,17 @@ interface ValidatorRun {
   startedAt: string;
   completedAt: string | null;
   status: ValidatorRunStatus;
-  result: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;          // free-form/raw blob
+  assertionOutcomes: AssertionOutcome[];           // structured per-assertion verdicts
   pid: number | null;
   pidStarttime: string | null;
   pausedAt: string | null;
+}
+
+interface AssertionOutcome {
+  assertionId: string;                             // 'A-...'
+  status: AssertionStatus;                         // pending | passed | failed | blocked
+  message?: string;
 }
 
 interface FixLineage {
@@ -192,6 +199,7 @@ interface FixLineage {
   sourceFeatureId: string;
   fixFeatureId: string;
   validatorRunId: string;
+  failedAssertionIds: string[];                    // 'A-...' from the run; empty if granular outcomes weren't reported
   createdAt: string;
 }
 

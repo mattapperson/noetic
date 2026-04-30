@@ -1,9 +1,12 @@
 /**
- * Full-screen kanban board view. Loads every task in the project and lays
- * them out by `deriveColumn`. Arrow keys move the selection across columns
- * and within a column, Enter drills into the highlighted task, `c`
- * launches the create-form, `m` opens the move picker, and `Esc` returns
- * to the chat view.
+ * Full-screen kanban board view. The exported `TaskBoard` is a host that
+ * switches between five sub-views — kanban, create, move, detail,
+ * hierarchy — and routes the keyboard focus to whichever is active.
+ *
+ * `KanbanView` is the inner kanban grid. It loads every task, lays them out
+ * by `deriveColumn`, and dispatches `c`/`m`/`Enter` to host-supplied
+ * callbacks. The host owns the mode state so each sub-view's `useInput`
+ * has exclusive ownership while it's mounted.
  *
  * Pure helpers (`groupTasksByColumn`, `selectionAfterKey`, etc.) are
  * exported so unit tests can exercise the navigation/grouping logic
@@ -21,6 +24,10 @@ import { hasHierarchy, listTasks } from '../fs-store.js';
 import { deriveColumn, KanbanColumn } from '../kanban.js';
 import type { Task } from '../schemas.js';
 import { TaskCard } from './task-card.js';
+import { TaskCreateForm } from './task-create-form.js';
+import { TaskDetail } from './task-detail.js';
+import { TaskHierarchyView } from './task-hierarchy-view.js';
+import { TaskMovePicker } from './task-move-picker.js';
 import { useEventsTail } from './use-events-tail.js';
 
 //#region Types
@@ -30,17 +37,41 @@ export interface TaskBoardProps {
   projectRoot: string;
   /** FS adapter used to load tasks. */
   fs: FsAdapter;
-  /** Called when the user presses `Esc` to leave the board. */
+  /** Called when the user presses `Esc` from the kanban to leave the board. */
   onExit: () => void;
-  /** Called when the user presses Enter on a leaf task. */
-  onOpenTask?: (task: Task) => void;
-  /** Called when the user presses Enter on a structured task. */
-  onOpenHierarchy?: (task: Task) => void;
-  /** Called when the user presses `c` to create a new task. */
-  onCreateTask?: () => void;
-  /** Called when the user presses `m` to move the selected task. */
-  onMoveTask?: (task: Task) => void;
 }
+
+interface KanbanViewProps {
+  readonly projectRoot: string;
+  readonly fs: FsAdapter;
+  /** Bumped after a sub-view persists a change so the kanban re-fetches. */
+  readonly refreshNonce: number;
+  readonly onExit: () => void;
+  readonly onOpenTask: (task: Task) => void;
+  readonly onOpenHierarchy: (task: Task) => void;
+  readonly onCreateTask: () => void;
+  readonly onMoveTask: (task: Task) => void;
+}
+
+type Mode =
+  | {
+      readonly kind: 'kanban';
+    }
+  | {
+      readonly kind: 'create';
+    }
+  | {
+      readonly kind: 'move';
+      readonly task: Task;
+    }
+  | {
+      readonly kind: 'detail';
+      readonly task: Task;
+    }
+  | {
+      readonly kind: 'hierarchy';
+      readonly task: Task;
+    };
 
 /** A single task with its derived column and structured-flag pre-computed. */
 export interface DecoratedTask {
@@ -70,6 +101,43 @@ export const VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
   KanbanColumn.Removed,
   KanbanColumn.Archived,
 ];
+
+/**
+ * Active columns shown by default in narrow terminals. The remaining
+ * terminal-state columns (Cleanup Blocked / Removed / Archived) are
+ * hidden behind the `a` toggle until the terminal is wide enough to
+ * fit all eight side-by-side without truncation.
+ */
+const DEFAULT_VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
+  KanbanColumn.Triage,
+  KanbanColumn.InProgress,
+  KanbanColumn.NeedsChanges,
+  KanbanColumn.ReadyToMerge,
+  KanbanColumn.Done,
+];
+
+/** Minimum per-column width below which the kanban looks unreadable. */
+const MIN_COLUMN_WIDTH = 16;
+
+/**
+ * Pick which subset of `VISIBLE_COLUMNS` to render given the available
+ * terminal width and the user's "show all" toggle. The primary five
+ * are always visible; the terminal-state columns join only when there's
+ * enough room or the user explicitly asked.
+ */
+export function visibleColumnsFor(args: {
+  readonly terminalWidth: number;
+  readonly showAll: boolean;
+}): ReadonlyArray<KanbanColumn> {
+  if (args.showAll) {
+    return VISIBLE_COLUMNS;
+  }
+  const fitsAll = args.terminalWidth >= VISIBLE_COLUMNS.length * MIN_COLUMN_WIDTH;
+  if (fitsAll) {
+    return VISIBLE_COLUMNS;
+  }
+  return DEFAULT_VISIBLE_COLUMNS;
+}
 
 const COLUMN_LABELS: Record<KanbanColumn, string> = {
   [KanbanColumn.Triage]: 'Triage',
@@ -109,15 +177,20 @@ interface NavInput {
   readonly rowIndex: number;
   readonly key: 'left' | 'right' | 'up' | 'down';
   readonly buckets: ReadonlyMap<KanbanColumn, ReadonlyArray<DecoratedTask>>;
+  readonly visibleColumns?: ReadonlyArray<KanbanColumn>;
 }
 
 /**
  * Compute the next selection after a directional key. Empty columns are
  * skipped on horizontal moves so the user can never land on a column
  * with no rows. Vertical moves clamp at the column's bounds.
+ *
+ * `visibleColumns` defaults to the full ordering, but the host narrows
+ * it down for narrow terminals. Selection-stickiness across show-all
+ * toggles is the caller's responsibility.
  */
 export function selectionAfterKey(input: NavInput): BoardSelection {
-  const cols = VISIBLE_COLUMNS;
+  const cols = input.visibleColumns ?? VISIBLE_COLUMNS;
   if (input.key === 'up') {
     return {
       columnIndex: input.columnIndex,
@@ -158,13 +231,48 @@ export function selectionAfterKey(input: NavInput): BoardSelection {
 export function selectedTask(
   buckets: ReadonlyMap<KanbanColumn, ReadonlyArray<DecoratedTask>>,
   selection: BoardSelection,
+  visibleColumns: ReadonlyArray<KanbanColumn> = VISIBLE_COLUMNS,
 ): DecoratedTask | null {
-  const colKey = VISIBLE_COLUMNS[selection.columnIndex];
+  const colKey = visibleColumns[selection.columnIndex];
   if (colKey === undefined) {
     return null;
   }
   const bucket = buckets.get(colKey) ?? [];
   return bucket[selection.rowIndex] ?? null;
+}
+
+/**
+ * Subscribe to terminal resize events so the layout re-renders on resize.
+ * Ink's `useStdout` returns the stdout handle but does not subscribe; we
+ * have to listen for `resize` ourselves and update local state.
+ */
+function useTerminalDimensions(): {
+  cols: number;
+  rows: number;
+} {
+  const { stdout } = useStdout();
+  const [dims, setDims] = useState({
+    cols: stdout?.columns ?? 100,
+    rows: stdout?.rows ?? 24,
+  });
+  useEffect(() => {
+    if (!stdout) {
+      return;
+    }
+    const handler = (): void => {
+      setDims({
+        cols: stdout.columns,
+        rows: stdout.rows,
+      });
+    };
+    stdout.on('resize', handler);
+    return (): void => {
+      stdout.off('resize', handler);
+    };
+  }, [
+    stdout,
+  ]);
+  return dims;
 }
 
 //#endregion
@@ -211,17 +319,29 @@ async function loadBoardData(ctx: TaskStoreContext): Promise<BoardData> {
 
 //#endregion
 
-//#region Component
+//#region Kanban inner view
 
-export function TaskBoard(props: TaskBoardProps): React.ReactElement {
+function KanbanView(props: KanbanViewProps): React.ReactElement {
   const theme = useTheme();
-  const { stdout } = useStdout();
-  const terminalWidth = stdout?.columns ?? 100;
+  const { cols: terminalWidth } = useTerminalDimensions();
   const [data, setData] = useState<BoardData>(EMPTY_BOARD_DATA);
+  const [showAll, setShowAll] = useState(false);
   const [selection, setSelection] = useState<BoardSelection>({
     columnIndex: 0,
     rowIndex: 0,
   });
+
+  const visibleColumns = useMemo(
+    () =>
+      visibleColumnsFor({
+        terminalWidth,
+        showAll,
+      }),
+    [
+      terminalWidth,
+      showAll,
+    ],
+  );
 
   const ctx = useMemo<TaskStoreContext>(
     () => ({
@@ -239,10 +359,12 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
     fs: props.fs,
   });
 
-  // Re-load on mount and on every event-tail bump (revision changes).
+  // Re-load on mount, on every event-tail bump, and after a sub-view persists
+  // a change (refreshNonce). Reading `revision` and `refreshNonce` so the
+  // effect closure depends on both; the values themselves aren't used.
   useEffect(() => {
-    // Read so the effect closure depends on revision; we don't need the value.
     void revision;
+    void props.refreshNonce;
     let cancelled = false;
     void loadBoardData(ctx).then((next) => {
       if (cancelled) {
@@ -256,6 +378,7 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
   }, [
     ctx,
     revision,
+    props.refreshNonce,
   ]);
 
   const buckets = useMemo(
@@ -273,13 +396,32 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
           rowIndex: current.rowIndex,
           key,
           buckets,
+          visibleColumns,
         }),
       );
     },
     [
       buckets,
+      visibleColumns,
     ],
   );
+
+  // If the visible-columns set shrinks (e.g. user toggled show-all off,
+  // or terminal narrowed) clamp the selection so we never point past the
+  // end of the new ordering.
+  useEffect(() => {
+    setSelection((current) => {
+      if (current.columnIndex < visibleColumns.length) {
+        return current;
+      }
+      return {
+        columnIndex: Math.max(0, visibleColumns.length - 1),
+        rowIndex: 0,
+      };
+    });
+  }, [
+    visibleColumns,
+  ]);
 
   useInput((input, key) => {
     if (key.escape) {
@@ -303,25 +445,27 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
       return;
     }
     if (key.return) {
-      const picked = selectedTask(buckets, selection);
+      const picked = selectedTask(buckets, selection, visibleColumns);
       if (picked === null) {
         return;
       }
-      if (picked.isStructured && props.onOpenHierarchy) {
+      if (picked.isStructured) {
         props.onOpenHierarchy(picked.task);
         return;
       }
-      if (props.onOpenTask) {
-        props.onOpenTask(picked.task);
-      }
+      props.onOpenTask(picked.task);
       return;
     }
-    if (input === 'c' && props.onCreateTask) {
+    if (input === 'c') {
       props.onCreateTask();
       return;
     }
-    if (input === 'm' && props.onMoveTask) {
-      const picked = selectedTask(buckets, selection);
+    if (input === 'a') {
+      setShowAll((v) => !v);
+      return;
+    }
+    if (input === 'm') {
+      const picked = selectedTask(buckets, selection, visibleColumns);
       if (picked === null) {
         return;
       }
@@ -347,8 +491,9 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
   }
 
   // Pick a column width that fits all visible columns side-by-side.
-  const columnCount = VISIBLE_COLUMNS.length;
-  const columnWidth = Math.max(16, Math.floor(terminalWidth / columnCount));
+  const columnCount = visibleColumns.length;
+  const columnWidth = Math.max(MIN_COLUMN_WIDTH, Math.floor(terminalWidth / columnCount));
+  const allColumnsVisible = visibleColumns.length === VISIBLE_COLUMNS.length;
 
   return (
     <Box flexDirection="column" width={terminalWidth}>
@@ -357,7 +502,7 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
         <Text color={theme.muted}> — {props.projectRoot}</Text>
       </Box>
       <Box flexDirection="row">
-        {VISIBLE_COLUMNS.map((column, columnIndex) => {
+        {visibleColumns.map((column, columnIndex) => {
           const bucket = buckets.get(column) ?? [];
           const isSelectedColumn = columnIndex === selection.columnIndex;
           return (
@@ -395,9 +540,115 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
         })}
       </Box>
       <Box paddingX={1}>
-        <Text color={theme.muted}>↑↓←→ navigate • Enter open • c create • m move • Esc exit</Text>
+        <Text color={theme.muted}>
+          ↑↓←→ navigate • Enter open • c create • m move •{' '}
+          {allColumnsVisible ? 'a hide terminal' : 'a show all'} • Esc exit
+        </Text>
       </Box>
     </Box>
+  );
+}
+
+//#endregion
+
+//#region Host component
+
+/**
+ * TaskBoard host — owns the active sub-view mode and routes between the
+ * kanban grid and the create / move / detail / hierarchy sub-views. Each
+ * sub-view's `useInput` runs in isolation because only one is mounted at
+ * a time.
+ */
+export function TaskBoard(props: TaskBoardProps): React.ReactElement {
+  const [mode, setMode] = useState<Mode>({
+    kind: 'kanban',
+  });
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  const returnToKanban = useCallback((): void => {
+    setMode({
+      kind: 'kanban',
+    });
+  }, []);
+
+  const returnAndRefresh = useCallback((): void => {
+    setRefreshNonce((n) => n + 1);
+    setMode({
+      kind: 'kanban',
+    });
+  }, []);
+
+  if (mode.kind === 'create') {
+    return (
+      <TaskCreateForm
+        fs={props.fs}
+        projectRoot={props.projectRoot}
+        onCreated={returnAndRefresh}
+        onCancel={returnToKanban}
+      />
+    );
+  }
+  if (mode.kind === 'move') {
+    return (
+      <TaskMovePicker
+        fs={props.fs}
+        projectRoot={props.projectRoot}
+        task={mode.task}
+        onMoved={returnAndRefresh}
+        onCancel={returnToKanban}
+      />
+    );
+  }
+  if (mode.kind === 'detail') {
+    return (
+      <TaskDetail
+        fs={props.fs}
+        projectRoot={props.projectRoot}
+        task={mode.task}
+        onClose={returnToKanban}
+      />
+    );
+  }
+  if (mode.kind === 'hierarchy') {
+    return (
+      <TaskHierarchyView
+        fs={props.fs}
+        projectRoot={props.projectRoot}
+        task={mode.task}
+        onClose={returnToKanban}
+      />
+    );
+  }
+  return (
+    <KanbanView
+      fs={props.fs}
+      projectRoot={props.projectRoot}
+      refreshNonce={refreshNonce}
+      onExit={props.onExit}
+      onOpenTask={(task): void =>
+        setMode({
+          kind: 'detail',
+          task,
+        })
+      }
+      onOpenHierarchy={(task): void =>
+        setMode({
+          kind: 'hierarchy',
+          task,
+        })
+      }
+      onCreateTask={(): void =>
+        setMode({
+          kind: 'create',
+        })
+      }
+      onMoveTask={(task): void =>
+        setMode({
+          kind: 'move',
+          task,
+        })
+      }
+    />
   );
 }
 

@@ -7,9 +7,11 @@ import {
 } from '../../../src/commands/builtins/tasks/hierarchy/fix-feature.js';
 import type { Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
 import {
+  AssertionStatus,
   DEFAULT_IMPLEMENTATION_RETRY_BUDGET,
   FeatureLoopState,
   FeatureStatus,
+  generateAssertionId,
   generateFeatureId,
   generateSliceId,
   generateValidatorRunId,
@@ -96,6 +98,69 @@ describe('createGeneratedFixFeature', () => {
     expect(lineage[0]?.sourceFeatureId).toBe(source.id);
     expect(lineage[0]?.fixFeatureId).toBe(change.fixFeature.id);
     expect(lineage[0]?.validatorRunId).toBe(run.id);
+  });
+
+  it('plumbs failedAssertionIds from the validator run into the lineage and the change', async () => {
+    const ctx = makeStoreContext();
+    const source = makeFeature();
+    await saveFeature(ctx, TASK_ID, source);
+    const failedA = generateAssertionId();
+    const failedB = generateAssertionId();
+    const passedC = generateAssertionId();
+    const run = await recordValidatorRun(
+      {
+        ...ctx,
+        taskId: TASK_ID,
+      },
+      {
+        featureId: source.id,
+        status: ValidatorRunStatus.Fail,
+        assertionOutcomes: [
+          {
+            assertionId: failedA,
+            status: AssertionStatus.Failed,
+            message: 'broken on null input',
+          },
+          {
+            assertionId: passedC,
+            status: AssertionStatus.Passed,
+          },
+          {
+            assertionId: failedB,
+            status: AssertionStatus.Failed,
+          },
+        ],
+      },
+    );
+
+    const change = await createGeneratedFixFeature(
+      {
+        ...ctx,
+        taskId: TASK_ID,
+      },
+      {
+        sourceFeatureId: source.id,
+        validatorRunId: run.id,
+      },
+    );
+
+    expect(change.failedAssertionIds).toEqual([
+      failedA,
+      failedB,
+    ]);
+
+    const lineage = await readFixLineage(
+      {
+        ...ctx,
+        taskId: TASK_ID,
+      },
+      source.id,
+    );
+    expect(lineage.length).toBe(1);
+    expect(lineage[0]?.failedAssertionIds).toEqual([
+      failedA,
+      failedB,
+    ]);
   });
 
   it('throws BudgetExhaustedError once the source has hit its budget', async () => {

@@ -41,11 +41,11 @@ function makeEnoent(
 
 /**
  * In-memory `FsAdapter` for hermetic tests of the FS-backed task store.
- * Stores file contents as strings; directories are tracked separately so
- * `mkdir` of a deep path implicitly creates intermediate dirs.
+ * Stores file contents as Buffers so binary writes (`writeFileBytes`)
+ * round-trip cleanly; text helpers decode UTF-8 on read.
  */
 export class MemFs implements FsAdapter {
-  readonly files = new Map<string, string>();
+  readonly files = new Map<string, Buffer>();
   readonly dirs = new Set<string>();
 
   constructor(
@@ -75,15 +75,19 @@ export class MemFs implements FsAdapter {
   }
 
   async readFile(p: string): Promise<Buffer> {
-    return Buffer.from(await this.readFileText(p), 'utf-8');
+    const buf = this.files.get(path.resolve(p));
+    if (buf === undefined) {
+      throw makeEnoent('open', p);
+    }
+    return buf;
   }
 
   async readFileText(p: string): Promise<string> {
-    const text = this.files.get(path.resolve(p));
-    if (text === undefined) {
+    const buf = this.files.get(path.resolve(p));
+    if (buf === undefined) {
       throw makeEnoent('open', p);
     }
-    return text;
+    return buf.toString('utf-8');
   }
 
   async writeFile(p: string, content: string): Promise<void> {
@@ -91,7 +95,15 @@ export class MemFs implements FsAdapter {
     if (!this.parentExists(abs)) {
       throw makeEnoent('open', p);
     }
-    this.files.set(abs, content);
+    this.files.set(abs, Buffer.from(content, 'utf-8'));
+  }
+
+  async writeFileBytes(p: string, content: Buffer): Promise<void> {
+    const abs = path.resolve(p);
+    if (!this.parentExists(abs)) {
+      throw makeEnoent('open', p);
+    }
+    this.files.set(abs, Buffer.from(content));
   }
 
   async appendFile(p: string, content: string): Promise<void> {
@@ -99,8 +111,14 @@ export class MemFs implements FsAdapter {
     if (!this.parentExists(abs)) {
       throw makeEnoent('open', p);
     }
-    const prev = this.files.get(abs) ?? '';
-    this.files.set(abs, prev + content);
+    const prev = this.files.get(abs) ?? Buffer.alloc(0);
+    this.files.set(
+      abs,
+      Buffer.concat([
+        prev,
+        Buffer.from(content, 'utf-8'),
+      ]),
+    );
   }
 
   async mkdir(dir: string): Promise<void> {
@@ -194,10 +212,10 @@ export class MemFs implements FsAdapter {
 
   async stat(p: string): Promise<FsStats> {
     const abs = path.resolve(p);
-    const text = this.files.get(abs);
-    if (text !== undefined) {
+    const buf = this.files.get(abs);
+    if (buf !== undefined) {
       return toStats({
-        size: Buffer.byteLength(text, 'utf-8'),
+        size: buf.byteLength,
         isFile: true,
         isDirectory: false,
         isSymbolicLink: false,

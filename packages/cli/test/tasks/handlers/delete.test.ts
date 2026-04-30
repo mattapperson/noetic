@@ -11,7 +11,7 @@ import { EventKind } from '../../../src/commands/builtins/tasks/schemas.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('deleteTaskHandler', () => {
-  it('emits TaskArchived then removes the task directory', async () => {
+  it('emits TaskDeleted (not TaskArchived) and removes the task directory', async () => {
     const ctx = makeStoreContext();
     const created = await createTaskHandler(ctx, {
       title: 'Delete me',
@@ -24,9 +24,13 @@ describe('deleteTaskHandler', () => {
     expect(await listTasks(ctx)).toEqual([]);
 
     const events = await tailEvents(ctx);
+    const deleted = events.filter((e) => e.kind === EventKind.TaskDeleted);
+    expect(deleted.length).toBe(1);
+    expect(deleted[0]?.payload?.reason).toBe('deleted');
+    // Hard-delete must NOT masquerade as archive — listeners watching
+    // `task:archived` need to be able to distinguish.
     const archived = events.filter((e) => e.kind === EventKind.TaskArchived);
-    expect(archived.length).toBe(1);
-    expect(archived[0]?.payload?.reason).toBe('deleted');
+    expect(archived.length).toBe(0);
   });
 
   it('throws on missing task', async () => {

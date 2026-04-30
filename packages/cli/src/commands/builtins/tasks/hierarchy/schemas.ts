@@ -219,6 +219,24 @@ export const AssertionSchema = z.object({
 
 export type Assertion = z.infer<typeof AssertionSchema>;
 
+/**
+ * Per-assertion outcome captured by the validator. Lives alongside the
+ * opaque `result` blob so consumers (autopilot, fix-feature) can act on
+ * structured failure data instead of parsing free-form text.
+ */
+export const AssertionOutcomeSchema = z.object({
+  assertionId: AssertionIdSchema,
+  status: z.enum([
+    AssertionStatus.Pending,
+    AssertionStatus.Passed,
+    AssertionStatus.Failed,
+    AssertionStatus.Blocked,
+  ]),
+  message: z.string().optional(),
+});
+
+export type AssertionOutcome = z.infer<typeof AssertionOutcomeSchema>;
+
 export const ValidatorRunSchema = z.object({
   id: ValidatorRunIdSchema,
   featureId: FeatureIdSchema,
@@ -234,6 +252,12 @@ export const ValidatorRunSchema = z.object({
   ]),
   /** Free-form structured result payload (test report, error details, etc.). */
   result: z.record(z.string(), z.unknown()).nullable(),
+  /**
+   * Structured per-assertion outcomes. Empty array when the validator
+   * runner doesn't report at this granularity (legacy path) — consumers
+   * fall back to the opaque `result` blob in that case.
+   */
+  assertionOutcomes: z.array(AssertionOutcomeSchema).default([]),
   pid: z.number().int().nullable(),
   pidStarttime: z.string().nullable(),
   pausedAt: z.string().nullable(),
@@ -244,12 +268,17 @@ export type ValidatorRun = z.infer<typeof ValidatorRunSchema>;
 /**
  * Append-only lineage record connecting a failing source feature to the
  * generated fix feature and the validator run that triggered the fix.
+ *
+ * `failedAssertionIds` carries the structured "what failed" context so the
+ * AI generating the fix doesn't have to re-derive it by parsing the
+ * validator run's opaque `result` blob.
  */
 export const FixLineageSchema = z.object({
   id: FixLineageIdSchema,
   sourceFeatureId: FeatureIdSchema,
   fixFeatureId: FeatureIdSchema,
   validatorRunId: ValidatorRunIdSchema,
+  failedAssertionIds: z.array(AssertionIdSchema).default([]),
   createdAt: z.string(),
 });
 

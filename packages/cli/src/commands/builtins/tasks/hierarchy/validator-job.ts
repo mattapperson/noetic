@@ -7,7 +7,7 @@ import { getTaskHierarchy } from './aggregate.js';
 import type { FeatureLifecycleContext } from './feature-lifecycle.js';
 import { markFeatureBlocked, markFeaturePassed } from './feature-lifecycle.js';
 import { BudgetExhaustedError, createGeneratedFixFeature } from './fix-feature.js';
-import type { Assertion, Feature, ValidatorRun } from './schemas.js';
+import type { Assertion, AssertionOutcome, Feature, ValidatorRun } from './schemas.js';
 import { FeatureLoopState, ValidatorRunStatus } from './schemas.js';
 import type { ValidatorContext } from './validator.js';
 import { listValidatorRuns, recordValidatorRun, updateValidatorRun } from './validator.js';
@@ -17,12 +17,17 @@ import { listValidatorRuns, recordValidatorRun, updateValidatorRun } from './val
 /**
  * Outcome reported back by an external validator runner. Mirrors the legacy
  * `ValidatorRunResult` minus the runId (caller already knows it).
+ *
+ * `assertionOutcomes` carries structured per-assertion verdicts; runners
+ * that don't report at this granularity may omit it (in which case the
+ * fix-feature flow falls back to no specific failure context).
  */
 export interface ValidatorRunOutcome {
   readonly status: 'pass' | 'fail' | 'blocked' | 'error';
   readonly summary: string;
   readonly blockedReason?: string;
   readonly result?: Record<string, unknown>;
+  readonly assertionOutcomes?: ReadonlyArray<AssertionOutcome>;
 }
 
 /**
@@ -39,11 +44,28 @@ export interface RunValidatorArgs {
 
 export type RunValidatorFn = (args: RunValidatorArgs) => Promise<ValidatorRunOutcome>;
 
+/**
+ * Optional callback fired alongside the durable `feature:loopStateChanged`
+ * event-log entry whenever a feature's loop state actually transitions.
+ * The validator-flow binds this to a channel publish so daemon-internal
+ * subscribers (autopilot's `wakeOn: featureLoopStateChan`) can react
+ * without polling the JSONL tail. No-op when omitted.
+ */
+export interface LoopStateTransition {
+  readonly taskId: string;
+  readonly featureId: string;
+  readonly previousLoopState: FeatureLoopState;
+  readonly loopState: FeatureLoopState;
+}
+
+export type PublishLoopStateChange = (msg: LoopStateTransition) => void;
+
 /** Long-lived dependencies passed to the validator daemon job. */
 export interface ValidatorJobDeps {
   readonly ctx: TaskStoreContext;
   readonly signaller: Signaller;
   readonly runValidator: RunValidatorFn;
+  readonly publishLoopStateChange?: PublishLoopStateChange;
 }
 
 //#endregion
@@ -153,6 +175,7 @@ async function emitFeatureFixGenerated(
     readonly sourceFeatureId: string;
     readonly fixFeatureId: string;
     readonly validatorRunId: string;
+    readonly failedAssertionIds: ReadonlyArray<string>;
   },
 ): Promise<void> {
   await appendEvent(ctx, {
@@ -192,6 +215,29 @@ interface HandleResultArgs {
   readonly outcome: ValidatorRunOutcome;
 }
 
+/**
+ * Persist the durable `feature:loopStateChanged` event AND fire the
+ * optional in-process publisher so daemon-internal subscribers (autopilot's
+ * `wakeOn`) can react without tailing the JSONL.
+ */
+async function announceLoopStateChange(
+  deps: ValidatorJobDeps,
+  taskId: string,
+  change: {
+    readonly featureId: string;
+    readonly previousLoopState: FeatureLoopState;
+    readonly loopState: FeatureLoopState;
+  },
+): Promise<void> {
+  await emitFeatureLoopStateChanged(deps.ctx, taskId, change);
+  deps.publishLoopStateChange?.({
+    taskId,
+    featureId: change.featureId,
+    previousLoopState: change.previousLoopState,
+    loopState: change.loopState,
+  });
+}
+
 async function handlePassResult(args: HandleResultArgs): Promise<void> {
   const lifecycleCtx: FeatureLifecycleContext = {
     ...args.deps.ctx,
@@ -201,7 +247,7 @@ async function handlePassResult(args: HandleResultArgs): Promise<void> {
   if (change === null) {
     return;
   }
-  await emitFeatureLoopStateChanged(args.deps.ctx, args.taskId, change);
+  await announceLoopStateChange(args.deps, args.taskId, change);
 }
 
 async function handleFailResult(args: HandleResultArgs): Promise<void> {
@@ -224,6 +270,7 @@ async function handleFailResult(args: HandleResultArgs): Promise<void> {
       sourceFeatureId: args.feature.id,
       fixFeatureId: fix.fixFeature.id,
       validatorRunId: args.run.id,
+      failedAssertionIds: fix.failedAssertionIds,
     });
     if (fix.budgetRemaining === 0) {
       await emitFeatureBudgetExhausted(args.deps.ctx, args.taskId, {
@@ -242,7 +289,7 @@ async function handleFailResult(args: HandleResultArgs): Promise<void> {
       `Implementation retry budget exhausted (${err.attemptCount}/${err.budget}).`,
     );
     if (change !== null) {
-      await emitFeatureLoopStateChanged(args.deps.ctx, args.taskId, change);
+      await announceLoopStateChange(args.deps, args.taskId, change);
     }
     await emitFeatureBudgetExhausted(args.deps.ctx, args.taskId, {
       featureId: args.feature.id,
@@ -262,7 +309,7 @@ async function handleBlockedResult(args: HandleResultArgs): Promise<void> {
   if (change === null) {
     return;
   }
-  await emitFeatureLoopStateChanged(args.deps.ctx, args.taskId, change);
+  await announceLoopStateChange(args.deps, args.taskId, change);
 }
 
 function handleErrorResult(args: HandleResultArgs): void {
@@ -409,6 +456,7 @@ export async function runFeatureValidation(args: RunFeatureValidationArgs): Prom
         summary: outcome.summary,
         blockedReason: outcome.blockedReason ?? null,
       },
+      assertionOutcomes: outcome.assertionOutcomes,
     },
   });
 

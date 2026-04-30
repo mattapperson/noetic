@@ -60,8 +60,8 @@ async function copyAttachments(
   }
   await ctx.fs.mkdir(destDir);
   for (const entry of entries) {
-    const text = await ctx.fs.readFileText(join(sourceDir, entry));
-    await ctx.fs.writeFile(join(destDir, entry), text);
+    const bytes = await ctx.fs.readFile(join(sourceDir, entry));
+    await ctx.fs.writeFileBytes(join(destDir, entry), bytes);
   }
 }
 

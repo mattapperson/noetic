@@ -73,12 +73,12 @@ describe('submitNewTask', () => {
     expect(persistedRaw).toBeDefined();
     // description.md was written too.
     const descRaw = ctx.fs.files.get(path.resolve(dir.description));
-    expect(descRaw).toBe('Long-form details here.');
+    expect(descRaw?.toString('utf-8')).toBe('Long-form details here.');
     // Events file mentions the task.
     const eventsRaw = ctx.fs.files.get(path.resolve(taskRootPaths(ctx.projectRoot).events));
     expect(eventsRaw).toBeDefined();
-    expect(eventsRaw).toContain(task.id);
-    expect(eventsRaw).toContain('task:created');
+    expect(eventsRaw?.toString('utf-8')).toContain(task.id);
+    expect(eventsRaw?.toString('utf-8')).toContain('task:created');
     // Durable tail surfaces the appended row.
     const events = await tailEvents(ctx);
     const created = events.filter((e) => e.kind === 'task:created');

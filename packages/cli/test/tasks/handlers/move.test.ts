@@ -36,4 +36,53 @@ describe('moveTaskHandler', () => {
       }),
     ).rejects.toThrow();
   });
+
+  it('refuses to move into reconciler-owned columns without --force', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Sanity',
+    });
+    await expect(
+      moveTaskHandler(ctx, {
+        taskId: created.task.id,
+        column: KanbanColumn.Removed,
+      }),
+    ).rejects.toThrow(/reconciler-owned/);
+    await expect(
+      moveTaskHandler(ctx, {
+        taskId: created.task.id,
+        column: KanbanColumn.CleanupBlocked,
+      }),
+    ).rejects.toThrow(/reconciler-owned/);
+  });
+
+  it('allows force move into a reconciler-owned column', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Forced',
+    });
+    const result = await moveTaskHandler(ctx, {
+      taskId: created.task.id,
+      column: KanbanColumn.Removed,
+      force: true,
+    });
+    expect(result.column).toBe(KanbanColumn.Removed);
+  });
+
+  it('allows moving OUT of a reconciler-owned column without --force', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Recover',
+    });
+    await moveTaskHandler(ctx, {
+      taskId: created.task.id,
+      column: KanbanColumn.Removed,
+      force: true,
+    });
+    const result = await moveTaskHandler(ctx, {
+      taskId: created.task.id,
+      column: KanbanColumn.InProgress,
+    });
+    expect(result.column).toBe(KanbanColumn.InProgress);
+  });
 });

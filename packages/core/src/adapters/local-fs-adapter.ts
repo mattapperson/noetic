@@ -28,6 +28,7 @@ export function createLocalFsAdapter(): FsAdapter {
     readFile: (p) => fs.readFile(p),
     readFileText: (p) => fs.readFile(p, 'utf-8'),
     writeFile: (p, content) => fs.writeFile(p, content, 'utf-8'),
+    writeFileBytes: (p, content) => fs.writeFile(p, content),
     appendFile: (p, content) => fs.appendFile(p, content, 'utf-8'),
     mkdir: async (dir) => {
       await fs.mkdir(dir, {

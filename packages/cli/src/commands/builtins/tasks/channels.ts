@@ -23,29 +23,6 @@ export const ValidatorRequestSchema = z.object({
 
 export type ValidatorRequest = z.infer<typeof ValidatorRequestSchema>;
 
-export const ValidatorOutcomeStatus = {
-  Pass: 'pass',
-  Fail: 'fail',
-  Blocked: 'blocked',
-} as const;
-
-export type ValidatorOutcomeStatus =
-  (typeof ValidatorOutcomeStatus)[keyof typeof ValidatorOutcomeStatus];
-
-export const ValidatorOutcomeSchema = z.object({
-  taskId: z.string(),
-  featureId: z.string(),
-  runId: z.string(),
-  status: z.enum([
-    ValidatorOutcomeStatus.Pass,
-    ValidatorOutcomeStatus.Fail,
-    ValidatorOutcomeStatus.Blocked,
-  ]),
-  result: z.record(z.string(), z.unknown()).nullable(),
-});
-
-export type ValidatorOutcome = z.infer<typeof ValidatorOutcomeSchema>;
-
 const FeatureLoopStateSchema = z.enum([
   FeatureLoopState.Idle,
   FeatureLoopState.Implementing,
@@ -81,20 +58,16 @@ export const validatorRequestChan = channel('tasks.validator-request', {
 });
 
 /**
- * Autopilot subscribes; the validator flow signals when a run terminates
- * (pass/fail/blocked). Same delivery semantics as `validatorRequestChan`.
- */
-export const validatorOutcomeChan = channel('tasks.validator-outcome', {
-  schema: ValidatorOutcomeSchema,
-  mode: 'queue',
-  capacity: 1024,
-});
-
-/**
  * Feature loop-state changes — the autopilot's `wakeOn` trigger and a
- * fan-out feed for telemetry taps. Topic mode so multiple consumers see
- * each transition with at-most-once delivery; missed messages are
- * recoverable from `_events.jsonl`.
+ * fan-out feed for telemetry taps. Published by the validator flow (and
+ * any other code path that mutates a feature's loop state). Topic mode
+ * so multiple consumers see each transition with at-most-once delivery;
+ * missed messages are recoverable from `_events.jsonl`.
+ *
+ * Self-publish from the autopilot's tick body is intentionally a no-op:
+ * topic recv() only subscribes during `every`'s park phase, and a send
+ * during the tick body has no concurrent subscribers, so the autopilot
+ * cannot wake itself in a busy loop.
  */
 export const featureLoopStateChan = channel('tasks.feature-loop-state', {
   schema: FeatureLoopStateChangedMessageSchema,

@@ -60,6 +60,10 @@ class MemFs implements FsAdapter {
     throw new Error('write not supported in test');
   }
 
+  async writeFileBytes(_path: string, _content: Buffer): Promise<void> {
+    throw new Error('writeFileBytes not supported in test');
+  }
+
   async appendFile(_path: string, _content: string): Promise<void> {
     throw new Error('append not supported in test');
   }

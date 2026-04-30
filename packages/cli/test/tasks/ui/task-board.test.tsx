@@ -22,6 +22,7 @@ import {
   selectedTask,
   selectionAfterKey,
   VISIBLE_COLUMNS,
+  visibleColumnsFor,
 } from '../../../src/commands/builtins/tasks/ui/task-board.js';
 
 //#region Fixtures
@@ -291,5 +292,45 @@ describe('selectedTask', () => {
       rowIndex: 0,
     });
     expect(picked).toBeNull();
+  });
+});
+
+describe('visibleColumnsFor', () => {
+  test('shows all eight columns when terminal fits all min-widths (8 * 16 = 128)', () => {
+    const cols = visibleColumnsFor({
+      terminalWidth: 128,
+      showAll: false,
+    });
+    expect(cols).toEqual(VISIBLE_COLUMNS);
+  });
+
+  test('hides terminal-state columns at narrow widths (e.g. 80 cols)', () => {
+    const cols = visibleColumnsFor({
+      terminalWidth: 80,
+      showAll: false,
+    });
+    expect(cols).toEqual([
+      KanbanColumn.Triage,
+      KanbanColumn.InProgress,
+      KanbanColumn.NeedsChanges,
+      KanbanColumn.ReadyToMerge,
+      KanbanColumn.Done,
+    ]);
+  });
+
+  test('show-all override surfaces all columns even on narrow terminals', () => {
+    const cols = visibleColumnsFor({
+      terminalWidth: 80,
+      showAll: true,
+    });
+    expect(cols).toEqual(VISIBLE_COLUMNS);
+  });
+
+  test('boundary at 127 cols still hides terminal columns', () => {
+    const cols = visibleColumnsFor({
+      terminalWidth: 127,
+      showAll: false,
+    });
+    expect(cols.length).toBe(5);
   });
 });

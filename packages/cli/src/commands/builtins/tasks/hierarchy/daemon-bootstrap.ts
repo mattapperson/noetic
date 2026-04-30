@@ -14,12 +14,7 @@
 import { AgentHarness, createLocalFsAdapter } from '@noetic/core';
 
 import { defaultSignaller } from '../agent-ci-control.js';
-import {
-  externalTaskEventsChan,
-  featureLoopStateChan,
-  validatorOutcomeChan,
-  validatorRequestChan,
-} from '../channels.js';
+import { externalTaskEventsChan, featureLoopStateChan, validatorRequestChan } from '../channels.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import type { AutopilotDeps } from './autopilot.js';
 import type { TaskDaemonFlowDeps } from './daemon-flow.js';
@@ -39,7 +34,6 @@ export interface HierarchyDaemonHarnessBundle {
   readonly flow: ReturnType<typeof buildTaskDaemonFlow>;
   readonly channels: {
     readonly validatorRequestChan: typeof validatorRequestChan;
-    readonly validatorOutcomeChan: typeof validatorOutcomeChan;
     readonly featureLoopStateChan: typeof featureLoopStateChan;
     readonly externalTaskEventsChan: typeof externalTaskEventsChan;
   };
@@ -111,7 +105,6 @@ export function buildHierarchyDaemonHarness(projectRoot: string): HierarchyDaemo
     flow,
     channels: {
       validatorRequestChan,
-      validatorOutcomeChan,
       featureLoopStateChan,
       externalTaskEventsChan,
     },

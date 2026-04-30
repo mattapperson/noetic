@@ -189,6 +189,12 @@ export const EventKind = {
   TaskUpdated: 'task:updated',
   TaskMoved: 'task:moved',
   TaskArchived: 'task:archived',
+  /**
+   * Hard-delete (the on-disk task dir was removed). Distinct from
+   * `TaskArchived` so listeners can drop the row instead of treating
+   * it as recoverable.
+   */
+  TaskDeleted: 'task:deleted',
   TaskReviewStatusChanged: 'task:reviewStatusChanged',
   SessionFinished: 'session:finished',
   LogAppended: 'log:appended',
@@ -214,6 +220,7 @@ export const EventSchema = z.object({
     EventKind.TaskUpdated,
     EventKind.TaskMoved,
     EventKind.TaskArchived,
+    EventKind.TaskDeleted,
     EventKind.TaskReviewStatusChanged,
     EventKind.SessionFinished,
     EventKind.LogAppended,

@@ -17,6 +17,12 @@ export interface FsAdapter {
   /** Write string content to a file (UTF-8). */
   writeFile(path: string, content: string): Promise<void>;
   /**
+   * Write raw bytes to a file. Use this when content may not be valid
+   * UTF-8 (binary attachments, images, etc.). Round-tripping through
+   * `writeFile` corrupts non-UTF-8 sequences.
+   */
+  writeFileBytes(path: string, content: Buffer): Promise<void>;
+  /**
    * Append string content to a file (UTF-8). Creates the file if it does
    * not exist. On POSIX, the underlying write uses `O_APPEND`, which is
    * atomic for sub-`PIPE_BUF` writes — multiple concurrent writers can

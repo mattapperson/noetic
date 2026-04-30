@@ -10,6 +10,7 @@
 import type { FsAdapter } from '@noetic/core';
 import { createLocalFsAdapter } from '@noetic/core';
 
+import { ensureDaemon } from '../../../daemon-runtime/runtime.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
 import { activateSliceHandler } from './handlers/activate-slice.js';
@@ -245,6 +246,7 @@ async function handleMove(
   const result = await moveTaskHandler(ctx, {
     taskId,
     column,
+    force: booleanFlag(parsed, 'force'),
   });
   writeJson(streams.stdout, result);
 }
@@ -399,6 +401,7 @@ async function handleDelete(
   const taskId = requireString(parsed, 'task', 0);
   const result = await deleteTaskHandler(ctx, {
     taskId,
+    force: booleanFlag(parsed, 'force'),
   });
   writeJson(streams.stdout, result);
 }
@@ -697,6 +700,18 @@ export async function runTasksCli(
     projectRoot,
     fs,
   };
+
+  // Auto-start the background daemon (autopilot / validator / health /
+  // reconcile) so CLI verbs see the same orchestration as the
+  // interactive TUI. Skipped when we ARE the daemon child (avoids a
+  // recursive spawn) or when tests inject a custom fs/projectRoot.
+  if (process.env.NOETIC_DAEMON !== '1' && options.projectRoot === undefined) {
+    try {
+      ensureDaemon(projectRoot);
+    } catch (err) {
+      write(streams.stderr, `[warn] [tasks daemon] startup failed: ${formatError(err)}\n`);
+    }
+  }
 
   try {
     await descriptor.run(ctx, argv.slice(1), streams);

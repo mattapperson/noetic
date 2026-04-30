@@ -382,6 +382,35 @@ describe('buildAutopilotEvery', () => {
     expect(everyStep.wakeOn?.name).toBe('tasks.feature-loop-state');
     expect(everyStep.step.id).toBe('autopilot.scan-and-tick.void');
   });
+
+  it('void wrapper actually invokes the inner tick (slice activation visible on disk)', async () => {
+    // This is the behavior test that catches a wrapper which silently
+    // returns undefined without running the inner step. The id check
+    // alone (above) would still pass in that regression.
+    const seed = await seedTaskWithTwoSlices('T-flowevery1');
+    const everyStep = buildAutopilotEvery(makeDeps(seed));
+    const harness = makeHarness(seed.fs);
+    const childCtx = harness.createContext();
+    await harness.run(everyStep.step, undefined, childCtx);
+
+    const slices = await listSlices(
+      {
+        fs: seed.fs,
+        projectRoot: seed.projectRoot,
+      },
+      seed.taskId,
+    );
+    const active = slices.find((s) => s.status === SliceStatus.Active);
+    expect(active).toBeDefined();
+    const reloaded = await tryLoadTask(
+      {
+        fs: seed.fs,
+        projectRoot: seed.projectRoot,
+      },
+      seed.taskId,
+    );
+    expect(reloaded?.autopilotState).toBe(AutopilotState.Watching);
+  });
 });
 
 //#endregion

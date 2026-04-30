@@ -18,13 +18,11 @@
 import type { ContextMemory, Step } from '@noetic/core';
 import { every, step } from '@noetic/core';
 import * as log from '../../../../util/log.js';
-import type { ValidatorRequest } from '../channels.js';
-import { ValidatorOutcomeStatus, validatorOutcomeChan, validatorRequestChan } from '../channels.js';
+import type { FeatureLoopStateChangedMessage, ValidatorRequest } from '../channels.js';
+import { featureLoopStateChan, validatorRequestChan } from '../channels.js';
 import { tryLoadTask } from '../fs-store.js';
 import type { Feature } from './schemas.js';
-import { FeatureLoopState, ValidatorRunStatus } from './schemas.js';
-import type { ValidatorContext } from './validator.js';
-import { listValidatorRuns } from './validator.js';
+import { FeatureLoopState } from './schemas.js';
 import type { StructuredTask, ValidatorJobDeps } from './validator-job.js';
 import { gatherStructuredTasks, runFeatureValidation } from './validator-job.js';
 
@@ -80,63 +78,9 @@ async function findStructuredForRequest(
   return null;
 }
 
-function mapValidatorRunStatusToOutcomeStatus(
-  status: ValidatorRunStatus,
-): (typeof ValidatorOutcomeStatus)[keyof typeof ValidatorOutcomeStatus] | null {
-  if (status === ValidatorRunStatus.Pass) {
-    return ValidatorOutcomeStatus.Pass;
-  }
-  if (status === ValidatorRunStatus.Fail) {
-    return ValidatorOutcomeStatus.Fail;
-  }
-  if (status === ValidatorRunStatus.Blocked) {
-    return ValidatorOutcomeStatus.Blocked;
-  }
-  return null;
-}
-
-async function publishLatestOutcome(
-  ctx: ValidatorContext,
-  request: ValidatorRequest,
-  send: (value: {
-    taskId: string;
-    featureId: string;
-    runId: string;
-    status: (typeof ValidatorOutcomeStatus)[keyof typeof ValidatorOutcomeStatus];
-    result: Record<string, unknown> | null;
-  }) => void,
-): Promise<void> {
-  const runs = await listValidatorRuns(ctx, request.featureId);
-  if (runs.length === 0) {
-    return;
-  }
-  const latest = runs[runs.length - 1];
-  if (latest === undefined) {
-    return;
-  }
-  const outcomeStatus = mapValidatorRunStatusToOutcomeStatus(latest.status);
-  if (outcomeStatus === null) {
-    return;
-  }
-  send({
-    taskId: request.taskId,
-    featureId: request.featureId,
-    runId: latest.id,
-    status: outcomeStatus,
-    result: latest.result,
-  });
-}
-
 async function processOneRequest(
   deps: ValidatorFlowDeps,
   request: ValidatorRequest,
-  emitOutcome: (value: {
-    taskId: string;
-    featureId: string;
-    runId: string;
-    status: (typeof ValidatorOutcomeStatus)[keyof typeof ValidatorOutcomeStatus];
-    result: Record<string, unknown> | null;
-  }) => void,
 ): Promise<void> {
   const found = await findStructuredForRequest(deps, request);
   if (found === null) {
@@ -163,14 +107,6 @@ async function processOneRequest(
     structured,
     feature,
   });
-  await publishLatestOutcome(
-    {
-      ...deps.ctx,
-      taskId: structured.taskId,
-    },
-    request,
-    emitOutcome,
-  );
 }
 
 async function drainValidatorRequests(
@@ -193,7 +129,10 @@ async function drainValidatorRequests(
 
 /**
  * Build the per-iteration `step.run` that drains the validator-request
- * channel, runs each feature validation, and publishes the outcome.
+ * channel and runs each feature validation. The deps bundle is augmented
+ * with a `publishLoopStateChange` binding that fires `featureLoopStateChan`
+ * whenever a feature transitions, so the autopilot's `wakeOn` reacts to
+ * validator outcomes without polling the JSONL tail.
  */
 export function buildValidatorIterationStep(
   deps: ValidatorFlowDeps,
@@ -201,9 +140,21 @@ export function buildValidatorIterationStep(
   return step.run<ContextMemory, void, void>({
     id: 'validator.iteration',
     execute: async (_input, ctx): Promise<void> => {
+      const enriched: ValidatorFlowDeps = {
+        ...deps,
+        publishLoopStateChange: (msg): void => {
+          const message: FeatureLoopStateChangedMessage = {
+            taskId: msg.taskId,
+            featureId: msg.featureId,
+            previousLoopState: msg.previousLoopState,
+            loopState: msg.loopState,
+          };
+          ctx.send(featureLoopStateChan, message);
+        },
+      };
       const requests = await drainValidatorRequests(() => ctx.tryRecv(validatorRequestChan));
       for (const request of requests) {
-        await processOneRequest(deps, request, (value) => ctx.send(validatorOutcomeChan, value));
+        await processOneRequest(enriched, request);
       }
     },
   });

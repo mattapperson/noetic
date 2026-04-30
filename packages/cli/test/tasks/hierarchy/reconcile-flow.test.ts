@@ -163,6 +163,33 @@ describe('buildReconcileEvery', () => {
     // adapter so the daemon-fork's path types stay uniform `Step<void, void>`.
     expect(everyStep.step.id).toBe('reconcile.tick.void');
   });
+
+  it('void wrapper actually invokes the inner tick (loadWorktrees observed, mark-removed visible)', async () => {
+    // Catches a wrapper-only refactor where the void adapter never
+    // calls `harness.run(inner, ...)`. The .void id check above would
+    // still pass in that regression.
+    const ctx = makeStoreContext();
+    const stale = makeTask({
+      worktreePath: '/repo/.worktrees/gone',
+    });
+    await saveTask(ctx, stale);
+
+    let loadCalls = 0;
+    const everyStep = buildReconcileEvery({
+      ctx,
+      loadWorktrees: async () => {
+        loadCalls += 1;
+        return [];
+      },
+    });
+    const harness = makeHarness(ctx.fs);
+    const childCtx = harness.createContext();
+    await harness.run(everyStep.step, undefined, childCtx);
+
+    expect(loadCalls).toBe(1);
+    const reloaded = await loadTask(ctx, stale.id);
+    expect(reloaded.lifecycleStatus).toBe(TaskLifecycleStatus.Removed);
+  });
 });
 
 //#endregion

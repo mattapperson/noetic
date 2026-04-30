@@ -4,7 +4,7 @@ import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { tempPath } from '../paths.js';
 import { featureDirPaths, validatorRunPath } from './paths.js';
-import type { Feature, ValidatorRun } from './schemas.js';
+import type { AssertionOutcome, Feature, ValidatorRun } from './schemas.js';
 import {
   generateValidatorRunId,
   ValidatorRunIdSchema,
@@ -23,6 +23,7 @@ export interface RecordValidatorRunArgs {
   readonly featureId: string;
   readonly status: ValidatorRunStatus;
   readonly result?: Record<string, unknown> | null;
+  readonly assertionOutcomes?: ReadonlyArray<AssertionOutcome>;
   readonly pid?: number | null;
   readonly pidStarttime?: string | null;
   readonly startedAt?: string;
@@ -32,6 +33,7 @@ export interface UpdateValidatorRunPatch {
   readonly status?: ValidatorRunStatus;
   readonly completedAt?: string | null;
   readonly result?: Record<string, unknown> | null;
+  readonly assertionOutcomes?: ReadonlyArray<AssertionOutcome>;
   readonly pid?: number | null;
   readonly pidStarttime?: string | null;
   readonly pausedAt?: string | null;
@@ -140,6 +142,7 @@ export async function recordValidatorRun(
     completedAt,
     status: args.status,
     result: args.result ?? null,
+    assertionOutcomes: args.assertionOutcomes ?? [],
     pid: args.pid ?? null,
     pidStarttime: args.pidStarttime ?? null,
     pausedAt: null,

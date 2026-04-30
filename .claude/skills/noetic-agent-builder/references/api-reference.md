@@ -539,6 +539,7 @@ interface FsAdapter {
   readFile(path: string): Promise<Buffer>;
   readFileText(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  writeFileBytes(path: string, content: Buffer): Promise<void>;  // binary-safe write
   appendFile(path: string, content: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
   rename(oldPath: string, newPath: string): Promise<void>;
