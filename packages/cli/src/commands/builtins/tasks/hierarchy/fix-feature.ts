@@ -5,7 +5,6 @@ import { branch, step } from '@noetic/core';
 
 import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';
-import { markFeatureBlocked } from './feature-lifecycle.js';
 import { featureDirPaths } from './paths.js';
 import type { Feature, FixLineage } from './schemas.js';
 import {
@@ -228,19 +227,16 @@ const createFixFeatureStep = step.run<ContextMemory, LoadAndCheckResult, FixFeat
 });
 
 /**
- * Budget-exhausted branch: mark the source feature blocked (recording the
- * exhaustion reason) and surface a typed `BudgetExhaustedError`. The step
- * never returns — the FixFeatureChange in the type signature is satisfied
- * by the throw.
+ * Budget-exhausted branch: surface a typed `BudgetExhaustedError`. The
+ * actual `markFeatureBlocked` side-effect is the caller's responsibility
+ * (validator-job's catch handler does it and emits the
+ * feature:loopStateChanged event), so the step intentionally only signals
+ * the budget verdict. The step never returns — the FixFeatureChange in
+ * the type signature is satisfied by the throw.
  */
 const markBudgetExhaustedStep = step.run<ContextMemory, LoadAndCheckResult, FixFeatureChange>({
   id: 'fix-feature.mark-budget-exhausted',
   execute: async (input) => {
-    await markFeatureBlocked(
-      input.ctx,
-      input.source.id,
-      `Implementation retry budget exhausted (${input.source.implementationAttemptCount}/${input.budget}).`,
-    );
     throw new BudgetExhaustedError(
       input.source.id,
       input.source.implementationAttemptCount,
@@ -333,11 +329,6 @@ async function executeFixFeatureFallback(
     budget: args.budget,
   });
   if (checked.source.implementationAttemptCount >= checked.budget) {
-    await markFeatureBlocked(
-      checked.ctx,
-      checked.source.id,
-      `Implementation retry budget exhausted (${checked.source.implementationAttemptCount}/${checked.budget}).`,
-    );
     throw new BudgetExhaustedError(
       checked.source.id,
       checked.source.implementationAttemptCount,
