@@ -1,7 +1,7 @@
 # Loop and Until: Iteration and Termination
 
-> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context), `09-error-model` (NoeticError)
-> **Exports:** `loop()`, `LoopConfig`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates, `any()`, `all()`, `VerifyFn`, `ConvergeConfig`
+> **Depends On:** `01-step-type` (Step<I,O>), `06-channels` (Channel), `07-context-and-event-log` (Context), `09-error-model` (NoeticError)
+> **Exports:** `loop()`, `LoopConfig`, `every()`, `EveryOptions`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates, `any()`, `all()`, `VerifyFn`, `ConvergeConfig`
 
 ---
 
@@ -112,6 +112,7 @@ const until = {
   maxCost:        (usd: number) => Until,
   maxDuration:    (ms: number) => Until,
   noToolCalls:    () => Until,                    // ReAct termination
+  never:          () => Until,                    // never stops; pair with `every` or external cancellation
   verified:       (fn: VerifyFn) => Until,        // Ralph Wiggum external check
   converged:      (opts: ConvergeConfig) => Until,  // recursive self-refinement
   outputContains: (marker: string) => Until,      // completion promise marker
@@ -189,7 +190,67 @@ When a sub-agent completes, its result is sent to the inbox channel. The loop wa
 
 ---
 
+## `every()` — Scheduled Forever-Iteration
+
+`every` runs a body step on a fixed-interval schedule, optionally woken sooner by a wake channel. It runs forever until the executing context is cancelled.
+
+```typescript
+interface EveryOptions<I, O> {
+  id: string;
+  step: Step<I, O>;
+  ms: number;                 // park duration between iterations (>= 0)
+  wakeOn?: Channel<unknown>;  // any value on this channel wakes the park
+  onError?: 'continue' | 'fail';   // default 'continue'
+  jitter?: number;            // ms of symmetric random jitter (>= 0, default 0)
+}
+
+every<I, O>(opts: EveryOptions<I, O>): StepEvery<I, O>;
+```
+
+### Semantics
+
+1. The first iteration starts immediately; the body step is invoked with `input`.
+2. After the body returns, `every` parks for `ms ± jitter` ms or until any value is received on `wakeOn` — whichever happens first.
+3. The park resolves immediately when the executing context is aborted; the next iteration's abort check then surfaces a `cancelled` `NoeticError`.
+4. The operator output is `void`. `every` does not accumulate iteration outputs.
+5. `every` only terminates by throw — either `cancelled` from abort, or the body's error under `onError: 'fail'`.
+
+### Error Policy
+
+- **`onError: 'continue'`** *(default)*: when the body throws, `every` records a span event named `every.iteration.error` with `message` and `stack` attributes, then proceeds to the park step as if no error occurred.
+- **`onError: 'fail'`**: re-throws the body's error, terminating the operator. Any enclosing `fork({ mode: 'all' })` settles with that error.
+- A `cancelled` `NoeticError` thrown by the body is never swallowed — it propagates regardless of `onError`.
+
+### Composition with `fork` and `spawn`
+
+- Inside `fork({ mode: 'race' })`, the first racing path that returns wins; cancelling the others aborts their `every`.
+- Inside `fork({ mode: 'all' })`, an `every` with `onError: 'fail'` rejects the fork on first body failure.
+- Inside `spawn`, `every` runs in the isolated child context with its own abort signal.
+
+### Example
+
+```typescript
+const wake = channel('poll-wake', { schema: z.string(), mode: 'queue' });
+
+const poller = every({
+  id: 'job-poller',
+  ms: 30_000,                // poll every 30s
+  jitter: 5_000,             // ±5s to spread load
+  wakeOn: wake,              // external trigger to poll immediately
+  onError: 'continue',
+  step: step.run({
+    id: 'fetch-jobs',
+    execute: async (_, ctx) => fetchAndDispatchPendingJobs(ctx),
+  }),
+});
+```
+
+Pair with `until.never()` when you need a `loop`-shaped never-stops predicate elsewhere in the same tree.
+
+---
+
 ## Error Behavior
 
 - **`until` predicate throws:** Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A broken predicate should not cause infinite iteration.
 - **Loop body failure with `onError`:** See `09-error-model` for full propagation rules.
+- **`every` body failure:** Governed by `every`'s own `onError` policy (`'continue'` records a span event; `'fail'` re-throws).
