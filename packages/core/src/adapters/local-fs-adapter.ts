@@ -34,6 +34,10 @@ export function createLocalFsAdapter(): FsAdapter {
         recursive: true,
       });
     },
+    rename: (oldPath, newPath) => fs.rename(oldPath, newPath),
+    rm: async (p, options) => {
+      await fs.rm(p, options);
+    },
     access: (p, mode) => fs.access(p, mode ?? constants.R_OK),
     stat: async (p) => toFsStats(await fs.stat(p)),
     lstat: async (p) => toFsStats(await fs.lstat(p)),

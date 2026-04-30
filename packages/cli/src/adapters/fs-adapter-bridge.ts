@@ -7,7 +7,7 @@
  * Limitations:
  * - stat/lstat return hardcoded mode (0o644) and current timestamp for mtime
  *   since FsStats does not expose these fields
- * - rm, cp, mv, symlink, link, readlink are not supported (FsAdapter lacks these ops)
+ * - cp, symlink, link, readlink are not supported (FsAdapter lacks these ops)
  * - getAllPaths returns [] (glob expansion in just-bash falls back to readdir)
  */
 
@@ -80,16 +80,16 @@ export function createBridgedFs(fs: FsAdapter): IFileSystem {
       return fs.readdir(p);
     },
 
-    async rm() {
-      throw new Error('rm not supported via FsAdapter bridge');
+    async rm(p, options) {
+      await fs.rm(p, options);
     },
 
     async cp() {
       throw new Error('cp not supported via FsAdapter bridge');
     },
 
-    async mv() {
-      throw new Error('mv not supported via FsAdapter bridge');
+    async mv(from, to) {
+      await fs.rename(from, to);
     },
 
     resolvePath(base, rel) {

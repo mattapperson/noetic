@@ -68,6 +68,20 @@ class MemFs implements FsAdapter {
     throw new Error('mkdir not supported in test');
   }
 
+  async rename(_oldPath: string, _newPath: string): Promise<void> {
+    throw new Error('rename not supported in test');
+  }
+
+  async rm(
+    _path: string,
+    _options?: {
+      recursive?: boolean;
+      force?: boolean;
+    },
+  ): Promise<void> {
+    throw new Error('rm not supported in test');
+  }
+
   async access(path: string): Promise<void> {
     if (!this.files.has(path) && !this.dirs.has(path)) {
       throw new Error(`ENOENT: ${path}`);

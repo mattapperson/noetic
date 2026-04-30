@@ -1,0 +1,73 @@
+import { join } from 'node:path';
+
+//#region Types
+
+/** Paths shared across the project's task root. */
+export interface TaskRootPaths {
+  /** `<projectRoot>/.noetic/tasks` */
+  readonly root: string;
+  /** `<root>/_events.jsonl` cross-process event feed. */
+  readonly events: string;
+  /** `<root>/_state.json` (schemaVersion + monotonic event id). */
+  readonly state: string;
+}
+
+/** Per-task on-disk layout. */
+export interface TaskDirPaths {
+  /** `<root>/<taskId>` */
+  readonly dir: string;
+  /** `<dir>/task.json` canonical record. */
+  readonly task: string;
+  /** `<dir>/description.md` long-form description. */
+  readonly description: string;
+  /** `<dir>/log.jsonl` append-only audit. */
+  readonly log: string;
+  /** `<dir>/steering.md` (optional). */
+  readonly steering: string;
+  /** `<dir>/attachments/` (optional). */
+  readonly attachments: string;
+  /** `<dir>/hierarchy/` (present iff structured). */
+  readonly hierarchy: string;
+}
+
+//#endregion
+
+//#region Helpers
+
+/** Returns the `.noetic/tasks` root for a project. */
+export function tasksRoot(projectRoot: string): string {
+  return join(projectRoot, '.noetic', 'tasks');
+}
+
+export function taskRootPaths(projectRoot: string): TaskRootPaths {
+  const root = tasksRoot(projectRoot);
+  return {
+    root,
+    events: join(root, '_events.jsonl'),
+    state: join(root, '_state.json'),
+  };
+}
+
+export function taskDirPaths(projectRoot: string, taskId: string): TaskDirPaths {
+  const dir = join(tasksRoot(projectRoot), taskId);
+  return {
+    dir,
+    task: join(dir, 'task.json'),
+    description: join(dir, 'description.md'),
+    log: join(dir, 'log.jsonl'),
+    steering: join(dir, 'steering.md'),
+    attachments: join(dir, 'attachments'),
+    hierarchy: join(dir, 'hierarchy'),
+  };
+}
+
+/**
+ * The temp file used as the source of write-temp-then-rename for atomic
+ * publishes. The suffix carries random bits so concurrent writers don't
+ * collide on the same temp path.
+ */
+export function tempPath(target: string, salt: string): string {
+  return `${target}.tmp.${salt}`;
+}
+
+//#endregion

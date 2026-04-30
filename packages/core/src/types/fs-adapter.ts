@@ -26,6 +26,20 @@ export interface FsAdapter {
   appendFile(path: string, content: string): Promise<void>;
   /** Create directories recursively. */
   mkdir(dir: string): Promise<void>;
+  /**
+   * Atomically rename a file or directory. On POSIX, this is the atomic
+   * swap used by write-temp + rename to publish a new file version
+   * without exposing readers to a half-written state.
+   */
+  rename(oldPath: string, newPath: string): Promise<void>;
+  /** Remove a file or directory. With `recursive: true`, removes a directory tree. */
+  rm(
+    path: string,
+    options?: {
+      recursive?: boolean;
+      force?: boolean;
+    },
+  ): Promise<void>;
   /** Check file accessibility (throws on failure). */
   access(path: string, mode?: number): Promise<void>;
   /** Get file/directory stats (follows symlinks). */

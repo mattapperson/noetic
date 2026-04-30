@@ -140,4 +140,70 @@ describe('createLocalFsAdapter', () => {
       ]);
     });
   });
+
+  describe('rename', () => {
+    it('atomically renames a file in the same directory', async () => {
+      const fs = createLocalFsAdapter();
+      const tmp = join(dir, 'task.json.tmp');
+      const final = join(dir, 'task.json');
+
+      await fs.writeFile(tmp, '{"id":"T-x"}');
+      await fs.rename(tmp, final);
+
+      expect(await fs.readFileText(final)).toBe('{"id":"T-x"}');
+      await expect(fs.access(tmp)).rejects.toThrow();
+    });
+
+    it('overwrites the destination if it exists', async () => {
+      const fs = createLocalFsAdapter();
+      const tmp = join(dir, 'next.tmp');
+      const final = join(dir, 'state.json');
+
+      await fs.writeFile(final, 'old');
+      await fs.writeFile(tmp, 'new');
+      await fs.rename(tmp, final);
+
+      expect(await fs.readFileText(final)).toBe('new');
+    });
+  });
+
+  describe('rm', () => {
+    it('removes a single file', async () => {
+      const fs = createLocalFsAdapter();
+      const file = join(dir, 'gone.txt');
+      await fs.writeFile(file, 'x');
+
+      await fs.rm(file);
+
+      await expect(fs.access(file)).rejects.toThrow();
+    });
+
+    it('removes a directory tree with recursive: true', async () => {
+      const fs = createLocalFsAdapter();
+      const root = join(dir, 'tree');
+      const inner = join(root, 'a', 'b');
+      await fs.mkdir(inner);
+      await fs.writeFile(join(inner, 'leaf.txt'), 'x');
+
+      await fs.rm(root, {
+        recursive: true,
+      });
+
+      await expect(fs.access(root)).rejects.toThrow();
+    });
+
+    it('rejects when removing a missing path without force', async () => {
+      const fs = createLocalFsAdapter();
+
+      await expect(fs.rm(join(dir, 'missing'))).rejects.toThrow();
+    });
+
+    it('is silent on missing paths with force: true', async () => {
+      const fs = createLocalFsAdapter();
+
+      await fs.rm(join(dir, 'missing'), {
+        force: true,
+      });
+    });
+  });
 });
