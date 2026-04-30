@@ -1,4 +1,3 @@
-import type { JobDefinition } from '../../../../daemon-runtime/jobs.js';
 import * as log from '../../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
 import type { TaskStoreContext } from '../fs-store.js';
@@ -12,12 +11,6 @@ import type { Assertion, Feature, ValidatorRun } from './schemas.js';
 import { FeatureLoopState, ValidatorRunStatus } from './schemas.js';
 import type { ValidatorContext } from './validator.js';
 import { listValidatorRuns, recordValidatorRun, updateValidatorRun } from './validator.js';
-
-//#region Constants
-
-const VALIDATOR_TICK_INTERVAL_MS = 30_000;
-
-//#endregion
 
 //#region Types
 
@@ -470,18 +463,6 @@ async function runValidatorTick(deps: ValidatorJobDeps): Promise<void> {
 //#endregion
 
 //#region Public API
-
-/** Daemon job: scan validating features, run the validator, dispatch on result. */
-export function tasksValidatorPollJob(deps: ValidatorJobDeps): JobDefinition {
-  return {
-    id: 'tasks.validator.poll',
-    intervalMs: VALIDATOR_TICK_INTERVAL_MS,
-    runOnStart: true,
-    run: async () => {
-      await runValidatorTick(deps);
-    },
-  };
-}
 
 /** Test seam: drive a single validator-job tick deterministically. */
 export async function _testRunValidatorTick(deps: ValidatorJobDeps): Promise<void> {

@@ -1,4 +1,3 @@
-import type { JobDefinition } from '../../../../daemon-runtime/jobs.js';
 import * as log from '../../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
 import type { TaskStoreContext } from '../fs-store.js';
@@ -10,12 +9,6 @@ import type { Feature, ValidatorRun } from './schemas.js';
 import { FeatureLoopState, ValidatorRunStatus } from './schemas.js';
 import type { ValidatorContext } from './validator.js';
 import { listValidatorRuns, updateValidatorRun } from './validator.js';
-
-//#region Constants
-
-const HEALTH_TICK_INTERVAL_MS = 5 * 60_000;
-
-//#endregion
 
 //#region Types
 
@@ -183,18 +176,6 @@ export async function runHealthTick(deps: HealthJobDeps): Promise<void> {
 //#endregion
 
 //#region Public API
-
-/** Daemon job: sweep stale validator runs and reconcile feature ↔ task drift. */
-export function tasksHealthReconcileJob(deps: HealthJobDeps): JobDefinition {
-  return {
-    id: 'tasks.health.reconcile',
-    intervalMs: HEALTH_TICK_INTERVAL_MS,
-    runOnStart: false,
-    run: async () => {
-      await runHealthTick(deps);
-    },
-  };
-}
 
 /** Test seam: drive a single health-job tick deterministically. */
 export async function _testRunHealthTick(deps: HealthJobDeps): Promise<void> {
