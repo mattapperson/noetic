@@ -10,6 +10,7 @@ import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 const TABS = [
   'ReAct reasoning loop',
   '5-layer memory in 10 lines',
+  'Sandboxed harness',
   'Extend any primitive',
 ] as const;
 
@@ -18,6 +19,7 @@ type Tab = (typeof TABS)[number];
 const TAB_FILES: Record<Tab, string> = {
   'ReAct reasoning loop': 'react-loop.ts',
   '5-layer memory in 10 lines': 'memory-setup.ts',
+  'Sandboxed harness': 'harness-adapters.ts',
   'Extend any primitive': 'custom-step.ts',
 };
 
@@ -56,6 +58,25 @@ const harness = new AgentHarness({
     durableTaskState({ baseDir: '.noetic/tasks' }),
     semanticRecall,
   ],
+});`,
+
+  'Sandboxed harness': `import { AgentHarness } from '@noetic/core';
+import type { FsAdapter, ShellAdapter } from '@noetic/core';
+
+// Swap any of these for an in-memory, remote, or sandboxed backend.
+const fs: FsAdapter = createSandboxFs({ root: '/work' });
+const shell: ShellAdapter = {
+  exec: async (command, opts) => runInContainer(command, opts),
+};
+
+const harness = new AgentHarness({
+  name: 'sandboxed-agent',
+  initialStep: agent,
+  params: {},
+  fs,           // tools, skill discovery, memory layers all route here
+  shell,        // every sub-process the agent spawns goes through this
+  initialCwd: '/work',
+  llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
 });`,
 
   'Extend any primitive': `import { step } from '@noetic/core';
