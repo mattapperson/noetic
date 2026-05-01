@@ -231,6 +231,7 @@ async function handleList(
     column: column !== undefined ? parseKanbanColumn(column) : undefined,
     source: source !== undefined ? parseTaskSource(source) : undefined,
     all: booleanFlag(parsed, 'all'),
+    terminal: booleanFlag(parsed, 'terminal'),
   });
   writeJson(streams.stdout, result.tasks);
 }
@@ -562,7 +563,8 @@ const verbs: Record<string, VerbDescriptor> = {
     run: handleShow,
   },
   list: {
-    summary: 'List tasks. Filter with --column / --source; include archived with --all.',
+    summary:
+      'List tasks. Filter with --column / --source; --terminal shows hidden terminal columns; --all shows everything (including archived).',
     run: handleList,
   },
   move: {

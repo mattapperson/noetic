@@ -1,0 +1,19 @@
+{"id":1,"taskId":"T-prTXdMtaZ9","kind":"task:created","payload":{"title":"QA: write hello-qa script","source":"manual"},"ts":"2026-05-01T12:55:49.186Z"}
+{"id":2,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"autopilotEnabled":true,"autopilotState":"watching"},"ts":"2026-05-01T12:56:03.669Z"}
+{"id":3,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"previousAutopilotState":"watching","autopilotState":"planning","sessionId":"T-prTXdMtaZ9-ed8a0833","pid":4446,"phase":"spawn"},"ts":"2026-05-01T12:56:49.460Z"}
+{"id":4,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"autopilotState":"inactive","plannerStatus":"failed","reason":"Step 'interview' failed: Step 'interview-turn' failed: LLM parse error at step 'planner.llm-interview-responder': failed to parse output","phase":"exit"},"ts":"2026-05-01T12:56:55.237Z"}
+{"id":5,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"previousAutopilotState":"inactive","autopilotState":"planning","sessionId":"T-prTXdMtaZ9-e87778dd","pid":4740,"phase":"spawn"},"ts":"2026-05-01T12:57:49.478Z"}
+{"id":6,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"autopilotState":"inactive","plannerStatus":"failed","reason":"Step 'interview' failed: Step 'interview-turn' failed: LLM parse error at step 'planner.llm-interview-responder': failed to parse output","phase":"exit"},"ts":"2026-05-01T12:57:55.720Z"}
+{"id":7,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"previousAutopilotState":"inactive","autopilotState":"planning","sessionId":"T-prTXdMtaZ9-32139685","pid":5093,"phase":"spawn"},"ts":"2026-05-01T12:58:49.494Z"}
+{"id":8,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"autopilotState":"inactive","plannerStatus":"failed","reason":"Step 'interview' failed: Step 'interview-turn' failed: LLM parse error at step 'interview-llm': failed to parse output","phase":"exit"},"ts":"2026-05-01T12:58:53.498Z"}
+{"id":9,"taskId":"T-prTXdMtaZ9","kind":"task:updated","payload":{"autopilotEnabled":false,"autopilotState":"inactive"},"ts":"2026-05-01T12:59:16.173Z"}
+{"id":10,"taskId":"T-mlga9-oiOO","kind":"task:created","payload":{"title":"QA: implement-pass test","source":"manual"},"ts":"2026-05-01T13:00:34.796Z"}
+{"id":11,"taskId":"T-mlga9-oiOO","kind":"milestone:created","payload":{"milestoneId":"ML-4WcnW_oZ0v"},"ts":"2026-05-01T13:00:35.079Z"}
+{"id":12,"taskId":"T-mlga9-oiOO","kind":"slice:created","payload":{"sliceId":"SL-kHZXNyarAv","milestoneId":"ML-4WcnW_oZ0v"},"ts":"2026-05-01T13:00:35.358Z"}
+{"id":13,"taskId":"T-mlga9-oiOO","kind":"feature:created","payload":{"featureId":"F-T3UNKqDHar","sliceId":"SL-kHZXNyarAv"},"ts":"2026-05-01T13:00:35.618Z"}
+{"id":14,"taskId":"T-mlga9-oiOO","kind":"task:updated","payload":{"autopilotEnabled":true,"autopilotState":"watching"},"ts":"2026-05-01T13:00:36.146Z"}
+{"id":15,"taskId":"T-mlga9-oiOO","kind":"task:updated","payload":{"previousAutopilotState":"watching","autopilotState":"planning","sessionId":"T-mlga9-oiOO-278f14e8","pid":6326,"phase":"spawn"},"ts":"2026-05-01T13:00:49.510Z"}
+{"id":16,"taskId":"T-mlga9-oiOO","kind":"task:updated","payload":{"autopilotState":"inactive","plannerStatus":"failed","reason":"task already has 1 milestone(s); refusing to overwrite","phase":"exit"},"ts":"2026-05-01T13:00:49.630Z"}
+{"id":17,"taskId":"T-mlga9-oiOO","kind":"task:updated","payload":{"previousAutopilotState":"inactive","autopilotState":"planning","sessionId":"T-mlga9-oiOO-a5157752","pid":6600,"phase":"spawn"},"ts":"2026-05-01T13:01:49.529Z"}
+{"id":18,"taskId":"T-mlga9-oiOO","kind":"task:updated","payload":{"autopilotState":"inactive","plannerStatus":"failed","reason":"task already has 1 milestone(s); refusing to overwrite","phase":"exit"},"ts":"2026-05-01T13:01:49.650Z"}
+{"id":19,"taskId":"T-mlga9-oiOO","kind":"task:updated","payload":{"autopilotEnabled":false,"autopilotState":"inactive"},"ts":"2026-05-01T13:02:25.184Z"}

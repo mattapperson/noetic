@@ -19,7 +19,7 @@ Storage lives at `<projectRoot>/.noetic/tasks/` and is FS-only — JSON for cano
 |---|---|
 | `create` | Create a manual task (`--title`, optional `--description`). |
 | `show` | Print a task with recent log + hierarchy summary (`--tail n`). |
-| `list` | List tasks. Filter with `--column` / `--source`; include archived with `--all`. |
+| `list` | List tasks. Filter with `--column` / `--source`. Terminal columns (`removed`, `cleanup_blocked`, `archived`) are hidden by default to match the kanban TUI; pass `--terminal` to include `removed` / `cleanup_blocked`, or `--all` to additionally include archived. An explicit `--column <hidden>` always shows that column. |
 | `move` | Move a task to another kanban column (`--column`). |
 | `merge` | Merge the task branch via `wt merge`; falls back to `git merge`. |
 | `log` | Append a `kind='log'` entry to the audit. |
@@ -82,20 +82,28 @@ After planning, the task carries milestones, slices, features and assertions you
 noetic tasks show <T-id>
 ```
 
-### Run autopilot on a structured task
+### Run autopilot end-to-end
 
-Autopilot is a per-task flag the daemons consult to decide whether to triage features, spawn validator runs, and generate fix features automatically.
+Autopilot is a per-task flag the daemon consults to decide whether to autonomously plan, build, and validate the work. When enabled, the daemon's autopilot tick orchestrates a three-phase pipeline:
+
+1. **Plan** — for a manual task with no hierarchy, the daemon spawns the planner runner (`packages/cli/src/commands/builtins/tasks/planner-runner.ts`). It interviews itself via an LLM and persists a `milestones → slices → features → assertions` hierarchy. Task `autopilotState` flips `inactive → planning → watching`; `hierarchyStatus` lands at `active` on success.
+2. **Build** — for triaged features whose linked leaf task has no worktree yet, the daemon spawns the implementer runner (`packages/cli/src/commands/builtins/tasks/implementer-runner.ts`). It provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback), drives a `react()` agent loop with full coding tools rooted at the worktree, and on success flips the feature's `loopState: implementing → validating`.
+3. **Validate** — features in `validating` are dispatched to a Step-graph validator (`adversarial-validator-flow.ts`). The flow runs `agent-ci` and an LLM-driven adversarial code review in parallel (via `fork({mode: 'all'})`) and merges their outcomes. agent-ci pass + no adversarial issues → `loopState: passed`; otherwise → `needs_fix` (which the existing fix-feature flow re-triages with the failing assertion outcomes attached).
 
 ```bash
-noetic tasks autopilot on <T-id>
-# → flips autopilotEnabled=true; the daemon attaches on its next health tick
+noetic tasks create --title "Add scripts/qa-hello.ts"
+# → returns T-<id>
 
-noetic tasks activate-slice --task <T-id> --slice <SL-id>
-# → marks the slice 'active' and triages its features into leaf tasks under
-#   the same parent T-id, each labelled [w] in the kanban
+noetic tasks autopilot on <T-id>
+# → flips autopilotEnabled=true; the daemon's plan-pass spawns the planner
+#   on its next tick. Watch progress with:
+
+tail -f .noetic/tasks/_events.jsonl
 ```
 
-Flip it back off any time:
+You can still drive each phase manually if you prefer: `noetic tasks plan <id>` runs the live TUI interview without autopilot, and `noetic tasks activate-slice --task <id> --slice <SL-id>` triages a slice's features by hand. Autonomous and manual workflows can be mixed.
+
+Flip autopilot back off at any time:
 
 ```bash
 noetic tasks autopilot off <T-id>
@@ -153,6 +161,8 @@ See the agent-builder skill reference for full input schemas.
     ├── log.jsonl                ← append-only audit
     ├── steering.md              ← optional, surfaced to in-task agent runs
     ├── _runner.json             ← agent-ci runner sidecar
+    ├── _planner.json            ← planner runner sidecar (autopilot plan-pass)
+    ├── _implementer.json        ← implementer runner sidecar (autopilot implement-pass)
     ├── attachments/
     └── hierarchy/               ← only on structured tasks
         ├── milestones/ML-<id>.json

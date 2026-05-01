@@ -503,3 +503,24 @@ Properties of the projection:
 - **Pair integrity.** After slicing, `stripUnresolvedToolCalls` runs on the window so no `function_call` is ever sent to the LLM without its matching `function_call_output` (or vice-versa) — the API rejects unpaired tool items.
 - **Mid-round flow uncapped.** Within a single `callModel` invocation's tool loop, that round's own `function_call` / `function_call_output` items keep accumulating in the wire payload. The cap fires at turn boundaries, not mid-call.
 - **Opt-in for the CLI.** When `AgentConfig.history.maxItems` is unset, the layer is not installed and history is uncapped. Set the value via `noetic.config.ts` or the `/config` editor's Memory tab to enable capping.
+
+## Subprocess-spawned task agent (planner / implementer / agent-ci)
+
+Spawn a long-running agent as a detached `bun run` subprocess that owns its own `AgentHarness`. The pattern is used by all three task-system runners (`planner-runner.ts`, `implementer-runner.ts`, `agent-ci-runner.ts`):
+
+**When to use**: when the agent needs isolation from the parent process (its own LLM client, its own working directory, its own crash boundary) AND a known long lifetime, AND you want pause/cancel via OS signals.
+
+**Shape**:
+
+1. **Launcher** writes a `_<runner>.json` sidecar with `{taskId, sessionId, pid, pidStarttime, ...}` BEFORE the spawn lands the process state, in order **spawn → sidecar → state-mutation → event** so a crash never produces a "task points at running pid" without the sidecar being recoverable.
+2. **Runner script** reads its identity from `NOETIC_*` env vars, constructs an `AgentHarness` (lazy: skill catalog, plugins, tools, LLM client all per-runner), drives a `react()` or `interview()` step, and on exit commits in **audit → state → event** order:
+   - `appendLog` a `kind='system'` line (audit always survives even if state mutation fails).
+   - Atomically rewrite the canonical state file (`task.json` or feature record).
+   - Append the matching `_events.jsonl` row.
+   - Best-effort `clearSidecar()`.
+3. **`Signaller` from `agent-ci-control.ts`** does pid-liveness checks (`isAlive(pid)` + optional `startTime(pid)` snapshot) so launchers and delete-guards never misfire on a recycled pid. Sidecars carry `pidStarttime` for that round-trip.
+4. **`findLiveSidecars(ctx, taskId)`** in `handlers/delete.ts` is a single source of truth for "what subprocess is attached to this task" — extends with new `SidecarKind` values when adding a fourth runner.
+
+**Why subprocess instead of in-process**: the daemon harness is intentionally lean (no LLM client, no plugins). LLM-driven work runs in a child harness whose memory + tools + cost tracking are scoped to one feature / one task. The parent observes outcomes via the durable event log + the sidecar's pid lifecycle, not via in-memory channels (the event-bridge `every` step in `daemon-flow.ts` tails `_events.jsonl` and re-publishes onto `externalTaskEventsChan` for in-process subscribers).
+
+**Reusable helpers**: `verifyPidIdentity` (`agent-ci-control.ts`), `provisionWorktree` (`worktree-provision.ts`), `createShellValidator` (`hierarchy/daemon-validator.ts`), `createLlmInterviewResponder` (`llm-interview-responder.ts`).

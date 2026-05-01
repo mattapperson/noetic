@@ -89,6 +89,8 @@ export type HierarchyStatus = (typeof HierarchyStatus)[keyof typeof HierarchySta
 
 export const AutopilotState = {
   Inactive: 'inactive',
+  /** Planner subprocess is building the task hierarchy. */
+  Planning: 'planning',
   Watching: 'watching',
   Activating: 'activating',
   Completing: 'completing',
@@ -140,6 +142,7 @@ export const TaskSchema = z.object({
   autopilotEnabled: z.boolean(),
   autopilotState: z.enum([
     AutopilotState.Inactive,
+    AutopilotState.Planning,
     AutopilotState.Watching,
     AutopilotState.Activating,
     AutopilotState.Completing,

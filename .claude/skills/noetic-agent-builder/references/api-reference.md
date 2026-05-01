@@ -327,6 +327,42 @@ Behaviour:
 
 The layer carries no state (`state: null`); everything is resolved at recall time, so a steering file edited mid-session takes effect on the next recall. See `specs/21-tasks.md` for the full task-system contract.
 
+### createFixFeedbackLayer (`@noetic/cli`)
+
+Thread-scoped layer that carries the implementer's retry-feedback bundle (parent-task plan, description, accumulated assertion failures, attempt count) across iterations of the implementer↔validator retry loop.
+
+```typescript
+import { createFixFeedbackLayer } from '@noetic/cli/src/commands/builtins/tasks/memory/fix-feedback-layer.js';
+
+const layer = createFixFeedbackLayer({
+  initial: { plan, description, accumulatedIssues, attempt: 1 },
+});
+// slot:  Slot.WORKING_MEMORY (100)
+// scope: 'thread'
+// recall(): emits a developer-role "# Implementation context" block when state is non-empty.
+// provides.update: layerFn that merges new feedback (plan/description/issues/attempt).
+// onSpawn: clones parent state to the child so a sub-flow inherits the bundle.
+```
+
+The implementer-runner seeds this layer's `initial` from disk (parent task description + accumulated `assertionOutcomes` from prior validator runs in the feature's fix lineage), so each retry's react loop sees prior failures via `recall()` without depending on chat-history continuation.
+
+### createPlannerAttemptLayer (`@noetic/cli`)
+
+Resource-scoped layer that tracks per-task planner-attempt counts and persists them to `<projectRoot>/.noetic/tasks/_planner-attempts.json`. The autopilot's plan-pass reads the file directly to gate retry budget; the planner subprocess increments via `recordAttempt`.
+
+```typescript
+import { createPlannerAttemptLayer, MAX_PLANNER_ATTEMPTS } from '@noetic/cli/src/commands/builtins/tasks/memory/planner-attempt-layer.js';
+
+const layer = createPlannerAttemptLayer({ projectRoot, maxAttempts? });
+// slot:  Slot.REMINDER (80) — code-only, no recall surface
+// scope: 'resource'
+// provides.snapshot: layerData → { attempts, maxAttempts }
+// provides.recordAttempt: layerFn → increment + persist
+// provides.clearAttempts: layerFn → drop a task's counter
+```
+
+`MAX_PLANNER_ATTEMPTS` (default 3) caps re-spawns per task so a permanently-failing planner can't burn unbounded LLM tokens on the autopilot's 60-second tick.
+
 ### ToolMemoryDeclaration
 
 Declared on a `Tool`'s `memory` property. The runtime auto-generates a `MemoryLayer` per unique `id`.

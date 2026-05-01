@@ -68,7 +68,7 @@ describe('clampCursor', () => {
 });
 
 describe('commitMove', () => {
-  test('moves a task to InProgress and appends task:moved', async () => {
+  test('moves a task to InProgress and appends task:moved with previousColumn', async () => {
     const ctx = makeStoreContext('/repo');
     const task = makeTask('T-aaaaaaaaaa');
     await saveTask(ctx, task);
@@ -85,6 +85,7 @@ describe('commitMove', () => {
     expect(moved).toHaveLength(1);
     expect(moved[0]?.taskId).toBe(task.id);
     expect(moved[0]?.payload?.column).toBe(KanbanColumn.InProgress);
+    expect(moved[0]?.payload?.previousColumn).toBe(KanbanColumn.Triage);
   });
 
   test('moving to Archived stamps archivedAt', async () => {
@@ -109,5 +110,38 @@ describe('commitMove', () => {
       column: KanbanColumn.Done,
     });
     expect(next.lifecycleStatus).toBe('merged');
+  });
+
+  test('refuses to move into reconciler-owned column without force', async () => {
+    const ctx = makeStoreContext('/repo4');
+    const task = makeTask('T-dddddddddd');
+    await saveTask(ctx, task);
+    await expect(
+      commitMove({
+        ctx,
+        taskId: task.id,
+        column: KanbanColumn.Removed,
+      }),
+    ).rejects.toThrow(/reconciler-owned/);
+    await expect(
+      commitMove({
+        ctx,
+        taskId: task.id,
+        column: KanbanColumn.CleanupBlocked,
+      }),
+    ).rejects.toThrow(/reconciler-owned/);
+  });
+
+  test('allows force move into a reconciler-owned column', async () => {
+    const ctx = makeStoreContext('/repo5');
+    const task = makeTask('T-eeeeeeeeee');
+    await saveTask(ctx, task);
+    const next = await commitMove({
+      ctx,
+      taskId: task.id,
+      column: KanbanColumn.Removed,
+      force: true,
+    });
+    expect(next.lifecycleStatus).toBe('removed');
   });
 });

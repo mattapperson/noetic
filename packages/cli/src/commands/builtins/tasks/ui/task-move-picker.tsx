@@ -7,14 +7,14 @@
 
 import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
-import type React from 'react';
+import type { ReactElement } from 'react';
 import { useCallback, useState } from 'react';
 
 import { useTheme } from '../../../../tui/components/theme.js';
 import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent } from '../fs-store.js';
+import { moveTaskHandler } from '../handlers/move.js';
 import type { KanbanColumn } from '../kanban.js';
-import { deriveColumn, moveTask } from '../kanban.js';
+import { deriveColumn } from '../kanban.js';
 import type { Task } from '../schemas.js';
 import { columnLabel, VISIBLE_COLUMNS } from './task-board.js';
 
@@ -34,6 +34,12 @@ export interface CommitMoveInput {
   readonly ctx: TaskStoreContext;
   readonly taskId: string;
   readonly column: KanbanColumn;
+  /**
+   * Override the reconciler-owned-column guard. Required to move into
+   * `removed` or `cleanup_blocked` (these columns are normally only
+   * reached by the daemon's reconcile pass).
+   */
+  readonly force?: boolean;
 }
 
 //#endregion
@@ -41,25 +47,18 @@ export interface CommitMoveInput {
 //#region Helpers
 
 /**
- * Move a task and emit the corresponding `task:moved` event. Returns
- * the freshly-saved record. Pure exception path: `moveTask` rejects if
- * the column is unsupported (e.g. a synthetic column not represented
- * in the active enum) — we surface that to the caller.
+ * Move a task via the canonical {@link moveTaskHandler}. The handler
+ * owns the reconciler-owned-column guard and emits the `task:moved`
+ * event with both `previousColumn` and `column` in the payload, so
+ * TUI moves and CLI moves produce identical event shapes.
  */
 export async function commitMove(input: CommitMoveInput): Promise<Task> {
-  const next = await moveTask(input.ctx, {
+  const result = await moveTaskHandler(input.ctx, {
     taskId: input.taskId,
     column: input.column,
+    force: input.force,
   });
-  await appendEvent(input.ctx, {
-    taskId: next.id,
-    kind: 'task:moved',
-    ts: new Date().toISOString(),
-    payload: {
-      column: input.column,
-    },
-  });
-  return next;
+  return result.task;
 }
 
 /** Pure clamp helper: nudge `cursor` by `delta`, clipping to `[0, max]`. */
@@ -81,7 +80,7 @@ export function clampCursor(cursor: number, delta: number, max: number): number 
 
 //#region Component
 
-export function TaskMovePicker(props: TaskMovePickerProps): React.ReactElement {
+export function TaskMovePicker(props: TaskMovePickerProps): ReactElement {
   const theme = useTheme();
   const currentColumn = deriveColumn(props.task);
   const [cursor, setCursor] = useState(() => {

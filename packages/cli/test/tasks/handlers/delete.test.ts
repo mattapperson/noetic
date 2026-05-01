@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
 import {
   listTasks,
   tailEvents,
@@ -7,8 +8,23 @@ import {
 } from '../../../src/commands/builtins/tasks/fs-store.js';
 import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { deleteTaskHandler } from '../../../src/commands/builtins/tasks/handlers/delete.js';
+import { saveImplementer } from '../../../src/commands/builtins/tasks/implementer-state.js';
+import { saveRunner } from '../../../src/commands/builtins/tasks/runner-state.js';
 import { EventKind } from '../../../src/commands/builtins/tasks/schemas.js';
 import { makeStoreContext } from '../_helpers.js';
+
+interface FakeSignallerOptions {
+  readonly liveSet: ReadonlySet<number>;
+  readonly startTimes?: ReadonlyMap<number, string>;
+}
+
+function makeFakeSignaller(opts: FakeSignallerOptions): Signaller {
+  return {
+    isAlive: (pid) => opts.liveSet.has(pid),
+    startTime: (pid) => opts.startTimes?.get(pid) ?? null,
+    kill: () => {},
+  };
+}
 
 describe('deleteTaskHandler', () => {
   it('emits TaskDeleted (not TaskArchived) and removes the task directory', async () => {
@@ -40,5 +56,220 @@ describe('deleteTaskHandler', () => {
         taskId: 'T-zzzzzzzzzz',
       }),
     ).rejects.toThrow();
+  });
+
+  it('refuses to delete when an agent-ci runner sidecar is alive', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Sidecar attached',
+    });
+    await saveRunner(ctx, {
+      taskId: created.task.id,
+      sessionId: 'S-fake',
+      pid: 4242,
+      pidStarttime: 'Mon Jan  1 00:00:00 2026',
+      workflow: 'ci.yml',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set([
+        4242,
+      ]),
+      startTimes: new Map([
+        [
+          4242,
+          'Mon Jan  1 00:00:00 2026',
+        ],
+      ]),
+    });
+    await expect(
+      deleteTaskHandler(ctx, {
+        taskId: created.task.id,
+        signaller,
+      }),
+    ).rejects.toThrow(/agent-ci runner pid=4242 still attached/);
+    // Task survived the failed delete.
+    expect(await tryLoadTask(ctx, created.task.id)).not.toBeNull();
+  });
+
+  it('--force overrides the live-sidecar guard', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Force me',
+    });
+    await saveRunner(ctx, {
+      taskId: created.task.id,
+      sessionId: 'S-fake',
+      pid: 4242,
+      pidStarttime: null,
+      workflow: 'ci.yml',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set([
+        4242,
+      ]),
+    });
+    const result = await deleteTaskHandler(ctx, {
+      taskId: created.task.id,
+      force: true,
+      signaller,
+    });
+    expect(result.taskId).toBe(created.task.id);
+    expect(await tryLoadTask(ctx, created.task.id)).toBeNull();
+  });
+
+  it('treats a stale (dead-pid) sidecar as not blocking', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Stale sidecar',
+    });
+    await saveRunner(ctx, {
+      taskId: created.task.id,
+      sessionId: 'S-stale',
+      pid: 4242,
+      pidStarttime: null,
+      workflow: 'ci.yml',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set(),
+    });
+    const result = await deleteTaskHandler(ctx, {
+      taskId: created.task.id,
+      signaller,
+    });
+    expect(result.taskId).toBe(created.task.id);
+  });
+
+  it('treats a recycled-pid (mismatched startTime) sidecar as not blocking', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Recycled pid',
+    });
+    await saveRunner(ctx, {
+      taskId: created.task.id,
+      sessionId: 'S-recycled',
+      pid: 4242,
+      pidStarttime: 'Mon Jan  1 00:00:00 2026',
+      workflow: 'ci.yml',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set([
+        4242,
+      ]),
+      startTimes: new Map([
+        [
+          4242,
+          'Mon Feb  1 00:00:00 2026',
+        ],
+      ]),
+    });
+    const result = await deleteTaskHandler(ctx, {
+      taskId: created.task.id,
+      signaller,
+    });
+    expect(result.taskId).toBe(created.task.id);
+  });
+
+  it('treats a live pid whose startTime probe returns null as not blocking', async () => {
+    // Sidecar has a recorded pidStarttime, pid is alive, but `ps` failed
+    // (signaller.startTime returns null). Mirrors verifyPidIdentity's
+    // explicit "ps failed → treat as dead" guard.
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'ps failed',
+    });
+    await saveRunner(ctx, {
+      taskId: created.task.id,
+      sessionId: 'S-ps-failed',
+      pid: 4242,
+      pidStarttime: 'Mon Jan  1 00:00:00 2026',
+      workflow: 'ci.yml',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set([
+        4242,
+      ]),
+      // No entry in startTimes → fake returns null.
+    });
+    const result = await deleteTaskHandler(ctx, {
+      taskId: created.task.id,
+      signaller,
+    });
+    expect(result.taskId).toBe(created.task.id);
+  });
+
+  it('refuses to delete when sidecar has null pidStarttime and pid is alive', async () => {
+    // pidStarttime can legitimately be null when ps was unavailable at
+    // spawn time; in that case bare liveness is enough to block.
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'No starttime',
+    });
+    await saveRunner(ctx, {
+      taskId: created.task.id,
+      sessionId: 'S-no-starttime',
+      pid: 4242,
+      pidStarttime: null,
+      workflow: 'ci.yml',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set([
+        4242,
+      ]),
+    });
+    await expect(
+      deleteTaskHandler(ctx, {
+        taskId: created.task.id,
+        signaller,
+      }),
+    ).rejects.toThrow(/agent-ci runner pid=4242 still attached/);
+  });
+
+  it('refuses to delete when an implementer sidecar is alive', async () => {
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'Implementer attached',
+    });
+    await saveImplementer(ctx, {
+      taskId: created.task.id,
+      parentTaskId: 'T-parent0000',
+      featureId: 'F-abc1234567',
+      sessionId: 'S-impl',
+      pid: 5151,
+      pidStarttime: 'Mon Jan  1 00:00:00 2026',
+      worktreePath: '/repo/.worktrees/feat-x',
+      branch: 'feat/x',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      pausedAt: null,
+    });
+    const signaller = makeFakeSignaller({
+      liveSet: new Set([
+        5151,
+      ]),
+      startTimes: new Map([
+        [
+          5151,
+          'Mon Jan  1 00:00:00 2026',
+        ],
+      ]),
+    });
+    await expect(
+      deleteTaskHandler(ctx, {
+        taskId: created.task.id,
+        signaller,
+      }),
+    ).rejects.toThrow(/implementer runner pid=5151 still attached/);
+    expect(await tryLoadTask(ctx, created.task.id)).not.toBeNull();
   });
 });

@@ -248,7 +248,15 @@ async function resolveActiveRunner(args: ResolveArgs): Promise<ResolveOutcome> {
   };
 }
 
-function verifyPidIdentity(
+/**
+ * True when a stored pid is provably the same process we recorded:
+ * pid is alive AND its current `startTime` matches the snapshot we
+ * captured. Returns false on any uncertainty (dead pid, recycled pid,
+ * `ps` failed for a live pid). A null `storedStartTime` falls back to
+ * bare liveness — used when the platform couldn't snapshot startTime
+ * at spawn time.
+ */
+export function verifyPidIdentity(
   signaller: Signaller,
   pid: number,
   storedStartTime: string | null,
@@ -257,7 +265,6 @@ function verifyPidIdentity(
     return false;
   }
   if (storedStartTime === null) {
-    // No stored snapshot — fall back to liveness only.
     return true;
   }
   const current = signaller.startTime(pid);

@@ -31,7 +31,7 @@ const QuestionOptionSchema = z.object({
   description: z.string().optional(),
 });
 
-const QuestionSchema = z.object({
+export const QuestionSchema = z.object({
   id: z.string(),
   type: z.enum([
     'single_select',
@@ -74,7 +74,7 @@ const MilestoneSchema = z.object({
   assertions: z.array(AssertionSchema).optional(),
 });
 
-const CompleteSchema = z.object({
+export const CompleteSchema = z.object({
   milestones: z.array(MilestoneSchema),
 });
 

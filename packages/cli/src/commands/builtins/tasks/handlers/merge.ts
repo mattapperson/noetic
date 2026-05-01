@@ -5,6 +5,7 @@ import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';
 import type { Task } from '../schemas.js';
 import { EventKind, TaskLifecycleStatus } from '../schemas.js';
+import { execTolerantOfMissing, isShellMissing } from '../shell-utils.js';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types
@@ -34,47 +35,18 @@ export interface MergeTaskResult {
 
 //#region Helpers
 
-function isShellEnoent(result: ShellExecResult): boolean {
-  if (result.exitCode === 127) {
-    return true;
-  }
-  return /command\s+not\s+found|no\s+such\s+file/i.test(result.stderr);
-}
-
 async function tryWtMerge(args: { shell: ShellAdapter; branch: string; cwd: string }): Promise<{
   ok: boolean;
   result: ShellExecResult;
 }> {
-  let result: ShellExecResult;
-  try {
-    result = await args.shell.exec(`wt merge ${args.branch}`, {
-      cwd: args.cwd,
-    });
-  } catch (err) {
-    if (err instanceof Error && /ENOENT/i.test(err.message)) {
-      return {
-        ok: false,
-        result: {
-          stdout: '',
-          stderr: err.message,
-          exitCode: 127,
-        },
-      };
-    }
-    throw err;
-  }
-  if (result.exitCode === 0) {
-    return {
-      ok: true,
-      result,
-    };
-  }
-  if (isShellEnoent(result)) {
+  const result = await execTolerantOfMissing(args.shell, `wt merge ${args.branch}`, args.cwd);
+  if (isShellMissing(result)) {
     return {
       ok: false,
       result,
     };
   }
+  // wt is on PATH — surface its outcome (success or genuine failure) as ok.
   return {
     ok: true,
     result,

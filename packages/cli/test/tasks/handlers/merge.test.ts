@@ -63,6 +63,48 @@ describe('mergeTaskHandler', () => {
     expect(reviewEvents[0]?.payload?.mergedVia).toBe('wt');
   });
 
+  it('falls back to git when shell.exec throws ENOENT for wt', async () => {
+    // Some platforms surface "binary not on PATH" as a thrown ENOENT
+    // rather than a synthetic exit 127. execTolerantOfMissing is
+    // responsible for normalising both signals; this test pins the
+    // ENOENT-throw branch for the merge caller.
+    const ctx = makeStoreContext();
+    const created = await createTaskHandler(ctx, {
+      title: 'ENOENT fallback',
+    });
+    await saveTask(ctx, {
+      ...created.task,
+      branch: 'feature/enoent',
+    });
+    const calls: RecordedExec[] = [];
+    const shell: ShellAdapter = {
+      async exec(command) {
+        calls.push({
+          command,
+        });
+        if (command.startsWith('wt')) {
+          const err: NodeJS.ErrnoException = new Error('spawn wt ENOENT');
+          err.code = 'ENOENT';
+          throw err;
+        }
+        return {
+          stdout: 'Merge made by the recursive strategy.',
+          stderr: '',
+          exitCode: 0,
+        };
+      },
+    };
+    const result = await mergeTaskHandler(ctx, {
+      taskId: created.task.id,
+      shell,
+    });
+    expect(result.tool).toBe('git');
+    expect(calls.map((c) => c.command)).toEqual([
+      'wt merge feature/enoent',
+      'git merge --no-edit feature/enoent',
+    ]);
+  });
+
   it('falls back to git when wt is not installed (exit 127)', async () => {
     const ctx = makeStoreContext();
     const created = await createTaskHandler(ctx, {

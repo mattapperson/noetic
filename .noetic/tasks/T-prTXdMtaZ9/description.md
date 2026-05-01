@@ -1,0 +1,1 @@
+Add scripts/qa-hello.ts that exports a default function which returns 'hello QA'. Include a test in test/qa-hello.test.ts that asserts the return value.

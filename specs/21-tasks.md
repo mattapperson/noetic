@@ -18,8 +18,12 @@ A task has:
 - **Identity.** `T-<10 chars>` — an immutable id (`packages/cli/src/commands/builtins/tasks/schemas.ts#TaskIdSchema`). All hierarchy entities use the same `<prefix>-<10 chars>` shape with prefixes `ML`, `SL`, `F`, `A`, `V`, `FX`, `IV`.
 - **Source.** `'manual' | 'worktree'` — set at creation, immutable. Manual tasks are simple kanban cards. Worktree tasks were spawned by a worktree CLI flow and carry `worktreePath`, `branch`, `headSha`.
 - **State axes.** Independent dimensions: `reviewStatus × lifecycleStatus × archivedAt × paused`. Kanban columns are derived from these axes; the on-disk record never stores the column directly.
-- **Optional hierarchy.** A task gains a `hierarchy/` subdirectory when the user runs `noetic tasks plan <id>` (AI-driven interview) or `noetic tasks add-milestone <id>`. Tasks without `hierarchy/` are leaves; tasks with `hierarchy/` are "structured." `hasHierarchy` is **derived** (`fs.exists(taskDir(id) + '/hierarchy/')`) — never stored, never persisted.
-- **Optional autopilot.** Only meaningful for structured tasks. Toggled with `noetic tasks autopilot <on|off> <id>`.
+- **Optional hierarchy.** A task gains a `hierarchy/` subdirectory when the user runs `noetic tasks plan <id>` (AI-driven interview), `noetic tasks add-milestone <id>`, or autonomously via the daemon's planner runner (autopilot plan-pass). Tasks without `hierarchy/` are leaves; tasks with `hierarchy/` are "structured." `hasHierarchy` is **derived** (`fs.exists(taskDir(id) + '/hierarchy/')`) — never stored, never persisted.
+- **Optional autopilot.** Toggled with `noetic tasks autopilot <on|off> <id>`. When enabled, the daemon's autopilot tick orchestrates a three-phase pipeline:
+  1. **plan-pass** — for tasks with no hierarchy yet, spawn the planner runner subprocess. The planner uses an LLM-driven `interview()` to produce a `TaskHierarchyInput` and persists it to `hierarchy/`.
+  2. **implement-pass** — for triaged features whose linked leaf task has no worktree, spawn the implementer runner subprocess. The implementer provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback), drives a `react()` agent loop in the worktree, and flips the feature's `loopState` from `implementing` to `validating` on success or `blocked` on failure.
+  3. **structured-tick** — for active hierarchies, advance slice/milestone state machines, dispatch `validatorRequestChan` events for `validating` features, and fire `mission:statusChanged` when `hierarchyStatus` transitions.
+  The validator flow consumes `validatorRequestChan` and runs the `runValidator` built by `buildAdversarialValidatorStep()` (the default Step-graph validator: `agent-ci` and an LLM-driven adversarial code review forked in parallel — see "Validator runner" below). Each phase is independent; a manual task can be planned without autopilot ever firing the implement-pass, and structured tasks created by hand skip the plan-pass entirely.
 
 A task may be both `worktree`-sourced and `structured`. All combinations of (source × hierarchy × autopilot) are valid.
 
@@ -73,7 +77,7 @@ type TaskSource = 'manual' | 'worktree';
 type TaskReviewStatus = 'not_started' | 'reviewing' | 'needs_changes' | 'approved';
 type TaskLifecycleStatus = 'active' | 'merged' | 'cleanup-blocked' | 'removed';
 type HierarchyStatus = 'planning' | 'active' | 'blocked' | 'complete' | 'archived';
-type AutopilotState = 'inactive' | 'watching' | 'activating' | 'completing';
+type AutopilotState = 'inactive' | 'planning' | 'watching' | 'activating' | 'completing';
 
 interface Task {
   id: string;                                      // 'T-' + 10 chars
@@ -333,6 +337,102 @@ interface RunnerState {
 
 The launcher creates it; the runner clears it on exit; control surfaces read it. Stale entries are evicted by the launcher's pre-spawn pid check.
 
+## Planner runner contract
+
+The planner runner produces a task hierarchy autonomously for a manual task that has been opted into autopilot but has no `hierarchy/` subtree yet. Lifecycle:
+
+1. **Launcher** (`packages/cli/src/commands/builtins/tasks/planner-launcher.ts`) refuses to start if a live planner is already attached, spawns `bun run planner-runner.ts` as a detached child with the env contract below, persists `_planner.json`, then atomically flips `task.json#autopilotState` to `'planning'` and emits a `task:updated{phase: 'spawn'}` event.
+2. **Runner** (`packages/cli/src/commands/builtins/tasks/planner-runner.ts`) is a `bun run`-invoked wrapper. It constructs a minimal `AgentHarness`, drives the `interview()` pattern (`@noetic/core`) with an LLM-backed `askQuestion` responder (`llm-interview-responder.ts`) so the model interviews itself using only the task title + `description.md` as context. On completion the runner commits in **audit → state → event** order:
+   1. Append a `kind='system'` log entry summarising the outcome.
+   2. Persist the resulting hierarchy via `persistTaskHierarchy()` and atomically rewrite `task.json` with `hierarchyStatus: 'active'` + `autopilotState: 'watching'`.
+   3. Append a `mission:statusChanged` event.
+   4. Best-effort: clear `_planner.json`.
+
+   On `failed` / `maxQuestions` outcomes the runner flips `autopilotState` back to `'inactive'` and emits a `task:updated{phase: 'exit'}` event.
+3. **Refusal to overwrite.** Even if a stale launcher races a new spawn, the runner re-checks `getTaskHierarchy` and refuses to plan a task whose hierarchy already has milestones.
+
+### Env contract
+
+| Var | Required | Meaning |
+|---|---|---|
+| `NOETIC_TASK_DIR` | yes | Absolute path to `<projectRoot>/.noetic/tasks/<taskId>`. The runner derives `taskId` and `projectRoot`. |
+| `NOETIC_TASK_CWD` | no | Working dir for the AgentHarness. Defaults to `process.cwd()`. |
+| `NOETIC_MODEL` | no | LLM identifier. Defaults to `anthropic/claude-sonnet-4`. |
+| `OPENROUTER_API_KEY` | yes (production) | OpenRouter key for the LLM provider. |
+
+### Sidecar `_planner.json`
+
+Schema (`packages/cli/src/commands/builtins/tasks/planner-state.ts#PlannerStateSchema`):
+
+```typescript
+interface PlannerState {
+  taskId: string;                                  // 'T-...'
+  sessionId: string;
+  pid: number;
+  pidStarttime: string | null;
+  startedAt: string;
+  pausedAt: string | null;
+}
+```
+
+## Implementer runner contract
+
+The implementer runner builds one feature inside its own git worktree. The autopilot's implement-pass spawns one implementer per triaged feature whose linked leaf task has no `worktreePath` yet. Lifecycle:
+
+1. **Launcher** (`packages/cli/src/commands/builtins/tasks/implementer-launcher.ts`) refuses to start if a live implementer is already attached, calls `provisionWorktree` (tries `wt switch -c <branch>`, falls back to `git worktree add <projectRoot>/.worktrees/<branch> -b <branch>`), spawns `bun run implementer-runner.ts` with the env contract below, then in **audit→state→event** order persists `_implementer.json`, atomically patches the leaf task's `worktreePath` + `branch`, emits `task:updated`, and finally emits `feature:loopStateChanged{phase: 'spawn', loopState: 'implementing'}`.
+2. **Runner** (`packages/cli/src/commands/builtins/tasks/implementer-runner.ts`) constructs a full coding-tools `AgentHarness` rooted at the worktree, loads the parent's hierarchy, builds a prompt from the feature's `acceptanceCriteria` + the parent milestone's assertions, and drives a `react()` agent loop bounded by `DEFAULT_IMPLEMENTATION_RETRY_BUDGET`. On success it commits **audit→state→event**:
+   1. Append a `kind='system'` log entry on the leaf task.
+   2. Atomically flip the parent feature's `loopState` from `implementing` to `validating` (or `blocked` on failure / max-steps) via `applyFeatureLoopStateUpdate`.
+   3. Append a `feature:loopStateChanged{phase: 'exit'}` event on the parent task.
+   4. Best-effort: clear `_implementer.json`.
+
+### Env contract
+
+| Var | Required | Meaning |
+|---|---|---|
+| `NOETIC_TASK_DIR` | yes | Absolute path to the **leaf** task dir. Used to derive the leaf `taskId` and the project root. |
+| `NOETIC_PARENT_TASK_ID` | yes | Structured task that owns the feature. The runner mutates the feature on this task's hierarchy. |
+| `NOETIC_FEATURE_ID` | yes | Feature inside the parent's hierarchy. |
+| `NOETIC_TASK_CWD` | yes | The worktree path. The harness runs all coding tools rooted here. |
+| `NOETIC_MODEL` | no | LLM identifier. Defaults to `anthropic/claude-sonnet-4`. |
+| `OPENROUTER_API_KEY` | yes (production) | OpenRouter key for the LLM provider. |
+
+### Sidecar `_implementer.json`
+
+Schema (`packages/cli/src/commands/builtins/tasks/implementer-state.ts#ImplementerStateSchema`):
+
+```typescript
+interface ImplementerState {
+  taskId: string;                                  // 'T-...' (leaf task)
+  parentTaskId: string;                            // 'T-...' (structured parent)
+  featureId: string;                               // 'F-...'
+  sessionId: string;
+  pid: number;
+  pidStarttime: string | null;
+  worktreePath: string;
+  branch: string;
+  startedAt: string;
+  pausedAt: string | null;
+}
+```
+
+## Validator runner
+
+The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `step.run` resolves the leaf task's worktree, then dispatches a `fork({mode: 'all'})` over two paths that run in parallel:
+
+| Path | Step kind | Behaviour |
+|---|---|---|
+| `validator.agent-ci` | `step.run` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
+| `validator.adversarial-review` | `step.llm({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
+
+The fork's `merge` reconciles both partials into a single `ValidatorRunOutcome`:
+
+- agent-ci `error` → outcome `error` (adversarial result discarded).
+- agent-ci `fail` OR adversarial issues found → outcome `fail`. The adversarial reviewer's per-assertion findings populate `assertionOutcomes` so the fix-feature flow has structured failure data, not just free text.
+- Both pass → outcome `pass` with all assertions reported as `passed`.
+
+The validator returns `error` immediately when the leaf task has no `worktreePath` (i.e. the implementer hasn't run yet) so the daemon never observes a hung validation. Projects that don't want adversarial review can pass `runValidator` directly to `buildHierarchyDaemonHarness` to short-circuit the default wiring.
+
 ## Steering memory layer
 
 `createSteeringFileLayer()` (`packages/cli/src/memory/steering-file-layer.ts`) surfaces `<NOETIC_TASK_DIR>/steering.md` to a task's agent run.
@@ -354,7 +454,7 @@ Single dispatcher: `noetic tasks <verb>`. Source: `packages/cli/src/commands/bui
 |---|---|
 | `create` | Create a manual task (`--title`, optional `--description`). |
 | `show` | Print a task with recent log + hierarchy summary (`--tail n`). |
-| `list` | List tasks. Filter with `--column` / `--source`; include archived with `--all`. |
+| `list` | List tasks. Filter with `--column` / `--source`. Terminal columns (`removed`, `cleanup_blocked`, `archived`) are hidden by default to match the kanban TUI; `--terminal` reveals `removed` / `cleanup_blocked`, and `--all` additionally reveals archived. An explicit `--column <hidden>` always shows that column. |
 | `move` | Move a task to another kanban column (`--column`). |
 | `merge` | Merge the task branch via `wt merge`; falls back to `git merge`. |
 | `log` | Append a `kind='log'` entry. |
@@ -366,7 +466,7 @@ Single dispatcher: `noetic tasks <verb>`. Source: `packages/cli/src/commands/bui
 | `unpause` | Resume a paused runner. |
 | `archive` | Set `archivedAt` to now. |
 | `unarchive` | Clear `archivedAt`. |
-| `delete` | Hard-delete the task directory; emits `task:archived` before the delete. |
+| `delete` | Hard-delete the task directory; emits `task:deleted`. Refused while a live agent-ci runner sidecar is attached or a validator run is running; pass `--force` to override. |
 | `duplicate` | Copy `task.json` + `description.md` + `attachments/` under a new id. |
 | `plan` | Run the live AI-driven interview to build a hierarchy. TUI-only — the headless CLI surfaces a "use the TUI" error. |
 | `add-milestone` | Append a milestone (`--title`, `--verification`). |

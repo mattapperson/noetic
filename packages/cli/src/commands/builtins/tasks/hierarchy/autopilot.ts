@@ -1,8 +1,24 @@
+import * as log from '../../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
 import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, listTasks, saveTask, tryLoadTask } from '../fs-store.js';
+import { appendEvent, hasHierarchy, listTasks, saveTask, tryLoadTask } from '../fs-store.js';
+import type {
+  StartImplementerRunArgs,
+  StartImplementerRunResult,
+} from '../implementer-launcher.js';
+import {
+  MAX_PLANNER_ATTEMPTS,
+  readPlannerAttemptsFromDisk,
+} from '../memory/planner-attempt-layer.js';
+import type { StartPlannerRunArgs, StartPlannerRunResult } from '../planner-launcher.js';
 import type { Task } from '../schemas.js';
-import { AutopilotState, EventKind, HierarchyStatus, TaskLifecycleStatus } from '../schemas.js';
+import {
+  AutopilotState,
+  EventKind,
+  HierarchyStatus,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+} from '../schemas.js';
 import { activateSlice } from './activation.js';
 import { getTaskHierarchy } from './aggregate.js';
 import type {
@@ -17,10 +33,24 @@ import { saveMilestone, saveSlice } from './store.js';
 
 //#region Types
 
+/**
+ * Launchers the autopilot may invoke when the plan-pass / implement-pass
+ * find an eligible task or feature. Both default to no-ops in tests so
+ * the existing tick logic can run without spawning real subprocesses.
+ */
+export type StartPlannerRunFn = (args: StartPlannerRunArgs) => Promise<StartPlannerRunResult>;
+export type StartImplementerRunFn = (
+  args: StartImplementerRunArgs,
+) => Promise<StartImplementerRunResult>;
+
 /** Long-lived dependencies shared by the autopilot/validator/health daemons. */
 export interface AutopilotDeps {
   readonly ctx: TaskStoreContext;
   readonly signaller: Signaller;
+  /** Test seam — invoked once per eligible task in the plan-pass. */
+  readonly startPlannerRun?: StartPlannerRunFn;
+  /** Test seam — invoked once per eligible feature in the implement-pass. */
+  readonly startImplementerRun?: StartImplementerRunFn;
 }
 
 /** Aggregate counts produced by a single autopilot tick. */
@@ -32,6 +62,8 @@ export interface AutopilotTickReport {
   slicesCompleted: number;
   tasksCompleted: number;
   tasksBlocked: number;
+  plannersStarted: number;
+  implementersStarted: number;
 }
 
 interface FeatureGroups {
@@ -73,7 +105,190 @@ function emptyReport(): AutopilotTickReport {
     slicesCompleted: 0,
     tasksCompleted: 0,
     tasksBlocked: 0,
+    plannersStarted: 0,
+    implementersStarted: 0,
   };
+}
+
+/**
+ * Branch name for an implementer-spawned worktree. Deterministic by
+ * leaf task id so re-spawns reuse the same worktree, and safe per
+ * `worktree-provision.ts#isSafeBranchName` (alphanumerics + slash + dash).
+ */
+function deriveBranchForLeaf(leafTaskId: string): string {
+  return `noetic/${leafTaskId}`;
+}
+
+interface RunPlanPassArgs {
+  readonly deps: AutopilotDeps;
+  readonly tasks: ReadonlyArray<Task>;
+  readonly report: AutopilotTickReport;
+}
+
+/**
+ * Spawn the planner subprocess for every autopilot-enabled manual task
+ * that hasn't yet been planned. The launcher itself is responsible for
+ * the live-sidecar guard (it throws `PlannerSpawnError` on collision);
+ * we swallow that error here so a single in-flight planner doesn't
+ * break the rest of the tick.
+ */
+async function runPlanPass(args: RunPlanPassArgs): Promise<void> {
+  const startPlannerRun = args.deps.startPlannerRun;
+  if (startPlannerRun === undefined) {
+    return;
+  }
+  // Load the per-task planner attempt counts once at the start of the
+  // pass — they're written by the planner subprocess via its memory
+  // layer, and we read them here to gate spawning so the autopilot
+  // doesn't re-fire planners that have already exhausted their budget.
+  const attempts = await readPlannerAttemptsFromDisk({
+    fs: args.deps.ctx.fs,
+    projectRoot: args.deps.ctx.projectRoot,
+  });
+  for (const task of args.tasks) {
+    if (!task.autopilotEnabled) {
+      continue;
+    }
+    // Disk-level hierarchy presence is authoritative; `task.hierarchyStatus`
+    // is null for manual hierarchies, so checking the field would burn a
+    // planner spawn per tick on tasks built via `add-milestone`.
+    if (await hasHierarchy(args.deps.ctx, task.id)) {
+      continue;
+    }
+    if (task.reviewStatus !== TaskReviewStatus.NotStarted) {
+      continue;
+    }
+    if (task.autopilotState === AutopilotState.Planning) {
+      continue;
+    }
+    // Cap spawns per task: a permanently-failing planner would otherwise
+    // burn LLM tokens every 60s. Counter persists via the layer-backed JSON.
+    const taskAttempts = attempts[task.id] ?? 0;
+    if (taskAttempts >= MAX_PLANNER_ATTEMPTS) {
+      log.warn(
+        `[tasks.autopilot] plan-pass: budget exhausted for ${task.id} (${taskAttempts}/${MAX_PLANNER_ATTEMPTS})`,
+      );
+      continue;
+    }
+    try {
+      await startPlannerRun({
+        ctx: args.deps.ctx,
+        taskId: task.id,
+      });
+      args.report.plannersStarted += 1;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`[tasks.autopilot] plan-pass failed for ${task.id}: ${message}`);
+    }
+  }
+}
+
+interface RunImplementPassArgs {
+  readonly deps: AutopilotDeps;
+  readonly tasks: ReadonlyArray<Task>;
+  readonly report: AutopilotTickReport;
+}
+
+interface ImplementCandidate {
+  readonly parentTaskId: string;
+  readonly feature: Feature;
+  /** Non-null narrow of `feature.taskId`, captured at yield time. */
+  readonly leafTaskId: string;
+}
+
+/**
+ * Walk one structured task's hierarchy and yield every feature in
+ * `loopState === 'implementing'` whose linked leaf id is non-null.
+ * Pulled into a generator so the outer pass body stays flat.
+ */
+function* eachImplementingFeature(
+  parentTaskId: string,
+  hierarchy: {
+    milestones: ReadonlyArray<MilestoneWithChildren>;
+  },
+): Generator<ImplementCandidate> {
+  for (const milestone of hierarchy.milestones) {
+    for (const slice of milestone.slices) {
+      for (const feature of slice.features) {
+        if (feature.loopState !== FeatureLoopState.Implementing) {
+          continue;
+        }
+        if (feature.taskId === null) {
+          continue;
+        }
+        yield {
+          parentTaskId,
+          feature,
+          leafTaskId: feature.taskId,
+        };
+      }
+    }
+  }
+}
+
+/**
+ * Spawn the implementer subprocess for every triaged feature whose
+ * linked leaf task hasn't been provisioned yet. Gathers candidates
+ * across all structured tasks first, batch-loads their leaf records
+ * in parallel, then dispatches the launcher serially (sequencing the
+ * launcher calls keeps per-task event ordering deterministic and
+ * avoids two concurrent launchers racing the same `_implementer.json`
+ * sidecar). Launcher errors are logged and swallowed so one bad spawn
+ * doesn't break the rest of the tick.
+ */
+async function runImplementPass(args: RunImplementPassArgs): Promise<void> {
+  const startImplementerRun = args.deps.startImplementerRun;
+  if (startImplementerRun === undefined) {
+    return;
+  }
+  const candidates: ImplementCandidate[] = [];
+  for (const task of args.tasks) {
+    // Same disk-level check as plan-pass; the `task.hierarchyStatus`
+    // field is unreliable for manual hierarchies.
+    if (!(await hasHierarchy(args.deps.ctx, task.id))) {
+      continue;
+    }
+    const hierarchy = await getTaskHierarchy(args.deps.ctx, task.id);
+    if (hierarchy === null) {
+      continue;
+    }
+    for (const candidate of eachImplementingFeature(task.id, hierarchy)) {
+      candidates.push(candidate);
+    }
+  }
+  if (candidates.length === 0) {
+    return;
+  }
+  // Batch-load the leaf records in parallel — each is an independent
+  // FS read with no shared state. The generator already filtered
+  // null `feature.taskId`, so every candidate has a `leafTaskId`.
+  const leaves = await Promise.all(candidates.map((c) => tryLoadTask(args.deps.ctx, c.leafTaskId)));
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const leaf = leaves[i];
+    if (candidate === undefined || !leaf) {
+      continue;
+    }
+    if (leaf.worktreePath !== null) {
+      continue;
+    }
+    const branch = leaf.branch ?? deriveBranchForLeaf(leaf.id);
+    try {
+      await startImplementerRun({
+        ctx: args.deps.ctx,
+        taskId: leaf.id,
+        parentTaskId: candidate.parentTaskId,
+        featureId: candidate.feature.id,
+        branch,
+      });
+      args.report.implementersStarted += 1;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(
+        `[tasks.autopilot] implement-pass failed for feature ${candidate.feature.id} (leaf ${leaf.id}): ${message}`,
+      );
+    }
+  }
 }
 
 export function groupFeaturesByLoopState(features: ReadonlyArray<Feature>): FeatureGroups {
@@ -124,14 +339,15 @@ async function patchTaskAutopilot(
     readonly lifecycleStatus?: TaskLifecycleStatus;
   },
 ): Promise<Task> {
+  const ts = nowIso();
   const next: Task = {
     ...task,
     autopilotState: patch.autopilotState ?? task.autopilotState,
     hierarchyStatus:
       patch.hierarchyStatus !== undefined ? patch.hierarchyStatus : task.hierarchyStatus,
     lifecycleStatus: patch.lifecycleStatus ?? task.lifecycleStatus,
-    lastAutopilotActivityAt: nowIso(),
-    updatedAt: nowIso(),
+    lastAutopilotActivityAt: ts,
+    updatedAt: ts,
   };
   await saveTask(ctx, next);
   return next;
@@ -225,13 +441,6 @@ function findNextPendingSlice(
     }
   }
   return null;
-}
-
-function _milestoneIsFullyComplete(milestone: MilestoneWithChildren): boolean {
-  if (milestone.slices.length === 0) {
-    return false;
-  }
-  return milestone.slices.every((slice) => slice.status === SliceStatus.Complete);
 }
 
 //#endregion
@@ -449,15 +658,32 @@ async function tickOneTask(
 //#region Public API
 
 /**
- * Drives a single autopilot tick across every autopilot-enabled
- * structured task whose hierarchyStatus is `planning` or `active`.
- * Advances slice and milestone state machines, triages newly-activated
- * slices, and emits a `mission:statusChanged` event whenever the task's
- * hierarchyStatus transitions.
+ * Drives a single autopilot tick. Three passes:
+ *
+ *   1. **plan-pass** — spawn the planner subprocess for autopilot-enabled
+ *      manual tasks that haven't yet been planned. No-op when
+ *      `deps.startPlannerRun` is undefined (e.g. in tests).
+ *   2. **implement-pass** — spawn the implementer subprocess for
+ *      triaged features whose linked leaf task has no worktree. No-op
+ *      when `deps.startImplementerRun` is undefined.
+ *   3. **structured-tick** — for every autopilot-enabled structured
+ *      task whose hierarchyStatus is `planning` or `active`, advance
+ *      slice and milestone state machines, triage newly-activated
+ *      slices, and emit `mission:statusChanged` events.
  */
 export async function runAutopilotTick(deps: AutopilotDeps): Promise<AutopilotTickReport> {
   const report = emptyReport();
   const tasks = await listTasks(deps.ctx);
+  await runPlanPass({
+    deps,
+    tasks,
+    report,
+  });
+  await runImplementPass({
+    deps,
+    tasks,
+    report,
+  });
   for (const task of tasks) {
     if (!task.autopilotEnabled) {
       continue;

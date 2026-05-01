@@ -1,0 +1,18 @@
+{
+  "id": "F-T3UNKqDHar",
+  "sliceId": "SL-kHZXNyarAv",
+  "title": "F1",
+  "description": null,
+  "acceptanceCriteria": "Add scripts/qa-impl.ts that prints hi",
+  "status": "triaged",
+  "loopState": "implementing",
+  "implementationAttemptCount": 1,
+  "validatorAttemptCount": 0,
+  "taskId": "T-EEG4bRjyPV",
+  "generatedFromFeatureId": null,
+  "generatedFromRunId": null,
+  "blockedReason": null,
+  "orderIndex": 0,
+  "createdAt": "2026-05-01T13:00:35.618Z",
+  "updatedAt": "2026-05-01T13:00:35.882Z"
+}
