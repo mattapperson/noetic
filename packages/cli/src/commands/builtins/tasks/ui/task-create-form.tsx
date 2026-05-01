@@ -5,10 +5,11 @@
  * the description; the form only saves when Submit is focused and Enter or
  * Space is pressed. Esc cancels.
  *
- * On submit, the form persists `task.json`, optionally writes
- * `description.md`, and appends a `task:created` event to
- * `_events.jsonl`. The kanban hook tails the events file (and watches
- * its size watermark) and re-renders when it grows.
+ * On submit, the form persists `task.json`, writes `description.md`, and
+ * appends a `task:created` event to `_events.jsonl`. Both title and
+ * description are required — empty values are rejected with a descriptive
+ * error. The kanban hook tails the events file (and watches its size
+ * watermark) and re-renders when it grows.
  *
  * The persistence logic is exposed as `submitNewTask` so unit tests
  * can drive it without rendering Ink.
@@ -101,9 +102,10 @@ export function buildManualTask(opts: { title: string; projectRoot: string }): T
 
 /**
  * Persist a new manual task and emit the corresponding `task:created`
- * event. Returns the freshly-saved record.
+ * event. Returns the freshly-saved record. Both title and description
+ * are required.
  *
- * Order: write `task.json` → write `description.md` (if any) → append
+ * Order: write `task.json` → write `description.md` → append
  * `_events.jsonl` → emit in-process. The on-disk write happens before
  * the event so any tailer reading the events file finds the row already
  * present.
@@ -113,16 +115,16 @@ export async function submitNewTask(input: SubmitNewTaskInput): Promise<Task> {
   if (trimmedTitle.length === 0) {
     throw new Error('Title is required');
   }
+  if (input.description.trim().length === 0) {
+    throw new Error('Description is required');
+  }
   const task = buildManualTask({
     title: trimmedTitle,
     projectRoot: input.ctx.projectRoot,
   });
   await saveTask(input.ctx, task);
-  if (input.description.trim().length > 0) {
-    const paths = taskDirPaths(input.ctx.projectRoot, task.id);
-    await input.ctx.fs.mkdir(paths.dir);
-    await input.ctx.fs.writeFile(paths.description, input.description);
-  }
+  const paths = taskDirPaths(input.ctx.projectRoot, task.id);
+  await input.ctx.fs.writeFile(paths.description, input.description);
   await appendEvent(input.ctx, {
     taskId: task.id,
     kind: 'task:created',

@@ -1,14 +1,15 @@
 /**
  * Coverage for the persistence path inside `task-create-form.tsx`.
  *
- * `submitNewTask` writes `task.json` (and optionally `description.md`),
- * then appends a `task:created` event. This test mounts the in-memory
- * `MemFs` store, drives `submitNewTask` end-to-end, and asserts:
+ * `submitNewTask` writes `task.json` and `description.md`, then appends a
+ * `task:created` event. This test mounts the in-memory `MemFs` store,
+ * drives `submitNewTask` end-to-end, and asserts:
  *
  * 1. A well-formed `Task` lands on disk with the expected defaults.
- * 2. Description text is persisted iff non-empty.
+ * 2. Description text is persisted alongside the task.
  * 3. `_events.jsonl` gains a `task:created` row referencing the new task.
  * 4. Empty titles are rejected with a descriptive error.
+ * 5. Empty descriptions are rejected with a descriptive error.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -86,15 +87,15 @@ describe('submitNewTask', () => {
     expect(created[0]?.taskId).toBe(task.id);
   });
 
-  test('omits description.md when description is whitespace only', async () => {
+  test('rejects whitespace-only descriptions with a descriptive error', async () => {
     const ctx = makeStoreContext('/repo2');
-    const task = await submitNewTask({
-      ctx,
-      title: 'Whitespace',
-      description: '   \n  ',
-    });
-    const dir = taskDirPaths(ctx.projectRoot, task.id);
-    expect(ctx.fs.files.has(path.resolve(dir.description))).toBe(false);
+    await expect(
+      submitNewTask({
+        ctx,
+        title: 'Whitespace',
+        description: '   \n  ',
+      }),
+    ).rejects.toThrow(/Description is required/);
   });
 
   test('rejects empty titles with a descriptive error', async () => {
@@ -103,8 +104,31 @@ describe('submitNewTask', () => {
       submitNewTask({
         ctx,
         title: '   ',
-        description: '',
+        description: 'has a description',
       }),
     ).rejects.toThrow(/Title is required/);
+  });
+
+  test('rejects empty descriptions with a descriptive error', async () => {
+    const ctx = makeStoreContext('/repo4');
+    await expect(
+      submitNewTask({
+        ctx,
+        title: 'Has title',
+        description: '',
+      }),
+    ).rejects.toThrow(/Description is required/);
+  });
+
+  test('accepts a single-character description (boundary)', async () => {
+    const ctx = makeStoreContext('/repo5');
+    const task = await submitNewTask({
+      ctx,
+      title: 'Boundary',
+      description: 'x',
+    });
+    const dir = taskDirPaths(ctx.projectRoot, task.id);
+    const descRaw = ctx.fs.files.get(path.resolve(dir.description));
+    expect(descRaw?.toString('utf-8')).toBe('x');
   });
 });
