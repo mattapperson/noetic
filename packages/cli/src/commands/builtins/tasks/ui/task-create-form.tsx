@@ -1,7 +1,9 @@
 /**
  * Inline form for creating a manual task. Two text fields (title,
- * description); Tab cycles focus, Enter on the title field moves to the
- * description, Enter on the description submits, Esc cancels.
+ * description) and a focusable Submit button. Tab/Shift+Tab cycle focus
+ * through the three controls. Enter is reserved for inserting newlines in
+ * the description; the form only saves when Submit is focused and Enter or
+ * Space is pressed. Esc cancels.
  *
  * On submit, the form persists `task.json`, optionally writes
  * `description.md`, and appends a `task:created` event to
@@ -30,6 +32,7 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '../schemas.js';
+import { MultilineTextArea } from './multiline-text-area.js';
 
 //#region Types
 
@@ -54,7 +57,22 @@ export interface SubmitNewTaskInput {
 
 const FIELD_TITLE = 'title' as const;
 const FIELD_DESCRIPTION = 'description' as const;
-type FocusedField = typeof FIELD_TITLE | typeof FIELD_DESCRIPTION;
+const FIELD_SUBMIT = 'submit' as const;
+type FocusedField = typeof FIELD_TITLE | typeof FIELD_DESCRIPTION | typeof FIELD_SUBMIT;
+
+const FOCUS_ORDER: ReadonlyArray<FocusedField> = [
+  FIELD_TITLE,
+  FIELD_DESCRIPTION,
+  FIELD_SUBMIT,
+];
+
+function nextFocus(current: FocusedField, direction: 1 | -1): FocusedField {
+  const index = FOCUS_ORDER.indexOf(current);
+  const length = FOCUS_ORDER.length;
+  const nextIndex = (index + direction + length) % length;
+  const nextField = FOCUS_ORDER[nextIndex];
+  return nextField === undefined ? FIELD_TITLE : nextField;
+}
 
 /** Build a fully-defaulted `Task` record. Pure helper for unit tests. */
 export function buildManualTask(opts: { title: string; projectRoot: string }): Task {
@@ -113,6 +131,8 @@ export async function submitNewTask(input: SubmitNewTaskInput): Promise<Task> {
   return task;
 }
 
+function noop(): void {}
+
 //#endregion
 
 //#region Component
@@ -152,25 +172,25 @@ export function TaskCreateForm(props: TaskCreateFormProps): React.ReactElement {
     props,
   ]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (key.escape) {
       props.onCancel();
       return;
     }
     if (key.tab) {
-      setFocused((current) => (current === FIELD_TITLE ? FIELD_DESCRIPTION : FIELD_TITLE));
+      setFocused((current) => nextFocus(current, key.shift ? -1 : 1));
+      return;
+    }
+    if (focused !== FIELD_SUBMIT) {
+      return;
+    }
+    if (key.return || input === ' ') {
+      void submit();
     }
   });
 
-  const handleTitleSubmit = useCallback((): void => {
-    setFocused(FIELD_DESCRIPTION);
-  }, []);
-
-  const handleDescriptionSubmit = useCallback((): void => {
-    void submit();
-  }, [
-    submit,
-  ]);
+  const submitColor = focused === FIELD_SUBMIT ? theme.primary : theme.muted;
+  const submitLabel = submitting ? 'Saving...' : 'Submit';
 
   return (
     <Box flexDirection="column" paddingX={1} borderStyle="single" borderColor={theme.border}>
@@ -181,7 +201,7 @@ export function TaskCreateForm(props: TaskCreateFormProps): React.ReactElement {
         <TextInput
           value={title}
           onChange={setTitle}
-          onSubmit={handleTitleSubmit}
+          onSubmit={noop}
           focus={focused === FIELD_TITLE}
           placeholder="Short summary..."
         />
@@ -189,13 +209,20 @@ export function TaskCreateForm(props: TaskCreateFormProps): React.ReactElement {
 
       <Box marginTop={1} flexDirection="column">
         <Text color={focused === FIELD_DESCRIPTION ? theme.primary : theme.muted}>Description</Text>
-        <TextInput
+        <MultilineTextArea
           value={description}
           onChange={setDescription}
-          onSubmit={handleDescriptionSubmit}
           focus={focused === FIELD_DESCRIPTION}
           placeholder="Long-form details..."
         />
+      </Box>
+
+      <Box marginTop={1}>
+        <Box borderStyle="round" borderColor={submitColor} paddingX={1}>
+          <Text color={submitColor} bold={focused === FIELD_SUBMIT}>
+            {submitLabel}
+          </Text>
+        </Box>
       </Box>
 
       {error !== null ? (
@@ -206,7 +233,7 @@ export function TaskCreateForm(props: TaskCreateFormProps): React.ReactElement {
 
       <Box marginTop={1}>
         <Text color={theme.muted}>
-          {submitting ? 'Saving...' : 'Tab switches fields • Enter advances/saves • Esc cancels'}
+          Tab navigates • Enter inserts newline • Tab to Submit, then Enter/Space • Esc cancels
         </Text>
       </Box>
     </Box>
