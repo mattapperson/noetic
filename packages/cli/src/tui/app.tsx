@@ -17,6 +17,7 @@ import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
+import { resolveChatTarget } from '../commands/builtins/tasks/resolve-chat-target.js';
 import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
 import {
   BUILTIN_COMMANDS,
@@ -89,6 +90,7 @@ import type { PendingAskUserRequest } from './services/ask-user-service.js';
 import { createAskUserService } from './services/ask-user-service.js';
 import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
 import { StreamMetricsProvider } from './stream-metrics-context.js';
+import { TaskChatView } from './task-chat/task-chat-view.js';
 import { getDefaultImageStore } from './utils/image-store.js';
 
 //#region Helpers
@@ -438,7 +440,9 @@ function App({
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
   const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'normal');
-  const [viewMode, setViewMode] = useState<ViewMode>('chat');
+  const [viewMode, setViewMode] = useState<ViewMode>({
+    kind: 'chat',
+  });
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
   const [effectiveCwd, setEffectiveCwd] = useState<string>(
@@ -1454,17 +1458,57 @@ function App({
     [],
   );
 
-  const showTaskBoard = viewMode === 'taskBoard';
-  const exitTaskBoard = useCallback((): void => {
-    setViewMode('chat');
+  const exitToChat = useCallback((): void => {
+    setViewMode({
+      kind: 'chat',
+    });
   }, []);
+
+  const handleOpenChat = useCallback(
+    (task: { id: string }): void => {
+      void (async (): Promise<void> => {
+        const target = await resolveChatTarget(
+          {
+            fs: config.fs,
+            projectRoot: config.cwd,
+          },
+          task.id,
+        );
+        if (target === null) {
+          return;
+        }
+        setViewMode({
+          kind: 'taskChat',
+          socketPath: target.socketPath,
+          taskId: task.id,
+          roleLabel: target.roleLabel,
+        });
+      })();
+    },
+    [
+      config.fs,
+      config.cwd,
+    ],
+  );
 
   return (
     <InkProvider>
       <FooterContextProvider value={footerValue}>
         <StreamMetricsProvider value={streamMetrics}>
-          {showTaskBoard ? (
-            <TaskBoard fs={config.fs} projectRoot={config.cwd} onExit={exitTaskBoard} />
+          {viewMode.kind === 'taskBoard' ? (
+            <TaskBoard
+              fs={config.fs}
+              projectRoot={config.cwd}
+              onExit={exitToChat}
+              onOpenChat={handleOpenChat}
+            />
+          ) : viewMode.kind === 'taskChat' ? (
+            <TaskChatView
+              socketPath={viewMode.socketPath}
+              taskId={viewMode.taskId}
+              roleLabel={viewMode.roleLabel}
+              onExit={exitToChat}
+            />
           ) : (
             <ResponsesChat
               entries={entries}

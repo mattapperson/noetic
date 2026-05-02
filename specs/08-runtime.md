@@ -499,3 +499,33 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
   params: TParams;
 }
 ```
+
+---
+
+## Per-Task IPC for Live Chat
+
+A runner subprocess (planner, implementer, validator) exposes its harness over a unix-domain socket so external clients — primarily the TUI — can chat with the agent live, on the same `execute()` channel the in-process chat uses.
+
+### Socket placement
+
+```
+<projectRoot>/.noetic/tasks/<taskId>/sockets/<role>-<runnerId>.sock
+```
+
+`role` is `planner` | `implementer` | `validator`. `runnerId` distinguishes concurrent runners of the same role (the implementer is per-feature, so `runnerId` is the feature id; for singletons it's the role itself). The runner records the bound path in its sidecar JSON (`_planner.json` / `_implementer.json`) under `socketPath` so clients discover the socket without scanning.
+
+### Wire format
+
+Newline-delimited JSON. One frame per line. Both ends validate the frame envelope with Zod; the inner `item` / `event` payloads pass through as `unknown` because the `Item` / `StreamEvent` unions are open-ended tagged unions whose extension shapes the protocol layer doesn't own.
+
+Client → server frames: `subscribe`, `getHistory`, `send { messageId, text }`, `getStatus`, `abort`.
+
+Server → client frames: `hello { protocolVersion, taskId, role, runnerId, threadId }`, `history { items }`, `item { item }`, `event { event }`, `status { status }`, `ack { messageId }`, `error { error }`, `bye`.
+
+### Bridging
+
+On `send`, the server calls `harness.execute(text, { threadId, messageId })` — exactly the same call shape the in-process chat uses. On every `harness.getItemStream()` emission whose `isComplete` flag is `true`, the server appends the underlying `Item` (with the framework-only `isComplete` field stripped) to `<taskDir>/chat.jsonl` and fans out the streaming snapshot to subscribed clients. Streaming partials are fanned out only — they're not persisted, since `seedSessionHistory` replays final items and resuming a partial isn't meaningful. Framework events from `harness.getFullStream()` fan out to subscribed clients but are never persisted. Persistence happens before fan-out so a crash between the two doesn't lose state the client never received.
+
+### Resume
+
+On runner startup, the IPC server reads `<taskDir>/chat.jsonl` and calls `harness.seedSessionHistory(threadId, items)` before any `execute()` is issued. Conversations therefore survive subprocess restarts: the next runner spawn replays prior items into the fresh session and the user's chat continues from where it left off.

@@ -39,6 +39,12 @@ export interface TaskBoardProps {
   fs: FsAdapter;
   /** Called when the user presses `Esc` from the kanban to leave the board. */
   onExit: () => void;
+  /**
+   * Called from a task's detail view when the user presses `c` to chat
+   * with that task's running agent. The host (app.tsx) is responsible
+   * for resolving the IPC socket and switching viewMode.
+   */
+  onOpenChat?: (task: Task) => void;
 }
 
 interface KanbanViewProps {
@@ -600,12 +606,20 @@ export function TaskBoard(props: TaskBoardProps): React.ReactElement {
     );
   }
   if (mode.kind === 'detail') {
+    const taskForDetail = mode.task;
     return (
       <TaskDetail
         fs={props.fs}
         projectRoot={props.projectRoot}
-        task={mode.task}
+        task={taskForDetail}
         onClose={returnToKanban}
+        onOpenChat={
+          props.onOpenChat
+            ? (): void => {
+                props.onOpenChat?.(taskForDetail);
+              }
+            : undefined
+        }
       />
     );
   }

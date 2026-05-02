@@ -92,7 +92,19 @@ interface CommandContext {
 }
 
 /** Top-level views the TUI can render. */
-export type ViewMode = 'chat' | 'taskBoard';
+export type ViewMode =
+  | {
+      readonly kind: 'chat';
+    }
+  | {
+      readonly kind: 'taskBoard';
+    }
+  | {
+      readonly kind: 'taskChat';
+      readonly socketPath: string;
+      readonly taskId: string;
+      readonly roleLabel: string;
+    };
 
 export interface SessionSnapshot {
   sessionId: string;

@@ -30,6 +30,8 @@ export interface TaskDetailProps {
   projectRoot: string;
   /** Called when the user presses `Esc` to return to the board. */
   onClose: () => void;
+  /** Called when the user presses `c` to chat with the task's running agent. */
+  onOpenChat?: () => void;
   /** Maximum log entries to tail. Defaults to 25. */
   logLimit?: number;
 }
@@ -201,9 +203,13 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
     logLimit,
   ]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (key.escape) {
       props.onClose();
+      return;
+    }
+    if (input === 'c' && props.onOpenChat) {
+      props.onOpenChat();
     }
   });
 
@@ -267,7 +273,9 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
       </Box>
 
       <Box marginTop={1}>
-        <Text color={theme.muted}>Esc to return</Text>
+        <Text color={theme.muted}>
+          Esc to return{props.onOpenChat ? '  ·  c to chat with agent' : ''}
+        </Text>
       </Box>
     </Box>
   );

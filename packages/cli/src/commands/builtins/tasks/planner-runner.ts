@@ -2,21 +2,28 @@
  * Wrapper script that owns the autonomous planner subprocess for one
  * manual task. Spawned by `planner-launcher.ts` via `bun run`. Reads
  * `NOETIC_TASK_DIR` (the leaf task) and `NOETIC_TASK_CWD` (the project
- * root) from env. Constructs an `AgentHarness` with the planner-attempt
- * memory layer mounted, then drives a Step-graph planner flow rooted at
- * `branch({route: hasHierarchyPredicate, ...})`. The flow's body steps
- * own the imperative audit→state→event commit sequence.
+ * root) from env. Constructs a chat-shaped `AgentHarness` (see
+ * `runner-harness.ts`) wired with the planner's role-specific terminal
+ * tools and drives it through one or more turns until the agent calls
+ * `submit_hierarchy` or `abandon_planning`. The IPC server (started in
+ * a follow-up commit) keeps the runner addressable while the agent
+ * works, so the TUI can chat with it live.
  */
 
 import { basename, dirname } from 'node:path';
 
-import { AgentHarness, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/core';
+import { createSteeringFileLayer } from '../../../memory/steering-file-layer.js';
+import { createCodingTools } from '../../../tools/index.js';
+import { AgentIpcServer, unlinkSocketSync } from './agent-ipc-server.js';
 import { DEFAULT_MODEL } from './defaults.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendLog, loadTask } from './fs-store.js';
-import type { PlannerFlowInput, PlannerOutcome, RunInterviewFn } from './hierarchy/planner-flow.js';
-import { buildPlannerFlow } from './hierarchy/planner-flow.js';
-import { loadPlanner } from './planner-state.js';
+import { createPlannerAttemptLayer } from './memory/planner-attempt-layer.js';
+import { loadPlanner, savePlanner } from './planner-state.js';
+import type { PlannerOutcome } from './planner-tools.js';
+import { createAbandonPlanningTool, createSubmitHierarchyTool } from './planner-tools.js';
+import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
 import { LogEntryKind } from './schemas.js';
 
 //#region Types
@@ -24,16 +31,12 @@ import { LogEntryKind } from './schemas.js';
 const ENV_TASK_DIR = 'NOETIC_TASK_DIR';
 const ENV_CWD = 'NOETIC_TASK_CWD';
 
-export type RunPlannerInterviewFn = RunInterviewFn;
-
 export interface RunPlannerOptions {
   readonly ctx?: TaskStoreContext;
   readonly taskDir?: string;
   readonly cwd?: string;
   readonly model?: string;
   readonly apiKey?: string;
-  readonly runInterviewFn?: RunPlannerInterviewFn;
-  readonly maxQuestions?: number;
 }
 
 export interface RunPlannerResult {
@@ -73,14 +76,52 @@ async function loadDescription(args: {
 }): Promise<string> {
   // Description lives at `<taskDir>/description.md`. Missing file is
   // common for tasks created without `--description` — return empty
-  // string rather than throwing, since the LLM responder already
-  // handles the empty-context case.
+  // string rather than throwing.
   const path = `${args.ctx.projectRoot}/.noetic/tasks/${args.taskId}/description.md`;
   try {
     return await args.ctx.fs.readFileText(path);
   } catch {
     return '';
   }
+}
+
+const PLANNER_INSTRUCTIONS = `You are the Noetic task planner.
+
+Your single job is to produce a structured plan for the task — a hierarchy of milestones, slices, and features — and submit it via the \`submit_hierarchy\` tool.
+
+# Hierarchy concepts
+- **Milestone**: a major phase or deliverable. Has verification criteria describing how to confirm the phase is complete. Aim for 2–4.
+- **Slice**: a focused work unit inside a milestone, activatable on its own. Has verification criteria. Aim for 1–3 per milestone.
+- **Feature**: a specific leaf deliverable inside a slice. Has acceptance criteria (a single concrete, testable string). Aim for 2–5 per slice.
+- **Assertion** (optional): a milestone-level check that ties together one or more features by index.
+
+# Conversation flow
+1. Read the task title and description.
+2. If the description is rich enough, draft a plan and submit it directly.
+3. If anything is unclear, ask the user clarifying questions in chat. Keep questions short and answerable.
+4. Push back on vague objectives. Challenge unrealistic scope and suggest phasing.
+5. When you have enough context (usually after 0–4 clarifying turns), call \`submit_hierarchy\` exactly once with the final plan.
+
+# Failure path
+If the task is too underspecified to plan even after asking, call \`abandon_planning\` with a one-sentence reason. Do not silently produce a low-quality plan.
+
+# Response style
+- In chat turns, be concise. Short questions, no preamble.
+- Do **not** emit raw JSON in chat. The hierarchy goes through \`submit_hierarchy\` only.`;
+
+function buildInitialPrompt(args: {
+  readonly title: string;
+  readonly description: string;
+}): string {
+  const lines: string[] = [];
+  lines.push(`# Task: ${args.title}`);
+  if (args.description.trim().length > 0) {
+    lines.push('', '## Description', '', args.description.trim());
+  } else {
+    lines.push('', '_(no description provided)_');
+  }
+  lines.push('', 'Plan this task. Ask clarifying questions if needed, then call submit_hierarchy.');
+  return lines.join('\n');
 }
 
 //#endregion
@@ -121,57 +162,138 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
   const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
   const model = opts.model ?? process.env.NOETIC_MODEL ?? DEFAULT_MODEL;
 
-  // Build the flow's Step graph + the memory layers it expects mounted.
-  // Body steps reach the harness via `ctx.harness` so the flow doesn't
-  // need a backreference at build time.
-  const flow = buildPlannerFlow({
+  const signal = createRunnerSignal<PlannerOutcome>();
+
+  const submitTool = createSubmitHierarchyTool({
     storeCtx: ctx,
-    model,
-    runInterview: opts.runInterviewFn,
-    maxQuestions: opts.maxQuestions,
+    taskId,
+    signal,
+  });
+  const abandonTool = createAbandonPlanningTool({
+    storeCtx: ctx,
+    taskId,
+    signal,
   });
 
-  const harness = new AgentHarness({
-    name: 'noetic-planner',
+  const codingTools = createCodingTools({
+    cwd,
     fs: ctx.fs,
-    shell: createLocalShellAdapter(),
-    params: {
-      model,
-    },
-    llm: {
-      provider: 'openrouter',
-      apiKey,
-    },
-    memory: [
-      ...flow.layers,
-    ],
-    initialCwd: cwd,
   });
 
-  const flowInput: PlannerFlowInput = {
-    taskId,
-    task,
-    description,
-  };
-  const flowCtx = harness.createContext({});
-  // `harness.run` does not auto-initialise context layers; do it
-  // manually using the layer set we already built (avoids relying on
-  // `Context.layers`, which is an internal field on the impl).
-  if (flow.layers.length > 0) {
-    await harness.initLayers(
-      [
-        ...flow.layers,
-      ],
-      flowCtx,
-      harness.config.storage,
-    );
-  }
-  const outcome = await harness.run(flow.step, flowInput, flowCtx);
+  const plannerAttemptLayer = createPlannerAttemptLayer({
+    projectRoot: ctx.projectRoot,
+  });
+  const steeringLayer = createSteeringFileLayer();
 
-  return {
+  const { harness, threadId } = createRunnerHarness({
+    role: 'planner',
     taskId,
-    outcome,
+    cwd,
+    apiKey,
+    model,
+    instructions: PLANNER_INSTRUCTIONS,
+    tools: [
+      ...codingTools,
+      submitTool,
+      abandonTool,
+    ],
+    memory: [
+      plannerAttemptLayer,
+      steeringLayer,
+    ],
+    fs: ctx.fs,
+  });
+
+  const initialPromptText = buildInitialPrompt({
+    title: task.title,
+    description,
+  });
+  // The IPC server's stream pump appends the framing item to chat.jsonl
+  // when the harness emits it, so we don't write to disk here. The id
+  // is stable per-task so re-spawns recognise it as the same framing.
+  const initialMessage = {
+    id: `planner-init-${taskId}`,
+    type: 'message' as const,
+    role: 'developer' as const,
+    status: 'completed' as const,
+    content: [
+      {
+        type: 'input_text' as const,
+        text: initialPromptText,
+      },
+    ],
   };
+
+  const ipcServer = new AgentIpcServer({
+    harness,
+    storeCtx: ctx,
+    taskId,
+    role: 'planner',
+    runnerId: 'planner',
+    threadId,
+  });
+  await ipcServer.listen();
+  // Re-read the sidecar before adding `socketPath` so we don't clobber
+  // any control-surface mutation (pause/cancel/delete-guard) that may
+  // have updated it between the runner's startup `loadPlanner` above
+  // and now. If the sidecar was cleared while listen() was binding,
+  // skip the write entirely — the runner is already orphaned.
+  const currentSidecar = await loadPlanner(ctx, taskId);
+  if (currentSidecar !== null) {
+    await savePlanner(ctx, {
+      ...currentSidecar,
+      socketPath: ipcServer.getSocketPath(),
+    });
+  }
+
+  const installSignalHandlers = (): (() => void) => {
+    const onSignal = (signalName: string): void => {
+      // Reject the runner signal so `runRunnerLoop`'s `await signal.done`
+      // unwinds and the surrounding finally block can close the IPC
+      // server cleanly. Without this rejection the await would block
+      // forever and the OS would kill the process before unlink runs.
+      signal.reject(new Error(`runner aborted by ${signalName}`));
+      void ipcServer.close(`process-signal:${signalName}`);
+    };
+    const onSigInt = (): void => onSignal('SIGINT');
+    const onSigTerm = (): void => onSignal('SIGTERM');
+    process.on('SIGINT', onSigInt);
+    process.on('SIGTERM', onSigTerm);
+    return () => {
+      process.off('SIGINT', onSigInt);
+      process.off('SIGTERM', onSigTerm);
+    };
+  };
+  const removeSignalHandlers = installSignalHandlers();
+
+  // Belt-and-suspenders: if the process exits via an uncaught throw the
+  // try/finally below doesn't run, so this 'exit' handler unlinks the
+  // socket synchronously as a last resort. We use the top-level
+  // `unlinkSocketSync` helper rather than an inline require so the
+  // import surface stays in one place.
+  const onExit = (): void => {
+    unlinkSocketSync(ipcServer.getSocketPath());
+  };
+  process.on('exit', onExit);
+
+  try {
+    const outcome = await runRunnerLoop({
+      harness,
+      threadId,
+      initialMessage,
+      signal,
+      storeCtx: ctx,
+      taskId,
+    });
+    return {
+      taskId,
+      outcome,
+    };
+  } finally {
+    process.off('exit', onExit);
+    removeSignalHandlers();
+    await ipcServer.close('runner-exit');
+  }
 }
 
 //#endregion

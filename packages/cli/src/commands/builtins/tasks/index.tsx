@@ -17,7 +17,9 @@ const call: LocalCommandCall = async (_args, ctx) => {
       value: 'Task board is not available in this context.',
     };
   }
-  ctx.setViewMode('taskBoard');
+  ctx.setViewMode({
+    kind: 'taskBoard',
+  });
   return {
     type: 'skip',
   };

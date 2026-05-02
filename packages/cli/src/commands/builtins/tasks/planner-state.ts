@@ -34,6 +34,13 @@ export const PlannerStateSchema = z.object({
   pidStarttime: z.string().nullable(),
   startedAt: z.string(),
   pausedAt: z.string().nullable(),
+  /**
+   * Absolute path to the runner's IPC unix-domain socket. Populated by the
+   * runner once it binds; the TUI reads this to connect for live chat.
+   * Null until the runner has bound (e.g. between launcher write and
+   * runner startup).
+   */
+  socketPath: z.string().nullish(),
 });
 
 export type PlannerState = z.infer<typeof PlannerStateSchema>;

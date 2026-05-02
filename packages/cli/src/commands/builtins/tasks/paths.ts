@@ -28,6 +28,10 @@ export interface TaskDirPaths {
   readonly attachments: string;
   /** `<dir>/hierarchy/` (present iff structured). */
   readonly hierarchy: string;
+  /** `<dir>/chat.jsonl` append-only chat history (one Item per line). */
+  readonly chat: string;
+  /** `<dir>/sockets/` runner IPC sockets (one per active runner). */
+  readonly sockets: string;
 }
 
 //#endregion
@@ -58,7 +62,25 @@ export function taskDirPaths(projectRoot: string, taskId: string): TaskDirPaths 
     steering: join(dir, 'steering.md'),
     attachments: join(dir, 'attachments'),
     hierarchy: join(dir, 'hierarchy'),
+    chat: join(dir, 'chat.jsonl'),
+    sockets: join(dir, 'sockets'),
   };
+}
+
+/** Resolve the unix-domain-socket path for a single runner.
+ *
+ * `role` distinguishes the agent role; `runnerId` distinguishes concurrent
+ * runners of the same role (e.g. multiple implementers, one per feature).
+ * For singletons (planner, validator) `runnerId` is the role itself.
+ */
+export function runnerSocketPath(args: {
+  readonly projectRoot: string;
+  readonly taskId: string;
+  readonly role: string;
+  readonly runnerId: string;
+}): string {
+  const { sockets } = taskDirPaths(args.projectRoot, args.taskId);
+  return join(sockets, `${args.role}-${args.runnerId}.sock`);
 }
 
 /**

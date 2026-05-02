@@ -42,6 +42,12 @@ export const ImplementerStateSchema = z.object({
   branch: z.string().min(1),
   startedAt: z.string(),
   pausedAt: z.string().nullable(),
+  /**
+   * Absolute path to the runner's IPC unix-domain socket. Populated by
+   * the runner once it binds; the TUI reads this to connect for live
+   * chat. Null until the runner has bound.
+   */
+  socketPath: z.string().nullish(),
 });
 
 export type ImplementerState = z.infer<typeof ImplementerStateSchema>;

@@ -18,27 +18,32 @@
  */
 
 import { basename, dirname } from 'node:path';
-import { AgentHarness, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 
+import { createLocalFsAdapter } from '@noetic/core';
+
+import { createSteeringFileLayer } from '../../../memory/steering-file-layer.js';
 import { createCodingTools } from '../../../tools/index.js';
+import { AgentIpcServer, unlinkSocketSync } from './agent-ipc-server.js';
 import { DEFAULT_MODEL } from './defaults.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendEvent, appendLog } from './fs-store.js';
 import { getTaskHierarchy } from './hierarchy/aggregate.js';
 import type { FeatureLifecycleContext } from './hierarchy/feature-lifecycle.js';
 import { applyFeatureLoopStateUpdate, markFeatureBlocked } from './hierarchy/feature-lifecycle.js';
-import type { ImplementerFlowInput, ImplementerOutcome } from './hierarchy/implementer-flow.js';
-import {
-  buildFixFeedbackSeed,
-  buildImplementerFlow,
-  loadAccumulatedIssues,
-} from './hierarchy/implementer-flow.js';
+import type { ImplementerOutcome } from './hierarchy/implementer-flow.js';
+import { buildFixFeedbackSeed, loadAccumulatedIssues } from './hierarchy/implementer-flow.js';
 import type { Assertion, Feature, MilestoneWithChildren } from './hierarchy/schemas.js';
 import { DEFAULT_IMPLEMENTATION_RETRY_BUDGET, FeatureLoopState } from './hierarchy/schemas.js';
-import { clearImplementer, loadImplementer } from './implementer-state.js';
+import { clearImplementer, loadImplementer, saveImplementer } from './implementer-state.js';
+import {
+  createImplementationBlockedTool,
+  createImplementationDoneTool,
+} from './implementer-tools.js';
+import { createFixFeedbackLayer } from './memory/fix-feedback-layer.js';
+import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
 import { EventKind, LogEntryKind } from './schemas.js';
 
-export type { ImplementerOutcome, RunReactFn } from './hierarchy/implementer-flow.js';
+export type { ImplementerOutcome } from './hierarchy/implementer-flow.js';
 
 //#region Types
 
@@ -55,8 +60,6 @@ export interface RunImplementerOptions {
   readonly cwd?: string;
   readonly model?: string;
   readonly apiKey?: string;
-  /** Test seam: replace the react-loop executor with a stub. */
-  readonly runReactFn?: import('./hierarchy/implementer-flow.js').RunReactFn;
   readonly maxSteps?: number;
 }
 
@@ -65,8 +68,6 @@ export interface RunImplementerResult {
   readonly parentTaskId: string;
   readonly featureId: string;
   readonly outcome: ImplementerOutcome;
-  readonly previousLoopState: FeatureLoopState;
-  readonly loopState: FeatureLoopState;
 }
 
 //#endregion
@@ -145,7 +146,24 @@ async function loadParentDescription(args: {
   }
 }
 
-function buildPrompt(args: {
+const IMPLEMENTER_INSTRUCTIONS = `You are the Noetic implementer.
+
+Your job is to implement a single feature in the current worktree using the available coding tools (read, write, edit, bash, grep, find, ls). When you are confident the acceptance criteria are met, call \`signal_implementation_done\` with a one-paragraph summary. If you cannot complete the feature in this attempt, call \`signal_implementation_blocked\` with a one-sentence reason — do not partially implement and pretend you finished.
+
+# Working style
+- Keep changes scoped to the feature. Don't refactor or restructure unrelated code.
+- Read existing code before writing new code. Match the project's conventions.
+- Run any tests you write or rely on before declaring done.
+- The user can chat with you mid-task to steer or clarify. Treat any user turn as authoritative new context.
+
+# Termination
+You MUST end the run by calling exactly one of these tools:
+- \`signal_implementation_done\` when the feature is implemented and the acceptance criteria are satisfied.
+- \`signal_implementation_blocked\` when the feature cannot be implemented in this attempt.
+
+Do not return without calling one of these tools.`;
+
+function buildInitialPrompt(args: {
   feature: Feature;
   assertions: ReadonlyArray<Assertion>;
   worktreeCwd: string;
@@ -165,8 +183,7 @@ function buildPrompt(args: {
   lines.push(
     '',
     `Working directory: ${args.worktreeCwd}.`,
-    'Use the available tools to make code changes that satisfy the acceptance criteria.',
-    'When you are confident the feature is complete, stop emitting tool calls and summarize what you did.',
+    'Implement this feature, then call signal_implementation_done. If you get stuck, call signal_implementation_blocked.',
   );
   return lines.join('\n');
 }
@@ -364,7 +381,14 @@ export async function runImplementer(
 
   const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
   const model = opts.model ?? process.env.NOETIC_MODEL ?? DEFAULT_MODEL;
-  const maxSteps = opts.maxSteps ?? DEFAULT_IMPLEMENTATION_RETRY_BUDGET;
+  // `maxSteps` previously bounded the react-loop iterations. With the
+  // chat-shaped runner the agent self-terminates by calling a terminal
+  // tool, so we no longer thread maxSteps into a step graph. The option
+  // is kept on `RunImplementerOptions` for forward compatibility (a turn
+  // budget could be re-introduced as a runner-loop guard) but is unused
+  // here — silenced via destructure to keep the unused-locals lint clean.
+  void DEFAULT_IMPLEMENTATION_RETRY_BUDGET;
+  void opts.maxSteps;
 
   // Seed the fix-feedback layer from disk: prior plan + description +
   // accumulated assertion failures from this feature's fix lineage.
@@ -389,80 +413,142 @@ export async function runImplementer(
     attempt: found.feature.implementationAttemptCount + 1,
   });
 
-  const flow = buildImplementerFlow({
-    model,
-    maxSteps,
-    runReact: opts.runReactFn,
-    fixFeedbackInitial,
+  const signal = createRunnerSignal<ImplementerOutcome>();
+
+  const doneTool = createImplementationDoneTool({
+    storeCtx: ctx,
+    leafTaskId,
+    parentTaskId,
+    featureId,
+    signal,
+  });
+  const blockedTool = createImplementationBlockedTool({
+    storeCtx: ctx,
+    leafTaskId,
+    parentTaskId,
+    featureId,
+    signal,
   });
 
-  const harness = new AgentHarness({
-    name: 'noetic-implementer',
-    fs: ctx.fs,
-    shell: createLocalShellAdapter(),
-    params: {
-      model,
-    },
-    llm: {
-      provider: 'openrouter',
-      apiKey,
-    },
-    memory: [
-      ...flow.layers,
-    ],
-    initialCwd: cwd,
-  });
-
-  const tools = createCodingTools({
+  const codingTools = createCodingTools({
     cwd,
     fs: ctx.fs,
   });
 
-  const prompt = buildPrompt({
-    feature: found.feature,
-    assertions: found.assertions,
-    worktreeCwd: cwd,
+  const fixFeedbackLayer = createFixFeedbackLayer({
+    initial: fixFeedbackInitial,
   });
+  const steeringLayer = createSteeringFileLayer();
 
-  const flowInput: ImplementerFlowInput = {
-    feature: found.feature,
-    assertions: found.assertions,
-    worktreeCwd: cwd,
-    prompt,
-    tools,
-  };
-  const flowCtx = harness.createContext({});
-  // `harness.run` does not auto-init layers; do it manually using
-  // `flow.layers` (avoids reading the internal `Context.layers`
-  // field). Ensures the fix-feedback layer's seeded state is
-  // visible on the first recall.
-  if (flow.layers.length > 0) {
-    await harness.initLayers(
-      [
-        ...flow.layers,
-      ],
-      flowCtx,
-      harness.config.storage,
-    );
-  }
-  const outcome = await harness.run(flow.step, flowInput, flowCtx);
-
-  const { previousLoopState, loopState } = await commitExitWrites({
-    ctx,
-    leafTaskId,
-    parentTaskId,
-    featureId,
-    outcome,
-  });
-
-  return {
+  const { harness, threadId } = createRunnerHarness({
+    role: 'implementer',
     taskId: leafTaskId,
-    parentTaskId,
-    featureId,
-    outcome,
-    previousLoopState,
-    loopState,
+    cwd,
+    apiKey,
+    model,
+    instructions: IMPLEMENTER_INSTRUCTIONS,
+    tools: [
+      ...codingTools,
+      doneTool,
+      blockedTool,
+    ],
+    memory: [
+      fixFeedbackLayer,
+      steeringLayer,
+    ],
+    fs: ctx.fs,
+  });
+
+  const initialPromptText = buildInitialPrompt({
+    feature: found.feature,
+    assertions: found.assertions,
+    worktreeCwd: cwd,
+  });
+  // The IPC server's stream pump appends the framing item to chat.jsonl
+  // when the harness emits it, so we don't write to disk here.
+  const initialMessage = {
+    id: `implementer-init-${leafTaskId}`,
+    type: 'message' as const,
+    role: 'developer' as const,
+    status: 'completed' as const,
+    content: [
+      {
+        type: 'input_text' as const,
+        text: initialPromptText,
+      },
+    ],
   };
+
+  const ipcServer = new AgentIpcServer({
+    harness,
+    storeCtx: ctx,
+    taskId: leafTaskId,
+    role: 'implementer',
+    runnerId: featureId,
+    threadId,
+  });
+  await ipcServer.listen();
+  // Re-read the sidecar before adding `socketPath` so we don't clobber
+  // any control-surface mutation that may have updated it between the
+  // runner's startup `loadImplementer` above and now. If the sidecar
+  // was cleared while listen() was binding, skip the write — runner
+  // is already orphaned.
+  const currentSidecar = await loadImplementer(ctx, leafTaskId);
+  if (currentSidecar !== null) {
+    await saveImplementer(ctx, {
+      ...currentSidecar,
+      socketPath: ipcServer.getSocketPath(),
+    });
+  }
+
+  const installSignalHandlers = (): (() => void) => {
+    const onSignal = (signalName: string): void => {
+      // Reject the runner signal so `runRunnerLoop`'s `await signal.done`
+      // unwinds and the surrounding finally block can close the IPC
+      // server cleanly. Without this rejection the await would block
+      // forever and the OS would kill the process before unlink runs.
+      signal.reject(new Error(`runner aborted by ${signalName}`));
+      void ipcServer.close(`process-signal:${signalName}`);
+    };
+    const onSigInt = (): void => onSignal('SIGINT');
+    const onSigTerm = (): void => onSignal('SIGTERM');
+    process.on('SIGINT', onSigInt);
+    process.on('SIGTERM', onSigTerm);
+    return () => {
+      process.off('SIGINT', onSigInt);
+      process.off('SIGTERM', onSigTerm);
+    };
+  };
+  const removeSignalHandlers = installSignalHandlers();
+
+  // Belt-and-suspenders: if the process exits via an uncaught throw the
+  // try/finally below doesn't run, so this 'exit' handler unlinks the
+  // socket synchronously as a last resort.
+  const onExit = (): void => {
+    unlinkSocketSync(ipcServer.getSocketPath());
+  };
+  process.on('exit', onExit);
+
+  try {
+    const outcome = await runRunnerLoop({
+      harness,
+      threadId,
+      initialMessage,
+      signal,
+      storeCtx: ctx,
+      taskId: leafTaskId,
+    });
+    return {
+      taskId: leafTaskId,
+      parentTaskId,
+      featureId,
+      outcome,
+    };
+  } finally {
+    process.off('exit', onExit);
+    removeSignalHandlers();
+    await ipcServer.close('runner-exit');
+  }
 }
 
 //#endregion

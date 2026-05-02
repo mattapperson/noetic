@@ -283,6 +283,21 @@ const harness = new AgentHarness({
 });
 ```
 
+## Resuming a session from disk
+
+`harness.seedSessionHistory(threadId, items)` populates a fresh session's accumulated items before the next `execute()` call. Pair it with append-only persistence (one `Item` per line in a JSONL file) to make a chat survive subprocess restarts:
+
+```ts
+import { harness } from './my-harness';
+import { readPriorItems } from './my-store';
+
+const threadId = 'task-T-abc123';
+harness.seedSessionHistory(threadId, await readPriorItems(threadId));
+await harness.execute('continue from here', { threadId });
+```
+
+The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Task IPC for Live Chat" section of `specs/08-runtime.md` for the end-to-end design.
+
 ## Related Pages
 
 - [Context & Event Log](/docs/framework/context) -- the context object the agent harness creates.
