@@ -89,7 +89,7 @@ Tools are created with a `cwd` context and return `Tool` type from `@noetic/core
 | `agent` | Spawn a sub-agent (teammate) sync, background, or named+addressable; optional `isolation: 'worktree'`. Picks skill by `subagent_type`. |
 | `sendMessage` | Write a message to a named teammate's inbound queue; the teammate sees it as `<inbound-message>` on its next turn. |
 | `checkAgent` | Poll status/result/error of a previously-launched teammate by agentId. |
-| `AskUserQuestion` | Pause mid-turn to pose 1–4 multiple-choice questions (with optional markdown/HTML `preview` per option, multi-select, and free-text "Other"). Returns a `question → answer` map. Only registered when an `AskUserService` is supplied (i.e. when running under the TUI). |
+| `AskUserQuestion` | Pause mid-turn to pose 1–4 multiple-choice questions (with optional markdown/HTML `preview` per option, multi-select, and free-text "Other"). Returns a `question → answer` map. Registered whenever an `AskUserService` is supplied — the in-process TUI service for the main chat, and an IPC-backed service (`tasks/ipc-ask-user-service.ts`) for autonomous task runners. |
 
 Use `createCodingTools(opts)` for full toolset or `createReadOnlyTools(opts)` for safe exploration. Both accept `{ cwd, fs?, shell?, lspService?, askUserService? }`; the TUI passes `askUserService` so the ask-user tool can render a modal.
 

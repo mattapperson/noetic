@@ -19,6 +19,7 @@ import { AgentIpcServer, unlinkSocketSync } from './agent-ipc-server.js';
 import { DEFAULT_MODEL } from './defaults.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendLog, loadTask } from './fs-store.js';
+import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createPlannerAttemptLayer } from './memory/planner-attempt-layer.js';
 import { loadPlanner, savePlanner } from './planner-state.js';
 import type { PlannerOutcome } from './planner-tools.js';
@@ -175,9 +176,26 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     signal,
   });
 
+  // Construct the IPC-backed ask-user service before tools so the
+  // `AskUserQuestion` tool gets registered. The broadcaster is wired
+  // up after the IPC server is constructed (server holds the client
+  // set the broadcaster fans out to). Calls before that wiring become
+  // no-ops, which is safe because the agent can't ask anything before
+  // its first turn anyway.
+  let serverRef: AgentIpcServer | null = null;
+  const askUserService = createIpcAskUserService({
+    broadcastRequest: (request) => {
+      serverRef?.broadcastAskUserRequest(request);
+    },
+    broadcastCleared: (id) => {
+      serverRef?.broadcastAskUserCleared(id);
+    },
+  });
+
   const codingTools = createCodingTools({
     cwd,
     fs: ctx.fs,
+    askUserService,
   });
 
   const plannerAttemptLayer = createPlannerAttemptLayer({
@@ -231,7 +249,9 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     role: 'planner',
     runnerId: 'planner',
     threadId,
+    askUserService,
   });
+  serverRef = ipcServer;
   await ipcServer.listen();
   // Re-read the sidecar before adding `socketPath` so we don't clobber
   // any control-surface mutation (pause/cancel/delete-guard) that may
@@ -284,6 +304,15 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
       signal,
       storeCtx: ctx,
       taskId,
+      nudge: {
+        role: 'planner',
+        askUserService,
+        buildStalledOutcome: (): PlannerOutcome => ({
+          status: 'failed',
+          reason:
+            'planner stalled — finished its turn without calling submit_hierarchy or AskUserQuestion',
+        }),
+      },
     });
     return {
       taskId,

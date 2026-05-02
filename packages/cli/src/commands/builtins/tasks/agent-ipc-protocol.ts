@@ -12,10 +12,31 @@
 
 import { z } from 'zod';
 
+import { AskUserInputSchema, AskUserOutputSchema } from '../../../tools/ask-user-types.js';
+
 //#region Constants
 
 /** Wire protocol version. Bumped when frame shapes change incompatibly. */
 export const PROTOCOL_VERSION = 1;
+
+//#endregion
+
+//#region Ask-user payload schemas
+
+/**
+ * Pending ask-user request as it travels over the wire. Mirrors the
+ * `PendingAskUserRequest` shape exposed by the in-memory ask-user
+ * service, but defined here so server and client both validate the
+ * frame without importing the service module (which would pull TUI
+ * dependencies into the runner).
+ */
+export const AskUserPendingFrameSchema = z.object({
+  id: z.string().min(1),
+  input: AskUserInputSchema,
+  createdAt: z.number().int().nonnegative(),
+});
+
+export type AskUserPendingFrame = z.infer<typeof AskUserPendingFrameSchema>;
 
 //#endregion
 
@@ -44,12 +65,26 @@ const AbortFrameSchema = z.object({
   reason: z.string().optional(),
 });
 
+const AskUserResolveFrameSchema = z.object({
+  type: z.literal('askUserResolve'),
+  id: z.string().min(1),
+  output: AskUserOutputSchema,
+});
+
+const AskUserCancelFrameSchema = z.object({
+  type: z.literal('askUserCancel'),
+  id: z.string().min(1),
+  reason: z.string().optional(),
+});
+
 export const ClientFrameSchema = z.discriminatedUnion('type', [
   SubscribeFrameSchema,
   GetHistoryFrameSchema,
   SendFrameSchema,
   GetStatusFrameSchema,
   AbortFrameSchema,
+  AskUserResolveFrameSchema,
+  AskUserCancelFrameSchema,
 ]);
 
 export type ClientFrame = z.infer<typeof ClientFrameSchema>;
@@ -105,6 +140,16 @@ const ByeFrameSchema = z.object({
   reason: z.string().optional(),
 });
 
+const AskUserRequestFrameSchema = z.object({
+  type: z.literal('askUserRequest'),
+  request: AskUserPendingFrameSchema,
+});
+
+const AskUserClearedFrameSchema = z.object({
+  type: z.literal('askUserCleared'),
+  id: z.string().min(1),
+});
+
 export const ServerFrameSchema = z.discriminatedUnion('type', [
   HelloFrameSchema,
   HistoryFrameSchema,
@@ -114,6 +159,8 @@ export const ServerFrameSchema = z.discriminatedUnion('type', [
   AckFrameSchema,
   ErrorFrameSchema,
   ByeFrameSchema,
+  AskUserRequestFrameSchema,
+  AskUserClearedFrameSchema,
 ]);
 
 export type ServerFrame = z.infer<typeof ServerFrameSchema>;

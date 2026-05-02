@@ -98,6 +98,7 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
     reviewStatus: TaskReviewStatus.Reviewing,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: false,

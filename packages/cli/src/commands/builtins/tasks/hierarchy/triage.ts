@@ -57,6 +57,7 @@ function buildPlaceholderTask(args: { feature: Feature; projectRoot: string; now
     reviewStatus: TaskReviewStatus.NotStarted,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: false,

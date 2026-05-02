@@ -73,6 +73,7 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
     reviewStatus: TaskReviewStatus.NotStarted,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: HierarchyStatus.Active,
     autopilotEnabled: false,

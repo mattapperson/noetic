@@ -5,10 +5,17 @@
  * the same `ResponsesChat` component the in-process chat uses. The
  * header strip shows what role you're chatting with (planner /
  * implementer / validator), the task id, and the connection state.
+ *
+ * When the runner agent has issued an outstanding `AskUserQuestion`,
+ * the existing `AskUserModal` is rendered as an overlay over the chat
+ * scroll. Submitting / cancelling the modal forwards the user's
+ * decision back through the per-task IPC socket so the agent's
+ * awaiting tool call resolves.
  */
 
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
+import { AskUserModal } from '../components/ask-user/ask-user-modal.js';
 import type { ChatStatus } from '../components/prompt-input.js';
 import { ResponsesChat } from '../components/responses-chat.js';
 import { useTheme } from '../components/theme.js';
@@ -101,10 +108,19 @@ export function TaskChatView(props: TaskChatViewProps): React.ReactElement {
     socketPath: props.socketPath,
   });
 
+  // Esc dismisses an open ask-user modal first; only when no modal is
+  // open does it fall through to leaving the view. Without this the
+  // user would have no way to back out of a stuck question other than
+  // clicking the (non-existent) cancel button.
   useInput((_input, key) => {
-    if (key.escape) {
-      props.onExit();
+    if (!key.escape) {
+      return;
     }
+    if (chat.pendingAskUser !== null) {
+      chat.cancelAskUser('user dismissed via escape');
+      return;
+    }
+    props.onExit();
   });
 
   const handleSubmit = (text: string): void => {
@@ -129,6 +145,25 @@ export function TaskChatView(props: TaskChatViewProps): React.ReactElement {
         status={toChatStatus(chat.status)}
         onSubmit={handleSubmit}
       />
+      {chat.pendingAskUser === null ? null : (
+        <Box marginTop={1}>
+          <AskUserModal
+            input={chat.pendingAskUser.input}
+            isPlanMode={false}
+            onSubmit={(output) => {
+              chat.submitAskUser(output);
+            }}
+            onCancel={(reason) => {
+              chat.cancelAskUser(reason);
+            }}
+            onFinishPlanInterview={() => {
+              // Plan mode isn't meaningful in the task-runner chat —
+              // the runner agent only ever asks structured questions
+              // mid-implementation, never as a plan interview.
+            }}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

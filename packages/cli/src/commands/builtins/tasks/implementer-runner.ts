@@ -39,6 +39,7 @@ import {
   createImplementationBlockedTool,
   createImplementationDoneTool,
 } from './implementer-tools.js';
+import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createFixFeedbackLayer } from './memory/fix-feedback-layer.js';
 import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
 import { EventKind, LogEntryKind } from './schemas.js';
@@ -430,9 +431,24 @@ export async function runImplementer(
     signal,
   });
 
+  // Construct the IPC-backed ask-user service before tools so the
+  // `AskUserQuestion` tool gets registered. The broadcaster is wired
+  // up after the IPC server is constructed (server holds the client
+  // set the broadcaster fans out to).
+  let serverRef: AgentIpcServer | null = null;
+  const askUserService = createIpcAskUserService({
+    broadcastRequest: (request) => {
+      serverRef?.broadcastAskUserRequest(request);
+    },
+    broadcastCleared: (id) => {
+      serverRef?.broadcastAskUserCleared(id);
+    },
+  });
+
   const codingTools = createCodingTools({
     cwd,
     fs: ctx.fs,
+    askUserService,
   });
 
   const fixFeedbackLayer = createFixFeedbackLayer({
@@ -486,7 +502,9 @@ export async function runImplementer(
     role: 'implementer',
     runnerId: featureId,
     threadId,
+    askUserService,
   });
+  serverRef = ipcServer;
   await ipcServer.listen();
   // Re-read the sidecar before adding `socketPath` so we don't clobber
   // any control-surface mutation that may have updated it between the
@@ -537,6 +555,16 @@ export async function runImplementer(
       signal,
       storeCtx: ctx,
       taskId: leafTaskId,
+      nudge: {
+        role: 'implementer',
+        askUserService,
+        buildStalledOutcome: (): ImplementerOutcome => ({
+          status: 'blocked',
+          summary:
+            'implementer stalled — finished its turn without calling signal_implementation_done, signal_implementation_blocked, or AskUserQuestion',
+          blockedReason: 'agent stalled',
+        }),
+      },
     });
     return {
       taskId: leafTaskId,

@@ -107,6 +107,7 @@ async function seedLeafTask(
     reviewStatus: TaskReviewStatus.NotStarted,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: false,

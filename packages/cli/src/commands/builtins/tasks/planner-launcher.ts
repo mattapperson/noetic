@@ -217,6 +217,7 @@ async function patchTaskForPlanning(args: PatchPlanningArgs): Promise<PatchPlann
     ...task,
     autopilotState: AutopilotState.Planning,
     paused: false,
+    pauseReason: null,
     lastAutopilotActivityAt: args.now,
     updatedAt: args.now,
     lastSeenAt: args.now,

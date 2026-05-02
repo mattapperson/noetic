@@ -22,6 +22,13 @@
  * Multiple clients may subscribe simultaneously (e.g. the TUI plus a CLI
  * inspector) — the server fans out items and events to every subscribed
  * connection.
+ *
+ * The server also owns an `IpcAskUserService` so headless runners can
+ * register the `AskUserQuestion` tool: when the agent calls the tool,
+ * the service fans out an `askUserRequest` frame to subscribed clients,
+ * and clients return answers via `askUserResolve` / `askUserCancel`
+ * frames. Pending requests are replayed to late-joining clients so a
+ * reconnecting TUI sees the outstanding question instead of blanking.
  */
 
 import { unlinkSync } from 'node:fs';
@@ -38,11 +45,13 @@ import type {
   StreamingItem,
 } from '@noetic/core';
 import { ZodError } from 'zod';
+import type { PendingAskUserRequest } from '../../../tui/services/ask-user-service.js';
 import type { ClientFrame, ServerFrame } from './agent-ipc-protocol.js';
 import { encodeFrame, PROTOCOL_VERSION, parseClientFrame } from './agent-ipc-protocol.js';
 import type { ChatHistoryStoreContext } from './chat-history-store.js';
 import { appendChatItem, readChatHistory } from './chat-history-store.js';
 import { appendLog } from './fs-store.js';
+import type { IpcAskUserService } from './ipc-ask-user-service.js';
 import { runnerSocketPath } from './paths.js';
 import { LogEntryKind } from './schemas.js';
 
@@ -80,6 +89,20 @@ export interface AgentIpcServerOpts {
   readonly role: string;
   readonly runnerId: string;
   readonly threadId: string;
+  /**
+   * IPC-backed ask-user service the runner threads through its tool
+   * registration. The server uses it to (a) replay outstanding requests
+   * to late-joining clients, (b) route `askUserResolve` / `askUserCancel`
+   * client frames into the service, and (c) cancel any pending request
+   * on close so a runner shutdown doesn't strand the agent's awaiting
+   * tool call.
+   *
+   * The service's broadcaster (constructed by the runner) is expected
+   * to forward into this server's `broadcastAskUserRequest` /
+   * `broadcastAskUserCleared` methods so events propagate to subscribed
+   * clients.
+   */
+  readonly askUserService: IpcAskUserService;
 }
 
 interface ClientState {
@@ -196,6 +219,16 @@ async function handleSubscribe(_frame: ClientFrame, ctx: FrameContext): Promise<
       threadId: ctx.server.threadId,
     }),
   });
+  // Replay any outstanding ask-user request so a late-joining client
+  // (e.g. TUI reconnecting after a network blip) sees the modal it
+  // would otherwise have missed.
+  const pending = ctx.server.askUserService.peek();
+  if (pending !== null) {
+    writeFrame(ctx.client.socket, {
+      type: 'askUserRequest',
+      request: pending,
+    });
+  }
 }
 
 async function handleGetHistory(_frame: ClientFrame, ctx: FrameContext): Promise<void> {
@@ -239,12 +272,28 @@ async function handleAbort(frame: ClientFrame, ctx: FrameContext): Promise<void>
   });
 }
 
+async function handleAskUserResolve(frame: ClientFrame, ctx: FrameContext): Promise<void> {
+  if (frame.type !== 'askUserResolve') {
+    return;
+  }
+  ctx.server.askUserService.handleResolve(frame.id, frame.output);
+}
+
+async function handleAskUserCancel(frame: ClientFrame, ctx: FrameContext): Promise<void> {
+  if (frame.type !== 'askUserCancel') {
+    return;
+  }
+  ctx.server.askUserService.handleCancel(frame.id, frame.reason ?? 'user cancelled');
+}
+
 const FRAME_HANDLERS: Record<ClientFrame['type'], FrameHandler> = {
   subscribe: handleSubscribe,
   getHistory: handleGetHistory,
   send: handleSend,
   getStatus: handleGetStatus,
   abort: handleAbort,
+  askUserResolve: handleAskUserResolve,
+  askUserCancel: handleAskUserCancel,
 };
 
 //#endregion
@@ -254,6 +303,7 @@ const FRAME_HANDLERS: Record<ClientFrame['type'], FrameHandler> = {
 export class AgentIpcServer {
   readonly threadId: string;
   readonly harness: IpcHarness;
+  readonly askUserService: IpcAskUserService;
 
   private readonly storeCtx: ChatHistoryStoreContext;
   private readonly taskId: string;
@@ -272,11 +322,37 @@ export class AgentIpcServer {
     this.role = opts.role;
     this.runnerId = opts.runnerId;
     this.threadId = opts.threadId;
+    this.askUserService = opts.askUserService;
     this.socketPath = runnerSocketPath({
       projectRoot: opts.storeCtx.projectRoot,
       taskId: opts.taskId,
       role: opts.role,
       runnerId: opts.runnerId,
+    });
+  }
+
+  /**
+   * Fan an ask-user request out to every subscribed client. The runner
+   * constructs the IPC-backed `AskUserService` with a broadcaster that
+   * forwards into this method, so the service stays unaware of sockets.
+   */
+  broadcastAskUserRequest(request: PendingAskUserRequest): void {
+    broadcastFrame(this.clients, {
+      type: 'askUserRequest',
+      request,
+    });
+  }
+
+  /**
+   * Notify subscribed clients that a previously-broadcast request has
+   * been resolved or cancelled. Idempotent — late frames against an
+   * already-cleared id are harmless on the client side (they just
+   * close a modal that's already gone).
+   */
+  broadcastAskUserCleared(id: string): void {
+    broadcastFrame(this.clients, {
+      type: 'askUserCleared',
+      id,
     });
   }
 
@@ -353,6 +429,9 @@ export class AgentIpcServer {
     }
     this.closed = true;
     this.streamPumpStopped = true;
+    // Reject any outstanding ask-user request so the agent's awaiting
+    // tool call doesn't hang past server shutdown.
+    this.askUserService.cancelAll(reason ?? 'agent ipc server closed');
     for (const client of this.clients) {
       writeFrame(client.socket, {
         type: 'bye',

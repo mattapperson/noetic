@@ -34,6 +34,7 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
     reviewStatus: 'not_started',
     lifecycleStatus: 'active',
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: false,

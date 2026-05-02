@@ -9,7 +9,9 @@
  *   - `send(text)` queues a user message via the runner's `harness.execute()`.
  *   - `getHistory()` returns the seeded chat-history snapshot.
  *   - `subscribe()` switches to streaming mode and returns AsyncIterables
- *     for incoming items and framework events.
+ *     for incoming items, framework events, and ask-user state changes.
+ *   - `resolveAskUser(id, output)` / `cancelAskUser(id, reason)` answer
+ *     a server-issued `askUserRequest`.
  *   - `close()` gracefully tears the connection down.
  *
  * The client never assumes the server is the same process — frame
@@ -22,7 +24,8 @@ import type { Socket } from 'node:net';
 import { createConnection } from 'node:net';
 
 import { z } from 'zod';
-import type { ServerFrame } from './agent-ipc-protocol.js';
+import type { AskUserOutput } from '../../../tools/ask-user-types.js';
+import type { AskUserPendingFrame, ServerFrame } from './agent-ipc-protocol.js';
 import { encodeFrame, parseServerFrame } from './agent-ipc-protocol.js';
 
 //#region Types
@@ -39,6 +42,22 @@ export interface AgentIpcClientOpts {
   readonly socketPath: string;
 }
 
+/**
+ * Discriminated event the `askUser` subscription stream emits. `pending`
+ * carries a new outstanding request; `cleared` signals the request with
+ * `id` has been resolved or cancelled (by us or by another client). The
+ * UI uses these to show/dismiss the modal.
+ */
+export type AskUserStreamEvent =
+  | {
+      readonly kind: 'pending';
+      readonly request: AskUserPendingFrame;
+    }
+  | {
+      readonly kind: 'cleared';
+      readonly id: string;
+    };
+
 interface PendingDeferred<T> {
   resolve(value: T): void;
   reject(err: unknown): void;
@@ -47,6 +66,7 @@ interface PendingDeferred<T> {
 interface SubscriptionStreams {
   pushItem(item: unknown): void;
   pushEvent(event: unknown): void;
+  pushAskUser(event: AskUserStreamEvent): void;
   close(): void;
 }
 
@@ -171,24 +191,28 @@ export class AgentIpcClient {
   }
 
   /**
-   * Switch to streaming mode. Returns AsyncIterables for items and
-   * framework events. Calling `subscribe()` more than once returns the
-   * same streams (idempotent).
+   * Switch to streaming mode. Returns AsyncIterables for items,
+   * framework events, and ask-user state changes. Calling
+   * `subscribe()` more than once returns the same streams (idempotent).
    */
   subscribe(): {
     readonly items: AsyncIterable<unknown>;
     readonly events: AsyncIterable<unknown>;
+    readonly askUser: AsyncIterable<AskUserStreamEvent>;
   } {
     this.requireConnected();
     if (this.subscriptionStreams === null) {
       const items = makeQueueIterable<unknown>();
       const events = makeQueueIterable<unknown>();
+      const askUser = makeQueueIterable<AskUserStreamEvent>();
       this.subscriptionStreams = {
         pushItem: items.push,
         pushEvent: events.push,
+        pushAskUser: askUser.push,
         close: () => {
           items.close();
           events.close();
+          askUser.close();
         },
       };
       this.writeFrame({
@@ -198,6 +222,7 @@ export class AgentIpcClient {
       return {
         items: items.iter,
         events: events.iter,
+        askUser: askUser.iter,
       };
     }
     // Re-derive iterables from the existing pump on a second call. We
@@ -205,6 +230,7 @@ export class AgentIpcClient {
     // already pushed to the original.
     const itemsAgain = makeQueueIterable<unknown>();
     const eventsAgain = makeQueueIterable<unknown>();
+    const askUserAgain = makeQueueIterable<AskUserStreamEvent>();
     const previous = this.subscriptionStreams;
     this.subscriptionStreams = {
       pushItem: (v) => {
@@ -215,15 +241,21 @@ export class AgentIpcClient {
         previous.pushEvent(v);
         eventsAgain.push(v);
       },
+      pushAskUser: (v) => {
+        previous.pushAskUser(v);
+        askUserAgain.push(v);
+      },
       close: () => {
         previous.close();
         itemsAgain.close();
         eventsAgain.close();
+        askUserAgain.close();
       },
     };
     return {
       items: itemsAgain.iter,
       events: eventsAgain.iter,
+      askUser: askUserAgain.iter,
     };
   }
 
@@ -292,6 +324,33 @@ export class AgentIpcClient {
     this.requireConnected();
     this.writeFrame({
       type: 'abort',
+      reason,
+    });
+  }
+
+  /**
+   * Resolve a pending ask-user request with the user's answer. The
+   * server forwards the output to its IPC-backed `AskUserService`,
+   * which resolves the agent's awaiting tool call.
+   */
+  resolveAskUser(id: string, output: AskUserOutput): void {
+    this.requireConnected();
+    this.writeFrame({
+      type: 'askUserResolve',
+      id,
+      output,
+    });
+  }
+
+  /**
+   * Cancel a pending ask-user request. The server rejects the agent's
+   * awaiting tool call with a `cancelled` error.
+   */
+  cancelAskUser(id: string, reason?: string): void {
+    this.requireConnected();
+    this.writeFrame({
+      type: 'askUserCancel',
+      id,
       reason,
     });
   }
@@ -402,6 +461,20 @@ export class AgentIpcClient {
         this.pendingAcks.delete(frame.messageId);
         pending.resolve();
       }
+      return;
+    }
+    if (frame.type === 'askUserRequest') {
+      this.subscriptionStreams?.pushAskUser({
+        kind: 'pending',
+        request: frame.request,
+      });
+      return;
+    }
+    if (frame.type === 'askUserCleared') {
+      this.subscriptionStreams?.pushAskUser({
+        kind: 'cleared',
+        id: frame.id,
+      });
       return;
     }
     if (frame.type === 'error') {

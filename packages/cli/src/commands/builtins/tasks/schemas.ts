@@ -98,6 +98,17 @@ export const AutopilotState = {
 
 export type AutopilotState = (typeof AutopilotState)[keyof typeof AutopilotState];
 
+/**
+ * Why a task is currently paused. Set when an autonomous runner pauses
+ * itself (e.g. an agent finished its turn without progressing the
+ * phase even after a nudge); cleared when the user resumes the task.
+ */
+export const TaskPauseReason = {
+  AgentStalled: 'agent_stalled',
+} as const;
+
+export type TaskPauseReason = (typeof TaskPauseReason)[keyof typeof TaskPauseReason];
+
 export const TaskIdSchema = z
   .string()
   .regex(new RegExp(`^T-[A-Za-z0-9_-]{${ID_LENGTH}}$`), 'must be of the form T-<10 chars>');
@@ -128,6 +139,16 @@ export const TaskSchema = z.object({
     TaskLifecycleStatus.Removed,
   ]),
   paused: z.boolean(),
+  /**
+   * Optional structured reason for the current pause. `null` for legacy
+   * user-initiated pauses; populated by autonomous-runner escalations.
+   */
+  pauseReason: z
+    .enum([
+      TaskPauseReason.AgentStalled,
+    ])
+    .nullable()
+    .default(null),
   archivedAt: z.string().nullable(),
 
   hierarchyStatus: z

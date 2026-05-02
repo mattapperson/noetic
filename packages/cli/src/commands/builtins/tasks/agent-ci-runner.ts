@@ -189,6 +189,7 @@ async function commitExitWrites(args: CommitWritesArgs): Promise<CommitWritesRes
     ...existing,
     reviewStatus,
     paused: false,
+    pauseReason: null,
     updatedAt: ts,
     lastSeenAt: ts,
   };

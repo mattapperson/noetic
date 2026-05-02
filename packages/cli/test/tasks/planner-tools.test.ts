@@ -58,6 +58,7 @@ async function seedManualTask(ctx: ReturnType<typeof makeStoreContext>): Promise
     reviewStatus: TaskReviewStatus.NotStarted,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: true,

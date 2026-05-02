@@ -4,14 +4,19 @@
  * Connects to the runner's per-task IPC socket (`agent-ipc-server.ts`),
  * pulls history + the live item / event streams, and exposes the same
  * shape the in-process chat hook does so the same `ResponsesChat`
- * component can render either source.
+ * component can render either source. Also surfaces any pending
+ * ask-user request the runner has issued (via `pendingAskUser` /
+ * `submitAskUser` / `cancelAskUser`) so the TUI can render the modal.
  */
 
 import type { StreamingItem } from '@noetic/core';
 import { ItemSchema } from '@noetic/core';
 import { useEffect, useRef, useState } from 'react';
 
+import type { AskUserStreamEvent } from '../../commands/builtins/tasks/agent-ipc-client.js';
 import { AgentIpcClient } from '../../commands/builtins/tasks/agent-ipc-client.js';
+import type { AskUserPendingFrame } from '../../commands/builtins/tasks/agent-ipc-protocol.js';
+import type { AskUserOutput } from '../../tools/ask-user-types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import { appendOrUpdateEntry } from '../item-utils.js';
 
@@ -46,8 +51,19 @@ export interface TaskChatHandle {
     readonly runnerId: string;
     readonly threadId: string;
   } | null;
+  /**
+   * Currently-pending ask-user request issued by the runner agent, or
+   * `null` if none. Set when an `askUserRequest` frame arrives;
+   * cleared when the matching `askUserCleared` frame arrives or when
+   * the user submits/cancels the modal locally.
+   */
+  readonly pendingAskUser: AskUserPendingFrame | null;
   /** Submit a user message; resolves once the runner acks it. */
   send(text: string): Promise<void>;
+  /** Answer the currently-pending ask-user request. */
+  submitAskUser(output: AskUserOutput): void;
+  /** Dismiss the currently-pending ask-user request. */
+  cancelAskUser(reason?: string): void;
   /** Disconnect from the runner socket. */
   close(): void;
 }
@@ -104,6 +120,7 @@ export function useTaskChat(opts: UseTaskChatOpts): TaskChatHandle {
     kind: 'connecting',
   });
   const [hello, setHello] = useState<TaskChatHandle['hello']>(null);
+  const [pendingAskUser, setPendingAskUser] = useState<AskUserPendingFrame | null>(null);
   const clientRef = useRef<AgentIpcClient | null>(null);
 
   useEffect(() => {
@@ -130,6 +147,27 @@ export function useTaskChat(opts: UseTaskChatOpts): TaskChatHandle {
             return;
           }
           setEntries((prev) => appendOrUpdateEntry(prev, item));
+        }
+      } catch {
+        // Stream closed — handled via socket close below.
+      }
+    };
+
+    const askUserPump = async (stream: AsyncIterable<AskUserStreamEvent>): Promise<void> => {
+      try {
+        for await (const evt of stream) {
+          if (cancelled) {
+            return;
+          }
+          if (evt.kind === 'pending') {
+            setPendingAskUser(evt.request);
+            continue;
+          }
+          // Cleared. Drop the pending question if its id matches — a
+          // mismatched id means another client answered a different
+          // question (shouldn't happen with a single-pending design,
+          // but harmless if it ever does).
+          setPendingAskUser((prev) => (prev !== null && prev.id === evt.id ? null : prev));
         }
       } catch {
         // Stream closed — handled via socket close below.
@@ -166,6 +204,7 @@ export function useTaskChat(opts: UseTaskChatOpts): TaskChatHandle {
           kind: 'ready',
         });
         void itemPump(streams.items);
+        void askUserPump(streams.askUser);
       } catch (err) {
         if (cancelled) {
           return;
@@ -224,6 +263,35 @@ export function useTaskChat(opts: UseTaskChatOpts): TaskChatHandle {
     }
   };
 
+  const submitAskUser = (output: AskUserOutput): void => {
+    const client = clientRef.current;
+    if (client === null) {
+      return;
+    }
+    if (pendingAskUser === null) {
+      return;
+    }
+    const id = pendingAskUser.id;
+    // Optimistically clear the modal — the server will broadcast an
+    // `askUserCleared` echoing this anyway, but waiting for the round
+    // trip would leave the modal visible for a flicker.
+    setPendingAskUser(null);
+    client.resolveAskUser(id, output);
+  };
+
+  const cancelAskUser = (reason?: string): void => {
+    const client = clientRef.current;
+    if (client === null) {
+      return;
+    }
+    if (pendingAskUser === null) {
+      return;
+    }
+    const id = pendingAskUser.id;
+    setPendingAskUser(null);
+    client.cancelAskUser(id, reason);
+  };
+
   const close = (): void => {
     clientRef.current?.close();
     clientRef.current = null;
@@ -233,7 +301,10 @@ export function useTaskChat(opts: UseTaskChatOpts): TaskChatHandle {
     entries,
     status,
     hello,
+    pendingAskUser,
     send,
+    submitAskUser,
+    cancelAskUser,
     close,
   };
 }

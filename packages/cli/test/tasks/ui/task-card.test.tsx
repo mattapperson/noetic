@@ -29,6 +29,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     reviewStatus: 'not_started',
     lifecycleStatus: 'active',
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: false,
@@ -69,6 +70,7 @@ describe('statusIcon', () => {
       statusIcon(
         makeTask({
           paused: true,
+          pauseReason: null,
         }),
       ),
     ).toBe('‖');
@@ -93,6 +95,7 @@ describe('statusIcon', () => {
       statusIcon(
         makeTask({
           paused: true,
+          pauseReason: null,
           archivedAt: '2026-01-01T00:00:00.000Z',
         }),
       ),

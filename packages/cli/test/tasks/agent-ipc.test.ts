@@ -17,6 +17,7 @@ import { AgentIpcClient } from '../../src/commands/builtins/tasks/agent-ipc-clie
 import type { IpcHarness } from '../../src/commands/builtins/tasks/agent-ipc-server.js';
 import { AgentIpcServer } from '../../src/commands/builtins/tasks/agent-ipc-server.js';
 import { appendChatItem } from '../../src/commands/builtins/tasks/chat-history-store.js';
+import { createIpcAskUserService } from '../../src/commands/builtins/tasks/ipc-ask-user-service.js';
 
 const TASK_ID = 'T-ipc000001';
 const ROLE = 'planner';
@@ -197,6 +198,10 @@ describe('agent-ipc end-to-end', () => {
       role: ROLE,
       runnerId: RUNNER_ID,
       threadId: THREAD_ID,
+      askUserService: createIpcAskUserService({
+        broadcastRequest: () => {},
+        broadcastCleared: () => {},
+      }),
     });
     await server.listen();
 
@@ -289,6 +294,10 @@ describe('agent-ipc end-to-end', () => {
       role: ROLE,
       runnerId: RUNNER_ID,
       threadId: THREAD_ID,
+      askUserService: createIpcAskUserService({
+        broadcastRequest: () => {},
+        broadcastCleared: () => {},
+      }),
     });
     await server.listen();
 

@@ -80,6 +80,7 @@ export async function ensureWorktreeTask(args: EnsureWorktreeTaskArgs): Promise<
     reviewStatus: TaskReviewStatus.NotStarted,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: null,
     autopilotEnabled: false,

@@ -251,6 +251,7 @@ async function patchTaskForReview(args: PatchTaskArgs): Promise<PatchTaskResult>
     ...task,
     reviewStatus,
     paused: false,
+    pauseReason: null,
     updatedAt: args.now,
     lastSeenAt: args.now,
   };

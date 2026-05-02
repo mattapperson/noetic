@@ -309,6 +309,7 @@ async function markRunnerStale(args: MarkRunnerStaleArgs): Promise<void> {
     ...task,
     reviewStatus: TaskReviewStatus.NeedsChanges,
     paused: false,
+    pauseReason: null,
     updatedAt: args.now,
     lastSeenAt: args.now,
   };

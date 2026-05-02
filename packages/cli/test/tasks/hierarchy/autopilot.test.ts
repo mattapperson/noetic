@@ -63,6 +63,7 @@ function makeTask(overrides: Partial<Task>, projectRoot: string, taskId: string)
     reviewStatus: TaskReviewStatus.NotStarted,
     lifecycleStatus: TaskLifecycleStatus.Active,
     paused: false,
+    pauseReason: null,
     archivedAt: null,
     hierarchyStatus: HierarchyStatus.Active,
     autopilotEnabled: true,
