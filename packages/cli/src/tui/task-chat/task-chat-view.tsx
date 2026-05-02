@@ -11,6 +11,7 @@ import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import type { ChatStatus } from '../components/prompt-input.js';
 import { ResponsesChat } from '../components/responses-chat.js';
+import { useTheme } from '../components/theme.js';
 import type { TaskChatStatus } from './use-task-chat.js';
 import { useTaskChat } from './use-task-chat.js';
 
@@ -66,6 +67,34 @@ function describeStatus(status: TaskChatStatus): string {
 //#endregion
 
 //#region Public component
+
+/**
+ * Placeholder view shown while the planner runner is spawning and we wait
+ * for the IPC socket to bind. Pure render — `app.tsx` handles the polling
+ * and swaps to {@link TaskChatView} once the socket path is known.
+ */
+export function TaskChatSpawningView(props: {
+  readonly taskId: string;
+  readonly onExit: () => void;
+}): React.ReactElement {
+  const theme = useTheme();
+  useInput((_input, key) => {
+    if (key.escape) {
+      props.onExit();
+    }
+  });
+  return (
+    <Box flexDirection="column" paddingX={1} gap={1}>
+      <Box flexDirection="row">
+        <Text color={theme.primary} bold>
+          {`Task ${props.taskId}`}
+        </Text>
+        <Text color={theme.muted}>{'  ·  starting planner agent…'}</Text>
+      </Box>
+      <Text color={theme.muted}>Esc to cancel</Text>
+    </Box>
+  );
+}
 
 export function TaskChatView(props: TaskChatViewProps): React.ReactElement {
   const chat = useTaskChat({

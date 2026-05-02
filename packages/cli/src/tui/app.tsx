@@ -17,7 +17,7 @@ import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
-import { resolveChatTarget } from '../commands/builtins/tasks/resolve-chat-target.js';
+import { ensureChatTarget } from '../commands/builtins/tasks/resolve-chat-target.js';
 import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
 import {
   BUILTIN_COMMANDS,
@@ -90,7 +90,7 @@ import type { PendingAskUserRequest } from './services/ask-user-service.js';
 import { createAskUserService } from './services/ask-user-service.js';
 import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
 import { StreamMetricsProvider } from './stream-metrics-context.js';
-import { TaskChatView } from './task-chat/task-chat-view.js';
+import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
 import { getDefaultImageStore } from './utils/image-store.js';
 
 //#region Helpers
@@ -1467,21 +1467,34 @@ function App({
   const handleOpenChat = useCallback(
     (task: { id: string }): void => {
       void (async (): Promise<void> => {
-        const target = await resolveChatTarget(
-          {
-            fs: config.fs,
-            projectRoot: config.cwd,
-          },
-          task.id,
-        );
-        if (target === null) {
-          return;
-        }
-        setViewMode({
-          kind: 'taskChat',
-          socketPath: target.socketPath,
-          taskId: task.id,
-          roleLabel: target.roleLabel,
+        const ctx = {
+          fs: config.fs,
+          projectRoot: config.cwd,
+        };
+        const found = await ensureChatTarget(ctx, task.id, {
+          onSpawning: () =>
+            setViewMode({
+              kind: 'taskChatSpawning',
+              taskId: task.id,
+            }),
+        });
+        setViewMode((current) => {
+          // Bail if the user navigated away to a different spawning task
+          // mid-poll — clobbering their current view would be disorienting.
+          if (current.kind === 'taskChatSpawning' && current.taskId !== task.id) {
+            return current;
+          }
+          if (found === null) {
+            return {
+              kind: 'taskBoard',
+            };
+          }
+          return {
+            kind: 'taskChat',
+            socketPath: found.socketPath,
+            taskId: task.id,
+            roleLabel: found.roleLabel,
+          };
         });
       })();
     },
@@ -1509,6 +1522,8 @@ function App({
               roleLabel={viewMode.roleLabel}
               onExit={exitToChat}
             />
+          ) : viewMode.kind === 'taskChatSpawning' ? (
+            <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitToChat} />
           ) : (
             <ResponsesChat
               entries={entries}

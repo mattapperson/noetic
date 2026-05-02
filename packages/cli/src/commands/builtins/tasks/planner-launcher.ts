@@ -58,12 +58,22 @@ export interface StartPlannerRunResult {
   readonly autopilotState: Task['autopilotState'];
 }
 
+export const PlannerSpawnErrorCode = {
+  AlreadyAttached: 'already-attached',
+  SpawnFailed: 'spawn-failed',
+} as const;
+
+export type PlannerSpawnErrorCode =
+  (typeof PlannerSpawnErrorCode)[keyof typeof PlannerSpawnErrorCode];
+
 export class PlannerSpawnError extends Error {
-  constructor(message: string, cause: unknown = null) {
+  readonly code: PlannerSpawnErrorCode;
+  constructor(code: PlannerSpawnErrorCode, message: string, cause: unknown = null) {
     super(message, {
       cause,
     });
     this.name = 'PlannerSpawnError';
+    this.code = code;
   }
 }
 
@@ -165,6 +175,7 @@ function spawnRunner(args: SpawnRunnerArgs): SpawnRunnerResult {
     return {
       kind: 'error',
       error: new PlannerSpawnError(
+        PlannerSpawnErrorCode.SpawnFailed,
         'planner runner failed to start: no pid returned by spawn',
         asyncSpawnError,
       ),
@@ -175,6 +186,7 @@ function spawnRunner(args: SpawnRunnerArgs): SpawnRunnerResult {
     return {
       kind: 'error',
       error: new PlannerSpawnError(
+        PlannerSpawnErrorCode.SpawnFailed,
         `planner runner pid=${pid} did not start (likely missing bun or invalid script)`,
         asyncSpawnError,
       ),
@@ -253,7 +265,10 @@ export async function startPlannerRun(args: StartPlannerRunArgs): Promise<StartP
     signaller,
   });
   if (live) {
-    throw new PlannerSpawnError(`planner already attached to task ${args.taskId}`);
+    throw new PlannerSpawnError(
+      PlannerSpawnErrorCode.AlreadyAttached,
+      `planner already attached to task ${args.taskId}`,
+    );
   }
 
   const spawned = spawnRunner({

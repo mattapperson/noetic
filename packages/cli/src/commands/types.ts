@@ -104,6 +104,10 @@ export type ViewMode =
       readonly socketPath: string;
       readonly taskId: string;
       readonly roleLabel: string;
+    }
+  | {
+      readonly kind: 'taskChatSpawning';
+      readonly taskId: string;
     };
 
 export interface SessionSnapshot {
