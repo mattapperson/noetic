@@ -651,7 +651,20 @@ interface ShellExecResult {
 interface ShellAdapter {
   exec(command: string, options: ShellExecOptions): Promise<ShellExecResult>;
 }
+
+interface CreateLocalShellAdapterOptions {
+  /** Wrap commands through `rtk rewrite` for token-efficient output. Default false in core. */
+  useRtk?: boolean;
+}
+
+interface LocalShellAdapter extends ShellAdapter {
+  readonly rtkAvailable: boolean;
+  readonly rtkPath: string | null;
+  readonly useRtk: boolean;
+}
 ```
+
+`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic/core` so non-CLI embedders keep raw shell semantics; `@noetic/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
 
 Pass a custom adapter to the harness:
 
@@ -663,6 +676,10 @@ const harness = new AgentHarness({
   params: {},
   shell: myCustomShellAdapter,  // optional, defaults to createLocalShellAdapter()
 });
+
+// Or opt into rtk wrapping explicitly:
+const rtkShell = createLocalShellAdapter({ useRtk: true });
+if (!rtkShell.rtkAvailable) throw new Error('rtk is required but not on PATH');
 ```
 
 Access from tools and layers:

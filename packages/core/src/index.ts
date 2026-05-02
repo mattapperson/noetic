@@ -4,7 +4,11 @@
 export { createLocalFsAdapter } from './adapters/local-fs-adapter';
 
 /** @public */
-export { createLocalShellAdapter } from './adapters/local-shell-adapter';
+export {
+  type CreateLocalShellAdapterOptions,
+  createLocalShellAdapter,
+  type LocalShellAdapter,
+} from './adapters/local-shell-adapter';
 
 /** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';

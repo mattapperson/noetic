@@ -101,6 +101,21 @@ export const HistoryConfigSchema = z.object({
 
 export type HistoryConfig = z.infer<typeof HistoryConfigSchema>;
 
+/**
+ * Shell namespace: knobs for how shell commands run.
+ *
+ * `useRtk` wraps every command that goes through the shell adapter with
+ * `rtk rewrite` (https://github.com/rtk-ai/rtk) to filter and summarize
+ * output before it reaches the model. When `true` (the default), `rtk` is a
+ * hard requirement — startup fails fast with install instructions if it is
+ * not on PATH. Set `false` to opt out; commands then run raw via `sh -c`.
+ */
+export const ShellConfigSchema = z.object({
+  useRtk: z.boolean().default(true),
+});
+
+export type ShellConfig = z.infer<typeof ShellConfigSchema>;
+
 export const AgentConfigSchema = z.object({
   model: z.string(),
   cwd: z.string(),
@@ -143,6 +158,7 @@ export const AgentConfigSchema = z.object({
   worktree: WorktreeConfigSchema.optional(),
   ui: UiConfigSchema.optional(),
   history: HistoryConfigSchema.optional(),
+  shell: ShellConfigSchema.optional(),
 });
 
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;

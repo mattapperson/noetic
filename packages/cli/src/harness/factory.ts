@@ -8,7 +8,6 @@ import type {
 } from '@noetic/core';
 import {
   AgentHarness,
-  createLocalShellAdapter,
   durableTaskState,
   fileReference,
   historyWindow,
@@ -45,6 +44,7 @@ import { createActivateSkillTool, createCodingTools, createReadOnlyTools } from 
 import { createSendMessageTool } from '../tools/send-message.js';
 import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
+import { createDefaultShellAdapter } from './shell-adapter-bootstrap.js';
 
 //#region Types
 
@@ -227,7 +227,7 @@ interface CreateAgentHarnessOpts {
  */
 export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<HarnessWithSkills> {
   const { config, plugins, fs, buildContext } = opts;
-  const shell = opts.shell ?? createLocalShellAdapter();
+  const shell = opts.shell ?? createDefaultShellAdapter(config);
   const mode: AgentMode = opts.mode ?? 'normal';
   const planHooks = opts.planHooks;
 

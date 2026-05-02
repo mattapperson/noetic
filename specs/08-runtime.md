@@ -65,9 +65,32 @@ interface ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter()` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
+`createLocalShellAdapter(opts?)` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
 
 The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
+
+### rtk Output Filtering
+
+The local shell adapter can wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) before exec to filter and summarize output for token efficiency. `rtk` is a Rust CLI proxy that recognizes common dev commands (git, npm, ls, cargo, …) and rewrites their output into compact, model-friendly forms.
+
+Wrapping is per-command and best-effort: each `exec` shells out to `rtk rewrite "<cmd>"`. If `rtk` knows the command (exit 0 with a rewritten string), the rewrite is run via `sh -c`. If `rtk` returns exit 1 or empty output (unknown command, timeout, spawn failure), the raw command runs unchanged.
+
+```typescript
+createLocalShellAdapter();                   // default: raw sh -c, no rtk
+createLocalShellAdapter({ useRtk: true });   // opt in: wrap via rtk rewrite
+```
+
+The returned adapter exposes `rtkAvailable`, `rtkPath`, and `useRtk` for introspection so callers can fail fast on missing rtk instead of silently degrading.
+
+`@noetic/cli` opts in by default via the `shell` namespace in `noetic.config.ts` and fails fast at startup with install instructions when `rtk` is missing:
+
+```typescript
+export default {
+  shell: { useRtk: true }, // CLI default
+};
+```
+
+Other embedders of `@noetic/core` keep the raw shell semantics unless they explicitly enable rtk.
 
 ---
 
