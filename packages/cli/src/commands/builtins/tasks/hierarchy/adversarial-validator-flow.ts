@@ -29,6 +29,8 @@
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Context, ContextMemory, Step } from '@noetic/core';
 import { fork, step } from '@noetic/core';
 import { z } from 'zod';
@@ -37,6 +39,21 @@ import { tryLoadTask } from '../fs-store.js';
 import type { Assertion, AssertionOutcome } from './schemas.js';
 import { AssertionStatus } from './schemas.js';
 import type { RunValidatorArgs, ValidatorRunOutcome } from './validator-job.js';
+
+/**
+ * Returns true if the working tree has at least one workflow file under
+ * `.github/workflows/` that agent-ci could plausibly run. Without this,
+ * `npx @redwoodjs/agent-ci run` exits 0 with a usage error on stderr,
+ * which the spawn wrapper would otherwise mis-classify as a pass.
+ */
+export function hasAgentCiWorkflows(cwd: string): boolean {
+  try {
+    const entries = readdirSync(join(cwd, '.github', 'workflows'));
+    return entries.some((name) => name.endsWith('.yml') || name.endsWith('.yaml'));
+  } catch {
+    return false;
+  }
+}
 
 //#region Types
 
@@ -54,9 +71,14 @@ export type ValidatorShellSpawn = (
 ) => SpawnedChild;
 
 export interface AgentCiSubprocessOutcome {
-  readonly status: 'pass' | 'fail' | 'error';
+  readonly status: 'pass' | 'fail' | 'error' | 'skipped';
   readonly summary: string;
-  /** When the binary or workflow is missing, callers may opt to treat as 'pass'. */
+  /**
+   * True when agent-ci was not run — either the binary is missing or the
+   * project has no workflow files in `.github/workflows/`. Skipped runs use
+   * `status: 'skipped'`; this flag stays as a back-compat signal for older
+   * consumers reading persisted run records.
+   */
   readonly missing: boolean;
 }
 
@@ -112,6 +134,13 @@ export interface AdversarialValidatorDeps {
   readonly agentCiArgs?: ReadonlyArray<string>;
   /** Treat agent-ci `missing` as `pass` rather than `error`. Default: `true`. */
   readonly agentCiSkipOnMissing?: boolean;
+  /**
+   * Pre-flight check: returns true iff the project has agent-ci workflows
+   * worth running. When false, `createDefaultRunAgentCi` returns
+   * `{status: 'pass', missing: true}` (skipped) without invoking the binary.
+   * Defaults to {@link hasAgentCiWorkflows}.
+   */
+  readonly hasAgentCiWorkflowsFn?: (cwd: string) => boolean;
   readonly diffBase?: string;
   readonly maxOutputBytes?: number;
   readonly spawnFn?: ValidatorShellSpawn;
@@ -247,7 +276,15 @@ export function createDefaultRunAgentCi(deps: AdversarialValidatorDeps): RunAgen
   const command = deps.agentCiCommand ?? DEFAULT_AGENT_CI_COMMAND;
   const args = deps.agentCiArgs ?? DEFAULT_AGENT_CI_ARGS;
   const spawnFn = deps.spawnFn ?? defaultSpawn;
+  const hasWorkflows = deps.hasAgentCiWorkflowsFn ?? hasAgentCiWorkflows;
   return async ({ cwd, maxOutputBytes }) => {
+    if (!hasWorkflows(cwd)) {
+      return {
+        status: 'skipped',
+        summary: 'agent-ci skipped: no workflow files in .github/workflows/',
+        missing: true,
+      };
+    }
     const result = await spawnAndWait({
       spawnFn,
       command,
@@ -258,8 +295,8 @@ export function createDefaultRunAgentCi(deps: AdversarialValidatorDeps): RunAgen
     if (result.spawnError !== null) {
       if (isMissingBinary(result.spawnError)) {
         return {
-          status: 'pass',
-          summary: `agent-ci binary not found: ${result.spawnError.message}`,
+          status: 'skipped',
+          summary: `agent-ci skipped: binary not found (${result.spawnError.message})`,
           missing: true,
         };
       }
@@ -368,15 +405,13 @@ export function combineOutcomes(args: CombineOutcomesArgs): ValidatorRunOutcome 
   const adversarialFailed = args.review.issues.length > 0;
   const summaryParts: string[] = [];
   if (args.agentCi.status === 'pass') {
-    if (args.agentCi.missing) {
-      summaryParts.push(`agent-ci skipped (missing): ${args.agentCi.summary}`);
-    } else {
-      summaryParts.push(`agent-ci: pass (${args.agentCi.summary.split('\n')[0] ?? ''})`);
-    }
+    summaryParts.push(`agent-ci: pass (${args.agentCi.summary.split('\n')[0] ?? ''})`);
+  } else if (args.agentCi.status === 'skipped') {
+    summaryParts.push(`agent-ci: skipped (${args.agentCi.summary})`);
   } else if (args.agentCi.status === 'fail') {
     summaryParts.push('agent-ci: fail');
     summaryParts.push(args.agentCi.summary);
-  } else if (args.agentCi.status === 'error') {
+  } else {
     summaryParts.push(`agent-ci: error: ${args.agentCi.summary}`);
   }
   if (adversarialFailed) {
@@ -387,6 +422,8 @@ export function combineOutcomes(args: CombineOutcomesArgs): ValidatorRunOutcome 
   } else {
     summaryParts.push('adversarial review: no issues found');
   }
+  // 'skipped' is treated as a non-blocking outcome for the overall validator —
+  // the run still passes if the adversarial side finds no issues.
   const status: ValidatorRunOutcome['status'] =
     args.agentCi.status === 'error'
       ? 'error'
@@ -484,8 +521,13 @@ function buildAgentCiPathStep(
               missing: true,
             }
           : outcome;
+      // The agent-ci subprocess's `'skipped'` is non-blocking — the fork
+      // outcome maps it to `'pass'` so `mode: 'all'` doesn't reject the path,
+      // while the original status is preserved on `result.agentCi.status`.
+      const pathStatus: ValidatorRunOutcome['status'] =
+        effective.status === 'skipped' ? 'pass' : effective.status;
       return {
-        status: effective.status,
+        status: pathStatus,
         summary: effective.summary,
         result: pathResult({
           source: 'agent-ci',

@@ -1,7 +1,9 @@
 import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
+import type { ChannelStore } from '../runtime/channel-store';
 import type { Channel } from '../types/channel';
 import type { Context } from '../types/context';
 import type { ExecuteStepFn, StepEvery } from '../types/step';
+import { getContextChannelStore } from './typeguards';
 
 //#region Types
 
@@ -10,6 +12,7 @@ interface ParkContext<TMemory> {
   jitter: number;
   wakeOn?: Channel<unknown>;
   ctx: Context<TMemory>;
+  channelStore?: ChannelStore;
 }
 
 //#endregion
@@ -42,6 +45,7 @@ function park<TMemory>(parkCtx: ParkContext<TMemory>): Promise<void> {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let abortPoll: ReturnType<typeof setInterval> | null = null;
+    let wakeUnsub: (() => void) | null = null;
 
     const settle = (): void => {
       if (settled) {
@@ -53,6 +57,9 @@ function park<TMemory>(parkCtx: ParkContext<TMemory>): Promise<void> {
       }
       if (abortPoll !== null) {
         clearInterval(abortPoll);
+      }
+      if (wakeUnsub !== null) {
+        wakeUnsub();
       }
       resolve();
     };
@@ -69,20 +76,27 @@ function park<TMemory>(parkCtx: ParkContext<TMemory>): Promise<void> {
       }
     }, 5);
 
-    if (parkCtx.wakeOn) {
-      // recv() rejects on channel timeout; we set our own park timeout via the
-      // setTimeout above, so request a recv timeout that exceeds the park
-      // duration. Channel timeouts are swallowed — settle still fires from the
-      // setTimeout / abort-poll paths.
-      parkCtx.ctx
-        .recv(parkCtx.wakeOn, {
-          timeout: Math.max(duration, 1) + 100,
-        })
-        .then(settle)
-        .catch(() => {
-          // Channel timeout / store error — ignore; another path settles us.
-        });
+    if (!parkCtx.wakeOn) {
+      return;
     }
+    const { channelStore } = parkCtx;
+    if (channelStore) {
+      // Non-consuming subscription so the body still observes the message that
+      // woke us — `recv()` would dequeue queue-mode messages and leave the
+      // body's drain loop empty.
+      wakeUnsub = channelStore.subscribeWake(parkCtx.wakeOn, settle);
+      return;
+    }
+    // Contexts without a ContextImpl/channel store have no body draining the
+    // channel anyway; the destructive `recv` is acceptable in that edge case.
+    parkCtx.ctx
+      .recv(parkCtx.wakeOn, {
+        timeout: Math.max(duration, 1) + 1e2,
+      })
+      .then(settle)
+      .catch(() => {
+        // Channel timeout / store error — another path settles us.
+      });
   });
 }
 
@@ -126,6 +140,9 @@ export async function executeEvery<TMemory, I, O>(
 ): Promise<O> {
   const onError = step.onError ?? 'continue';
   const jitter = step.jitter ?? 0;
+  // Resolve once — the channel store reference is stable for the lifetime
+  // of the every loop, no need to re-derive it per park.
+  const channelStore = getContextChannelStore(ctx);
 
   while (true) {
     if (ctx.aborted) {
@@ -155,6 +172,7 @@ export async function executeEvery<TMemory, I, O>(
       jitter,
       wakeOn: step.wakeOn,
       ctx,
+      channelStore,
     });
   }
 }

@@ -52,7 +52,13 @@ export class ContextImpl implements Context<ContextMemory> {
   readonly _broadcaster?: EventBroadcaster;
 
   private readonly _createdAt: number;
-  private readonly channelStore?: ChannelStore;
+  /**
+   * Shared channel store for cross-context communication. Inherited by
+   * `fork` / `spawn` children so channels published by a sibling are visible
+   * to peers — see `interpreter/execute-fork.ts` and `interpreter/execute-spawn.ts`.
+   * @internal
+   */
+  readonly channelStore?: ChannelStore;
   private _checkpointFn?: () => Promise<void>;
   private _completionValue?: unknown;
   private _completed = false;

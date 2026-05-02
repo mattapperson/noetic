@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
+import { channel } from '../../src/builders/channel-builder';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeFork } from '../../src/interpreter/execute-fork';
+import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { ContextMemory } from '../../src/types/memory';
@@ -579,6 +581,56 @@ describe('executeFork', () => {
       });
       const result = await executeFork(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
+    });
+  });
+
+  describe('channel store inheritance', () => {
+    it('child contexts inherit channelStore so siblings can communicate', async () => {
+      const ch = channel<number>('fork-share', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      const channelStore = new ChannelStore();
+
+      let senderError: unknown = null;
+      let received: number | null | undefined;
+
+      const step: StepForkAll<ContextMemory, void, void> = {
+        kind: 'fork',
+        id: 'channel-share',
+        mode: 'all',
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'sender',
+            execute: async (_input, c) => {
+              try {
+                c.send(ch, 7);
+              } catch (e) {
+                senderError = e;
+              }
+            },
+          },
+          {
+            kind: 'run',
+            id: 'receiver',
+            execute: async (_input, c) => {
+              await new Promise((r) => setTimeout(r, 10));
+              received = c.tryRecv(ch);
+            },
+          },
+        ],
+        merge: () => undefined,
+      };
+
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        channelStore,
+      });
+      await executeFork(step, undefined, ctx, simpleExecute);
+      expect(senderError).toBeNull();
+      assert(received !== undefined);
+      expect(received).toBe(7);
     });
   });
 });

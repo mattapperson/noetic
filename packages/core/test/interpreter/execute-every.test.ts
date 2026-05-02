@@ -437,4 +437,60 @@ describe('executeEvery', () => {
     await sleep(50);
     expect(count).toBe(1);
   });
+
+  it('wakeOn on a queue channel does not consume the message — body sees it', async () => {
+    const wake = channel<string>('wake-queue', {
+      schema: z.string(),
+      mode: 'queue',
+    });
+    const channelStore = new ChannelStore();
+    const observed: string[] = [];
+
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+      channelStore,
+    });
+
+    const everyStep = every<ContextMemory, void, void>({
+      id: 'queue-wake',
+      step: {
+        kind: 'run',
+        id: 'drain',
+        execute: async (_input, c) => {
+          while (true) {
+            const v = c.tryRecv(wake);
+            if (v === null) {
+              break;
+            }
+            observed.push(v);
+          }
+          if (observed.length >= 2) {
+            ctx.abort('done');
+          }
+        },
+      },
+      ms: 5_000,
+      wakeOn: wake,
+    });
+
+    setTimeout(() => {
+      channelStore.send(wake, 'first');
+    }, 30);
+    setTimeout(() => {
+      channelStore.send(wake, 'second');
+    }, 80);
+
+    try {
+      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      expect.unreachable('should have thrown cancelled');
+    } catch (e) {
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('cancelled');
+    }
+
+    expect(observed).toEqual([
+      'first',
+      'second',
+    ]);
+  });
 });

@@ -15,11 +15,12 @@ import type {
 } from '../types/step';
 import { cloneWithGuard } from './clone-guard';
 import { frameworkCast } from './framework-cast';
-import { isContextImpl } from './typeguards';
+import { getContextChannelStore, isContextImpl } from './typeguards';
 
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();
   const resourceId = isContextImpl(ctx) ? ctx.resourceId : undefined;
+  const channelStore = getContextChannelStore(ctx);
 
   return Array.from(
     {
@@ -35,6 +36,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         state: cloneWithGuard(ctx.state, `Fork '${stepId}'`),
         threadId,
         resourceId,
+        channelStore,
         cwdState: snapshotCwdState(ctx),
       }),
   );

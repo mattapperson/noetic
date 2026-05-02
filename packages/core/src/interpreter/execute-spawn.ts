@@ -13,6 +13,7 @@ import type { ExecuteStepFn, StepSpawn } from '../types/step';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import { frameworkCast } from './framework-cast';
+import { getContextChannelStore } from './typeguards';
 
 //#region Types
 
@@ -130,6 +131,7 @@ export async function executeSpawn<TMemory, I, O>(
     state: cloneWithGuard(baseCtx.state, `Spawn '${step.id}'`),
     threadId: baseCtx.threadId,
     resourceId: baseCtx.resourceId,
+    channelStore: getContextChannelStore(baseCtx),
     layers: layers.length > 0 ? layers : undefined,
     unifiedTools: childUnifiedTools.length > 0 ? childUnifiedTools : undefined,
     cwdState: snapshotCwdState(baseCtx),

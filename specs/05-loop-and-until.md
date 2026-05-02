@@ -210,7 +210,7 @@ every<I, O>(opts: EveryOptions<I, O>): StepEvery<I, O>;
 ### Semantics
 
 1. The first iteration starts immediately; the body step is invoked with `input`.
-2. After the body returns, `every` parks for `ms ± jitter` ms or until any value is received on `wakeOn` — whichever happens first.
+2. After the body returns, `every` parks for `ms ± jitter` ms or until any value is sent on `wakeOn` — whichever happens first. The park observes the wake non-consumingly: a queue-mode wake message stays on the queue so the next iteration's body can drain it via `tryRecv`.
 3. The park resolves immediately when the executing context is aborted; the next iteration's abort check then surfaces a `cancelled` `NoeticError`.
 4. The operator output is `void`. `every` does not accumulate iteration outputs.
 5. `every` only terminates by throw — either `cancelled` from abort, or the body's error under `onError: 'fail'`.

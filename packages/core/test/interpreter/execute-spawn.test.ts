@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
+import { channel } from '../../src/builders/channel-builder';
 import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { createLayerStateStore } from '../../src/memory/layer-lifecycle';
+import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { Item } from '../../src/types/items';
@@ -369,6 +371,46 @@ describe('executeSpawn', () => {
       // Lower slot (WORKING_MEMORY=100) should come before higher slot (EPISODIC=300)
       expect(getItemId(first)).toBe('low-item');
       expect(getItemId(second)).toBe('high-item');
+    });
+  });
+
+  describe('channel store inheritance', () => {
+    it('child context inherits channelStore so it can read/write parent channels', async () => {
+      const ch = channel<number>('spawn-share', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      const channelStore = new ChannelStore();
+
+      let sendError: unknown = null;
+      let received: number | undefined;
+
+      const step: StepSpawn<ContextMemory, void, void> = {
+        kind: 'spawn',
+        id: 'channel-spawn',
+        child: {
+          kind: 'run',
+          id: 'child',
+          execute: async (_input, c) => {
+            try {
+              c.send(ch, 13);
+            } catch (e) {
+              sendError = e;
+            }
+            const v = c.tryRecv(ch);
+            received = v ?? undefined;
+          },
+        },
+      };
+
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        channelStore,
+      });
+      await executeSpawn(step, undefined, ctx, simpleExecute);
+      expect(sendError).toBeNull();
+      assert(received !== undefined);
+      expect(received).toBe(13);
     });
   });
 });

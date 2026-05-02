@@ -333,4 +333,67 @@ describe('ChannelStore', () => {
       expect(store.tryRecv(ch)).toBeNull();
     });
   });
+
+  describe('subscribeWake (non-consuming)', () => {
+    it('fires every wake subscriber on next send and leaves the queue intact', () => {
+      const store = new ChannelStore();
+      const ch = channel<number>('wake-test', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      let fired = 0;
+      store.subscribeWake(ch, () => {
+        fired += 1;
+      });
+      store.send(ch, 99);
+      expect(fired).toBe(1);
+      // The send should still have populated the queue — wake is non-consuming.
+      expect(store.tryRecv(ch)).toBe(99);
+    });
+
+    it('is one-shot — a second send after a fired wake does not re-fire', () => {
+      const store = new ChannelStore();
+      const ch = channel<number>('wake-once', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      let fired = 0;
+      store.subscribeWake(ch, () => {
+        fired += 1;
+      });
+      store.send(ch, 1);
+      store.send(ch, 2);
+      expect(fired).toBe(1);
+    });
+
+    it('unsubscribe before send removes the subscriber', () => {
+      const store = new ChannelStore();
+      const ch = channel<number>('wake-unsub', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      let fired = 0;
+      const unsub = store.subscribeWake(ch, () => {
+        fired += 1;
+      });
+      unsub();
+      store.send(ch, 1);
+      expect(fired).toBe(0);
+    });
+
+    it('works for value-mode channels — does not consume the latest value', () => {
+      const store = new ChannelStore();
+      const ch = channel<number>('wake-value', {
+        schema: z.number(),
+        mode: 'value',
+      });
+      let fired = 0;
+      store.subscribeWake(ch, () => {
+        fired += 1;
+      });
+      store.send(ch, 42);
+      expect(fired).toBe(1);
+      expect(store.tryRecv(ch)).toBe(42);
+    });
+  });
 });

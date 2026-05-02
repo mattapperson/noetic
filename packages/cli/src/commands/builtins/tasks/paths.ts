@@ -72,6 +72,12 @@ export function taskDirPaths(projectRoot: string, taskId: string): TaskDirPaths 
  * `role` distinguishes the agent role; `runnerId` distinguishes concurrent
  * runners of the same role (e.g. multiple implementers, one per feature).
  * For singletons (planner, validator) `runnerId` is the role itself.
+ *
+ * macOS caps unix-domain socket paths at 104 bytes — when a project lives
+ * under a deep path, the default `<projectRoot>/.noetic/tasks/<taskId>/sockets/...`
+ * blows the limit. Setting `NOETIC_RUNTIME_DIR=/tmp/n` (or any short base)
+ * relocates the sockets dir to `<NOETIC_RUNTIME_DIR>/<taskId>/`. The on-disk
+ * task store keeps using its long path; only the socket leaves.
  */
 export function runnerSocketPath(args: {
   readonly projectRoot: string;
@@ -79,6 +85,10 @@ export function runnerSocketPath(args: {
   readonly role: string;
   readonly runnerId: string;
 }): string {
+  const runtimeDir = process.env.NOETIC_RUNTIME_DIR;
+  if (typeof runtimeDir === 'string' && runtimeDir.length > 0) {
+    return join(runtimeDir, args.taskId, `${args.role}-${args.runnerId}.sock`);
+  }
   const { sockets } = taskDirPaths(args.projectRoot, args.taskId);
   return join(sockets, `${args.role}-${args.runnerId}.sock`);
 }

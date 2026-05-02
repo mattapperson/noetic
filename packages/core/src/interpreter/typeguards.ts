@@ -1,3 +1,4 @@
+import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
 import type { FunctionCallItem, Item, MessageItem } from '../types/items';
@@ -16,6 +17,18 @@ export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableCon
 
 export function isContextImpl(ctx: Context<ContextMemory>): ctx is ContextImpl {
   return ctx instanceof ContextImpl;
+}
+
+/**
+ * Co-located with `isContextImpl` so the import of `ContextImpl` flows through
+ * the same module other interpreters pull it from, sidestepping a circular
+ * TDZ when this helper is used by `execute-every.ts`.
+ */
+export function getContextChannelStore<TMemory>(ctx: Context<TMemory>): ChannelStore | undefined {
+  if (ctx instanceof ContextImpl) {
+    return ctx.channelStore;
+  }
+  return undefined;
 }
 
 export function isAssistantMessage(item: unknown): item is MessageItem {

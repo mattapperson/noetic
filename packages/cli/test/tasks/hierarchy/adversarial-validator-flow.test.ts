@@ -212,11 +212,11 @@ describe('combineOutcomes', () => {
     expect(out.summary).toContain('agent-ci: error');
   });
 
-  it('treats agent-ci missing as pass (the skip path)', () => {
+  it('treats agent-ci skipped as a non-blocking outcome (overall pass when adversarial passes)', () => {
     const out = combineOutcomes({
       agentCi: {
-        status: 'pass',
-        summary: 'binary not found',
+        status: 'skipped',
+        summary: 'no workflow files in .github/workflows/',
         missing: true,
       },
       review: {
@@ -225,7 +225,7 @@ describe('combineOutcomes', () => {
       assertions: ASSERTIONS,
     });
     expect(out.status).toBe('pass');
-    expect(out.summary).toContain('agent-ci skipped');
+    expect(out.summary).toContain('agent-ci: skipped');
   });
 
   it('aggregates multiple issues per assertion into one message', () => {
@@ -300,10 +300,13 @@ describe('buildAdversarialPrompt', () => {
 });
 
 describe('createDefaultRunAgentCi', () => {
+  const workflowsPresent = (): boolean => true;
+
   it('returns pass on exit 0', async () => {
     const ctx = makeStoreContext();
     await seedLeafTask(ctx, '/repo/.worktrees/feat-x');
     const runner = createDefaultRunAgentCi({
+      hasAgentCiWorkflowsFn: workflowsPresent,
       spawnFn: () =>
         makeFakeChild({
           exitCode: 0,
@@ -321,6 +324,7 @@ describe('createDefaultRunAgentCi', () => {
 
   it('returns fail on non-zero exit', async () => {
     const runner = createDefaultRunAgentCi({
+      hasAgentCiWorkflowsFn: workflowsPresent,
       spawnFn: () =>
         makeFakeChild({
           exitCode: 1,
@@ -335,11 +339,12 @@ describe('createDefaultRunAgentCi', () => {
     expect(out.summary).toContain('lint:error');
   });
 
-  it('returns missing=true when binary spawn throws ENOENT', async () => {
+  it('returns skipped when binary spawn throws ENOENT', async () => {
     const enoent = Object.assign(new Error('spawn npx ENOENT'), {
       code: 'ENOENT',
     });
     const runner = createDefaultRunAgentCi({
+      hasAgentCiWorkflowsFn: workflowsPresent,
       spawnFn: () => {
         throw enoent;
       },
@@ -348,13 +353,14 @@ describe('createDefaultRunAgentCi', () => {
       cwd: '/x',
       maxOutputBytes: 4_096,
     });
-    expect(out.status).toBe('pass');
+    expect(out.status).toBe('skipped');
     expect(out.missing).toBe(true);
-    expect(out.summary).toContain('not found');
+    expect(out.summary).toContain('binary not found');
   });
 
   it('returns error for non-ENOENT spawn errors', async () => {
     const runner = createDefaultRunAgentCi({
+      hasAgentCiWorkflowsFn: workflowsPresent,
       spawnFn: () => {
         throw new Error('EACCES');
       },
@@ -369,6 +375,7 @@ describe('createDefaultRunAgentCi', () => {
 
   it('returns error when killed by signal (exitCode null without spawnError)', async () => {
     const runner = createDefaultRunAgentCi({
+      hasAgentCiWorkflowsFn: workflowsPresent,
       spawnFn: () =>
         makeFakeChild({
           exitCode: null,
@@ -380,5 +387,26 @@ describe('createDefaultRunAgentCi', () => {
     });
     expect(out.status).toBe('error');
     expect(out.summary).toContain('signal');
+  });
+
+  it('returns skipped (without invoking spawn) when no workflow files exist', async () => {
+    let spawnCalled = false;
+    const runner = createDefaultRunAgentCi({
+      hasAgentCiWorkflowsFn: () => false,
+      spawnFn: () => {
+        spawnCalled = true;
+        return makeFakeChild({
+          exitCode: 0,
+        });
+      },
+    });
+    const out = await runner({
+      cwd: '/x',
+      maxOutputBytes: 4_096,
+    });
+    expect(out.status).toBe('skipped');
+    expect(out.missing).toBe(true);
+    expect(out.summary).toContain('no workflow files');
+    expect(spawnCalled).toBe(false);
   });
 });
