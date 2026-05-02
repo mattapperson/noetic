@@ -1,0 +1,20 @@
+{
+  "id": "T-f3DpRH2Dl-",
+  "source": "manual",
+  "title": "QA: structured task",
+  "projectRoot": "/Users/mattapperson/Development/noetic",
+  "worktreePath": null,
+  "branch": null,
+  "headSha": null,
+  "reviewStatus": "not_started",
+  "lifecycleStatus": "active",
+  "paused": false,
+  "archivedAt": null,
+  "hierarchyStatus": null,
+  "autopilotEnabled": true,
+  "autopilotState": "watching",
+  "lastAutopilotActivityAt": "2026-05-01T00:55:28.310Z",
+  "createdAt": "2026-05-01T00:55:26.743Z",
+  "updatedAt": "2026-05-01T00:55:28.310Z",
+  "lastSeenAt": "2026-05-01T00:55:26.743Z"
+}

@@ -17,6 +17,7 @@ import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
 import { installInterruptSafetyNet } from './interrupt-safety-net.js';
+import { installWorkspaceProxy } from './workspace-proxy.js';
 
 if (process.argv[2] === 'tasks') {
   const { runTasksCli } = await import('../commands/builtins/tasks/cli.js');
@@ -35,6 +36,10 @@ if (process.argv[2] === 'daemon' || process.argv[2] === 'tasks-daemon') {
   await runDaemon(daemonCwd);
   process.exit(0);
 }
+
+// Only the interactive TUI path needs cross-checkout React deduping; the
+// `tasks` and `daemon` subcommands above don't render Ink. See workspace-proxy.ts.
+installWorkspaceProxy();
 
 const { config: argsConfig, flags } = parseArgs(process.argv);
 const discovered = await discoverConfig();

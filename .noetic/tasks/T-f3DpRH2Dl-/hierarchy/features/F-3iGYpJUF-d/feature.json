@@ -1,0 +1,18 @@
+{
+  "id": "F-3iGYpJUF-d",
+  "sliceId": "SL-ePne_a7YSC",
+  "title": "F1",
+  "description": null,
+  "acceptanceCriteria": "user can do X",
+  "status": "triaged",
+  "loopState": "implementing",
+  "implementationAttemptCount": 1,
+  "validatorAttemptCount": 0,
+  "taskId": "T-fQN8SmbRTl",
+  "generatedFromFeatureId": null,
+  "generatedFromRunId": null,
+  "blockedReason": null,
+  "orderIndex": 0,
+  "createdAt": "2026-05-01T00:55:27.523Z",
+  "updatedAt": "2026-05-01T00:55:32.632Z"
+}

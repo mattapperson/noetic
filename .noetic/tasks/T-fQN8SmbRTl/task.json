@@ -1,0 +1,20 @@
+{
+  "id": "T-fQN8SmbRTl",
+  "source": "worktree",
+  "title": "F1",
+  "projectRoot": "/Users/mattapperson/Development/noetic",
+  "worktreePath": null,
+  "branch": null,
+  "headSha": null,
+  "reviewStatus": "not_started",
+  "lifecycleStatus": "active",
+  "paused": false,
+  "archivedAt": null,
+  "hierarchyStatus": null,
+  "autopilotEnabled": false,
+  "autopilotState": "inactive",
+  "lastAutopilotActivityAt": null,
+  "createdAt": "2026-05-01T00:55:32.632Z",
+  "updatedAt": "2026-05-01T00:55:32.632Z",
+  "lastSeenAt": "2026-05-01T00:55:32.632Z"
+}

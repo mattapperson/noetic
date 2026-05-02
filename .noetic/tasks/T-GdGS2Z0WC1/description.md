@@ -1,0 +1,1 @@
+uodate the readme, include a basic getting started and ensure all code and examples are uo to date with the current codebase

@@ -1,0 +1,4 @@
+{"kind":"system","ts":"2026-05-01T01:08:13.780Z","message":"agent-ci runner started (pid=60793, workflow=fake-workflow.yml)"}
+{"kind":"system","ts":"2026-05-01T01:08:13.781Z","message":"agent-ci exited with code 0"}
+{"kind":"system","ts":"2026-05-01T01:08:13.785Z","message":"agent-ci runner started (pid=60793, workflow=fake-workflow.yml)"}
+{"kind":"system","ts":"2026-05-01T01:08:13.785Z","message":"agent-ci exited with code 1"}

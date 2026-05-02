@@ -1,7 +1,7 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `setHarness()`, `setTraceExporter()`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`, `setHarness()`, `setTraceExporter()`
 
 ---
 
@@ -71,6 +71,98 @@ The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shel
 
 ---
 
+## Subprocess Abstraction
+
+The `SubprocessAdapter` interface abstracts long-lived child-process lifecycle and inter-process RPC. Tools, memory layers, and CLI features that need to spawn helper processes (agent-ci runs, daemons, sub-agents, RPC services) call through this adapter rather than `node:child_process` or `node:net` directly. This enables the harness to run inside non-POSIX runtimes (Cloudflare Worker isolates, Durable Objects, remote workers) where a "subprocess" maps to a service binding or a separately-deployed worker.
+
+The interface speaks in opaque ids and capability flags rather than POSIX-specific concepts (pid, signals) so non-POSIX backends are first-class.
+
+```typescript
+type SubprocessStdio = 'inherit' | 'pipe' | 'ignore';
+type SubprocessKillSignal = 'SIGTERM' | 'SIGKILL' | 'SIGINT';
+
+interface SubprocessIpcSchemas<Req, Res> {
+  request: ZodType<Req>;
+  response: ZodType<Res>;
+}
+
+interface SubprocessSpec<Req = unknown, Res = unknown> {
+  command: string;                       // executable, service binding, or DO class
+  args?: ReadonlyArray<string>;
+  cwd?: string;
+  env?: Record<string, string>;
+  detached?: boolean;
+  stdio?: SubprocessStdio;
+  signal?: AbortSignal;
+  ipc?: SubprocessIpcSchemas<Req, Res>;
+}
+
+interface SubprocessExitInfo {
+  code: number | null;
+  signal: string | null;
+  reason?: string;
+}
+
+interface SubprocessIpcChannel<Req = unknown, Res = unknown> {
+  send(msg: Req): Promise<Res>;
+  readonly closed: boolean;
+  close(): Promise<void>;
+}
+
+interface SubprocessServer<Req = unknown, Res = unknown> {
+  serve(handler: (req: Req) => Promise<Res>): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface SubprocessHandle<Req = unknown, Res = unknown> {
+  readonly id: string;                   // opaque (stringified pid locally; instance id on workers)
+  readonly startToken: string;           // identity token surviving id reuse
+  readonly detached: boolean;
+  readonly stdin?: WritableStream<Uint8Array>;
+  readonly stdout?: ReadableStream<Uint8Array>;
+  readonly stderr?: ReadableStream<Uint8Array>;
+  readonly ipc?: SubprocessIpcChannel<Req, Res>;
+  isAlive(): Promise<boolean>;
+  kill(signal?: SubprocessKillSignal): Promise<void>;
+  wait(): Promise<SubprocessExitInfo>;
+  pause?: () => Promise<void>;            // present when capabilities.pauseResume
+  resume?: () => Promise<void>;           // present when capabilities.pauseResume
+}
+
+interface SubprocessCapabilities {
+  readonly pauseResume: boolean;
+  readonly signals: boolean;
+  readonly detached: boolean;
+  readonly stdio: boolean;
+  readonly ipc: boolean;
+}
+
+interface SubprocessAdapter {
+  readonly capabilities: SubprocessCapabilities;
+  spawn<Req, Res>(spec: SubprocessSpec<Req, Res>): Promise<SubprocessHandle<Req, Res>>;
+  attach(id: string, startToken: string): Promise<SubprocessHandle | null>;
+  serve<Req, Res>(name: string, schemas: SubprocessIpcSchemas<Req, Res>): Promise<SubprocessServer<Req, Res>>;
+}
+```
+
+`createLocalSubprocessAdapter()` returns the default implementation backed by `node:child_process.spawn` (process lifecycle), POSIX signals (kill / SIGSTOP / SIGCONT), `ps -p <pid> -o lstart=` (start-time identity), and unix-domain sockets with length-prefixed JSON framing for the typed RPC channel.
+
+The adapter is threaded through the same path as `FsAdapter` and `ShellAdapter`: `AgentHarness.subprocess` → `Context.subprocess` → `ToolExecutionContext.subprocess` → `ExecutionContext.subprocess`.
+
+### Identity and `attach`
+
+`spawn()` returns a handle with an opaque `id` plus a `startToken` that uniquely identifies the running instance. Persistence layers (e.g. the CLI tasks SQLite db) store both, then later call `subprocess.attach(id, startToken)` to re-acquire a working handle. `attach` returns `null` when the underlying process is gone OR when the start token no longer matches (PID reuse on POSIX, instance regeneration on workers). This replaces ad-hoc liveness + start-time identity checks.
+
+### Capability flags
+
+POSIX-only operations (signals, pause/resume) are advertised by `adapter.capabilities` and reflected as optional methods on `SubprocessHandle`. Consumers should consult `capabilities` once and degrade gracefully (hide UI, skip features) rather than try/catch on missing methods. On the Worker backend, for example, `capabilities.pauseResume` is `false` and `handle.pause` is `undefined`.
+
+### Typed RPC channel
+
+When `spec.ipc` is set with Zod schemas for request and response, the spawn pre-wires a bidirectional channel between parent and child. The child binds a named endpoint via `adapter.serve(name, schemas)` (locally, a unix socket path provided in the `NOETIC_SUBPROCESS_IPC_PATH` env var; on workers, a service binding or DO name). Both ends Zod-parse messages at the boundary; mismatched payloads short-circuit before they reach handler code.
+
+---
+
 ## The `AgentHarness` Interface
 
 The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
@@ -85,6 +177,9 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 
   // Shell abstraction
   readonly shell: ShellAdapter;
+
+  // Subprocess abstraction
+  readonly subprocess: SubprocessAdapter;
 
   // Primary execution — enqueues input on the session identified by
   // options.threadId and returns once the message is accepted. The session
@@ -485,6 +580,9 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Shell adapter. Defaults to createLocalShellAdapter(). */
   shell?: ShellAdapter;
+
+  /** Subprocess adapter. Defaults to createLocalSubprocessAdapter(). */
+  subprocess?: SubprocessAdapter;
 
   /** Storage backend for memory persistence. See 11-memory-layer-system. */
   storage?: StorageAdapter;
