@@ -20,6 +20,8 @@ import generalPurposeAgentSource from './general-purpose/SKILL.md' with { type: 
 import planAgentSource from './plan/SKILL.md' with { type: 'text' };
 // @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
 import planModeSkillSource from './plan-mode/SKILL.md' with { type: 'text' };
+// @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
+import verificationAgentSource from './verification/SKILL.md' with { type: 'text' };
 
 //#region Helpers
 
@@ -69,6 +71,10 @@ const BUILT_IN_INPUTS: ReadonlyArray<BuiltInSkillInput> = [
   {
     dirName: 'plan',
     source: planAgentSource,
+  },
+  {
+    dirName: 'verification',
+    source: verificationAgentSource,
   },
 ];
 

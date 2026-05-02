@@ -116,6 +116,32 @@ export const ShellConfigSchema = z.object({
 
 export type ShellConfig = z.infer<typeof ShellConfigSchema>;
 
+/**
+ * Per-sub-agent override applied when the parent agent invokes a teammate via
+ * the `agent` tool. Keys in `agents` are agent-type ids (e.g. `explore`,
+ * `plan`, `verification`) — they match the `agent-type` field on a SKILL.md.
+ *
+ * Each field overrides the matching SKILL.md frontmatter:
+ *  - `model`        beats `agent-model` (including `inherit`)
+ *  - `instructions` appended to the SKILL body, or replaces it when
+ *                   `instructionsMode` is `'replace'`
+ *  - `tools`        replaces the SKILL `allowed-tools` allowlist;
+ *                   `[]` means "no tools"
+ */
+export const AgentOverrideSchema = z.object({
+  model: z.string().optional(),
+  instructions: z.string().optional(),
+  instructionsMode: z
+    .enum([
+      'append',
+      'replace',
+    ])
+    .optional(),
+  tools: z.array(z.string()).optional(),
+});
+
+export type AgentOverride = z.infer<typeof AgentOverrideSchema>;
+
 export const AgentConfigSchema = z.object({
   model: z.string(),
   cwd: z.string(),
@@ -159,6 +185,12 @@ export const AgentConfigSchema = z.object({
   ui: UiConfigSchema.optional(),
   history: HistoryConfigSchema.optional(),
   shell: ShellConfigSchema.optional(),
+  /**
+   * Per-sub-agent overrides keyed by `agent-type` (e.g. `explore`, `plan`,
+   * `verification`). Beats the matching SKILL.md frontmatter. Surfaced via
+   * the `/config` TUI editor.
+   */
+  agents: z.record(z.string(), AgentOverrideSchema).optional(),
 });
 
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;

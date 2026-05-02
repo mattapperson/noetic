@@ -123,6 +123,19 @@ function buildUsingToolsSection(): string {
  - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.`;
 }
 
+function buildDelegationSection(): string {
+  return `# Delegating to sub-agents
+
+You can spawn sub-agents (teammates) via the \`agent\` tool. Use them to keep your own context window clean and to parallelize work.
+
+ - For broad codebase exploration or research that will take more than ~3 tool calls, prefer \`subagent_type: explore\` over running serial \`grep\`/\`read\` calls yourself. Specify a thoroughness level — \`quick\` / \`medium\` / \`very thorough\` — based on how much depth the answer needs.
+ - For implementation plans where you should not start writing code yet (architecture decisions, multi-file change scoping), use \`subagent_type: plan\`. It returns a step-by-step plan and a list of critical files.
+ - For complex multi-step research that needs the full coding toolset (not just read-only), use \`subagent_type: general-purpose\`.
+ - After non-trivial implementation work (3+ file edits, backend/API changes, infrastructure changes), spawn \`subagent_type: verification\` with \`run_in_background: true\` to adversarially verify the change before reporting completion. Pass the original task description, files changed, and approach taken; expect a \`VERDICT: PASS|FAIL|PARTIAL\` line in the result.
+ - Do NOT delegate when the task is already known to be one or two file reads — the round-trip overhead isn't worth it.
+ - When you launch multiple sub-agents for independent work, send them in a single message with multiple tool calls so they run concurrently.`;
+}
+
 function buildToneAndStyleSection(): string {
   return `# Tone and style
  - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
@@ -203,6 +216,10 @@ const SECTIONS: ReadonlyArray<PromptSection> = [
   {
     id: 'using_tools',
     build: buildUsingToolsSection,
+  },
+  {
+    id: 'delegation',
+    build: buildDelegationSection,
   },
   {
     id: 'tone_style',

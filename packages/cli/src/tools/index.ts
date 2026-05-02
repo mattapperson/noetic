@@ -8,6 +8,7 @@ import type { LspService } from '../lsp/service.js';
 import type { AskUserService } from '../tui/services/ask-user-service.js';
 import { createAskUserTool } from './ask-user.js';
 import { createBashTool } from './bash.js';
+import { createBrowserTool } from './browser.js';
 import { createEditTool } from './edit.js';
 import { createFindTool } from './find.js';
 import { createGrepTool } from './grep.js';
@@ -39,6 +40,14 @@ export {
   AskUserQuestionSchema,
 } from './ask-user-types.js';
 export { type BashOutput, type BashTool, createBashTool } from './bash.js';
+export {
+  type BrowserInput,
+  BrowserInputSchema,
+  type BrowserOutput,
+  BrowserOutputSchema,
+  type BrowserTool,
+  createBrowserTool,
+} from './browser.js';
 export { createCheckAgentTool } from './check-agent.js';
 export { createEditTool, type EditOutput, type EditTool } from './edit.js';
 export {
@@ -124,6 +133,7 @@ export function createCodingTools(opts: CreateToolsOptions): Tool[] {
     createInteractiveTerminalTool(cwd, shell, {
       mutationPolicy: opts.mutationPolicy,
     }),
+    createBrowserTool(cwd, shell),
   ];
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));

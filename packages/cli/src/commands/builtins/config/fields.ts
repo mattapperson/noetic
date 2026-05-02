@@ -1,9 +1,11 @@
+import { BUILT_IN_SKILLS } from '../../../skills/built-in/index.js';
+import type { SkillDefinition } from '../../../skills/types.js';
 import type { ConfigFieldDefinition, ConfigFieldPath } from './types.js';
 import { ConfigTab, FieldKind } from './types.js';
 
-//#region Field Registry
+//#region Static Field Registry
 
-export const CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
+const STATIC_CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
   {
     path: 'model',
     label: 'Model',
@@ -137,45 +139,95 @@ export const CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
   },
 ];
 
-const ModelField = CONFIG_FIELDS[0];
-const ApiKeyField = CONFIG_FIELDS[1];
-const MaxTurnsField = CONFIG_FIELDS[2];
-const SystemPromptModeField = CONFIG_FIELDS[3];
-const SystemPromptField = CONFIG_FIELDS[4];
-const CwdField = CONFIG_FIELDS[5];
-const TrustProjectEmbeddedCommandsField = CONFIG_FIELDS[6];
-const WorktreeEnabledField = CONFIG_FIELDS[7];
-const WorktreePathField = CONFIG_FIELDS[8];
-const WorktreeBranchField = CONFIG_FIELDS[9];
-const WorktreeCleanupField = CONFIG_FIELDS[10];
-const WorktreeCloneFilesField = CONFIG_FIELDS[11];
-const ToolsIncludeField = CONFIG_FIELDS[12];
-const ToolsExcludeField = CONFIG_FIELDS[13];
-const MemoryField = CONFIG_FIELDS[14];
-const HistoryMaxItemsField = CONFIG_FIELDS[15];
+//#endregion
 
-export const CONFIG_FIELDS_BY_PATH: Record<ConfigFieldPath, ConfigFieldDefinition> = {
-  model: ModelField,
-  apiKey: ApiKeyField,
-  maxTurns: MaxTurnsField,
-  systemPromptMode: SystemPromptModeField,
-  systemPrompt: SystemPromptField,
-  cwd: CwdField,
-  trustProjectEmbeddedCommands: TrustProjectEmbeddedCommandsField,
-  'worktree.enabled': WorktreeEnabledField,
-  'worktree.worktree-path': WorktreePathField,
-  'worktree.branch': WorktreeBranchField,
-  'worktree.cleanup': WorktreeCleanupField,
-  'worktree.clone-files': WorktreeCloneFilesField,
-  'tools.include': ToolsIncludeField,
-  'tools.exclude': ToolsExcludeField,
-  memory: MemoryField,
-  'history.maxItems': HistoryMaxItemsField,
-};
+//#region Dynamic Sub-agent Field Registry
+
+/**
+ * Build the agents-tab field set from the registered built-in agents
+ * (`BUILT_IN_SKILLS` filtered to those with `agentType` set). For each
+ * agent type we emit three fields: model, instructions, tools.
+ *
+ * The list is built once at module init — built-in skills are static text
+ * imports, so the catalog never changes at runtime. User-defined agent
+ * skills are not surfaced here yet (they can still be configured via the
+ * `agents` field in `noetic.config.ts` directly).
+ */
+function buildAgentFields(skills: ReadonlyArray<SkillDefinition>): ConfigFieldDefinition[] {
+  const fields: ConfigFieldDefinition[] = [];
+  for (const skill of skills) {
+    const agentType = skill.agentType;
+    if (agentType === undefined || agentType.length === 0) {
+      continue;
+    }
+    const skillModel = skill.agentModel;
+    const placeholderModel =
+      skillModel && skillModel !== 'inherit' ? skillModel : 'inherit from main agent';
+    fields.push({
+      path: `agents.${agentType}.model`,
+      label: `${agentType} model`,
+      kind: FieldKind.Text,
+      tab: ConfigTab.Agents,
+      placeholder: placeholderModel,
+      description: `Model id for the ${agentType} sub-agent. Empty = inherit from SKILL.md.`,
+    });
+    fields.push({
+      path: `agents.${agentType}.instructions`,
+      label: `${agentType} instructions`,
+      kind: FieldKind.Multiline,
+      tab: ConfigTab.Agents,
+      placeholder: 'Extra instructions appended to SKILL.md…',
+      description: `Extra instructions for the ${agentType} sub-agent (appended to its SKILL.md body). Use \\n for line breaks.`,
+    });
+    fields.push({
+      path: `agents.${agentType}.tools`,
+      label: `${agentType} tools`,
+      kind: FieldKind.List,
+      tab: ConfigTab.Agents,
+      placeholder: 'inherit from SKILL.md',
+      description: `Comma-separated tool allow-list for the ${agentType} sub-agent. Empty = inherit from SKILL.md.`,
+    });
+  }
+  return fields;
+}
+
+const AGENT_CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = buildAgentFields(BUILT_IN_SKILLS);
 
 //#endregion
 
-//#region Helpers
+//#region Public API
+
+export const CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
+  ...STATIC_CONFIG_FIELDS,
+  ...AGENT_CONFIG_FIELDS,
+];
+
+const CONFIG_FIELDS_INDEX: Map<string, ConfigFieldDefinition> = new Map(
+  CONFIG_FIELDS.map((field) => [
+    field.path,
+    field,
+  ]),
+);
+
+/**
+ * Look up a field definition by its path. Returns `undefined` for an unknown
+ * path — callers should treat that as a programming error.
+ */
+export function getFieldByPath(path: ConfigFieldPath): ConfigFieldDefinition | undefined {
+  return CONFIG_FIELDS_INDEX.get(path);
+}
+
+/**
+ * Same as `getFieldByPath` but throws on miss. Use at sites that already
+ * established the path is valid (e.g. derived from `state.focusedField`).
+ */
+export function requireFieldByPath(path: ConfigFieldPath): ConfigFieldDefinition {
+  const field = CONFIG_FIELDS_INDEX.get(path);
+  if (!field) {
+    throw new Error(`Unknown config field path: ${path}`);
+  }
+  return field;
+}
 
 export function getFieldsForTab(tab: ConfigTab): ReadonlyArray<ConfigFieldDefinition> {
   return CONFIG_FIELDS.filter((field) => field.tab === tab);
@@ -191,7 +243,10 @@ export function getNextField(
   offset: number,
   isFieldVisible: (path: ConfigFieldPath) => boolean,
 ): ConfigFieldPath {
-  const field = CONFIG_FIELDS_BY_PATH[current];
+  const field = getFieldByPath(current);
+  if (!field) {
+    return current;
+  }
   const fields = getFieldsForTab(field.tab).filter((candidate) => isFieldVisible(candidate.path));
   if (fields.length === 0) {
     return current;

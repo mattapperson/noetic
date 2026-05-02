@@ -330,6 +330,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       worktreeConfig: config.worktree,
       cwd: config.cwd,
       historyMaxItems: config.history?.maxItems,
+      agentOverrides: config.agents,
     }),
     createSendMessageTool({
       teammates,

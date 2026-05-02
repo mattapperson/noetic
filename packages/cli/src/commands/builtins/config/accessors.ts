@@ -1,7 +1,26 @@
-import type { AgentConfig, WorktreeConfig } from '../../../types/config.js';
-import type { ConfigFieldPath } from './types.js';
+import type { AgentConfig, AgentOverride, WorktreeConfig } from '../../../types/config.js';
+import type { AgentOverrideFieldName, ConfigFieldPath } from './types.js';
+import { parseAgentOverrideFieldPath } from './types.js';
 
 //#region Helpers
+
+function cloneAgentOverrides(overrides: AgentConfig['agents']): AgentConfig['agents'] {
+  if (!overrides) {
+    return undefined;
+  }
+  const next: Record<string, AgentOverride> = {};
+  for (const [agentType, override] of Object.entries(overrides)) {
+    next[agentType] = {
+      ...override,
+      tools: override.tools
+        ? [
+            ...override.tools,
+          ]
+        : undefined,
+    };
+  }
+  return next;
+}
 
 function cloneConfig(config: AgentConfig): AgentConfig {
   return {
@@ -45,6 +64,7 @@ function cloneConfig(config: AgentConfig): AgentConfig {
           ...config.history,
         }
       : undefined,
+    agents: cloneAgentOverrides(config.agents),
   };
 }
 
@@ -59,12 +79,59 @@ function splitList(value: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+function parseMultilineValue(rawValue: string): string {
+  return rawValue.replaceAll('\\n', '\n');
+}
+
+function ensureAgentOverride(config: AgentConfig, agentType: string): AgentOverride {
+  if (!config.agents) {
+    config.agents = {};
+  }
+  const existing = config.agents[agentType];
+  if (existing) {
+    return existing;
+  }
+  const fresh: AgentOverride = {};
+  config.agents[agentType] = fresh;
+  return fresh;
+}
+
+function pruneAgentOverride(config: AgentConfig, agentType: string): void {
+  if (!config.agents) {
+    return;
+  }
+  const override = config.agents[agentType];
+  if (!override) {
+    return;
+  }
+  const isEmpty =
+    override.model === undefined &&
+    override.instructions === undefined &&
+    override.instructionsMode === undefined &&
+    (override.tools === undefined || override.tools.length === 0);
+  if (!isEmpty) {
+    return;
+  }
+  delete config.agents[agentType];
+  if (Object.keys(config.agents).length === 0) {
+    config.agents = undefined;
+  }
+}
+
 //#endregion
 
 //#region Getters
 
 export function getFieldValue(config: AgentConfig, path: ConfigFieldPath): string {
-  const value = fieldGetters[path](config);
+  const agentPath = parseAgentOverrideFieldPath(path);
+  if (agentPath) {
+    return getAgentFieldValue(config, agentPath.agentType, agentPath.field);
+  }
+  const getter = staticFieldGetters[path];
+  if (!getter) {
+    return '';
+  }
+  const value = getter(config);
   if (Array.isArray(value)) {
     return value.join(', ');
   }
@@ -77,10 +144,27 @@ export function getFieldValue(config: AgentConfig, path: ConfigFieldPath): strin
   return value ?? '';
 }
 
-const fieldGetters: Record<
-  ConfigFieldPath,
-  (config: AgentConfig) => string | number | boolean | string[] | undefined
-> = {
+function getAgentFieldValue(
+  config: AgentConfig,
+  agentType: string,
+  field: AgentOverrideFieldName,
+): string {
+  const override = config.agents?.[agentType];
+  if (!override) {
+    return '';
+  }
+  if (field === 'model') {
+    return override.model ?? '';
+  }
+  if (field === 'instructions') {
+    return override.instructions ?? '';
+  }
+  return (override.tools ?? []).join(', ');
+}
+
+type StaticFieldGetter = (config: AgentConfig) => string | number | boolean | string[] | undefined;
+
+const staticFieldGetters: Record<string, StaticFieldGetter> = {
   model: (config) => config.model,
   apiKey: (config) => config.apiKey,
   maxTurns: (config) => config.maxTurns,
@@ -109,11 +193,50 @@ export function setFieldValue(
   rawValue: string,
 ): AgentConfig {
   const next = cloneConfig(config);
-  fieldSetters[path](next, rawValue);
+  const agentPath = parseAgentOverrideFieldPath(path);
+  if (agentPath) {
+    setAgentFieldValue({
+      config: next,
+      agentType: agentPath.agentType,
+      field: agentPath.field,
+      rawValue,
+    });
+    return next;
+  }
+  const setter = staticFieldSetters[path];
+  if (!setter) {
+    return next;
+  }
+  setter(next, rawValue);
   return next;
 }
 
-const fieldSetters: Record<ConfigFieldPath, (config: AgentConfig, rawValue: string) => void> = {
+interface SetAgentFieldValueArgs {
+  config: AgentConfig;
+  agentType: string;
+  field: AgentOverrideFieldName;
+  rawValue: string;
+}
+
+function setAgentFieldValue(args: SetAgentFieldValueArgs): void {
+  const { config, agentType, field, rawValue } = args;
+  const override = ensureAgentOverride(config, agentType);
+  if (field === 'model') {
+    const trimmed = rawValue.trim();
+    override.model = trimmed.length > 0 ? trimmed : undefined;
+  } else if (field === 'instructions') {
+    const value = parseMultilineValue(rawValue);
+    override.instructions = value.length > 0 ? value : undefined;
+  } else {
+    const values = splitList(rawValue);
+    override.tools = values.length > 0 ? values : undefined;
+  }
+  pruneAgentOverride(config, agentType);
+}
+
+type StaticFieldSetter = (config: AgentConfig, rawValue: string) => void;
+
+const staticFieldSetters: Record<string, StaticFieldSetter> = {
   model: (config, rawValue) => {
     config.model = rawValue.trim();
   },
@@ -127,7 +250,7 @@ const fieldSetters: Record<ConfigFieldPath, (config: AgentConfig, rawValue: stri
     config.systemPromptMode = rawValue === 'replace' ? 'replace' : 'compose';
   },
   systemPrompt: (config, rawValue) => {
-    const value = rawValue.replaceAll('\\n', '\n');
+    const value = parseMultilineValue(rawValue);
     config.systemPrompt = value.length > 0 ? value : undefined;
   },
   cwd: (config, rawValue) => {

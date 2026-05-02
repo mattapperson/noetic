@@ -8,6 +8,7 @@ export const ConfigTab = {
   Memory: 'memory',
   Runtime: 'runtime',
   Worktree: 'worktree',
+  Agents: 'agents',
 } as const;
 export type ConfigTab = (typeof ConfigTab)[keyof typeof ConfigTab];
 
@@ -17,17 +18,28 @@ export const CONFIG_TAB_TITLES: Record<ConfigTab, string> = {
   [ConfigTab.Memory]: 'Memory',
   [ConfigTab.Runtime]: 'Runtime',
   [ConfigTab.Worktree]: 'Worktree',
+  [ConfigTab.Agents]: 'Sub-agents',
 };
 
 export const CONFIG_TAB_ORDER: ReadonlyArray<ConfigTab> = [
   ConfigTab.Model,
+  ConfigTab.Agents,
   ConfigTab.Tools,
   ConfigTab.Memory,
   ConfigTab.Runtime,
   ConfigTab.Worktree,
 ];
 
-export type ConfigFieldPath =
+/**
+ * Static field paths cover every editable AgentConfig field except per-sub-agent
+ * overrides. Sub-agent overrides use the template-literal slot
+ * `agents.{type}.{field}` — the `type` portion is the agent-type id from a
+ * registered skill, dynamic at runtime, so we widen that segment to `string`.
+ */
+export type AgentOverrideFieldName = 'model' | 'instructions' | 'tools';
+export type AgentOverrideFieldPath = `agents.${string}.${AgentOverrideFieldName}`;
+
+export type StaticConfigFieldPath =
   | 'model'
   | 'apiKey'
   | 'maxTurns'
@@ -44,6 +56,8 @@ export type ConfigFieldPath =
   | 'tools.exclude'
   | 'memory'
   | 'history.maxItems';
+
+export type ConfigFieldPath = StaticConfigFieldPath | AgentOverrideFieldPath;
 
 export const FieldKind = {
   Text: 'text',
@@ -95,6 +109,34 @@ export interface ConfigEditorProps {
   config: AgentConfig;
   sourcePath?: string;
   onCancel: (message?: string) => void;
+}
+
+/**
+ * Parse `agents.{type}.{field}` into its components, or return null if the
+ * path is not an agent-override path. Accepts an arbitrary string so it can
+ * narrow Zod issue paths (raw strings) as well as known `ConfigFieldPath`s.
+ */
+export function parseAgentOverrideFieldPath(path: string): {
+  agentType: string;
+  field: AgentOverrideFieldName;
+} | null {
+  if (!path.startsWith('agents.')) {
+    return null;
+  }
+  const rest = path.slice('agents.'.length);
+  const lastDot = rest.lastIndexOf('.');
+  if (lastDot === -1) {
+    return null;
+  }
+  const agentType = rest.slice(0, lastDot);
+  const fieldName = rest.slice(lastDot + 1);
+  if (fieldName !== 'model' && fieldName !== 'instructions' && fieldName !== 'tools') {
+    return null;
+  }
+  return {
+    agentType,
+    field: fieldName,
+  };
 }
 
 //#endregion

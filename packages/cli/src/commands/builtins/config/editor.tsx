@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { Tab, Tabs } from '../../../tui/components/tabs/index.js';
 import { useTheme } from '../../../tui/components/theme.js';
-import { CONFIG_FIELDS_BY_PATH } from './fields.js';
+import { requireFieldByPath } from './fields.js';
 import { PANEL_COMPONENTS } from './panels.js';
 import { saveConfig } from './save.js';
 import {
@@ -107,7 +107,7 @@ function EditInput({
   onChange: (value: string) => void;
   onSubmit: () => void;
 }): ReactNode {
-  const field = CONFIG_FIELDS_BY_PATH[state.focusedField];
+  const field = requireFieldByPath(state.focusedField);
   const mask = field.kind === FieldKind.MaskedText ? '•' : undefined;
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -334,7 +334,7 @@ export function ConfigEditor({
         return;
       }
       if (key.return) {
-        const field = CONFIG_FIELDS_BY_PATH[state.focusedField];
+        const field = requireFieldByPath(state.focusedField);
         if (field.kind === FieldKind.Boolean) {
           setState((current) => toggleFocusedBoolean(current));
           return;

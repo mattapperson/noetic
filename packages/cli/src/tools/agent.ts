@@ -41,7 +41,7 @@ import { unknownAgentType } from '../errors/worktree-errors.js';
 import { teammateInboundLayer } from '../memory/teammate-inbound-layer.js';
 import { getAgent, listAgents } from '../skills/catalog.js';
 import type { SkillDefinition } from '../skills/types.js';
-import type { WorktreeConfig } from '../types/config.js';
+import type { AgentOverride, WorktreeConfig } from '../types/config.js';
 import * as log from '../util/log.js';
 
 //#region Constants
@@ -83,6 +83,12 @@ interface CreateAgentToolArgs {
    * parent's memory stack; non-inheriting ones receive an explicit instance.
    */
   historyMaxItems: number | undefined;
+  /**
+   * Per-sub-agent overrides keyed by `agent-type`. Beats the matching
+   * SKILL.md frontmatter for `model`, `instructions`, and `allowed-tools`.
+   * Sourced from `noetic.config.ts`'s `agents` field.
+   */
+  agentOverrides?: Record<string, AgentOverride>;
 }
 
 interface ResolvedAgent {
@@ -90,6 +96,8 @@ interface ResolvedAgent {
   model: string;
   tools: Tool[];
   background: boolean;
+  /** Final instructions after applying any `instructions` / `instructionsMode` override. */
+  instructions: string;
 }
 
 const AgentInputSchema = z.object({
@@ -163,9 +171,10 @@ interface ResolveAgentArgs {
   catalog: ReadonlyArray<SkillDefinition>;
   parentTools: ReadonlyArray<Tool>;
   parentModel: string;
+  agentOverrides?: Record<string, AgentOverride>;
 }
 
-function resolveAgent(args: ResolveAgentArgs): ResolvedAgent {
+export function resolveAgent(args: ResolveAgentArgs): ResolvedAgent {
   const requestedType = args.input.subagent_type ?? 'general-purpose';
   const skill = getAgent(args.catalog, requestedType);
   if (!skill) {
@@ -175,11 +184,18 @@ function resolveAgent(args: ResolveAgentArgs): ResolvedAgent {
     });
   }
 
-  const skillModel = skill.agentModel;
-  const model =
-    skillModel && skillModel !== 'inherit' ? skillModel : (args.input.model ?? args.parentModel);
+  const override = args.agentOverrides?.[requestedType];
 
-  const tools = filterTools(args.parentTools, skill.allowedTools);
+  const skillModel = skill.agentModel;
+  const fallbackModel =
+    skillModel && skillModel !== 'inherit' ? skillModel : (args.input.model ?? args.parentModel);
+  const model = override?.model ?? fallbackModel;
+
+  const instructions = applyInstructionsOverride(skill.instructions, override);
+
+  const allowList = override?.tools ?? skill.allowedTools;
+  const tools = filterTools(args.parentTools, allowList);
+
   const background = args.input.run_in_background === true || skill.agentBackground === true;
 
   return {
@@ -187,7 +203,23 @@ function resolveAgent(args: ResolveAgentArgs): ResolvedAgent {
     model,
     tools,
     background,
+    instructions,
   };
+}
+
+/**
+ * Apply the `instructions` / `instructionsMode` override on top of the
+ * SKILL.md body. Default is `'append'` — concat after the body separated by
+ * a blank line. `'replace'` swaps the body out entirely.
+ */
+function applyInstructionsOverride(base: string, override: AgentOverride | undefined): string {
+  if (override?.instructions === undefined) {
+    return base;
+  }
+  if (override.instructionsMode === 'replace') {
+    return override.instructions;
+  }
+  return `${base}\n\n${override.instructions}`;
 }
 
 /**
@@ -229,14 +261,14 @@ function buildChildStep(args: BuildChildStepArgs) {
     resolved.tools.length > 0
       ? react({
           model: resolved.model,
-          instructions: resolved.skill.instructions,
+          instructions: resolved.instructions,
           tools: resolved.tools,
           maxSteps: resolved.skill.agentMaxSteps,
         })
       : step.llm<ContextMemory, string, string>({
           id: `agent-${agentId}-llm`,
           model: resolved.model,
-          instructions: resolved.skill.instructions,
+          instructions: resolved.instructions,
         });
 
   // Memory semantics:
@@ -369,6 +401,7 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
         catalog: args.catalog,
         parentTools: args.parentTools,
         parentModel: args.parentModel,
+        agentOverrides: args.agentOverrides,
       });
 
       const inheritContext = input.inherit_context === true;
