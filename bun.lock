@@ -49,9 +49,10 @@
         "noetic": "src/cli/cli.ts",
       },
       "dependencies": {
+        "@noetic/code-agent": "workspace:*",
         "@noetic/core": "workspace:*",
         "@openrouter/agent": "0.3.1",
-        "agent-browser": "^0.26.0",
+        "agent-browser": "0.26.0",
         "chalk": "5.6.2",
         "cli-highlight": "2.1.11",
         "diff": "7.0.0",
@@ -77,6 +78,24 @@
         "@types/diff": "^8.0.0",
         "@types/html-to-text": "9.0.4",
         "@types/react": "^19.2.14",
+        "bun-types": "latest",
+      },
+    },
+    "packages/code-agent": {
+      "name": "@noetic/code-agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic/core": "workspace:*",
+        "diff": "7.0.0",
+        "glob": "11.0.3",
+        "pilotty": "0.0.7",
+        "vscode-jsonrpc": "8.2.1",
+        "vscode-languageserver-protocol": "3.17.5",
+        "yaml": "^2.8.3",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "@types/diff": "^8.0.0",
         "bun-types": "latest",
       },
     },
@@ -441,6 +460,8 @@
     "@noetic/chat-sdk": ["@noetic/chat-sdk@workspace:packages/chat-sdk"],
 
     "@noetic/cli": ["@noetic/cli@workspace:packages/cli"],
+
+    "@noetic/code-agent": ["@noetic/code-agent@workspace:packages/code-agent"],
 
     "@noetic/core": ["@noetic/core@workspace:packages/core"],
 

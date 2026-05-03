@@ -110,7 +110,7 @@ export function getItemId(item: AssistantEntry): string {
   if (item.type === 'function_call_output') {
     return item.id ?? `call-output-${item.callId}`;
   }
-  return item.id ?? `anon-${++anonCounter}`;
+  return 'id' in item && item.id ? item.id : `anon-${++anonCounter}`;
 }
 
 //#endregion

@@ -1,0 +1,3 @@
+name = "noetic-code-agent-worker-fixture"
+main = "./src.ts"
+compatibility_date = "2026-05-02"

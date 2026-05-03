@@ -1,4 +1,3 @@
-import * as path from 'node:path';
 import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { FsAdapter } from '../../types/fs-adapter';
 import type { InputMessageItem, InputTextPart, Item } from '../../types/items';
@@ -131,6 +130,49 @@ function extractFileReferences(text: string): string[] {
   ]; // Dedupe
 }
 
+function normalizePath(input: string): string {
+  const raw = input.length > 0 ? input : '.';
+  const absolute = raw.startsWith('/') ? raw : `/${raw}`;
+  const parts: string[] = [];
+  for (const part of absolute.split('/')) {
+    if (part.length === 0 || part === '.') {
+      continue;
+    }
+    if (part === '..') {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+}
+
+function resolvePath(base: string, ref = ''): string {
+  return normalizePath(ref.startsWith('/') ? ref : `${base}/${ref}`);
+}
+
+function pathBasename(input: string): string {
+  const normalized = normalizePath(input);
+  if (normalized === '/') {
+    return '';
+  }
+  return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function pathExtname(input: string): string {
+  const name = pathBasename(input);
+  const idx = name.lastIndexOf('.');
+  return idx > 0 ? name.slice(idx) : '';
+}
+
+function isAbsolutePath(input: string): boolean {
+  return input.startsWith('/');
+}
+
+function currentWorkingDirectory(): string {
+  return typeof process !== 'undefined' ? process.cwd() : '/';
+}
+
 function simpleHash(content: string): string {
   let hash = 0;
   for (let i = 0; i < content.length; i++) {
@@ -181,12 +223,9 @@ async function readFileContent(
 ): Promise<ReadFileResult> {
   try {
     // Security: Validate path stays within baseDir (prevent path traversal)
-    const normalizedBase = path.resolve(opts.baseDir);
-    const normalizedPath = path.resolve(absolutePath);
-    if (
-      !normalizedPath.startsWith(normalizedBase + path.sep) &&
-      normalizedPath !== normalizedBase
-    ) {
+    const normalizedBase = resolvePath(opts.baseDir);
+    const normalizedPath = resolvePath(absolutePath);
+    if (!normalizedPath.startsWith(`${normalizedBase}/`) && normalizedPath !== normalizedBase) {
       return {
         content: null,
         deleted: false,
@@ -195,8 +234,8 @@ async function readFileContent(
     }
 
     // Security: Check file extension
-    const ext = path.extname(normalizedPath).toLowerCase();
-    const basename = path.basename(normalizedPath);
+    const ext = pathExtname(normalizedPath).toLowerCase();
+    const basename = pathBasename(normalizedPath);
     const isAllowedExt = opts.allowedExtensions.some(
       (allowed) => ext === allowed.toLowerCase() || basename === allowed,
     );
@@ -287,7 +326,7 @@ async function scoreFileRelevance(params: ScoreFileRelevanceParams): Promise<num
   if (!ctx.callModel) {
     const queryLower = userQuery.toLowerCase();
     const pathLower = filePath.toLowerCase();
-    if (pathLower.includes(queryLower) || queryLower.includes(path.basename(pathLower))) {
+    if (pathLower.includes(queryLower) || queryLower.includes(pathBasename(pathLower))) {
       return 80;
     }
     return 50;
@@ -350,7 +389,7 @@ Score:`;
  * @public
  */
 export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileReferenceState> {
-  const baseDir = opts?.baseDir ?? process.cwd();
+  const baseDir = opts?.baseDir ?? currentWorkingDirectory();
   const slot = opts?.slot ?? Slot.RAG;
   const scoringModel = opts?.scoringModel ?? 'anthropic/claude-haiku-4-5-20251001';
   const maxFileSize = opts?.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
@@ -416,7 +455,7 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
           for (const ref of refs) {
             if (!newFiles.has(ref)) {
               // Security: Reject absolute paths - all paths must be relative to baseDir
-              if (path.isAbsolute(ref)) {
+              if (isAbsolutePath(ref)) {
                 newFiles.set(ref, {
                   absolutePath: ref,
                   referencePath: ref,
@@ -431,7 +470,7 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
                 continue;
               }
 
-              const absolutePath = path.resolve(state.baseDir, ref);
+              const absolutePath = resolvePath(state.baseDir, ref);
               const result = await readFileContent(absolutePath, currentReadOpts, ctx.fs);
 
               const priority = result.content

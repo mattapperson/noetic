@@ -8,6 +8,7 @@
     "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
+    "@noetic/code-agent": "workspace:*",
     "@noetic/core": "workspace:*",
     "@openrouter/agent": "0.3.1",
     "agent-browser": "0.26.0",

@@ -45,7 +45,7 @@ export async function runDaemon(cwd: string): Promise<void> {
     return null;
   });
 
-  const { harness, flow } = buildHierarchyDaemonHarness(cwd);
+  const { harness, flow } = await buildHierarchyDaemonHarness(cwd);
   const ctx = harness.createContext({
     resourceId: 'tasks-daemon',
   });

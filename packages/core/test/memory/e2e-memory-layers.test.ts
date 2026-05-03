@@ -78,9 +78,10 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
         });
       });
 
+    type OpenRouterInput = Parameters<typeof client.callModel>[0]['input'];
     const sdkResult = client.callModel({
       model: request.model,
-      input: inputMessages,
+      input: frameworkCast<OpenRouterInput>(inputMessages),
     });
     const response = await sdkResult.getResponse();
 

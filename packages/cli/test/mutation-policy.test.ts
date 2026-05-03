@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic/core';
+import type { FsAdapter, ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic/core';
 import { BashOutputSchema, createBashTool } from '../src/tools/bash.js';
 import { createEditTool, EditOutputSchema } from '../src/tools/edit.js';
 import type { MutationPolicy } from '../src/tools/mutation-policy.js';
@@ -39,11 +39,15 @@ function stubShell(): {
   };
 }
 
-function stubFs() {
+function stubFs(): FsAdapter {
   return {
     readFile: async () => Buffer.from('old'),
     readFileText: async () => 'old',
     writeFile: async () => undefined,
+    writeFileBytes: async () => undefined,
+    appendFile: async () => undefined,
+    rename: async () => undefined,
+    rm: async () => undefined,
     mkdir: async () => undefined,
     access: async () => undefined,
     stat: async () => ({

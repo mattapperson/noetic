@@ -456,7 +456,7 @@ export async function runImplementer(
   });
   const steeringLayer = createSteeringFileLayer();
 
-  const { harness, threadId } = createRunnerHarness({
+  const { harness, threadId } = await createRunnerHarness({
     role: 'implementer',
     taskId: leafTaskId,
     cwd,

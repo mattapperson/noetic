@@ -21,7 +21,9 @@
  *     that drives `harness.run(adversarialValidatorStep, args, ctx)`.
  */
 
-import { AgentHarness, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import { createCodeAgent } from '@noetic/code-agent';
+import type { AgentHarness } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 
 import { defaultSignaller } from '../agent-ci-control.js';
 import { externalTaskEventsChan, featureLoopStateChan, validatorRequestChan } from '../channels.js';
@@ -83,10 +85,10 @@ function buildDefaultRunValidator(args: {
 
 //#region Public API
 
-export function buildHierarchyDaemonHarness(
+export async function buildHierarchyDaemonHarness(
   projectRoot: string,
   opts: BuildHierarchyDaemonHarnessOpts = {},
-): HierarchyDaemonHarnessBundle {
+): Promise<HierarchyDaemonHarnessBundle> {
   const fs = createLocalFsAdapter();
   const ctx: TaskStoreContext = {
     fs,
@@ -103,19 +105,21 @@ export function buildHierarchyDaemonHarness(
   // The harness needs an LLM provider only because the validator's
   // adversarial-review path uses `step.llm`. Other daemon flows
   // (autopilot, health, reconcile, events-bridge) do not.
-  const harness = new AgentHarness({
+  const codeAgent = await createCodeAgent({
     name: 'noetic-tasks-daemon',
-    params: {
-      model,
+    model,
+    cwd: projectRoot,
+    adapters: {
+      fs,
+      shell: createLocalShellAdapter(),
     },
-    fs,
-    shell: createLocalShellAdapter(),
+    defaultMemory: false,
     llm: {
       provider: 'openrouter',
       apiKey,
     },
-    initialCwd: projectRoot,
   });
+  const harness = codeAgent.harness;
   const validatorDeps: AdversarialValidatorDeps = {
     adversarialModel: model,
     ...opts.validatorDeps,

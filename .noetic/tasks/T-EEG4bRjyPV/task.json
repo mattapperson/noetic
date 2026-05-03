@@ -3,8 +3,8 @@
   "source": "worktree",
   "title": "F1",
   "projectRoot": "/Users/mattapperson/Development/noetic/.worktrees/feat-task-autonomy",
-  "worktreePath": null,
-  "branch": null,
+  "worktreePath": "/Users/mattapperson/Development/noetic/.worktrees/noetic-T-EEG4bRjyPV",
+  "branch": "noetic/T-EEG4bRjyPV",
   "headSha": null,
   "reviewStatus": "not_started",
   "lifecycleStatus": "active",
@@ -15,6 +15,6 @@
   "autopilotState": "inactive",
   "lastAutopilotActivityAt": null,
   "createdAt": "2026-05-01T13:00:35.882Z",
-  "updatedAt": "2026-05-01T13:00:35.882Z",
-  "lastSeenAt": "2026-05-01T13:00:35.882Z"
+  "updatedAt": "2026-05-02T14:39:18.172Z",
+  "lastSeenAt": "2026-05-02T14:39:18.172Z"
 }

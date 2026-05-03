@@ -541,7 +541,7 @@ describe('executeLLM', () => {
           executionId: ctx.id,
         }),
         store: {
-          get: (_e, layerId) => (layerId === realLayer.id ? null : undefined),
+          get: <T>() => frameworkCast<T>(null),
           set: () => {},
           cleanup: () => {},
           diagnostic: () => {},

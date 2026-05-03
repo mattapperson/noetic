@@ -203,7 +203,7 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
   });
   const steeringLayer = createSteeringFileLayer();
 
-  const { harness, threadId } = createRunnerHarness({
+  const { harness, threadId } = await createRunnerHarness({
     role: 'planner',
     taskId,
     cwd,

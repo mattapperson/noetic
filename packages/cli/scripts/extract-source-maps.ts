@@ -31,7 +31,7 @@ const INLINE_MAP_RE =
 
 function decodeInlineSourceMap(source: string): SourceMap | null {
   const match = INLINE_MAP_RE.exec(source);
-  if (!match || !match[1]) {
+  if (!match?.[1]) {
     return null;
   }
   const json = Buffer.from(match[1], 'base64').toString('utf-8');

@@ -257,7 +257,7 @@ describe('LspService', () => {
       shutdownCount: 0,
       openedUris: [],
     };
-    let releaseStart: (() => void) | null = null;
+    let releaseStart: () => void = () => {};
     const startBlocker = new Promise<void>((resolve) => {
       releaseStart = resolve;
     });

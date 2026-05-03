@@ -31,6 +31,7 @@ import {
   CollapsedReadGroupView,
   EditResult,
   LoadingSpinner,
+  LspResult,
   Reasoning,
   SystemMessage,
   ToolCall,
@@ -628,7 +629,7 @@ export function ResponsesChat({
         {streamingEntry && <Box>{renderEntry(streamingEntry, collapsedCompleted.length, ctx)}</Box>}
         {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
-      {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
+      {footerPlugin?.footer ? <Box>{footerPlugin.footer() as ReactNode}</Box> : null}
       {exitHintArmed ? (
         <Box>
           <Text dimColor>Press Ctrl+C again to exit</Text>

@@ -11,6 +11,7 @@ import type { Span } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
+import type { SubprocessAdapter } from './subprocess-adapter';
 
 /** @public Optional lifecycle hooks invoked before and after each step execution. */
 export interface AgentHooks {
@@ -146,6 +147,8 @@ export interface AgentHarnessContract<
   readonly fs: FsAdapter;
   /** Shell adapter for virtual or real shell command execution. */
   readonly shell: ShellAdapter;
+  /** Subprocess adapter for virtual, same-process, or host process execution. */
+  readonly subprocess: SubprocessAdapter;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
 
   /**
