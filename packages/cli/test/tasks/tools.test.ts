@@ -362,9 +362,12 @@ describe('taskTools() — happy-path mutation', () => {
     const seeded = await createTaskHandler(ctx, {
       title: 'Seeded for autopilot',
     });
-    expect(seeded.task.autopilotEnabled).toBe(false);
     const tools = taskTools({
       ctx,
+    });
+    await runTool(tools, 'task_autopilot', {
+      taskId: seeded.task.id,
+      enabled: false,
     });
     const { envelope } = await runTool(tools, 'task_autopilot', {
       taskId: seeded.task.id,

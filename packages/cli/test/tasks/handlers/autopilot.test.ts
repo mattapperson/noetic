@@ -12,6 +12,10 @@ describe('autopilotHandler', () => {
     const task = await createTaskHandler(ctx, {
       title: 'Toggle',
     });
+    await autopilotHandler(ctx, {
+      taskId: task.task.id,
+      enabled: false,
+    });
     const result = await autopilotHandler(ctx, {
       taskId: task.task.id,
       enabled: true,
@@ -29,10 +33,6 @@ describe('autopilotHandler', () => {
     const task = await createTaskHandler(ctx, {
       title: 'Disable',
     });
-    await autopilotHandler(ctx, {
-      taskId: task.task.id,
-      enabled: true,
-    });
     const result = await autopilotHandler(ctx, {
       taskId: task.task.id,
       enabled: false,
@@ -48,7 +48,7 @@ describe('autopilotHandler', () => {
     });
     const result = await autopilotHandler(ctx, {
       taskId: task.task.id,
-      enabled: false,
+      enabled: true,
     });
     expect(result.task).toEqual(task.task);
   });

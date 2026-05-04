@@ -49,6 +49,10 @@ describe('activateSliceHandler', () => {
     const task = await createTaskHandler(ctx, {
       title: 'No autopilot',
     });
+    await saveTask(ctx, {
+      ...task.task,
+      autopilotEnabled: false,
+    });
     const { sliceId } = await seedHierarchy(ctx, task.task.id);
     const result = await activateSliceHandler(ctx, {
       taskId: task.task.id,
@@ -69,10 +73,6 @@ describe('activateSliceHandler', () => {
     const ctx = makeStoreContext();
     const task = await createTaskHandler(ctx, {
       title: 'Autopilot',
-    });
-    await saveTask(ctx, {
-      ...task.task,
-      autopilotEnabled: true,
     });
     const { sliceId } = await seedHierarchy(ctx, task.task.id);
     const result = await activateSliceHandler(ctx, {
