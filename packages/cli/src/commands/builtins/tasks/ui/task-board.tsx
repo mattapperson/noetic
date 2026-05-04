@@ -97,17 +97,16 @@ export interface BoardSelection {
 //#region Helpers
 
 /**
- * Stable column ordering shown in the UI. Only active columns are
- * surfaced here — the terminal-state columns (Cleanup Blocked,
- * Removed, Archived) are intentionally omitted so tasks in those
- * states drop off the board and the move picker.
+ * Stable column ordering shown in the UI. Only active pre-merge
+ * columns are surfaced here — Done and the terminal-state columns
+ * (Cleanup Blocked, Removed, Archived) are intentionally omitted so
+ * tasks in those states drop off the board and the move picker.
  */
 export const VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
   KanbanColumn.Triage,
   KanbanColumn.InProgress,
   KanbanColumn.NeedsChanges,
   KanbanColumn.ReadyToMerge,
-  KanbanColumn.Done,
 ];
 
 /** Minimum per-column width below which the kanban looks unreadable. */
@@ -117,7 +116,7 @@ const COLUMN_LABELS: Record<KanbanColumn, string> = {
   [KanbanColumn.Triage]: 'Triage',
   [KanbanColumn.InProgress]: 'In Progress',
   [KanbanColumn.NeedsChanges]: 'Needs Changes',
-  [KanbanColumn.ReadyToMerge]: 'Ready to Merge',
+  [KanbanColumn.ReadyToMerge]: 'Ready to PR',
   [KanbanColumn.Done]: 'Done',
   [KanbanColumn.CleanupBlocked]: 'Cleanup Blocked',
   [KanbanColumn.Removed]: 'Removed',

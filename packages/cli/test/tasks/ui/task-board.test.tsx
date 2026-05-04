@@ -65,10 +65,11 @@ function decorate(task: Task, column: KanbanColumn, isStructured = false): Decor
 describe('VISIBLE_COLUMNS', () => {
   test('contains every active column once', () => {
     expect(new Set(VISIBLE_COLUMNS).size).toBe(VISIBLE_COLUMNS.length);
-    expect(VISIBLE_COLUMNS.length).toBe(5);
+    expect(VISIBLE_COLUMNS.length).toBe(4);
   });
 
-  test('omits terminal-state columns (CleanupBlocked / Removed / Archived)', () => {
+  test('omits Done and terminal-state columns (CleanupBlocked / Removed / Archived)', () => {
+    expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Done);
     expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.CleanupBlocked);
     expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Removed);
     expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Archived);
@@ -85,7 +86,7 @@ describe('columnLabel', () => {
   test('formats well-known columns', () => {
     expect(columnLabel(KanbanColumn.Triage)).toBe('Triage');
     expect(columnLabel(KanbanColumn.InProgress)).toBe('In Progress');
-    expect(columnLabel(KanbanColumn.ReadyToMerge)).toBe('Ready to Merge');
+    expect(columnLabel(KanbanColumn.ReadyToMerge)).toBe('Ready to PR');
   });
 });
 
@@ -294,4 +295,3 @@ describe('selectedTask', () => {
     expect(picked).toBeNull();
   });
 });
-
