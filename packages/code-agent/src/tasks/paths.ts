@@ -30,8 +30,6 @@ export interface TaskDirPaths {
   readonly hierarchy: string;
   /** `<dir>/chat.jsonl` append-only chat history (one Item per line). */
   readonly chat: string;
-  /** `<dir>/sockets/` runner IPC sockets (one per active runner). */
-  readonly sockets: string;
 }
 
 //#endregion
@@ -63,34 +61,31 @@ export function taskDirPaths(projectRoot: string, taskId: string): TaskDirPaths 
     attachments: join(dir, 'attachments'),
     hierarchy: join(dir, 'hierarchy'),
     chat: join(dir, 'chat.jsonl'),
-    sockets: join(dir, 'sockets'),
   };
 }
 
+/** Default base directory for runner IPC sockets. */
+export const DEFAULT_RUNTIME_DIR = '/tmp/.noetic';
+
 /** Resolve the unix-domain-socket path for a single runner.
  *
- * `role` distinguishes the agent role; `runnerId` distinguishes concurrent
- * runners of the same role (e.g. multiple implementers, one per feature).
- * For singletons (planner, validator) `runnerId` is the role itself.
+ * `role` distinguishes the agent role; `runnerId` must be unique across
+ * concurrent runners — for implementers it's the featureId, for planners
+ * it's the taskId.
  *
- * macOS caps unix-domain socket paths at 104 bytes — when a project lives
- * under a deep path, the default `<projectRoot>/.noetic/tasks/<taskId>/sockets/...`
- * blows the limit. Setting `NOETIC_RUNTIME_DIR=/tmp/n` (or any short base)
- * relocates the sockets dir to `<NOETIC_RUNTIME_DIR>/<taskId>/`. The on-disk
- * task store keeps using its long path; only the socket leaves.
+ * macOS caps unix-domain socket paths at 104 bytes, so sockets default to
+ * `/tmp/.noetic/<role>-<runnerId>.sock` rather than a path under the
+ * project directory (which can easily blow the limit on deep homedirs).
+ * Override the base via `NOETIC_RUNTIME_DIR`.
  */
 export function runnerSocketPath(args: {
-  readonly projectRoot: string;
-  readonly taskId: string;
   readonly role: string;
   readonly runnerId: string;
 }): string {
   const runtimeDir = process.env.NOETIC_RUNTIME_DIR;
-  if (typeof runtimeDir === 'string' && runtimeDir.length > 0) {
-    return join(runtimeDir, args.taskId, `${args.role}-${args.runnerId}.sock`);
-  }
-  const { sockets } = taskDirPaths(args.projectRoot, args.taskId);
-  return join(sockets, `${args.role}-${args.runnerId}.sock`);
+  const baseDir =
+    typeof runtimeDir === 'string' && runtimeDir.length > 0 ? runtimeDir : DEFAULT_RUNTIME_DIR;
+  return join(baseDir, `${args.role}-${args.runnerId}.sock`);
 }
 
 /**
