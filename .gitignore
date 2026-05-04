@@ -9,3 +9,4 @@ packages/web/next-env.d.ts
 packages/web/.typecheck-snippets/
 *.tsbuildinfo
 examples/skippy/.env
+.noetic/tasks/
