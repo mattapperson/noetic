@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
-import {
-  createShellValidator,
-  type ValidatorShellSpawn,
-} from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
+import type { ValidatorShellSpawn } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
+import { createShellValidator } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
 import type {
   Feature,
   ValidatorRun,
@@ -33,22 +32,22 @@ interface FakeChildOptions {
 
 function makeFakeChild(opts: FakeChildOptions): ReturnType<ValidatorShellSpawn> {
   const emitter = new EventEmitter();
-  const stdout = new EventEmitter();
-  const stderr = new EventEmitter();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
   const child = Object.assign(emitter, {
     stdout,
     stderr,
-  });
+  }) satisfies ReturnType<ValidatorShellSpawn>;
   setImmediate(() => {
     if (opts.stdout !== undefined) {
-      stdout.emit('data', Buffer.from(opts.stdout, 'utf-8'));
+      stdout.write(Buffer.from(opts.stdout, 'utf-8'));
     }
     if (opts.stderr !== undefined) {
-      stderr.emit('data', Buffer.from(opts.stderr, 'utf-8'));
+      stderr.write(Buffer.from(opts.stderr, 'utf-8'));
     }
     emitter.emit('exit', opts.exitCode);
   });
-  return child as unknown as ReturnType<ValidatorShellSpawn>;
+  return child;
 }
 
 const LEAF_TASK_ID = 'T-leaf000000';

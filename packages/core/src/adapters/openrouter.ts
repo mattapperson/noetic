@@ -7,7 +7,15 @@ import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { LLMResponse, Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
-import type { InputMessageItem, Item, MessageItem } from '../types/items';
+import type {
+  InputContentPart,
+  InputFilePart,
+  InputImagePart,
+  InputMessageItem,
+  InputTextPart,
+  Item,
+  MessageItem,
+} from '../types/items';
 import type { MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
@@ -20,6 +28,7 @@ type OpenRouterInputItem =
   | OpenRouterAgent.FunctionCallItem
   | OpenRouterAgent.FunctionCallOutputItem
   | ProviderOutputItem;
+type ProviderInputContentPart = OpenRouterAgent.EasyInputMessageContentUnion1;
 
 /** @internal */
 export type SdkTool = OpenRouterAgent.Tool;
@@ -65,6 +74,58 @@ function contentPartsToText(
     .join('');
 }
 
+function inputTextPartToProvider(part: InputTextPart): OpenRouterAgent.InputText {
+  return {
+    type: 'input_text',
+    text: part.text,
+  };
+}
+
+function inputImagePartToProvider(
+  part: InputImagePart,
+): OpenRouterAgent.EasyInputMessageContentInputImage {
+  return {
+    type: 'input_image',
+    imageUrl: part.imageUrl,
+    detail: part.detail ?? 'auto',
+  };
+}
+
+function inputFilePartToProvider(part: InputFilePart): OpenRouterAgent.InputFile {
+  return {
+    type: 'input_file',
+    filename: part.filename,
+    fileData: part.fileData,
+    fileUrl: part.fileUrl,
+    fileId: part.fileId,
+  };
+}
+
+function inputContentPartToProvider(part: InputContentPart): ProviderInputContentPart {
+  if (part.type === 'input_text') {
+    return inputTextPartToProvider(part);
+  }
+  if (part.type === 'input_image') {
+    return inputImagePartToProvider(part);
+  }
+  return inputFilePartToProvider(part);
+}
+
+function contentPartsToProviderContent(
+  parts: ReadonlyArray<{
+    type: string;
+    text?: string;
+  }>,
+): string | ProviderInputContentPart[] {
+  const hasStructuredInput = parts.some(
+    (part) => part.type === 'input_image' || part.type === 'input_file',
+  );
+  if (!hasStructuredInput) {
+    return contentPartsToText(parts);
+  }
+  return frameworkCast<ReadonlyArray<InputContentPart>>(parts).map(inputContentPartToProvider);
+}
+
 //#endregion
 
 //#region Item → OpenRouter Input Conversion
@@ -105,7 +166,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     // because the SDK's input union does not accept ResponsesOutputMessage directly.
     return {
       role: item.role,
-      content: contentPartsToText(item.content),
+      content: contentPartsToProviderContent(item.content),
     } satisfies OpenRouterAgent.EasyInputMessage;
   }
 

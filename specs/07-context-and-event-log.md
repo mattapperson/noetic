@@ -1,7 +1,7 @@
 # Context and Item Log
 
 > **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
-> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
+> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `InputImagePart`, `InputFilePart`, `InputContentPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
 
 ---
 
@@ -104,14 +104,33 @@ interface InputTextPart {
   readonly text: string;
 }
 
+/** User image input. */
+interface InputImagePart {
+  readonly type: 'input_image';
+  readonly imageUrl: string;
+  readonly detail?: 'auto' | 'low' | 'high';
+}
+
+/** User file input. */
+interface InputFilePart {
+  readonly type: 'input_file';
+  readonly fileData?: string;
+  readonly fileId?: string | null;
+  readonly fileUrl?: string;
+  readonly filename?: string;
+}
+
 /** Reasoning trace content. */
 type ReasoningTextPart = ReasoningTextContent;
 
 /** Reasoning summary content. */
 type SummaryTextPart = ReasoningSummaryText;
 
+/** User/developer input content variants. */
+type InputContentPart = InputTextPart | InputImagePart | InputFilePart;
+
 /** Content part variants for message items. */
-type ContentPart = OutputTextPart | RefusalPart | InputTextPart;
+type ContentPart = OutputTextPart | RefusalPart | InputContentPart;
 ```
 
 ### Output Items (from the model)
@@ -169,7 +188,7 @@ interface InputMessageItem {
   readonly type: 'message';
   readonly role: 'user' | 'system' | 'developer';
   readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
-  readonly content: InputTextPart[];
+  readonly content: InputContentPart[];
 }
 
 /**

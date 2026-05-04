@@ -33,9 +33,9 @@ import type {
   Tool,
 } from '@noetic/core';
 import {
+  createLocalSubprocessAdapter,
   durableTaskState,
   fileReference,
-  createLocalSubprocessAdapter,
   historyWindow,
   observationalMemory,
   planMemory,
@@ -44,11 +44,11 @@ import {
 } from '@noetic/core';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
-import type { NoeticPlugin } from '../plugins/types.js';
 import type { TaskStoreContext } from '../commands/builtins/tasks/fs-store.js';
 import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-policy.js';
 import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
+import type { NoeticPlugin } from '../plugins/types.js';
 import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 import { createDefaultShellAdapter } from './shell-adapter-bootstrap.js';

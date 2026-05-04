@@ -7,15 +7,15 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext } from 'react';
 
-import type { FooterContext as FooterContextValue } from '../plugins/types.js';
+import type { FooterContext } from '../plugins/types.js';
 
-const FooterReactContext = createContext<FooterContextValue | null>(null);
+const FooterReactContext = createContext<FooterContext | null>(null);
 
 export function FooterContextProvider({
   value,
   children,
 }: {
-  value: FooterContextValue;
+  value: FooterContext;
   children: ReactNode;
 }): ReactNode {
   return <FooterReactContext.Provider value={value}>{children}</FooterReactContext.Provider>;
@@ -25,7 +25,7 @@ export function FooterContextProvider({
  * Access the current session snapshot from inside a plugin footer component.
  * Throws if used outside a `FooterContextProvider`.
  */
-export function useFooterContext(): FooterContextValue {
+export function useFooterContext(): FooterContext {
   const ctx = useContext(FooterReactContext);
   if (ctx === null) {
     throw new Error('useFooterContext must be used within FooterContextProvider');

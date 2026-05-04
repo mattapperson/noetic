@@ -38,7 +38,7 @@ import {
   ToolResult,
   UserPrompt,
 } from './items/index.js';
-import type { ChatStatus } from './prompt-input.js';
+import type { ChatStatus, PromptInputMessage } from './prompt-input.js';
 import { PromptInput } from './prompt-input.js';
 import type { CallInfo } from './transcript-view.js';
 import { TranscriptView } from './transcript-view.js';
@@ -48,7 +48,7 @@ import { TranscriptView } from './transcript-view.js';
 export interface ResponsesChatProps {
   entries: ConversationEntry[];
   status: ChatStatus;
-  onSubmit: (text: string) => void;
+  onSubmit: (message: PromptInputMessage) => void;
   onStop?: () => void;
   model?: string;
   agentMode?: AgentMode;
@@ -453,8 +453,8 @@ export function ResponsesChat({
     getRequestItems,
   ]);
 
-  function handleSubmit(msg: { text: string }): void {
-    onSubmit(msg.text);
+  function handleSubmit(msg: PromptInputMessage): void {
+    onSubmit(msg);
   }
 
   useInput(
@@ -629,7 +629,7 @@ export function ResponsesChat({
         {streamingEntry && <Box>{renderEntry(streamingEntry, collapsedCompleted.length, ctx)}</Box>}
         {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
-      {footerPlugin?.footer ? <Box>{footerPlugin.footer() as ReactNode}</Box> : null}
+      {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
       {exitHintArmed ? (
         <Box>
           <Text dimColor>Press Ctrl+C again to exit</Text>

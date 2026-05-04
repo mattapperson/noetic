@@ -57,14 +57,33 @@ export interface InputTextPart {
   readonly text: string;
 }
 
+/** @public User image input content. */
+export interface InputImagePart {
+  readonly type: 'input_image';
+  readonly imageUrl: string;
+  readonly detail?: 'auto' | 'low' | 'high';
+}
+
+/** @public User file input content. */
+export interface InputFilePart {
+  readonly type: 'input_file';
+  readonly fileData?: string;
+  readonly fileId?: string | null;
+  readonly fileUrl?: string;
+  readonly filename?: string;
+}
+
 /** @public Reasoning trace content. */
 export type ReasoningTextPart = ReasoningTextContent;
 
 /** @public Reasoning summary content. */
 export type SummaryTextPart = ReasoningSummaryText;
 
+/** @public User/developer input content variants. */
+export type InputContentPart = InputTextPart | InputImagePart | InputFilePart;
+
 /** @public Content part variants for message items. */
-export type ContentPart = OutputTextPart | RefusalPart | InputTextPart;
+export type ContentPart = OutputTextPart | RefusalPart | InputContentPart;
 
 //#endregion
 
@@ -115,7 +134,7 @@ export interface InputMessageItem {
   readonly type: 'message';
   readonly role: 'user' | 'system' | 'developer';
   readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
-  readonly content: InputTextPart[];
+  readonly content: InputContentPart[];
 }
 
 /**

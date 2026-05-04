@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { OpenResponsesResult as OpenResponsesNonStreamingResponse } from '@openrouter/agent';
+import type { OpenResponsesResult } from '@openrouter/agent';
 
+type OpenResponsesNonStreamingResponse = OpenResponsesResult;
 type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
 
 import {
@@ -11,7 +12,7 @@ import {
   itemsToInput,
 } from '../../src/adapters/openrouter';
 import { frameworkCast } from '../../src/interpreter/framework-cast';
-import type { Item, ReasoningItem } from '../../src/types/items';
+import type { InputMessageItem, Item, ReasoningItem } from '../../src/types/items';
 import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
 describe('extractSystemInstruction', () => {
@@ -48,6 +49,47 @@ describe('itemsToInput', () => {
         role: string;
       }>(input[0]).role,
     ).toBe('user');
+  });
+
+  it('preserves structured user message parts for provider input', () => {
+    const message: InputMessageItem = {
+      id: 'msg-structured',
+      type: 'message',
+      role: 'user',
+      status: 'completed',
+      content: [
+        {
+          type: 'input_text',
+          text: 'Inspect this screenshot',
+        },
+        {
+          type: 'input_image',
+          imageUrl: 'data:image/png;base64,abcd',
+          detail: 'auto',
+        },
+        {
+          type: 'input_file',
+          filename: 'notes.txt',
+          fileData: 'data:text/plain;base64,aGVsbG8=',
+        },
+      ],
+    };
+
+    const input = itemsToInput([
+      message,
+    ]);
+
+    expect(input).toHaveLength(1);
+    const converted = frameworkCast<{
+      content: Array<{
+        type: string;
+      }>;
+    }>(input[0]);
+    expect(converted.content.map((part) => part.type)).toEqual([
+      'input_text',
+      'input_image',
+      'input_file',
+    ]);
   });
 
   it('converts function_call items to OpenRouter format with callId', () => {

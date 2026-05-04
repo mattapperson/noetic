@@ -1,42 +1,25 @@
+import * as CodeAgentConfig from '@noetic/code-agent/config';
 import type { FsAdapter } from '@noetic/core';
-import {
-  AgentConfigSchema as AgentSdkConfigSchema,
-  type AgentConfig as AgentSdkConfig,
-  type AgentOverride,
-  AgentOverrideSchema,
-  type AgentRuntimeConfig as AgentSdkRuntimeConfig,
-  type HistoryConfig,
-  HistoryConfigSchema,
-  type PluginSpec,
-  PluginSpecSchema,
-  type ShellConfig,
-  ShellConfigSchema,
-  type WorktreeConfig,
-  WorktreeConfigSchema,
-  type WorktreeHook,
-  WorktreeHookSchema,
-} from '@noetic/code-agent/config';
 import { z } from 'zod';
 
-export {
-  AgentOverrideSchema,
-  AgentSdkConfigSchema,
-  HistoryConfigSchema,
-  PluginSpecSchema,
-  ShellConfigSchema,
-  WorktreeConfigSchema,
-  WorktreeHookSchema,
+export const AgentSdkConfigSchema = CodeAgentConfig.AgentConfigSchema;
+export const AgentOverrideSchema = CodeAgentConfig.AgentOverrideSchema;
+export const HistoryConfigSchema = CodeAgentConfig.HistoryConfigSchema;
+export const PluginSpecSchema = CodeAgentConfig.PluginSpecSchema;
+export const ShellConfigSchema = CodeAgentConfig.ShellConfigSchema;
+export const WorktreeConfigSchema = CodeAgentConfig.WorktreeConfigSchema;
+export const WorktreeHookSchema = CodeAgentConfig.WorktreeHookSchema;
+
+export type AgentOverride = z.infer<typeof AgentOverrideSchema>;
+export type AgentSdkConfig = z.infer<typeof AgentSdkConfigSchema>;
+export type AgentSdkRuntimeConfig = AgentSdkConfig & {
+  fs: FsAdapter;
 };
-export type {
-  AgentOverride,
-  AgentSdkConfig,
-  AgentSdkRuntimeConfig,
-  HistoryConfig,
-  PluginSpec,
-  ShellConfig,
-  WorktreeConfig,
-  WorktreeHook,
-};
+export type HistoryConfig = z.infer<typeof HistoryConfigSchema>;
+export type PluginSpec = z.infer<typeof PluginSpecSchema>;
+export type ShellConfig = z.infer<typeof ShellConfigSchema>;
+export type WorktreeConfig = z.infer<typeof WorktreeConfigSchema>;
+export type WorktreeHook = z.infer<typeof WorktreeHookSchema>;
 
 /**
  * CLI/TUI-only tuning. Agent SDK hosts should not depend on this namespace.

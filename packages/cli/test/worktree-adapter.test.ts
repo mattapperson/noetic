@@ -512,7 +512,7 @@ describe('post-start with dependency installation', () => {
     // Should have both custom post-start and default bun install
     const bunInstallCalls = calls.filter((c) => c.command.includes('bun install'));
     const customCalls = calls.filter((c) => c.command.includes('echo "custom post-start"'));
-    
+
     expect(bunInstallCalls.length).toBeGreaterThan(0);
     expect(customCalls.length).toBeGreaterThan(0);
   });
@@ -524,13 +524,33 @@ describe('file cloning', () => {
       rules: [
         ...happyPathProgramming().rules,
         // Mock find command to return some files
-        ['find . -path', { stdout: './.env\n./config/.env.local\n', exitCode: 0 }],
+        [
+          'find . -path',
+          {
+            stdout: './.env\n./config/.env.local\n',
+            exitCode: 0,
+          },
+        ],
         // Mock mkdir command
-        ['mkdir -p', { exitCode: 0 }],
+        [
+          'mkdir -p',
+          {
+            exitCode: 0,
+          },
+        ],
         // Mock cp command - match any cp command
-        ['cp ', { exitCode: 0 }],
+        [
+          'cp ',
+          {
+            exitCode: 0,
+          },
+        ],
       ],
-      default: { exitCode: 0, stdout: '', stderr: '' },
+      default: {
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      },
     };
   }
 
@@ -541,7 +561,10 @@ describe('file cloning', () => {
       cwd: '/repo',
       shell,
       config: {
-        'clone-files': ['.env*', 'config/.env*'],
+        'clone-files': [
+          '.env*',
+          'config/.env*',
+        ],
       },
     });
 
@@ -554,7 +577,7 @@ describe('file cloning', () => {
     // Should have mkdir and cp commands
     const mkdirCalls = calls.filter((c) => c.command.includes('mkdir -p'));
     const cpCalls = calls.filter((c) => c.command.includes('cp '));
-    
+
     expect(mkdirCalls.length).toBeGreaterThan(0);
     expect(cpCalls.length).toBeGreaterThan(0);
   });
@@ -571,7 +594,7 @@ describe('file cloning', () => {
     // Should not have any find/copy commands
     const findCalls = calls.filter((c) => c.command.includes('find . -path'));
     const cpCalls = calls.filter((c) => c.command.includes('cp '));
-    
+
     expect(findCalls.length).toBe(0);
     expect(cpCalls.length).toBe(0);
   });
@@ -581,20 +604,35 @@ describe('file cloning', () => {
       rules: [
         ...happyPathProgramming().rules,
         // Mock find command to fail (no files found)
-        ['find . -path', { stdout: '', stderr: 'No files found', exitCode: 1 }],
+        [
+          'find . -path',
+          {
+            stdout: '',
+            stderr: 'No files found',
+            exitCode: 1,
+          },
+        ],
       ],
-      default: { exitCode: 0, stdout: '', stderr: '' },
+      default: {
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      },
     });
 
     // Should not throw, just log warnings
-    await expect(createAgentWorktree({
-      agentId: 'agent-missing-files',
-      cwd: '/repo',
-      shell,
-      config: {
-        'clone-files': ['nonexistent.env'],
-      },
-    })).resolves.toBeDefined();
+    await expect(
+      createAgentWorktree({
+        agentId: 'agent-missing-files',
+        cwd: '/repo',
+        shell,
+        config: {
+          'clone-files': [
+            'nonexistent.env',
+          ],
+        },
+      }),
+    ).resolves.toBeDefined();
 
     const findCalls = calls.filter((c) => c.command.includes('find . -path'));
     expect(findCalls.length).toBe(1);

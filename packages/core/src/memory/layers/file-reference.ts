@@ -184,15 +184,28 @@ function simpleHash(content: string): string {
   return `${content.length}:${hash.toString(16)}`;
 }
 
-function isInputMessage(item: Item): item is InputMessageItem {
+type TextOnlyInputMessage = Omit<InputMessageItem, 'content'> & {
+  readonly content: InputTextPart[];
+};
+
+function isInputTextPart(value: unknown): value is InputTextPart {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'input_text' &&
+    'text' in value &&
+    typeof value.text === 'string'
+  );
+}
+
+function isInputMessage(item: Item): item is TextOnlyInputMessage {
   return (
     item.type === 'message' &&
     'role' in item &&
     'content' in item &&
     Array.isArray(item.content) &&
-    item.content.every(
-      (c: unknown) => typeof c === 'object' && c !== null && 'type' in c && c.type === 'input_text',
-    )
+    item.content.every(isInputTextPart)
   );
 }
 

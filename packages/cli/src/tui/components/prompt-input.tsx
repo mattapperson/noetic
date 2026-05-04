@@ -3,6 +3,15 @@ import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
+import type { PromptAttachment } from '../utils/prompt-attachments.js';
+import { resolvePromptEscapeAction } from '../utils/prompt-escape.js';
+import {
+  createPromptHistoryState,
+  navigatePromptHistoryDown,
+  navigatePromptHistoryUp,
+  recordPromptHistoryEntry,
+  resetPromptHistoryNavigation,
+} from '../utils/prompt-history.js';
 import { useTheme } from './theme';
 
 /** Chat lifecycle status. Compatible with any AI SDK. */
@@ -16,6 +25,7 @@ export interface Suggestion {
 /** Message shape passed to onSubmit. */
 export interface PromptInputMessage {
   text: string;
+  attachments: PromptAttachment[];
 }
 
 // ============================================================================
@@ -510,8 +520,8 @@ export function PromptInput({
   const [localValue, setLocalValue] = useState(defaultValue);
   const [localSuggestions, setLocalSuggestions] = useState<Suggestion[]>([]);
   const [localSugIdx, setLocalSugIdx] = useState(0);
-  const [history, setHistory] = useState<string[]>([]);
-  const [histIdx, setHistIdx] = useState(-1);
+  const [historyState, setHistoryState] = useState(() => createPromptHistoryState([]));
+  const [attachments] = useState<PromptAttachment[]>([]);
 
   // Resolve value from: controlled prop > provider > local
   const value = isControlled
@@ -538,10 +548,8 @@ export function PromptInput({
   suggestionsRef.current = suggestions;
   const sugIdxRef = useRef(0);
   sugIdxRef.current = sugIdx;
-  const historyRef = useRef<string[]>([]);
-  historyRef.current = history;
-  const histIdxRef = useRef(-1);
-  histIdxRef.current = histIdx;
+  const historyStateRef = useRef(historyState);
+  historyStateRef.current = historyState;
 
   const setSug = useCallback(
     (next: Suggestion[]) => {
@@ -572,16 +580,6 @@ export function PromptInput({
       controller,
     ],
   );
-
-  const setHist = useCallback((next: string[]) => {
-    historyRef.current = next;
-    setHistory(next);
-  }, []);
-
-  const setHistI = useCallback((next: number) => {
-    histIdxRef.current = next;
-    setHistIdx(next);
-  }, []);
 
   const computeSuggestions = useCallback(
     (input: string): Suggestion[] => {
@@ -647,6 +645,7 @@ export function PromptInput({
 
       const result = onSubmit({
         text,
+        attachments,
       });
 
       // Handle async onSubmit: clear on resolve, preserve on reject
@@ -665,6 +664,7 @@ export function PromptInput({
     [
       onSubmit,
       clearInput,
+      attachments,
     ],
   );
 
@@ -680,12 +680,10 @@ export function PromptInput({
             // Slash commands: submit immediately on selection
             updateValue('');
             if (enableHistory) {
-              setHist([
-                sel.text,
-                ...historyRef.current,
-              ]);
+              const nextHistory = recordPromptHistoryEntry(historyStateRef.current, sel.text);
+              historyStateRef.current = nextHistory;
+              setHistoryState(nextHistory);
             }
-            setHistI(-1);
             handleSubmit(sel.text);
           } else {
             const base = valueRef.current.slice(0, valueRef.current.lastIndexOf('@'));
@@ -701,20 +699,16 @@ export function PromptInput({
         return;
       }
       if (enableHistory) {
-        setHist([
-          trimmed,
-          ...historyRef.current,
-        ]);
+        const nextHistory = recordPromptHistoryEntry(historyStateRef.current, trimmed);
+        historyStateRef.current = nextHistory;
+        setHistoryState(nextHistory);
       }
       updateValue('');
-      setHistI(-1);
       handleSubmit(trimmed);
     },
     [
       enableHistory,
       handleSubmit,
-      setHist,
-      setHistI,
       setSug,
       updateValue,
     ],
@@ -726,21 +720,32 @@ export function PromptInput({
 
   useInput(
     (_input, key) => {
-      // Escape: handle modal close first, then streaming stop, then suggestions dismiss
       if (key.escape) {
-        // Priority 1: Close modal if open
-        if (isModalOpen && onModalClose) {
-          onModalClose();
+        const action = resolvePromptEscapeAction({
+          value: valueRef.current,
+          status,
+          suggestionCount: suggestionsRef.current.length,
+          isModalOpen,
+          hasModalClose: onModalClose !== undefined,
+          hasStop: onStop !== undefined,
+        });
+        if (action === 'close-modal') {
+          onModalClose?.();
           return;
         }
-        // Priority 2: Stop streaming
-        if ((status === 'streaming' || status === 'submitted') && onStop) {
-          onStop();
+        if (action === 'clear-input') {
+          updateValue('');
+          const nextHistory = resetPromptHistoryNavigation(historyStateRef.current);
+          historyStateRef.current = nextHistory;
+          setHistoryState(nextHistory);
           return;
         }
-        // Priority 3: Dismiss suggestions
-        if (suggestionsRef.current.length > 0) {
+        if (action === 'dismiss-suggestions') {
           setSug([]);
+          return;
+        }
+        if (action === 'stop') {
+          onStop?.();
         }
         return;
       }
@@ -778,10 +783,11 @@ export function PromptInput({
       if (key.upArrow) {
         if (suggestionsRef.current.length > 0) {
           setSugI(Math.max(0, sugIdxRef.current - 1));
-        } else if (enableHistory && historyRef.current.length > 0) {
-          const idx = Math.min(historyRef.current.length - 1, histIdxRef.current + 1);
-          setHistI(idx);
-          updateValue(historyRef.current[idx]!);
+        } else if (enableHistory && historyStateRef.current.entries.length > 0) {
+          const result = navigatePromptHistoryUp(historyStateRef.current, valueRef.current);
+          historyStateRef.current = result.state;
+          setHistoryState(result.state);
+          updateValue(result.value);
         }
         return;
       }
@@ -790,13 +796,11 @@ export function PromptInput({
       if (key.downArrow) {
         if (suggestionsRef.current.length > 0) {
           setSugI(Math.min(suggestionsRef.current.length - 1, sugIdxRef.current + 1));
-        } else if (enableHistory && histIdxRef.current > 0) {
-          const nextIdx = histIdxRef.current - 1;
-          setHistI(nextIdx);
-          updateValue(historyRef.current[nextIdx]!);
-        } else if (enableHistory && histIdxRef.current === 0) {
-          setHistI(-1);
-          updateValue('');
+        } else if (enableHistory && historyStateRef.current.index >= 0) {
+          const result = navigatePromptHistoryDown(historyStateRef.current);
+          historyStateRef.current = result.state;
+          setHistoryState(result.state);
+          updateValue(result.value);
         }
         return;
       }

@@ -123,7 +123,8 @@ export function TaskChatView(props: TaskChatViewProps): React.ReactElement {
     props.onExit();
   });
 
-  const handleSubmit = (text: string): void => {
+  const handleSubmit = (message: { text: string }): void => {
+    const text = message.text;
     if (text.trim().length === 0) {
       return;
     }

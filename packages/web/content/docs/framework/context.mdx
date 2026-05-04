@@ -243,6 +243,8 @@ Content arrays use these discriminated variants:
 |---|---|---|
 | `output_text` | `text: string` | Model-generated text |
 | `input_text` | `text: string` | User-provided text |
+| `input_image` | `imageUrl: string`, `detail?: 'auto' \| 'low' \| 'high'` | User-provided image |
+| `input_file` | `fileData?: string`, `fileId?: string \| null`, `fileUrl?: string`, `filename?: string` | User-provided file |
 | `refusal` | `refusal: string` | Model refusal message |
 
 ## Per-Layer Usage Breakdown

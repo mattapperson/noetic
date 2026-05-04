@@ -1,12 +1,9 @@
-import type {
-  AgentPlugin,
-  AgentPluginContext,
-  NoeticPlugin as SdkNoeticPlugin,
-} from '@noetic/code-agent/plugins';
+import type { AgentPlugin, AgentPluginContext } from '@noetic/code-agent/plugins';
 import type { LastLayerUsage } from '@noetic/core';
+import type { ReactNode } from 'react';
 import type { Command } from '../commands/types.js';
 
-export type PluginRenderable = unknown;
+export type PluginRenderable = ReactNode;
 
 /**
  * Read-only snapshot of TUI session state passed to plugin footer components.
@@ -38,4 +35,4 @@ export interface CliPlugin extends AgentPlugin {
 
 export type PluginContext = CliPluginContext;
 export type NoeticPlugin = CliPlugin;
-export type AgentSdkPlugin = SdkNoeticPlugin;
+export type AgentSdkPlugin = AgentPlugin;

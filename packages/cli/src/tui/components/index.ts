@@ -9,7 +9,7 @@ export {
   ChainOfThoughtStep,
 } from './chain-of-thought.js';
 export { Message } from './message.js';
-export { type ChatStatus, PromptInput } from './prompt-input.js';
+export { type ChatStatus, PromptInput, type PromptInputMessage } from './prompt-input.js';
 export {
   GridlandProvider,
   type GridlandProviderProps,

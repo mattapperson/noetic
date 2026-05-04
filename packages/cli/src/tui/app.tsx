@@ -4,11 +4,12 @@
 
 import type { TeammateRegistry } from '@noetic/code-agent/agents';
 import type { LspService } from '@noetic/code-agent/lsp';
-import type { PluginContextBuilder } from '@noetic/code-agent/plugins';
 import type { SkillDefinition } from '@noetic/code-agent/skills';
 import { buildSkillCatalog } from '@noetic/code-agent/skills';
 import type {
   AgentHarness,
+  InputContentPart,
+  InputMessageItem,
   Item,
   LastLayerUsage,
   MemoryLayer,
@@ -43,14 +44,14 @@ import { ensureDaemon } from '../daemon-runtime/runtime.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness, createLspService } from '../harness/factory.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
+import { createPluginContextBuilder } from '../plugins/context.js';
+import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
 import type { SaveResult } from '../sessions/store.js';
 import { saveSession } from '../sessions/store.js';
 import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
 import type { SessionFile } from '../sessions/types.js';
 import type { AskUserOutput } from '../tools/ask-user-types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
-import { createPluginContextBuilder } from '../plugins/context.js';
-import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
 import { getModelContextLimit } from '../types/model-context.js';
 import type { LocalBashResult } from './bash-command.js';
 import {
@@ -67,7 +68,7 @@ import {
   runUserShellCommand,
 } from './bash-command.js';
 import { AskUserModal } from './components/ask-user/index.js';
-import type { ChatStatus } from './components/index.js';
+import type { ChatStatus, PromptInputMessage } from './components/index.js';
 import { InkProvider, ResponsesChat } from './components/index.js';
 import { PlanApprovalModal } from './components/plan-approval-modal.js';
 import { FooterContextProvider } from './footer-context.js';
@@ -93,6 +94,7 @@ import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js'
 import { StreamMetricsProvider } from './stream-metrics-context.js';
 import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
 import { getDefaultImageStore } from './utils/image-store.js';
+import { resolvePromptAttachments } from './utils/prompt-attachments.js';
 
 //#region Helpers
 
@@ -544,7 +546,7 @@ function App({
             return [];
           }
           try {
-            return (await p.commands(buildCtx(p.name))) as ReadonlyArray<Command>;
+            return await p.commands(buildCtx(p.name));
           } catch {
             return [];
           }
@@ -1221,8 +1223,12 @@ function App({
   );
 
   const handleSubmit = useCallback(
-    async (text: string): Promise<void> => {
-      const sendUserMessage = async (messageText: string): Promise<void> => {
+    async (message: PromptInputMessage): Promise<void> => {
+      const text = message.text;
+      const sendUserMessage = async (
+        messageText: string,
+        contentParts?: ReadonlyArray<InputContentPart>,
+      ): Promise<void> => {
         // Snapshot pending bash outputs now so any `!cmd` the user runs during
         // the agent turn falls through to the NEXT flush instead of being
         // dropped here.
@@ -1230,6 +1236,22 @@ function App({
           ...pendingBashOutputsRef.current,
         ];
         const augmented = augmentTextWithPendingBash(messageText, pendingSnapshot);
+        const input =
+          contentParts === undefined
+            ? augmented
+            : ({
+                id: `user-${crypto.randomUUID()}`,
+                type: 'message',
+                role: 'user',
+                status: 'completed',
+                content: [
+                  {
+                    type: 'input_text',
+                    text: augmented,
+                  },
+                  ...contentParts.filter((part) => part.type !== 'input_text'),
+                ],
+              } satisfies InputMessageItem);
         try {
           const harness = await getOrCreateHarness(agentMode, model);
           const isBusy =
@@ -1253,7 +1275,7 @@ function App({
           }
           setStatus('submitted');
 
-          await harness.execute(augmented, {
+          await harness.execute(input, {
             threadId: threadIdRef.current,
             messageId,
           });
@@ -1288,8 +1310,26 @@ function App({
         return;
       }
 
-      if (!isSlashCommand(text)) {
-        await sendUserMessage(text);
+      const resolvedAttachments = await resolvePromptAttachments({
+        text,
+        cwd: effectiveCwdRef.current,
+      });
+      if (resolvedAttachments.errors.length > 0) {
+        setEntries((prev) => [
+          ...prev,
+          ...resolvedAttachments.errors.map(
+            (content): ErrorEntry => ({
+              role: 'system',
+              type: 'error',
+              content,
+            }),
+          ),
+        ]);
+      }
+      const hasAttachments = resolvedAttachments.attachments.length > 0;
+
+      if (!isSlashCommand(text) || hasAttachments) {
+        await sendUserMessage(text, hasAttachments ? resolvedAttachments.contentParts : undefined);
         return;
       }
 

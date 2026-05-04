@@ -15,7 +15,7 @@
  * lifecycle and translates exit code → outcome.
  */
 
-import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import type { SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 
 import { tryLoadTask } from '../fs-store.js';
@@ -23,7 +23,12 @@ import type { RunValidatorArgs, ValidatorRunOutcome } from './validator-job.js';
 
 //#region Types
 
-type SpawnedChild = Pick<ChildProcess, 'on' | 'stdout' | 'stderr'>;
+interface SpawnedChild {
+  readonly stdout?: NodeJS.ReadableStream | null;
+  readonly stderr?: NodeJS.ReadableStream | null;
+  on(event: 'exit', listener: (code: number | null) => void): unknown;
+  on(event: 'error', listener: (err: Error) => void): unknown;
+}
 
 /** Pluggable spawn — primarily a test seam. */
 export type ValidatorShellSpawn = (

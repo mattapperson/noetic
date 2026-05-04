@@ -36,6 +36,8 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
+`AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, and `input_file` parts.
+
 ### step.tool
 
 Direct tool execution (not via LLM selection).
