@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isNoeticConfigError } from '@noetic/core';
 import { createDefaultShellAdapter } from '../src/harness/shell-adapter-bootstrap.js';
 import type { AgentConfig } from '../src/types/config.js';
 
@@ -48,19 +47,15 @@ describe('createDefaultShellAdapter', () => {
     expect(adapter.rtkAvailable).toBe(false);
   });
 
-  it('throws NoeticConfigError when useRtk is the default and rtk is missing', () => {
+  it('falls back to raw shell when useRtk is the default and rtk is missing', () => {
     process.env.PATH = '/nonexistent';
-    try {
-      createDefaultShellAdapter(makeConfig({}));
-      throw new Error('expected createDefaultShellAdapter to throw');
-    } catch (err) {
-      if (!isNoeticConfigError(err)) {
-        throw err;
-      }
-      expect(err.code).toBe('RTK_NOT_FOUND');
-      expect(err.hint).toContain('brew install rtk');
-      expect(err.docsUrl).toBe('https://github.com/rtk-ai/rtk');
-    }
+    const adapter = createDefaultShellAdapter(makeConfig({}));
+    // Adapter still reports `useRtk: true` (the requested mode) but
+    // `rtkAvailable: false` — at exec time it silently falls through to `sh -c`.
+    // This lets the CLI boot in environments without rtk (Cloudflare Workers,
+    // CI without the binary) rather than hard-failing on startup.
+    expect(adapter.useRtk).toBe(true);
+    expect(adapter.rtkAvailable).toBe(false);
   });
 
   it('returns an rtk-wrapped adapter when rtk is on PATH and useRtk is enabled', () => {
