@@ -1,4 +1,30 @@
+import { createCodeAgent } from '@noetic/code-agent';
+import { TeammateRegistry } from '@noetic/code-agent/agents';
+import type { LspServerContribution } from '@noetic/code-agent/lsp';
+import { createBuiltinLspServers, LspService } from '@noetic/code-agent/lsp';
+import type { ReminderTrigger } from '@noetic/code-agent/memory';
+import {
+  agentMdLayer,
+  BUILTIN_TRIGGERS,
+  createReminderRegistry,
+  createSteeringFileLayer,
+  reminderLayer,
+  skillsLayer,
+  teammateInboxLayer,
+} from '@noetic/code-agent/memory';
+import type { PluginContextBuilder } from '@noetic/code-agent/plugins';
+import type { SkillDefinition } from '@noetic/code-agent/skills';
+import { buildSkillCatalog } from '@noetic/code-agent/skills';
+import {
+  createActivateSkillTool,
+  createAgentTool,
+  createCheckAgentTool,
+  createCodingTools,
+  createReadOnlyTools,
+  createSendMessageTool,
+} from '@noetic/code-agent/tools/node';
 import type {
+  AgentHarness,
   FsAdapter,
   MemoryLayer,
   PlanEnterSessionCallback,
@@ -7,41 +33,22 @@ import type {
   Tool,
 } from '@noetic/core';
 import {
-  AgentHarness,
   durableTaskState,
   fileReference,
+  createLocalSubprocessAdapter,
   historyWindow,
   observationalMemory,
   planMemory,
-  step,
   toolMemoryLayer,
   workingMemory,
 } from '@noetic/core';
-import { TeammateRegistry } from '../agents/registry-runtime.js';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
+import type { NoeticPlugin } from '../plugins/types.js';
 import type { TaskStoreContext } from '../commands/builtins/tasks/fs-store.js';
 import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-policy.js';
 import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
-import { createBuiltinLspServers } from '../lsp/builtin/index.js';
-import { LspService } from '../lsp/service.js';
-import type { LspServerContribution } from '../lsp/types.js';
-import { agentMdLayer } from '../memory/agent-md-layer.js';
-import { reminderLayer } from '../memory/reminder-layer.js';
-import type { ReminderTrigger } from '../memory/reminder-triggers.js';
-import { BUILTIN_TRIGGERS, createReminderRegistry } from '../memory/reminder-triggers.js';
-import { skillsLayer } from '../memory/skills-layer.js';
-import { createSteeringFileLayer } from '../memory/steering-file-layer.js';
-import { teammateInboxLayer } from '../memory/teammate-inbox-layer.js';
-import type { PluginContextBuilder } from '../plugins/context.js';
-import type { NoeticPlugin } from '../plugins/types.js';
-import { buildSkillCatalog } from '../skills/catalog.js';
-import type { SkillDefinition } from '../skills/types.js';
-import { createAgentTool } from '../tools/agent.js';
-import { createCheckAgentTool } from '../tools/check-agent.js';
-import { createActivateSkillTool, createCodingTools, createReadOnlyTools } from '../tools/index.js';
-import { createSendMessageTool } from '../tools/send-message.js';
 import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 import { createDefaultShellAdapter } from './shell-adapter-bootstrap.js';
@@ -330,6 +337,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       worktreeConfig: config.worktree,
       cwd: config.cwd,
       historyMaxItems: config.history?.maxItems,
+      agentOverrides: config.agents,
     }),
     createSendMessageTool({
       teammates,
@@ -445,26 +453,25 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     mode,
   });
 
-  const harness = new AgentHarness({
+  const codeAgent = await createCodeAgent({
     name: 'noetic-cli',
-    fs,
-    shell,
-    params: {
-      model: config.model,
+    model: config.model,
+    cwd: config.cwd,
+    adapters: {
+      fs,
+      shell,
+      subprocess: createLocalSubprocessAdapter(),
     },
-    initialStep: step.llm({
-      id: 'chat',
-      model: config.model,
-      instructions,
-      tools,
-    }),
+    tools,
     memory,
+    instructions,
+    defaultMemory: false,
     llm: {
       provider: 'openrouter',
       apiKey: config.apiKey,
     },
-    initialCwd: config.cwd,
   });
+  const harness = codeAgent.harness;
 
   return {
     harness,

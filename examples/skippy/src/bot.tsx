@@ -3,8 +3,10 @@ import { createDiscordAdapter } from '@chat-adapter/discord';
 import { createMemoryState } from '@chat-adapter/state-memory';
 import { chatStream, NoeticChat } from '@noetic/chat-sdk';
 import { AgentHarness, step } from '@noetic/core';
-import { Card, CardText as Text } from 'chat';
+import { Card, CardText } from 'chat';
 import type { Env } from './env';
+
+const Text = CardText;
 
 //#region Types
 

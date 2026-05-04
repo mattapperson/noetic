@@ -57,10 +57,20 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         child: cloneAndReplace(step.child, candidate, `${path}.`),
       };
+    case 'provide':
+      return {
+        ...step,
+        child: cloneAndReplace(step.child, candidate, `${path}.`),
+      };
     case 'loop':
       return {
         ...step,
         steps: step.steps.map((s) => cloneAndReplace(s, candidate, `${path}.`)),
+      };
+    case 'every':
+      return {
+        ...step,
+        step: cloneAndReplace(step.step, candidate, `${path}.`),
       };
     case 'branch':
       return {

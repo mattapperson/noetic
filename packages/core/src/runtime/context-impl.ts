@@ -126,6 +126,10 @@ export class ContextImpl implements Context<ContextMemory> {
     return this.harness.shell;
   }
 
+  get subprocess(): AgentHarnessContract['subprocess'] {
+    return this.harness.subprocess;
+  }
+
   get memory(): ContextMemory {
     if (!this._memory) {
       this._memory = this.layers ? buildContextMemory(this.layers, this) : EMPTY_MEMORY;

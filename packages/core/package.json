@@ -9,6 +9,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./portable": {
+      "types": "./src/portable.ts",
+      "default": "./src/portable.ts"
+    },
     "./unstable": {
       "types": "./src/unstable.ts",
       "default": "./src/unstable.ts"

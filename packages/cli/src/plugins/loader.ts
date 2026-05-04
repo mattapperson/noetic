@@ -23,6 +23,7 @@ const FN_FIELDS = [
   'commands',
   'subagentPresets',
   'reminderTriggers',
+  'lspServers',
 ] as const;
 
 const NoeticPluginSchema = z
@@ -39,6 +40,7 @@ const NoeticPluginSchema = z
     commands: z.unknown().optional(),
     subagentPresets: z.unknown().optional(),
     reminderTriggers: z.unknown().optional(),
+    lspServers: z.unknown().optional(),
   })
   .refine(
     (obj) => {

@@ -29,7 +29,9 @@
  * signal with `buildStalledOutcome()` so the parent unwinds cleanly.
  */
 
+import { createCodeAgent } from '@noetic/code-agent';
 import type {
+  AgentHarness,
   ExecuteInput,
   ExecuteOptions,
   FsAdapter,
@@ -38,7 +40,7 @@ import type {
   MemoryLayer,
   Tool,
 } from '@noetic/core';
-import { AgentHarness, createLocalShellAdapter, step } from '@noetic/core';
+import { createLocalShellAdapter } from '@noetic/core';
 import type { AskUserService } from '../../../tui/services/ask-user-service.js';
 import { readChatHistory } from './chat-history-store.js';
 import type { TaskStoreContext } from './fs-store.js';
@@ -182,31 +184,27 @@ export function createRunnerSignal<TOutcome>(): RunnerSignal<TOutcome> {
  * harness has `initialStep` populated so callers drive it via `execute()`
  * rather than `run()`.
  */
-export function createRunnerHarness(opts: RunnerHarnessOpts): RunnerHarnessResult {
-  const harness = new AgentHarness({
+export async function createRunnerHarness(opts: RunnerHarnessOpts): Promise<RunnerHarnessResult> {
+  const codeAgent = await createCodeAgent({
     name: `noetic-${opts.role}`,
-    fs: opts.fs,
-    shell: createLocalShellAdapter(),
-    params: {
-      model: opts.model,
+    model: opts.model,
+    cwd: opts.cwd,
+    adapters: {
+      fs: opts.fs,
+      shell: createLocalShellAdapter(),
     },
-    initialStep: step.llm({
-      id: `${opts.role}-chat`,
-      model: opts.model,
-      instructions: opts.instructions,
-      tools: [
-        ...opts.tools,
-      ],
-    }),
+    tools: opts.tools,
     memory: [
       ...opts.memory,
     ],
+    instructions: opts.instructions,
+    defaultMemory: false,
     llm: {
       provider: 'openrouter',
       apiKey: opts.apiKey,
     },
-    initialCwd: opts.cwd,
   });
+  const harness = codeAgent.harness;
 
   const threadId = `noetic-${opts.role}-${opts.taskId}-${Date.now()}`;
 

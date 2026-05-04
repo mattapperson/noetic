@@ -71,13 +71,14 @@ describe('catalog.getAgent', () => {
 });
 
 describe('built-in agent skills', () => {
-  test('ship general-purpose, explore, and plan as agents', () => {
+  test('ship general-purpose, explore, plan, and verification as agents', () => {
     const builtInAgents = listAgents(BUILT_IN_SKILLS);
     const types = builtInAgents.map((a) => a.agentType).sort();
     expect(types).toEqual([
       'explore',
       'general-purpose',
       'plan',
+      'verification',
     ]);
   });
 

@@ -7,6 +7,7 @@ import type { ContextMemory, MemoryLayer } from './memory';
 import type { Span } from './observability';
 import type { AgentHarnessContract } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
+import type { SubprocessAdapter } from './subprocess-adapter';
 
 /** @public Append-only log of conversation items accumulated during execution. */
 export interface ItemLog {
@@ -67,6 +68,8 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly fs: FsAdapter;
   /** Shell adapter for virtual or real shell command execution. */
   readonly shell: ShellAdapter;
+  /** Subprocess adapter for virtual, same-process, or host process execution. */
+  readonly subprocess: SubprocessAdapter;
   /**
    * Mutable cwd state shared with the tools bound to this context. Tools
    * resolve relative paths from `cwdState.cwd` at execution time so that an

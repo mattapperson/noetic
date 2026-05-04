@@ -1,0 +1,212 @@
+/**
+ * Tool exports and convenience factories.
+ */
+
+import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import type { LspService } from '../lsp/service.js';
+import type { AskUserService } from './ask-user.js';
+import { createAskUserTool } from './ask-user.js';
+import { createBashTool } from './bash.js';
+import { createBrowserTool } from './browser.js';
+import { createEditTool } from './edit.js';
+import { createFindTool } from './find.js';
+import { createGrepTool } from './grep.js';
+import { createInteractiveTerminalTool } from './interactive-terminal.js';
+import { createLsTool } from './ls.js';
+import { createLspTool } from './lsp.js';
+import type { MutationPolicy } from './mutation-policy.js';
+import { createReadTool } from './read.js';
+import { createWriteTool } from './write.js';
+
+//#region Re-exports
+
+export {
+  type ActivateSkillTool,
+  createActivateSkillTool,
+} from './activate-skill.js';
+export {
+  createAgentTool,
+  resolveAgent,
+  TEAMMATE_NAME_MAX_LENGTH,
+  TEAMMATE_NAME_PATTERN,
+} from './agent.js';
+export { type AskUserTool, createAskUserTool } from './ask-user.js';
+export {
+  type AskUserAnnotation,
+  AskUserAnnotationSchema,
+  type AskUserInput,
+  AskUserInputSchema,
+  type AskUserOption,
+  AskUserOptionSchema,
+  type AskUserOutput,
+  AskUserOutputSchema,
+  type AskUserQuestion,
+  AskUserQuestionSchema,
+} from './ask-user-types.js';
+export {
+  BashEventSchema,
+  type BashOutput,
+  BashOutputSchema,
+  type BashTool,
+  createBashTool,
+} from './bash.js';
+export {
+  type BrowserInput,
+  BrowserInputSchema,
+  type BrowserOutput,
+  BrowserOutputSchema,
+  type BrowserTool,
+  createBrowserTool,
+} from './browser.js';
+export {
+  type CdFailure,
+  type CdResult,
+  type CdSuccess,
+  type HandleCdArgs,
+  handleCd,
+  isPlainCdCommand,
+  parseCdArg,
+} from './cd-helper.js';
+export { createCheckAgentTool } from './check-agent.js';
+export {
+  createEditTool,
+  type EditOutput,
+  EditOutputSchema,
+  type EditTool,
+} from './edit.js';
+export {
+  computeEditDiff,
+  detectLineEnding,
+  type EditDiffError,
+  type EditDiffResult,
+  generateDiffString,
+  normalizeToLf,
+  restoreLineEndings,
+  stripBom,
+} from './edit-diff.js';
+export { createFindTool, type FindOutput, type FindTool } from './find.js';
+export { createGrepTool, type GrepOutput, type GrepTool } from './grep.js';
+export {
+  type CreateInteractiveTerminalOptions,
+  createInteractiveTerminalTool,
+  type InteractiveTerminalInput,
+  InteractiveTerminalInputSchema,
+  type InteractiveTerminalOutput,
+  InteractiveTerminalOutputSchema,
+  type InteractiveTerminalTool,
+} from './interactive-terminal.js';
+export { createLspTool, type LspOutput, type LspTool } from './lsp.js';
+export { createLsTool, type LsOutput, type LsTool } from './ls.js';
+export {
+  ALLOW_MUTATION,
+  isInteractiveTerminalMutation,
+  isProbablyMutatingShellCommand,
+  type MutationKind,
+  type MutationPolicy,
+  type MutationPolicyDecision,
+  type MutationPolicyRequest,
+} from './mutation-policy.js';
+export { expandPath, resolveReadPath, resolveToCwd } from './path-utils.js';
+export {
+  createReadTool,
+  type ReadOutput,
+  type ReadTool,
+} from './read.js';
+export {
+  BANNED_COMMANDS,
+  getFirstCommand,
+  getRiskDescription,
+  HIGH_RISK_PATTERNS,
+  INTERACTIVE_TUI_COMMANDS,
+  isBannedCommand,
+  isHighRiskCommand,
+  isInteractiveCommand,
+  READONLY_BANNED_SPAWN_COMMANDS,
+  validateCommand,
+  validateSpawnCommand,
+} from './security.js';
+export { createSendMessageTool } from './send-message.js';
+export {
+  formatSize,
+  type TruncationOptions,
+  type TruncationResult,
+  truncateHead,
+  truncateLine,
+  truncateTail,
+} from './truncate.js';
+export {
+  createWriteTool,
+  type WriteOutput,
+  WriteOutputSchema,
+  type WriteTool,
+} from './write.js';
+
+//#endregion
+
+//#region Tool Collection Factories
+
+export interface CreateToolsOptions {
+  cwd: string;
+  fs?: FsAdapter;
+  shell?: ShellAdapter;
+  lspService?: LspService;
+  /**
+   * Optional ask-user service, supplied by the TUI. When present, the
+   * `AskUserQuestion` tool is registered and can pause mid-turn for human
+   * input. Headless harnesses should omit it — asking with no UI would hang.
+   */
+  askUserService?: AskUserService;
+  mutationPolicy?: MutationPolicy;
+}
+
+export function createCodingTools(opts: CreateToolsOptions): Tool[] {
+  const { cwd, lspService, askUserService } = opts;
+  const fs = opts.fs ?? createLocalFsAdapter();
+  const shell = opts.shell ?? createLocalShellAdapter();
+  const tools: Tool[] = [
+    createReadTool(cwd, fs),
+    createWriteTool(cwd, fs, opts.mutationPolicy),
+    createEditTool(cwd, fs, opts.mutationPolicy),
+    createBashTool(cwd, shell, opts.mutationPolicy),
+    createGrepTool(cwd, fs, shell),
+    createFindTool(cwd, fs),
+    createLsTool(cwd, fs),
+    createInteractiveTerminalTool(cwd, shell, {
+      mutationPolicy: opts.mutationPolicy,
+    }),
+    createBrowserTool(cwd, shell),
+  ];
+  if (lspService) {
+    tools.push(createLspTool(lspService, cwd));
+  }
+  if (askUserService) {
+    tools.push(createAskUserTool(askUserService));
+  }
+  return tools;
+}
+
+export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
+  const { cwd, lspService, askUserService } = opts;
+  const fs = opts.fs ?? createLocalFsAdapter();
+  const shell = opts.shell ?? createLocalShellAdapter();
+  const tools: Tool[] = [
+    createReadTool(cwd, fs),
+    createGrepTool(cwd, fs, shell),
+    createFindTool(cwd, fs),
+    createLsTool(cwd, fs),
+    createInteractiveTerminalTool(cwd, shell, {
+      readonly: true,
+      mutationPolicy: opts.mutationPolicy,
+    }),
+  ];
+  if (lspService) {
+    tools.push(createLspTool(lspService, cwd));
+  }
+  if (askUserService) {
+    tools.push(createAskUserTool(askUserService));
+  }
+  return tools;
+}
+
+//#endregion

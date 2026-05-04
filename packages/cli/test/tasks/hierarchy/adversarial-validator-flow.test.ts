@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 
 import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
-import type { AdversarialReviewOutput } from '../../../src/commands/builtins/tasks/hierarchy/adversarial-validator-flow.js';
+import type {
+  AdversarialReviewOutput,
+  ValidatorShellSpawn,
+} from '../../../src/commands/builtins/tasks/hierarchy/adversarial-validator-flow.js';
 import {
   buildAdversarialPrompt,
   combineOutcomes,
@@ -30,7 +33,7 @@ interface FakeChildOptions {
   readonly stderr?: string;
 }
 
-function makeFakeChild(opts: FakeChildOptions) {
+function makeFakeChild(opts: FakeChildOptions): ReturnType<ValidatorShellSpawn> {
   const emitter = new EventEmitter();
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
@@ -47,7 +50,7 @@ function makeFakeChild(opts: FakeChildOptions) {
     }
     emitter.emit('exit', opts.exitCode);
   });
-  return child;
+  return child as unknown as ReturnType<ValidatorShellSpawn>;
 }
 
 const LEAF_TASK_ID = 'T-leaf000000';

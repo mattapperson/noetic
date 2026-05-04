@@ -32,6 +32,7 @@ function cleanConfig(
     memory: config.memory,
     worktree: cleanWorktree(config),
     history: config.history,
+    agents: config.agents,
   };
 }
 

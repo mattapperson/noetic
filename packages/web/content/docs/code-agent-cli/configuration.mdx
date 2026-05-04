@@ -37,6 +37,13 @@ export default {
   history: { maxItems: 200 },
   shell: { useRtk: true },
   worktree: { /* see Hooks */ },
+  agents: {
+    explore: { model: '~moonshotai/kimi-latest' },
+    verification: {
+      model: 'openai/gpt-5.5',
+      tools: ['read', 'grep', 'find', 'ls', 'bash', 'browser'],
+    },
+  },
 } satisfies AgentConfig;
 ```
 
@@ -65,6 +72,25 @@ export default {
 | `ui.doublePressWindowMs` | `int` 100–5000 | `800` | Window in ms within which a second `Ctrl+C` / `Ctrl+D` press triggers a graceful exit. |
 | `history.maxItems` | `int` 2–10000 | — | Cap on trailing items projected to the LLM each turn. Storage is untouched — this is a read-side projection only. When unset, history is uncapped. |
 | `shell.useRtk` | `boolean` | `true` | Wrap every command run by the bash tool through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. When `true` (the default) `rtk` is required on `PATH` — startup fails fast with install instructions if it is missing. Set `false` to opt out and run raw `sh -c` instead. Install rtk via `brew install rtk`, `cargo install --git https://github.com/rtk-ai/rtk`, or the upstream `install.sh`. |
+| `agents` | `Record<string, AgentOverride>` | — | Per-sub-agent overrides keyed by `agent-type` (e.g. `explore`, `plan`, `verification`). Each override beats the matching SKILL.md frontmatter. Surfaced via the `/config` TUI editor. |
+
+### `AgentOverride`
+
+| Field | Type | Notes |
+|---|---|---|
+| `model` | `string` | OpenRouter model id. Beats SKILL.md `agent-model` (including `inherit`). |
+| `instructions` | `string` | Extra instructions. Default mode appends after the SKILL.md body; switch via `instructionsMode`. |
+| `instructionsMode` | `'append' \| 'replace'` | Default `'append'`. `'replace'` swaps the SKILL.md body out entirely. |
+| `tools` | `string[]` | Replaces the SKILL.md `allowed-tools` allow-list. `[]` means "no tools". |
+
+The built-in sub-agents that ship with the CLI:
+
+| Type | Default model | Tools | Notes |
+|---|---|---|---|
+| `explore` | `~moonshotai/kimi-latest` | `read`, `grep`, `find`, `ls` | Fast read-only research. Specify thoroughness (`quick` / `medium` / `very thorough`) when invoking. |
+| `plan` | `inherit` | `read`, `grep`, `find`, `ls` | Read-only architect. Returns a step-by-step plan and critical files. |
+| `general-purpose` | `inherit` | full parent pool | Default fallback for non-trivial multi-step tasks. |
+| `verification` | `openai/gpt-5.5` | `read`, `grep`, `find`, `ls`, `bash`, `interactive_terminal`, `browser` | Adversarial reviewer. Runs builds, tests, and probes; returns `VERDICT: PASS \| FAIL \| PARTIAL`. Backgrounded by default. |
 
 ## Environment variables
 

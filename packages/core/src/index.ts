@@ -1,6 +1,12 @@
 //#region Adapters
 
 /** @public */
+export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
+/** @public */
+export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
+/** @public */
+export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
+/** @public */
 export { createLocalFsAdapter } from './adapters/local-fs-adapter';
 
 /** @public */
@@ -9,6 +15,14 @@ export {
   createLocalShellAdapter,
   type LocalShellAdapter,
 } from './adapters/local-shell-adapter';
+/** @public */
+export {
+  type CreateLocalSubprocessAdapterOptions,
+  createLocalSubprocessAdapter,
+  defaultProcessSignaller,
+  type ProcessSignaller,
+  type SubprocessSignal,
+} from './adapters/local-subprocess-adapter';
 
 /** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
@@ -127,6 +141,9 @@ export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
+
+/** @public */
+export { createInMemoryStorage } from './runtime/in-memory-storage';
 
 //#endregion
 
@@ -398,6 +415,15 @@ export type { FsAdapter, FsStats } from './types/fs-adapter';
 export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
 /** @public */
 export { TIMEOUT_ERROR_PREFIX } from './types/shell-adapter';
+/** @public */
+export type {
+  SubprocessAdapter,
+  SubprocessControlResult,
+  SubprocessHandle,
+  SubprocessRequest,
+  SubprocessStatus,
+  SubprocessStopResult,
+} from './types/subprocess-adapter';
 
 //#endregion
 

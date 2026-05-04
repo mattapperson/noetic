@@ -1,15 +1,32 @@
 import type { AgentConfig, PluginSpec } from '../../../types/config.js';
 import { AgentConfigSchema } from '../../../types/config.js';
-import { CONFIG_FIELDS_BY_PATH } from './fields.js';
-import type { ConfigFieldPath } from './types.js';
+import { getFieldByPath } from './fields.js';
+import type { AgentOverrideFieldName, ConfigFieldPath } from './types.js';
+import { parseAgentOverrideFieldPath } from './types.js';
 
 //#region Field Validation
 
 export function validateField(path: ConfigFieldPath, rawValue: string): string | undefined {
-  return fieldValidators[path](rawValue);
+  const agentPath = parseAgentOverrideFieldPath(path);
+  if (agentPath) {
+    return validateAgentField(agentPath.field, rawValue);
+  }
+  const validator = staticFieldValidators[path];
+  if (!validator) {
+    return undefined;
+  }
+  return validator(rawValue);
 }
 
-const fieldValidators: Record<ConfigFieldPath, (rawValue: string) => string | undefined> = {
+function validateAgentField(field: AgentOverrideFieldName, rawValue: string): string | undefined {
+  if (field === 'tools') {
+    return validateList(rawValue);
+  }
+  // model and instructions are free-form; empty = inherit from SKILL.md.
+  return undefined;
+}
+
+const staticFieldValidators: Record<string, (rawValue: string) => string | undefined> = {
   model: validateRequired,
   apiKey: validateRequired,
   maxTurns: validatePositiveInteger,
@@ -51,7 +68,7 @@ function validateBoolean(rawValue: string): string | undefined {
 }
 
 function validateOption(path: ConfigFieldPath, rawValue: string): string | undefined {
-  const options = CONFIG_FIELDS_BY_PATH[path].options ?? [];
+  const options = getFieldByPath(path)?.options ?? [];
   if (options.includes(rawValue)) {
     return undefined;
   }
@@ -150,6 +167,10 @@ function toFieldPath(path: ReadonlyArray<PropertyKey>): ConfigFieldPath {
   const mapped = schemaPathMap[joined];
   if (mapped) {
     return mapped;
+  }
+  const agentPath = parseAgentOverrideFieldPath(joined);
+  if (agentPath) {
+    return `agents.${agentPath.agentType}.${agentPath.field}`;
   }
   return 'model';
 }

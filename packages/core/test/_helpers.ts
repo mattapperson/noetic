@@ -4,6 +4,7 @@
 
 import { expect } from 'bun:test';
 import { z } from 'zod';
+import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
 import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
 import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
 import { frameworkCast } from '../src/interpreter/framework-cast';
@@ -207,6 +208,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     harness,
     fs: harness.fs,
     shell: harness.shell,
+    subprocess: harness.subprocess,
     cwdState: {
       cwd: process.cwd(),
     },
@@ -343,6 +345,7 @@ export function makeMockHarness(): AgentHarnessContract {
     },
     fs: createLocalFsAdapter(),
     shell: createLocalShellAdapter(),
+    subprocess: createInMemorySubprocessAdapter(),
     callModel: async () => {
       throw new Error('not impl');
     },

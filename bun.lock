@@ -49,8 +49,10 @@
         "noetic": "src/cli/cli.ts",
       },
       "dependencies": {
+        "@noetic/code-agent": "workspace:*",
         "@noetic/core": "workspace:*",
         "@openrouter/agent": "0.3.1",
+        "agent-browser": "0.26.0",
         "chalk": "5.6.2",
         "cli-highlight": "2.1.11",
         "diff": "7.0.0",
@@ -76,6 +78,24 @@
         "@types/diff": "^8.0.0",
         "@types/html-to-text": "9.0.4",
         "@types/react": "^19.2.14",
+        "bun-types": "latest",
+      },
+    },
+    "packages/code-agent": {
+      "name": "@noetic/code-agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic/core": "workspace:*",
+        "diff": "7.0.0",
+        "glob": "11.0.3",
+        "pilotty": "0.0.7",
+        "vscode-jsonrpc": "8.2.1",
+        "vscode-languageserver-protocol": "3.17.5",
+        "yaml": "^2.8.3",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "@types/diff": "^8.0.0",
         "bun-types": "latest",
       },
     },
@@ -441,6 +461,8 @@
 
     "@noetic/cli": ["@noetic/cli@workspace:packages/cli"],
 
+    "@noetic/code-agent": ["@noetic/code-agent@workspace:packages/code-agent"],
+
     "@noetic/core": ["@noetic/core@workspace:packages/core"],
 
     "@noetic/eval": ["@noetic/eval@workspace:packages/eval"],
@@ -682,6 +704,8 @@
     "acorn-jsx": ["acorn-jsx@5.3.2", "", { "peerDependencies": { "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ=="],
 
     "acorn-walk": ["acorn-walk@8.3.2", "", {}, "sha512-cjkyv4OtNCIeqhHrfS81QWXoCBPExR/J62oyEqepVw8WaQeSqpW2uhuLPh1m9eWhDuOo/jUXVTlifvesOWp/4A=="],
+
+    "agent-browser": ["agent-browser@0.26.0", "", { "bin": { "agent-browser": "bin/agent-browser.js" } }, "sha512-pdqSfjwbFSp+qnwlb2g23e9wXveIOfMi19xpPA9xZUbzEAUp6W4YBZj6Ybj8z4M7WkcbGDDYc+oDIHDt9R3EDQ=="],
 
     "ansi-escapes": ["ansi-escapes@7.3.0", "", { "dependencies": { "environment": "^1.0.0" } }, "sha512-BvU8nYgGQBxcmMuEeUEmNTvrMVjJNSH7RgW24vXexN4Ven6qCvy4TntnvlnwnMLTVlcRQQdbRY8NKnaIoeWDNg=="],
 

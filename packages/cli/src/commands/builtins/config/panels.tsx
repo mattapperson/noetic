@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { Theme } from '../../../tui/components/theme.js';
 import { useTheme } from '../../../tui/components/theme.js';
 import { getFieldValue } from './accessors.js';
-import { CONFIG_FIELDS_BY_PATH, getFieldsForTab } from './fields.js';
+import { getFieldsForTab, requireFieldByPath } from './fields.js';
 import type { ConfigEditorState, ConfigFieldDefinition } from './types.js';
 import { ConfigTab, FieldKind } from './types.js';
 
@@ -195,11 +195,29 @@ export function RuntimePanel({ state }: PanelProps): ReactNode {
   );
 }
 
+export function AgentsPanel({ state }: PanelProps): ReactNode {
+  if (getFieldsForTab(ConfigTab.Agents).length === 0) {
+    return (
+      <ConfigSection title="Sub-agents" description="Per-sub-agent overrides for the `agent` tool">
+        <Text dimColor>No registered sub-agents.</Text>
+      </ConfigSection>
+    );
+  }
+  return (
+    <ConfigSection
+      title="Sub-agent Overrides"
+      description="Override model / instructions / tools for each registered sub-agent. Empty values inherit from the SKILL.md defaults."
+    >
+      <EditableFields tab={ConfigTab.Agents} state={state} />
+    </ConfigSection>
+  );
+}
+
 export function WorktreePanel({ state }: PanelProps): ReactNode {
   const worktreeEnabled = getFieldValue(state.draftConfig, 'worktree.enabled') === 'true';
   return (
     <ConfigSection title="Worktree Isolation" description="Git worktree isolation configuration">
-      <FieldRow field={CONFIG_FIELDS_BY_PATH['worktree.enabled']} state={state} />
+      <FieldRow field={requireFieldByPath('worktree.enabled')} state={state} />
       {worktreeEnabled ? (
         getFieldsForTab(ConfigTab.Worktree)
           .filter((field) => field.path !== 'worktree.enabled')
@@ -217,6 +235,7 @@ export const PANEL_COMPONENTS: Record<ConfigTab, (props: PanelProps) => ReactNod
   [ConfigTab.Memory]: MemoryPanel,
   [ConfigTab.Runtime]: RuntimePanel,
   [ConfigTab.Worktree]: WorktreePanel,
+  [ConfigTab.Agents]: AgentsPanel,
 };
 
 //#endregion

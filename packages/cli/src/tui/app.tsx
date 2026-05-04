@@ -2,6 +2,11 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
+import type { TeammateRegistry } from '@noetic/code-agent/agents';
+import type { LspService } from '@noetic/code-agent/lsp';
+import type { PluginContextBuilder } from '@noetic/code-agent/plugins';
+import type { SkillDefinition } from '@noetic/code-agent/skills';
+import { buildSkillCatalog } from '@noetic/code-agent/skills';
 import type {
   AgentHarness,
   Item,
@@ -15,7 +20,6 @@ import { createLocalShellAdapter } from '@noetic/core';
 import { render } from 'ink';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
 import { ensureChatTarget } from '../commands/builtins/tasks/resolve-chat-target.js';
 import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
@@ -38,18 +42,15 @@ import type {
 import { ensureDaemon } from '../daemon-runtime/runtime.js';
 import type { AgentMode, PlanHooks } from '../harness/factory.js';
 import { createAgentHarness, createLspService } from '../harness/factory.js';
-import type { LspService } from '../lsp/service.js';
 import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
-import { createPluginContextBuilder } from '../plugins/context.js';
-import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
 import type { SaveResult } from '../sessions/store.js';
 import { saveSession } from '../sessions/store.js';
 import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
 import type { SessionFile } from '../sessions/types.js';
-import { buildSkillCatalog } from '../skills/catalog.js';
-import type { SkillDefinition } from '../skills/types.js';
 import type { AskUserOutput } from '../tools/ask-user-types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
+import { createPluginContextBuilder } from '../plugins/context.js';
+import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
 import { getModelContextLimit } from '../types/model-context.js';
 import type { LocalBashResult } from './bash-command.js';
 import {
@@ -543,7 +544,7 @@ function App({
             return [];
           }
           try {
-            return await p.commands(buildCtx(p.name));
+            return (await p.commands(buildCtx(p.name))) as ReadonlyArray<Command>;
           } catch {
             return [];
           }

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 
 import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
-import { createShellValidator } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
+import {
+  createShellValidator,
+  type ValidatorShellSpawn,
+} from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
 import type {
   Feature,
   ValidatorRun,
@@ -28,7 +31,7 @@ interface FakeChildOptions {
   readonly throwOnSpawn?: Error;
 }
 
-function makeFakeChild(opts: FakeChildOptions) {
+function makeFakeChild(opts: FakeChildOptions): ReturnType<ValidatorShellSpawn> {
   const emitter = new EventEmitter();
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
@@ -45,7 +48,7 @@ function makeFakeChild(opts: FakeChildOptions) {
     }
     emitter.emit('exit', opts.exitCode);
   });
-  return child;
+  return child as unknown as ReturnType<ValidatorShellSpawn>;
 }
 
 const LEAF_TASK_ID = 'T-leaf000000';

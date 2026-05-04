@@ -2,8 +2,9 @@ import type * as OpenRouterAgent from '@openrouter/agent';
 import { OpenRouter } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
-import { createLocalFsAdapter } from '../adapters/local-fs-adapter';
-import { createLocalShellAdapter } from '../adapters/local-shell-adapter';
+import { createInMemoryFsAdapter } from '../adapters/in-memory-fs-adapter';
+import { createInMemoryShellAdapter } from '../adapters/in-memory-shell-adapter';
+import { createInMemorySubprocessAdapter } from '../adapters/in-memory-subprocess-adapter';
 import {
   convertTools,
   executeToolCall,
@@ -60,6 +61,7 @@ import type { ShellAdapter } from '../types/shell-adapter';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
+import type { SubprocessAdapter } from '../types/subprocess-adapter';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
@@ -87,6 +89,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   fs?: FsAdapter;
   /** Shell adapter. Defaults to local sh when not provided. */
   shell?: ShellAdapter;
+  /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
+  subprocess?: SubprocessAdapter;
   llm?: LlmProviderConfig;
   /** Harness-wide item schema extensions. */
   itemSchemas?: ItemSchemaExtensions;
@@ -156,7 +160,17 @@ function resolveContextCwdState(
 }
 
 function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
-  const apiKey = config?.apiKey ?? process.env.OPENROUTER_API_KEY;
+  const processValue = 'process' in globalThis ? globalThis.process : undefined;
+  const envValue =
+    typeof processValue === 'object' && processValue !== null && 'env' in processValue
+      ? processValue.env
+      : undefined;
+  const openRouterApiKey =
+    typeof envValue === 'object' && envValue !== null && 'OPENROUTER_API_KEY' in envValue
+      ? envValue.OPENROUTER_API_KEY
+      : undefined;
+  const apiKey =
+    config?.apiKey ?? (typeof openRouterApiKey === 'string' ? openRouterApiKey : undefined);
   if (!apiKey) {
     return undefined;
   }
@@ -495,6 +509,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   readonly config: AgentConfig<TParams>;
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
+  readonly subprocess: SubprocessAdapter;
   private readonly initialStep?: Step<ContextMemory, string, string>;
   private readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
@@ -524,8 +539,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       itemSchemas: opts.itemSchemas,
       strictItemSchemas: opts.strictItemSchemas ?? true,
     };
-    this.fs = opts.fs ?? createLocalFsAdapter();
-    this.shell = opts.shell ?? createLocalShellAdapter();
+    this.fs = opts.fs ?? createInMemoryFsAdapter();
+    this.shell = opts.shell ?? createInMemoryShellAdapter();
+    this.subprocess = opts.subprocess ?? createInMemorySubprocessAdapter();
     this.initialStep = opts.initialStep;
     this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;
@@ -539,7 +555,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       strictUnknownExtensions: opts.strictItemSchemas ?? true,
     });
     this.rootCwdState = {
-      cwd: opts.initialCwd ?? process.cwd(),
+      cwd: opts.initialCwd ?? '/',
     };
   }
 
