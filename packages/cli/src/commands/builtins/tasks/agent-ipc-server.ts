@@ -324,8 +324,6 @@ export class AgentIpcServer {
     this.threadId = opts.threadId;
     this.askUserService = opts.askUserService;
     this.socketPath = runnerSocketPath({
-      projectRoot: opts.storeCtx.projectRoot,
-      taskId: opts.taskId,
       role: opts.role,
       runnerId: opts.runnerId,
     });

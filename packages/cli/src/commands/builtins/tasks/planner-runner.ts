@@ -247,7 +247,7 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     storeCtx: ctx,
     taskId,
     role: 'planner',
-    runnerId: 'planner',
+    runnerId: taskId,
     threadId,
     askUserService,
   });

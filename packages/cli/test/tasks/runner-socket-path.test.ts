@@ -1,23 +1,27 @@
 import { describe, expect, it } from 'bun:test';
-import { runnerSocketPath } from '../../src/commands/builtins/tasks/paths.js';
+import { DEFAULT_RUNTIME_DIR, runnerSocketPath } from '../../src/commands/builtins/tasks/paths.js';
 
 const MACOS_SOCKET_PATH_LIMIT_BYTES = 104;
 
 describe('runnerSocketPath', () => {
-  const baseArgs = {
-    projectRoot: '/Users/mattapperson/Development/noetic/packages/cli',
-    taskId: 'T-iy9LrtX6ct',
+  const implementerArgs = {
+    role: 'implementer',
+    runnerId: 'F-T3UNKqDHar',
+  } as const;
+  const plannerArgs = {
     role: 'planner',
-    runnerId: 'planner',
+    runnerId: 'T-iy9LrtX6ct',
   } as const;
 
-  it('defaults to <projectRoot>/.noetic/tasks/<taskId>/sockets/<role>-<runnerId>.sock', () => {
+  it('defaults to /tmp/.noetic/<role>-<runnerId>.sock', () => {
     const prev = process.env.NOETIC_RUNTIME_DIR;
     delete process.env.NOETIC_RUNTIME_DIR;
     try {
-      const path = runnerSocketPath(baseArgs);
-      expect(path).toBe(
-        '/Users/mattapperson/Development/noetic/packages/cli/.noetic/tasks/T-iy9LrtX6ct/sockets/planner-planner.sock',
+      expect(runnerSocketPath(implementerArgs)).toBe(
+        `${DEFAULT_RUNTIME_DIR}/implementer-F-T3UNKqDHar.sock`,
+      );
+      expect(runnerSocketPath(plannerArgs)).toBe(
+        `${DEFAULT_RUNTIME_DIR}/planner-T-iy9LrtX6ct.sock`,
       );
     } finally {
       if (prev !== undefined) {
@@ -26,15 +30,24 @@ describe('runnerSocketPath', () => {
     }
   });
 
-  it('relocates the socket under NOETIC_RUNTIME_DIR when set, keeping it under macOS 104-byte limit', () => {
+  it('keeps the default under the macOS 104-byte socket-path limit', () => {
+    const prev = process.env.NOETIC_RUNTIME_DIR;
+    delete process.env.NOETIC_RUNTIME_DIR;
+    try {
+      const path = runnerSocketPath(implementerArgs);
+      expect(Buffer.byteLength(path, 'utf8')).toBeLessThan(MACOS_SOCKET_PATH_LIMIT_BYTES);
+    } finally {
+      if (prev !== undefined) {
+        process.env.NOETIC_RUNTIME_DIR = prev;
+      }
+    }
+  });
+
+  it('relocates the socket under NOETIC_RUNTIME_DIR when set', () => {
     const prev = process.env.NOETIC_RUNTIME_DIR;
     process.env.NOETIC_RUNTIME_DIR = '/tmp/n';
     try {
-      const path = runnerSocketPath(baseArgs);
-      expect(path).toBe('/tmp/n/T-iy9LrtX6ct/planner-planner.sock');
-      // The default path blows the macOS socket-path cap; the relocated path
-      // stays well under it, which is the whole reason the env var exists.
-      expect(Buffer.byteLength(path, 'utf8')).toBeLessThan(MACOS_SOCKET_PATH_LIMIT_BYTES);
+      expect(runnerSocketPath(plannerArgs)).toBe('/tmp/n/planner-T-iy9LrtX6ct.sock');
     } finally {
       if (prev === undefined) {
         delete process.env.NOETIC_RUNTIME_DIR;
@@ -48,8 +61,9 @@ describe('runnerSocketPath', () => {
     const prev = process.env.NOETIC_RUNTIME_DIR;
     process.env.NOETIC_RUNTIME_DIR = '';
     try {
-      const path = runnerSocketPath(baseArgs);
-      expect(path).toContain('/.noetic/tasks/T-iy9LrtX6ct/sockets/');
+      expect(runnerSocketPath(plannerArgs)).toBe(
+        `${DEFAULT_RUNTIME_DIR}/planner-T-iy9LrtX6ct.sock`,
+      );
     } finally {
       if (prev === undefined) {
         delete process.env.NOETIC_RUNTIME_DIR;
