@@ -79,7 +79,7 @@ describe('deriveColumn (active lifecycle)', () => {
 //#region deriveColumn — terminal lifecycle precedence
 
 describe('deriveColumn (terminal lifecycle wins over reviewStatus)', () => {
-  it('merged lifecycle → done regardless of reviewStatus', () => {
+  it('merged lifecycle collapses into ready_to_merge regardless of reviewStatus', () => {
     for (const reviewStatus of [
       TaskReviewStatus.NotStarted,
       TaskReviewStatus.Reviewing,
@@ -90,7 +90,7 @@ describe('deriveColumn (terminal lifecycle wins over reviewStatus)', () => {
         reviewStatus,
         lifecycleStatus: TaskLifecycleStatus.Merged,
       });
-      expect(deriveColumn(t)).toBe(KanbanColumn.Done);
+      expect(deriveColumn(t)).toBe(KanbanColumn.ReadyToMerge);
     }
   });
 
@@ -252,23 +252,6 @@ describe('moveTask', () => {
 
     expect(moved.reviewStatus).toBe(TaskReviewStatus.Approved);
     expect(deriveColumn(moved)).toBe(KanbanColumn.ReadyToMerge);
-  });
-
-  it('moving to done sets lifecycleStatus=merged and clears archivedAt', async () => {
-    const ctx = makeStoreContext();
-    const t = makeTask({
-      archivedAt: NOW,
-    });
-    await saveTask(ctx, t);
-
-    const moved = await moveTask(ctx, {
-      taskId: t.id,
-      column: KanbanColumn.Done,
-    });
-
-    expect(moved.lifecycleStatus).toBe(TaskLifecycleStatus.Merged);
-    expect(moved.archivedAt).toBeNull();
-    expect(deriveColumn(moved)).toBe(KanbanColumn.Done);
   });
 
   it('moving to cleanup_blocked sets lifecycleStatus=cleanup-blocked', async () => {

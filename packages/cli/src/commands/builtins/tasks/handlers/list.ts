@@ -58,7 +58,7 @@ function matchesSource(task: Task, source: TaskSource | undefined): boolean {
  * The default view hides archived tasks AND the non-archived terminal
  * columns (`cleanup_blocked`, `removed`) so the CLI matches the kanban
  * TUI's default (which only renders Triage / In Progress / Needs
- * Changes / Ready to Merge / Done unless `a` is pressed).
+ * Changes / Ready to PR — merged tasks collapse into Ready to PR).
  *
  * - `--all`: lifts both hides.
  * - `--terminal`: lifts only the non-archived terminal hide; archived

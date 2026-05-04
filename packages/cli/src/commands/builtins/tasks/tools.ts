@@ -64,7 +64,6 @@ const KanbanColumnSchema = z
     KanbanColumn.InProgress,
     KanbanColumn.NeedsChanges,
     KanbanColumn.ReadyToMerge,
-    KanbanColumn.Done,
     KanbanColumn.CleanupBlocked,
     KanbanColumn.Removed,
     KanbanColumn.Archived,

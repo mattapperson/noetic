@@ -117,7 +117,6 @@ const COLUMN_LABELS: Record<KanbanColumn, string> = {
   [KanbanColumn.InProgress]: 'In Progress',
   [KanbanColumn.NeedsChanges]: 'Needs Changes',
   [KanbanColumn.ReadyToMerge]: 'Ready to PR',
-  [KanbanColumn.Done]: 'Done',
   [KanbanColumn.CleanupBlocked]: 'Cleanup Blocked',
   [KanbanColumn.Removed]: 'Removed',
   [KanbanColumn.Archived]: 'Archived',

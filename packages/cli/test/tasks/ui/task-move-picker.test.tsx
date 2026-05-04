@@ -101,18 +101,6 @@ describe('commitMove', () => {
     expect(next.archivedAt).not.toBeNull();
   });
 
-  test('moving to Done flips lifecycleStatus to merged', async () => {
-    const ctx = makeStoreContext('/repo3');
-    const task = makeTask('T-cccccccccc');
-    await saveTask(ctx, task);
-    const next = await commitMove({
-      ctx,
-      taskId: task.id,
-      column: KanbanColumn.Done,
-    });
-    expect(next.lifecycleStatus).toBe('merged');
-  });
-
   test('refuses to move into reconciler-owned column without force', async () => {
     const ctx = makeStoreContext('/repo4');
     const task = makeTask('T-dddddddddd');

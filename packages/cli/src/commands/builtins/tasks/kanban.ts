@@ -11,13 +11,17 @@ import { TaskLifecycleStatus, TaskReviewStatus } from './schemas.js';
  * archived/lifecycle terminals win first, then `reviewStatus` for active
  * tasks. `source` is *not* part of the column matrix — it's a card badge,
  * not a column.
+ *
+ * The `merged` lifecycle state collapses into `ReadyToMerge` — opening a
+ * PR and the PR landing are treated as the same column from the user's
+ * perspective; the underlying lifecycle flag is still tracked for
+ * reconcile/cleanup but is not its own column.
  */
 export const KanbanColumn = {
   Triage: 'triage',
   InProgress: 'in_progress',
   NeedsChanges: 'needs_changes',
   ReadyToMerge: 'ready_to_merge',
-  Done: 'done',
   CleanupBlocked: 'cleanup_blocked',
   Removed: 'removed',
   Archived: 'archived',
@@ -52,15 +56,17 @@ const COLUMN_TO_REVIEW_STATUS: Partial<Record<KanbanColumn, TaskReviewStatus>> =
 //#region deriveColumn
 
 /**
- * Map a `Task` to its kanban column. Terminal states (archived, merged,
- * cleanup-blocked, removed) take precedence over the review-status axis.
+ * Map a `Task` to its kanban column. Archived / cleanup-blocked /
+ * removed win first; `merged` collapses into `ReadyToMerge` so
+ * "approved" and "merged" share a single column; otherwise we dispatch
+ * on the review-status axis.
  */
 export function deriveColumn(task: Task): KanbanColumn {
   if (task.archivedAt !== null) {
     return KanbanColumn.Archived;
   }
   if (task.lifecycleStatus === TaskLifecycleStatus.Merged) {
-    return KanbanColumn.Done;
+    return KanbanColumn.ReadyToMerge;
   }
   if (task.lifecycleStatus === TaskLifecycleStatus.CleanupBlocked) {
     return KanbanColumn.CleanupBlocked;
@@ -109,13 +115,6 @@ function buildPatch(args: { task: Task; column: KanbanColumn; now: string }): Co
     return {
       archivedAt: task.archivedAt ?? now,
       lifecycleStatus: task.lifecycleStatus,
-      reviewStatus: task.reviewStatus,
-    };
-  }
-  if (column === KanbanColumn.Done) {
-    return {
-      archivedAt: null,
-      lifecycleStatus: TaskLifecycleStatus.Merged,
       reviewStatus: task.reviewStatus,
     };
   }

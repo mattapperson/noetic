@@ -68,8 +68,7 @@ describe('VISIBLE_COLUMNS', () => {
     expect(VISIBLE_COLUMNS.length).toBe(4);
   });
 
-  test('omits Done and terminal-state columns (CleanupBlocked / Removed / Archived)', () => {
-    expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Done);
+  test('omits terminal-state columns (CleanupBlocked / Removed / Archived)', () => {
     expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.CleanupBlocked);
     expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Removed);
     expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Archived);
