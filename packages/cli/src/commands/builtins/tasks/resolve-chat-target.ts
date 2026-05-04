@@ -4,13 +4,22 @@
  *
  * Priority order:
  *   1. planner sidecar (`_planner.json`) — present iff a planner runner
- *      is bound to this task.
+ *      is bound to this task AND its socket is reachable on disk.
  *   2. implementer sidecar (`_implementer.json`) — present iff an
- *      implementer runner is bound to this leaf task.
+ *      implementer runner is bound to this leaf task AND its socket is
+ *      reachable on disk.
  *
- * Returns `null` when no live agent is bound (e.g. autopilot is paused
- * or the task has terminated).
+ * A sidecar whose `socketPath` names a file that no longer exists is
+ * treated as absent. Without this check the TUI would be handed a
+ * dead path and surface "disconnected: connect ENOENT <path>" — the
+ * regression captured in `resolve-chat-target-staleness.test.ts`.
+ *
+ * Returns `null` when no reachable agent is bound (e.g. autopilot is
+ * paused, the task has terminated, or a runner crashed without
+ * clearing its sidecar).
  */
+
+import { access } from 'node:fs/promises';
 
 import type { TaskStoreContext } from './fs-store.js';
 import { loadImplementer } from './implementer-state.js';
@@ -25,12 +34,24 @@ export interface ChatTarget {
   readonly roleLabel: string;
 }
 
-export interface WaitForChatTargetOptions {
+/** Probe for whether a unix-domain-socket file is reachable on disk. */
+export type SocketReachabilityProbe = (socketPath: string) => Promise<boolean>;
+
+export interface ResolveChatTargetOptions {
+  /**
+   * Probe the runner socket before accepting it as a target. Default
+   * is a real `fs.access()` check. Tests pass stubs to simulate the
+   * crashed-runner case without managing real unix-domain sockets.
+   */
+  readonly isSocketReachable?: SocketReachabilityProbe;
+}
+
+export interface WaitForChatTargetOptions extends ResolveChatTargetOptions {
   readonly timeoutMs: number;
   readonly pollIntervalMs: number;
 }
 
-export interface EnsureChatTargetOptions {
+export interface EnsureChatTargetOptions extends ResolveChatTargetOptions {
   /** Invoked once we transition from "checking" to "spawning + polling". */
   readonly onSpawning?: () => void;
   /** Total time to wait for the runner to bind its IPC socket. */
@@ -43,19 +64,37 @@ export interface EnsureChatTargetOptions {
 
 //#endregion
 
+//#region Helpers
+
+const defaultIsSocketReachable: SocketReachabilityProbe = async (socketPath) => {
+  try {
+    await access(socketPath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+//#endregion
+
 //#region Public API
 
 export async function resolveChatTarget(
   ctx: TaskStoreContext,
   taskId: string,
+  opts: ResolveChatTargetOptions = {},
 ): Promise<ChatTarget | null> {
+  const isReachable = opts.isSocketReachable ?? defaultIsSocketReachable;
+
   const planner = await loadPlanner(ctx, taskId);
   if (planner !== null && planner.socketPath !== null && planner.socketPath !== undefined) {
-    return {
-      socketPath: planner.socketPath,
-      role: 'planner',
-      roleLabel: 'planner',
-    };
+    if (await isReachable(planner.socketPath)) {
+      return {
+        socketPath: planner.socketPath,
+        role: 'planner',
+        roleLabel: 'planner',
+      };
+    }
   }
   const implementer = await loadImplementer(ctx, taskId);
   if (
@@ -63,11 +102,13 @@ export async function resolveChatTarget(
     implementer.socketPath !== null &&
     implementer.socketPath !== undefined
   ) {
-    return {
-      socketPath: implementer.socketPath,
-      role: 'implementer',
-      roleLabel: `implementer · ${implementer.featureId}`,
-    };
+    if (await isReachable(implementer.socketPath)) {
+      return {
+        socketPath: implementer.socketPath,
+        role: 'implementer',
+        roleLabel: `implementer · ${implementer.featureId}`,
+      };
+    }
   }
   return null;
 }
@@ -84,7 +125,9 @@ export async function waitForChatTarget(
 ): Promise<ChatTarget | null> {
   const deadline = Date.now() + opts.timeoutMs;
   while (Date.now() < deadline) {
-    const target = await resolveChatTarget(ctx, taskId);
+    const target = await resolveChatTarget(ctx, taskId, {
+      isSocketReachable: opts.isSocketReachable,
+    });
     if (target !== null) {
       return target;
     }
@@ -107,7 +150,9 @@ export async function ensureChatTarget(
   taskId: string,
   opts: EnsureChatTargetOptions = {},
 ): Promise<ChatTarget | null> {
-  const initial = await resolveChatTarget(ctx, taskId);
+  const initial = await resolveChatTarget(ctx, taskId, {
+    isSocketReachable: opts.isSocketReachable,
+  });
   if (initial !== null) {
     return initial;
   }
@@ -130,6 +175,7 @@ export async function ensureChatTarget(
   return waitForChatTarget(ctx, taskId, {
     timeoutMs: opts.timeoutMs ?? 15e3,
     pollIntervalMs: opts.pollIntervalMs ?? 250,
+    isSocketReachable: opts.isSocketReachable,
   });
 }
 

@@ -1,24 +1,29 @@
 /**
  * End-to-end test for the "open chat on a task" flow.
  *
- * Reproduces the hang where the TUI sits on "starting planner agent…"
- * forever because the spawned planner runner crashes at startup before
- * binding its IPC socket. The TUI polls `resolveChatTarget` for a socket
- * that never arrives.
+ * Regression guard for the original bug: the spawned planner runner
+ * crashed at startup (undefined projectRoot → `paths[0] must be of
+ * type string`) before binding its IPC socket, and the TUI polled
+ * `resolveChatTarget` forever for a path that never arrived.
  *
- * The failure mode is subtle: the launcher's `spawn()` returns a pid,
- * the sidecar is written, and `isAlive(pid)` is true for ~1ms. But the
- * runner throws inside `runnerSocketPath()` (missing required args after
- * the `@noetic/code-agent` extraction) and exits. stdio is `'ignore'`, so
- * nothing surfaces.
+ * Because the stderr of a detached runner goes to `/dev/null` in
+ * production, the hang was invisible. This test spawns the real
+ * runner with stderr inherited so any startup crash surfaces
+ * immediately, and asserts the runner made it far enough to write its
+ * "planner started" log entry.
  *
- * This test drives the full launcher → runner → `waitForChatTarget` path
- * against a real temp project and fails fast when the runner can't bind.
+ * Note: we do NOT assert that `ensureChatTarget` returns a non-null
+ * target. With the stale-sidecar fix (`planner-runner.ts` now clears
+ * the sidecar on exit), a fast LLM completion — or a fast runner
+ * crash — leaves the sidecar gone, which is the correct post-state.
+ * The "connect to the live runner" path is covered in the pilotty
+ * tests when an API key is present; the socket-reachability contract
+ * is covered in `resolve-chat-target-staleness.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,6 +42,11 @@ describe('chat on a task end-to-end', () => {
   });
 
   afterEach(async () => {
+    // Keep artifacts on failure for debugging.
+    if (process.env.NOETIC_TEST_KEEP_TMP === '1') {
+      console.error(`[keep] ${projectRoot}`);
+      return;
+    }
     await rm(projectRoot, {
       recursive: true,
       force: true,
@@ -77,10 +87,12 @@ describe('chat on a task end-to-end', () => {
         },
       });
 
-    const target = await ensureChatTarget(ctx, created.task.id, {
-      // Generous timeout — the RED case takes the full window, the
-      // GREEN case returns in well under a second.
-      timeoutMs: 10e3,
+    await ensureChatTarget(ctx, created.task.id, {
+      // Short poll window: we're not trying to chat, only verifying
+      // that the launcher succeeded and the runner didn't crash at
+      // startup. Whether the runner is still alive at assertion time
+      // depends on LLM latency — irrelevant here.
+      timeoutMs: 3e3,
       pollIntervalMs: 100,
       startPlannerRunFn: (runArgs) =>
         startPlannerRun({
@@ -89,10 +101,15 @@ describe('chat on a task end-to-end', () => {
         }),
     });
 
-    expect(target).not.toBeNull();
-    expect(target?.role).toBe('planner');
-    expect(target?.socketPath.length).toBeGreaterThan(0);
+    // The runner writes a "planner started" line before touching the
+    // LLM — its presence proves the launcher + runner boot chain
+    // completed (including `runnerSocketPath()` resolution, which
+    // was the site of the original hang). Absence means the runner
+    // threw during startup and stderr (inherited above) will show why.
+    const logPath = join(projectRoot, '.noetic', 'tasks', created.task.id, 'log.jsonl');
+    const log = await readFile(logPath, 'utf8');
+    expect(log.includes('planner started')).toBe(true);
     },
-    15e3,
+    10e3,
   );
 });

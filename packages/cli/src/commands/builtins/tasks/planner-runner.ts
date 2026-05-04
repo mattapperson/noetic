@@ -21,7 +21,7 @@ import type { TaskStoreContext } from './fs-store.js';
 import { appendLog, loadTask } from './fs-store.js';
 import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createPlannerAttemptLayer } from './memory/planner-attempt-layer.js';
-import { loadPlanner, savePlanner } from './planner-state.js';
+import { clearPlanner, loadPlanner, savePlanner } from './planner-state.js';
 import type { PlannerOutcome } from './planner-tools.js';
 import { createAbandonPlanningTool, createSubmitHierarchyTool } from './planner-tools.js';
 import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
@@ -322,6 +322,17 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     process.off('exit', onExit);
     removeSignalHandlers();
     await ipcServer.close('runner-exit');
+    // Always clear the sidecar on exit — without this, a stalled /
+    // killed / crashed runner leaves `_planner.json` pointing at the
+    // socket path `ipcServer.close()` just unlinked. The TUI would
+    // then hand that dead path to its IPC client and surface
+    // "disconnected: connect ENOENT <path>". The happy paths
+    // (`submit_hierarchy` / `abandon_planning`) clear the sidecar too,
+    // via `planner-flow.ts`, so this call is redundant but idempotent
+    // (`rm --force` on a missing file is a no-op) on those paths.
+    await clearPlanner(ctx, taskId).catch(() => {
+      /* swallow — sidecar will be evicted by the next launcher's pid check */
+    });
   }
 }
 

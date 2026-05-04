@@ -18,6 +18,13 @@ import { makeStoreContext } from './_helpers.js';
 
 const TASK_ID = 'T-aaaaaaaaaa';
 
+// These tests use fake `/sock/*.sock` paths that don't exist on disk,
+// so the default reachability probe (real `fs.access`) would reject
+// every target. Stubbing "always reachable" keeps the tests focused
+// on the sidecar-resolution logic; the socket-reachability contract
+// itself is covered in `resolve-chat-target-staleness.test.ts`.
+const alwaysReachable = async (): Promise<boolean> => true;
+
 interface FakePlannerSpawn {
   readonly fn: (args: StartPlannerRunArgs) => Promise<StartPlannerRunResult>;
   readonly calls: Array<{
@@ -92,6 +99,7 @@ describe('ensureChatTarget', () => {
         spawningFired += 1;
       },
       startPlannerRunFn: spawn.fn,
+      isSocketReachable: alwaysReachable,
     });
     expect(got?.socketPath).toBe('/sock/already.sock');
     expect(spawningFired).toBe(0);
@@ -112,6 +120,7 @@ describe('ensureChatTarget', () => {
       startPlannerRunFn: spawn.fn,
       timeoutMs: 200,
       pollIntervalMs: 10,
+      isSocketReachable: alwaysReachable,
     });
     expect(got?.socketPath).toBe('/sock/fresh.sock');
     expect(got?.role).toBe('planner');
@@ -143,6 +152,7 @@ describe('ensureChatTarget', () => {
       startPlannerRunFn: spawn.fn,
       timeoutMs: 500,
       pollIntervalMs: 10,
+      isSocketReachable: alwaysReachable,
     });
     expect(got?.socketPath).toBe('/sock/inflight.sock');
   });
@@ -190,7 +200,9 @@ describe('ensureChatTarget', () => {
 describe('resolveChatTarget', () => {
   test('returns null when no sidecar exists', async () => {
     const ctx = makeStoreContext();
-    const got = await resolveChatTarget(ctx, TASK_ID);
+    const got = await resolveChatTarget(ctx, TASK_ID, {
+      isSocketReachable: alwaysReachable,
+    });
     expect(got).toBeNull();
   });
 
@@ -204,7 +216,9 @@ describe('resolveChatTarget', () => {
       startedAt: '2026-05-02T00:00:00Z',
       pausedAt: null,
     });
-    const got = await resolveChatTarget(ctx, TASK_ID);
+    const got = await resolveChatTarget(ctx, TASK_ID, {
+      isSocketReachable: alwaysReachable,
+    });
     expect(got).toBeNull();
   });
 
@@ -219,7 +233,9 @@ describe('resolveChatTarget', () => {
       pausedAt: null,
       socketPath: '/sock/p.sock',
     });
-    const got = await resolveChatTarget(ctx, TASK_ID);
+    const got = await resolveChatTarget(ctx, TASK_ID, {
+      isSocketReachable: alwaysReachable,
+    });
     expect(got).toEqual({
       socketPath: '/sock/p.sock',
       role: 'planner',
@@ -242,7 +258,9 @@ describe('resolveChatTarget', () => {
       pausedAt: null,
       socketPath: '/sock/i.sock',
     });
-    const got = await resolveChatTarget(ctx, TASK_ID);
+    const got = await resolveChatTarget(ctx, TASK_ID, {
+      isSocketReachable: alwaysReachable,
+    });
     expect(got).toEqual({
       socketPath: '/sock/i.sock',
       role: 'implementer',
@@ -274,7 +292,9 @@ describe('resolveChatTarget', () => {
       pausedAt: null,
       socketPath: '/sock/i.sock',
     });
-    const got = await resolveChatTarget(ctx, TASK_ID);
+    const got = await resolveChatTarget(ctx, TASK_ID, {
+      isSocketReachable: alwaysReachable,
+    });
     expect(got?.role).toBe('planner');
   });
 });
@@ -294,6 +314,7 @@ describe('waitForChatTarget', () => {
     const got = await waitForChatTarget(ctx, TASK_ID, {
       timeoutMs: 100,
       pollIntervalMs: 10,
+      isSocketReachable: alwaysReachable,
     });
     expect(got?.socketPath).toBe('/sock/p.sock');
   });
@@ -323,6 +344,7 @@ describe('waitForChatTarget', () => {
     const got = await waitForChatTarget(ctx, TASK_ID, {
       timeoutMs: 500,
       pollIntervalMs: 10,
+      isSocketReachable: alwaysReachable,
     });
     expect(got?.socketPath).toBe('/sock/late.sock');
   });
