@@ -96,25 +96,13 @@ export interface BoardSelection {
 
 //#region Helpers
 
-/** Stable column ordering shown in the UI. Active columns first, terminal last. */
-export const VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  KanbanColumn.Triage,
-  KanbanColumn.InProgress,
-  KanbanColumn.NeedsChanges,
-  KanbanColumn.ReadyToMerge,
-  KanbanColumn.Done,
-  KanbanColumn.CleanupBlocked,
-  KanbanColumn.Removed,
-  KanbanColumn.Archived,
-];
-
 /**
- * Active columns shown by default in narrow terminals. The remaining
- * terminal-state columns (Cleanup Blocked / Removed / Archived) are
- * hidden behind the `a` toggle until the terminal is wide enough to
- * fit all eight side-by-side without truncation.
+ * Stable column ordering shown in the UI. Only active columns are
+ * surfaced here — the terminal-state columns (Cleanup Blocked,
+ * Removed, Archived) are intentionally omitted so tasks in those
+ * states drop off the board and the move picker.
  */
-const DEFAULT_VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
+export const VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
   KanbanColumn.Triage,
   KanbanColumn.InProgress,
   KanbanColumn.NeedsChanges,
@@ -124,26 +112,6 @@ const DEFAULT_VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
 
 /** Minimum per-column width below which the kanban looks unreadable. */
 const MIN_COLUMN_WIDTH = 16;
-
-/**
- * Pick which subset of `VISIBLE_COLUMNS` to render given the available
- * terminal width and the user's "show all" toggle. The primary five
- * are always visible; the terminal-state columns join only when there's
- * enough room or the user explicitly asked.
- */
-export function visibleColumnsFor(args: {
-  readonly terminalWidth: number;
-  readonly showAll: boolean;
-}): ReadonlyArray<KanbanColumn> {
-  if (args.showAll) {
-    return VISIBLE_COLUMNS;
-  }
-  const fitsAll = args.terminalWidth >= VISIBLE_COLUMNS.length * MIN_COLUMN_WIDTH;
-  if (fitsAll) {
-    return VISIBLE_COLUMNS;
-  }
-  return DEFAULT_VISIBLE_COLUMNS;
-}
 
 const COLUMN_LABELS: Record<KanbanColumn, string> = {
   [KanbanColumn.Triage]: 'Triage',
@@ -190,10 +158,6 @@ interface NavInput {
  * Compute the next selection after a directional key. Empty columns are
  * skipped on horizontal moves so the user can never land on a column
  * with no rows. Vertical moves clamp at the column's bounds.
- *
- * `visibleColumns` defaults to the full ordering, but the host narrows
- * it down for narrow terminals. Selection-stickiness across show-all
- * toggles is the caller's responsibility.
  */
 export function selectionAfterKey(input: NavInput): BoardSelection {
   const cols = input.visibleColumns ?? VISIBLE_COLUMNS;
@@ -331,23 +295,12 @@ function KanbanView(props: KanbanViewProps): React.ReactElement {
   const theme = useTheme();
   const { cols: terminalWidth } = useTerminalDimensions();
   const [data, setData] = useState<BoardData>(EMPTY_BOARD_DATA);
-  const [showAll, setShowAll] = useState(false);
   const [selection, setSelection] = useState<BoardSelection>({
     columnIndex: 0,
     rowIndex: 0,
   });
 
-  const visibleColumns = useMemo(
-    () =>
-      visibleColumnsFor({
-        terminalWidth,
-        showAll,
-      }),
-    [
-      terminalWidth,
-      showAll,
-    ],
-  );
+  const visibleColumns = VISIBLE_COLUMNS;
 
   const ctx = useMemo<TaskStoreContext>(
     () => ({
@@ -408,26 +361,8 @@ function KanbanView(props: KanbanViewProps): React.ReactElement {
     },
     [
       buckets,
-      visibleColumns,
     ],
   );
-
-  // If the visible-columns set shrinks (e.g. user toggled show-all off,
-  // or terminal narrowed) clamp the selection so we never point past the
-  // end of the new ordering.
-  useEffect(() => {
-    setSelection((current) => {
-      if (current.columnIndex < visibleColumns.length) {
-        return current;
-      }
-      return {
-        columnIndex: Math.max(0, visibleColumns.length - 1),
-        rowIndex: 0,
-      };
-    });
-  }, [
-    visibleColumns,
-  ]);
 
   useInput((input, key) => {
     if (key.escape) {
@@ -466,10 +401,6 @@ function KanbanView(props: KanbanViewProps): React.ReactElement {
       props.onCreateTask();
       return;
     }
-    if (input === 'a') {
-      setShowAll((v) => !v);
-      return;
-    }
     if (input === 'm') {
       const picked = selectedTask(buckets, selection, visibleColumns);
       if (picked === null) {
@@ -499,7 +430,6 @@ function KanbanView(props: KanbanViewProps): React.ReactElement {
   // Pick a column width that fits all visible columns side-by-side.
   const columnCount = visibleColumns.length;
   const columnWidth = Math.max(MIN_COLUMN_WIDTH, Math.floor(terminalWidth / columnCount));
-  const allColumnsVisible = visibleColumns.length === VISIBLE_COLUMNS.length;
 
   return (
     <Box flexDirection="column" width={terminalWidth}>
@@ -546,10 +476,7 @@ function KanbanView(props: KanbanViewProps): React.ReactElement {
         })}
       </Box>
       <Box paddingX={1}>
-        <Text color={theme.muted}>
-          ↑↓←→ navigate • Enter open • c create • m move •{' '}
-          {allColumnsVisible ? 'a hide terminal' : 'a show all'} • Esc exit
-        </Text>
+        <Text color={theme.muted}>↑↓←→ navigate • Enter open • c create • m move • Esc exit</Text>
       </Box>
     </Box>
   );

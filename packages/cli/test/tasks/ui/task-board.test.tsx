@@ -22,7 +22,6 @@ import {
   selectedTask,
   selectionAfterKey,
   VISIBLE_COLUMNS,
-  visibleColumnsFor,
 } from '../../../src/commands/builtins/tasks/ui/task-board.js';
 
 //#region Fixtures
@@ -64,15 +63,15 @@ function decorate(task: Task, column: KanbanColumn, isStructured = false): Decor
 //#endregion
 
 describe('VISIBLE_COLUMNS', () => {
-  test('contains every kanban column once', () => {
+  test('contains every active column once', () => {
     expect(new Set(VISIBLE_COLUMNS).size).toBe(VISIBLE_COLUMNS.length);
-    expect(VISIBLE_COLUMNS.length).toBe(8);
+    expect(VISIBLE_COLUMNS.length).toBe(5);
   });
 
-  test('places terminal columns after active ones', () => {
-    const triageIdx = VISIBLE_COLUMNS.indexOf(KanbanColumn.Triage);
-    const archivedIdx = VISIBLE_COLUMNS.indexOf(KanbanColumn.Archived);
-    expect(triageIdx).toBeLessThan(archivedIdx);
+  test('omits terminal-state columns (CleanupBlocked / Removed / Archived)', () => {
+    expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.CleanupBlocked);
+    expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Removed);
+    expect(VISIBLE_COLUMNS).not.toContain(KanbanColumn.Archived);
   });
 });
 
@@ -296,42 +295,3 @@ describe('selectedTask', () => {
   });
 });
 
-describe('visibleColumnsFor', () => {
-  test('shows all eight columns when terminal fits all min-widths (8 * 16 = 128)', () => {
-    const cols = visibleColumnsFor({
-      terminalWidth: 128,
-      showAll: false,
-    });
-    expect(cols).toEqual(VISIBLE_COLUMNS);
-  });
-
-  test('hides terminal-state columns at narrow widths (e.g. 80 cols)', () => {
-    const cols = visibleColumnsFor({
-      terminalWidth: 80,
-      showAll: false,
-    });
-    expect(cols).toEqual([
-      KanbanColumn.Triage,
-      KanbanColumn.InProgress,
-      KanbanColumn.NeedsChanges,
-      KanbanColumn.ReadyToMerge,
-      KanbanColumn.Done,
-    ]);
-  });
-
-  test('show-all override surfaces all columns even on narrow terminals', () => {
-    const cols = visibleColumnsFor({
-      terminalWidth: 80,
-      showAll: true,
-    });
-    expect(cols).toEqual(VISIBLE_COLUMNS);
-  });
-
-  test('boundary at 127 cols still hides terminal columns', () => {
-    const cols = visibleColumnsFor({
-      terminalWidth: 127,
-      showAll: false,
-    });
-    expect(cols.length).toBe(5);
-  });
-});
