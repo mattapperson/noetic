@@ -67,13 +67,16 @@ export function formatLogLine(entry: LogEntry): string {
 
 /**
  * Compose a stable React key for a log row. Combines `ts`, `chunk`
- * (when set), and a prefix of the message so duplicate-timestamp rows
- * still get distinct keys without resorting to the array index.
+ * (when set), a prefix of the message, and the row's position in the
+ * rendered tail. The trailing `index` is a last-resort tiebreaker —
+ * without it, two unchunked entries written in the same millisecond
+ * with the same short message (e.g. two `"spawned"` system entries)
+ * would collide.
  */
-export function logEntryKey(entry: LogEntry): string {
+export function logEntryKey(entry: LogEntry, index: number): string {
   const chunk = entry.chunk ?? 0;
   const head = entry.message.slice(0, 32);
-  return `${entry.ts}#${chunk}#${head}`;
+  return `${entry.ts}#${chunk}#${head}#${index}`;
 }
 
 /**
@@ -251,8 +254,8 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
         {data.logEntries.length === 0 ? (
           <Text color={theme.muted}>(empty)</Text>
         ) : (
-          truncateLogTail(data.logEntries, logLimit).map((entry) => (
-            <Text key={logEntryKey(entry)} wrap="truncate-end">
+          truncateLogTail(data.logEntries, logLimit).map((entry, index) => (
+            <Text key={logEntryKey(entry, index)} wrap="truncate-end">
               {formatLogLine(entry)}
             </Text>
           ))

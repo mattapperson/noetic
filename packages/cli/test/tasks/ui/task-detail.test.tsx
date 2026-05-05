@@ -118,17 +118,19 @@ describe('truncateLogTail', () => {
 });
 
 describe('logEntryKey', () => {
-  test('combines ts + chunk + head of message', () => {
+  test('combines ts + chunk + head of message + index', () => {
     const key = logEntryKey(
       makeEntry({
         ts: '2026-04-30T12:34:56.000Z',
         message: 'abcdef',
         chunk: 2,
       }),
+      0,
     );
     expect(key).toContain('2026-04-30T12:34:56.000Z');
     expect(key).toContain('#2#');
     expect(key).toContain('abcdef');
+    expect(key.endsWith('#0')).toBe(true);
   });
 
   test('treats missing chunk as 0', () => {
@@ -136,6 +138,7 @@ describe('logEntryKey', () => {
       makeEntry({
         message: 'x',
       }),
+      0,
     );
     expect(key).toContain('#0#');
   });
@@ -147,6 +150,18 @@ describe('logEntryKey', () => {
     const b = makeEntry({
       message: 'second',
     });
-    expect(logEntryKey(a)).not.toBe(logEntryKey(b));
+    expect(logEntryKey(a, 0)).not.toBe(logEntryKey(b, 1));
+  });
+
+  test('regression: two unchunked entries with identical ts + message get distinct keys', () => {
+    // Matches the real-world collision: two `system` entries both with
+    // `ts=2026-04-30T00:00:00.000Z` and `message="spawned"` were yielding
+    // the same React key.
+    const entry = makeEntry({
+      kind: 'system',
+      ts: '2026-04-30T00:00:00.000Z',
+      message: 'spawned',
+    });
+    expect(logEntryKey(entry, 0)).not.toBe(logEntryKey(entry, 1));
   });
 });
