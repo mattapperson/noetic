@@ -1,5 +1,6 @@
 import { createCodeAgent } from '@noetic/code-agent';
 import { TeammateRegistry } from '@noetic/code-agent/agents';
+import type { AskUserService } from '@noetic/code-agent/ask-user-service';
 import type { LspServerContribution } from '@noetic/code-agent/lsp';
 import { createBuiltinLspServers, LspService } from '@noetic/code-agent/lsp';
 import type { ReminderTrigger } from '@noetic/code-agent/memory';
@@ -49,7 +50,6 @@ import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-po
 import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
 import type { NoeticPlugin } from '../plugins/types.js';
-import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 import { createDefaultShellAdapter } from './shell-adapter-bootstrap.js';
 

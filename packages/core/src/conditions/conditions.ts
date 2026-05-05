@@ -1,9 +1,10 @@
 import { z } from 'zod';
-import { createMessage, extractAssistantText, trackUsage } from '../interpreter/message-helpers';
+import { trackUsage } from '../interpreter/message-helpers';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type { ContextMemory, StorageAdapter } from '../types/memory';
 import type { Step } from '../types/step';
+import { createMessage, extractAssistantText } from '../util/message-helpers';
 import { cosineSimilarity } from './cosine-similarity';
 
 //#region Types

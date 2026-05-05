@@ -1,6 +1,6 @@
 import type { Context } from '../types/context';
 import type { ExecuteStepFn, StepBranch } from '../types/step';
-import { frameworkCast } from './framework-cast';
+import { frameworkCast } from '../util/framework-cast';
 
 export async function executeBranch<TMemory, I, O>(
   step: StepBranch<TMemory, I, O>,

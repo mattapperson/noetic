@@ -1,5 +1,5 @@
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { FsAdapter, FsStats } from '../types/fs-adapter';
+import { frameworkCast } from '../util/framework-cast';
 
 //#region Helpers
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { createLayerStateStore, initLayers, recallLayers } from '../../src/memory/layer-lifecycle';
 import { staticContent } from '../../src/memory/layers/static-content';
 import type { MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 function asLayers(layer: MemoryLayer<string>): MemoryLayer[] {

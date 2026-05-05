@@ -14,10 +14,10 @@
  */
 
 import { NoeticConfigError } from '../../errors/noetic-config-error';
-import { isAssistantMessage, isUserMessage } from '../../interpreter/typeguards';
 import type { Item } from '../../types/items';
 import type { MemoryLayer } from '../../types/memory';
 import { Slot } from '../../types/memory';
+import { isAssistantMessage, isUserMessage } from '../../util/message-helpers';
 import { stripUnresolvedToolCalls } from '../strip-unresolved';
 
 //#region Constants

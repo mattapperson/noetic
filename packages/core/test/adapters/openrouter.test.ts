@@ -11,8 +11,8 @@ import {
   extractUsage,
   itemsToInput,
 } from '../../src/adapters/openrouter';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import type { InputMessageItem, Item, ReasoningItem } from '../../src/types/items';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
 describe('extractSystemInstruction', () => {

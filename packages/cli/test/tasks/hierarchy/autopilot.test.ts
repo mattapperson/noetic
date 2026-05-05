@@ -111,7 +111,10 @@ async function seedTaskWithTwoSlices(taskId: string): Promise<SeededTask> {
       },
     ],
   });
-  return { fs: ctx.fs, projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
+  return {
+    fs: ctx.fs,
+    projectRoot: ctx.projectRoot,
+    tasksRoot: ctx.tasksRoot,
     taskId,
   };
 }
@@ -155,7 +158,11 @@ describe('runAutopilotTick (no active slice)', () => {
     expect(report.slicesActivated).toBe(1);
     expect(report.featuresTriaged).toBe(1);
     const slices = await listSlices(
-      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
+      {
+        fs: seed.fs,
+        projectRoot: seed.projectRoot,
+        tasksRoot: seed.tasksRoot,
+      },
       seed.taskId,
     );
     const active = slices.find((s) => s.status === SliceStatus.Active);
@@ -166,7 +173,11 @@ describe('runAutopilotTick (no active slice)', () => {
     const seed = await seedTaskWithTwoSlices('T-watcher000');
     await runAutopilotTick(makeDeps(seed));
     const reloaded = await tryLoadTask(
-      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
+      {
+        fs: seed.fs,
+        projectRoot: seed.projectRoot,
+        tasksRoot: seed.tasksRoot,
+      },
       seed.taskId,
     );
     expect(reloaded?.autopilotState).toBe(AutopilotState.Watching);

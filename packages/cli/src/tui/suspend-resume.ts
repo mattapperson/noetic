@@ -17,7 +17,7 @@
  * `clear()` method to force a redraw).
  */
 
-import { buildTerminalRestoreSequence } from './interrupt-safety-net.js';
+import { buildTerminalRestoreSequence } from '../cli/interrupt-safety-net.js';
 
 export type SuspendSignal = 'SIGTSTP' | 'SIGCONT';
 

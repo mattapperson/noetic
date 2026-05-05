@@ -2,12 +2,12 @@ import type { ZodType } from 'zod';
 import { z } from 'zod';
 import { loop } from '../builders/loop-builder';
 import { step } from '../builders/step-builders';
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
 import { any } from '../until/combinators';
 import { until } from '../until/predicates';
+import { frameworkCast } from '../util/framework-cast';
 
 //#region Types
 

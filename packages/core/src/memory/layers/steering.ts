@@ -1,9 +1,4 @@
 import { NoeticConfigError } from '../../errors/noetic-config-error';
-import {
-  createMessage,
-  estimateTokens,
-  extractAssistantText,
-} from '../../interpreter/message-helpers';
 import type { ExecutionContext, MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
 import type {
@@ -16,6 +11,7 @@ import type {
   SteeringState,
 } from '../../types/steering';
 import { LedgerEntryKind, SteeringAction } from '../../types/steering';
+import { createMessage, estimateTokens, extractAssistantText } from '../../util/message-helpers';
 import { mostRestrictive } from '../layer-lifecycle';
 
 //#region Constants

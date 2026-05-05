@@ -2,8 +2,8 @@ import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { ExecuteStepFn, Snapshot, StepLoop, Verdict } from '../types/step';
-import { frameworkCast } from './framework-cast';
-import { createMessage } from './message-helpers';
+import { frameworkCast } from '../util/framework-cast';
+import { createMessage } from '../util/message-helpers';
 import { isMutableContext } from './typeguards';
 
 //#region Types

@@ -1,6 +1,6 @@
 import type { Tool } from '../types/common';
 import type { Step } from '../types/step';
-import { frameworkCast } from './framework-cast';
+import { frameworkCast } from '../util/framework-cast';
 
 /**
  * Recursively walks a step tree and collects all Tool instances

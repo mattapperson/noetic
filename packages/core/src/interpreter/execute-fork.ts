@@ -13,8 +13,8 @@ import type {
   StepForkRace,
   StepForkSettle,
 } from '../types/step';
+import { frameworkCast } from '../util/framework-cast';
 import { cloneWithGuard } from './clone-guard';
-import { frameworkCast } from './framework-cast';
 import { getContextChannelStore, isContextImpl } from './typeguards';
 
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {

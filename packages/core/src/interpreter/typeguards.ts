@@ -1,9 +1,12 @@
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
-import type { FunctionCallItem, Item, MessageItem } from '../types/items';
+import type { FunctionCallItem, Item } from '../types/items';
 import type { ContextMemory } from '../types/memory';
 import type { MutableContext } from '../types/mutable-context';
+
+// Re-exports for backward compatibility; the pure variants live in util/.
+export { isAssistantMessage, isOutputText, isUserMessage } from '../util/message-helpers';
 
 export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableContext {
   // Check if the context has writable mutable fields (ContextImpl or compatible mock)
@@ -31,37 +34,8 @@ export function getContextChannelStore<TMemory>(ctx: Context<TMemory>): ChannelS
   return undefined;
 }
 
-export function isAssistantMessage(item: unknown): item is MessageItem {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'type' in item &&
-    item.type === 'message' &&
-    'role' in item &&
-    item.role === 'assistant'
-  );
-}
-
-export function isUserMessage(item: unknown): item is MessageItem {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'type' in item &&
-    item.type === 'message' &&
-    'role' in item &&
-    item.role === 'user'
-  );
-}
-
 export function isFunctionCall(item: Item): item is FunctionCallItem {
   return item.type === 'function_call' && 'callId' in item && 'name' in item;
-}
-
-export function isOutputText(part: { type: string }): part is {
-  type: 'output_text';
-  text: string;
-} {
-  return part.type === 'output_text';
 }
 
 function assertNever(_value: never): never {

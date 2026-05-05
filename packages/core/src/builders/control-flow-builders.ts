@@ -1,5 +1,4 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type {
@@ -11,6 +10,7 @@ import type {
   StepForkRace,
   StepForkSettle,
 } from '../types/step';
+import { frameworkCast } from '../util/framework-cast';
 
 /**
  * Creates a parallel execution step that races paths and returns the first result.

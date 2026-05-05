@@ -1,6 +1,4 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { frameworkCast } from '../interpreter/framework-cast';
-import { createMessage, estimateTokens } from '../interpreter/message-helpers';
 import type { ItemSchemaRegistry } from '../schemas/item';
 import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { LLMResponse } from '../types/common';
@@ -9,6 +7,8 @@ import type { Item } from '../types/items';
 import type { ExecutionContext, MemoryLayer, StorageAdapter } from '../types/memory';
 import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
+import { frameworkCast } from '../util/framework-cast';
+import { createMessage, estimateTokens } from '../util/message-helpers';
 import { createScopedStorage, resolveScopeKey } from './scope';
 
 //#region Types

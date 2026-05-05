@@ -75,7 +75,11 @@ describe('resolveChatTarget — socket reachability', () => {
       socketPath: LIVE_SOCK,
     });
     const got = await resolveChatTarget(ctx, TASK_ID, {
-      isSocketReachable: onlyLive(new Set([LIVE_SOCK])),
+      isSocketReachable: onlyLive(
+        new Set([
+          LIVE_SOCK,
+        ]),
+      ),
     });
     expect(got).toEqual({
       socketPath: LIVE_SOCK,

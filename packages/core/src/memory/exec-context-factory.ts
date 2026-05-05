@@ -1,6 +1,6 @@
-import { estimateTokens } from '../interpreter/message-helpers';
 import type { Context } from '../types/context';
 import type { ExecutionContext } from '../types/memory';
+import { estimateTokens } from '../util/message-helpers';
 
 /**
  * Optional overrides for `contextToExecCtx`. Used by `executeSpawn` to build

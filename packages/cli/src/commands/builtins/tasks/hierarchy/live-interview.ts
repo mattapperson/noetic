@@ -11,12 +11,11 @@
  * run can be resumed.
  */
 
+import type { AskUserService } from '@noetic/code-agent/ask-user-service';
 import type { AgentHarness, InterviewQuestionAnswer, InterviewResult } from '@noetic/core';
 import { interview } from '@noetic/core';
 import { z } from 'zod';
-
 import type { AskUserInput, AskUserQuestion } from '../../../../tools/ask-user-types.js';
-import type { AskUserService } from '../../../../tui/services/ask-user-service.js';
 import type { TaskStoreContext } from '../fs-store.js';
 import { INTERVIEW_SYSTEM_PROMPT } from './prompts.js';
 import type { InterviewSession, TaskHierarchyInput } from './schemas.js';

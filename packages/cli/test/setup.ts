@@ -1,7 +1,6 @@
+import { afterAll, beforeAll, beforeEach } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-
-import { afterAll, beforeAll, beforeEach } from 'bun:test';
 
 // Per-test-process NOETIC_HOME so real-fs tests that spawn planner /
 // implementer runners (or otherwise hit the task store) land in a

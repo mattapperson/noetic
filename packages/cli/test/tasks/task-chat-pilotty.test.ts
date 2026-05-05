@@ -57,17 +57,23 @@ async function waitForScreen(session: string, needle: string, timeoutMs: number)
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`waitForScreen: "${needle}" not found in ${timeoutMs}ms. Last screen:\n${lastScreen}`);
+  throw new Error(
+    `waitForScreen: "${needle}" not found in ${timeoutMs}ms. Last screen:\n${lastScreen}`,
+  );
 }
 
 //#endregion
 
 const HAS_PILOTTY = (() => {
-  const { status } = spawnSync('pilotty', [
-    '--version',
-  ], {
-    encoding: 'utf8',
-  });
+  const { status } = spawnSync(
+    'pilotty',
+    [
+      '--version',
+    ],
+    {
+      encoding: 'utf8',
+    },
+  );
   return status === 0;
 })();
 
@@ -124,86 +130,82 @@ describe.skipIf(!HAS_PILOTTY)('pilotty: open chat on a task', () => {
     });
   });
 
-  it(
-    'enters the chat route without surfacing a dead-socket ENOENT banner',
-    async () => {
-      const spawnResult = pilotty([
-        'spawn',
-        '-n',
-        SESSION,
-        '--cwd',
-        projectRoot,
-        'bash',
-        '-c',
-        `OPENROUTER_API_KEY=test-key-sk-unused bun run ${CLI_PATH} --api-key test-key-sk-unused`,
-      ]);
-      expect(spawnResult.status).toBe(0);
+  it('enters the chat route without surfacing a dead-socket ENOENT banner', async () => {
+    const spawnResult = pilotty([
+      'spawn',
+      '-n',
+      SESSION,
+      '--cwd',
+      projectRoot,
+      'bash',
+      '-c',
+      `OPENROUTER_API_KEY=test-key-sk-unused bun run ${CLI_PATH} --api-key test-key-sk-unused`,
+    ]);
+    expect(spawnResult.status).toBe(0);
 
-      // TUI is up when the input prompt is visible.
-      await waitForScreen(SESSION, 'Type a message', 10e3);
+    // TUI is up when the input prompt is visible.
+    await waitForScreen(SESSION, 'Type a message', 10e3);
 
-      // Open the task board via the slash command.
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        '/tasks',
-      ]);
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
+    // Open the task board via the slash command.
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      '/tasks',
+    ]);
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
 
-      // Board shows the task we created. The narrow 80-column test PTY
-      // truncates long task titles to `pilott…`, so match a prefix that
-      // survives truncation.
-      await waitForScreen(SESSION, 'pilott', 5e3);
+    // Board shows the task we created. The narrow 80-column test PTY
+    // truncates long task titles to `pilott…`, so match a prefix that
+    // survives truncation.
+    await waitForScreen(SESSION, 'pilott', 5e3);
 
-      // Enter opens the task detail view; `c` from there opens chat.
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
-      await waitForScreen(SESSION, 'c to chat with agent', 3e3);
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        'c',
-      ]);
+    // Enter opens the task detail view; `c` from there opens chat.
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
+    await waitForScreen(SESSION, 'c to chat with agent', 3e3);
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      'c',
+    ]);
 
-      // "starting planner agent…" is the spawning placeholder —
-      // seeing it proves we got past board navigation and into the
-      // chat route. This is the RED case for the original hang bug
-      // (TUI never leaves the spawning view because the runner
-      // crashes at startup). Post-fix, we see the placeholder and
-      // then one of two outcomes:
-      //   1. With a live LLM keeping the planner alive long enough,
-      //      the view transitions to "chatting with planner".
-      //   2. Without one (or with a fast-completing planner), the
-      //      TUI returns cleanly to the task board when the runner
-      //      exits — no hang, no ENOENT banner.
-      // Either outcome is acceptable; a dangling ENOENT banner is not.
-      await waitForScreen(SESSION, 'starting planner agent', 5e3);
+    // "starting planner agent…" is the spawning placeholder —
+    // seeing it proves we got past board navigation and into the
+    // chat route. This is the RED case for the original hang bug
+    // (TUI never leaves the spawning view because the runner
+    // crashes at startup). Post-fix, we see the placeholder and
+    // then one of two outcomes:
+    //   1. With a live LLM keeping the planner alive long enough,
+    //      the view transitions to "chatting with planner".
+    //   2. Without one (or with a fast-completing planner), the
+    //      TUI returns cleanly to the task board when the runner
+    //      exits — no hang, no ENOENT banner.
+    // Either outcome is acceptable; a dangling ENOENT banner is not.
+    await waitForScreen(SESSION, 'starting planner agent', 5e3);
 
-      // Give the TUI time to settle into its final state (connected
-      // chat, back to board, or error). Snapshot and assert the one
-      // invariant the user actually cares about: no dead-socket banner.
-      await new Promise((resolve) => setTimeout(resolve, 2e3));
-      const screen = pilotty([
-        'snapshot',
-        '-s',
-        SESSION,
-        '-f',
-        'text',
-      ]).stdout;
-      expect(screen.includes('disconnected:')).toBe(false);
-      expect(screen.includes('ENOENT')).toBe(false);
-    },
-    45e3,
-  );
+    // Give the TUI time to settle into its final state (connected
+    // chat, back to board, or error). Snapshot and assert the one
+    // invariant the user actually cares about: no dead-socket banner.
+    await new Promise((resolve) => setTimeout(resolve, 2e3));
+    const screen = pilotty([
+      'snapshot',
+      '-s',
+      SESSION,
+      '-f',
+      'text',
+    ]).stdout;
+    expect(screen.includes('disconnected:')).toBe(false);
+    expect(screen.includes('ENOENT')).toBe(false);
+  }, 45e3);
 });

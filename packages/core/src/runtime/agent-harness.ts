@@ -16,8 +16,8 @@ import {
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { collectAllTools, deduplicateTools } from '../interpreter/collect-tools';
 import { execute } from '../interpreter/execute';
-import { frameworkCast } from '../interpreter/framework-cast';
 import { isFunctionCall } from '../interpreter/typeguards';
+import { contextToExecCtx } from '../memory/exec-context-factory';
 import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import {
@@ -62,13 +62,13 @@ import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
 import type { SubprocessAdapter } from '../types/subprocess-adapter';
+import { frameworkCast } from '../util/framework-cast';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { snapshotCwdState } from './cwd-helpers';
 import { DetachedHandleImpl } from './detached-handle';
 import type { EventBroadcaster } from './event-broadcaster';
-import { contextToExecCtx } from './exec-context-factory';
 import { createInMemoryStorage } from './in-memory-storage';
 import type { MessageQueue, QueuedMessage } from './message-queue';
 import { SessionRunner } from './session-runner';

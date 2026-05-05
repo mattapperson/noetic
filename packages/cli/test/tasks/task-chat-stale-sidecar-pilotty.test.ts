@@ -52,11 +52,7 @@ function pilotty(args: ReadonlyArray<string>, timeoutMs = 10e3): PilottyResult {
   };
 }
 
-async function waitForScreen(
-  session: string,
-  needle: string,
-  timeoutMs: number,
-): Promise<string> {
+async function waitForScreen(session: string, needle: string, timeoutMs: number): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let lastScreen = '';
   while (Date.now() < deadline) {
@@ -91,11 +87,15 @@ async function snapshotText(session: string): Promise<string> {
 //#endregion
 
 const HAS_PILOTTY = (() => {
-  const { status } = spawnSync('pilotty', [
-    '--version',
-  ], {
-    encoding: 'utf8',
-  });
+  const { status } = spawnSync(
+    'pilotty',
+    [
+      '--version',
+    ],
+    {
+      encoding: 'utf8',
+    },
+  );
   return status === 0;
 })();
 
@@ -150,68 +150,64 @@ describe.skipIf(!HAS_PILOTTY)('pilotty: chat on task with stale planner sidecar'
     });
   });
 
-  it(
-    'never surfaces "disconnected: connect ENOENT" for a stale sidecar',
-    async () => {
-      const spawnResult = pilotty([
-        'spawn',
-        '-n',
-        SESSION,
-        '--cwd',
-        projectRoot,
-        'bash',
-        '-c',
-        // NOETIC_HOME redirects the TUI's `/tasks` view and every
-        // descendant spawn to the test's temp tasks-root so it sees
-        // the pre-seeded stale sidecar instead of the developer's
-        // real `~/.noetic/tasks`.
-        `NOETIC_HOME=${projectRoot} OPENROUTER_API_KEY=test-key-sk-unused bun run ${CLI_PATH} --api-key test-key-sk-unused`,
-      ]);
-      expect(spawnResult.status).toBe(0);
+  it('never surfaces "disconnected: connect ENOENT" for a stale sidecar', async () => {
+    const spawnResult = pilotty([
+      'spawn',
+      '-n',
+      SESSION,
+      '--cwd',
+      projectRoot,
+      'bash',
+      '-c',
+      // NOETIC_HOME redirects the TUI's `/tasks` view and every
+      // descendant spawn to the test's temp tasks-root so it sees
+      // the pre-seeded stale sidecar instead of the developer's
+      // real `~/.noetic/tasks`.
+      `NOETIC_HOME=${projectRoot} OPENROUTER_API_KEY=test-key-sk-unused bun run ${CLI_PATH} --api-key test-key-sk-unused`,
+    ]);
+    expect(spawnResult.status).toBe(0);
 
-      await waitForScreen(SESSION, 'Type a message', 10e3);
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        '/tasks',
-      ]);
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
-      await waitForScreen(SESSION, 'stale', 5e3);
+    await waitForScreen(SESSION, 'Type a message', 10e3);
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      '/tasks',
+    ]);
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
+    await waitForScreen(SESSION, 'stale', 5e3);
 
-      // Enter the task detail view, then `c` for chat.
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
-      await waitForScreen(SESSION, 'c to chat with agent', 3e3);
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        'c',
-      ]);
+    // Enter the task detail view, then `c` for chat.
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
+    await waitForScreen(SESSION, 'c to chat with agent', 3e3);
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      'c',
+    ]);
 
-      // Wait for whatever view the TUI settles on after pressing `c`.
-      // Post-fix, the resolver sees the sidecar's dead socket, rejects
-      // it, and either spawns a fresh planner ("starting planner
-      // agent…") or returns null and the UI handles it. Either way,
-      // the user must not see the ENOENT banner.
-      await new Promise((resolve) => setTimeout(resolve, 2e3));
-      const screen = await snapshotText(SESSION);
+    // Wait for whatever view the TUI settles on after pressing `c`.
+    // Post-fix, the resolver sees the sidecar's dead socket, rejects
+    // it, and either spawns a fresh planner ("starting planner
+    // agent…") or returns null and the UI handles it. Either way,
+    // the user must not see the ENOENT banner.
+    await new Promise((resolve) => setTimeout(resolve, 2e3));
+    const screen = await snapshotText(SESSION);
 
-      // The exact banner from the user's report:
-      //   "disconnected: connect ENOENT /tmp/.noetic/planner-T-….sock"
-      expect(screen.includes('disconnected:')).toBe(false);
-      expect(screen.includes('ENOENT')).toBe(false);
-    },
-    45e3,
-  );
+    // The exact banner from the user's report:
+    //   "disconnected: connect ENOENT /tmp/.noetic/planner-T-….sock"
+    expect(screen.includes('disconnected:')).toBe(false);
+    expect(screen.includes('ENOENT')).toBe(false);
+  }, 45e3);
 });

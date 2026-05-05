@@ -3,6 +3,7 @@ import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broad
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
+import { frameworkCast } from '../util/framework-cast';
 import { executeBranch } from './execute-branch';
 import { executeEvery } from './execute-every';
 import { executeFork } from './execute-fork';
@@ -12,7 +13,6 @@ import { executeProvide } from './execute-provide';
 import { executeRun } from './execute-run';
 import { executeSpawn } from './execute-spawn';
 import { executeTool } from './execute-tool';
-import { frameworkCast } from './framework-cast';
 import { isMutableContext } from './typeguards';
 
 const MAX_DEPTH = 64;

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import type { PlanExecutionEntry, PlanState } from '../../src/memory/layers/plan';
 import { PlanPhase, planMemory } from '../../src/memory/layers/plan';
 import type { FlowNode, LlmFlowNode, SequenceFlowNode } from '../../src/patterns/flow';
 import { SteeringAction } from '../../src/types/steering';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 //#region Test Fixtures

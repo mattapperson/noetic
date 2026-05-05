@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { ItemLogImpl } from '../../src/runtime/item-log-impl';
 import type {
   FunctionCallItem,
@@ -10,6 +9,7 @@ import type {
   ReasoningItem,
   ServerToolItem,
 } from '../../src/types/items';
+import { frameworkCast } from '../../src/util/framework-cast';
 
 const makeInputMessage = (
   id: string,

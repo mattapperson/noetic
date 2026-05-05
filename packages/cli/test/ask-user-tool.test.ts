@@ -4,13 +4,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import type { AskUserService } from '@noetic/code-agent/ask-user-service';
+import { AskUserBusyError, createAskUserService } from '@noetic/code-agent/ask-user-service';
 import type { ToolExecutionContext } from '@noetic/core';
 import { isNoeticError } from '@noetic/core';
 import { createAskUserTool } from '../src/tools/ask-user.js';
 import type { AskUserInput } from '../src/tools/ask-user-types.js';
 import { AskUserInputSchema, AskUserOutputSchema } from '../src/tools/ask-user-types.js';
-import type { AskUserService } from '../src/tui/services/ask-user-service.js';
-import { AskUserBusyError, createAskUserService } from '../src/tui/services/ask-user-service.js';
 
 // Minimal stub — our ask-user tool's execute body doesn't read from ctx, so
 // the rest can be opaque. The `Object.create(null)` cast avoids touching

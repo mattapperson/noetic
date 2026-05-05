@@ -1,5 +1,5 @@
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { StorageAdapter } from '../types/memory';
+import { frameworkCast } from '../util/framework-cast';
 
 //#region Public API
 

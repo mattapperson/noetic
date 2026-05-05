@@ -264,7 +264,7 @@ describe('validatorLauncherTool execute', () => {
           'hi',
         ],
         projectRoot: ctx.projectRoot,
-          tasksRoot: ctx.tasksRoot,
+        tasksRoot: ctx.tasksRoot,
       },
       makeToolCtx(fs),
     );

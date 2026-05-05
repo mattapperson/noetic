@@ -128,7 +128,10 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
       statusOverride: FeatureStatus.Triaged,
     },
   );
-  return { fs: ctx.fs, projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
+  return {
+    fs: ctx.fs,
+    projectRoot: ctx.projectRoot,
+    tasksRoot: ctx.tasksRoot,
     taskId: parentTaskId,
     featureId: feature.id,
     leafTaskId,
@@ -137,7 +140,11 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
 
 function makeDeps(seed: SeededTask, runValidator: RunValidatorFn): ValidatorFlowDeps {
   return {
-    ctx: { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
+    ctx: {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
+    },
     signaller: staticSignaller(),
     runValidator,
   };
@@ -172,7 +179,11 @@ async function captureEventsSince(
 describe('validatorIterationStep — pass result', () => {
   it('records a passing run, marks the feature done, and publishes the loop-state change on featureLoopStateChan', async () => {
     const seed = await seedStructuredTask('T-flowpass00');
-    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
+    };
     const drainRecorded = await captureEventsSince(ctx, EventKind.ValidatorRunRecorded);
     const drainLoopChanges = await captureEventsSince(ctx, EventKind.FeatureLoopStateChanged);
 
@@ -220,7 +231,11 @@ describe('validatorIterationStep — pass result', () => {
 describe('validatorIterationStep — fail result', () => {
   it('generates a fix feature and emits feature:fixGenerated', async () => {
     const seed = await seedStructuredTask('T-flowfail00');
-    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
+    };
     const drainFixEvents = await captureEventsSince(ctx, EventKind.FeatureFixGenerated);
 
     const harness = makeHarness(seed.fs);
@@ -245,7 +260,11 @@ describe('validatorIterationStep — fail result', () => {
 
   it('falls back to feature:budgetExhausted when retry budget is hit', async () => {
     const seed = await seedStructuredTask('T-flowbudg00');
-    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
+    };
     const existing = await loadFeature(ctx, seed.taskId, seed.featureId);
     if (existing === null) {
       throw new Error('seed feature missing');
@@ -285,7 +304,11 @@ describe('validatorIterationStep — fail result', () => {
 describe('validatorIterationStep — blocked result', () => {
   it('marks the feature blocked when the validator reports blocked and publishes the loop-state change', async () => {
     const seed = await seedStructuredTask('T-flowblck00');
-    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
+    };
     const drainLoopChanges = await captureEventsSince(ctx, EventKind.FeatureLoopStateChanged);
 
     const harness = makeHarness(seed.fs);
@@ -321,7 +344,11 @@ describe('validatorIterationStep — blocked result', () => {
 describe('validatorIterationStep — validator throws', () => {
   it('marks the run as error without dispatching a result handler', async () => {
     const seed = await seedStructuredTask('T-flowthrw00');
-    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
+    const ctx = {
+      fs: seed.fs,
+      projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
+    };
     const drainExhausted = await captureEventsSince(ctx, EventKind.FeatureBudgetExhausted);
 
     const harness = makeHarness(seed.fs);

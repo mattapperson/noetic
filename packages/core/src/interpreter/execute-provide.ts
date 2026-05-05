@@ -3,8 +3,8 @@ import type { Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { ExecuteStepFn, StepProvide } from '../types/step';
+import { frameworkCast } from '../util/framework-cast';
 import { deduplicateTools } from './collect-tools';
-import { frameworkCast } from './framework-cast';
 
 //#region Helper Functions
 

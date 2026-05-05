@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
-import type { SuspendResumeDeps } from '../src/cli/suspend-resume.js';
-import { installSuspendResumeHandlers } from '../src/cli/suspend-resume.js';
+import type { SuspendResumeDeps } from '../src/tui/suspend-resume.js';
+import { installSuspendResumeHandlers } from '../src/tui/suspend-resume.js';
 
 type ListenedSignal = 'SIGTSTP' | 'SIGCONT';
 type RaisedSignal = 'SIGSTOP' | 'SIGCONT';

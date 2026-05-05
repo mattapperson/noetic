@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { OpenResponsesResult } from '@openrouter/agent';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
+import { frameworkCast } from '../../src/util/framework-cast';
 
 type OpenResponsesOutputItem = OpenResponsesResult['output'][number];
 

@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
-import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { MemoryLayer } from '../../types/memory';
 import { Slot } from '../../types/memory';
+import { createMessage, estimateTokens } from '../../util/message-helpers';
 
 export interface DurableTaskState {
   checkpoints: Array<{

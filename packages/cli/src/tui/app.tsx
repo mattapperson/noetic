@@ -3,6 +3,8 @@
  */
 
 import type { TeammateRegistry } from '@noetic/code-agent/agents';
+import type { PendingAskUserRequest } from '@noetic/code-agent/ask-user-service';
+import { createAskUserService } from '@noetic/code-agent/ask-user-service';
 import type { LspService } from '@noetic/code-agent/lsp';
 import type { SkillDefinition } from '@noetic/code-agent/skills';
 import { buildSkillCatalog } from '@noetic/code-agent/skills';
@@ -21,7 +23,6 @@ import { createLocalShellAdapter } from '@noetic/core';
 import { render } from 'ink';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { installSuspendResumeHandlers } from '../cli/suspend-resume.js';
 import { ensureChatTarget } from '../commands/builtins/tasks/resolve-chat-target.js';
 import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
 import {
@@ -88,10 +89,9 @@ import {
   getItemId,
   isUserEntry,
 } from './item-utils.js';
-import type { PendingAskUserRequest } from './services/ask-user-service.js';
-import { createAskUserService } from './services/ask-user-service.js';
 import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
 import { StreamMetricsProvider } from './stream-metrics-context.js';
+import { installSuspendResumeHandlers } from './suspend-resume.js';
 import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
 import { getDefaultImageStore } from './utils/image-store.js';
 import { resolvePromptAttachments } from './utils/prompt-attachments.js';

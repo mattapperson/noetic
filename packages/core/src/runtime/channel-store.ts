@@ -1,6 +1,6 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
+import { frameworkCast } from '../util/framework-cast';
 
 function isExternalChannel<T>(ch: Channel<T>): ch is ExternalChannel<T> {
   return 'external' in ch && ch.external === true;

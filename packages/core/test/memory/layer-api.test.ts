@@ -3,12 +3,12 @@ import { z } from 'zod';
 import { createLocalFsAdapter } from '../../src/adapters/local-fs-adapter';
 import { createLocalShellAdapter } from '../../src/adapters/local-shell-adapter';
 import { layerData, layerFn } from '../../src/builders/layer-provides-builders';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { resolveLayerTools } from '../../src/memory/layer-api';
 import { workingMemory } from '../../src/memory/layers/working-memory';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { MemoryLayer, MemoryScope } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 //#region Test Helpers

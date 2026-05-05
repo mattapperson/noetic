@@ -1,8 +1,7 @@
-import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
-import { isOutputText } from '../../interpreter/typeguards';
 import type { MessageItem } from '../../types/items';
 import type { MemoryLayer } from '../../types/memory';
 import { Slot } from '../../types/memory';
+import { createMessage, estimateTokens, isOutputText } from '../../util/message-helpers';
 
 export interface ObservationalState {
   observations: string[];

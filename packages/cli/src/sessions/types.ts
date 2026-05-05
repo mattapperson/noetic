@@ -3,10 +3,97 @@
  * is a redundant TUI view persisted for faster render on resume.
  */
 
-import type { LastLayerUsage } from '@noetic/core';
+import type { Item, LastLayerUsage, StreamingItem } from '@noetic/core';
 import { ItemSchema } from '@noetic/core';
 import { z } from 'zod';
-import { ConversationEntrySchema } from '../tui/item-utils.js';
+
+//#region Entry Types
+
+export interface UserEntry {
+  role: 'user';
+  content: string;
+  /** Stable id assigned when the entry is created. Used to flip `deliveryStatus`
+   *  from `queued` to `sent` once the message is delivered to the agent. */
+  id?: string;
+  /** `queued` when the message was enqueued while the session was generating;
+   *  `sent` once the session has started a turn that includes it. Undefined
+   *  defaults to `sent` in the UI (i.e. messages sent while idle). */
+  deliveryStatus?: 'queued' | 'sent';
+}
+
+export interface ErrorEntry {
+  role: 'system';
+  type: 'error';
+  content: string;
+}
+
+export interface SystemEntry {
+  role: 'system';
+  type: 'info';
+  content: string;
+}
+
+export type AssistantEntry = Item | StreamingItem;
+export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry | SystemEntry;
+
+//#endregion
+
+//#region Entry Schemas
+
+const UserEntrySchema = z.object({
+  role: z.literal('user'),
+  content: z.string(),
+  id: z.string().optional(),
+  deliveryStatus: z
+    .enum([
+      'queued',
+      'sent',
+    ])
+    .optional(),
+});
+
+const SystemEntrySchema = z.object({
+  role: z.literal('system'),
+  type: z.literal('info'),
+  content: z.string(),
+});
+
+const ErrorEntrySchema = z.object({
+  role: z.literal('system'),
+  type: z.literal('error'),
+  content: z.string(),
+});
+
+/** Runtime schema for {@link ConversationEntry}. Trust-boundary validation for
+ *  persisted session entries. The assistant branch delegates to ItemSchema,
+ *  which only structurally validates the `type` discriminant — provider-shaped
+ *  items aren't deeply re-validated. */
+export const ConversationEntrySchema: z.ZodType<ConversationEntry> = z.union([
+  UserEntrySchema,
+  SystemEntrySchema,
+  ErrorEntrySchema,
+  ItemSchema,
+]);
+
+//#endregion
+
+//#region Entry Type Guards
+
+export function isUserEntry(entry: ConversationEntry): entry is UserEntry {
+  return 'role' in entry && entry.role === 'user';
+}
+
+export function isErrorEntry(entry: ConversationEntry): entry is ErrorEntry {
+  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'error';
+}
+
+export function isSystemEntry(entry: ConversationEntry): entry is SystemEntry {
+  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'info';
+}
+
+//#endregion
+
+//#region Session File
 
 const CumulativeUsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
@@ -89,3 +176,5 @@ export function toSessionMetadata(file: SessionFile): SessionMetadata {
     messageCount: file.messageCount,
   };
 }
+
+//#endregion

@@ -1,18 +1,18 @@
+import { contextToExecCtx } from '../memory/exec-context-factory';
 import { resolveLayerTools } from '../memory/layer-api';
 import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
 import { ContextImpl } from '../runtime/context-impl';
 import { snapshotCwdState } from '../runtime/cwd-helpers';
-import { contextToExecCtx } from '../runtime/exec-context-factory';
 import type { ItemSchemaRegistry } from '../schemas/item';
 import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { Context } from '../types/context';
 import type { Item } from '../types/items';
 import type { ContextMemory, ExecutionContext, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { ExecuteStepFn, StepSpawn } from '../types/step';
+import { frameworkCast } from '../util/framework-cast';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
-import { frameworkCast } from './framework-cast';
 import { getContextChannelStore } from './typeguards';
 
 //#region Types

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { estimateTokens } from '../../src/interpreter/message-helpers';
 import { commitLayerUsage, computeLayerUsage } from '../../src/memory/layer-usage';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { InputMessageItem } from '../../src/types/items';
 import type { RecallLayerOutput } from '../../src/types/runtime';
+import { estimateTokens } from '../../src/util/message-helpers';
 import { makeMockHarness } from '../_helpers';
 
 function makeMessageItem(id: string, text: string): InputMessageItem {

@@ -3,13 +3,13 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeLLM } from '../../src/interpreter/execute-llm';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { projectHistoryLayers } from '../../src/memory/layer-lifecycle';
 import { historyWindow } from '../../src/memory/layers/history-window';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { ContextMemory, ExecutionContext, MemoryLayer } from '../../src/types/memory';
 import type { CallModelRequest } from '../../src/types/runtime';
 import type { StepLLM } from '../../src/types/step';
+import { frameworkCast } from '../../src/util/framework-cast';
 import {
   makeLLMResponse,
   makeMockContext,

@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { layerData, layerFn } from '../../builders/layer-provides-builders';
-import { createMessage, estimateTokens } from '../../interpreter/message-helpers';
 import type { FlowNode } from '../../patterns/flow';
 import { FlowSchema, flowDepth } from '../../patterns/flow';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
 import { SteeringAction } from '../../types/steering';
+import { createMessage, estimateTokens } from '../../util/message-helpers';
 
 //#region Constants
 

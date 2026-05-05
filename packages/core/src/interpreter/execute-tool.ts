@@ -6,7 +6,7 @@ import type { ContextMemory, MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
 import type { StepTool } from '../types/step';
-import { frameworkCast } from './framework-cast';
+import { frameworkCast } from '../util/framework-cast';
 
 //#region Helpers
 

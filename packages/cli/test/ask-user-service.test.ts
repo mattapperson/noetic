@@ -4,9 +4,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { AskUserBusyError, createAskUserService } from '@noetic/code-agent/ask-user-service';
 import { isNoeticError } from '@noetic/core';
 import type { AskUserInput, AskUserOutput } from '../src/tools/ask-user-types.js';
-import { AskUserBusyError, createAskUserService } from '../src/tui/services/ask-user-service.js';
 
 function makeInput(): AskUserInput {
   return {

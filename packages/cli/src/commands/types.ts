@@ -5,12 +5,11 @@
  * distinct from skills which are instruction prompts for the model.
  */
 
+import type { AskUserService } from '@noetic/code-agent/ask-user-service';
 import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic/core';
 import type { ReactNode } from 'react';
-
 import type { SkillDefinition } from '../skills/types.js';
 import type { ConversationEntry } from '../tui/item-utils.js';
-import type { AskUserService } from '../tui/services/ask-user-service.js';
 import type { AgentConfig } from '../types/config.js';
 
 //#region Command Context

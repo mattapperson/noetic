@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { executeProvide } from '../../src/interpreter/execute-provide';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
 import type { ExecuteStepFn, StepProvide } from '../../src/types/step';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { getItemId, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions

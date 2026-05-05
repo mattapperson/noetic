@@ -8,7 +8,6 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
 import { allocateBudgets } from '../../src/memory/budget';
 import { findFunctionCall } from '../../src/memory/function-call-utils';
 import {
@@ -30,6 +29,7 @@ import type { Item } from '../../src/types/items';
 import type { ExecutionContext, MemoryLayer } from '../../src/types/memory';
 import type { SteeringState } from '../../src/types/steering';
 import { SteeringAction } from '../../src/types/steering';
+import { frameworkCast } from '../../src/util/framework-cast';
 import {
   assistantMessage,
   isRecord,
