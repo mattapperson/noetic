@@ -103,7 +103,7 @@ export async function attachTaskHandler(
   if (fileName.length === 0) {
     throw new Error(`Cannot derive a file name from source path ${args.sourcePath}`);
   }
-  const paths = taskDirPaths(ctx.projectRoot, args.taskId);
+  const paths = taskDirPaths(ctx, args.taskId);
   await ctx.fs.mkdir(paths.attachments);
   const destination = await uniqueDestinationPath(ctx, paths.attachments, fileName);
   const contents = await sourceFs.readFile(args.sourcePath);

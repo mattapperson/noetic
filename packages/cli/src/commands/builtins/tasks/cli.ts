@@ -56,6 +56,12 @@ export interface RunTasksCliOptions {
   readonly streams?: CliStreams;
   /** Override the project root resolution. Defaults to `requireProjectRoot()`. */
   readonly projectRoot?: string;
+  /**
+   * Override the tasks-root. Defaults to resolving via `NOETIC_HOME`
+   * env or `~/.noetic/tasks`. Tests usually want this pinned to a
+   * temp dir so they don't share `$HOME/.noetic/tasks` with each other.
+   */
+  readonly tasksRoot?: string;
   /** Override the FsAdapter. Defaults to `createLocalFsAdapter()`. */
   readonly fs?: FsAdapter;
 }
@@ -701,6 +707,7 @@ export async function runTasksCli(
   const ctx: TaskStoreContext = {
     projectRoot,
     fs,
+    tasksRoot: options.tasksRoot,
   };
 
   // Auto-start the background daemon (autopilot / validator / health /

@@ -323,9 +323,15 @@ export class AgentIpcServer {
     this.runnerId = opts.runnerId;
     this.threadId = opts.threadId;
     this.askUserService = opts.askUserService;
-    this.socketPath = runnerSocketPath({
+    // Singleton roles (planner) pass the role as their runnerId and
+    // land on `<taskDir>/sockets/planner.sock`; multi-instance roles
+    // (implementer) pass a distinguishing runnerId (featureId) and
+    // land on `<taskDir>/sockets/implementer-<featureId>.sock`.
+    const runnerIdArg = opts.runnerId === opts.role ? undefined : opts.runnerId;
+    this.socketPath = runnerSocketPath(opts.storeCtx, {
+      taskId: opts.taskId,
       role: opts.role,
-      runnerId: opts.runnerId,
+      runnerId: runnerIdArg,
     });
   }
 
@@ -382,8 +388,9 @@ export class AgentIpcServer {
       throw new Error(
         `unix-domain socket path exceeds ${MAX_UNIX_SOCKET_PATH_BYTES} bytes ` +
           `(${socketPathBytes}): ${this.socketPath}. ` +
-          'Move the project to a shorter path or set NOETIC_RUNTIME_DIR to a ' +
-          'shorter base (e.g. /tmp/n).',
+          'Set NOETIC_HOME to a shorter base (e.g. NOETIC_HOME=/tmp/n) so ' +
+          'runner sockets land under a short path. Your task data will ' +
+          'live at <NOETIC_HOME>/tasks/<taskId>/.',
       );
     }
     await mkdir(dirname(this.socketPath), {

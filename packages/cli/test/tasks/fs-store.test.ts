@@ -89,7 +89,7 @@ describe('saveTask / loadTask', () => {
   it('throws on corrupted task.json', async () => {
     const ctx = makeStoreContext();
     const taskId = 'T-corrupted0';
-    const paths = taskDirPaths(ctx.projectRoot, taskId);
+    const paths = taskDirPaths(ctx, taskId);
     await ctx.fs.mkdir(paths.dir);
     await ctx.fs.writeFile(paths.task, '{ this is not json');
 
@@ -102,7 +102,7 @@ describe('saveTask / loadTask', () => {
     expect(await tryLoadTask(ctx, 'bad-id')).toBeNull();
 
     const taskId = 'T-corrupted1';
-    const paths = taskDirPaths(ctx.projectRoot, taskId);
+    const paths = taskDirPaths(ctx, taskId);
     await ctx.fs.mkdir(paths.dir);
     await ctx.fs.writeFile(paths.task, '{ this is not json');
     expect(await tryLoadTask(ctx, taskId)).toBeNull();
@@ -126,7 +126,7 @@ describe('listTasks', () => {
     await saveTask(ctx, a);
     await saveTask(ctx, b);
     // Underscored sibling that should be ignored
-    const root = taskRootPaths(ctx.projectRoot).root;
+    const root = taskRootPaths(ctx).root;
     await ctx.fs.writeFile(join(root, '_state.json'), '{"schemaVersion":1,"lastEventId":0}');
 
     const tasks = await listTasks(ctx);
@@ -146,7 +146,7 @@ describe('listTasks', () => {
     });
     await saveTask(ctx, good);
     const badId = 'T-badtask002';
-    const paths = taskDirPaths(ctx.projectRoot, badId);
+    const paths = taskDirPaths(ctx, badId);
     await ctx.fs.mkdir(paths.dir);
     await ctx.fs.writeFile(paths.task, '{ malformed');
 
@@ -199,7 +199,7 @@ describe('hasHierarchy', () => {
     const ctx = makeStoreContext();
     const t = makeTask();
     await saveTask(ctx, t);
-    const paths = taskDirPaths(ctx.projectRoot, t.id);
+    const paths = taskDirPaths(ctx, t.id);
     await ctx.fs.mkdir(paths.hierarchy);
     expect(await hasHierarchy(ctx, t.id)).toBe(true);
   });
@@ -435,10 +435,11 @@ describe('saveTask + appendLog (real local fs)', () => {
     });
   });
 
-  it('writes task.json and log.jsonl beneath <projectRoot>/.noetic/tasks', async () => {
+  it('writes task.json and log.jsonl beneath <tasksRoot>/<taskId>', async () => {
     const ctx: TaskStoreContext = {
       fs: createLocalFsAdapter(),
       projectRoot: dir,
+      tasksRoot: join(dir, 'tasks'),
     };
     const t = makeTask({
       id: 'T-realfs0001',

@@ -23,6 +23,7 @@ describe('chat-history-store', () => {
     ctx = {
       fs: createLocalFsAdapter(),
       projectRoot,
+      tasksRoot: join(projectRoot, 'tasks'),
     };
   });
 
@@ -67,7 +68,7 @@ describe('chat-history-store', () => {
   it('writes one JSON object per line', async () => {
     await appendChatItem(ctx, TASK_ID, userMessage('m1', 'a'));
     await appendChatItem(ctx, TASK_ID, userMessage('m2', 'b'));
-    const { chat } = taskDirPaths(projectRoot, TASK_ID);
+    const { chat } = taskDirPaths(ctx, TASK_ID);
     const text = await readFile(chat, 'utf8');
     const lines = text.split('\n').filter((line) => line.length > 0);
     expect(lines.length).toBe(2);
@@ -78,7 +79,7 @@ describe('chat-history-store', () => {
 
   it('skips malformed lines without aborting the read', async () => {
     await appendChatItem(ctx, TASK_ID, userMessage('m1', 'good'));
-    const { chat } = taskDirPaths(projectRoot, TASK_ID);
+    const { chat } = taskDirPaths(ctx, TASK_ID);
     // Append a malformed line followed by a good one.
     await writeFile(
       chat,
@@ -96,7 +97,7 @@ describe('chat-history-store', () => {
 
   it('skips parsed lines that are not item-like', async () => {
     await appendChatItem(ctx, TASK_ID, userMessage('m1', 'good'));
-    const { chat } = taskDirPaths(projectRoot, TASK_ID);
+    const { chat } = taskDirPaths(ctx, TASK_ID);
     // Inject a line that parses as JSON but isn't an Item (no `type`).
     await writeFile(
       chat,

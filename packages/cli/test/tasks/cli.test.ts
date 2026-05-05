@@ -44,7 +44,7 @@ describe('runTasksCli — help & dispatch', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -63,7 +63,7 @@ describe('runTasksCli — help & dispatch', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -84,7 +84,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -105,7 +105,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: captureStreams().streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -116,7 +116,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -137,7 +137,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: createCap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -151,7 +151,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -171,7 +171,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: createCap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -183,7 +183,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: captureStreams().streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -203,7 +203,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: createCap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -217,7 +217,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -235,7 +235,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -252,7 +252,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: cap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -271,7 +271,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: createCap.streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );
@@ -283,7 +283,7 @@ describe('runTasksCli — verbs', () => {
       ],
       {
         streams: captureStreams().streams,
-        projectRoot: ctx.projectRoot,
+        projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
         fs: ctx.fs,
       },
     );

@@ -16,7 +16,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { access, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createLocalFsAdapter } from '@noetic/core';
@@ -65,7 +64,9 @@ describe('planner-runner sidecar cleanup', () => {
   let projectRoot: string;
 
   beforeEach(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), 'noetic-runner-cleanup-'));
+    // `/tmp` (not `tmpdir()`) keeps socket paths under the macOS
+    // 104-byte `sun_path` cap.
+    projectRoot = await mkdtemp(join('/tmp', 'noetic-runner-cleanup-'));
   });
 
   afterEach(async () => {
@@ -78,15 +79,17 @@ describe('planner-runner sidecar cleanup', () => {
   it(
     'clears _planner.json and unlinks the socket after the runner exits',
     async () => {
+      const tasksRoot = join(projectRoot, 'tasks');
       const ctx = {
         fs: createLocalFsAdapter(),
         projectRoot,
+        tasksRoot,
       };
       const created = await createTaskHandler(ctx, {
         title: 'cleanup test',
       });
       const taskId = created.task.id;
-      const taskDir = join(projectRoot, '.noetic', 'tasks', taskId);
+      const taskDir = join(tasksRoot, taskId);
       const sidecarPath = join(taskDir, '_planner.json');
 
       // Pre-write the sidecar so the runner's `loadPlanner()` sees it.
@@ -122,6 +125,10 @@ describe('planner-runner sidecar cleanup', () => {
             ...process.env,
             NOETIC_TASK_DIR: taskDir,
             NOETIC_TASK_CWD: projectRoot,
+            // Redirect the runner's tasks-root so its `taskDirPaths()`
+            // resolves under the test's temp dir rather than the
+            // developer's real `~/.noetic/tasks`.
+            NOETIC_HOME: projectRoot,
             OPENROUTER_API_KEY: 'test-key-sk-unused',
           },
         },
@@ -140,7 +147,7 @@ describe('planner-runner sidecar cleanup', () => {
       // 2. The socket file must be unlinked (ipcServer.close handles
       //    this already — asserted here so regressions show up
       //    immediately if the close path changes).
-      const socketPath = `/tmp/.noetic/planner-${taskId}.sock`;
+      const socketPath = join(taskDir, 'sockets', 'planner.sock');
       expect(await fileExists(socketPath)).toBe(false);
 
       // 3. The runner process is actually gone — guards against a

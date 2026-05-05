@@ -149,8 +149,8 @@ async function deleteFlat(ctx: TaskStoreContext, pathFor: string): Promise<void>
 
 function milestoneSpec(ctx: TaskStoreContext, taskId: string): FlatStoreSpec<Milestone> {
   return {
-    pathFor: (id) => milestonePath(ctx.projectRoot, taskId, id),
-    dirFor: () => hierarchyPaths(ctx.projectRoot, taskId).milestones,
+    pathFor: (id) => milestonePath(ctx, taskId, id),
+    dirFor: () => hierarchyPaths(ctx, taskId).milestones,
     schema: MilestoneSchema,
     idSchema: MilestoneIdSchema,
     suffix: '.json',
@@ -159,8 +159,8 @@ function milestoneSpec(ctx: TaskStoreContext, taskId: string): FlatStoreSpec<Mil
 
 function sliceSpec(ctx: TaskStoreContext, taskId: string): FlatStoreSpec<Slice> {
   return {
-    pathFor: (id) => slicePath(ctx.projectRoot, taskId, id),
-    dirFor: () => hierarchyPaths(ctx.projectRoot, taskId).slices,
+    pathFor: (id) => slicePath(ctx, taskId, id),
+    dirFor: () => hierarchyPaths(ctx, taskId).slices,
     schema: SliceSchema,
     idSchema: SliceIdSchema,
     suffix: '.json',
@@ -169,8 +169,8 @@ function sliceSpec(ctx: TaskStoreContext, taskId: string): FlatStoreSpec<Slice> 
 
 function assertionSpec(ctx: TaskStoreContext, taskId: string): FlatStoreSpec<Assertion> {
   return {
-    pathFor: (id) => assertionPath(ctx.projectRoot, taskId, id),
-    dirFor: () => hierarchyPaths(ctx.projectRoot, taskId).assertions,
+    pathFor: (id) => assertionPath(ctx, taskId, id),
+    dirFor: () => hierarchyPaths(ctx, taskId).assertions,
     schema: AssertionSchema,
     idSchema: AssertionIdSchema,
     suffix: '.json',
@@ -182,8 +182,8 @@ function interviewSessionSpec(
   taskId: string,
 ): FlatStoreSpec<InterviewSession> {
   return {
-    pathFor: (id) => interviewSessionPath(ctx.projectRoot, taskId, id),
-    dirFor: () => hierarchyPaths(ctx.projectRoot, taskId).interviewSessions,
+    pathFor: (id) => interviewSessionPath(ctx, taskId, id),
+    dirFor: () => hierarchyPaths(ctx, taskId).interviewSessions,
     schema: InterviewSessionSchema,
     idSchema: InterviewSessionIdSchema,
     suffix: '.json',
@@ -219,7 +219,7 @@ export function deleteMilestone(
   taskId: string,
   milestoneId: string,
 ): Promise<void> {
-  return deleteFlat(ctx, milestonePath(ctx.projectRoot, taskId, milestoneId));
+  return deleteFlat(ctx, milestonePath(ctx, taskId, milestoneId));
 }
 
 //#endregion
@@ -243,7 +243,7 @@ export function listSlices(ctx: TaskStoreContext, taskId: string): Promise<Slice
 }
 
 export function deleteSlice(ctx: TaskStoreContext, taskId: string, sliceId: string): Promise<void> {
-  return deleteFlat(ctx, slicePath(ctx.projectRoot, taskId, sliceId));
+  return deleteFlat(ctx, slicePath(ctx, taskId, sliceId));
 }
 
 //#endregion
@@ -258,7 +258,7 @@ export async function loadFeature(
   if (!FeatureIdSchema.safeParse(featureId).success) {
     return null;
   }
-  const paths = featureDirPaths(ctx.projectRoot, taskId, featureId);
+  const paths = featureDirPaths(ctx, taskId, featureId);
   return readJson<Feature>(ctx, paths.feature, (raw) => FeatureSchema.parse(raw));
 }
 
@@ -268,13 +268,13 @@ export async function saveFeature(
   feature: Feature,
 ): Promise<void> {
   const validated = FeatureSchema.parse(feature);
-  const paths = featureDirPaths(ctx.projectRoot, taskId, validated.id);
+  const paths = featureDirPaths(ctx, taskId, validated.id);
   await ctx.fs.mkdir(paths.dir);
   await atomicWriteJson(ctx, paths.feature, validated);
 }
 
 export async function listFeatures(ctx: TaskStoreContext, taskId: string): Promise<Feature[]> {
-  const featuresRoot = hierarchyPaths(ctx.projectRoot, taskId).features;
+  const featuresRoot = hierarchyPaths(ctx, taskId).features;
   const entries = await listDirSafe(ctx, featuresRoot);
   const out: Feature[] = [];
   for (const entry of entries) {
@@ -294,7 +294,7 @@ export async function deleteFeature(
   taskId: string,
   featureId: string,
 ): Promise<void> {
-  const paths = featureDirPaths(ctx.projectRoot, taskId, featureId);
+  const paths = featureDirPaths(ctx, taskId, featureId);
   await ctx.fs.rm(paths.dir, {
     recursive: true,
     force: true,
@@ -330,7 +330,7 @@ export function deleteAssertion(
   taskId: string,
   assertionId: string,
 ): Promise<void> {
-  return deleteFlat(ctx, assertionPath(ctx.projectRoot, taskId, assertionId));
+  return deleteFlat(ctx, assertionPath(ctx, taskId, assertionId));
 }
 
 //#endregion
@@ -366,7 +366,7 @@ export function listInterviewSessions(
 
 /** Hard-delete the entire `hierarchy/` subtree for a task. */
 export async function clearTaskHierarchy(ctx: TaskStoreContext, taskId: string): Promise<void> {
-  const paths = hierarchyPaths(ctx.projectRoot, taskId);
+  const paths = hierarchyPaths(ctx, taskId);
   await ctx.fs.rm(paths.root, {
     recursive: true,
     force: true,

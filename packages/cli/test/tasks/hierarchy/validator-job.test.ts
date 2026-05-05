@@ -34,6 +34,7 @@ const NOW = '2026-04-30T00:00:00.000Z';
 interface SeededTask {
   readonly fs: MemFs;
   readonly projectRoot: string;
+  readonly tasksRoot: string;
   readonly taskId: string;
   readonly featureId: string;
   readonly leafTaskId: string;
@@ -122,9 +123,7 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
       statusOverride: FeatureStatus.Triaged,
     },
   );
-  return {
-    fs: ctx.fs,
-    projectRoot: ctx.projectRoot,
+  return { fs: ctx.fs, projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
     taskId: parentTaskId,
     featureId: feature.id,
     leafTaskId,
@@ -133,10 +132,7 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
 
 function makeDeps(seed: SeededTask, runValidator: RunValidatorFn): ValidatorJobDeps {
   return {
-    ctx: {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    },
+    ctx: { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
     signaller: staticSignaller(),
     runValidator,
   };
@@ -165,10 +161,7 @@ async function captureEventsSince(
 describe('_testRunValidatorTick (pass result)', () => {
   it('records a passing run and marks the feature done', async () => {
     const seed = await seedStructuredTask('T-pass000000');
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const drainRecorded = await captureEventsSince(ctx, EventKind.ValidatorRunRecorded);
     const drainLoopChanges = await captureEventsSince(ctx, EventKind.FeatureLoopStateChanged);
     await _testRunValidatorTick(
@@ -197,10 +190,7 @@ describe('_testRunValidatorTick (pass result)', () => {
 describe('_testRunValidatorTick (fail result)', () => {
   it('generates a fix feature and emits feature:fixGenerated', async () => {
     const seed = await seedStructuredTask('T-fail000000');
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const drainFixEvents = await captureEventsSince(ctx, EventKind.FeatureFixGenerated);
     await _testRunValidatorTick(
       makeDeps(seed, async () => ({
@@ -217,10 +207,7 @@ describe('_testRunValidatorTick (fail result)', () => {
     const seed = await seedStructuredTask('T-budgt00000');
     // Pre-bump the source feature's implementationAttemptCount to the budget so the
     // next fail saturates and createGeneratedFixFeature throws BudgetExhaustedError.
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const existing = await loadFeature(ctx, seed.taskId, seed.featureId);
     if (existing === null) {
       throw new Error('seed feature missing');
@@ -250,10 +237,7 @@ describe('_testRunValidatorTick (fail result)', () => {
 describe('_testRunValidatorTick (validator throws)', () => {
   it('marks the run as error without dispatching a result handler', async () => {
     const seed = await seedStructuredTask('T-error00000');
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const drainExhausted = await captureEventsSince(ctx, EventKind.FeatureBudgetExhausted);
     await _testRunValidatorTick(
       makeDeps(seed, async () => {

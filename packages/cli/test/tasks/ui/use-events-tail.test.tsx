@@ -29,6 +29,7 @@ describe('readEventsSize', () => {
     const size = await readEventsSize({
       fs: ctx.fs,
       projectRoot: ctx.projectRoot,
+      tasksRoot: ctx.tasksRoot,
     });
     expect(size).toBe(-1);
   });
@@ -43,10 +44,11 @@ describe('readEventsSize', () => {
     const size = await readEventsSize({
       fs: ctx.fs,
       projectRoot: ctx.projectRoot,
+      tasksRoot: ctx.tasksRoot,
     });
     expect(size).toBeGreaterThan(0);
     // Sanity: the size matches the on-disk content length.
-    const eventsPath = taskRootPaths(ctx.projectRoot).events;
+    const eventsPath = taskRootPaths(ctx).events;
     const fileText = await ctx.fs.readFileText(eventsPath);
     expect(size).toBe(Buffer.byteLength(fileText, 'utf-8'));
   });
@@ -88,6 +90,7 @@ describe('readEventsSize + shouldBumpRevision composition', () => {
     const before = await readEventsSize({
       fs: ctx.fs,
       projectRoot: ctx.projectRoot,
+      tasksRoot: ctx.tasksRoot,
     });
     await appendEvent(ctx, {
       taskId: 'T-bbbbbbbbbb',
@@ -97,6 +100,7 @@ describe('readEventsSize + shouldBumpRevision composition', () => {
     const after = await readEventsSize({
       fs: ctx.fs,
       projectRoot: ctx.projectRoot,
+      tasksRoot: ctx.tasksRoot,
     });
     expect(shouldBumpRevision(before, after)).toBe(true);
   });

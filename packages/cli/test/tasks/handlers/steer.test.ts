@@ -27,7 +27,7 @@ describe('steerTaskHandler', () => {
     expect(log.length).toBe(2);
     expect(log[0]?.kind).toBe(LogEntryKind.Steer);
 
-    const paths = taskDirPaths(ctx.projectRoot, created.task.id);
+    const paths = taskDirPaths(ctx, created.task.id);
     const steering = await ctx.fs.readFileText(paths.steering);
     expect(steering).toContain('prefer functional style');
     expect(steering).toContain('avoid React refs');

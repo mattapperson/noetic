@@ -17,11 +17,12 @@
 import type { FsAdapter, Item } from '@noetic/core';
 
 import { isEnoent } from './_fs-errors.js';
+import type { TasksRootCtx } from './paths.js';
 import { taskDirPaths } from './paths.js';
 
 //#region Types
 
-export interface ChatHistoryStoreContext {
+export interface ChatHistoryStoreContext extends TasksRootCtx {
   readonly fs: FsAdapter;
   readonly projectRoot: string;
 }
@@ -59,7 +60,7 @@ export async function appendChatItem(
   taskId: string,
   item: Item,
 ): Promise<void> {
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   await ctx.fs.mkdir(paths.dir);
   await ctx.fs.appendFile(paths.chat, encodeLine(item));
 }
@@ -73,7 +74,7 @@ export async function readChatHistory(
   ctx: ChatHistoryStoreContext,
   taskId: string,
 ): Promise<Item[]> {
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   let raw: string;
   try {
     raw = await ctx.fs.readFileText(paths.chat);
@@ -109,7 +110,7 @@ export async function clearChatHistory(
   ctx: ChatHistoryStoreContext,
   taskId: string,
 ): Promise<void> {
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   try {
     await ctx.fs.rm(paths.chat, {
       force: true,

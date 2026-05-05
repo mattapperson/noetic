@@ -46,8 +46,9 @@ export interface UseEventsTailOptions {
 export async function readEventsSize(opts: {
   fs: FsAdapter;
   projectRoot: string;
+  tasksRoot?: string;
 }): Promise<number> {
-  const paths = taskRootPaths(opts.projectRoot);
+  const paths = taskRootPaths(opts);
   try {
     const stats = await opts.fs.stat(paths.events);
     return stats.size;

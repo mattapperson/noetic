@@ -95,7 +95,7 @@ async function readDescription(opts: {
   projectRoot: string;
   taskId: string;
 }): Promise<string> {
-  const paths = taskDirPaths(opts.projectRoot, opts.taskId);
+  const paths = taskDirPaths(opts, opts.taskId);
   try {
     return await opts.fs.readFileText(paths.description);
   } catch (err) {
@@ -111,7 +111,7 @@ async function readAttachments(opts: {
   projectRoot: string;
   taskId: string;
 }): Promise<string[]> {
-  const paths = taskDirPaths(opts.projectRoot, opts.taskId);
+  const paths = taskDirPaths(opts, opts.taskId);
   try {
     return await opts.fs.readdir(paths.attachments);
   } catch (err) {

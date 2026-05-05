@@ -41,6 +41,7 @@ import {
 } from './implementer-tools.js';
 import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createFixFeedbackLayer } from './memory/fix-feedback-layer.js';
+import { taskDirPaths } from './paths.js';
 import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
 import { EventKind, LogEntryKind } from './schemas.js';
 
@@ -88,14 +89,14 @@ function nowIso(): string {
 }
 
 /**
- * `<projectRoot>/.noetic/tasks/T-<id>` → projectRoot. Strips three path
- * segments: the task id, the literal `tasks` directory, and the literal
- * `.noetic` directory.
+ * `<tasksRoot>/T-<id>` → tasksRoot. The task state lives directly under
+ * the tasks-root (user-global `~/.noetic/tasks` by default); the
+ * runner recovers the root from the task-dir env var so it can anchor
+ * `taskDirPaths()` calls to the right location without trusting
+ * `NOETIC_HOME` to still match what the launcher resolved.
  */
-function projectRootFromTaskDir(taskDir: string): string {
-  const tasksDir = dirname(taskDir);
-  const noeticDir = dirname(tasksDir);
-  return dirname(noeticDir);
+function tasksRootFromTaskDir(taskDir: string): string {
+  return dirname(taskDir);
 }
 
 function taskIdFromTaskDir(taskDir: string): string {
@@ -139,9 +140,9 @@ async function loadParentDescription(args: {
   readonly ctx: TaskStoreContext;
   readonly parentTaskId: string;
 }): Promise<string> {
-  const path = `${args.ctx.projectRoot}/.noetic/tasks/${args.parentTaskId}/description.md`;
+  const { description } = taskDirPaths(args.ctx, args.parentTaskId);
   try {
-    return await args.ctx.fs.readFileText(path);
+    return await args.ctx.fs.readFileText(description);
   } catch {
     return '';
   }
@@ -339,10 +340,11 @@ export async function runImplementer(
   const cwd = opts.cwd ?? readEnv(ENV_CWD) ?? process.cwd();
 
   const leafTaskId = taskIdFromTaskDir(taskDir);
-  const projectRoot = projectRootFromTaskDir(taskDir);
+  const tasksRoot = tasksRootFromTaskDir(taskDir);
   const ctx: TaskStoreContext = opts.ctx ?? {
     fs: createLocalFsAdapter(),
-    projectRoot,
+    projectRoot: cwd,
+    tasksRoot,
   };
 
   const sidecar = await loadImplementer(ctx, leafTaskId);

@@ -104,8 +104,8 @@ export async function duplicateTaskHandler(
   };
   await saveTask(ctx, newTask);
 
-  const sourcePaths = taskDirPaths(ctx.projectRoot, source.id);
-  const destPaths = taskDirPaths(ctx.projectRoot, newTask.id);
+  const sourcePaths = taskDirPaths(ctx, source.id);
+  const destPaths = taskDirPaths(ctx, newTask.id);
   await ctx.fs.mkdir(destPaths.dir);
   await copyOptionalFile(ctx, sourcePaths.description, destPaths.description);
   await copyAttachments(ctx, sourcePaths.attachments, destPaths.attachments);

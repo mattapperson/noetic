@@ -149,7 +149,7 @@ async function seed(
     reviewStatus,
   });
   await saveTask(ctx, task);
-  const dir = taskDirPaths(ctx.projectRoot, task.id).dir;
+  const dir = taskDirPaths(ctx, task.id).dir;
   return {
     ctx,
     task,

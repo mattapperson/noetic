@@ -38,7 +38,7 @@ export async function addMilestoneHandler(
   if (trimmed.length === 0) {
     throw new Error('Milestone title must not be empty');
   }
-  const paths = hierarchyPaths(ctx.projectRoot, args.taskId);
+  const paths = hierarchyPaths(ctx, args.taskId);
   await ctx.fs.mkdir(paths.milestones);
   const existing = await listMilestones(ctx, args.taskId);
   const now = nowIso();

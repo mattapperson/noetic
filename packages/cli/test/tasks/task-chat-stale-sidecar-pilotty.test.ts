@@ -25,7 +25,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createLocalFsAdapter } from '@noetic/core';
@@ -108,11 +107,14 @@ describe.skipIf(!HAS_PILOTTY)('pilotty: chat on task with stale planner sidecar'
   let taskId: string;
 
   beforeEach(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), 'noetic-stale-pilotty-'));
+    // `/tmp` keeps the runner socket path under macOS's 104-byte cap.
+    projectRoot = await mkdtemp(join('/tmp', 'noetic-stale-pilotty-'));
 
+    const tasksRoot = join(projectRoot, 'tasks');
     const ctx = {
       fs: createLocalFsAdapter(),
       projectRoot,
+      tasksRoot,
     };
     const created = await createTaskHandler(ctx, {
       title: 'stale sidecar repro',
@@ -121,7 +123,10 @@ describe.skipIf(!HAS_PILOTTY)('pilotty: chat on task with stale planner sidecar'
 
     // Drop in the exact stale state the user's task was in: planner
     // sidecar with a socketPath that points at a file that does not
-    // exist on disk.
+    // exist on disk. `/tmp/.noetic/planner-<taskId>.sock` is the old
+    // (pre-home-refactor) socket location; keeping the path short
+    // ensures the absence-of-ENOENT assertion is the only signal the
+    // test relies on.
     await savePlanner(ctx, {
       taskId,
       sessionId: `${taskId}-dead`,
@@ -129,7 +134,7 @@ describe.skipIf(!HAS_PILOTTY)('pilotty: chat on task with stale planner sidecar'
       pidStarttime: null,
       startedAt: new Date(Date.now() - 60e3).toISOString(),
       pausedAt: null,
-      socketPath: `/tmp/.noetic/planner-${taskId}.sock`,
+      socketPath: join(tasksRoot, taskId, 'sockets', 'planner.sock'),
     });
   });
 
@@ -156,7 +161,11 @@ describe.skipIf(!HAS_PILOTTY)('pilotty: chat on task with stale planner sidecar'
         projectRoot,
         'bash',
         '-c',
-        `OPENROUTER_API_KEY=test-key-sk-unused bun run ${CLI_PATH} --api-key test-key-sk-unused`,
+        // NOETIC_HOME redirects the TUI's `/tasks` view and every
+        // descendant spawn to the test's temp tasks-root so it sees
+        // the pre-seeded stale sidecar instead of the developer's
+        // real `~/.noetic/tasks`.
+        `NOETIC_HOME=${projectRoot} OPENROUTER_API_KEY=test-key-sk-unused bun run ${CLI_PATH} --api-key test-key-sk-unused`,
       ]);
       expect(spawnResult.status).toBe(0);
 

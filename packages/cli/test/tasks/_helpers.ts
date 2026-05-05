@@ -269,10 +269,18 @@ export class MemFs implements FsAdapter {
 
 //#region Helpers
 
-/** Build a fresh in-memory store context rooted at `/repo`. */
+/** Build a fresh in-memory store context rooted at `/repo`.
+ *
+ * Sets `tasksRoot` to `<projectRoot>/.noetic/tasks` so existing tests
+ * can pre-seed files using the same taskDirPaths() → path layout the
+ * production code uses, just redirected under the MemFs-backed
+ * projectRoot. Without `tasksRoot` the paths resolver would fall
+ * through to `$HOME/.noetic/tasks`, which MemFs doesn't know about.
+ */
 export function makeStoreContext(projectRoot = '/repo'): {
   fs: MemFs;
   projectRoot: string;
+  tasksRoot: string;
 } {
   const fs = new MemFs([
     projectRoot,
@@ -280,6 +288,7 @@ export function makeStoreContext(projectRoot = '/repo'): {
   return {
     fs,
     projectRoot,
+    tasksRoot: path.join(projectRoot, '.noetic', 'tasks'),
   };
 }
 

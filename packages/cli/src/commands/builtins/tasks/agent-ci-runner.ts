@@ -85,14 +85,11 @@ function readEnv(name: string): string | null {
 }
 
 /**
- * `<projectRoot>/.noetic/tasks/T-<id>` → projectRoot. We strip three path
- * segments: the task id, the literal `tasks` directory, and the literal
- * `.noetic` directory.
+ * `<tasksRoot>/T-<id>` → tasksRoot. Task state lives directly under
+ * the user-global tasks-root (`~/.noetic/tasks` by default).
  */
-function projectRootFromTaskDir(taskDir: string): string {
-  const tasksDir = dirname(taskDir);
-  const noeticDir = dirname(tasksDir);
-  return dirname(noeticDir);
+function tasksRootFromTaskDir(taskDir: string): string {
+  return dirname(taskDir);
 }
 
 function taskIdFromTaskDir(taskDir: string): string {
@@ -246,10 +243,11 @@ export async function runAgentCi(opts: RunAgentCiOptions = {}): Promise<RunAgent
   const cwd = opts.cwd ?? readEnv(ENV_CWD) ?? process.cwd();
 
   const taskId = taskIdFromTaskDir(taskDir);
-  const projectRoot = projectRootFromTaskDir(taskDir);
+  const tasksRoot = tasksRootFromTaskDir(taskDir);
   const ctx = opts.ctx ?? {
     fs: createLocalFsAdapter(),
-    projectRoot,
+    projectRoot: cwd,
+    tasksRoot,
   };
   const spawnFn = opts.spawnFn ?? defaultSpawn;
 

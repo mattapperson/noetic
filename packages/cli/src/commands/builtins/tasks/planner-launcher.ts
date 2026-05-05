@@ -258,7 +258,7 @@ export async function startPlannerRun(args: StartPlannerRunArgs): Promise<StartP
   const now = args.now ?? new Date().toISOString();
   const runnerScript = args.runnerScript ?? defaultRunnerScript();
 
-  const taskDir = taskDirPaths(args.ctx.projectRoot, args.taskId).dir;
+  const taskDir = taskDirPaths(args.ctx, args.taskId).dir;
 
   const live = await isLivePlanner({
     ctx: args.ctx,

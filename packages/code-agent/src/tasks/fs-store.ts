@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { FsAdapter } from '@noetic/core';
 
 import { isEnoent } from './_fs-errors.js';
+import type { TasksRootCtx } from './paths.js';
 import { taskDirPaths, taskRootPaths, tempPath } from './paths.js';
 import type { Event, LogEntry, State, Task } from './schemas.js';
 import {
@@ -19,11 +20,17 @@ import {
 //#region Types
 
 /**
- * Bundle of dependencies the FS store reads/writes through. Carrying both
- * `fs` and `projectRoot` together keeps the per-call API two-argument and
- * makes downstream handlers/tools cleanly composable.
+ * Bundle of dependencies the FS store reads/writes through.
+ *
+ * `projectRoot` is kept for non-task-state concerns — cwd for child
+ * processes, git worktree roots, `noetic.config.ts` discovery — but is
+ * no longer used to locate task records. Those live under a
+ * user-global tasks root (`$HOME/.noetic/tasks` by default, override
+ * via `NOETIC_HOME`, or pass `tasksRoot` on this context to pin it).
+ * `TasksRootCtx` on the extends chain means every path-helper call
+ * picks up whichever root is in effect without threading an extra arg.
  */
-export interface TaskStoreContext {
+export interface TaskStoreContext extends TasksRootCtx {
   readonly fs: FsAdapter;
   readonly projectRoot: string;
 }
@@ -145,7 +152,7 @@ function chunkMessage(message: string, capBytes: number): string[] {
 
 /** Read the cross-process state file, returning a fresh default if absent. */
 export async function loadState(ctx: TaskStoreContext): Promise<State> {
-  const paths = taskRootPaths(ctx.projectRoot);
+  const paths = taskRootPaths(ctx);
   const state = await readJsonIfExists<State>(ctx.fs, paths.state, (raw) => StateSchema.parse(raw));
   if (state === null) {
     return {
@@ -157,7 +164,7 @@ export async function loadState(ctx: TaskStoreContext): Promise<State> {
 }
 
 async function saveState(ctx: TaskStoreContext, state: State): Promise<void> {
-  const paths = taskRootPaths(ctx.projectRoot);
+  const paths = taskRootPaths(ctx);
   await atomicWrite(ctx.fs, paths.state, `${JSON.stringify(state, null, 2)}\n`);
 }
 
@@ -168,7 +175,7 @@ async function saveState(ctx: TaskStoreContext, state: State): Promise<void> {
  * `lastEventId` is guaranteed to find every event with `id <= lastEventId`.
  */
 export async function appendEvent(ctx: TaskStoreContext, input: Omit<Event, 'id'>): Promise<Event> {
-  const paths = taskRootPaths(ctx.projectRoot);
+  const paths = taskRootPaths(ctx);
   const state = await loadState(ctx);
   const next: State = {
     schemaVersion: SCHEMA_VERSION,
@@ -186,7 +193,7 @@ export async function appendEvent(ctx: TaskStoreContext, input: Omit<Event, 'id'
 
 /** Tail events with id strictly greater than `sinceId` (default 0). */
 export async function tailEvents(ctx: TaskStoreContext, sinceId = 0): Promise<Event[]> {
-  const paths = taskRootPaths(ctx.projectRoot);
+  const paths = taskRootPaths(ctx);
   let raw: string;
   try {
     raw = await ctx.fs.readFileText(paths.events);
@@ -217,14 +224,14 @@ export async function tailEvents(ctx: TaskStoreContext, sinceId = 0): Promise<Ev
 /** Persist `task.json` atomically. Caller is responsible for emitting any event. */
 export async function saveTask(ctx: TaskStoreContext, task: Task): Promise<void> {
   const validated = TaskSchema.parse(task);
-  const paths = taskDirPaths(ctx.projectRoot, validated.id);
+  const paths = taskDirPaths(ctx, validated.id);
   await atomicWrite(ctx.fs, paths.task, `${JSON.stringify(validated, null, 2)}\n`);
 }
 
 /** Load a task by id; throws if missing or malformed. */
 export async function loadTask(ctx: TaskStoreContext, taskId: string): Promise<Task> {
   TaskIdSchema.parse(taskId);
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   const task = await readJsonIfExists<Task>(ctx.fs, paths.task, (raw) => TaskSchema.parse(raw));
   if (task === null) {
     throw new Error(`Task not found: ${taskId}`);
@@ -237,7 +244,7 @@ export async function tryLoadTask(ctx: TaskStoreContext, taskId: string): Promis
   if (!TaskIdSchema.safeParse(taskId).success) {
     return null;
   }
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   try {
     return await readJsonIfExists<Task>(ctx.fs, paths.task, (raw) => TaskSchema.parse(raw));
   } catch {
@@ -247,7 +254,7 @@ export async function tryLoadTask(ctx: TaskStoreContext, taskId: string): Promis
 
 /** List every well-formed task in the project. Bad entries are skipped. */
 export async function listTasks(ctx: TaskStoreContext): Promise<Task[]> {
-  const paths = taskRootPaths(ctx.projectRoot);
+  const paths = taskRootPaths(ctx);
   let entries: string[];
   try {
     entries = await ctx.fs.readdir(paths.root);
@@ -277,7 +284,7 @@ export async function listTasks(ctx: TaskStoreContext): Promise<Task[]> {
 /** Hard-delete the entire task directory. Caller emits any event. */
 export async function deleteTaskDir(ctx: TaskStoreContext, taskId: string): Promise<void> {
   TaskIdSchema.parse(taskId);
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   await ctx.fs.rm(paths.dir, {
     recursive: true,
     force: true,
@@ -286,7 +293,7 @@ export async function deleteTaskDir(ctx: TaskStoreContext, taskId: string): Prom
 
 /** Whether the task carries a `hierarchy/` subdirectory. */
 export async function hasHierarchy(ctx: TaskStoreContext, taskId: string): Promise<boolean> {
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   return exists(ctx.fs, paths.hierarchy);
 }
 
@@ -302,7 +309,7 @@ export async function hasHierarchy(ctx: TaskStoreContext, taskId: string): Promi
  */
 export async function appendLog(ctx: TaskStoreContext, options: AppendLogOptions): Promise<void> {
   TaskIdSchema.parse(options.taskId);
-  const paths = taskDirPaths(ctx.projectRoot, options.taskId);
+  const paths = taskDirPaths(ctx, options.taskId);
   await ctx.fs.mkdir(paths.dir);
   const chunks = chunkMessage(options.entry.message, LOG_LINE_MAX_BYTES);
   if (chunks.length === 1) {
@@ -329,7 +336,7 @@ export async function appendLog(ctx: TaskStoreContext, options: AppendLogOptions
 /** Read every log entry in order. Returns [] if log file is missing. */
 export async function readLog(ctx: TaskStoreContext, taskId: string): Promise<LogEntry[]> {
   TaskIdSchema.parse(taskId);
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   let raw: string;
   try {
     raw = await ctx.fs.readFileText(paths.log);

@@ -50,7 +50,7 @@ export type PlannerState = z.infer<typeof PlannerStateSchema>;
 //#region Helpers
 
 function plannerPath(ctx: TaskStoreContext, taskId: string): string {
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   return path.join(paths.dir, '_planner.json');
 }
 

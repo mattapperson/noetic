@@ -122,7 +122,7 @@ async function seedTaskDir(
     reviewStatus,
   });
   await saveTask(ctx, task);
-  const paths = taskDirPaths(ctx.projectRoot, task.id);
+  const paths = taskDirPaths(ctx, task.id);
   return {
     ctx,
     taskDir: paths.dir,
@@ -291,6 +291,7 @@ describe('runAgentCi commit order', () => {
     const fs = seeded.ctx.fs;
     const wrapped: TaskStoreContext = {
       projectRoot: seeded.ctx.projectRoot,
+      tasksRoot: seeded.ctx.tasksRoot,
       fs: {
         ...fs,
         readFile: fs.readFile.bind(fs),

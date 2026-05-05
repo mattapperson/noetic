@@ -158,7 +158,7 @@ describe('milestones CRUD', () => {
     await saveMilestone(ctx, TASK_ID, a);
     await saveMilestone(ctx, TASK_ID, b);
     // Sneak in a non-json file:
-    const dir = hierarchyPaths(ctx.projectRoot, TASK_ID).milestones;
+    const dir = hierarchyPaths(ctx, TASK_ID).milestones;
     await ctx.fs.writeFile(`${dir}/README.md`, 'ignore me');
 
     const all = await listMilestones(ctx, TASK_ID);
@@ -182,7 +182,7 @@ describe('milestones CRUD', () => {
   it('throws on a malformed milestone file (bad status on disk)', async () => {
     const ctx = makeStoreContext();
     const m = makeMilestone();
-    const dir = hierarchyPaths(ctx.projectRoot, TASK_ID).milestones;
+    const dir = hierarchyPaths(ctx, TASK_ID).milestones;
     await ctx.fs.mkdir(dir);
     await ctx.fs.writeFile(
       `${dir}/${m.id}.json`,
@@ -275,7 +275,7 @@ describe('features CRUD', () => {
     const f = makeFeature(s.id);
     await saveFeature(ctx, TASK_ID, f);
     // Drop a sibling file inside the feature dir to simulate validator-runs/.
-    const featureRoot = hierarchyPaths(ctx.projectRoot, TASK_ID).features;
+    const featureRoot = hierarchyPaths(ctx, TASK_ID).features;
     await ctx.fs.writeFile(`${featureRoot}/${f.id}/sibling.txt`, 'x');
 
     await deleteFeature(ctx, TASK_ID, f.id);

@@ -33,6 +33,7 @@ const NOW = '2026-04-30T00:00:00.000Z';
 interface SeededTask {
   readonly fs: MemFs;
   readonly projectRoot: string;
+  readonly tasksRoot: string;
   readonly taskId: string;
   readonly featureId: string;
   readonly leafTaskId: string;
@@ -111,9 +112,7 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
   if (leafTaskId === undefined) {
     throw new Error('triage produced no leaf task');
   }
-  return {
-    fs: ctx.fs,
-    projectRoot: ctx.projectRoot,
+  return { fs: ctx.fs, projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
     taskId: parentTaskId,
     featureId: feature.id,
     leafTaskId,
@@ -122,10 +121,7 @@ async function seedStructuredTask(parentTaskId: string): Promise<SeededTask> {
 
 function makeDeps(seed: SeededTask, signaller: Signaller): HealthJobDeps {
   return {
-    ctx: {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    },
+    ctx: { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
     signaller,
   };
 }
@@ -134,8 +130,7 @@ describe('reapStaleValidatorRuns', () => {
   it('marks running runs whose pid is dead as error', async () => {
     const seed = await seedStructuredTask('T-reap000000');
     const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
+      fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot,
       taskId: seed.taskId,
     };
     const run = await recordValidatorRun(ctx, {
@@ -158,8 +153,7 @@ describe('reapStaleValidatorRuns', () => {
   it('leaves running runs alone when the pid identity matches', async () => {
     const seed = await seedStructuredTask('T-keepalive0');
     const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
+      fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot,
       taskId: seed.taskId,
     };
     const run = await recordValidatorRun(ctx, {
@@ -197,8 +191,7 @@ describe('reapStaleValidatorRuns', () => {
   it('reaps a running run whose start time has changed (pid recycled)', async () => {
     const seed = await seedStructuredTask('T-recyc00000');
     const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
+      fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot,
       taskId: seed.taskId,
     };
     const run = await recordValidatorRun(ctx, {
@@ -237,10 +230,7 @@ describe('reapStaleValidatorRuns', () => {
 describe('reconcileFeatureLinkageDrift', () => {
   it('blocks features whose linked leaf task has been deleted', async () => {
     const seed = await seedStructuredTask('T-drift00000');
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     // Move the feature into validating so the reconciler considers it.
     await applyFeatureLoopStateUpdate(
       {
@@ -267,10 +257,7 @@ describe('reconcileFeatureLinkageDrift', () => {
 
   it('leaves features alone when their linked task still exists', async () => {
     const seed = await seedStructuredTask('T-stable0000');
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     await applyFeatureLoopStateUpdate(
       {
         ...ctx,

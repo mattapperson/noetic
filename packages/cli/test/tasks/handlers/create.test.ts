@@ -19,7 +19,7 @@ describe('createTaskHandler', () => {
     const reloaded = await loadTask(ctx, result.task.id);
     expect(reloaded.id).toBe(result.task.id);
 
-    const paths = taskDirPaths(ctx.projectRoot, result.task.id);
+    const paths = taskDirPaths(ctx, result.task.id);
     const desc = await ctx.fs.readFileText(paths.description);
     expect(desc).toContain('Move tasks between columns');
   });
@@ -29,7 +29,7 @@ describe('createTaskHandler', () => {
     const result = await createTaskHandler(ctx, {
       title: 'No description task',
     });
-    const paths = taskDirPaths(ctx.projectRoot, result.task.id);
+    const paths = taskDirPaths(ctx, result.task.id);
     await expect(ctx.fs.readFileText(paths.description)).rejects.toThrow();
   });
 

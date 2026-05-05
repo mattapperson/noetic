@@ -47,6 +47,12 @@ const ValidatorLauncherInputSchema = z.object({
   cwd: z.string().optional(),
   /** Project root that the spawn cwd defaults to. */
   projectRoot: z.string().min(1),
+  /**
+   * Override for the tasks-root directory. Rarely passed — production
+   * callers use the `NOETIC_HOME`-resolved default. Tests pin this to
+   * a MemFs-friendly path.
+   */
+  tasksRoot: z.string().optional(),
 });
 
 const ValidatorLauncherOutputSchema = z.object({
@@ -78,6 +84,7 @@ export function createValidatorLauncherTool(
       const validatorCtx: ValidatorContext = {
         fs: toolCtx.fs,
         projectRoot: args.projectRoot,
+        tasksRoot: args.tasksRoot,
         taskId: args.taskId,
       };
       const result = await spawnValidatorChild({

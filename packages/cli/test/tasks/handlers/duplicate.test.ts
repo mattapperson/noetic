@@ -43,7 +43,7 @@ describe('duplicateTaskHandler', () => {
     const reloaded = await loadTask(ctx, result.task.id);
     expect(reloaded.id).toBe(result.task.id);
 
-    const newPaths = taskDirPaths(ctx.projectRoot, result.task.id);
+    const newPaths = taskDirPaths(ctx, result.task.id);
     const desc = await ctx.fs.readFileText(newPaths.description);
     expect(desc).toBe('first description');
     const attachments = await ctx.fs.readdir(newPaths.attachments);

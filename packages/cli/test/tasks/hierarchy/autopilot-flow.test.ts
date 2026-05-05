@@ -40,6 +40,7 @@ const NOW = '2026-04-30T00:00:00.000Z';
 interface SeededTask {
   readonly fs: MemFs;
   readonly projectRoot: string;
+  readonly tasksRoot: string;
   readonly taskId: string;
 }
 
@@ -114,19 +115,14 @@ async function seedTaskWithTwoSlices(taskId: string): Promise<SeededTask> {
       },
     ],
   });
-  return {
-    fs: ctx.fs,
-    projectRoot: ctx.projectRoot,
+  return { fs: ctx.fs, projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
     taskId,
   };
 }
 
 function makeDeps(seed: SeededTask): AutopilotFlowDeps {
   return {
-    ctx: {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    },
+    ctx: { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
     signaller: staticSignaller(),
   };
 }
@@ -154,10 +150,7 @@ describe('autopilotTickStep (driven by harness.run)', () => {
     expect(report.slicesActivated).toBe(1);
     expect(report.featuresTriaged).toBe(1);
     const slices = await listSlices(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
+      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
       seed.taskId,
     );
     const active = slices.find((s) => s.status === SliceStatus.Active);
@@ -171,10 +164,7 @@ describe('autopilotTickStep (driven by harness.run)', () => {
     const tickStep = buildAutopilotTickStep(makeDeps(seed));
     await harness.run(tickStep, undefined, childCtx);
     const reloaded = await tryLoadTask(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
+      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
       seed.taskId,
     );
     expect(reloaded?.autopilotState).toBe(AutopilotState.Watching);
@@ -182,10 +172,7 @@ describe('autopilotTickStep (driven by harness.run)', () => {
 
   it('skips tasks whose autopilot is disabled', async () => {
     const seed = await seedTaskWithTwoSlices('T-flowdisb00');
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const existing = await tryLoadTask(ctx, seed.taskId);
     if (existing === null) {
       throw new Error('seed task missing');
@@ -206,10 +193,7 @@ describe('autopilotTickStep — slice completion advancement (Phase 2.5e bug-fix
   it('completes the slice, activates the next slice', async () => {
     const seed = await seedTaskWithTwoSlices('T-flowadvc00');
     const harness = makeHarness(seed.fs);
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     // First tick activates the first slice.
     const tickStep = buildAutopilotTickStep(makeDeps(seed));
     await harness.run(tickStep, undefined, harness.createContext());
@@ -242,10 +226,7 @@ describe('autopilotTickStep — slice completion advancement (Phase 2.5e bug-fix
   it('marks milestones complete when all their slices are complete', async () => {
     const seed = await seedTaskWithTwoSlices('T-flowmlcmp0');
     const harness = makeHarness(seed.fs);
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const tickStep = buildAutopilotTickStep(makeDeps(seed));
     // Tick 1: activates S1.
     await harness.run(tickStep, undefined, harness.createContext());
@@ -292,10 +273,7 @@ describe('autopilotTickStep — slice completion advancement (Phase 2.5e bug-fix
   it('blocks tasks whose active slice is fully blocked', async () => {
     const seed = await seedTaskWithTwoSlices('T-flowblock0');
     const harness = makeHarness(seed.fs);
-    const ctx = {
-      fs: seed.fs,
-      projectRoot: seed.projectRoot,
-    };
+    const ctx = { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot };
     const tickStep = buildAutopilotTickStep(makeDeps(seed));
     await harness.run(tickStep, undefined, harness.createContext());
     const features = await listFeatures(ctx, seed.taskId);
@@ -395,19 +373,13 @@ describe('buildAutopilotEvery', () => {
     await harness.run(everyStep.step, undefined, childCtx);
 
     const slices = await listSlices(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
+      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
       seed.taskId,
     );
     const active = slices.find((s) => s.status === SliceStatus.Active);
     expect(active).toBeDefined();
     const reloaded = await tryLoadTask(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
+      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
       seed.taskId,
     );
     expect(reloaded?.autopilotState).toBe(AutopilotState.Watching);

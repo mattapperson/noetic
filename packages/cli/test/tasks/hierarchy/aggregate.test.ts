@@ -107,7 +107,7 @@ describe('getTaskHierarchy', () => {
 
   it('returns an empty hierarchy when the subdir exists but is empty', async () => {
     const ctx = makeStoreContext();
-    await ctx.fs.mkdir(hierarchyPaths(ctx.projectRoot, TASK_ID).root);
+    await ctx.fs.mkdir(hierarchyPaths(ctx, TASK_ID).root);
 
     const tree = await getTaskHierarchy(ctx, TASK_ID);
     expect(tree).toEqual({

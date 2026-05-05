@@ -21,6 +21,7 @@ import type { TaskStoreContext } from './fs-store.js';
 import { appendLog, loadTask } from './fs-store.js';
 import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createPlannerAttemptLayer } from './memory/planner-attempt-layer.js';
+import { taskDirPaths } from './paths.js';
 import { clearPlanner, loadPlanner, savePlanner } from './planner-state.js';
 import type { PlannerOutcome } from './planner-tools.js';
 import { createAbandonPlanningTool, createSubmitHierarchyTool } from './planner-tools.js';
@@ -61,10 +62,8 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function projectRootFromTaskDir(taskDir: string): string {
-  const tasksDir = dirname(taskDir);
-  const noeticDir = dirname(tasksDir);
-  return dirname(noeticDir);
+function tasksRootFromTaskDir(taskDir: string): string {
+  return dirname(taskDir);
 }
 
 function taskIdFromTaskDir(taskDir: string): string {
@@ -78,9 +77,9 @@ async function loadDescription(args: {
   // Description lives at `<taskDir>/description.md`. Missing file is
   // common for tasks created without `--description` — return empty
   // string rather than throwing.
-  const path = `${args.ctx.projectRoot}/.noetic/tasks/${args.taskId}/description.md`;
+  const { description } = taskDirPaths(args.ctx, args.taskId);
   try {
-    return await args.ctx.fs.readFileText(path);
+    return await args.ctx.fs.readFileText(description);
   } catch {
     return '';
   }
@@ -136,10 +135,17 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
   }
   const cwd = opts.cwd ?? readEnv(ENV_CWD) ?? process.cwd();
   const taskId = taskIdFromTaskDir(taskDir);
-  const projectRoot = projectRootFromTaskDir(taskDir);
+  const tasksRoot = tasksRootFromTaskDir(taskDir);
+  // `NOETIC_TASK_CWD` is the launcher-provided project root; if the
+  // caller supplied a full `ctx`, honour it, otherwise stitch one from
+  // the env + a real fs adapter. `projectRoot` is the project the task
+  // was created from (used as the default child-process cwd, nothing
+  // else at this layer); `tasksRoot` anchors every `taskDirPaths()`
+  // lookup to the user-global task state.
   const ctx: TaskStoreContext = opts.ctx ?? {
     fs: createLocalFsAdapter(),
-    projectRoot,
+    projectRoot: cwd,
+    tasksRoot,
   };
 
   const sidecar = await loadPlanner(ctx, taskId);
@@ -247,7 +253,12 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     storeCtx: ctx,
     taskId,
     role: 'planner',
-    runnerId: taskId,
+    // Planner is a singleton per task — there is no need to disambiguate
+    // concurrent runners, so the runnerId matches the role and the
+    // socket filename collapses to `planner.sock` under the per-task
+    // sockets/ dir (saving ~12 bytes vs `planner-<taskId>.sock`, which
+    // matters on macOS's 104-byte sun_path limit).
+    runnerId: 'planner',
     threadId,
     askUserService,
   });

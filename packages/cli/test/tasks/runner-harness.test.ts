@@ -45,6 +45,7 @@ async function createTaskFixture(): Promise<TestContext> {
   const storeCtx = {
     fs,
     projectRoot,
+    tasksRoot: join(projectRoot, '.noetic', 'tasks'),
   };
   const task: Task = {
     id: taskId,

@@ -24,7 +24,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createLocalFsAdapter } from '@noetic/core';
@@ -38,7 +37,11 @@ describe('chat on a task end-to-end', () => {
   let projectRoot: string;
 
   beforeEach(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), 'noetic-chat-e2e-'));
+    // Use `/tmp` (not `tmpdir()`) because on macOS `tmpdir()` is
+    // `/var/folders/…` and the full socket path
+    // `<tasksRoot>/<taskId>/sockets/planner.sock` otherwise blows the
+    // 104-byte `sun_path` cap.
+    projectRoot = await mkdtemp(join('/tmp', 'noetic-chat-e2e-'));
   });
 
   afterEach(async () => {
@@ -53,12 +56,12 @@ describe('chat on a task end-to-end', () => {
     });
   });
 
-  it(
-    'planner runner binds its IPC socket so the TUI can open chat',
-    async () => {
+  it('planner runner binds its IPC socket so the TUI can open chat', async () => {
+    const tasksRoot = join(projectRoot, 'tasks');
     const ctx = {
       fs: createLocalFsAdapter(),
       projectRoot,
+      tasksRoot,
     };
 
     const created = await createTaskHandler(ctx, {
@@ -81,9 +84,14 @@ describe('chat on a task end-to-end', () => {
           // The runner needs *a* key to boot its harness, but the LLM
           // call only happens after the IPC socket is bound — any
           // value works for covering the socket-bind path.
-          OPENROUTER_API_KEY: (process.env.OPENROUTER_API_KEY ?? '').length > 0
-            ? process.env.OPENROUTER_API_KEY
-            : 'test-key-sk-unused',
+          OPENROUTER_API_KEY:
+            (process.env.OPENROUTER_API_KEY ?? '').length > 0
+              ? process.env.OPENROUTER_API_KEY
+              : 'test-key-sk-unused',
+          // Redirect the runner's tasks-root to the test's temp dir.
+          // The subprocess inherits only env, not the ctx.tasksRoot,
+          // so we thread the override here.
+          NOETIC_HOME: projectRoot,
         },
       });
 
@@ -106,10 +114,8 @@ describe('chat on a task end-to-end', () => {
     // completed (including `runnerSocketPath()` resolution, which
     // was the site of the original hang). Absence means the runner
     // threw during startup and stderr (inherited above) will show why.
-    const logPath = join(projectRoot, '.noetic', 'tasks', created.task.id, 'log.jsonl');
+    const logPath = join(tasksRoot, created.task.id, 'log.jsonl');
     const log = await readFile(logPath, 'utf8');
     expect(log.includes('planner started')).toBe(true);
-    },
-    10e3,
-  );
+  }, 10e3);
 });

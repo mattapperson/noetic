@@ -64,7 +64,7 @@ export async function createTaskHandler(
   };
   await saveTask(ctx, task);
   if (args.description !== undefined && args.description.length > 0) {
-    const paths = taskDirPaths(ctx.projectRoot, task.id);
+    const paths = taskDirPaths(ctx, task.id);
     await ctx.fs.mkdir(paths.dir);
     await ctx.fs.writeFile(paths.description, args.description);
   }

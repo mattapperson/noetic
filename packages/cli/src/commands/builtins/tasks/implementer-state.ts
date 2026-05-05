@@ -57,7 +57,7 @@ export type ImplementerState = z.infer<typeof ImplementerStateSchema>;
 //#region Helpers
 
 function implementerPath(ctx: TaskStoreContext, taskId: string): string {
-  const paths = taskDirPaths(ctx.projectRoot, taskId);
+  const paths = taskDirPaths(ctx, taskId);
   return path.join(paths.dir, '_implementer.json');
 }
 

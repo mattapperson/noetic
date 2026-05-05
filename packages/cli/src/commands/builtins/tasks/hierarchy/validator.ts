@@ -148,7 +148,7 @@ export async function recordValidatorRun(
     pausedAt: null,
   });
   const target = validatorRunPath({
-    projectRoot: ctx.projectRoot,
+    ctx,
     taskId: ctx.taskId,
     featureId: args.featureId,
     runId: id,
@@ -170,7 +170,7 @@ export async function updateValidatorRun(
   args: UpdateValidatorRunArgs,
 ): Promise<ValidatorRun> {
   const target = validatorRunPath({
-    projectRoot: ctx.projectRoot,
+    ctx,
     taskId: ctx.taskId,
     featureId: args.featureId,
     runId: args.runId,
@@ -211,7 +211,7 @@ export async function loadValidatorRun(
     return null;
   }
   const target = validatorRunPath({
-    projectRoot: ctx.projectRoot,
+    ctx,
     taskId: ctx.taskId,
     featureId,
     runId,
@@ -223,7 +223,7 @@ export async function listValidatorRuns(
   ctx: ValidatorContext,
   featureId: string,
 ): Promise<ValidatorRun[]> {
-  const dirs = featureDirPaths(ctx.projectRoot, ctx.taskId, featureId);
+  const dirs = featureDirPaths(ctx, ctx.taskId, featureId);
   let entries: string[];
   try {
     entries = await ctx.fs.readdir(dirs.validatorRuns);

@@ -125,7 +125,7 @@ async function appendFixLineage(
   sourceFeatureId: string,
   entry: FixLineage,
 ): Promise<void> {
-  const target = featureDirPaths(ctx.projectRoot, ctx.taskId, sourceFeatureId).fixLineage;
+  const target = featureDirPaths(ctx, ctx.taskId, sourceFeatureId).fixLineage;
   await ctx.fs.mkdir(path.dirname(target));
   await ctx.fs.appendFile(target, `${JSON.stringify(entry)}\n`);
 }
@@ -310,7 +310,7 @@ export async function readFixLineage(
   ctx: FixFeatureContext,
   featureId: string,
 ): Promise<FixLineage[]> {
-  const target = featureDirPaths(ctx.projectRoot, ctx.taskId, featureId).fixLineage;
+  const target = featureDirPaths(ctx, ctx.taskId, featureId).fixLineage;
   let raw: string;
   try {
     raw = await ctx.fs.readFileText(target);

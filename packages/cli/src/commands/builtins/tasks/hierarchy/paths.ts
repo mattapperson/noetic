@@ -1,5 +1,7 @@
 import { join } from 'node:path';
 
+import type { TasksRootCtx } from '@noetic/code-agent/tasks/store/fs-node';
+
 import { taskDirPaths } from '../paths.js';
 
 //#region Types
@@ -35,8 +37,8 @@ export interface FeatureDirPaths {
 
 //#region Helpers
 
-export function hierarchyPaths(projectRoot: string, taskId: string): HierarchyPaths {
-  const root = taskDirPaths(projectRoot, taskId).hierarchy;
+export function hierarchyPaths(ctx: TasksRootCtx, taskId: string): HierarchyPaths {
+  const root = taskDirPaths(ctx, taskId).hierarchy;
   return {
     root,
     milestones: join(root, 'milestones'),
@@ -47,20 +49,20 @@ export function hierarchyPaths(projectRoot: string, taskId: string): HierarchyPa
   };
 }
 
-export function milestonePath(projectRoot: string, taskId: string, milestoneId: string): string {
-  return join(hierarchyPaths(projectRoot, taskId).milestones, `${milestoneId}.json`);
+export function milestonePath(ctx: TasksRootCtx, taskId: string, milestoneId: string): string {
+  return join(hierarchyPaths(ctx, taskId).milestones, `${milestoneId}.json`);
 }
 
-export function slicePath(projectRoot: string, taskId: string, sliceId: string): string {
-  return join(hierarchyPaths(projectRoot, taskId).slices, `${sliceId}.json`);
+export function slicePath(ctx: TasksRootCtx, taskId: string, sliceId: string): string {
+  return join(hierarchyPaths(ctx, taskId).slices, `${sliceId}.json`);
 }
 
 export function featureDirPaths(
-  projectRoot: string,
+  ctx: TasksRootCtx,
   taskId: string,
   featureId: string,
 ): FeatureDirPaths {
-  const dir = join(hierarchyPaths(projectRoot, taskId).features, featureId);
+  const dir = join(hierarchyPaths(ctx, taskId).features, featureId);
   return {
     dir,
     feature: join(dir, 'feature.json'),
@@ -70,27 +72,23 @@ export function featureDirPaths(
 }
 
 export interface ValidatorRunPathArgs {
-  readonly projectRoot: string;
+  readonly ctx: TasksRootCtx;
   readonly taskId: string;
   readonly featureId: string;
   readonly runId: string;
 }
 
 export function validatorRunPath(args: ValidatorRunPathArgs): string {
-  const dirs = featureDirPaths(args.projectRoot, args.taskId, args.featureId);
+  const dirs = featureDirPaths(args.ctx, args.taskId, args.featureId);
   return join(dirs.validatorRuns, `${args.runId}.json`);
 }
 
-export function assertionPath(projectRoot: string, taskId: string, assertionId: string): string {
-  return join(hierarchyPaths(projectRoot, taskId).assertions, `${assertionId}.json`);
+export function assertionPath(ctx: TasksRootCtx, taskId: string, assertionId: string): string {
+  return join(hierarchyPaths(ctx, taskId).assertions, `${assertionId}.json`);
 }
 
-export function interviewSessionPath(
-  projectRoot: string,
-  taskId: string,
-  sessionId: string,
-): string {
-  return join(hierarchyPaths(projectRoot, taskId).interviewSessions, `${sessionId}.json`);
+export function interviewSessionPath(ctx: TasksRootCtx, taskId: string, sessionId: string): string {
+  return join(hierarchyPaths(ctx, taskId).interviewSessions, `${sessionId}.json`);
 }
 
 //#endregion

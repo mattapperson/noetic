@@ -53,7 +53,7 @@ export async function steerTaskHandler(
     taskId: args.taskId,
     entry,
   });
-  const paths = taskDirPaths(ctx.projectRoot, args.taskId);
+  const paths = taskDirPaths(ctx, args.taskId);
   await ctx.fs.mkdir(paths.dir);
   await ctx.fs.appendFile(
     paths.steering,

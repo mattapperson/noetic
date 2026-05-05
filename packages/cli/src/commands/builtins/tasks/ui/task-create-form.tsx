@@ -124,7 +124,7 @@ export async function submitNewTask(input: SubmitNewTaskInput): Promise<Task> {
     projectRoot: input.ctx.projectRoot,
   });
   await saveTask(input.ctx, task);
-  const paths = taskDirPaths(input.ctx.projectRoot, task.id);
+  const paths = taskDirPaths(input.ctx, task.id);
   await input.ctx.fs.writeFile(paths.description, input.description);
   await appendEvent(input.ctx, {
     taskId: task.id,

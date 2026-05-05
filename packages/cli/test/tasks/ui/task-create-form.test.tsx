@@ -68,7 +68,7 @@ describe('submitNewTask', () => {
       title: 'Build kanban',
       description: 'Long-form details here.',
     });
-    const dir = taskDirPaths(ctx.projectRoot, task.id);
+    const dir = taskDirPaths(ctx, task.id);
     // task.json on disk parses as the same record we returned.
     const persistedRaw = ctx.fs.files.get(path.resolve(dir.task));
     expect(persistedRaw).toBeDefined();
@@ -76,7 +76,7 @@ describe('submitNewTask', () => {
     const descRaw = ctx.fs.files.get(path.resolve(dir.description));
     expect(descRaw?.toString('utf-8')).toBe('Long-form details here.');
     // Events file mentions the task.
-    const eventsRaw = ctx.fs.files.get(path.resolve(taskRootPaths(ctx.projectRoot).events));
+    const eventsRaw = ctx.fs.files.get(path.resolve(taskRootPaths(ctx).events));
     expect(eventsRaw).toBeDefined();
     expect(eventsRaw?.toString('utf-8')).toContain(task.id);
     expect(eventsRaw?.toString('utf-8')).toContain('task:created');
@@ -127,7 +127,7 @@ describe('submitNewTask', () => {
       title: 'Boundary',
       description: 'x',
     });
-    const dir = taskDirPaths(ctx.projectRoot, task.id);
+    const dir = taskDirPaths(ctx, task.id);
     const descRaw = ctx.fs.files.get(path.resolve(dir.description));
     expect(descRaw?.toString('utf-8')).toBe('x');
   });

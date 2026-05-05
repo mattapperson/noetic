@@ -326,7 +326,7 @@ export async function startAgentCiRun(args: StartAgentCiRunArgs): Promise<StartA
   const now = args.now ?? new Date().toISOString();
   const runnerScript = args.runnerScript ?? defaultRunnerScript();
 
-  const taskDir = taskDirPaths(args.ctx.projectRoot, args.taskId).dir;
+  const taskDir = taskDirPaths(args.ctx, args.taskId).dir;
 
   // 1. Reject re-spawn if a live runner is already attached.
   const live = await isLiveRunner({

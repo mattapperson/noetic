@@ -38,6 +38,7 @@ const NOW = '2026-04-30T00:00:00.000Z';
 interface SeededTask {
   readonly fs: MemFs;
   readonly projectRoot: string;
+  readonly tasksRoot: string;
   readonly taskId: string;
 }
 
@@ -110,9 +111,7 @@ async function seedTaskWithTwoSlices(taskId: string): Promise<SeededTask> {
       },
     ],
   });
-  return {
-    fs: ctx.fs,
-    projectRoot: ctx.projectRoot,
+  return { fs: ctx.fs, projectRoot: ctx.projectRoot, tasksRoot: ctx.tasksRoot,
     taskId,
   };
 }
@@ -122,6 +121,7 @@ function makeDeps(seed: SeededTask): AutopilotDeps {
     ctx: {
       fs: seed.fs,
       projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
     },
     signaller: staticSignaller(),
   };
@@ -155,10 +155,7 @@ describe('runAutopilotTick (no active slice)', () => {
     expect(report.slicesActivated).toBe(1);
     expect(report.featuresTriaged).toBe(1);
     const slices = await listSlices(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
+      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
       seed.taskId,
     );
     const active = slices.find((s) => s.status === SliceStatus.Active);
@@ -169,10 +166,7 @@ describe('runAutopilotTick (no active slice)', () => {
     const seed = await seedTaskWithTwoSlices('T-watcher000');
     await runAutopilotTick(makeDeps(seed));
     const reloaded = await tryLoadTask(
-      {
-        fs: seed.fs,
-        projectRoot: seed.projectRoot,
-      },
+      { fs: seed.fs, projectRoot: seed.projectRoot, tasksRoot: seed.tasksRoot },
       seed.taskId,
     );
     expect(reloaded?.autopilotState).toBe(AutopilotState.Watching);
@@ -183,6 +177,7 @@ describe('runAutopilotTick (no active slice)', () => {
     const ctx = {
       fs: seed.fs,
       projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
     };
     const existing = await tryLoadTask(ctx, seed.taskId);
     if (existing === null) {
@@ -205,6 +200,7 @@ describe('runAutopilotTick (active slice with all features passed)', () => {
     const ctx = {
       fs: seed.fs,
       projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
     };
     const features = await import('../../../src/commands/builtins/tasks/hierarchy/store.js').then(
       (m) => m.listFeatures(ctx, seed.taskId),
@@ -256,6 +252,7 @@ describe('runAutopilotTick (no slices left)', () => {
     const seed: SeededTask = {
       fs: ctx.fs,
       projectRoot: ctx.projectRoot,
+      tasksRoot: ctx.tasksRoot,
       taskId,
     };
     const report = await runAutopilotTick(makeDeps(seed));
@@ -277,6 +274,7 @@ describe('runAutopilotTick (slice fully blocked)', () => {
     const ctx = {
       fs: seed.fs,
       projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
     };
     const features = await import('../../../src/commands/builtins/tasks/hierarchy/store.js').then(
       (m) => m.listFeatures(ctx, seed.taskId),
@@ -313,6 +311,7 @@ describe('runAutopilotTick (milestone completion)', () => {
     const ctx = {
       fs: seed.fs,
       projectRoot: seed.projectRoot,
+      tasksRoot: seed.tasksRoot,
     };
     // Tick 1: activates S1.
     await runAutopilotTick(makeDeps(seed));
