@@ -10,4 +10,3 @@ packages/web/.typecheck-snippets/
 *.tsbuildinfo
 examples/skippy/.env
 .noetic/tasks/
-.sentrux/baseline.json
