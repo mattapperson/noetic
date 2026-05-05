@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeFork } from '../../src/interpreter/execute-fork';
+import { executeFork } from '../../src/interpreter/execute-control';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';

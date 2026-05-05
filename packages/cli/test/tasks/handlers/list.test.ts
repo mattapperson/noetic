@@ -1,9 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { listTasksHandler } from '../../../src/commands/builtins/tasks/handlers/list.js';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import {
   AutopilotState,
   generateTaskId,
@@ -11,6 +6,10 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { listTasksHandler } from '../../../src/commands/builtins/tasks/handlers/inspection.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('listTasksHandler', () => {

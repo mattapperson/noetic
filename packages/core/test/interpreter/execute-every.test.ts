@@ -5,7 +5,7 @@ import { channel } from '../../src/builders/channel-builder';
 import { every } from '../../src/builders/every';
 import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
-import { executeEvery } from '../../src/interpreter/execute-every';
+import { executeEvery } from '../../src/interpreter/execute-control';
 import { SpanImpl } from '../../src/observability/span-impl';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';

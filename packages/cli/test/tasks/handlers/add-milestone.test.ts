@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
-import { addMilestoneHandler } from '../../../src/commands/builtins/tasks/handlers/add-milestone.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
+import { addMilestoneHandler } from '../../../src/commands/builtins/tasks/handlers/hierarchy.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { listMilestones } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 

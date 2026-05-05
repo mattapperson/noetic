@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { executeSpawn } from '../../src/interpreter/execute-spawn';
+import { executeSpawn } from '../../src/interpreter/execute-action';
 import { createLayerStateStore } from '../../src/memory/layer-lifecycle';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';

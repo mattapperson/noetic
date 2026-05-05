@@ -7,15 +7,14 @@ import type { ContextMemory } from '../types/memory';
 import type { Step, StepRun, StepSpawn } from '../types/step';
 import type { StepSubprocessRequest, SubprocessAdapter } from '../types/subprocess-adapter';
 import { frameworkCast } from '../util/framework-cast';
-import { executeBranch } from './execute-branch';
-import { executeEvery } from './execute-every';
-import { executeFork } from './execute-fork';
-import { executeLLM } from './execute-llm';
-import { executeLoop } from './execute-loop';
-import { executeProvide } from './execute-provide';
-import { executeRun } from './execute-run';
-import { executeSpawn } from './execute-spawn';
-import { executeTool } from './execute-tool';
+import {
+  executeLLM,
+  executeProvide,
+  executeRun,
+  executeSpawn,
+  executeTool,
+} from './execute-action';
+import { executeBranch, executeEvery, executeFork, executeLoop } from './execute-control';
 import { isMutableContext } from './typeguards';
 
 //#region Constants

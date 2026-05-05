@@ -12,7 +12,7 @@ import { Box, Text, useInput } from 'ink';
 import type { ReactElement } from 'react';
 import { useCallback, useState } from 'react';
 import { useTheme } from '../../../../tui/components/theme.js';
-import { moveTaskHandler } from '../handlers/move.js';
+import { moveTaskHandler } from '../handlers/state.js';
 import type { KanbanColumn } from '../kanban.js';
 import { deriveColumn } from '../kanban.js';
 import { columnLabel, VISIBLE_COLUMNS } from './columns.js';

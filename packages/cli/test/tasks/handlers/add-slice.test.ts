@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-
-import { addMilestoneHandler } from '../../../src/commands/builtins/tasks/handlers/add-milestone.js';
-import { addSliceHandler } from '../../../src/commands/builtins/tasks/handlers/add-slice.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
+import {
+  addMilestoneHandler,
+  addSliceHandler,
+} from '../../../src/commands/builtins/tasks/handlers/hierarchy.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { listSlices } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 

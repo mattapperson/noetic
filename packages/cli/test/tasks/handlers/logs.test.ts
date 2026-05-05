@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { logTaskHandler } from '../../../src/commands/builtins/tasks/handlers/log.js';
-import { logsTaskHandler } from '../../../src/commands/builtins/tasks/handlers/logs.js';
+import {
+  logsTaskHandler,
+  logTaskHandler,
+} from '../../../src/commands/builtins/tasks/handlers/inspection.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('logsTaskHandler', () => {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
 import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { archiveTaskHandler } from '../../../src/commands/builtins/tasks/handlers/archive.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { unarchiveTaskHandler } from '../../../src/commands/builtins/tasks/handlers/unarchive.js';
+import {
+  archiveTaskHandler,
+  createTaskHandler,
+  unarchiveTaskHandler,
+} from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('unarchiveTaskHandler', () => {

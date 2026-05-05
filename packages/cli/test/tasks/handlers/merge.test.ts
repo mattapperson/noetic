@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-
-import type { ShellAdapter, ShellExecResult } from '@noetic/core';
+import { EventKind, TaskLifecycleStatus } from '@noetic/code-agent/tasks/schema';
 
 import { loadTask, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { mergeTaskHandler } from '../../../src/commands/builtins/tasks/handlers/merge.js';
-import { EventKind, TaskLifecycleStatus } from '@noetic/code-agent/tasks/schema';
+import type { ShellAdapter, ShellExecResult } from '@noetic/core';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { mergeTaskHandler } from '../../../src/commands/builtins/tasks/handlers/state.js';
 import { makeStoreContext } from '../_helpers.js';
 
 interface RecordedExec {

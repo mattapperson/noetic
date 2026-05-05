@@ -15,28 +15,35 @@ import { createFileStorage } from '@noetic/core';
 import { createLocalFsAdapter, createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
 import { ensureDaemon } from '../../../daemon-runtime/runtime.js';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
-import { activateSliceHandler } from './handlers/activate-slice.js';
-import { addAssertionHandler } from './handlers/add-assertion.js';
-import { addFeatureHandler } from './handlers/add-feature.js';
-import { addMilestoneHandler } from './handlers/add-milestone.js';
-import { addSliceHandler } from './handlers/add-slice.js';
-import { archiveTaskHandler } from './handlers/archive.js';
-import { attachTaskHandler } from './handlers/attach.js';
-import { autopilotHandler } from './handlers/autopilot.js';
-import { commentTaskHandler } from './handlers/comment.js';
-import { createTaskHandler } from './handlers/create.js';
-import { deleteTaskHandler } from './handlers/delete.js';
-import { duplicateTaskHandler } from './handlers/duplicate.js';
-import { listTasksHandler } from './handlers/list.js';
-import { logTaskHandler } from './handlers/log.js';
-import { logsTaskHandler } from './handlers/logs.js';
-import { mergeTaskHandler } from './handlers/merge.js';
-import { moveTaskHandler } from './handlers/move.js';
-import { pauseTaskHandler } from './handlers/pause.js';
-import { showTaskHandler } from './handlers/show.js';
-import { steerTaskHandler } from './handlers/steer.js';
-import { unarchiveTaskHandler } from './handlers/unarchive.js';
-import { unpauseTaskHandler } from './handlers/unpause.js';
+import { autopilotHandler, steerTaskHandler } from './handlers/autopilot.js';
+import {
+  activateSliceHandler,
+  addAssertionHandler,
+  addFeatureHandler,
+  addMilestoneHandler,
+  addSliceHandler,
+} from './handlers/hierarchy.js';
+import {
+  commentTaskHandler,
+  listTasksHandler,
+  logsTaskHandler,
+  logTaskHandler,
+  showTaskHandler,
+} from './handlers/inspection.js';
+import {
+  archiveTaskHandler,
+  createTaskHandler,
+  deleteTaskHandler,
+  duplicateTaskHandler,
+  unarchiveTaskHandler,
+} from './handlers/lifecycle.js';
+import {
+  attachTaskHandler,
+  mergeTaskHandler,
+  moveTaskHandler,
+  pauseTaskHandler,
+  unpauseTaskHandler,
+} from './handlers/state.js';
 import { KanbanColumn } from './kanban.js';
 
 //#region Types

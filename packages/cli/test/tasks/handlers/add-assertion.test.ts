@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-
-import { addAssertionHandler } from '../../../src/commands/builtins/tasks/handlers/add-assertion.js';
-import { addMilestoneHandler } from '../../../src/commands/builtins/tasks/handlers/add-milestone.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
+import {
+  addAssertionHandler,
+  addMilestoneHandler,
+} from '../../../src/commands/builtins/tasks/handlers/hierarchy.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { AssertionStatus } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
 import { listAssertions } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
 import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
-import { executeLoop } from '../../src/interpreter/execute-loop';
+import { executeLoop } from '../../src/interpreter/execute-control';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { ContextMemory } from '../../src/types/memory';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { executeProvide } from '../../src/interpreter/execute-provide';
+import { executeProvide } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { ContextMemory, MemoryLayer } from '../../src/types/memory';

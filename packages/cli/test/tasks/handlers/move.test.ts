@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-
-import { tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { moveTaskHandler } from '../../../src/commands/builtins/tasks/handlers/move.js';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import { EventKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import { tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { moveTaskHandler } from '../../../src/commands/builtins/tasks/handlers/state.js';
+import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('moveTaskHandler', () => {

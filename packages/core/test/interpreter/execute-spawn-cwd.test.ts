@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { executeSpawn } from '../../src/interpreter/execute-spawn';
+import { executeSpawn } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { setToolCwd } from '../../src/runtime/cwd-helpers';
 import type { Context } from '../../src/types/context';

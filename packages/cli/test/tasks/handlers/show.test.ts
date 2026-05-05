@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-
-import { appendLog } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { showTaskHandler } from '../../../src/commands/builtins/tasks/handlers/show.js';
 import { LogEntryKind } from '@noetic/code-agent/tasks/schema';
+import { appendLog } from '@noetic/code-agent/tasks/store/fs-node';
+import { showTaskHandler } from '../../../src/commands/builtins/tasks/handlers/inspection.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('showTaskHandler', () => {

@@ -4,8 +4,8 @@ import type {
   ControlSignal,
   Signaller,
 } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { unpauseTaskHandler } from '../../../src/commands/builtins/tasks/handlers/unpause.js';
+import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { unpauseTaskHandler } from '../../../src/commands/builtins/tasks/handlers/state.js';
 import { saveRunner } from '../../../src/commands/builtins/tasks/runner-state.js';
 import { makeStoreContext } from '../_helpers.js';
 

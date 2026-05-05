@@ -1,7 +1,25 @@
+/**
+ * Task lifecycle handlers: create, delete, duplicate, archive, unarchive.
+ */
+
 import { listLiveTaskHandles, TaskRole } from '@noetic/code-agent/tasks';
-import { EventKind } from '@noetic/code-agent/tasks/schema';
+import { join } from '@noetic/code-agent/tasks/path-utils';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import {
+  AutopilotState,
+  EventKind,
+  generateTaskId,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent, deleteTaskDir } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  deleteTaskDir,
+  saveTask,
+  taskDirPaths,
+} from '@noetic/code-agent/tasks/store/fs-node';
 import type { SubprocessAdapter, SubprocessHandle } from '@noetic/core';
 import type { Signaller } from '../agent-ci-control.js';
 import { defaultSignaller, verifyPidIdentity } from '../agent-ci-control.js';
@@ -11,7 +29,75 @@ import { listValidatorRuns } from '../hierarchy/validator.js';
 import { loadRunner } from '../runner-state.js';
 import { nowIso, resolveTask } from './_shared.js';
 
-//#region Types
+//#region create
+
+export interface CreateTaskArgs {
+  readonly title: string;
+  readonly description?: string;
+}
+
+export interface CreateTaskResult {
+  readonly task: Task;
+}
+
+/**
+ * Create a fresh manual task: write `task.json`, optionally seed
+ * `description.md`, append a `task:created` event, and fan out the
+ * in-process notification.
+ */
+export async function createTaskHandler(
+  ctx: TaskStoreContext,
+  args: CreateTaskArgs,
+): Promise<CreateTaskResult> {
+  const trimmed = args.title.trim();
+  if (trimmed.length === 0) {
+    throw new Error('Task title must not be empty');
+  }
+  const now = nowIso();
+  const task: Task = {
+    id: generateTaskId(),
+    source: TaskSource.Manual,
+    title: trimmed,
+    projectRoot: ctx.projectRoot,
+    worktreePath: null,
+    branch: null,
+    headSha: null,
+    reviewStatus: TaskReviewStatus.NotStarted,
+    lifecycleStatus: TaskLifecycleStatus.Active,
+    paused: false,
+    pauseReason: null,
+    archivedAt: null,
+    hierarchyStatus: null,
+    autopilotEnabled: true,
+    autopilotState: AutopilotState.Watching,
+    lastAutopilotActivityAt: now,
+    createdAt: now,
+    updatedAt: now,
+    lastSeenAt: now,
+  };
+  await saveTask(ctx, task);
+  if (args.description !== undefined && args.description.length > 0) {
+    const paths = taskDirPaths(ctx, task.id);
+    await ctx.fs.mkdir(paths.dir);
+    await ctx.fs.writeFile(paths.description, args.description);
+  }
+  await appendEvent(ctx, {
+    taskId: task.id,
+    kind: EventKind.TaskCreated,
+    payload: {
+      title: task.title,
+      source: task.source,
+    },
+    ts: now,
+  });
+  return {
+    task,
+  };
+}
+
+//#endregion
+
+//#region delete
 
 export interface DeleteTaskArgs {
   readonly taskId: string;
@@ -57,10 +143,6 @@ export interface LiveSidecar {
   readonly pid: number;
   readonly sessionId: string;
 }
-
-//#endregion
-
-//#region Helpers
 
 /**
  * Look for any `running` validator run under the task's hierarchy.
@@ -180,10 +262,6 @@ export async function findLiveSidecars(
   return out;
 }
 
-//#endregion
-
-//#region Public API
-
 /**
  * Hard-delete a task. Emits `task:deleted` so listeners that mirror
  * state to other surfaces (UI lists, search indexes) can drop the
@@ -231,6 +309,190 @@ export async function deleteTaskHandler(
   await deleteTaskDir(ctx, existing.id);
   return {
     taskId: existing.id,
+  };
+}
+
+//#endregion
+
+//#region duplicate
+
+export interface DuplicateTaskArgs {
+  readonly taskId: string;
+  /** Optional title override; defaults to `<original> (copy)`. */
+  readonly title?: string;
+}
+
+export interface DuplicateTaskResult {
+  readonly task: Task;
+}
+
+async function copyOptionalFile(
+  ctx: TaskStoreContext,
+  source: string,
+  destination: string,
+): Promise<void> {
+  let text: string;
+  try {
+    text = await ctx.fs.readFileText(source);
+  } catch {
+    return;
+  }
+  await ctx.fs.writeFile(destination, text);
+}
+
+async function copyAttachments(
+  ctx: TaskStoreContext,
+  sourceDir: string,
+  destDir: string,
+): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await ctx.fs.readdir(sourceDir);
+  } catch {
+    return;
+  }
+  if (entries.length === 0) {
+    return;
+  }
+  await ctx.fs.mkdir(destDir);
+  for (const entry of entries) {
+    const bytes = await ctx.fs.readFile(join(sourceDir, entry));
+    await ctx.fs.writeFileBytes(join(destDir, entry), bytes);
+  }
+}
+
+/**
+ * Copy a task into a new id, preserving description and attachments
+ * but resetting lifecycle (review status, archive timestamp,
+ * autopilot). Hierarchies are NOT copied — duplicate is for branching
+ * a starting point, not for cloning in-flight planning.
+ */
+export async function duplicateTaskHandler(
+  ctx: TaskStoreContext,
+  args: DuplicateTaskArgs,
+): Promise<DuplicateTaskResult> {
+  const source = await resolveTask(ctx, args.taskId);
+  const now = nowIso();
+  const newTask: Task = {
+    id: generateTaskId(),
+    source: TaskSource.Manual,
+    title: args.title ?? `${source.title} (copy)`,
+    projectRoot: source.projectRoot,
+    worktreePath: null,
+    branch: null,
+    headSha: null,
+    reviewStatus: TaskReviewStatus.NotStarted,
+    lifecycleStatus: TaskLifecycleStatus.Active,
+    paused: false,
+    pauseReason: null,
+    archivedAt: null,
+    hierarchyStatus: null,
+    autopilotEnabled: true,
+    autopilotState: AutopilotState.Watching,
+    lastAutopilotActivityAt: now,
+    createdAt: now,
+    updatedAt: now,
+    lastSeenAt: now,
+  };
+  await saveTask(ctx, newTask);
+
+  const sourcePaths = taskDirPaths(ctx, source.id);
+  const destPaths = taskDirPaths(ctx, newTask.id);
+  await ctx.fs.mkdir(destPaths.dir);
+  await copyOptionalFile(ctx, sourcePaths.description, destPaths.description);
+  await copyAttachments(ctx, sourcePaths.attachments, destPaths.attachments);
+
+  await appendEvent(ctx, {
+    taskId: newTask.id,
+    kind: EventKind.TaskCreated,
+    payload: {
+      title: newTask.title,
+      source: newTask.source,
+      duplicatedFrom: source.id,
+    },
+    ts: now,
+  });
+  return {
+    task: newTask,
+  };
+}
+
+//#endregion
+
+//#region archive
+
+export interface ArchiveTaskArgs {
+  readonly taskId: string;
+}
+
+export interface ArchiveTaskResult {
+  readonly task: Task;
+}
+
+/**
+ * Mark a task archived by stamping `archivedAt`. Idempotent: if the
+ * task is already archived, the existing timestamp is preserved.
+ */
+export async function archiveTaskHandler(
+  ctx: TaskStoreContext,
+  args: ArchiveTaskArgs,
+): Promise<ArchiveTaskResult> {
+  const existing = await resolveTask(ctx, args.taskId);
+  const ts = nowIso();
+  const next: Task = {
+    ...existing,
+    archivedAt: existing.archivedAt ?? ts,
+    updatedAt: ts,
+  };
+  await saveTask(ctx, next);
+  await appendEvent(ctx, {
+    taskId: next.id,
+    kind: EventKind.TaskArchived,
+    payload: {
+      archivedAt: next.archivedAt,
+    },
+    ts,
+  });
+  return {
+    task: next,
+  };
+}
+
+//#endregion
+
+//#region unarchive
+
+export interface UnarchiveTaskArgs {
+  readonly taskId: string;
+}
+
+export interface UnarchiveTaskResult {
+  readonly task: Task;
+}
+
+/** Clear `archivedAt`, returning the task to its prior column. */
+export async function unarchiveTaskHandler(
+  ctx: TaskStoreContext,
+  args: UnarchiveTaskArgs,
+): Promise<UnarchiveTaskResult> {
+  const existing = await resolveTask(ctx, args.taskId);
+  const ts = nowIso();
+  const next: Task = {
+    ...existing,
+    archivedAt: null,
+    updatedAt: ts,
+  };
+  await saveTask(ctx, next);
+  await appendEvent(ctx, {
+    taskId: next.id,
+    kind: EventKind.TaskArchived,
+    payload: {
+      archivedAt: null,
+    },
+    ts,
+  });
+  return {
+    task: next,
   };
 }
 

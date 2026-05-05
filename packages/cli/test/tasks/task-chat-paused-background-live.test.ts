@@ -40,13 +40,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-
+import { TaskPauseReason } from '@noetic/code-agent/tasks/schema';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createLocalFsAdapter } from '@noetic/core';
 import { z } from 'zod';
-
-import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/create.js';
-import { TaskPauseReason } from '@noetic/code-agent/tasks/schema';
+import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/lifecycle.js';
 
 //#region Schemas
 
@@ -192,198 +190,195 @@ const TASK_TITLE_CARD_PREFIX = 'paused';
 // changes (durable SubprocessAdapter now owns task handle manifests, but
 // this pilotty-spawned child doesn't propagate NOETIC_HOME scoping).
 // Quarantined so the default CLI test gate can go green.
-describe.skip(
-  'pilotty (live): paused task chat keeps agent running after Escape',
-  () => {
-    let projectRoot: string;
-    let taskId: string;
-    let plannerPid: number | null = null;
+describe.skip('pilotty (live): paused task chat keeps agent running after Escape', () => {
+  let projectRoot: string;
+  let taskId: string;
+  let plannerPid: number | null = null;
 
-    beforeEach(async () => {
-      // `/tmp` (not `tmpdir()`) keeps the unix-domain socket path under
-      // the macOS 104-byte `sun_path` cap — the test infrastructure
-      // this file inherits from relies on the same.
-      projectRoot = await mkdtemp(join('/tmp', 'noetic-paused-live-'));
-      const tasksRoot = join(projectRoot, 'tasks');
-      const ctx = {
-        fs: createLocalFsAdapter(),
-        projectRoot,
-        tasksRoot,
-      };
+  beforeEach(async () => {
+    // `/tmp` (not `tmpdir()`) keeps the unix-domain socket path under
+    // the macOS 104-byte `sun_path` cap — the test infrastructure
+    // this file inherits from relies on the same.
+    projectRoot = await mkdtemp(join('/tmp', 'noetic-paused-live-'));
+    const tasksRoot = join(projectRoot, 'tasks');
+    const ctx = {
+      fs: createLocalFsAdapter(),
+      projectRoot,
+      tasksRoot,
+    };
 
-      const created = await createTaskHandler(ctx, {
-        title: TASK_TITLE,
-      });
-      taskId = created.task.id;
+    const created = await createTaskHandler(ctx, {
+      title: TASK_TITLE,
+    });
+    taskId = created.task.id;
 
-      // Flip the task into the paused state the user opens chat from.
-      // No `_planner.json` sidecar is written: a fresh paused task
-      // with no live runner is exactly the shape the TUI hits when a
-      // previously-stalled agent is revisited.
-      await saveTask(ctx, {
-        ...created.task,
-        paused: true,
-        pauseReason: TaskPauseReason.AgentStalled,
-        updatedAt: new Date().toISOString(),
-      });
-
-      // Seed chat.jsonl so the runner takes the resume path on spawn
-      // (see module docstring). Without this the fresh-spawn path
-      // stalls the runner within milliseconds on the first empty LLM
-      // turn and the TUI never gets a connected chat view to detach
-      // from.
-      const taskDir = join(tasksRoot, taskId);
-      await mkdir(taskDir, {
-        recursive: true,
-      });
-      await seedChatHistory(taskDir, taskId);
-
-      // Fail-fast if seeding somehow didn't stick — cheaper than
-      // finding out mid-TUI-drive.
-      const reloaded = await loadTask(ctx, taskId);
-      expect(reloaded.paused).toBe(true);
-      expect(reloaded.pauseReason).toBe(TaskPauseReason.AgentStalled);
-
-      plannerPid = null;
+    // Flip the task into the paused state the user opens chat from.
+    // No `_planner.json` sidecar is written: a fresh paused task
+    // with no live runner is exactly the shape the TUI hits when a
+    // previously-stalled agent is revisited.
+    await saveTask(ctx, {
+      ...created.task,
+      paused: true,
+      pauseReason: TaskPauseReason.AgentStalled,
+      updatedAt: new Date().toISOString(),
     });
 
-    afterEach(async () => {
-      if (plannerPid !== null && plannerPid > 1) {
-        try {
-          process.kill(plannerPid, 'SIGTERM');
-        } catch {
-          // Already exited — harmless.
-        }
-      }
-      pilotty([
-        'kill',
-        '-s',
-        SESSION,
-      ]);
-      if (process.env.NOETIC_TEST_KEEP_TMP === '1') {
-        console.error(`[keep] ${projectRoot}`);
-        return;
-      }
-      await rm(projectRoot, {
-        recursive: true,
-        force: true,
-      });
+    // Seed chat.jsonl so the runner takes the resume path on spawn
+    // (see module docstring). Without this the fresh-spawn path
+    // stalls the runner within milliseconds on the first empty LLM
+    // turn and the TUI never gets a connected chat view to detach
+    // from.
+    const taskDir = join(tasksRoot, taskId);
+    await mkdir(taskDir, {
+      recursive: true,
     });
+    await seedChatHistory(taskDir, taskId);
 
-    it('enters chat, and the detached planner stays alive after Escape', async () => {
-      // pilotty's daemon environment does not forward
-      // `OPENROUTER_API_KEY` from the test process automatically —
-      // read it here and splice it into the child's env explicitly.
-      // The skip gate above guarantees the variable is non-empty.
-      const apiKey = process.env.OPENROUTER_API_KEY ?? '';
-      const spawnResult = pilotty([
-        'spawn',
-        '-n',
-        SESSION,
-        '--cwd',
-        projectRoot,
-        'bash',
-        '-c',
-        // NOETIC_HOME redirects tasksRoot to the seeded temp dir.
-        `NOETIC_HOME=${projectRoot} OPENROUTER_API_KEY=${apiKey} bun run ${CLI_PATH}`,
-      ]);
-      expect(spawnResult.status).toBe(0);
+    // Fail-fast if seeding somehow didn't stick — cheaper than
+    // finding out mid-TUI-drive.
+    const reloaded = await loadTask(ctx, taskId);
+    expect(reloaded.paused).toBe(true);
+    expect(reloaded.pauseReason).toBe(TaskPauseReason.AgentStalled);
 
-      await waitForScreen(SESSION, 'Type a message', 10e3);
+    plannerPid = null;
+  });
 
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        '/tasks',
-      ]);
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
+  afterEach(async () => {
+    if (plannerPid !== null && plannerPid > 1) {
+      try {
+        process.kill(plannerPid, 'SIGTERM');
+      } catch {
+        // Already exited — harmless.
+      }
+    }
+    pilotty([
+      'kill',
+      '-s',
+      SESSION,
+    ]);
+    if (process.env.NOETIC_TEST_KEEP_TMP === '1') {
+      console.error(`[keep] ${projectRoot}`);
+      return;
+    }
+    await rm(projectRoot, {
+      recursive: true,
+      force: true,
+    });
+  });
 
-      await waitForScreen(SESSION, TASK_TITLE_CARD_PREFIX, 5e3);
+  it('enters chat, and the detached planner stays alive after Escape', async () => {
+    // pilotty's daemon environment does not forward
+    // `OPENROUTER_API_KEY` from the test process automatically —
+    // read it here and splice it into the child's env explicitly.
+    // The skip gate above guarantees the variable is non-empty.
+    const apiKey = process.env.OPENROUTER_API_KEY ?? '';
+    const spawnResult = pilotty([
+      'spawn',
+      '-n',
+      SESSION,
+      '--cwd',
+      projectRoot,
+      'bash',
+      '-c',
+      // NOETIC_HOME redirects tasksRoot to the seeded temp dir.
+      `NOETIC_HOME=${projectRoot} OPENROUTER_API_KEY=${apiKey} bun run ${CLI_PATH}`,
+    ]);
+    expect(spawnResult.status).toBe(0);
 
-      // Enter opens the task detail view; the footer advertises
-      // chat availability, which is our signal that `onOpenChat`
-      // is wired (it's only rendered when a handler is passed).
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
-      await waitForScreen(SESSION, 'c to chat with agent', 3e3);
+    await waitForScreen(SESSION, 'Type a message', 10e3);
 
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        'c',
-      ]);
-      await waitForScreen(SESSION, 'starting planner agent', 5e3);
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      '/tasks',
+    ]);
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
 
-      // Once the planner has bound its IPC socket the TUI swaps the
-      // placeholder for the real chat view. 20 s budget covers
-      // cold-start latency (bun startup + socket bind).
-      await waitForScreen(SESSION, 'chatting with planner', 20e3);
+    await waitForScreen(SESSION, TASK_TITLE_CARD_PREFIX, 5e3);
 
-      // Record the planner pid from the sidecar BEFORE Escape, while
-      // the runner is known alive and the sidecar is still present.
-      const sidecarPath = join(projectRoot, 'tasks', taskId, '_planner.json');
-      const pid = await waitForPlannerPid(sidecarPath, 5e3);
-      expect(pid).toBeGreaterThan(1);
-      expect(isLiveProcess(pid)).toBe(true);
-      plannerPid = pid;
+    // Enter opens the task detail view; the footer advertises
+    // chat availability, which is our signal that `onOpenChat`
+    // is wired (it's only rendered when a handler is passed).
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
+    await waitForScreen(SESSION, 'c to chat with agent', 3e3);
 
-      // Send a user message through the IPC channel so chat.jsonl
-      // grows while the TUI is connected. We wait only for the
-      // message to echo on screen, not for the agent's reply —
-      // the reply may still be streaming when we Escape, which is
-      // precisely the "agent keeps working after detach" scenario
-      // the final chat.jsonl assertion covers.
-      pilotty([
-        'type',
-        '-s',
-        SESSION,
-        'hello agent',
-      ]);
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Enter',
-      ]);
-      await waitForScreen(SESSION, 'hello agent', 5e3);
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      'c',
+    ]);
+    await waitForScreen(SESSION, 'starting planner agent', 5e3);
 
-      // Detach. Escape from the task-chat view routes the TUI back to
-      // the main chat (the `exitToChat` callback in `app.tsx:1564`),
-      // NOT to the task board — so the recovery needle is the main
-      // chat's input prompt, the same one we waited for at startup.
-      pilotty([
-        'key',
-        '-s',
-        SESSION,
-        'Escape',
-      ]);
-      await waitForScreen(SESSION, 'Type a message', 5e3);
+    // Once the planner has bound its IPC socket the TUI swaps the
+    // placeholder for the real chat view. 20 s budget covers
+    // cold-start latency (bun startup + socket bind).
+    await waitForScreen(SESSION, 'chatting with planner', 20e3);
 
-      // The core invariant: the detached planner is still alive
-      // immediately after Escape and for a full 3-second stability
-      // window after that. The window rules out a delayed
-      // shutdown-by-TUI race.
-      expect(isLiveProcess(pid)).toBe(true);
-      await assertPidStableFor(pid, 3e3);
+    // Record the planner pid from the sidecar BEFORE Escape, while
+    // the runner is known alive and the sidecar is still present.
+    const sidecarPath = join(projectRoot, 'tasks', taskId, '_planner.json');
+    const pid = await waitForPlannerPid(sidecarPath, 5e3);
+    expect(pid).toBeGreaterThan(1);
+    expect(isLiveProcess(pid)).toBe(true);
+    plannerPid = pid;
 
-      // Cheap sanity check on the IPC path: chat.jsonl grew beyond
-      // the single seed line while the TUI was connected (the user
-      // message we sent was pumped through).
-      const chatJsonlPath = join(projectRoot, 'tasks', taskId, 'chat.jsonl');
-      const chat = await readFile(chatJsonlPath, 'utf8');
-      const lines = chat.split('\n').filter((l) => l.length > 0);
-      expect(lines.length).toBeGreaterThan(1);
-    }, 60e3);
-  },
-);
+    // Send a user message through the IPC channel so chat.jsonl
+    // grows while the TUI is connected. We wait only for the
+    // message to echo on screen, not for the agent's reply —
+    // the reply may still be streaming when we Escape, which is
+    // precisely the "agent keeps working after detach" scenario
+    // the final chat.jsonl assertion covers.
+    pilotty([
+      'type',
+      '-s',
+      SESSION,
+      'hello agent',
+    ]);
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Enter',
+    ]);
+    await waitForScreen(SESSION, 'hello agent', 5e3);
+
+    // Detach. Escape from the task-chat view routes the TUI back to
+    // the main chat (the `exitToChat` callback in `app.tsx:1564`),
+    // NOT to the task board — so the recovery needle is the main
+    // chat's input prompt, the same one we waited for at startup.
+    pilotty([
+      'key',
+      '-s',
+      SESSION,
+      'Escape',
+    ]);
+    await waitForScreen(SESSION, 'Type a message', 5e3);
+
+    // The core invariant: the detached planner is still alive
+    // immediately after Escape and for a full 3-second stability
+    // window after that. The window rules out a delayed
+    // shutdown-by-TUI race.
+    expect(isLiveProcess(pid)).toBe(true);
+    await assertPidStableFor(pid, 3e3);
+
+    // Cheap sanity check on the IPC path: chat.jsonl grew beyond
+    // the single seed line while the TUI was connected (the user
+    // message we sent was pumped through).
+    const chatJsonlPath = join(projectRoot, 'tasks', taskId, 'chat.jsonl');
+    const chat = await readFile(chatJsonlPath, 'utf8');
+    const lines = chat.split('\n').filter((l) => l.length > 0);
+    expect(lines.length).toBeGreaterThan(1);
+  }, 60e3);
+});

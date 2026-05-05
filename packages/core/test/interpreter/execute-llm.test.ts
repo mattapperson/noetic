@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeLLM } from '../../src/interpreter/execute-llm';
+import { executeLLM } from '../../src/interpreter/execute-action';
 import { projectHistoryLayers } from '../../src/memory/layer-lifecycle';
 import { historyWindow } from '../../src/memory/layers/history-window';
 import { ContextImpl } from '../../src/runtime/context-impl';

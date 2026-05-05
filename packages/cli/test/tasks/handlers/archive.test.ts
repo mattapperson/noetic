@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-
-import { loadTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { archiveTaskHandler } from '../../../src/commands/builtins/tasks/handlers/archive.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { EventKind } from '@noetic/code-agent/tasks/schema';
+import { loadTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  archiveTaskHandler,
+  createTaskHandler,
+} from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('archiveTaskHandler', () => {

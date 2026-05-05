@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { executeBranch } from '../../src/interpreter/execute-branch';
+import { executeBranch } from '../../src/interpreter/execute-control';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import type { Context } from '../../src/types/context';
 import type { ContextMemory } from '../../src/types/memory';

@@ -3,8 +3,10 @@ import { EventKind } from '@noetic/code-agent/tasks/schema';
 import { listTasks, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { SubprocessAdapter } from '@noetic/core';
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
-import { deleteTaskHandler } from '../../../src/commands/builtins/tasks/handlers/delete.js';
+import {
+  createTaskHandler,
+  deleteTaskHandler,
+} from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { saveRunner } from '../../../src/commands/builtins/tasks/runner-state.js';
 import { makeEmptySubprocess, preloadLiveHandle } from '../_adapter-helpers.js';
 import { makeStoreContext } from '../_helpers.js';

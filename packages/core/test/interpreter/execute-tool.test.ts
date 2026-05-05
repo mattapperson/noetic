@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeTool } from '../../src/interpreter/execute-tool';
+import { executeTool } from '../../src/interpreter/execute-action';
 import type { ContextMemory } from '../../src/types/memory';
 import type { StepTool } from '../../src/types/step';
 import type { ToolExecutionContext } from '../../src/types/tool-context';

@@ -8,11 +8,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ToolExecutionContext } from '@noetic/core';
 import { z } from 'zod';
-
-import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/create.js';
+import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/lifecycle.js';
 import { READ_ONLY_TASK_TOOL_NAMES, taskTools } from '../../src/commands/builtins/tasks/tools.js';
 import { makeStoreContext } from './_helpers.js';
 
