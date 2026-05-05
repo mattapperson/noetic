@@ -48,5 +48,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "sentrux@sentrux-marketplace": true
   }
 }
