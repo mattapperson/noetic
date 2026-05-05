@@ -57,7 +57,8 @@ export class ContextImpl implements Context<ContextMemory> {
   /**
    * Shared channel store for cross-context communication. Inherited by
    * `fork` / `spawn` children so channels published by a sibling are visible
-   * to peers — see `interpreter/execute-fork.ts` and `interpreter/execute-spawn.ts`.
+   * to peers — see `executeFork` and `executeSpawn` in `interpreter/execute-action.ts`
+   * and `interpreter/execute-control.ts`.
    * @internal
    */
   readonly channelStore?: ChannelStore;

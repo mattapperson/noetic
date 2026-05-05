@@ -25,7 +25,7 @@ export function isContextImpl(ctx: Context<ContextMemory>): ctx is ContextImpl {
 /**
  * Co-located with `isContextImpl` so the import of `ContextImpl` flows through
  * the same module other interpreters pull it from, sidestepping a circular
- * TDZ when this helper is used by `execute-every.ts`.
+ * TDZ when this helper is used by `executeEvery` in `execute-control.ts`.
  */
 export function getContextChannelStore<TMemory>(ctx: Context<TMemory>): ChannelStore | undefined {
   if (ctx instanceof ContextImpl) {
