@@ -1,6 +1,6 @@
-import { basename, format, join, parse } from 'node:path';
+import { basename, format, join, parse } from '@noetic/code-agent/tasks/path-utils';
 import type { FsAdapter } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/core/adapters/node';
 
 import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';

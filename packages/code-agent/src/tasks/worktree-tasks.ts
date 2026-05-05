@@ -8,8 +8,6 @@
  * pointers refreshed; missing records are seeded with default lifecycle.
  */
 
-import { createHash } from 'node:crypto';
-
 import type { TaskStoreContext } from './fs-store.js';
 import { saveTask, tryLoadTask } from './fs-store.js';
 import type { Task } from './schemas.js';
@@ -24,17 +22,32 @@ import {
 
 //#region Public API
 
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /**
  * Deterministic FS-shaped task id for a worktree pair. The hash domain is
  * `(projectRoot, worktreePath)` so the same worktree always lands on the
- * same `T-<10>` id.
+ * same `T-<10>` id. Uses SHA-256 via Web Crypto so the SDK stays free of
+ * `node:crypto`.
  */
-export function deterministicWorktreeTaskId(projectRoot: string, worktreePath: string): string {
-  const digest = createHash('sha256')
-    .update(projectRoot)
-    .update('\0')
-    .update(worktreePath)
-    .digest('base64url');
+export async function deterministicWorktreeTaskId(
+  projectRoot: string,
+  worktreePath: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const input = new Uint8Array([
+    ...encoder.encode(projectRoot),
+    0,
+    ...encoder.encode(worktreePath),
+  ]);
+  const digestBuffer = await globalThis.crypto.subtle.digest('SHA-256', input);
+  const digest = bytesToBase64Url(new Uint8Array(digestBuffer));
   return `${IdPrefix.Task}-${digest.slice(0, ID_LENGTH)}`;
 }
 
@@ -55,7 +68,7 @@ export interface EnsureWorktreeTaskArgs {
  */
 export async function ensureWorktreeTask(args: EnsureWorktreeTaskArgs): Promise<Task> {
   const now = args.now ?? new Date().toISOString();
-  const taskId = deterministicWorktreeTaskId(args.projectRoot, args.worktreePath);
+  const taskId = await deterministicWorktreeTaskId(args.projectRoot, args.worktreePath);
   const existing = await tryLoadTask(args.ctx, taskId);
   if (existing !== null) {
     const next: Task = {

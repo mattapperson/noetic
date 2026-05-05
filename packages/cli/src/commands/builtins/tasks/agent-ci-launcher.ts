@@ -26,9 +26,9 @@
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { basename, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+
+import { fileUrlToPath, randomHex } from '@noetic/code-agent/tasks';
+import { basename, resolve } from '@noetic/code-agent/tasks/path-utils';
 
 import type { Signaller } from './agent-ci-control.js';
 import { defaultSignaller } from './agent-ci-control.js';
@@ -105,11 +105,11 @@ const TERMINAL_REVIEW_STATUSES: ReadonlySet<TaskReviewStatus> = new Set([
 
 function defaultRunnerScript(): string {
   // The runner ships beside the launcher in `dist/...`; tests inject a path.
-  return fileURLToPath(new URL('agent-ci-runner.ts', import.meta.url));
+  return fileUrlToPath(new URL('agent-ci-runner.ts', import.meta.url));
 }
 
 function makeSessionId(taskId: string): string {
-  return `${taskId}-${randomBytes(4).toString('hex')}`;
+  return `${taskId}-${randomHex(4)}`;
 }
 
 //#endregion

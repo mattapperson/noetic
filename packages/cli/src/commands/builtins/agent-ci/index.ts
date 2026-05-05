@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-
-import { createLocalFsAdapter } from '@noetic/core';
+import { deterministicWorktreeTaskId } from '@noetic/code-agent/tasks';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 
 import type { Command, LocalCommandCall, LocalCommandResult } from '../../types.js';
 import { AgentCiSpawnError, startAgentCiRun } from '../tasks/agent-ci-launcher.js';
@@ -13,8 +12,6 @@ import { loadProjectWorktrees } from '../tasks/git.js';
 import type { Task } from '../tasks/schemas.js';
 import {
   AutopilotState,
-  ID_LENGTH,
-  IdPrefix,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
@@ -78,22 +75,6 @@ function resolveWorkflow(args: ResolveWorkflowArgs): WorkflowResolution {
 //#endregion
 
 //#region Task ID + ensure
-
-/**
- * Deterministic FS-shaped task id for a worktree pair. The hash domain
- * is `(projectRoot, worktreePath)` so the same worktree always lands
- * on the same `T-<10>` id; the legacy SQLite id (sha256 hex) is
- * unrelated to this one because the FS schema requires the `T-<10>`
- * format.
- */
-function deterministicWorktreeTaskId(projectRoot: string, worktreePath: string): string {
-  const digest = createHash('sha256')
-    .update(projectRoot)
-    .update('\0')
-    .update(worktreePath)
-    .digest('base64url');
-  return `${IdPrefix.Task}-${digest.slice(0, ID_LENGTH)}`;
-}
 
 interface EnsureTaskArgs {
   readonly ctx: TaskStoreContext;
@@ -170,7 +151,9 @@ export async function runAgentCiCommand(args: RunAgentCiArgs): Promise<string> {
     return 'Usage: /agent-ci <workflow-file>';
   }
 
-  const loadWorktrees = args.loadProjectWorktreesFn ?? loadProjectWorktrees;
+  const shell = createLocalShellAdapter();
+  const loadWorktrees =
+    args.loadProjectWorktreesFn ?? ((cwd: string) => loadProjectWorktrees(cwd, shell));
   const startRun = args.startAgentCiRunFn ?? startAgentCiRun;
   const cwd = resolve(args.cwd);
   const worktrees = await loadWorktrees(cwd);
@@ -192,7 +175,7 @@ export async function runAgentCiCommand(args: RunAgentCiArgs): Promise<string> {
     projectRoot: current.projectRoot,
   };
   const now = args.now ?? new Date().toISOString();
-  const taskId = deterministicWorktreeTaskId(current.projectRoot, current.path);
+  const taskId = await deterministicWorktreeTaskId(current.projectRoot, current.path);
 
   try {
     await ensureWorktreeTask({

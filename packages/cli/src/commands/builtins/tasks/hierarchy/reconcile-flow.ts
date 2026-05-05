@@ -9,8 +9,9 @@
  * driven by `harness.detachedSpawn(...)` from the daemon entry.
  */
 
-import type { ContextMemory, Step } from '@noetic/core';
+import type { ContextMemory, ShellAdapter, Step } from '@noetic/core';
 import { every, step } from '@noetic/core';
+import { createLocalShellAdapter } from '@noetic/core/adapters/node';
 
 import type { TaskStoreContext } from '../fs-store.js';
 import type { ProjectWorktree } from '../git.js';
@@ -32,9 +33,14 @@ export interface ReconcileFlowDeps {
   readonly ctx: TaskStoreContext;
   /**
    * Optional override for the `git worktree list` resolver. Defaults to
-   * {@link loadProjectWorktrees} which spawns the real `git` CLI.
+   * {@link loadProjectWorktrees} driven by a local `ShellAdapter`.
    */
   readonly loadWorktrees?: LoadWorktreesFn;
+  /**
+   * Shell used when `loadWorktrees` is not injected. Defaults to
+   * `createLocalShellAdapter()`.
+   */
+  readonly shell?: ShellAdapter;
 }
 
 //#endregion
@@ -55,7 +61,9 @@ const RECONCILE_TICK_INTERVAL_MS = 60_000;
 export function buildReconcileTickStep(
   deps: ReconcileFlowDeps,
 ): Step<ContextMemory, void, ReconcileTasksFsResult> {
-  const loadWorktrees: LoadWorktreesFn = deps.loadWorktrees ?? loadProjectWorktrees;
+  const shell = deps.shell ?? createLocalShellAdapter();
+  const loadWorktrees: LoadWorktreesFn =
+    deps.loadWorktrees ?? ((projectRoot) => loadProjectWorktrees(projectRoot, shell));
   return step.run<ContextMemory, void, ReconcileTasksFsResult>({
     id: 'reconcile.tick',
     execute: async (): Promise<ReconcileTasksFsResult> => {

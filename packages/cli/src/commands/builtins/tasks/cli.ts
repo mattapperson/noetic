@@ -8,7 +8,7 @@
  */
 
 import type { FsAdapter } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/core/adapters/node';
 
 import { ensureDaemon } from '../../../daemon-runtime/runtime.js';
 import type { TaskStoreContext } from './fs-store.js';

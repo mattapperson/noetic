@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+
+import { join } from './path-utils.js';
 
 //#region Types
 

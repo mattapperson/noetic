@@ -10,9 +10,8 @@
  * works, so the TUI can chat with it live.
  */
 
-import { basename, dirname } from 'node:path';
-
-import { createLocalFsAdapter } from '@noetic/core';
+import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
+import { createLocalFsAdapter } from '@noetic/core/adapters/node';
 import { createSteeringFileLayer } from '../../../memory/steering-file-layer.js';
 import { createCodingTools } from '../../../tools/index.js';
 import { AgentIpcServer, unlinkSocketSync } from './agent-ipc-server.js';

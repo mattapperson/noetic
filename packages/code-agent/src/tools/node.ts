@@ -3,7 +3,7 @@
  */
 
 import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core/adapters/node';
 import type { LspService } from '../lsp/service.js';
 import type { AskUserService } from './ask-user.js';
 import { createAskUserTool } from './ask-user.js';
@@ -96,8 +96,8 @@ export {
   InteractiveTerminalOutputSchema,
   type InteractiveTerminalTool,
 } from './interactive-terminal.js';
-export { createLspTool, type LspOutput, type LspTool } from './lsp.js';
 export { createLsTool, type LsOutput, type LsTool } from './ls.js';
+export { createLspTool, type LspOutput, type LspTool } from './lsp.js';
 export {
   ALLOW_MUTATION,
   isInteractiveTerminalMutation,

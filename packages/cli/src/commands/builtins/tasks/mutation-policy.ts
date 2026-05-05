@@ -11,9 +11,9 @@
  * we fall open (allow mutation) rather than risk locking the user out.
  */
 
-import { resolve } from 'node:path';
+import { resolve } from '@noetic/code-agent/tasks/path-utils';
 import type { ShellAdapter } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/core/adapters/node';
 
 import type {
   MutationPolicy,

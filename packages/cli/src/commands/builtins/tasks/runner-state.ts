@@ -7,8 +7,7 @@
  * task record.
  */
 
-import path from 'node:path';
-
+import * as path from '@noetic/code-agent/tasks/path-utils';
 import { z } from 'zod';
 
 import { isEnoent } from './_fs-errors.js';

@@ -20,8 +20,7 @@
 
 import type { ChildProcess, SpawnOptions, StdioOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
-import { basename, dirname } from 'node:path';
-
+import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
 import { createLocalFsAdapter } from '@noetic/core';
 
 import type { TaskStoreContext } from './fs-store.js';

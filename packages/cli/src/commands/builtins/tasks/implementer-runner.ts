@@ -17,8 +17,7 @@
  *   4. Best-effort: clear `_implementer.json` on the leaf.
  */
 
-import { basename, dirname } from 'node:path';
-
+import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
 import { createLocalFsAdapter } from '@noetic/core';
 
 import { createSteeringFileLayer } from '../../../memory/steering-file-layer.js';

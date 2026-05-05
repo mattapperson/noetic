@@ -1,6 +1,8 @@
 import net from 'node:net';
-import { mkdir, rm } from 'node:fs/promises';
-import { dirname } from 'node:path';
+
+import type { FsAdapter } from '@noetic/core';
+
+import { dirname } from './path-utils.js';
 import type {
   TaskRunTransportAdapter,
   TaskRunTransportFrame,
@@ -9,6 +11,13 @@ import type {
 export interface UnixTaskRunTransportOptions {
   socketPath: string;
   role: 'server' | 'client';
+  /**
+   * FsAdapter used to prepare the socket directory (mkdir) and clear a
+   * stale socket (rm) before listening. Defaulting to `@noetic/core`'s
+   * local adapter would pull it into every consumer's bundle; callers
+   * pass their own.
+   */
+  fs: FsAdapter;
 }
 
 function encode(frame: TaskRunTransportFrame): string {
@@ -73,10 +82,8 @@ export function createUnixSocketTaskRunTransportNode(
     if (options.role !== 'server' || server) {
       return;
     }
-    await mkdir(dirname(options.socketPath), {
-      recursive: true,
-    });
-    await rm(options.socketPath, {
+    await options.fs.mkdir(dirname(options.socketPath));
+    await options.fs.rm(options.socketPath, {
       force: true,
     });
     server = net.createServer(attach);

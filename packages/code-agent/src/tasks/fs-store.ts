@@ -1,11 +1,10 @@
-import { randomBytes } from 'node:crypto';
-import path from 'node:path';
-
 import type { FsAdapter } from '@noetic/core';
 
 import { isEnoent } from './_fs-errors.js';
+import * as path from './path-utils.js';
 import type { TasksRootCtx } from './paths.js';
 import { taskDirPaths, taskRootPaths, tempPath } from './paths.js';
+import { randomBase64Url } from './random.js';
 import type { Event, LogEntry, State, Task } from './schemas.js';
 import {
   EventSchema,
@@ -64,7 +63,7 @@ async function exists(fs: FsAdapter, target: string): Promise<boolean> {
 }
 
 function randomSalt(): string {
-  return randomBytes(6).toString('base64url');
+  return randomBase64Url(6);
 }
 
 /**

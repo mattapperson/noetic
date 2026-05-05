@@ -1,7 +1,7 @@
-import path from 'node:path';
-
 import type { AgentHarness, ContextMemory, Step } from '@noetic/core';
 import { branch, step } from '@noetic/core';
+
+import * as path from '@noetic/code-agent/tasks/path-utils';
 
 import { isEnoent } from '../_fs-errors.js';
 import type { TaskStoreContext } from '../fs-store.js';

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { Signaller } from '../../src/commands/builtins/tasks/agent-ci-control.js';
+import type {
+  ProcessSignaller,
+  SubprocessAdapter,
+  SubprocessHandle,
+  SubprocessRequest,
+} from '@noetic/core';
 import { saveTask, tailEvents, tryLoadTask } from '../../src/commands/builtins/tasks/fs-store.js';
 import {
   ImplementerSpawnError,
@@ -34,7 +39,7 @@ interface FakeSignallerOpts {
 }
 
 function makeFakeSignaller(opts: FakeSignallerOpts = {}): {
-  signaller: Signaller;
+  signaller: ProcessSignaller;
   killed: Array<{
     target: number;
     signal: string;
@@ -62,20 +67,83 @@ function makeFakeSignaller(opts: FakeSignallerOpts = {}): {
   };
 }
 
-interface FakeChildOpts {
+interface FakeSubprocessOpts {
   readonly pid?: number;
-  readonly errorOnEvent?: Error;
+  readonly pidStarttime?: string | null;
+  readonly alive?: boolean;
+  readonly spawnError?: Error;
 }
 
-function makeFakeChild(opts: FakeChildOpts = {}) {
+function makeFakeSubprocess(opts: FakeSubprocessOpts = {}): {
+  subprocess: SubprocessAdapter;
+  requests: SubprocessRequest[];
+  stopped: Array<{
+    handleId: string;
+    reason?: string;
+  }>;
+} {
+  const requests: SubprocessRequest[] = [];
+  const stopped: Array<{
+    handleId: string;
+    reason?: string;
+  }> = [];
+  const handle: SubprocessHandle = {
+    id: 'subprocess-test',
+    status: 'running',
+    startedAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+    metadata: {
+      ...(opts.pid === undefined
+        ? {}
+        : {
+            pid: opts.pid,
+          }),
+      pidStarttime: opts.pidStarttime ?? null,
+    },
+  };
   return {
-    pid: opts.pid ?? 4242,
-    unref: () => {},
-    on: (_event: string, listener: (err: Error) => void) => {
-      if (opts.errorOnEvent) {
-        listener(opts.errorOnEvent);
-      }
-      return undefined;
+    requests,
+    stopped,
+    subprocess: {
+      async spawn(request) {
+        requests.push(request);
+        if (opts.spawnError) {
+          throw opts.spawnError;
+        }
+        return handle;
+      },
+      async get(handleId) {
+        return handleId === handle.id ? handle : null;
+      },
+      async stop(handleId, reason) {
+        stopped.push({
+          handleId,
+          reason,
+        });
+        return {
+          kind: 'stopped',
+          handleId,
+          handle: {
+            ...handle,
+            status: 'stopped',
+          },
+        };
+      },
+      async pause(handleId) {
+        return {
+          kind: 'not_found',
+          handleId,
+        };
+      },
+      async resume(handleId) {
+        return {
+          kind: 'not_found',
+          handleId,
+        };
+      },
+      async isAlive() {
+        return opts.alive ?? true;
+      },
     },
   };
 }
@@ -125,6 +193,9 @@ describe('startImplementerRun', () => {
     const leafId = 'T-leaf000000';
     await seedLeafTask(ctx, leafId);
     const { signaller } = makeFakeSignaller();
+    const { subprocess, requests } = makeFakeSubprocess({
+      pid: 4242,
+    });
 
     const result = await startImplementerRun({
       ctx,
@@ -135,7 +206,7 @@ describe('startImplementerRun', () => {
       now: '2026-05-01T00:00:00.000Z',
       runnerScript: '/abs/runner.ts',
       provisionFn: fakeProvision(),
-      spawnFn: () => makeFakeChild(),
+      subprocess,
       signaller,
       env: {
         FOO: 'bar',
@@ -148,6 +219,15 @@ describe('startImplementerRun', () => {
     expect(result.provisionTool).toBe(ProvisionTool.Git);
     expect(result.featureId).toBe('F-abc1234567');
     expect(result.taskId).toBe(leafId);
+    expect(requests[0]?.command).toBe('bun');
+    expect(requests[0]?.args).toEqual([
+      'run',
+      '/abs/runner.ts',
+    ]);
+    expect(requests[0]?.cwd).toBe('/repo/.worktrees/feat/x');
+    expect(requests[0]?.detached).toBe(true);
+    expect(requests[0]?.env?.FOO).toBe('bar');
+    expect(requests[0]?.env?.NOETIC_FEATURE_ID).toBe('F-abc1234567');
 
     const sidecar = await loadImplementer(ctx, leafId);
     expect(sidecar?.pid).toBe(4242);
@@ -201,6 +281,7 @@ describe('startImplementerRun', () => {
         ],
       ]),
     });
+    const { subprocess, requests } = makeFakeSubprocess();
 
     let provisionCalls = 0;
     await expect(
@@ -219,12 +300,13 @@ describe('startImplementerRun', () => {
             tool: ProvisionTool.Git,
           };
         },
-        spawnFn: () => makeFakeChild(),
+        subprocess,
         signaller,
       }),
     ).rejects.toThrow(ImplementerSpawnError);
     // Provision should not be reached when a live sidecar is already attached.
     expect(provisionCalls).toBe(0);
+    expect(requests).toEqual([]);
   });
 
   it('overwrites a stale sidecar (dead pid)', async () => {
@@ -248,6 +330,9 @@ describe('startImplementerRun', () => {
         4242,
       ]),
     });
+    const { subprocess } = makeFakeSubprocess({
+      pid: 4242,
+    });
     const result = await startImplementerRun({
       ctx,
       taskId: leafId,
@@ -256,7 +341,7 @@ describe('startImplementerRun', () => {
       branch: 'feat/x',
       runnerScript: '/abs/runner.ts',
       provisionFn: fakeProvision(),
-      spawnFn: () => makeFakeChild(),
+      subprocess,
       signaller,
     });
     expect(result.pid).toBe(4242);
@@ -293,6 +378,9 @@ describe('startImplementerRun', () => {
         ],
       ]),
     });
+    const { subprocess } = makeFakeSubprocess({
+      pid: 4242,
+    });
     const result = await startImplementerRun({
       ctx,
       taskId: leafId,
@@ -301,7 +389,7 @@ describe('startImplementerRun', () => {
       branch: 'feat/x',
       runnerScript: '/abs/runner.ts',
       provisionFn: fakeProvision(),
-      spawnFn: () => makeFakeChild(),
+      subprocess,
       signaller,
     });
     expect(result.pid).toBe(4242);
@@ -314,6 +402,7 @@ describe('startImplementerRun', () => {
     const leafId = 'T-leaf000003';
     await seedLeafTask(ctx, leafId);
     const { signaller, killed } = makeFakeSignaller();
+    const { subprocess, stopped } = makeFakeSubprocess();
     await expect(
       startImplementerRun({
         ctx,
@@ -323,17 +412,14 @@ describe('startImplementerRun', () => {
         branch: 'feat/x',
         runnerScript: '/abs/runner.ts',
         provisionFn: fakeProvision(),
-        spawnFn: () => ({
-          pid: undefined,
-          unref: () => {},
-          on: () => undefined,
-        }),
+        subprocess,
         signaller,
       }),
     ).rejects.toThrow(ImplementerSpawnError);
     // No sidecar should exist when spawn fails this early.
     expect(await loadImplementer(ctx, leafId)).toBeNull();
     expect(killed).toEqual([]);
+    expect(stopped[0]?.reason).toBe('missing pid metadata');
   });
 
   it('rejects with ImplementerSpawnError when worktree provisioning fails', async () => {
@@ -341,6 +427,7 @@ describe('startImplementerRun', () => {
     const leafId = 'T-leaf000004';
     await seedLeafTask(ctx, leafId);
     const { signaller } = makeFakeSignaller();
+    const { subprocess } = makeFakeSubprocess();
     await expect(
       startImplementerRun({
         ctx,
@@ -352,7 +439,7 @@ describe('startImplementerRun', () => {
         provisionFn: async () => {
           throw new Error('disk full');
         },
-        spawnFn: () => makeFakeChild(),
+        subprocess,
         signaller,
       }),
     ).rejects.toThrow(ImplementerSpawnError);
@@ -364,6 +451,7 @@ describe('startImplementerRun', () => {
     const leafId = 'T-leaf000005';
     await seedLeafTask(ctx, leafId);
     const { signaller } = makeFakeSignaller();
+    const { subprocess } = makeFakeSubprocess();
     await expect(
       startImplementerRun({
         ctx,
@@ -372,7 +460,7 @@ describe('startImplementerRun', () => {
         featureId: 'F-abc1234567',
         branch: '   ',
         provisionFn: fakeProvision(),
-        spawnFn: () => makeFakeChild(),
+        subprocess,
         signaller,
       }),
     ).rejects.toThrow(/branch is required/);
@@ -384,7 +472,7 @@ describe('startImplementerRun', () => {
         featureId: '',
         branch: 'feat/x',
         provisionFn: fakeProvision(),
-        spawnFn: () => makeFakeChild(),
+        subprocess,
         signaller,
       }),
     ).rejects.toThrow(/featureId is required/);

@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join } from '@noetic/code-agent/tasks/path-utils';
 
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';

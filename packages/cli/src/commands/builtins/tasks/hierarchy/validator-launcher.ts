@@ -1,6 +1,7 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+
+import { resolve } from '@noetic/code-agent/tasks/path-utils';
 
 import type { Signaller } from '../agent-ci-control.js';
 import { defaultSignaller } from '../agent-ci-control.js';

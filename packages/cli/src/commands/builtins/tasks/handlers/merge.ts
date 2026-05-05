@@ -1,5 +1,5 @@
 import type { ShellAdapter, ShellExecResult } from '@noetic/core';
-import { createLocalShellAdapter } from '@noetic/core';
+import { createLocalShellAdapter } from '@noetic/core/adapters/node';
 
 import type { TaskStoreContext } from '../fs-store.js';
 import { appendEvent, saveTask } from '../fs-store.js';

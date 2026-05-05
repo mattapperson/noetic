@@ -1,5 +1,6 @@
-import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import type { ShellAdapter } from '@noetic/core';
+
+import { resolve } from './path-utils.js';
 
 export interface ProjectWorktree {
   projectRoot: string;
@@ -20,8 +21,17 @@ export interface ParsedWorktreeRecord {
   prunable: boolean;
 }
 
-export async function loadProjectWorktrees(cwd: string): Promise<ProjectWorktree[]> {
-  return loadProjectWorktreesWithGit(cwd, gitOutput);
+/**
+ * Portable entry point. Accepts a `ShellAdapter` rather than spawning
+ * `git` directly, so the SDK stays free of `node:child_process`. The
+ * thin `loadProjectWorktreesWithGit` variant still exists for callers
+ * that want to inject a bespoke git runner (e.g. a fake in tests).
+ */
+export async function loadProjectWorktrees(
+  cwd: string,
+  shell: ShellAdapter,
+): Promise<ProjectWorktree[]> {
+  return loadProjectWorktreesWithGit(cwd, gitOutputFromShell(shell));
 }
 
 export async function loadProjectWorktreesWithGit(
@@ -114,30 +124,32 @@ async function getRepoRoot(cwd: string, git: GitCommandRunner): Promise<string> 
   ]);
 }
 
-async function gitOutput(cwd: string, args: ReadonlyArray<string>): Promise<string> {
-  return new Promise((resolveOutput, reject) => {
-    const child = spawn('git', args, {
-      cwd,
-      stdio: [
-        'ignore',
-        'pipe',
-        'pipe',
-      ],
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    child.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
-    child.stderr.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(Buffer.concat(stderr).toString('utf8').trim() || 'git command failed'));
-        return;
-      }
-      resolveOutput(Buffer.concat(stdout).toString('utf8').trim());
-    });
-  });
+//#region ShellAdapter-backed git runner
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
+
+/**
+ * Wrap a `ShellAdapter` so a `GitCommandRunner` can drive it. Quotes
+ * each argument, runs `git <args>` in the given cwd, and returns
+ * stdout trimmed. Non-zero exits propagate as a thrown `Error` with the
+ * captured stderr — the historical contract callers relied on.
+ */
+export function gitOutputFromShell(shell: ShellAdapter): GitCommandRunner {
+  return async (cwd, args) => {
+    const command = `git ${args.map(shellQuote).join(' ')}`;
+    const result = await shell.exec(command, {
+      cwd,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || 'git command failed');
+    }
+    return result.stdout.trim();
+  };
+}
+
+//#endregion
 
 function splitPorcelainLine(line: string): [
   string,

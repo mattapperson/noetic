@@ -30,7 +30,9 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+
+import { join } from '@noetic/code-agent/tasks/path-utils';
+
 import type { Context, ContextMemory, Step } from '@noetic/core';
 import { fork, step } from '@noetic/core';
 import { z } from 'zod';

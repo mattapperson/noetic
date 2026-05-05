@@ -29,6 +29,10 @@
       "types": "./src/plan/index.ts",
       "default": "./src/plan/index.ts"
     },
+    "./ask-user-service": {
+      "types": "./src/ask-user-service.ts",
+      "default": "./src/ask-user-service.ts"
+    },
     "./memory": {
       "types": "./src/memory/index.ts",
       "default": "./src/memory/index.ts"
@@ -56,6 +60,10 @@
     "./tasks/execution": {
       "types": "./src/tasks/execution.ts",
       "default": "./src/tasks/execution.ts"
+    },
+    "./tasks/path-utils": {
+      "types": "./src/tasks/path-utils.ts",
+      "default": "./src/tasks/path-utils.ts"
     },
     "./tasks/transport/memory": {
       "types": "./src/tasks/subprocess-transport-memory.ts",
