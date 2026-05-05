@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'bun:test';
-
-import { AgentHarness } from '@noetic/core';
-
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
+import { featureLoopStateChan, validatorRequestChan } from '@noetic/code-agent/tasks/ipc-node';
+import type { Event } from '@noetic/code-agent/tasks/schema';
 import {
-  featureLoopStateChan,
-  validatorRequestChan,
-} from '@noetic/code-agent/tasks/ipc-node';
+  AutopilotState,
+  EventKind,
+  HierarchyStatus,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
 import { loadState, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { AgentHarness } from '@noetic/core';
+import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
 import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
 import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
@@ -24,15 +28,6 @@ import {
   buildValidatorIterationStep,
 } from '../../../src/commands/builtins/tasks/hierarchy/validator-flow.js';
 import type { RunValidatorFn } from '../../../src/commands/builtins/tasks/hierarchy/validator-job.js';
-import type { Event } from '@noetic/code-agent/tasks/schema';
-import {
-  AutopilotState,
-  EventKind,
-  HierarchyStatus,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

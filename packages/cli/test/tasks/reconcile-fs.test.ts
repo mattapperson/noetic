@@ -1,7 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-
-import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
 import { reconcileTasksFs } from '@noetic/code-agent/tasks';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
@@ -11,6 +8,8 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
 import { makeStoreContext } from './_helpers.js';
 
 //#region Fixtures

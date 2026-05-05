@@ -7,8 +7,8 @@ import {
   ValidatorRequestSchema,
   validatorRequestChan,
 } from '@noetic/code-agent/tasks/ipc-node';
-import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
 import { EventKind, EventSchema } from '@noetic/code-agent/tasks/schema';
+import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
 
 //#region validatorRequestChan
 

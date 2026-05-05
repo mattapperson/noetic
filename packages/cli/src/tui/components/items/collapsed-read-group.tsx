@@ -4,12 +4,12 @@
  * (⎿ Read 3 files, listed 1 directory).
  */
 
-import { relativizeHome } from '../../paths.js';
 import { Text } from 'ink';
 import type { ReactNode } from 'react';
 import { EXPAND_HINT_TEXT } from '../../glyphs.js';
 import type { CollapsedReadGroup } from '../../grouping/types.js';
 import { totalOpCount } from '../../grouping/types.js';
+import { relativizeHome } from '../../paths.js';
 import { pluralize } from '../../plural.js';
 import { MessageResponse } from './message-response.js';
 

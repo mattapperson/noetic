@@ -3,7 +3,6 @@
  * +/- markers, and a 10-line cap with "+N lines (ctrl+o to expand)" suffix.
  */
 
-import { relativizeHome } from '../../paths.js';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
@@ -17,6 +16,7 @@ import {
   parseUnifiedDiff,
 } from '../../diff/parse-unified-diff.js';
 import { ELLIPSIS, EXPAND_HINT_TEXT } from '../../glyphs.js';
+import { relativizeHome } from '../../paths.js';
 import { pluralize } from '../../plural.js';
 import { parseToolOutput } from '../../tool-output.js';
 import type { Theme } from '../theme.js';

@@ -1,14 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { deterministicWorktreeTaskId } from '@noetic/code-agent/tasks';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
-
-import type { Command, LocalCommandCall, LocalCommandResult } from '../../types.js';
-import { AgentCiSpawnError, startAgentCiRun } from '../tasks/agent-ci-launcher.js';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
-import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
@@ -16,6 +8,13 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
+import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import type { Command, LocalCommandCall, LocalCommandResult } from '../../types.js';
+import { AgentCiSpawnError, startAgentCiRun } from '../tasks/agent-ci-launcher.js';
 
 //#region Workflow resolution
 

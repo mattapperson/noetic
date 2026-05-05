@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import {
+  AutopilotState,
+  generateTaskId,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type {
   AgentCiActionResult,
   ControlSignal,
@@ -10,17 +19,7 @@ import {
   findActiveAgentCiRunner,
   togglePauseAgentCiRun,
 } from '../src/commands/builtins/tasks/agent-ci-control.js';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { loadRunner, saveRunner } from '../src/commands/builtins/tasks/runner-state.js';
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import {
-  AutopilotState,
-  generateTaskId,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './tasks/_helpers.js';
 
 //#region Mock helpers

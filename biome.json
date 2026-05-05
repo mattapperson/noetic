@@ -23,6 +23,7 @@
       "!packages/web/.source",
       "!packages/web/.next",
       "!packages/web/next-env.d.ts",
+      "!.agents",
       "!.worktrees",
       "!.claude",
       "!.vercel",

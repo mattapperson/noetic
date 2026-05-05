@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-
-import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic/core';
-
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import {
+  AutopilotState,
+  HierarchyStatus,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
 import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic/core';
+import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
 import type { AutopilotFlowDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot-flow.js';
 import {
   buildAutopilotEvery,
@@ -24,14 +30,6 @@ import {
   listMilestones,
   listSlices,
 } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import {
-  AutopilotState,
-  HierarchyStatus,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

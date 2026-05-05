@@ -1,5 +1,4 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { getDefaultRegistrar } from '../types/step-registrar';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type {
@@ -11,6 +10,7 @@ import type {
   StepForkRace,
   StepForkSettle,
 } from '../types/step';
+import { getDefaultRegistrar } from '../types/step-registrar';
 import { frameworkCast } from '../util/framework-cast';
 
 /**

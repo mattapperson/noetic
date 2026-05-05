@@ -10,17 +10,19 @@ export interface RuntimeCapabilities {
   lsp: boolean;
 }
 
-export function detectRuntimeCapabilities(): RuntimeCapabilities {
-  const g = globalThis as typeof globalThis & {
-    Bun?: unknown;
-    WorkerGlobalScope?: unknown;
-    window?: unknown;
-    process?: {
-      versions?: {
-        node?: string;
-      };
+interface RuntimeGlobal {
+  Bun?: unknown;
+  WorkerGlobalScope?: unknown;
+  window?: unknown;
+  process?: {
+    versions?: {
+      node?: string;
     };
   };
+}
+
+export function detectRuntimeCapabilities(): RuntimeCapabilities {
+  const g: typeof globalThis & RuntimeGlobal = globalThis;
   const isBun = g.Bun !== undefined;
   const isNode = !!g.process?.versions?.node;
   const isWorker =

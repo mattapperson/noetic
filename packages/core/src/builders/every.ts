@@ -1,8 +1,8 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { getDefaultRegistrar } from '../types/step-registrar';
 import type { Channel } from '../types/channel';
 import type { ContextMemory } from '../types/memory';
 import type { EveryErrorPolicy, Step, StepEvery } from '../types/step';
+import { getDefaultRegistrar } from '../types/step-registrar';
 
 /**
  * Configuration options accepted by the `every()` builder, excluding the `kind`

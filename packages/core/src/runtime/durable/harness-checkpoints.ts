@@ -1,11 +1,11 @@
-import type { Context } from '../../types/context';
-import type { MemoryLayer } from '../../types/memory';
-import type { Item } from '../../types/items';
+import type { LayerStateStore } from '../../memory/layer-lifecycle';
+import type { ItemSchemaRegistry } from '../../schemas/item';
 import type { CheckpointSnapshot, FrontierFrame } from '../../types/checkpoint';
 import { CheckpointSchemaVersion } from '../../types/checkpoint';
-import type { ItemSchemaRegistry } from '../../schemas/item';
+import type { Context } from '../../types/context';
+import type { Item } from '../../types/items';
+import type { MemoryLayer } from '../../types/memory';
 import { ContextImpl } from '../context-impl';
-import type { LayerStateStore } from '../../memory/layer-lifecycle';
 import type { CheckpointStore } from './checkpoint-store';
 
 //#region Handle interface
@@ -45,10 +45,7 @@ export interface CheckpointHarnessHandle {
  *
  * @internal
  */
-export async function captureCheckpoint(
-  h: CheckpointHarnessHandle,
-  ctx: Context,
-): Promise<void> {
+export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context): Promise<void> {
   const store = h.checkpointStore;
   if (!store) {
     return;

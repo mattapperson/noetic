@@ -25,9 +25,13 @@ export interface AgentConfig {
     'clone-files'?: string[];
     cleanup?: 'always' | 'if-clean' | 'never';
   };
-  history?: { maxItems?: number };
+  history?: {
+    maxItems?: number;
+  };
   plugins?: ReadonlyArray<unknown>;
-  ui?: { doublePressWindowMs?: number };
+  ui?: {
+    doublePressWindowMs?: number;
+  };
   trustProjectEmbeddedCommands?: boolean;
 }
 
@@ -40,16 +44,12 @@ export interface PluginContext {
 export interface NoeticPlugin {
   name: string;
   version: string;
-  tools?: (
-    ctx: PluginContext,
-  ) => ReadonlyArray<Tool> | Promise<ReadonlyArray<Tool>>;
+  tools?: (ctx: PluginContext) => ReadonlyArray<Tool> | Promise<ReadonlyArray<Tool>>;
   memoryLayers?: (
     ctx: PluginContext,
   ) => ReadonlyArray<MemoryLayer> | Promise<ReadonlyArray<MemoryLayer>>;
   skills?: (ctx: PluginContext) => ReadonlyArray<unknown> | Promise<ReadonlyArray<unknown>>;
-  commands?: (
-    ctx: PluginContext,
-  ) => ReadonlyArray<{
+  commands?: (ctx: PluginContext) => ReadonlyArray<{
     name: string;
     description: string;
     execute: (input: string, session: unknown) => Promise<unknown> | unknown;

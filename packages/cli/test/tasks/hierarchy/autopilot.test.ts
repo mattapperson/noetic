@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'bun:test';
-
-import { createInMemorySubprocessAdapter } from '@noetic/core';
-
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
+import type { Event, Task } from '@noetic/code-agent/tasks/schema';
+import {
+  AutopilotState,
+  EventKind,
+  HierarchyStatus,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
 import {
   loadState,
   saveTask,
   tailEvents,
   tryLoadTask,
 } from '@noetic/code-agent/tasks/store/fs-node';
+import { createInMemorySubprocessAdapter } from '@noetic/core';
+import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
 import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
 import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
@@ -23,15 +30,6 @@ import {
   listMilestones,
   listSlices,
 } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { Event, Task } from '@noetic/code-agent/tasks/schema';
-import {
-  AutopilotState,
-  EventKind,
-  HierarchyStatus,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

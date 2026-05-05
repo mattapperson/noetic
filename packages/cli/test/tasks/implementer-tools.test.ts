@@ -7,10 +7,16 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-
+import {
+  AutopilotState,
+  EventKind,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
+import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ToolExecutionContext } from '@noetic/core';
 import { createDetachedSignal } from '@noetic/core';
-import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ImplementerOutcome } from '../../src/commands/builtins/tasks/hierarchy/implementer-flow.js';
 import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
 import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
@@ -19,13 +25,6 @@ import {
   createImplementationBlockedTool,
   createImplementationDoneTool,
 } from '../../src/commands/builtins/tasks/implementer-tools.js';
-import {
-  AutopilotState,
-  EventKind,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './_helpers.js';
 
 const PARENT_ID = 'T-parent0000';

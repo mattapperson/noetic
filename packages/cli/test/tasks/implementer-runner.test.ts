@@ -1,9 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-
-import { readLog, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
-import { loadFeature } from '../../src/commands/builtins/tasks/hierarchy/store.js';
-import { commitExitWrites } from '../../src/commands/builtins/tasks/implementer-runner.js';
 import {
   AutopilotState,
   EventKind,
@@ -11,6 +6,10 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import { readLog, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
+import { loadFeature } from '../../src/commands/builtins/tasks/hierarchy/store.js';
+import { commitExitWrites } from '../../src/commands/builtins/tasks/implementer-runner.js';
 import { makeStoreContext } from './_helpers.js';
 
 const PARENT_ID = 'T-parent0000';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { trackUsage } from '../../src/interpreter/message-helpers';
 import type { LLMResponse } from '../../src/types/common';
+import { trackUsage } from '../../src/util/message-helpers';
 import { makeMockContext } from '../_helpers';
 
 describe('trackUsage', () => {

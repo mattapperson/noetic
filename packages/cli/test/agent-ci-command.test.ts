@@ -2,14 +2,13 @@ import { describe, expect, mock, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-
+import { TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
 import { runAgentCiCommand } from '../src/commands/builtins/agent-ci/index.js';
 import type {
   StartAgentCiRunArgs,
   StartAgentCiRunResult,
 } from '../src/commands/builtins/tasks/agent-ci-launcher.js';
-import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
-import { TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './tasks/_helpers.js';
 
 interface MockHarness {

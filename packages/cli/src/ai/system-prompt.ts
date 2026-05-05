@@ -6,7 +6,7 @@
  * Sections are composed in fixed order — see `SECTIONS` below.
  *
  * Content adapted from Claude Code's open-source prompts (Anthropic) with
- * tool names interpolated from `../tools/constants.ts`. The cyber-risk
+ * tool names interpolated from `@noetic/code-agent/tools`. The cyber-risk
  * instruction is a verbatim copy per Safeguards team convention.
  */
 
@@ -18,7 +18,7 @@ import {
   LS_TOOL_NAME,
   READ_TOOL_NAME,
   WRITE_TOOL_NAME,
-} from '../tools/constants.js';
+} from '@noetic/code-agent/tools';
 
 //#region Types
 

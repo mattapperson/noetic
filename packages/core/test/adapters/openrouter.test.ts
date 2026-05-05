@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { OpenResponsesResult as OpenResponsesNonStreamingResponse } from '@openrouter/agent';
+import type { OpenResponsesResult } from '@openrouter/agent';
+
+type OpenResponsesNonStreamingResponse = OpenResponsesResult;
 
 type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
 

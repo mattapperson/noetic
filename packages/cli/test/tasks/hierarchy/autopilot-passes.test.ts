@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-
-import { createInMemorySubprocessAdapter } from '@noetic/core';
-
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
-import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
-import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
 import {
   AutopilotState,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+
+import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { createInMemorySubprocessAdapter } from '@noetic/core';
+import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
+import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
+import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
 import { makeStoreContext } from '../_helpers.js';
 
 interface FakeSignaller {

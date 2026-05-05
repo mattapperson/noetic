@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { z } from 'zod';
 import type {
   ChannelTransportAdapter,
   ChannelTransportController,
@@ -14,16 +15,18 @@ function encodeFrame(frame: ChannelTransportFrame): string {
   return `${JSON.stringify(frame)}\n`;
 }
 
+const ChannelTransportFrameSchema = z.object({
+  channel: z.string(),
+  value: z.unknown(),
+});
+
 function parseFrame(raw: string): ChannelTransportFrame | null {
   try {
-    const parsed = JSON.parse(raw) as Partial<ChannelTransportFrame>;
-    if (typeof parsed.channel !== 'string') {
+    const parsed = ChannelTransportFrameSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) {
       return null;
     }
-    return {
-      channel: parsed.channel,
-      value: parsed.value,
-    };
+    return parsed.data;
   } catch {
     return null;
   }

@@ -1,18 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { SpawnOptions } from 'node:child_process';
-import type { Signaller } from '../../src/commands/builtins/tasks/agent-ci-control.js';
-import type {
-  AgentCiSpawn,
-  StartAgentCiRunArgs,
-} from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
-import {
-  AgentCiSpawnError,
-  startAgentCiRun,
-} from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
-import { loadRunner, saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
@@ -22,6 +9,18 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { saveTask, tailEvents, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Signaller } from '../../src/commands/builtins/tasks/agent-ci-control.js';
+import type {
+  AgentCiSpawn,
+  StartAgentCiRunArgs,
+} from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
+import {
+  AgentCiSpawnError,
+  startAgentCiRun,
+} from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
+import { loadRunner, saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
 import { makeStoreContext } from './_helpers.js';
 
 //#region Helpers

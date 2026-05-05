@@ -1,12 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-
-import { AgentHarness } from '@noetic/core';
-
-import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import {
-  buildReconcileEvery,
-  buildReconcileTickStep,
-} from '../../../src/commands/builtins/tasks/hierarchy/reconcile-flow.js';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
@@ -15,6 +7,12 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { AgentHarness } from '@noetic/core';
+import {
+  buildReconcileEvery,
+  buildReconcileTickStep,
+} from '../../../src/commands/builtins/tasks/hierarchy/reconcile-flow.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const NOW = '2026-04-30T00:00:00.000Z';

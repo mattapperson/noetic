@@ -768,8 +768,8 @@ export async function createCodeAgent(
   const locallyPublishedFrames = new WeakSet<ChannelTransportFrame>();
   let channelBridgeCtx: Context | null = null;
 
-  function registerChannel<T>(channel: Channel<T>): void {
-    channelSchemas.set(channel.name, channel as Channel<unknown>);
+  function registerChannel(channel: Channel<unknown>): void {
+    channelSchemas.set(channel.name, channel);
   }
 
   const transportController: ChannelTransportController = {

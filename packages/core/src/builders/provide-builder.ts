@@ -1,7 +1,7 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { getDefaultRegistrar } from '../types/step-registrar';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { Step, StepProvide } from '../types/step';
+import { getDefaultRegistrar } from '../types/step-registrar';
 
 /**
  * Creates a provide step that attaches memory layers to its child without creating an isolated context.

@@ -162,22 +162,6 @@ async function seedChatHistory(taskDir: string, taskId: string): Promise<void> {
 
 //#endregion
 
-const HAS_PILOTTY = ((): boolean => {
-  const { status } = spawnSync(
-    'pilotty',
-    [
-      '--version',
-    ],
-    {
-      encoding: 'utf8',
-    },
-  );
-  return status === 0;
-})();
-
-const HAS_API_KEY =
-  typeof process.env.OPENROUTER_API_KEY === 'string' && process.env.OPENROUTER_API_KEY.length > 0;
-
 const CLI_PATH = join(import.meta.dir, '..', '..', 'src', 'cli', 'cli.ts');
 const SESSION = `noetic-paused-${process.pid}`;
 const TASK_TITLE = 'paused chat background';

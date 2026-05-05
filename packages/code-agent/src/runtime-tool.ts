@@ -1,4 +1,4 @@
-import type { Tool } from '@noetic/core';
+import type { Tool, ToolExecutionContext } from '@noetic/core';
 import { tool, toolWithGenerator } from '@noetic/core/portable';
 import type { ZodTypeAny, z } from 'zod';
 
@@ -11,6 +11,37 @@ export interface RuntimeToolOptions<I extends ZodTypeAny, O extends ZodTypeAny> 
   fallback: (params: z.infer<I>) => z.infer<O> | Promise<z.infer<O>>;
 }
 
+type RuntimeTool<I extends ZodTypeAny, O extends ZodTypeAny> = Omit<Tool<I, O>, 'execute'> & {
+  execute(args: z.infer<I>, toolCtx: ToolExecutionContext): Promise<z.infer<O>>;
+};
+
+type RuntimeGeneratorTool<I extends ZodTypeAny, E extends ZodTypeAny, O extends ZodTypeAny> = Omit<
+  Tool<I, O>,
+  'execute'
+> & {
+  execute(
+    args: z.infer<I>,
+    toolCtx: ToolExecutionContext,
+  ): AsyncGenerator<z.infer<E>, z.infer<O>> | Promise<z.infer<O>>;
+};
+
+function isRuntimeTool<I extends ZodTypeAny, O extends ZodTypeAny>(
+  toolImpl: Tool | null | undefined,
+  input: I,
+  output: O,
+): toolImpl is RuntimeTool<I, O> {
+  return toolImpl?.input === input && toolImpl.output === output;
+}
+
+function isRuntimeGeneratorTool<I extends ZodTypeAny, E extends ZodTypeAny, O extends ZodTypeAny>(
+  toolImpl: Tool | null | undefined,
+  input: I,
+  event: E,
+  output: O,
+): toolImpl is RuntimeGeneratorTool<I, E, O> {
+  return toolImpl?.input === input && toolImpl.event === event && toolImpl.output === output;
+}
+
 export function createRuntimeTool<I extends ZodTypeAny, O extends ZodTypeAny>(
   opts: RuntimeToolOptions<I, O>,
 ): Tool<I, O> {
@@ -21,10 +52,10 @@ export function createRuntimeTool<I extends ZodTypeAny, O extends ZodTypeAny>(
     output: opts.output,
     async execute(params, ctx) {
       const implementation = await opts.load();
-      if (!implementation) {
+      if (!isRuntimeTool(implementation, opts.input, opts.output)) {
         return opts.fallback(params);
       }
-      return implementation.execute(params, ctx) as Promise<z.infer<O>>;
+      return implementation.execute(params, ctx);
     },
   });
 }
@@ -54,21 +85,20 @@ export function createRuntimeGeneratorTool<
     output: opts.output,
     async *execute(params, ctx) {
       const implementation = await opts.load();
-      if (!implementation) {
+      if (!isRuntimeGeneratorTool(implementation, opts.input, opts.event, opts.output)) {
         return await opts.fallback(params);
       }
       const result = implementation.execute(params, ctx);
       if (isAsyncGenerator(result)) {
-        const generator = result as AsyncGenerator<z.infer<E>, z.infer<O>>;
         while (true) {
-          const next = await generator.next();
+          const next = await result.next();
           if (next.done) {
             return next.value;
           }
           yield next.value;
         }
       }
-      return (await result) as z.infer<O>;
+      return await result;
     },
   });
 }

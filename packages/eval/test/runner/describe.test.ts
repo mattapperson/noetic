@@ -1,10 +1,12 @@
-import { describe as bunDescribe, expect, test } from 'bun:test';
+import * as bun from 'bun:test';
 import { step } from '@noetic/core';
 import { describe } from '../../src/runner/describe';
 import { it } from '../../src/runner/it';
 import { clearSuites, getSuites } from '../../src/runner/registry';
 
-bunDescribe('describe()', () => {
+const { expect, test } = bun;
+
+bun.describe('describe()', () => {
   test('registers a suite in the registry', () => {
     clearSuites();
 

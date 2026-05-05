@@ -1,4 +1,4 @@
-import { spawn as spawnProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 import type { ApplyResult, CodingAgent, OptimizationRecommendation } from '../../types/optimizer';
 
@@ -53,7 +53,7 @@ export class PiMonoAgent implements CodingAgent {
 
   private sendRpcRequest(recommendation: OptimizationRecommendation): Promise<ApplyResult> {
     return new Promise((resolve, reject) => {
-      const child = spawnProcess(
+      const child = spawn(
         'pi',
         [
           '--mode',

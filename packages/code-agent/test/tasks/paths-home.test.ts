@@ -21,7 +21,7 @@
  * temp dir without touching the real user home).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 

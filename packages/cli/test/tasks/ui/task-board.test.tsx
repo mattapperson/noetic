@@ -12,9 +12,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import type { DecoratedTask } from '../../../src/commands/builtins/tasks/ui/task-board.js';
 import {
   columnLabel,

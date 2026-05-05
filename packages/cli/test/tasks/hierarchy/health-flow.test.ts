@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-
-import { AgentHarness } from '@noetic/core';
-
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
+import {
+  AutopilotState,
+  HierarchyStatus,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { AgentHarness } from '@noetic/core';
+import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
 import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
 import type { HealthFlowDeps } from '../../../src/commands/builtins/tasks/hierarchy/health-flow.js';
@@ -23,13 +28,6 @@ import {
   recordValidatorRun,
   updateValidatorRun,
 } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
-import {
-  AutopilotState,
-  HierarchyStatus,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

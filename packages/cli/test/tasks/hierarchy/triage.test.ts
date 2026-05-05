@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-
+import { TaskLifecycleStatus, TaskSource } from '@noetic/code-agent/tasks/schema';
 import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type {
   Feature,
@@ -25,7 +25,6 @@ import {
   triageFeature,
   triageSlice,
 } from '../../../src/commands/builtins/tasks/hierarchy/triage.js';
-import { TaskLifecycleStatus, TaskSource } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 const PARENT_TASK_ID = 'T-abcdefghij';

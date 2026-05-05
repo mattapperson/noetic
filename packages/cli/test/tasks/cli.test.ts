@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-
+import { TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { CliStreams } from '../../src/commands/builtins/tasks/cli.js';
 import { runTasksCli } from '../../src/commands/builtins/tasks/cli.js';
-import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './_helpers.js';
 
 interface CapturedStreams {

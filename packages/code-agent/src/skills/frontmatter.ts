@@ -8,7 +8,7 @@
 
 import yaml from 'yaml';
 import { z } from 'zod';
-import { warn as logWarn } from '../util/log.js';
+import { warn } from '../util/log.js';
 import type { SkillDefinition, SkillFrontmatter } from './types.js';
 
 //#region Types
@@ -76,7 +76,7 @@ export function parseFrontmatter(content: string, filePath?: string): ParsedSkil
   } catch (err) {
     const location = filePath ? ` in ${filePath}` : '';
     const message = err instanceof Error ? err.message : String(err);
-    logWarn(`[skills] Invalid YAML frontmatter${location}: ${message}`);
+    warn(`[skills] Invalid YAML frontmatter${location}: ${message}`);
     return {
       frontmatter: {
         name: '',
@@ -91,7 +91,7 @@ export function parseFrontmatter(content: string, filePath?: string): ParsedSkil
     const issues = result.error.issues
       .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
       .join('; ');
-    logWarn(`[skills] Invalid frontmatter${location}: ${issues}`);
+    warn(`[skills] Invalid frontmatter${location}: ${issues}`);
     return {
       frontmatter: {
         name: '',

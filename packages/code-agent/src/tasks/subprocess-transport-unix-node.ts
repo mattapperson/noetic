@@ -1,6 +1,7 @@
 import net from 'node:net';
 
 import type { FsAdapter } from '@noetic/core';
+import { z } from 'zod';
 
 import { dirname } from './path-utils.js';
 import type {
@@ -24,17 +25,19 @@ function encode(frame: TaskRunTransportFrame): string {
   return `${JSON.stringify(frame)}\n`;
 }
 
+const TaskRunTransportFrameSchema = z.object({
+  runId: z.string(),
+  type: z.string(),
+  payload: z.unknown().optional(),
+});
+
 function parse(raw: string): TaskRunTransportFrame | null {
   try {
-    const value = JSON.parse(raw) as Partial<TaskRunTransportFrame>;
-    if (typeof value.runId !== 'string' || typeof value.type !== 'string') {
+    const parsed = TaskRunTransportFrameSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) {
       return null;
     }
-    return {
-      runId: value.runId,
-      type: value.type,
-      payload: value.payload,
-    };
+    return parsed.data;
   } catch {
     return null;
   }

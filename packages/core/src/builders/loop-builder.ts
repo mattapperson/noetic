@@ -1,7 +1,7 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { getDefaultRegistrar } from '../types/step-registrar';
 import type { ContextMemory } from '../types/memory';
 import type { StepLoop } from '../types/step';
+import { getDefaultRegistrar } from '../types/step-registrar';
 
 /** @public Configuration options accepted by the `loop()` builder, excluding the `kind` discriminant. */
 export type LoopConfig<TMemory = ContextMemory, I = unknown, O = unknown> = Omit<

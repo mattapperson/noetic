@@ -14,9 +14,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-
-import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
-import { taskRootPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, taskRootPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   readEventsSize,
   shouldBumpRevision,

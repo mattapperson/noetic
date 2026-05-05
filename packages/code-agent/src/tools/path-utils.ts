@@ -6,7 +6,7 @@
 
 import { accessSync, constants } from 'node:fs';
 import * as os from 'node:os';
-import { isAbsolute, resolve as resolvePath } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = '\u202F';
@@ -44,7 +44,7 @@ export function resolveToCwd(filePath: string, cwd: string): string {
   if (isAbsolute(expanded)) {
     return expanded;
   }
-  return resolvePath(cwd, expanded);
+  return resolve(cwd, expanded);
 }
 
 /**

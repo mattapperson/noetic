@@ -8,11 +8,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-
-import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
 import {
   clampCursor,
   commitMove,

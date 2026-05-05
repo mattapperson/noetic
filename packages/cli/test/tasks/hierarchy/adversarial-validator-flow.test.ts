@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-
+import {
+  AutopilotState,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type {
   AdversarialReviewOutput,
@@ -18,12 +23,6 @@ import {
   FeatureLoopState,
   FeatureStatus,
 } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import {
-  AutopilotState,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-  TaskSource,
-} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 //#region Helpers

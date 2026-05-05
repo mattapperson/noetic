@@ -11,7 +11,7 @@ import type { FsAdapter } from '@noetic/core';
 import type { Diagnostic } from 'vscode-languageserver-protocol';
 
 import type { LspClientApi } from './client.js';
-import { LspClient as LspClientImpl } from './client.js';
+import { LspClient } from './client.js';
 import { DiagnosticStore } from './diagnostics.js';
 import type { ExtensionIndex } from './extension-index.js';
 import { createExtensionIndex, resolveContributionForFile } from './extension-index.js';
@@ -187,7 +187,7 @@ export class LspService {
       };
     }
     const command = await resolveLaunchCommand(contribution.launch, contribution.id);
-    const client = new LspClientImpl({
+    const client = new LspClient({
       id: contribution.id,
       root,
       command,

@@ -10,17 +10,6 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-
-import type { ToolExecutionContext } from '@noetic/core';
-import { createDetachedSignal } from '@noetic/core';
-
-import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { listMilestones } from '../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { PlannerOutcome } from '../../src/commands/builtins/tasks/planner-tools.js';
-import {
-  createAbandonPlanningTool,
-  createSubmitHierarchyTool,
-} from '../../src/commands/builtins/tasks/planner-tools.js';
 import {
   AutopilotState,
   EventKind,
@@ -29,6 +18,15 @@ import {
   TaskReviewStatus,
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
+import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { ToolExecutionContext } from '@noetic/core';
+import { createDetachedSignal } from '@noetic/core';
+import { listMilestones } from '../../src/commands/builtins/tasks/hierarchy/store.js';
+import type { PlannerOutcome } from '../../src/commands/builtins/tasks/planner-tools.js';
+import {
+  createAbandonPlanningTool,
+  createSubmitHierarchyTool,
+} from '../../src/commands/builtins/tasks/planner-tools.js';
 import { makeStoreContext } from './_helpers.js';
 
 const TASK_ID = 'T-plan000000';
