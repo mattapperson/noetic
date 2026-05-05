@@ -9,11 +9,11 @@
  * fix lineage so a re-attempt sees what previous attempts got wrong.
  */
 
-import type { TaskStoreContext } from '../fs-store.js';
+import type { AssertionOutcome } from '@noetic/code-agent/tasks/schema';
+import { AssertionStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FixFeedbackState } from '../memory/fix-feedback-layer.js';
 import { readFixLineage } from './fix-feature.js';
-import type { AssertionOutcome } from './schemas.js';
-import { AssertionStatus } from './schemas.js';
 import { loadValidatorRun } from './validator.js';
 
 //#region Outcome shape

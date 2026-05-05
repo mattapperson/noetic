@@ -12,16 +12,15 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { ToolExecutionContext } from '@noetic/core';
+import { createDetachedSignal } from '@noetic/core';
 
-import { saveTask, tailEvents, tryLoadTask } from '../../src/commands/builtins/tasks/fs-store.js';
+import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { listMilestones } from '../../src/commands/builtins/tasks/hierarchy/store.js';
-import { loadPlanner, savePlanner } from '../../src/commands/builtins/tasks/planner-state.js';
 import type { PlannerOutcome } from '../../src/commands/builtins/tasks/planner-tools.js';
 import {
   createAbandonPlanningTool,
   createSubmitHierarchyTool,
 } from '../../src/commands/builtins/tasks/planner-tools.js';
-import { createRunnerSignal } from '../../src/commands/builtins/tasks/runner-harness.js';
 import {
   AutopilotState,
   EventKind,
@@ -29,7 +28,7 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './_helpers.js';
 
 const TASK_ID = 'T-plan000000';
@@ -68,14 +67,6 @@ async function seedManualTask(ctx: ReturnType<typeof makeStoreContext>): Promise
     updatedAt: now,
     lastSeenAt: now,
   });
-  await savePlanner(ctx, {
-    taskId: TASK_ID,
-    sessionId: 'S-test',
-    pid: 4242,
-    pidStarttime: null,
-    startedAt: now,
-    pausedAt: null,
-  });
 }
 
 const HIERARCHY = {
@@ -113,7 +104,7 @@ describe('planner-tools', () => {
     it('persists the hierarchy, flips hierarchyStatus to Active, resolves the signal', async () => {
       const ctx = makeStoreContext();
       await seedManualTask(ctx);
-      const signal = createRunnerSignal<PlannerOutcome>();
+      const signal = createDetachedSignal<PlannerOutcome>();
       const tool = createSubmitHierarchyTool({
         storeCtx: ctx,
         taskId: TASK_ID,
@@ -139,8 +130,6 @@ describe('planner-tools', () => {
       expect(hierarchyEvents.length).toBe(1);
       expect(hierarchyEvents[0]?.payload?.hierarchyStatus).toBe(HierarchyStatus.Active);
 
-      expect(await loadPlanner(ctx, TASK_ID)).toBeNull();
-
       const outcome = await signal.done;
       expect(outcome.status).toBe('completed');
       if (outcome.status === 'completed') {
@@ -150,7 +139,7 @@ describe('planner-tools', () => {
 
     it('rejects an empty milestones array', () => {
       const ctx = makeStoreContext();
-      const signal = createRunnerSignal<PlannerOutcome>();
+      const signal = createDetachedSignal<PlannerOutcome>();
       const tool = createSubmitHierarchyTool({
         storeCtx: ctx,
         taskId: TASK_ID,
@@ -168,7 +157,7 @@ describe('planner-tools', () => {
     it('writes a failure log + event and resolves the signal as failed', async () => {
       const ctx = makeStoreContext();
       await seedManualTask(ctx);
-      const signal = createRunnerSignal<PlannerOutcome>();
+      const signal = createDetachedSignal<PlannerOutcome>();
       const tool = createAbandonPlanningTool({
         storeCtx: ctx,
         taskId: TASK_ID,
@@ -194,8 +183,6 @@ describe('planner-tools', () => {
       );
       expect(exitEvent?.payload?.plannerStatus).toBe('failed');
 
-      expect(await loadPlanner(ctx, TASK_ID)).toBeNull();
-
       const outcome = await signal.done;
       expect(outcome.status).toBe('failed');
       if (outcome.status === 'failed') {
@@ -205,7 +192,7 @@ describe('planner-tools', () => {
 
     it('rejects an empty reason', () => {
       const ctx = makeStoreContext();
-      const signal = createRunnerSignal<PlannerOutcome>();
+      const signal = createDetachedSignal<PlannerOutcome>();
       const tool = createAbandonPlanningTool({
         storeCtx: ctx,
         taskId: TASK_ID,

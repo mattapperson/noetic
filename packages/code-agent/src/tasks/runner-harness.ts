@@ -1,44 +1,48 @@
 /**
- * Build a chat-shaped `AgentHarness` for a task runner subprocess.
+ * Task-specific runner-harness factory + a thin task-aware wrapper around
+ * the core `runnableLoop` primitive.
  *
- * Each runner role (planner, implementer, validator) re-uses the same
- * turn-based chat shape as the main TUI: an LLM step with the standard
- * coding tools wired through `harness.execute()` and `getAgentResponse()`.
- * The differences are:
+ * Since Phase B, the generic "single-shot deferred" and "seed + drive one
+ * turn" primitives live in `@noetic/core` as `createDetachedSignal` and
+ * `runnableLoop`. What remains here is task-domain:
  *
- *   - role-specific system instructions
- *   - role-specific terminal tools that signal "I'm done" by resolving a
- *     `RunnerSignal<TOutcome>` deferred the runner awaits
- *   - role-specific extra memory layers (steering, fix-feedback, etc.)
- *   - a fresh `threadId` per runner invocation so the chat history is
- *     scoped to this run and resumable from `<taskDir>/chat.jsonl`
- *
- * The runner loop is intentionally minimal: seed prior chat history,
- * kick off the first turn, then await the role's terminal signal. The
- * IPC server (mounted by the runner) lets external clients (the TUI)
- * keep injecting `execute()` calls between agent turns. The session
- * stays alive until the agent calls a terminal tool, the signal is
- * rejected, or the process is signalled to exit.
+ *   - `createRunnerHarness(opts)` builds a chat-shaped `AgentHarness` via
+ *     `createCodeAgent`, which bakes in the standard coding tools and
+ *     role-specific memory layers the task runners need.
+ *   - `runRunnerLoop(opts)` reads prior chat history from `<taskDir>/chat.jsonl`
+ *     via `readChatHistory`, then delegates to `runnableLoop` in core,
+ *     wiring the optional stall-nudge hook with task-specific detection
+ *     (`askUserService.peek()`) and escalation (`escalateStalledRunner`).
+ *   - `escalateStalledRunner(args)` persists an `agent_stalled` pause to
+ *     the task record and appends the matching event.
  *
  * Stall recovery: when the runner is configured with `nudge`, the loop
  * detects an agent that finished its first turn without calling either
  * a terminal tool or `AskUserQuestion`. The runner sends one developer-
- * role nudge message reminding the agent to either call its terminal
- * tool or ask the user. If the agent stalls a second time, the runner
+ * role nudge message. If the agent stalls a second time, the runner
  * pauses the task with `pauseReason=agent_stalled` and resolves the
  * signal with `buildStalledOutcome()` so the parent unwinds cleanly.
+ *
+ * Compat aliases (`RunnerSignal`, `createRunnerSignal`) re-export the
+ * core names under the pre-Phase-B spelling so existing CLI / test
+ * callers keep compiling until Phase D renames them at the call sites.
  */
 
 import type {
   AgentHarness,
-  ExecuteInput,
-  ExecuteOptions,
+  DetachedSignal,
   FsAdapter,
   InputMessageItem,
-  Item,
   MemoryLayer,
+  RunnableLoopHarness,
   ShellAdapter,
   Tool,
+} from '@noetic/core';
+import {
+  createDetachedSignal,
+  createNudgeMessage,
+  createStallNudgeHook,
+  runnableLoop,
 } from '@noetic/core';
 
 import type { AskUserService } from '../ask-user-service.js';
@@ -54,24 +58,17 @@ export type RunnerRole = 'planner' | 'implementer' | 'validator';
 
 /**
  * Deferred signal a role's terminal tool resolves to end the runner loop.
- * The tool's `execute` fn calls `signal.resolve(outcome)`; the runner
- * awaits `signal.done` and exits with the resolved outcome.
+ * Kept as a name alias over the canonical `DetachedSignal` so existing
+ * callers keep compiling; new code should prefer `DetachedSignal` from
+ * `@noetic/core`.
  */
-export interface RunnerSignal<TOutcome> {
-  readonly done: Promise<TOutcome>;
-  resolve(outcome: TOutcome): void;
-  reject(err: unknown): void;
-}
+export type RunnerSignal<TOutcome> = DetachedSignal<TOutcome>;
 
 /**
- * Minimum subset of `AgentHarness` the runner loop calls into. Defining
- * this structurally lets tests pass a stub without `as` casts; the
- * concrete `AgentHarness<{model:string}>` already satisfies the shape.
+ * Minimum harness subset the runner loop calls into. Kept as an alias
+ * over the canonical `RunnableLoopHarness` for the same reason.
  */
-export interface RunnerLoopHarness {
-  seedSessionHistory(threadId: string, history: ReadonlyArray<Item>): void;
-  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
-}
+export type RunnerLoopHarness = RunnableLoopHarness;
 
 export interface RunnerHarnessOpts {
   readonly role: RunnerRole;
@@ -136,55 +133,14 @@ export interface RunRunnerLoopOpts<TOutcome> {
 
 //#endregion
 
-//#region Constants
-
-/**
- * Developer-role text the runner sends when an agent finishes a turn
- * without calling either a terminal tool or `AskUserQuestion`. Kept
- * short and unambiguous — the agent should be reminded of its options
- * without being lectured.
- */
-const NUDGE_MESSAGE_TEXT =
-  'You finished a turn without calling a terminal tool or AskUserQuestion. If you need user input or instruction to continue, call AskUserQuestion now. Otherwise call your terminal tool to complete this phase.';
-
-//#endregion
-
 //#region Public API
 
 /**
- * Construct a deferred-style signal a role's terminal tool resolves on
- * completion. Resolution is single-shot — additional `resolve` / `reject`
- * calls after the first are dropped silently.
+ * Single-shot deferred signal a role's terminal tool resolves on
+ * completion. Kept as a re-export of the canonical core primitive under
+ * the pre-Phase-B name; existing callers keep compiling.
  */
-export function createRunnerSignal<TOutcome>(): RunnerSignal<TOutcome> {
-  let resolveFn: ((outcome: TOutcome) => void) | null = null;
-  let rejectFn: ((err: unknown) => void) | null = null;
-  const done = new Promise<TOutcome>((resolve, reject) => {
-    resolveFn = resolve;
-    rejectFn = reject;
-  });
-  return {
-    done,
-    resolve(outcome) {
-      if (resolveFn === null) {
-        return;
-      }
-      const fn = resolveFn;
-      resolveFn = null;
-      rejectFn = null;
-      fn(outcome);
-    },
-    reject(err) {
-      if (rejectFn === null) {
-        return;
-      }
-      const fn = rejectFn;
-      resolveFn = null;
-      rejectFn = null;
-      fn(err);
-    },
-  };
-}
+export const createRunnerSignal = createDetachedSignal;
 
 /**
  * Construct an `AgentHarness` configured for a runner role. The returned
@@ -223,8 +179,8 @@ export async function createRunnerHarness(opts: RunnerHarnessOpts): Promise<Runn
 
 /**
  * Persist an `agent_stalled` pause to the task and append an event so
- * the kanban surfaces it. Pure I/O — extracted from `runRunnerLoop` for
- * readability and direct unit testing.
+ * the kanban surfaces it. Pure I/O — extracted for direct unit testing
+ * and reused by the nudge hook below.
  */
 export async function escalateStalledRunner(args: {
   readonly storeCtx: TaskStoreContext;
@@ -253,108 +209,54 @@ export async function escalateStalledRunner(args: {
 /**
  * Drive a runner harness through its lifecycle:
  *
- *   1. Seed the session from `<taskDir>/chat.jsonl` so a prior conversation
- *      is restored.
- *   2. **Fresh spawn only** — when chat.jsonl is empty, kick off the first
- *      turn with the role's developer-framing message. The IPC server's
- *      pump persists that message naturally via the item stream, so we
- *      don't double-write to disk.
- *   3. **Resume spawn** — when chat.jsonl already contains items, do NOT
- *      re-execute. The agent already has its prior context replayed; the
- *      next turn is driven by user chat (an IPC `send` frame) or by the
- *      autopilot externally clearing chat.jsonl and respawning.
- *   4. Stall recovery (fresh spawn only, when `nudge` is configured): if
- *      the first turn ends without resolving the signal and without a
- *      pending ask-user request, send one developer-role nudge. If the
- *      second turn also ends in a stall, pause the task with
- *      `pauseReason=agent_stalled` and resolve the signal with
- *      `buildStalledOutcome()` so the runner exits cleanly.
- *   5. Await the role's terminal signal — resolved by a terminal tool
- *      (or rejected externally on SIGTERM).
+ *   1. Read prior chat history from `<taskDir>/chat.jsonl` and seed the
+ *      harness session via `runnableLoop` (resume path — no kick-off).
+ *   2. If no prior history, execute the role's developer-framing message
+ *      as the first turn. The IPC server's stream pump persists the
+ *      emitted items to chat.jsonl naturally.
+ *   3. Stall recovery (fresh spawn only, when `nudge` is configured):
+ *      detect first-turn stalls via `askUserService.peek()`, send one
+ *      nudge, re-check after the second turn, escalate with
+ *      `escalateStalledRunner` + resolve the signal with
+ *      `buildStalledOutcome()` on a second stall.
+ *   4. Await the role's terminal signal.
  *
  * Returns the resolved outcome. If the signal rejects, this rejects with
- * the same reason. Caller is responsible for shutting down the IPC server.
+ * the same reason.
  */
 export async function runRunnerLoop<TOutcome>(
   opts: RunRunnerLoopOpts<TOutcome>,
 ): Promise<TOutcome> {
-  const prior: ReadonlyArray<Item> = await readChatHistory(opts.storeCtx, opts.taskId);
-  if (prior.length > 0) {
-    opts.harness.seedSessionHistory(opts.threadId, prior);
-    // Resume path: no kick-off. The agent's prior turns are restored;
-    // the next turn comes from user chat or external respawn.
-    return opts.signal.done;
-  }
+  const priorItems = await readChatHistory(opts.storeCtx, opts.taskId);
+  const nudge = opts.nudge;
+  const afterFirstTurn =
+    nudge === undefined
+      ? undefined
+      : createStallNudgeHook({
+          harness: opts.harness,
+          threadId: opts.threadId,
+          signal: opts.signal,
+          nudgeMessage: createNudgeMessage({
+            id: `runner-nudge-${opts.taskId}-${Date.now()}`,
+          }),
+          hasPendingExternal: () => nudge.askUserService.peek() !== null,
+          onStall: () =>
+            escalateStalledRunner({
+              storeCtx: opts.storeCtx,
+              taskId: opts.taskId,
+              role: nudge.role,
+            }),
+          buildStalledOutcome: nudge.buildStalledOutcome,
+        });
 
-  // Track signal settlement without blocking so we can detect stalls
-  // (turn ended but signal still pending) without racing the deferred.
-  let signalSettled = false;
-  void opts.signal.done.then(
-    () => {
-      signalSettled = true;
-    },
-    () => {
-      signalSettled = true;
-    },
-  );
-
-  // Fresh path: send the developer-role framing as the first item. The
-  // IPC server's pumpItemStream appends it to chat.jsonl when emitted.
-  await opts.harness.execute(opts.initialMessage, {
+  return runnableLoop<TOutcome>({
+    harness: opts.harness,
     threadId: opts.threadId,
+    priorItems,
+    initialMessage: opts.initialMessage,
+    signal: opts.signal,
+    afterFirstTurn,
   });
-
-  // Flush microtasks so the `signal.done.then` callback above reflects
-  // any synchronous resolve() that fired during execute().
-  await Promise.resolve();
-
-  if (opts.nudge === undefined) {
-    return opts.signal.done;
-  }
-
-  if (signalSettled) {
-    return opts.signal.done;
-  }
-
-  if (opts.nudge.askUserService.peek() !== null) {
-    // Agent is intentionally awaiting user input via AskUserQuestion.
-    return opts.signal.done;
-  }
-
-  // Stall — send a single nudge.
-  const nudgeMessage: InputMessageItem = {
-    id: `runner-nudge-${opts.taskId}-${Date.now()}`,
-    type: 'message',
-    role: 'developer',
-    status: 'completed',
-    content: [
-      {
-        type: 'input_text',
-        text: NUDGE_MESSAGE_TEXT,
-      },
-    ],
-  };
-  await opts.harness.execute(nudgeMessage, {
-    threadId: opts.threadId,
-  });
-  await Promise.resolve();
-
-  if (signalSettled) {
-    return opts.signal.done;
-  }
-
-  if (opts.nudge.askUserService.peek() !== null) {
-    return opts.signal.done;
-  }
-
-  // Second stall — escalate.
-  await escalateStalledRunner({
-    storeCtx: opts.storeCtx,
-    taskId: opts.taskId,
-    role: opts.nudge.role,
-  });
-  opts.signal.resolve(opts.nudge.buildStalledOutcome());
-  return opts.signal.done;
 }
 
 //#endregion

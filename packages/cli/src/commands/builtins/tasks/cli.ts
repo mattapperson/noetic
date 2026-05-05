@@ -7,11 +7,13 @@
  * `if (import.meta.main)` foot guards a direct `bun run` invocation.
  */
 
+import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core/adapters/node';
-
+import { createFileStorage } from '@noetic/core';
+import { createLocalFsAdapter, createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
 import { ensureDaemon } from '../../../daemon-runtime/runtime.js';
-import type { TaskStoreContext } from './fs-store.js';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
 import { activateSliceHandler } from './handlers/activate-slice.js';
 import { addAssertionHandler } from './handlers/add-assertion.js';
@@ -36,7 +38,6 @@ import { steerTaskHandler } from './handlers/steer.js';
 import { unarchiveTaskHandler } from './handlers/unarchive.js';
 import { unpauseTaskHandler } from './handlers/unpause.js';
 import { KanbanColumn } from './kanban.js';
-import { TaskSource } from './schemas.js';
 
 //#region Types
 
@@ -406,8 +407,18 @@ async function handleDelete(
 ): Promise<void> {
   const parsed = parseArgv(argv);
   const taskId = requireString(parsed, 'task', 0);
+  // One-shot CLI invocation: spin up a durable-storage-backed subprocess
+  // adapter purely to consult the live-handle manifest so delete-guards
+  // see planner/implementer runners spawned by the TUI/daemon that
+  // share the same `~/.noetic/subprocess` store.
+  const subprocess = createLocalSubprocessAdapter({
+    storage: createFileStorage({
+      root: resolveSubprocessRoot(),
+    }),
+  });
   const result = await deleteTaskHandler(ctx, {
     taskId,
+    subprocess,
     force: booleanFlag(parsed, 'force'),
   });
   writeJson(streams.stdout, result);

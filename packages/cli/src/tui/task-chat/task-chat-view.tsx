@@ -124,11 +124,10 @@ export function TaskChatView(props: TaskChatViewProps): React.ReactElement {
   });
 
   const handleSubmit = (message: { text: string }): void => {
-    const text = message.text;
-    if (text.trim().length === 0) {
+    if (message.text.trim().length === 0) {
       return;
     }
-    void chat.send(text);
+    void chat.send(message.text);
   };
 
   return (

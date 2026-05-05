@@ -1,8 +1,7 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendLog } from '../fs-store.js';
-import { taskDirPaths } from '../paths.js';
-import type { LogEntry } from '../schemas.js';
-import { LogEntryKind } from '../schemas.js';
+import type { LogEntry } from '@noetic/code-agent/tasks/schema';
+import { LogEntryKind } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendLog, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

@@ -1,22 +1,59 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { isNoeticError } from '../../src/errors/noetic-error';
 import { AgentHarness } from '../../src/runtime/agent-harness';
 import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
 import { DetachedStatus } from '../../src/types/detached';
 import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
+import type { StepSubprocessRequest } from '../../src/types/subprocess-adapter';
+
+//#region Helpers
+
+function makeStepRequest(overrides: Partial<StepSubprocessRequest> = {}): StepSubprocessRequest {
+  return {
+    kind: 'step',
+    stepId: 'test-step',
+    serializedInput: undefined,
+    executionId: `exec-${crypto.randomUUID()}`,
+    overrides: {},
+    ...overrides,
+  };
+}
+
+//#endregion
 
 describe('DetachedHandleImpl', () => {
-  it('reports running initially', () => {
-    const handle = new DetachedHandleImpl<string>('test-1', new Promise(() => {}));
+  it('reports running initially when the adapter has not yet settled', async () => {
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: () => new Promise(() => {}), // never resolves
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-1',
+      stepId: 'test-step',
+      adapter,
+      spawnPromise,
+    });
+    // Give the adapter a tick to register the handle but not finish it.
+    await spawnPromise;
     expect(handle.status).toBe(DetachedStatus.Running);
     expect(handle.result).toBeUndefined();
     expect(handle.error).toBeUndefined();
   });
 
   it('reports completed with result after child finishes', async () => {
-    const handle = new DetachedHandleImpl<string>('test-2', Promise.resolve('done'));
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: async () => 'done',
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-2',
+      stepId: 'test-step',
+      adapter,
+      spawnPromise,
+    });
     const result = await handle.await();
     expect(result).toBe('done');
     expect(handle.status).toBe(DetachedStatus.Completed);
@@ -25,7 +62,18 @@ describe('DetachedHandleImpl', () => {
   });
 
   it('reports failed with error message on child failure', async () => {
-    const handle = new DetachedHandleImpl<string>('test-3', Promise.reject(new Error('boom')));
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: async () => {
+        throw new Error('boom');
+      },
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-3',
+      stepId: 'test-step',
+      adapter,
+      spawnPromise,
+    });
     try {
       await handle.await();
       expect.unreachable('should have thrown');
@@ -38,16 +86,31 @@ describe('DetachedHandleImpl', () => {
   });
 
   it('await() resolves with child output', async () => {
-    const handle = new DetachedHandleImpl<number>('test-4', Promise.resolve(42));
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: async () => 42,
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<number>({
+      id: 'test-4',
+      stepId: 'test-step',
+      adapter,
+      spawnPromise,
+    });
     const result = await handle.await();
     expect(result).toBe(42);
   });
 
   it('await(timeout) throws on timeout if child has not finished', async () => {
-    const handle = new DetachedHandleImpl<string>(
-      'test-5',
-      new Promise(() => {}), // never resolves
-    );
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: () => new Promise(() => {}), // never resolves
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-5',
+      stepId: 'test-step',
+      adapter,
+      spawnPromise,
+    });
     try {
       await handle.await(50);
       expect.unreachable('should have thrown');
@@ -57,6 +120,33 @@ describe('DetachedHandleImpl', () => {
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('timed out');
     }
+  });
+
+  it('after timeout, handle does not leak into a completed state', async () => {
+    // Custom adapter that never transitions — simulates a hung step that
+    // must not be reported as `completed` after the caller's timeout fires.
+    const neverSettlingAdapter = createNeverSettlingAdapter();
+    const spawnPromise = neverSettlingAdapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-6',
+      stepId: 'test-step',
+      adapter: neverSettlingAdapter,
+      spawnPromise,
+    });
+    try {
+      await handle.await(20);
+      expect.unreachable('should have thrown');
+    } catch {
+      // expected timeout
+    }
+    // Wait a few more ticks — the underlying handle is still running, so
+    // the DetachedHandle should stay in its timeout state (the cached
+    // settlement promise is tied to the internal poll loop and hasn't
+    // completed). Specifically: we should NOT have transitioned to
+    // `Completed`.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(handle.status).not.toBe(DetachedStatus.Completed);
+    expect(handle.result).toBeUndefined();
   });
 });
 
@@ -113,3 +203,16 @@ describe('AgentHarness.detachedSpawn', () => {
     expect(handle.status).toBe(DetachedStatus.Completed);
   });
 });
+
+//#region Test adapter
+
+function createNeverSettlingAdapter(): ReturnType<typeof createInMemorySubprocessAdapter> {
+  // Build on top of the in-memory adapter but override the step runner to
+  // hang forever. `spawn()` still returns a handle synchronously (status
+  // `'running'`), but the internal completion never fires.
+  return createInMemorySubprocessAdapter({
+    stepRunner: () => new Promise(() => {}),
+  });
+}
+
+//#endregion

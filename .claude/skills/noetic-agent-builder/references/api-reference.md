@@ -11,8 +11,11 @@ step.run<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
   retry?: RetryPolicy;
+  subprocess?: SubprocessAdapter; // per-step adapter override
 }): StepRun<TMemory, I, O>
 ```
+
+The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
 ### step.llm
 
@@ -88,8 +91,11 @@ spawn<TMemory = ContextMemory, I = unknown, O = unknown>({
   child: Step<TMemory, I, O>;
   memory?: MemoryConfig | MemoryLayer[];
   timeout?: number;
+  subprocess?: SubprocessAdapter; // per-step adapter override
 }): StepSpawn<TMemory, I, O>
 ```
+
+Per-step `subprocess` mirrors `step.run` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
 ### loop
 
@@ -792,11 +798,164 @@ const isolatedHandle = harness.detachedSpawn(step, input, ctx, {
   threadId: 'background-task-1',
 });
 
+// Per-call subprocess adapter override (run a specific spawn out-of-process)
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createFileStorage } from '@noetic/core';
+const localAdapter = createLocalSubprocessAdapter({
+  storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
+});
+const osChildHandle = harness.detachedSpawn(step, input, ctx, {
+  subprocess: localAdapter,       // takes precedence over step.subprocess + harness.subprocess
+  cwdInit: '/tmp/workspace',
+});
+
 // Channels
 harness.send(channel, value, ctx);
 const msg = await harness.recv(channel, ctx);
 const msg2 = harness.tryRecv(channel, ctx);
 ```
+
+`DetachedHandle` is a thin wrapper over the adapter's `SubprocessHandle`. `.await()` polls `adapter.get()` until the handle reaches a terminal status, then reads the result from `handle.metadata.result` (or rehydrates `handle.metadata.error`). The default adapter (`createInMemorySubprocessAdapter()`) runs the step in-process on the microtask queue, so short-lived detached spawns resolve in sub-millisecond time; out-of-process adapters wait for the OS child to exit.
+
+## Subprocess Adapters and Durable Execution
+
+The harness always holds a `SubprocessAdapter`. Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. In-process vs out-of-process is a property of the adapter, never of the step. Zero-config harnesses use `createInMemorySubprocessAdapter()`, so dispatch overhead is essentially zero and every pre-existing in-process path keeps its behaviour.
+
+### The adapter interface
+
+```typescript
+interface SubprocessAdapter {
+  spawn(request: SubprocessRequest): Promise<SubprocessHandle>;
+  get(handleId: string): Promise<SubprocessHandle | null>;
+  stop(handleId: string, reason?: string): Promise<SubprocessStopResult>;
+  pause(handleId: string): Promise<SubprocessControlResult>;
+  resume(handleId: string): Promise<SubprocessControlResult>;
+  isAlive(handle: SubprocessHandle): Promise<boolean>;
+  /** Rebind to a handle persisted across a host restart. Returns null
+   *  when no manifest exists for the id. */
+  reattach(handleId: string): Promise<SubprocessHandle | null>;
+  /** Enumerate every handle the adapter currently treats as live. */
+  listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
+}
+```
+
+`SubprocessRequest` is a discriminated union:
+
+- `ProcessSubprocessRequest` (`kind: 'process'` or omitted) — launch an OS-level child.
+- `StepSubprocessRequest` (`kind: 'step'`) — dispatch a registered Noetic step. Carries `stepId`, `serializedInput`, `executionId`, `overrides: { threadId?, resourceId?, cwdInit? }`.
+
+`SubprocessHandle.metadata` carries well-known keys populated by the adapter: `result` (on successful completion), `error` (on failure, as `SerializedError`), and `executionId` (echoed from the request). Callers may attach additional tags via `request.metadata` — the tasks system uses `taskRole`, `taskId`, `featureId` so `findLiveTaskHandle({adapter, taskId, taskRole})` can locate a live handle without scanning sidecar files.
+
+### Factories
+
+```typescript
+// In-process dispatcher (default; also the test double).
+function createInMemorySubprocessAdapter(opts?: {
+  storage?: StorageAdapter;                                   // persist manifests for listLive/reattach
+  metadataInjector?: (request: SubprocessRequest) => Partial<SubprocessHandleMetadata>;
+}): SubprocessAdapter;
+
+// OS-child-process backend. Persists full handle manifests (pid,
+// pidStarttime, socketPath, cwd, stepId, serializedInput, executionId,
+// metadata) through `storage` when given one. Without storage, listLive()
+// returns the empty set and reattach() returns null.
+function createLocalSubprocessAdapter(opts?: {
+  storage?: StorageAdapter;
+  signaller?: ProcessSignaller;
+}): SubprocessAdapter;
+```
+
+`createInMemorySubprocessAdapter({metadataInjector})` is especially handy in tests: each spawn's returned handle has the injected metadata merged onto it synchronously, so unit tests can stamp `{taskRole: 'planner', taskId: 'T-...'}` without mutating the request surface.
+
+### CheckpointStore + CheckpointSnapshot
+
+```typescript
+interface CheckpointSnapshot {
+  schemaVersion: 1;
+  executionId: string;
+  threadId?: string;
+  resourceId?: string;
+  frontier: Array<{ stepId: string; input: unknown; state?: unknown }>;
+  layers: Record<string, unknown>;
+  cwd: { current: string | null; previous?: string | null } | null;
+  askUser: Array<{ id: string; input: unknown; createdAt: number }>;
+  itemLog: { items: unknown[] };
+  capturedAt: string;
+}
+
+interface CheckpointStore {
+  save(snapshot: CheckpointSnapshot): Promise<void>;
+  load(executionId: string): Promise<CheckpointSnapshot | null>;
+  list(): Promise<ReadonlyArray<{ executionId: string }>>;
+  clear(executionId: string): Promise<void>;
+}
+
+function createCheckpointStore(opts: { storage: StorageAdapter }): CheckpointStore;
+```
+
+Pass a `checkpointStore` to the harness constructor to turn `harness.checkpoint(ctx)` and `harness.restore(executionId)` into real crash-recovery hooks. Snapshots fire automatically after every `execute()`, `detachedSpawn()` settlement, ask-user enqueue, and `runAppendPipeline`. Failures are swallowed with `console.warn` so durability issues never abort a successful step.
+
+### `createFileStorage`
+
+```typescript
+function createFileStorage(opts?: { root?: string }): StorageAdapter;
+```
+
+File-backed `StorageAdapter`. Each key becomes a JSON file under `root`; writes use write-temp-then-rename for atomicity on POSIX filesystems. Defaults to `$HOME/.noetic/checkpoints` when `root` is omitted — for subprocess manifests, pass `{root: '$HOME/.noetic/subprocess'}` explicitly to keep manifests and snapshots on distinct disk roots.
+
+### Host-restart recovery
+
+```typescript
+// packages/cli/src/cli/reattach-live-children.ts
+import { reattachLiveChildren } from '@noetic/cli';
+
+const { handles, contexts } = await reattachLiveChildren(harness);
+// handles: ReadonlyArray<SubprocessHandle>
+// contexts: ReadonlyMap<handleId, Context>   // one entry per handle that
+//                                            // carried an executionId and
+//                                            // had a snapshot on disk
+```
+
+Calls `harness.subprocess.listLive()` first, then `harness.restore(executionId)` per live handle. With no durable storage configured it returns empty collections — cheap no-op on every startup path.
+
+### Runtime primitives for long-lived runners
+
+`@noetic/core/runtime` exports four primitives the tasks-system runners (and third-party long-running agents) use to compose their loop:
+
+```typescript
+// Single-shot resolve/reject signal.
+interface DetachedSignal<T> {
+  done: Promise<T>;
+  resolve(value: T): void;
+  reject(err: unknown): void;
+}
+function createDetachedSignal<T>(): DetachedSignal<T>;
+
+// Generic turn-driver: seed session → first turn → await signal.
+function runnableLoop<TOutcome>(opts: RunnableLoopOpts<TOutcome>): Promise<TOutcome>;
+
+// Two-strike nudge composable with runnableLoop.
+function createStallNudgeHook(opts: StallNudgeOpts): NudgeHook;
+
+// Path-free session seeding: pass an Item[] the caller has loaded.
+function seedFromItems(harness: AgentHarness, threadId: string, items: Item[]): Promise<void>;
+```
+
+These moved from the now-deleted `packages/code-agent/src/tasks/runner-harness.ts` into core under Phase B; the old names `createRunnerSignal` / `runRunnerLoop` became `createDetachedSignal` / `runnableLoop`.
+
+### Step registry
+
+```typescript
+function registerStep(step: Step): void;
+function lookupStep(id: string): Step | null;
+function getRegistry(): ReadonlyMap<string, Step>;
+```
+
+Step builders auto-register at construction; `lookupStep` is the cross-process contract for out-of-process adapters. Policy is **latest registration wins** on duplicate id — strict duplicate rejection is a tracked follow-up.
+
+### Durable IPC (advanced)
+
+`@noetic/core/adapters/node` additionally exposes `AgentIpcServer`, `AgentIpcClient`, the v2 wire protocol, and a `DurableOutboundQueue` primitive. The server composes the queue when a `StorageAdapter` is supplied: outbound frames are numbered, persisted, and replayed from the client's last ack on reconnect. Protocol frames `durable`, `durableResume`, `durableAck` carry the wire envelope. See the framework/durability.mdx page for the full end-to-end pattern.
 
 ## Slot Constants
 

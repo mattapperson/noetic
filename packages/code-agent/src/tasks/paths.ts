@@ -81,6 +81,26 @@ export function resolveTasksRoot(ctx: TasksRootCtx = {}): string {
   return join(homedir(), '.noetic', 'tasks');
 }
 
+/**
+ * Resolve the subprocess-manifest root directory used by the local
+ * `SubprocessAdapter`'s durable storage. Mirrors {@link resolveTasksRoot}'s
+ * precedence but lands under `<NOETIC_HOME>/subprocess` so handle
+ * manifests stay distinct from task state AND from the
+ * checkpoint-snapshot store (`<NOETIC_HOME>/checkpoints`): three
+ * different concerns, three different roots.
+ *
+ * Precedence (highest first):
+ *   1. `NOETIC_HOME` env var → `<NOETIC_HOME>/subprocess`.
+ *   2. Default: `$HOME/.noetic/subprocess`.
+ */
+export function resolveSubprocessRoot(): string {
+  const env = process.env.NOETIC_HOME;
+  if (typeof env === 'string' && env.length > 0) {
+    return join(env, 'subprocess');
+  }
+  return join(homedir(), '.noetic', 'subprocess');
+}
+
 export function taskRootPaths(ctx: TasksRootCtx = {}): TaskRootPaths {
   const root = resolveTasksRoot(ctx);
   return {

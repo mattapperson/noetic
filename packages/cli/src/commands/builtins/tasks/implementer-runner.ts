@@ -1,12 +1,12 @@
 /**
  * Wrapper script that owns the implementation-agent subprocess
- * lifecycle for a single feature. Spawned by `implementer-launcher.ts`
+ * lifecycle for a single feature. Spawned by the implementer launcher
  * via `bun run`. Reads `NOETIC_TASK_DIR` (leaf task), `NOETIC_PARENT_TASK_ID`
  * (structured task whose hierarchy owns the feature), `NOETIC_FEATURE_ID`,
  * and `NOETIC_TASK_CWD` (the worktree to run in) from env. Constructs an
  * `AgentHarness` with full coding tools and the fix-feedback memory layer
- * mounted (seeded from any prior fix-lineage), then drives a Step-graph
- * implementer flow rooted at `step.run` wrapping the `react()` agent loop.
+ * mounted (seeded from any prior fix-lineage), then drives a chat-shaped
+ * runner loop until the agent signals done or blocked.
  *
  * On runner exit, commits writes in the order **audit → state → event**:
  *
@@ -14,18 +14,44 @@
  *   2. Atomically rewrite the parent feature's `loopState`:
  *      `validating` on success, `blocked` on failure / max-steps.
  *   3. Append a `feature:loopStateChanged` event on the parent task.
- *   4. Best-effort: clear `_implementer.json` on the leaf.
+ *
+ * Subprocess lifecycle is tracked by the subprocess adapter's handle
+ * manifest — no per-leaf sidecar file to manage.
  */
 
+import {
+  appendChatItem,
+  createIpcAskUserService,
+  createRunnerHarness,
+  readChatHistory,
+} from '@noetic/code-agent/tasks';
 import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
-import { createLocalFsAdapter } from '@noetic/core';
-
+import { EventKind, LogEntryKind, TaskPauseReason } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  appendLog,
+  loadTask,
+  runnerSocketPath,
+  saveTask,
+  taskDirPaths,
+} from '@noetic/code-agent/tasks/store/fs-node';
+import type { Item } from '@noetic/core';
+import {
+  createDetachedSignal,
+  createLocalFsAdapter,
+  createNudgeMessage,
+  createStallNudgeHook,
+  runnableLoop,
+} from '@noetic/core';
+import {
+  AgentIpcServer,
+  createLocalShellAdapter,
+  unlinkSocketSync,
+} from '@noetic/core/adapters/node';
 import { createSteeringFileLayer } from '../../../memory/steering-file-layer.js';
 import { createCodingTools } from '../../../tools/index.js';
-import { AgentIpcServer, unlinkSocketSync } from './agent-ipc-server.js';
 import { DEFAULT_MODEL } from './defaults.js';
-import type { TaskStoreContext } from './fs-store.js';
-import { appendEvent, appendLog } from './fs-store.js';
 import { getTaskHierarchy } from './hierarchy/aggregate.js';
 import type { FeatureLifecycleContext } from './hierarchy/feature-lifecycle.js';
 import { applyFeatureLoopStateUpdate, markFeatureBlocked } from './hierarchy/feature-lifecycle.js';
@@ -33,16 +59,11 @@ import type { ImplementerOutcome } from './hierarchy/implementer-flow.js';
 import { buildFixFeedbackSeed, loadAccumulatedIssues } from './hierarchy/implementer-flow.js';
 import type { Assertion, Feature, MilestoneWithChildren } from './hierarchy/schemas.js';
 import { DEFAULT_IMPLEMENTATION_RETRY_BUDGET, FeatureLoopState } from './hierarchy/schemas.js';
-import { clearImplementer, loadImplementer, saveImplementer } from './implementer-state.js';
 import {
   createImplementationBlockedTool,
   createImplementationDoneTool,
 } from './implementer-tools.js';
-import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createFixFeedbackLayer } from './memory/fix-feedback-layer.js';
-import { taskDirPaths } from './paths.js';
-import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
-import { EventKind, LogEntryKind } from './schemas.js';
 
 export type { ImplementerOutcome } from './hierarchy/implementer-flow.js';
 
@@ -87,13 +108,6 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/**
- * `<tasksRoot>/T-<id>` → tasksRoot. The task state lives directly under
- * the tasks-root (user-global `~/.noetic/tasks` by default); the
- * runner recovers the root from the task-dir env var so it can anchor
- * `taskDirPaths()` calls to the right location without trusting
- * `NOETIC_HOME` to still match what the launcher resolved.
- */
 function tasksRootFromTaskDir(taskDir: string): string {
   return dirname(taskDir);
 }
@@ -258,10 +272,6 @@ export async function commitExitWrites(
     ts,
   });
 
-  await clearImplementer(args.ctx, args.leafTaskId).catch(() => {
-    /* swallow — sidecar will be evicted by the next launcher's pid check */
-  });
-
   return {
     previousLoopState,
     loopState,
@@ -270,8 +280,7 @@ export async function commitExitWrites(
 
 /**
  * Mark the feature blocked when the runner couldn't even start the
- * react loop (missing env, hierarchy not found, etc.). Mirrors the
- * shape of {@link commitExitWrites} but skips the success branch.
+ * react loop (missing env, hierarchy not found, etc.).
  */
 async function commitStartupFailure(args: {
   readonly ctx: TaskStoreContext;
@@ -306,8 +315,28 @@ async function commitStartupFailure(args: {
     },
     ts,
   });
-  await clearImplementer(args.ctx, args.leafTaskId).catch(() => {
-    /* swallow */
+}
+
+async function escalateStalledImplementer(args: {
+  readonly ctx: TaskStoreContext;
+  readonly taskId: string;
+}): Promise<void> {
+  const ts = nowIso();
+  const task = await loadTask(args.ctx, args.taskId);
+  await saveTask(args.ctx, {
+    ...task,
+    paused: true,
+    pauseReason: TaskPauseReason.AgentStalled,
+    updatedAt: ts,
+  });
+  await appendEvent(args.ctx, {
+    kind: EventKind.TaskUpdated,
+    taskId: args.taskId,
+    payload: {
+      phase: 'agent_stalled',
+      role: 'implementer',
+    },
+    ts,
   });
 }
 
@@ -315,11 +344,22 @@ async function commitStartupFailure(args: {
 
 //#region Public API
 
+type AllowedLogKind = (typeof LogEntryKind)[keyof typeof LogEntryKind];
+
+function matchLogKind(kind: string): AllowedLogKind {
+  if (
+    kind === LogEntryKind.Log ||
+    kind === LogEntryKind.Comment ||
+    kind === LogEntryKind.Steer ||
+    kind === LogEntryKind.System
+  ) {
+    return kind;
+  }
+  return LogEntryKind.System;
+}
+
 /**
- * Run a single implementation-agent loop for a feature. Resolves once
- * the react loop has settled and the audit/state/event writes are
- * committed. The caller (or the script entry point) translates the
- * outcome into a process exit code (0 on completed, 1 on blocked).
+ * Run a single implementation-agent loop for a feature.
  */
 export async function runImplementer(
   opts: RunImplementerOptions = {},
@@ -346,17 +386,14 @@ export async function runImplementer(
     tasksRoot,
   };
 
-  const sidecar = await loadImplementer(ctx, leafTaskId);
-  if (sidecar !== null) {
-    await appendLog(ctx, {
-      taskId: leafTaskId,
-      entry: {
-        kind: LogEntryKind.System,
-        ts: nowIso(),
-        message: `implementer started (pid=${sidecar.pid}, feature=${featureId}, branch=${sidecar.branch})`,
-      },
-    });
-  }
+  await appendLog(ctx, {
+    taskId: leafTaskId,
+    entry: {
+      kind: LogEntryKind.System,
+      ts: nowIso(),
+      message: `implementer started (pid=${process.pid}, feature=${featureId})`,
+    },
+  });
 
   const hierarchy = await getTaskHierarchy(ctx, parentTaskId);
   if (hierarchy === null) {
@@ -383,19 +420,9 @@ export async function runImplementer(
 
   const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
   const model = opts.model ?? process.env.NOETIC_MODEL ?? DEFAULT_MODEL;
-  // `maxSteps` previously bounded the react-loop iterations. With the
-  // chat-shaped runner the agent self-terminates by calling a terminal
-  // tool, so we no longer thread maxSteps into a step graph. The option
-  // is kept on `RunImplementerOptions` for forward compatibility (a turn
-  // budget could be re-introduced as a runner-loop guard) but is unused
-  // here — silenced via destructure to keep the unused-locals lint clean.
   void DEFAULT_IMPLEMENTATION_RETRY_BUDGET;
   void opts.maxSteps;
 
-  // Seed the fix-feedback layer from disk: prior plan + description +
-  // accumulated assertion failures from this feature's fix lineage.
-  // Description and lineage reads are independent — batch them so a
-  // long lineage doesn't add latency on top of the description read.
   const planText = buildPlanSummary(hierarchy.milestones);
   const [description, accumulatedIssues] = await Promise.all([
     loadParentDescription({
@@ -415,7 +442,7 @@ export async function runImplementer(
     attempt: found.feature.implementationAttemptCount + 1,
   });
 
-  const signal = createRunnerSignal<ImplementerOutcome>();
+  const signal = createDetachedSignal<ImplementerOutcome>();
 
   const doneTool = createImplementationDoneTool({
     storeCtx: ctx,
@@ -432,10 +459,6 @@ export async function runImplementer(
     signal,
   });
 
-  // Construct the IPC-backed ask-user service before tools so the
-  // `AskUserQuestion` tool gets registered. The broadcaster is wired
-  // up after the IPC server is constructed (server holds the client
-  // set the broadcaster fans out to).
   let serverRef: AgentIpcServer | null = null;
   const askUserService = createIpcAskUserService({
     broadcastRequest: (request) => {
@@ -474,6 +497,7 @@ export async function runImplementer(
       steeringLayer,
     ],
     fs: ctx.fs,
+    shell: createLocalShellAdapter(),
   });
 
   const initialPromptText = buildInitialPrompt({
@@ -481,8 +505,6 @@ export async function runImplementer(
     assertions: found.assertions,
     worktreeCwd: cwd,
   });
-  // The IPC server's stream pump appends the framing item to chat.jsonl
-  // when the harness emits it, so we don't write to disk here.
   const initialMessage = {
     id: `implementer-init-${leafTaskId}`,
     type: 'message' as const,
@@ -496,36 +518,42 @@ export async function runImplementer(
     ],
   };
 
+  const socketPath = runnerSocketPath(ctx, {
+    taskId: leafTaskId,
+    role: 'implementer',
+    runnerId: featureId,
+  });
+
   const ipcServer = new AgentIpcServer({
     harness,
-    storeCtx: ctx,
+    chatHistoryStore: {
+      readChatHistory: (id) => readChatHistory(ctx, id),
+      appendChatItem: (id, item) => appendChatItem(ctx, id, item),
+    },
+    logger: async (id, entry) => {
+      await appendLog(ctx, {
+        taskId: id,
+        entry: {
+          kind: matchLogKind(entry.kind),
+          ts: entry.ts,
+          message: entry.message,
+          meta: entry.meta,
+        },
+      });
+    },
     taskId: leafTaskId,
     role: 'implementer',
     runnerId: featureId,
     threadId,
+    socketPath,
     askUserService,
+    fs: ctx.fs,
   });
   serverRef = ipcServer;
   await ipcServer.listen();
-  // Re-read the sidecar before adding `socketPath` so we don't clobber
-  // any control-surface mutation that may have updated it between the
-  // runner's startup `loadImplementer` above and now. If the sidecar
-  // was cleared while listen() was binding, skip the write — runner
-  // is already orphaned.
-  const currentSidecar = await loadImplementer(ctx, leafTaskId);
-  if (currentSidecar !== null) {
-    await saveImplementer(ctx, {
-      ...currentSidecar,
-      socketPath: ipcServer.getSocketPath(),
-    });
-  }
 
   const installSignalHandlers = (): (() => void) => {
     const onSignal = (signalName: string): void => {
-      // Reject the runner signal so `runRunnerLoop`'s `await signal.done`
-      // unwinds and the surrounding finally block can close the IPC
-      // server cleanly. Without this rejection the await would block
-      // forever and the OS would kill the process before unlink runs.
       signal.reject(new Error(`runner aborted by ${signalName}`));
       void ipcServer.close(`process-signal:${signalName}`);
     };
@@ -540,32 +568,40 @@ export async function runImplementer(
   };
   const removeSignalHandlers = installSignalHandlers();
 
-  // Belt-and-suspenders: if the process exits via an uncaught throw the
-  // try/finally below doesn't run, so this 'exit' handler unlinks the
-  // socket synchronously as a last resort.
   const onExit = (): void => {
     unlinkSocketSync(ipcServer.getSocketPath());
   };
   process.on('exit', onExit);
 
   try {
-    const outcome = await runRunnerLoop({
+    const priorItems: ReadonlyArray<Item> = await readChatHistory(ctx, leafTaskId);
+    const nudge = createStallNudgeHook({
       harness,
       threadId,
+      signal,
+      nudgeMessage: createNudgeMessage({
+        id: `runner-nudge-${leafTaskId}-${Date.now()}`,
+      }),
+      hasPendingExternal: () => askUserService.peek() !== null,
+      onStall: () =>
+        escalateStalledImplementer({
+          ctx,
+          taskId: leafTaskId,
+        }),
+      buildStalledOutcome: (): ImplementerOutcome => ({
+        status: 'blocked',
+        summary:
+          'implementer stalled — finished its turn without calling signal_implementation_done, signal_implementation_blocked, or AskUserQuestion',
+        blockedReason: 'agent stalled',
+      }),
+    });
+    const outcome = await runnableLoop<ImplementerOutcome>({
+      harness,
+      threadId,
+      priorItems,
       initialMessage,
       signal,
-      storeCtx: ctx,
-      taskId: leafTaskId,
-      nudge: {
-        role: 'implementer',
-        askUserService,
-        buildStalledOutcome: (): ImplementerOutcome => ({
-          status: 'blocked',
-          summary:
-            'implementer stalled — finished its turn without calling signal_implementation_done, signal_implementation_blocked, or AskUserQuestion',
-          blockedReason: 'agent stalled',
-        }),
-      },
+      afterFirstTurn: nudge,
     });
     return {
       taskId: leafTaskId,

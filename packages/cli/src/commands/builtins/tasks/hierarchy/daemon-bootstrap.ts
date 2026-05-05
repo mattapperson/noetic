@@ -22,13 +22,18 @@
  */
 
 import { createCodeAgent } from '@noetic/code-agent';
-import type { AgentHarness } from '@noetic/core';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
-
+import {
+  externalTaskEventsChan,
+  featureLoopStateChan,
+  validatorRequestChan,
+} from '@noetic/code-agent/tasks/ipc-node';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
+import type { AgentHarness, StorageAdapter, SubprocessAdapter } from '@noetic/core';
+import { createFileStorage, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
 import { defaultSignaller } from '../agent-ci-control.js';
-import { externalTaskEventsChan, featureLoopStateChan, validatorRequestChan } from '../channels.js';
 import { DEFAULT_MODEL } from '../defaults.js';
-import type { TaskStoreContext } from '../fs-store.js';
 import { startImplementerRun } from '../implementer-launcher.js';
 import { startPlannerRun } from '../planner-launcher.js';
 import type { AdversarialValidatorDeps } from './adversarial-validator-flow.js';
@@ -94,9 +99,21 @@ export async function buildHierarchyDaemonHarness(
     fs,
     projectRoot,
   };
+  // Durable storage anchors the subprocess adapter's handle manifest so
+  // `findLiveTaskHandle` can see runner spawns across daemon restarts
+  // and across callers sharing this adapter. Lives under
+  // `<NOETIC_HOME>/subprocess` — separate from the checkpoint-snapshot
+  // root used by `harness.checkpoint`.
+  const storage: StorageAdapter = createFileStorage({
+    root: resolveSubprocessRoot(),
+  });
+  const subprocess: SubprocessAdapter = createLocalSubprocessAdapter({
+    storage,
+  });
   const autopilotDeps: AutopilotDeps = {
     ctx,
     signaller: defaultSignaller,
+    subprocess,
     startPlannerRun: opts.startPlannerRun ?? startPlannerRun,
     startImplementerRun: opts.startImplementerRun ?? startImplementerRun,
   };
@@ -112,6 +129,8 @@ export async function buildHierarchyDaemonHarness(
     adapters: {
       fs,
       shell: createLocalShellAdapter(),
+      subprocess,
+      storage,
     },
     defaultMemory: false,
     llm: {

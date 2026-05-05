@@ -15,14 +15,17 @@
  * the new flow tests drive an iteration through `harness.run(validatorIterationStep, ...)`.
  */
 
+import type {
+  FeatureLoopStateChangedMessage,
+  ValidatorRequest,
+} from '@noetic/code-agent/tasks/ipc-node';
+import { featureLoopStateChan, validatorRequestChan } from '@noetic/code-agent/tasks/ipc-node';
+import type { Feature } from '@noetic/code-agent/tasks/schema';
+import { FeatureLoopState } from '@noetic/code-agent/tasks/schema';
+import { tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step } from '@noetic/core';
 import { every, step } from '@noetic/core';
 import * as log from '../../../../util/log.js';
-import type { FeatureLoopStateChangedMessage, ValidatorRequest } from '../channels.js';
-import { featureLoopStateChan, validatorRequestChan } from '../channels.js';
-import { tryLoadTask } from '../fs-store.js';
-import type { Feature } from './schemas.js';
-import { FeatureLoopState } from './schemas.js';
 import type { StructuredTask, ValidatorJobDeps } from './validator-job.js';
 import { gatherStructuredTasks, runFeatureValidation } from './validator-job.js';
 

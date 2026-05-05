@@ -15,24 +15,22 @@
  * can drive it without rendering Ink.
  */
 
-import type { FsAdapter } from '@noetic/core';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
-import type React from 'react';
-import { useCallback, useState } from 'react';
-
-import { useTheme } from '../../../../tui/components/theme.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, saveTask } from '../fs-store.js';
-import { taskDirPaths } from '../paths.js';
-import type { Task } from '../schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../schemas.js';
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, saveTask, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import type { FsAdapter } from '@noetic/core';
+import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
+import type React from 'react';
+import { useCallback, useState } from 'react';
+import { useTheme } from '../../../../tui/components/theme.js';
 import { MultilineTextArea } from './multiline-text-area.js';
 
 //#region Types

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
-import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ValidatorShellSpawn } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
 import { createShellValidator } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
 import type {
@@ -20,7 +20,7 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 interface FakeChildOptions {

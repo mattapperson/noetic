@@ -2,6 +2,7 @@ import { buildContextMemory } from '../memory/layer-api';
 import type { ItemSchemaRegistry } from '../schemas/item';
 import { defaultItemSchemaRegistry } from '../schemas/item';
 import type { Channel } from '../types/channel';
+import type { FrontierFrame } from '../types/checkpoint';
 import type { StepMeta, TokenUsage, Tool } from '../types/common';
 import type { Context, CwdState, ItemLog, LastLayerUsage } from '../types/context';
 import type { FsAdapter } from '../types/fs-adapter';
@@ -65,6 +66,15 @@ export class ContextImpl implements Context<ContextMemory> {
   private _aborted = false;
   private _abortReason?: string;
   private _memory?: ContextMemory;
+  /**
+   * Stack of steps currently in flight on this context, most-recent last.
+   * Pushed by `enterStep` at the top of `execute()` and popped by
+   * `leaveStep` when the step resolves (success or failure). The harness'
+   * checkpoint writer serialises this stack as the execution frontier so
+   * a restart can identify which step the context was paused inside.
+   * @internal
+   */
+  private readonly _frontier: FrontierFrame[] = [];
 
   constructor(opts: {
     harness: AgentHarnessContract;
@@ -189,5 +199,48 @@ export class ContextImpl implements Context<ContextMemory> {
   abort(reason?: string): void {
     this._aborted = true;
     this._abortReason = reason;
+  }
+
+  /**
+   * @internal
+   * Push a frame onto the execution frontier. Called by `execute()` at the
+   * top of every step dispatch so that the frontier reflects exactly the
+   * stack of steps currently in-flight on this context.
+   */
+  enterStep(frame: FrontierFrame): void {
+    this._frontier.push(frame);
+  }
+
+  /**
+   * @internal
+   * Pop the top frame. Called when a step resolves (success or failure)
+   * so that the frontier unwinds cleanly. The value of `expectedStepId`
+   * is used as a consistency check — if it does not match the top frame
+   * the pop is still performed, but a best-effort warning is surfaced to
+   * stderr rather than swallowed silently.
+   */
+  leaveStep(expectedStepId: string): void {
+    const top = this._frontier[this._frontier.length - 1];
+    if (top && top.stepId !== expectedStepId) {
+      // A mismatch indicates bookkeeping drift. We unwind best-effort and
+      // let the caller observe via `serialiseFrontier()` if needed.
+      console.warn(
+        `ContextImpl.leaveStep: expected "${expectedStepId}" on top of frontier but saw "${top.stepId}".`,
+      );
+    }
+    this._frontier.pop();
+  }
+
+  /**
+   * @internal
+   * Return a defensive copy of the current frontier. Consumed by the
+   * checkpoint writer — see `AgentHarness.checkpoint`.
+   */
+  serialiseFrontier(): FrontierFrame[] {
+    return this._frontier.map((frame) => ({
+      stepId: frame.stepId,
+      input: frame.input,
+      state: frame.state,
+    }));
   }
 }

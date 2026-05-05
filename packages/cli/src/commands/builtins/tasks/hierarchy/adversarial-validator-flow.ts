@@ -32,14 +32,13 @@ import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 
 import { join } from '@noetic/code-agent/tasks/path-utils';
-
+import type { Assertion, AssertionOutcome } from '@noetic/code-agent/tasks/schema';
+import { AssertionStatus } from '@noetic/code-agent/tasks/schema';
+import { tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { Context, ContextMemory, Step } from '@noetic/core';
 import { fork, step } from '@noetic/core';
 import { z } from 'zod';
 import { DEFAULT_MODEL } from '../defaults.js';
-import { tryLoadTask } from '../fs-store.js';
-import type { Assertion, AssertionOutcome } from './schemas.js';
-import { AssertionStatus } from './schemas.js';
 import type { RunValidatorArgs, ValidatorRunOutcome } from './validator-job.js';
 
 /**

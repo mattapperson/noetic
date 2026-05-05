@@ -42,9 +42,9 @@
   "scripts": {
     "postinstall": "agent-browser install || true",
     "dev": "bun run src/cli/cli.ts",
-    "test": "bun test --preload ./test/setup.ts test/*.test.ts",
-    "test:coverage": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=text --coverage-reporter=json",
-    "test:ci": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=json",
+    "test": "bun test --preload ./test/setup.ts",
+    "test:coverage": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=json",
     "test:e2e": "bunx tui-test 'e2e'",
     "test:e2e:live": "bunx tui-test 'live\\.test\\.ts$'",
     "typecheck": "bunx tsc --noEmit",

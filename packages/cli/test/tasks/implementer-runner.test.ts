@@ -1,20 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 
-import { readLog, saveTask, tailEvents } from '../../src/commands/builtins/tasks/fs-store.js';
+import { readLog, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
 import { loadFeature } from '../../src/commands/builtins/tasks/hierarchy/store.js';
 import { commitExitWrites } from '../../src/commands/builtins/tasks/implementer-runner.js';
-import {
-  loadImplementer,
-  saveImplementer,
-} from '../../src/commands/builtins/tasks/implementer-state.js';
 import {
   AutopilotState,
   EventKind,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './_helpers.js';
 
 const PARENT_ID = 'T-parent0000';
@@ -112,18 +108,6 @@ describe('commitExitWrites', () => {
   it('flips the parent feature to validating on completed outcome', async () => {
     const ctx = makeStoreContext();
     const { featureId } = await seedHierarchy(ctx);
-    await saveImplementer(ctx, {
-      taskId: LEAF_ID,
-      parentTaskId: PARENT_ID,
-      featureId,
-      sessionId: 'S-test',
-      pid: 4242,
-      pidStarttime: null,
-      worktreePath: '/repo/.worktrees/feat-x',
-      branch: 'feat/x',
-      startedAt: '2026-05-01T00:00:00.000Z',
-      pausedAt: null,
-    });
 
     const result = await commitExitWrites({
       ctx,
@@ -150,8 +134,6 @@ describe('commitExitWrites', () => {
     expect(exitEvent?.payload?.loopState).toBe('validating');
     expect(exitEvent?.payload?.featureId).toBe(featureId);
     expect(exitEvent?.payload?.summary).toBe('wrote scripts/qa-hello.ts');
-
-    expect(await loadImplementer(ctx, LEAF_ID)).toBeNull();
   });
 
   it('marks the feature blocked on blocked outcome with reason', async () => {

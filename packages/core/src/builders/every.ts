@@ -1,4 +1,5 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
+import { getDefaultRegistrar } from '../types/step-registrar';
 import type { Channel } from '../types/channel';
 import type { ContextMemory } from '../types/memory';
 import type { EveryErrorPolicy, Step, StepEvery } from '../types/step';
@@ -76,7 +77,7 @@ export function every<TMemory = ContextMemory, I = unknown, O = unknown>(
       hint: 'Pass a non-negative number of milliseconds for jitter, or omit it.',
     });
   }
-  return {
+  const built: StepEvery<TMemory, I, O> = {
     kind: 'every',
     id: opts.id,
     step: opts.step,
@@ -85,4 +86,6 @@ export function every<TMemory = ContextMemory, I = unknown, O = unknown>(
     onError: opts.onError ?? 'continue',
     jitter: opts.jitter ?? 0,
   };
+  getDefaultRegistrar().register(built);
+  return built;
 }

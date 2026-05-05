@@ -5,9 +5,9 @@
  * timestamps) so every handler stays small and focused.
  */
 
-import type { TaskStoreContext } from '../fs-store.js';
-import { loadTask } from '../fs-store.js';
-import type { Task } from '../schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 
 //#region Helpers
 

@@ -6,13 +6,13 @@
  * Esc returns to the kanban. Pure helpers are exported for unit tests.
  */
 
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-
 import { useTheme } from '../../../../tui/components/theme.js';
-import type { TaskStoreContext } from '../fs-store.js';
 import { getTaskHierarchy } from '../hierarchy/aggregate.js';
 import type {
   FeatureStatus,
@@ -20,7 +20,6 @@ import type {
   SliceStatus,
   TaskHierarchy,
 } from '../hierarchy/schemas.js';
-import type { Task } from '../schemas.js';
 
 //#region Types
 

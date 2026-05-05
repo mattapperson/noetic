@@ -6,9 +6,9 @@ import {
   featureLoopStateChan,
   ValidatorRequestSchema,
   validatorRequestChan,
-} from '../../src/commands/builtins/tasks/channels.js';
+} from '@noetic/code-agent/tasks/ipc-node';
 import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { EventKind, EventSchema } from '../../src/commands/builtins/tasks/schemas.js';
+import { EventKind, EventSchema } from '@noetic/code-agent/tasks/schema';
 
 //#region validatorRequestChan
 

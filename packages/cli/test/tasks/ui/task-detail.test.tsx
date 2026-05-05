@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import type { LogEntry } from '../../../src/commands/builtins/tasks/schemas.js';
+import type { LogEntry } from '@noetic/code-agent/tasks/schema';
 import {
   formatLogLine,
   logEntryKey,

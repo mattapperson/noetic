@@ -47,6 +47,8 @@ const result = await harness.run(step, input, ctx);
 
 The agent harness manages execution, context creation, channels, memory lifecycle, and detached spawns. When no `callModel` is provided, `AgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
 
+The harness always holds a `SubprocessAdapter` — every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
+
 ### Tools
 
 Tools are defined with Zod schemas for input/output validation. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `memory` accessors:
@@ -181,6 +183,8 @@ Observability:
 5. **`until.noToolCalls()` checks the outer loop** -- the inner tool call loop is handled by `callModel`
 6. **Memory slot ordering matters** -- lower slots appear first in the LLM view. Use `Slot` constants
 7. **Fork paths get cloned state** -- mutations in one path don't affect siblings
+8. **SubprocessAdapter precedence is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`** -- reach for a per-step override to run one specific spawn out-of-process while keeping the rest in-process, or a per-call override on `detachedSpawn` to do the same without touching the step definition
+9. **Durability is opt-in and composed of three surfaces** -- `checkpointStore` (parent execution state), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). Configure the ones you need; absent surfaces are no-ops and the harness degrades gracefully
 
 ## API Reference
 

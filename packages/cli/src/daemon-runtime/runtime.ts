@@ -12,7 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-
+import { daemonRuntimePaths } from './paths.js';
 import { buildHierarchyDaemonHarness } from '../commands/builtins/tasks/hierarchy/daemon-bootstrap.js';
 import * as log from '../util/log.js';
 import {
@@ -24,7 +24,6 @@ import {
   reserveDaemonStart,
   tryUnlink,
 } from './lock.js';
-import { daemonRuntimePaths } from './paths.js';
 
 //#region Public API
 

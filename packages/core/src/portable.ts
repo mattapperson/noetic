@@ -52,3 +52,24 @@ export { AgentHarness } from './runtime/agent-harness';
 export { createInMemoryStorage } from './runtime/in-memory-storage';
 
 //#endregion
+
+//#region Ask-User Schemas
+
+/** @public */
+export type {
+  AskUserAnnotation,
+  AskUserInput,
+  AskUserOption,
+  AskUserOutput,
+  AskUserQuestion,
+} from './types/ask-user-types';
+/** @public */
+export {
+  AskUserAnnotationSchema,
+  AskUserInputSchema,
+  AskUserOptionSchema,
+  AskUserOutputSchema,
+  AskUserQuestionSchema,
+} from './types/ask-user-types';
+
+//#endregion

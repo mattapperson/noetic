@@ -4,38 +4,44 @@
  * hierarchy yet. Mirrors `implementer-launcher.ts`:
  *
  *   1. Reject if a live planner is already attached to the task.
+ *      "Live" means the adapter's handle manifest records a matching
+ *      handle whose underlying pid is still alive with the original
+ *      `pidStarttime` — `findLiveTaskHandle` + the adapter's
+ *      `listLive()` hydration do the drift check, replacing the old
+ *      sidecar-based detection.
  *   2. Spawn the wrapper with `NOETIC_TASK_DIR` env so the child can
- *      locate its task directory and project root.
- *   3. Persist `_planner.json` (sidecar before any state write so a
- *      crash leaves a record of the in-flight subprocess).
- *   4. Patch `task.json` to flip `autopilotState = 'planning'`.
- *   5. Append a `task:updated` event so daemon subscribers observe
+ *      locate its task directory and project root. The adapter's
+ *      durable `StorageAdapter` persists the handle manifest at
+ *      `spawn()` time so restarts + peer callers can rediscover the
+ *      live child.
+ *   3. Patch `task.json` to flip `autopilotState = 'planning'`.
+ *   4. Append a `task:updated` event so daemon subscribers observe
  *      the spawn.
  */
 
-import type { ProcessSignaller, SubprocessAdapter, SubprocessHandle } from '@noetic/core';
-
-import {
-  requireNodeProcessSignaller,
-  requireNodeSubprocessAdapter,
-} from './subprocess-required.js';
+import type { SubprocessAdapter, SubprocessHandle } from '@noetic/core';
 
 import { fileUrlToPath } from './file-url-to-path.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendEvent, loadTask, saveTask } from './fs-store.js';
 import { taskDirPaths } from './paths.js';
-import { clearPlanner, loadPlanner, savePlanner } from './planner-state.js';
 import { randomHex } from './random.js';
 import type { Task } from './schemas.js';
 import { AutopilotState, EventKind } from './schemas.js';
+import { findLiveTaskHandle, TaskRole } from './task-runtime-index.js';
 
 //#region Types
 
 export interface StartPlannerRunArgs {
   readonly ctx: TaskStoreContext;
   readonly taskId: string;
-  readonly subprocess?: SubprocessAdapter;
-  readonly signaller?: ProcessSignaller;
+  /**
+   * Subprocess adapter used to dispatch the runner process AND to check
+   * for an existing live planner via its handle manifest. Required —
+   * callers construct one per host (typically a durable
+   * `createLocalSubprocessAdapter({storage})`) and thread it through.
+   */
+  readonly subprocess: SubprocessAdapter;
   readonly now?: string;
   readonly runnerScript?: string;
   readonly env?: Record<string, string | undefined>;
@@ -84,42 +90,18 @@ function makeSessionId(taskId: string): string {
 
 //#region Helpers
 
-interface IsLivePlannerArgs {
-  readonly ctx: TaskStoreContext;
-  readonly taskId: string;
-  readonly signaller: ProcessSignaller;
-}
-
-async function isLivePlanner(args: IsLivePlannerArgs): Promise<boolean> {
-  const existing = await loadPlanner(args.ctx, args.taskId);
-  if (existing === null) {
-    return false;
-  }
-  if (!args.signaller.isAlive(existing.pid)) {
-    return false;
-  }
-  if (existing.pidStarttime === null) {
-    return true;
-  }
-  const current = args.signaller.startTime(existing.pid);
-  if (current === null) {
-    return false;
-  }
-  return current === existing.pidStarttime;
-}
-
 interface SpawnRunnerArgs {
   readonly subprocess: SubprocessAdapter;
   readonly runnerScript: string;
   readonly cwd: string;
   readonly taskDir: string;
+  readonly taskId: string;
   readonly extraEnv: Record<string, string | undefined> | undefined;
 }
 
 interface SpawnRunnerOk {
   readonly kind: 'ok';
   readonly pid: number;
-  readonly pidStarttime: string | null;
   readonly handle: SubprocessHandle;
 }
 
@@ -146,11 +128,6 @@ function handlePid(handle: SubprocessHandle): number | null {
   return pid;
 }
 
-function handlePidStarttime(handle: SubprocessHandle): string | null {
-  const pidStarttime = handle.metadata?.pidStarttime;
-  return typeof pidStarttime === 'string' ? pidStarttime : null;
-}
-
 async function spawnRunner(args: SpawnRunnerArgs): Promise<SpawnRunnerResult> {
   let handle: SubprocessHandle;
   try {
@@ -164,7 +141,8 @@ async function spawnRunner(args: SpawnRunnerArgs): Promise<SpawnRunnerResult> {
       detached: true,
       env: buildRunnerEnv(args),
       metadata: {
-        taskRole: 'planner',
+        taskRole: TaskRole.Planner,
+        taskId: args.taskId,
       },
     });
   } catch (err) {
@@ -208,7 +186,6 @@ async function spawnRunner(args: SpawnRunnerArgs): Promise<SpawnRunnerResult> {
   return {
     kind: 'ok',
     pid,
-    pidStarttime: handlePidStarttime(handle),
     handle,
   };
 }
@@ -263,23 +240,21 @@ async function abortChild(args: AbortChildArgs): Promise<void> {
 /**
  * Spawn a planner runner for `taskId`. Throws {@link PlannerSpawnError}
  * if the wrapper child fails to start or if another live planner is
- * already attached.
+ * already attached (detected via the adapter's handle manifest).
  */
 export async function startPlannerRun(args: StartPlannerRunArgs): Promise<StartPlannerRunResult> {
   const cwd = args.ctx.projectRoot;
-  const subprocess = args.subprocess ?? requireNodeSubprocessAdapter();
-  const signaller = args.signaller ?? requireNodeProcessSignaller;
   const now = args.now ?? new Date().toISOString();
   const runnerScript = args.runnerScript ?? defaultRunnerScript();
 
   const taskDir = taskDirPaths(args.ctx, args.taskId).dir;
 
-  const live = await isLivePlanner({
-    ctx: args.ctx,
+  const existing = await findLiveTaskHandle({
+    adapter: args.subprocess,
     taskId: args.taskId,
-    signaller,
+    taskRole: TaskRole.Planner,
   });
-  if (live) {
+  if (existing !== null) {
     throw new PlannerSpawnError(
       PlannerSpawnErrorCode.AlreadyAttached,
       `planner already attached to task ${args.taskId}`,
@@ -287,10 +262,11 @@ export async function startPlannerRun(args: StartPlannerRunArgs): Promise<StartP
   }
 
   const spawned = await spawnRunner({
-    subprocess,
+    subprocess: args.subprocess,
     runnerScript,
     cwd,
     taskDir,
+    taskId: args.taskId,
     extraEnv: args.env,
   });
   if (spawned.kind === 'error') {
@@ -298,23 +274,6 @@ export async function startPlannerRun(args: StartPlannerRunArgs): Promise<StartP
   }
 
   const sessionId = makeSessionId(args.taskId);
-  try {
-    await savePlanner(args.ctx, {
-      taskId: args.taskId,
-      sessionId,
-      pid: spawned.pid,
-      pidStarttime: spawned.pidStarttime,
-      startedAt: now,
-      pausedAt: null,
-    });
-  } catch (err) {
-    await abortChild({
-      subprocess,
-      handle: spawned.handle,
-    });
-    throw err;
-  }
-
   let patch: PatchPlanningResult;
   try {
     patch = await patchTaskForPlanning({
@@ -324,11 +283,8 @@ export async function startPlannerRun(args: StartPlannerRunArgs): Promise<StartP
     });
   } catch (err) {
     await abortChild({
-      subprocess,
+      subprocess: args.subprocess,
       handle: spawned.handle,
-    });
-    await clearPlanner(args.ctx, args.taskId).catch(() => {
-      /* swallow — best-effort cleanup */
     });
     throw err;
   }

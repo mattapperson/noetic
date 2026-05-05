@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 
-import { loadTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { planTaskHandler } from '../../../src/commands/builtins/tasks/handlers/plan.js';
 import {
   listInterviewSessions,
   listMilestones,
 } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import { HierarchyStatus } from '../../../src/commands/builtins/tasks/schemas.js';
+import { HierarchyStatus } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('planTaskHandler', () => {

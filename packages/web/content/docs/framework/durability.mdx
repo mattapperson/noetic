@@ -1,0 +1,262 @@
+---
+title: Durability
+description: Crash-recovery model for long-running agents — checkpoint/restore, subprocess reattach, durable IPC.
+---
+
+Durable execution is opt-in. A zero-config `AgentHarness` has no persistent storage, so every durability hook is a no-op and the harness behaves exactly like before. A harness wired with a durable `StorageAdapter`, a `CheckpointStore`, and a durable `SubprocessAdapter` gains full crash recovery — long-running children survive a host restart, parent contexts are rebuilt from snapshots, and IPC streams resume from the last acked frame with zero duplicates and zero losses.
+
+## Quick Example
+
+```ts
+import {
+  AgentHarness,
+  createCheckpointStore,
+  createFileStorage,
+} from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+
+// Two distinct on-disk roots: subprocess manifests vs checkpoint snapshots.
+const subprocessStorage = createFileStorage({
+  root: `${process.env.HOME}/.noetic/subprocess`,
+});
+const checkpointStorage = createFileStorage({
+  root: `${process.env.HOME}/.noetic/checkpoints`,
+});
+
+const harness = new AgentHarness({
+  name: 'durable-agent',
+  initialStep: agent,
+  params: {},
+  subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
+  checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
+});
+```
+
+Any `detachedSpawn` through this harness lands a manifest entry. Any `execute()` turn lands a checkpoint. On restart, construct the same harness and call `reattachLiveChildren(harness)` — every still-running child comes back with its parent context rebuilt.
+
+## The Three Surfaces
+
+Durable execution composes three primitives:
+
+1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, memory-layer state, cwd, pending ask-user queue, and item log.
+2. **`SubprocessAdapter.reattach` / `listLive`** — persists handle manifests for every long-lived child and rebinds them on parent restart.
+3. **Durable IPC (`DurableOutboundQueue` + protocol v2)** — numbers every outbound IPC frame with a monotonic sequence, persists it, and resumes from the client's last ack on reconnect.
+
+Each surface is independent. A host that needs durable checkpoints but in-process children gets the first without the other two. A host with long-lived OS subprocesses but no LLM state gets the second without the first. The CLI wires all three together; custom embedders mix and match.
+
+## Checkpoints
+
+### When Snapshots Fire
+
+`harness.checkpoint(ctx)` runs automatically at four boundaries:
+
+1. After every `execute()` call that mutated the item log.
+2. After `detachedSpawn()` settles (success or failure).
+3. When an ask-user prompt is enqueued.
+4. After `runAppendPipeline()` resolves.
+
+Any caller can also invoke `harness.checkpoint(ctx)` explicitly — it's an ordinary async method.
+
+### What's in a Snapshot
+
+```ts
+import type { CheckpointSnapshot } from '@noetic/core';
+
+interface CheckpointSnapshot {
+  schemaVersion: 1;
+  executionId: string;
+  threadId?: string;
+  resourceId?: string;
+  frontier: Array<{ stepId: string; input: unknown; state?: unknown }>;
+  layers: Record<string, unknown>;   // layerId → serialised state
+  cwd: { current: string | null; previous?: string | null } | null;
+  askUser: Array<{ id: string; input: unknown; createdAt: number }>;
+  itemLog: { items: unknown[] };
+  capturedAt: string;                // ISO-8601
+}
+```
+
+The snapshot is keyed by `executionId` and validated by `CheckpointSnapshotSchema` on load. Successive snapshots overwrite — no append-only log, no journaling. A failing save is logged and swallowed so a checkpoint never aborts an otherwise-successful step.
+
+### Restore
+
+```ts
+const restored = await harness.restore(executionId);
+if (restored !== null) {
+  // `restored.id === executionId`. The item log, layer state, and cwd
+  // are rebuilt from the snapshot; the frontier tells the caller which
+  // step to resume.
+}
+```
+
+Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unknown — callers discard via `checkpointStore.clear(executionId)` and start fresh.
+
+### Limitations
+
+Durable execution can replay a step body whose prior completion's checkpoint failed to land. The framework cannot make arbitrary `step.run` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
+
+LLM mid-stream is not resumed. If the host dies while the model is generating, on restart the turn is re-issued. The item log's response-id dedupe catches identical responses; different responses win as a new turn.
+
+## Subprocess Adapter Durability
+
+Every `SubprocessAdapter` exposes two durability hooks:
+
+```ts
+interface SubprocessAdapter {
+  reattach(handleId: string): Promise<SubprocessHandle | null>;
+  listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
+  // ... standard methods ...
+}
+```
+
+When the adapter is constructed with a `storage: StorageAdapter`, every `spawn()` writes a manifest entry covering `handleId`, `stepId`, `serializedInput`, `executionId`, the transport identity (pid + `pidStarttime` for the local adapter, socketPath for IPC), and any caller-attached metadata. `listLive()` scans the manifest prefix; `reattach(handleId)` re-queries liveness and rebinds the handle.
+
+Without storage, `listLive()` returns an empty set and `reattach()` returns null — every surface degrades gracefully to "fresh start".
+
+### Host Restart
+
+The CLI helper `reattachLiveChildren` wires up the recovery step:
+
+```ts
+import { reattachLiveChildren } from '@noetic/cli';
+
+const { handles, contexts } = await reattachLiveChildren(harness);
+for (const [handleId, ctx] of contexts) {
+  // Each context has its pre-crash item log, layer state, and cwd.
+  // Re-subscribe to the handle's IPC stream, replay pending ask-user
+  // modals, continue from the restored frontier.
+}
+```
+
+The helper calls `harness.subprocess.listLive()`, then `harness.restore(executionId)` for every handle that carries an `executionId`. With no durable storage configured the call is a cheap no-op.
+
+## Durable IPC
+
+A server that composes `DurableOutboundQueue` wraps every outbound frame in a `durable` envelope keyed by a monotonic sequence number. The client tracks the highest seq it has durably consumed and sends `durableResume { ackedThrough }` on every reconnect. The server replays any frames the client has not acked, resumes live emission, and compacts the queue when `durableAck { throughSeq }` arrives.
+
+```ts
+import { createDurableOutboundQueue } from '@noetic/core/adapters/node';
+
+const queue = await createDurableOutboundQueue({ storage, socketPath });
+
+// On each outbound frame:
+const { seq } = await queue.append(JSON.stringify(frame));
+socket.write(encodeFrame({ type: 'durable', seq, frame }));
+
+// On client durableAck:
+await queue.ackUpTo(ack.throughSeq);
+
+// On client durableResume:
+for (const entry of await queue.frameRange(resume.ackedThrough + 1)) {
+  socket.write(encodeFrame({
+    type: 'durable',
+    seq: entry.seq,
+    frame: JSON.parse(entry.frame),
+  }));
+}
+```
+
+The queue is transport-agnostic. Any framed byte stream — unix socket, WebSocket, TCP — can use the same pattern. Frames are opaque strings to the queue; the server encodes them before append and the client decodes them after unwrap.
+
+### Protocol v2
+
+Three new frame types extend the IPC wire protocol:
+
+| Frame | Direction | Purpose |
+|---|---|---|
+| `durable` | Server → Client | Wrapper carrying `{ seq, frame }`. The inner frame is the original v1 frame the server would have emitted. |
+| `durableResume` | Client → Server | `{ ackedThrough }` — "replay everything past this seq on reconnect". |
+| `durableAck` | Client → Server | `{ throughSeq }` — "I've durably consumed up to here; you may compact". |
+
+Protocol v2 is backward compatible. Peers that do not opt into durable delivery neither emit nor receive the new frames; v1 peers interoperate seamlessly.
+
+## Storage Layout
+
+The CLI reserves three distinct on-disk roots:
+
+| Concern | Default root | Env override |
+|---|---|---|
+| Subprocess handle manifests | `$HOME/.noetic/subprocess/` | `NOETIC_HOME=/path → $NOETIC_HOME/subprocess` |
+| Checkpoint snapshots | `$HOME/.noetic/checkpoints/` | `NOETIC_HOME=/path → $NOETIC_HOME/checkpoints` |
+| Task state (per-project) | `<projectRoot>/.noetic/tasks/` | (not env-configurable) |
+
+Subprocess manifests and IPC queues can share a root because both are owned by the adapter. Keeping the checkpoint-snapshot root distinct means "discard all recovery data" is a single directory removal.
+
+## Run an Agent Out-of-Process
+
+Switch a specific spawn to run in its own OS child by passing a local adapter as a per-call override:
+
+```ts
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createFileStorage } from '@noetic/core';
+
+const localAdapter = createLocalSubprocessAdapter({
+  storage: createFileStorage({
+    root: `${process.env.HOME}/.noetic/subprocess`,
+  }),
+});
+
+const handle = harness.detachedSpawn(
+  researchAgent,
+  'summarise the latest arXiv papers on RL',
+  parentCtx,
+  {
+    subprocess: localAdapter,
+    cwdInit: '/tmp/research-workspace',
+  },
+);
+
+// The parent continues immediately. The child runs in a separate bun
+// process. If the parent crashes, the manifest survives and the child
+// keeps running; on restart, `reattachLiveChildren` rebinds it.
+const result = await handle.await();
+```
+
+Per-step overrides work the same way: set `subprocess: localAdapter` on a `step.run` or `spawn` opts and every dispatch of that step uses the local adapter regardless of the harness default.
+
+## Survive a Host Crash
+
+```ts
+// First boot: configure durable storage.
+const harness = new AgentHarness({
+  name: 'crash-proof',
+  initialStep: agent,
+  params: {},
+  subprocess: createLocalSubprocessAdapter({
+    storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
+  }),
+  checkpointStore: createCheckpointStore({
+    storage: createFileStorage({ root: `${process.env.HOME}/.noetic/checkpoints` }),
+  }),
+});
+
+// Launch a long-lived child.
+harness.detachedSpawn(backgroundWorkerStep, jobSpec, parentCtx);
+
+// ... process crashes ...
+
+// Second boot: same harness construction, then:
+import { reattachLiveChildren } from '@noetic/cli';
+const { handles, contexts } = await reattachLiveChildren(harness);
+// `handles` contains the still-running background worker.
+// `contexts` has its rebuilt parent context.
+```
+
+The pattern generalises to any host — not just `@noetic/cli`. Any embedder that configures durable storage and calls `listLive()` + `restore()` on boot gets the same recovery.
+
+## Guarantees
+
+With the full durable stack configured:
+
+- Every completed step, spawned child, and ask-user prompt survives a host crash.
+- Restart rediscovers running children and rebuilds their parent contexts.
+- IPC replay is exactly-once at the frame level when the client acks correctly.
+- Schema version drift surfaces as a typed error rather than silent corruption.
+
+Without the full stack, the surfaces that depend on it are no-ops and the harness behaves as though durability were never requested.
+
+## Related Pages
+
+- [AgentHarness](/docs/framework/runtime) — the `subprocess` and `checkpointStore` options.
+- [Spawn](/docs/framework/operators/spawn) — `subprocess` override on `spawn` and `detachedSpawn`.
+- [Context](/docs/framework/context) — `ctx.checkpoint()` semantics and item log dedupe.

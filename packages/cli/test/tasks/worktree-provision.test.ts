@@ -7,7 +7,7 @@ import {
   ProvisionTool,
   provisionWorktree,
   WorktreeProvisionError,
-} from '../../src/commands/builtins/tasks/worktree-provision.js';
+} from '@noetic/code-agent/tasks';
 
 //#region Fake shell helpers
 

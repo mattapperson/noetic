@@ -16,6 +16,8 @@ import {
 import type { PluginContextBuilder } from '@noetic/code-agent/plugins';
 import type { SkillDefinition } from '@noetic/code-agent/skills';
 import { buildSkillCatalog } from '@noetic/code-agent/skills';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   createActivateSkillTool,
   createAgentTool,
@@ -31,9 +33,12 @@ import type {
   PlanEnterSessionCallback,
   PlanExitCallback,
   ShellAdapter,
+  StorageAdapter,
+  SubprocessAdapter,
   Tool,
 } from '@noetic/core';
 import {
+  createFileStorage,
   createLocalSubprocessAdapter,
   durableTaskState,
   fileReference,
@@ -45,7 +50,6 @@ import {
 } from '@noetic/core';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
-import type { TaskStoreContext } from '../commands/builtins/tasks/fs-store.js';
 import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-policy.js';
 import { taskTools } from '../commands/builtins/tasks/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
@@ -190,6 +194,14 @@ export interface HarnessWithSkills {
   harness: AgentHarness<{
     model: string;
   }>;
+  /**
+   * Subprocess adapter bound to the harness. Exposed so task launchers
+   * and control surfaces (delete-guard, resolve-chat-target) can thread
+   * the same adapter through — `findLiveTaskHandle` only sees handles
+   * persisted via the same adapter's `StorageAdapter`, so a shared
+   * instance is required.
+   */
+  subprocess: SubprocessAdapter;
   skills: ReadonlyArray<SkillDefinition>;
   memoryLayers: ReadonlyArray<MemoryLayer>;
   /** Tears down owned resources (LSP server processes, etc.). Safe to call multiple times. */
@@ -453,6 +465,18 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     mode,
   });
 
+  // Subprocess handle manifests live under `<NOETIC_HOME>/subprocess`
+  // (default `$HOME/.noetic/subprocess`) — distinct from the
+  // `~/.noetic/checkpoints` default that `createFileStorage()` uses,
+  // so task-runner identity and execution checkpoints don't share a
+  // directory.
+  const storage: StorageAdapter = createFileStorage({
+    root: resolveSubprocessRoot(),
+  });
+  const subprocess: SubprocessAdapter = createLocalSubprocessAdapter({
+    storage,
+  });
+
   const codeAgent = await createCodeAgent({
     name: 'noetic-cli',
     model: config.model,
@@ -460,7 +484,8 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     adapters: {
       fs,
       shell,
-      subprocess: createLocalSubprocessAdapter(),
+      subprocess,
+      storage,
     },
     tools,
     memory,
@@ -475,6 +500,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
 
   return {
     harness,
+    subprocess,
     skills: allSkills,
     memoryLayers: memory,
     // Only dispose the LSP service if we created it — a caller-supplied service

@@ -6,8 +6,8 @@
  * Ported from ~/Desktop/claude-code-main/src/components/permissions/AskUserQuestionPermissionRequest/SubmitQuestionsView.tsx.
  */
 
+import type { AskUserInput } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
-import type { AskUserInput } from '../../../tools/ask-user-types.js';
 import { useTheme } from '../theme.js';
 import type { MultipleChoiceState } from './use-multiple-choice-state.js';
 

@@ -33,18 +33,6 @@ export {
 } from './agent.js';
 export { type AskUserTool, createAskUserTool } from './ask-user.js';
 export {
-  type AskUserAnnotation,
-  AskUserAnnotationSchema,
-  type AskUserInput,
-  AskUserInputSchema,
-  type AskUserOption,
-  AskUserOptionSchema,
-  type AskUserOutput,
-  AskUserOutputSchema,
-  type AskUserQuestion,
-  AskUserQuestionSchema,
-} from './ask-user-types.js';
-export {
   BashEventSchema,
   type BashOutput,
   BashOutputSchema,

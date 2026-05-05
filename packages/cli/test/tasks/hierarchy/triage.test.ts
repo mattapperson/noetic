@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { listTasks, loadTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type {
   Feature,
   Milestone,
@@ -25,7 +25,7 @@ import {
   triageFeature,
   triageSlice,
 } from '../../../src/commands/builtins/tasks/hierarchy/triage.js';
-import { TaskLifecycleStatus, TaskSource } from '../../../src/commands/builtins/tasks/schemas.js';
+import { TaskLifecycleStatus, TaskSource } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 const PARENT_TASK_ID = 'T-abcdefghij';

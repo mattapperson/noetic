@@ -18,13 +18,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-
-import type { TaskStoreContext } from './fs-store.js';
-import { appendEvent, appendLog, loadTask, saveTask } from './fs-store.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { EventKind, LogEntryKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, appendLog, loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { RunnerState } from './runner-state.js';
 import { clearRunner, loadRunner, saveRunner } from './runner-state.js';
-import type { Task } from './schemas.js';
-import { EventKind, LogEntryKind, TaskReviewStatus } from './schemas.js';
 
 //#region Types
 

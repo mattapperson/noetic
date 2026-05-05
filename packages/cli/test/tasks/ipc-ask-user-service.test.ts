@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { PendingAskUserRequest } from '@noetic/code-agent/ask-user-service';
+import type { AskUserBroadcaster } from '@noetic/code-agent/tasks';
+import { createIpcAskUserService } from '@noetic/code-agent/tasks';
 import { isNoeticError } from '@noetic/core';
-import type { AskUserBroadcaster } from '../../src/commands/builtins/tasks/ipc-ask-user-service.js';
-import { createIpcAskUserService } from '../../src/commands/builtins/tasks/ipc-ask-user-service.js';
 
 interface BroadcastLog {
   readonly broadcaster: AskUserBroadcaster;

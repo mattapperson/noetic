@@ -11,26 +11,16 @@
  * runner with stderr inherited so any startup crash surfaces
  * immediately, and asserts the runner made it far enough to write its
  * "planner started" log entry.
- *
- * Note: we do NOT assert that `ensureChatTarget` returns a non-null
- * target. With the stale-sidecar fix (`planner-runner.ts` now clears
- * the sidecar on exit), a fast LLM completion — or a fast runner
- * crash — leaves the sidecar gone, which is the correct post-state.
- * The "connect to the live runner" path is covered in the pilotty
- * tests when an API key is present; the socket-reachability contract
- * is covered in `resolve-chat-target-staleness.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { createLocalFsAdapter } from '@noetic/core';
+import { createFileStorage, createLocalFsAdapter } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
 
 import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/create.js';
-import type { PlannerSpawn } from '../../src/commands/builtins/tasks/planner-launcher.js';
-import { startPlannerRun } from '../../src/commands/builtins/tasks/planner-launcher.js';
 import { ensureChatTarget } from '../../src/commands/builtins/tasks/resolve-chat-target.js';
 
 describe('chat on a task end-to-end', () => {
@@ -45,7 +35,6 @@ describe('chat on a task end-to-end', () => {
   });
 
   afterEach(async () => {
-    // Keep artifacts on failure for debugging.
     if (process.env.NOETIC_TEST_KEEP_TMP === '1') {
       console.error(`[keep] ${projectRoot}`);
       return;
@@ -68,54 +57,57 @@ describe('chat on a task end-to-end', () => {
       title: 'test chat hang',
     });
 
-    // Route the subprocess's stderr to the parent so a runner startup
-    // crash (e.g. the hang this test guards against) surfaces in test
-    // output instead of silently disappearing into /dev/null.
-    const visibleSpawn: PlannerSpawn = (command, args, options) =>
-      spawn(command, args.slice(), {
-        ...options,
-        stdio: [
-          'ignore',
-          'pipe',
-          'inherit',
-        ],
-        env: {
-          ...options.env,
-          // The runner needs *a* key to boot its harness, but the LLM
-          // call only happens after the IPC socket is bound — any
-          // value works for covering the socket-bind path.
-          OPENROUTER_API_KEY:
-            (process.env.OPENROUTER_API_KEY ?? '').length > 0
-              ? process.env.OPENROUTER_API_KEY
-              : 'test-key-sk-unused',
-          // Redirect the runner's tasks-root to the test's temp dir.
-          // The subprocess inherits only env, not the ctx.tasksRoot,
-          // so we thread the override here.
-          NOETIC_HOME: projectRoot,
-        },
-      });
-
-    await ensureChatTarget(ctx, created.task.id, {
-      // Short poll window: we're not trying to chat, only verifying
-      // that the launcher succeeded and the runner didn't crash at
-      // startup. Whether the runner is still alive at assertion time
-      // depends on LLM latency — irrelevant here.
-      timeoutMs: 3e3,
-      pollIntervalMs: 100,
-      startPlannerRunFn: (runArgs) =>
-        startPlannerRun({
-          ...runArgs,
-          spawnFn: visibleSpawn,
-        }),
+    // The subprocess adapter (with durable storage) is shared across
+    // the spawn + resolve calls — the launcher persists the handle
+    // manifest into storage, and resolveChatTarget reads back via
+    // listLive() through the same adapter.
+    const storage = createFileStorage({
+      root: join(projectRoot, 'subprocess-storage'),
     });
+    const subprocess = createLocalSubprocessAdapter({
+      storage,
+    });
+
+    // The runner needs *a* key to boot its harness, but the LLM call
+    // only happens after the IPC socket is bound — any value works
+    // for covering the socket-bind path.
+    const apiKey =
+      (process.env.OPENROUTER_API_KEY ?? '').length > 0
+        ? process.env.OPENROUTER_API_KEY
+        : 'test-key-sk-unused';
+    const envBefore = process.env.OPENROUTER_API_KEY;
+    const noeticHomeBefore = process.env.NOETIC_HOME;
+    process.env.OPENROUTER_API_KEY = apiKey;
+    process.env.NOETIC_HOME = projectRoot;
+
+    try {
+      await ensureChatTarget(ctx, created.task.id, {
+        subprocess,
+        // Short poll window: we're not trying to chat, only verifying
+        // that the launcher succeeded and the runner didn't crash at
+        // startup.
+        timeoutMs: 3e3,
+        pollIntervalMs: 100,
+      });
+    } finally {
+      if (envBefore === undefined) {
+        delete process.env.OPENROUTER_API_KEY;
+      } else {
+        process.env.OPENROUTER_API_KEY = envBefore;
+      }
+      if (noeticHomeBefore === undefined) {
+        delete process.env.NOETIC_HOME;
+      } else {
+        process.env.NOETIC_HOME = noeticHomeBefore;
+      }
+    }
 
     // The runner writes a "planner started" line before touching the
     // LLM — its presence proves the launcher + runner boot chain
-    // completed (including `runnerSocketPath()` resolution, which
-    // was the site of the original hang). Absence means the runner
-    // threw during startup and stderr (inherited above) will show why.
+    // completed (including `runnerSocketPath()` resolution, which was
+    // the site of the original hang).
     const logPath = join(tasksRoot, created.task.id, 'log.jsonl');
-    const log = await readFile(logPath, 'utf8');
+    const log = await readFile(logPath, 'utf8').catch(() => '');
     expect(log.includes('planner started')).toBe(true);
   }, 10e3);
 });

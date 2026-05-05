@@ -8,9 +8,8 @@
  */
 
 import type { Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { AskUserInputSchema, AskUserOutputSchema, tool } from '@noetic/core';
 import type { z } from 'zod';
-import { AskUserInputSchema, AskUserOutputSchema } from './ask-user-types.js';
 
 export interface AskUserService {
   request(input: z.infer<typeof AskUserInputSchema>): Promise<z.infer<typeof AskUserOutputSchema>>;

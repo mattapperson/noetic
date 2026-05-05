@@ -1,4 +1,4 @@
-import type { TaskStoreContext } from '../fs-store.js';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ActivateSliceResult } from '../hierarchy/activation.js';
 import { activateSlice } from '../hierarchy/activation.js';
 import { resolveTask } from './_shared.js';

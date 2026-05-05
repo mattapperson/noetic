@@ -3,16 +3,16 @@ import type { SpawnOptions } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { RunnerSpawn } from '../../src/commands/builtins/tasks/agent-ci-runner.js';
 import { runAgentCi } from '../../src/commands/builtins/tasks/agent-ci-runner.js';
-import type { TaskStoreContext } from '../../src/commands/builtins/tasks/fs-store.js';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   loadTask,
   readLog,
   saveTask,
   tailEvents,
-} from '../../src/commands/builtins/tasks/fs-store.js';
-import { taskDirPaths } from '../../src/commands/builtins/tasks/paths.js';
+} from '@noetic/code-agent/tasks/store/fs-node';
+import { taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import { saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
-import type { Task } from '../../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -21,7 +21,7 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { MemFs, makeStoreContext } from './_helpers.js';
 
 //#region Helpers

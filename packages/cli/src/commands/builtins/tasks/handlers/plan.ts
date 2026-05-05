@@ -1,5 +1,7 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, saveTask } from '../fs-store.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { EventKind, HierarchyStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type {
   InterviewQuestionEnvelope,
   InterviewResultLike,
@@ -8,8 +10,6 @@ import type {
 import { closeInterviewSession, ensureInterviewSession } from '../hierarchy/live-interview.js';
 import type { PersistedHierarchy } from '../hierarchy/persist.js';
 import { persistTaskHierarchy } from '../hierarchy/persist.js';
-import type { Task } from '../schemas.js';
-import { EventKind, HierarchyStatus } from '../schemas.js';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

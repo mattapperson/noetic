@@ -8,8 +8,8 @@ import type {
   StartAgentCiRunArgs,
   StartAgentCiRunResult,
 } from '../src/commands/builtins/tasks/agent-ci-launcher.js';
-import type { ProjectWorktree } from '../src/commands/builtins/tasks/git.js';
-import { TaskReviewStatus } from '../src/commands/builtins/tasks/schemas.js';
+import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
+import { TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './tasks/_helpers.js';
 
 interface MockHarness {

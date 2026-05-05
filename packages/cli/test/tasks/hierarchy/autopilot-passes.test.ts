@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
-import { saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { createInMemorySubprocessAdapter } from '@noetic/core';
+
+import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
 import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
 import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
@@ -9,7 +11,7 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 interface FakeSignaller {
@@ -96,6 +98,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startPlannerRun: async (args) => {
         calls.push(args.taskId);
         return {
@@ -123,6 +126,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startPlannerRun: async (args) => {
         calls.push(args.taskId);
         return {
@@ -148,6 +152,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startPlannerRun: async (args) => {
         calls.push(args.taskId);
         return {
@@ -194,6 +199,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startPlannerRun: async (args) => {
         calls.push(args.taskId);
         return {
@@ -232,6 +238,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startPlannerRun: async (args) => {
         calls.push(args.taskId);
         return {
@@ -255,6 +262,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startPlannerRun: async (args) => {
         calls.push(args.taskId);
         if (args.taskId === 'T-plan000005') {
@@ -283,6 +291,7 @@ describe('runAutopilotTick — plan-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
     };
     const report = await runAutopilotTick(deps);
     expect(report.plannersStarted).toBe(0);
@@ -341,6 +350,7 @@ describe('runAutopilotTick — implement-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startImplementerRun: async (args) => {
         calls.push({
           taskId: args.taskId,
@@ -411,6 +421,7 @@ describe('runAutopilotTick — implement-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
       startImplementerRun: async (args) => {
         calls.push(args.taskId);
         return {
@@ -439,6 +450,7 @@ describe('runAutopilotTick — implement-pass', () => {
     const deps: AutopilotDeps = {
       ctx,
       signaller: fakeSignaller,
+      subprocess: createInMemorySubprocessAdapter(),
     };
     const report = await runAutopilotTick(deps);
     expect(report.implementersStarted).toBe(0);

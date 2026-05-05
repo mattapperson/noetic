@@ -59,6 +59,8 @@ const harness = new AgentHarness({
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
 | `streamIdleTimeoutMs` | `number` | `120_000` | Abort the in-flight model call if the provider stream emits no events for this many milliseconds. Pass `0` or a negative number to disable. |
 | `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
+| `subprocess` | `SubprocessAdapter` | `createInMemorySubprocessAdapter()` | Adapter used to dispatch every `step.run`, `spawn`, and `detachedSpawn`. In-memory by default; set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
+| `checkpointStore` | `CheckpointStore` | `undefined` | Typed wrapper over the harness's `StorageAdapter` used by `checkpoint()` / `restore()`. When absent, checkpoint/restore are no-ops and the harness has no durable-execution guarantees. See [Durability](/docs/framework/durability). |
 
 ## execute()
 
@@ -221,11 +223,15 @@ interface RecallLayerOutput {
 
 ## Durability Methods
 
+When the harness is constructed with a `checkpointStore` (and, typically, a durable `subprocess` adapter), `checkpoint` and `restore` become real crash-recovery hooks. When they are absent every call is a no-op — zero-config harnesses preserve in-memory semantics unchanged.
+
 | Method | Description |
 |---|---|
-| `checkpoint(ctx)` | Persist execution state for crash recovery. No-op by default (in-memory). |
-| `restore(executionId)` | Restore a previously checkpointed context. Returns `null` by default. |
+| `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, ask-user queue, item log) through the configured `checkpointStore`. Fires automatically after every `execute()`, `detachedSpawn()` settle, ask-user enqueue, and `runAppendPipeline`. Keyed by `ctx.id`; idempotent. |
+| `restore(executionId)` | Rebuild a `Context` from a previously saved snapshot. Returns `null` when no snapshot exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. |
 | `cancel(ctx, reason?)` | Cancel a running execution. |
+
+The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
 
 ## Tracing
 
@@ -298,9 +304,32 @@ await harness.execute('continue from here', { threadId });
 
 The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Task IPC for Live Chat" section of `specs/08-runtime.md` for the end-to-end design.
 
+## Subprocess Adapter
+
+The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
+
+```ts
+import { AgentHarness, createFileStorage } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+
+const subprocess = createLocalSubprocessAdapter({
+  storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
+});
+
+const harness = new AgentHarness({
+  name: 'durable-agent',
+  initialStep: agent,
+  params: {},
+  subprocess,                                 // real OS subprocess with durable manifests
+});
+```
+
+Per-step and per-call overrides let you mix execution backends. A step with `subprocess: createInMemorySubprocessAdapter()` stays in-process even when the harness default is the local adapter; a `detachedSpawn(step, input, ctx, { subprocess: otherAdapter })` overrides both. Resolution order is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+
 ## Related Pages
 
 - [Context & Event Log](/docs/framework/context) -- the context object the agent harness creates.
 - [Channels](/docs/framework/operators/channels) -- channel send/recv methods on the agent harness.
 - [Memory](/docs/framework/memory) -- memory layers managed by the agent harness.
 - [Observability](/docs/framework/observability) -- tracing spans created by `createSpan`.
+- [Durability](/docs/framework/durability) -- checkpoint/restore, adapter durability, and the host-restart flow.

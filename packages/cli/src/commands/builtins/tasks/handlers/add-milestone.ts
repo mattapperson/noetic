@@ -1,10 +1,10 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent } from '../fs-store.js';
+import { EventKind } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
 import { hierarchyPaths } from '../hierarchy/paths.js';
 import type { Milestone } from '../hierarchy/schemas.js';
 import { generateMilestoneId, MilestoneStatus } from '../hierarchy/schemas.js';
 import { listMilestones, saveMilestone } from '../hierarchy/store.js';
-import { EventKind } from '../schemas.js';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

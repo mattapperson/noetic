@@ -1,6 +1,6 @@
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import type { AgentCiActionResult, Signaller } from '../agent-ci-control.js';
 import { togglePauseAgentCiRun } from '../agent-ci-control.js';
-import type { TaskStoreContext } from '../fs-store.js';
 import { resolveTask } from './_shared.js';
 
 //#region Types

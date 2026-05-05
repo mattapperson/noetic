@@ -5,17 +5,16 @@
  * The mutation hook is exposed as `commitMove` for unit testing.
  */
 
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
 import type { ReactElement } from 'react';
 import { useCallback, useState } from 'react';
-
 import { useTheme } from '../../../../tui/components/theme.js';
-import type { TaskStoreContext } from '../fs-store.js';
 import { moveTaskHandler } from '../handlers/move.js';
 import type { KanbanColumn } from '../kanban.js';
 import { deriveColumn } from '../kanban.js';
-import type { Task } from '../schemas.js';
 import { columnLabel, VISIBLE_COLUMNS } from './task-board.js';
 
 //#region Types

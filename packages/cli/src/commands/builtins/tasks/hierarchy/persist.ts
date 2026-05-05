@@ -1,5 +1,10 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import type { Assertion, Feature, Milestone, Slice, TaskHierarchyInput } from './schemas.js';
+import type {
+  Assertion,
+  Feature,
+  Milestone,
+  Slice,
+  TaskHierarchyInput,
+} from '@noetic/code-agent/tasks/schema';
 import {
   AssertionStatus,
   FeatureLoopState,
@@ -10,7 +15,8 @@ import {
   generateSliceId,
   MilestoneStatus,
   SliceStatus,
-} from './schemas.js';
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { loadFeature, saveAssertion, saveFeature, saveMilestone, saveSlice } from './store.js';
 
 //#region Types

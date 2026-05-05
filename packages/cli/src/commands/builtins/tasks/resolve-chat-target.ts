@@ -3,28 +3,29 @@
  * agent is currently active on that task.
  *
  * Priority order:
- *   1. planner sidecar (`_planner.json`) — present iff a planner runner
- *      is bound to this task AND its socket is reachable on disk.
- *   2. implementer sidecar (`_implementer.json`) — present iff an
- *      implementer runner is bound to this leaf task AND its socket is
- *      reachable on disk.
+ *   1. planner handle — present iff a planner runner's live subprocess
+ *      handle is in the adapter's manifest AND its socket is reachable
+ *      on disk.
+ *   2. implementer handle — present iff an implementer runner is bound
+ *      to this leaf task AND its socket is reachable on disk. The
+ *      handle's `metadata.featureId` disambiguates the socket filename.
  *
- * A sidecar whose `socketPath` names a file that no longer exists is
+ * A handle whose `socketPath` names a file that no longer exists is
  * treated as absent. Without this check the TUI would be handed a
  * dead path and surface "disconnected: connect ENOENT <path>" — the
  * regression captured in `resolve-chat-target-staleness.test.ts`.
  *
  * Returns `null` when no reachable agent is bound (e.g. autopilot is
- * paused, the task has terminated, or a runner crashed without
- * clearing its sidecar).
+ * paused, the task has terminated, or a runner crashed before its
+ * socket was ever bound).
  */
 
 import { access } from 'node:fs/promises';
-
-import type { TaskStoreContext } from './fs-store.js';
-import { loadImplementer } from './implementer-state.js';
+import { findLiveTaskHandle, TaskRole } from '@noetic/code-agent/tasks';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { runnerSocketPath } from '@noetic/code-agent/tasks/store/fs-node';
+import type { SubprocessHandle } from '@noetic/core';
 import { PlannerSpawnError, PlannerSpawnErrorCode, startPlannerRun } from './planner-launcher.js';
-import { loadPlanner } from './planner-state.js';
 
 //#region Types
 
@@ -38,6 +39,11 @@ export interface ChatTarget {
 export type SocketReachabilityProbe = (socketPath: string) => Promise<boolean>;
 
 export interface ResolveChatTargetOptions {
+  /**
+   * Subprocess adapter used to enumerate live runner handles by task id
+   * and role. Required — callers thread the host-wide adapter through.
+   */
+  readonly subprocess: import('@noetic/core').SubprocessAdapter;
   /**
    * Probe the runner socket before accepting it as a target. Default
    * is a real `fs.access()` check. Tests pass stubs to simulate the
@@ -75,6 +81,19 @@ const defaultIsSocketReachable: SocketReachabilityProbe = async (socketPath) => 
   }
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readMetadataString(handle: SubprocessHandle, key: string): string | null {
+  const metadata = handle.metadata;
+  if (!isRecord(metadata)) {
+    return null;
+  }
+  const value = metadata[key];
+  return typeof value === 'string' ? value : null;
+}
+
 //#endregion
 
 //#region Public API
@@ -82,32 +101,52 @@ const defaultIsSocketReachable: SocketReachabilityProbe = async (socketPath) => 
 export async function resolveChatTarget(
   ctx: TaskStoreContext,
   taskId: string,
-  opts: ResolveChatTargetOptions = {},
+  opts: ResolveChatTargetOptions,
 ): Promise<ChatTarget | null> {
   const isReachable = opts.isSocketReachable ?? defaultIsSocketReachable;
 
-  const planner = await loadPlanner(ctx, taskId);
-  if (planner !== null && planner.socketPath !== null && planner.socketPath !== undefined) {
-    if (await isReachable(planner.socketPath)) {
+  const plannerHandle = await findLiveTaskHandle({
+    adapter: opts.subprocess,
+    taskId,
+    taskRole: TaskRole.Planner,
+  });
+  if (plannerHandle !== null) {
+    // The planner is a singleton per task — its socket filename is
+    // deterministic, so we reconstruct the path rather than storing it
+    // on the handle. Matches the old sidecar-based resolution semantics.
+    const socketPath = runnerSocketPath(ctx, {
+      taskId,
+      role: 'planner',
+    });
+    if (await isReachable(socketPath)) {
       return {
-        socketPath: planner.socketPath,
+        socketPath,
         role: 'planner',
         roleLabel: 'planner',
       };
     }
   }
-  const implementer = await loadImplementer(ctx, taskId);
-  if (
-    implementer !== null &&
-    implementer.socketPath !== null &&
-    implementer.socketPath !== undefined
-  ) {
-    if (await isReachable(implementer.socketPath)) {
-      return {
-        socketPath: implementer.socketPath,
+
+  const implementerHandle = await findLiveTaskHandle({
+    adapter: opts.subprocess,
+    taskId,
+    taskRole: TaskRole.Implementer,
+  });
+  if (implementerHandle !== null) {
+    const featureId = readMetadataString(implementerHandle, 'featureId');
+    if (featureId !== null) {
+      const socketPath = runnerSocketPath(ctx, {
+        taskId,
         role: 'implementer',
-        roleLabel: `implementer · ${implementer.featureId}`,
-      };
+        runnerId: featureId,
+      });
+      if (await isReachable(socketPath)) {
+        return {
+          socketPath,
+          role: 'implementer',
+          roleLabel: `implementer · ${featureId}`,
+        };
+      }
     }
   }
   return null;
@@ -126,6 +165,7 @@ export async function waitForChatTarget(
   const deadline = Date.now() + opts.timeoutMs;
   while (Date.now() < deadline) {
     const target = await resolveChatTarget(ctx, taskId, {
+      subprocess: opts.subprocess,
       isSocketReachable: opts.isSocketReachable,
     });
     if (target !== null) {
@@ -148,9 +188,10 @@ export async function waitForChatTarget(
 export async function ensureChatTarget(
   ctx: TaskStoreContext,
   taskId: string,
-  opts: EnsureChatTargetOptions = {},
+  opts: EnsureChatTargetOptions,
 ): Promise<ChatTarget | null> {
   const initial = await resolveChatTarget(ctx, taskId, {
+    subprocess: opts.subprocess,
     isSocketReachable: opts.isSocketReachable,
   });
   if (initial !== null) {
@@ -162,9 +203,10 @@ export async function ensureChatTarget(
     await start({
       ctx,
       taskId,
+      subprocess: opts.subprocess,
     });
   } catch (err) {
-    // `already-attached` means a planner is in flight (sidecar exists,
+    // `already-attached` means a planner is in flight (handle present,
     // pid alive) but hasn't bound the socket yet — fall through to poll.
     const alreadyAttached =
       err instanceof PlannerSpawnError && err.code === PlannerSpawnErrorCode.AlreadyAttached;
@@ -173,6 +215,7 @@ export async function ensureChatTarget(
     }
   }
   return waitForChatTarget(ctx, taskId, {
+    subprocess: opts.subprocess,
     timeoutMs: opts.timeoutMs ?? 15e3,
     pollIntervalMs: opts.pollIntervalMs ?? 250,
     isSocketReachable: opts.isSocketReachable,

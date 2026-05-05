@@ -12,13 +12,15 @@
  * the real `node:child_process` spawn and the OS signaller.
  */
 
+import {
+  FeatureIdSchema,
+  TaskIdSchema,
+  ValidatorRunIdSchema,
+} from '@noetic/code-agent/tasks/schema';
 import type { Tool } from '@noetic/core';
 import { tool } from '@noetic/core';
 import { z } from 'zod';
-
 import type { Signaller } from '../agent-ci-control.js';
-import { TaskIdSchema } from '../schemas.js';
-import { FeatureIdSchema, ValidatorRunIdSchema } from './schemas.js';
 import type { ValidatorContext } from './validator.js';
 import type { ValidatorSpawn } from './validator-launcher.js';
 import { spawnValidatorChild } from './validator-launcher.js';

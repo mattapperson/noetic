@@ -67,7 +67,12 @@ import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-ut
 import { ChannelStore } from './channel-store';
 import { ContextImpl } from './context-impl';
 import { snapshotCwdState } from './cwd-helpers';
-import { DetachedHandleImpl } from './detached-handle';
+import type { CheckpointStore } from './durable';
+import { captureCheckpoint, restoreFromCheckpoint } from './durable/harness-checkpoints';
+import {
+  type DetachedSpawnOverrides,
+  dispatchStepThroughAdapter,
+} from './step-dispatcher';
 import type { EventBroadcaster } from './event-broadcaster';
 import { createInMemoryStorage } from './in-memory-storage';
 import type { MessageQueue, QueuedMessage } from './message-queue';
@@ -91,6 +96,13 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   shell?: ShellAdapter;
   /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
   subprocess?: SubprocessAdapter;
+  /**
+   * Checkpoint store used by `harness.checkpoint(ctx)` / `harness.restore()`.
+   * When absent, checkpoint/restore are no-ops — a zero-config harness keeps
+   * its current ephemeral semantics. Construct with `createCheckpointStore`
+   * to enable durable execution.
+   */
+  checkpointStore?: CheckpointStore;
   llm?: LlmProviderConfig;
   /** Harness-wide item schema extensions. */
   itemSchemas?: ItemSchemaExtensions;
@@ -510,8 +522,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
   readonly subprocess: SubprocessAdapter;
+  /**
+   * Optional durable-execution store. When present, `checkpoint(ctx)` writes
+   * a `CheckpointSnapshot`; when absent, it's a no-op.
+   * @internal
+   */
+  readonly checkpointStore?: CheckpointStore;
   private readonly initialStep?: Step<ContextMemory, string, string>;
-  private readonly _memory?: MemoryLayer[];
+  /** @internal Memory layers configured for this harness. Exposed non-private
+   *  so free functions in `runtime/durable/` (checkpoint/restore) can read it
+   *  without friend-class gymnastics. Do not access from outside core. */
+  readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
@@ -526,7 +547,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * TUI — observe each other's `cd`s.
    */
   readonly rootCwdState: CwdState;
-  private readonly itemSchemas: ItemSchemaRegistry;
+  /** @internal Item schema registry. Exposed non-private so free functions
+   *  in `runtime/durable/` (restore) can parse persisted items. Do not
+   *  access from outside core. */
+  readonly itemSchemas: ItemSchemaRegistry;
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
@@ -542,6 +566,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.fs = opts.fs ?? createInMemoryFsAdapter();
     this.shell = opts.shell ?? createInMemoryShellAdapter();
     this.subprocess = opts.subprocess ?? createInMemorySubprocessAdapter();
+    this.checkpointStore = opts.checkpointStore;
     this.initialStep = opts.initialStep;
     this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;
@@ -1206,23 +1231,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     s: Step<ContextMemory, I, O>,
     input: I,
     parentCtx: Context,
-    overrides?: {
-      /** Override the child's thread id. Default inherits from `parentCtx.threadId`. */
-      threadId?: string;
-      /** Override the child's resource id. Default inherits from `parentCtx.resourceId`. */
-      resourceId?: string;
-      /** Override the child's initial cwd. Used by worktree isolation to root the child at the worktree path. */
-      cwdInit?: string;
-    },
+    overrides?: DetachedSpawnOverrides,
   ): DetachedHandle<O> {
-    const childCtx = this.createContext({
-      parent: parentCtx,
-      threadId: overrides?.threadId ?? parentCtx.threadId,
-      resourceId: overrides?.resourceId ?? parentCtx.resourceId,
-      cwdInit: overrides?.cwdInit,
-    });
-    const promise = this.run(s, input, childCtx);
-    return new DetachedHandleImpl<O>(childCtx.id, promise);
+    return dispatchStepThroughAdapter(this, s, input, parentCtx, overrides);
   }
 
   createContext(opts?: {
@@ -1388,11 +1399,43 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  async checkpoint(_ctx: Context): Promise<void> {}
+  //#region Checkpoint boundaries
 
-  async restore(_executionId: string): Promise<Context | null> {
-    return null;
+  /**
+   * Snapshot the execution state at a checkpoint boundary.
+   *
+   * Fires at four well-defined points on the happy path:
+   *   1. End of every `execute()` that mutated the item log — so a crash
+   *      between turns lands on a snapshot that includes the user/assistant
+   *      items that actually flowed.
+   *   2. After `detachedSpawn()` settles (success or failure) — the parent's
+   *      record of running/completed children stays consistent with the
+   *      adapter's handle manifest.
+   *   3. After an ask-user enqueue — a restart can replay the pending modal
+   *      to the TUI.
+   *   4. After `runAppendPipeline` — layer state can mutate as items land,
+   *      so the snapshot must follow the mutation.
+   *
+   * Delegates to `captureCheckpoint` / `restoreFromCheckpoint` in
+   * `runtime/durable/harness-checkpoints` so the ~140 lines of snapshot
+   * logic live beside the other durability machinery.
+   */
+  async checkpoint(ctx: Context): Promise<void> {
+    return captureCheckpoint(this, ctx);
   }
+
+  /**
+   * Rebuild a `Context` from a previously-persisted snapshot. Returns `null`
+   * if no snapshot is recorded for `executionId`. Surface a typed
+   * `NoeticConfigError(CHECKPOINT_SCHEMA_MISMATCH)` when the snapshot's
+   * schema version is unrecognised — the caller is expected to discard the
+   * checkpoint via `CheckpointStore.clear()` and start a fresh execution.
+   */
+  async restore(executionId: string): Promise<Context | null> {
+    return restoreFromCheckpoint(this, executionId);
+  }
+
+  //#endregion
 
   async cancel(_ctx: Context, _reason?: string): Promise<void> {}
 

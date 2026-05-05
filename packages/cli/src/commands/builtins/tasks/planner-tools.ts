@@ -8,7 +8,7 @@
  *
  * Each tool's `execute` fn:
  *   1. runs the same audit→state→event commit the legacy step-graph runner ran
- *   2. resolves the runner's `RunnerSignal` with the role-specific outcome,
+ *   2. resolves the runner's `DetachedSignal` with the role-specific outcome,
  *      causing the runner loop to exit and the subprocess to terminate
  *
  * The schemas here mirror the historical `CompleteSchema` from `live-interview.ts`
@@ -16,14 +16,13 @@
  * consumers don't need to learn a new envelope.
  */
 
-import type { Tool } from '@noetic/core';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type { DetachedSignal, Tool } from '@noetic/core';
 import { z } from 'zod';
-
-import type { TaskStoreContext } from './fs-store.js';
 import type { CommitFailureArgs, CommitSuccessArgs } from './hierarchy/planner-flow.js';
 import { commitFailure, commitSuccess } from './hierarchy/planner-flow.js';
 import type { TaskHierarchyInput } from './hierarchy/schemas.js';
-import type { RunnerSignal } from './runner-harness.js';
+import { createTerminalTool } from './terminal-tool.js';
 
 //#region Outcome
 
@@ -123,7 +122,7 @@ function toHierarchyInput(args: z.infer<typeof SubmitHierarchyInputSchema>): Tas
 export interface PlannerToolDeps {
   readonly storeCtx: TaskStoreContext;
   readonly taskId: string;
-  readonly signal: RunnerSignal<PlannerOutcome>;
+  readonly signal: DetachedSignal<PlannerOutcome>;
 }
 
 /**
@@ -135,7 +134,11 @@ export interface PlannerToolDeps {
 export function createSubmitHierarchyTool(
   deps: PlannerToolDeps,
 ): Tool<typeof SubmitHierarchyInputSchema, typeof SubmitHierarchyOutputSchema> {
-  return {
+  return createTerminalTool<
+    typeof SubmitHierarchyInputSchema,
+    typeof SubmitHierarchyOutputSchema,
+    PlannerOutcome
+  >({
     name: 'submit_hierarchy',
     description:
       'Submit the final task hierarchy. Call this exactly once when the plan is ' +
@@ -143,7 +146,8 @@ export function createSubmitHierarchyTool(
       'with at least one slice containing at least one feature.',
     input: SubmitHierarchyInputSchema,
     output: SubmitHierarchyOutputSchema,
-    execute: async (args) => {
+    signal: deps.signal,
+    commit: async (args) => {
       const hierarchy = toHierarchyInput(args);
       const commitArgs: CommitSuccessArgs = {
         storeCtx: deps.storeCtx,
@@ -151,16 +155,19 @@ export function createSubmitHierarchyTool(
         hierarchy,
       };
       await commitSuccess(commitArgs);
-      deps.signal.resolve({
+      const outcome: PlannerOutcome = {
         status: 'completed',
         hierarchy,
-      });
+      };
       return {
-        status: 'committed',
-        milestoneCount: hierarchy.milestones.length,
+        outcome,
+        output: {
+          status: 'committed',
+          milestoneCount: hierarchy.milestones.length,
+        },
       };
     },
-  };
+  });
 }
 
 /**
@@ -171,7 +178,11 @@ export function createSubmitHierarchyTool(
 export function createAbandonPlanningTool(
   deps: PlannerToolDeps,
 ): Tool<typeof AbandonPlanningInputSchema, typeof AbandonPlanningOutputSchema> {
-  return {
+  return createTerminalTool<
+    typeof AbandonPlanningInputSchema,
+    typeof AbandonPlanningOutputSchema,
+    PlannerOutcome
+  >({
     name: 'abandon_planning',
     description:
       'Abandon planning. Call this when you cannot produce a meaningful hierarchy ' +
@@ -179,7 +190,8 @@ export function createAbandonPlanningTool(
       'is recorded as the planner failure message.',
     input: AbandonPlanningInputSchema,
     output: AbandonPlanningOutputSchema,
-    execute: async (args) => {
+    signal: deps.signal,
+    commit: async (args) => {
       const failureArgs: CommitFailureArgs = {
         storeCtx: deps.storeCtx,
         taskId: deps.taskId,
@@ -187,15 +199,18 @@ export function createAbandonPlanningTool(
         status: 'failed',
       };
       await commitFailure(failureArgs);
-      deps.signal.resolve({
+      const outcome: PlannerOutcome = {
         status: 'failed',
         reason: args.reason,
-      });
+      };
       return {
-        status: 'abandoned',
+        outcome,
+        output: {
+          status: 'abandoned',
+        },
       };
     },
-  };
+  });
 }
 
 //#endregion

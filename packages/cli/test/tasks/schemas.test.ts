@@ -18,7 +18,7 @@ import {
   TaskReviewStatus,
   TaskSchema,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 
 //#region ID helpers
 

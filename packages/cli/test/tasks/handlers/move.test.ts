@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
-import { tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { moveTaskHandler } from '../../../src/commands/builtins/tasks/handlers/move.js';
 import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
-import { EventKind, TaskReviewStatus } from '../../../src/commands/builtins/tasks/schemas.js';
+import { EventKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('moveTaskHandler', () => {

@@ -20,8 +20,8 @@ A task has:
 - **State axes.** Independent dimensions: `reviewStatus × lifecycleStatus × archivedAt × paused`. Kanban columns are derived from these axes; the on-disk record never stores the column directly.
 - **Optional hierarchy.** A task gains a `hierarchy/` subdirectory when the user runs `noetic tasks plan <id>` (AI-driven interview), `noetic tasks add-milestone <id>`, or autonomously via the daemon's planner runner (autopilot plan-pass). Tasks without `hierarchy/` are leaves; tasks with `hierarchy/` are "structured." `hasHierarchy` is **derived** (`fs.exists(taskDir(id) + '/hierarchy/')`) — never stored, never persisted.
 - **Optional autopilot.** Toggled with `noetic tasks autopilot <on|off> <id>`. When enabled, the daemon's autopilot tick orchestrates a three-phase pipeline:
-  1. **plan-pass** — for tasks with no hierarchy yet, spawn the planner runner subprocess. The planner uses an LLM-driven `interview()` to produce a `TaskHierarchyInput` and persists it to `hierarchy/`.
-  2. **implement-pass** — for triaged features whose linked leaf task has no worktree, spawn the implementer runner subprocess. The implementer provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback), drives a `react()` agent loop in the worktree, and flips the feature's `loopState` from `implementing` to `validating` on success or `blocked` on failure.
+  1. **plan-pass** — for tasks with no hierarchy yet, the daemon calls `harness.detachedSpawn(plannerStep, input, ctx, {subprocess: <localSubprocessAdapter>, cwdInit: taskDir})`. The adapter persists a handle manifest tagged with `{taskRole: 'planner', taskId}`; the planner's child runtime uses an LLM-driven `interview()` to produce a `TaskHierarchyInput` and persists it to `hierarchy/`.
+  2. **implement-pass** — for triaged features whose linked leaf task has no worktree, the daemon provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback) and calls `harness.detachedSpawn(implementerStep, input, ctx, {subprocess, cwdInit: worktreePath})`. The adapter's manifest is tagged `{taskRole: 'implementer', taskId, featureId}`. The implementer drives a `react()` agent loop and flips the feature's `loopState` from `implementing` to `validating` on success or `blocked` on failure.
   3. **structured-tick** — for active hierarchies, advance slice/milestone state machines, dispatch `validatorRequestChan` events for `validating` features, and fire `mission:statusChanged` when `hierarchyStatus` transitions.
   The validator flow consumes `validatorRequestChan` and runs the `runValidator` built by `buildAdversarialValidatorStep()` (the default Step-graph validator: `agent-ci` and an LLM-driven adversarial code review forked in parallel — see "Validator runner" below). Each phase is independent; a manual task can be planned without autopilot ever firing the implement-pass, and structured tasks created by hand skip the plan-pass entirely.
 
@@ -64,7 +64,7 @@ Single root: `<projectRoot>/.noetic/tasks/`. FS-only — no SQLite, no Drizzle. 
 
 The store relies on three primitives, surfaced by `FsAdapter` (see `08-runtime`):
 
-1. **Single-file mutables (`task.json`, `_state.json`, hierarchy JSONs, `_runner.json`).** Write-temp + atomic `rename`. Implemented by `atomicWrite` in `fs-store.ts` and `runner-state.ts`. The temp suffix carries random salt so concurrent writers do not collide.
+1. **Single-file mutables (`task.json`, `_state.json`, hierarchy JSONs, `_runner.json`).** Write-temp + atomic `rename`. Implemented by `atomicWrite` in `fs-store.ts` and `runner-state.ts`. The temp suffix carries random salt so concurrent writers do not collide. Planner and implementer subprocess lifecycle is tracked by the shared `SubprocessAdapter`'s durable handle manifest (`$HOME/.noetic/subprocess/`) — there are no `_planner.json` / `_implementer.json` sidecars inside the task directory.
 2. **Append-only logs (`log.jsonl`, `_events.jsonl`, `fix-lineage.jsonl`).** `FsAdapter#appendFile`, backed by POSIX `O_APPEND`. Each log line is capped at `LOG_LINE_MAX_BYTES` (3 KiB) — sub-`PIPE_BUF` — so a single `write()` syscall publishes the entry atomically. Longer messages are split into chunked `LogEntry` records sharing a `ts`, `chunk`, and `chunkCount`.
 3. **Multi-step writes are ordered audit → state → event.** Any change that touches multiple files publishes the audit log first (most conservative — never lies about intent), then the canonical state mutation (`task.json`), then the event in `_events.jsonl`. Within `appendEvent` the order is `_state.json` (bump `lastEventId`) → `_events.jsonl` append, so a tailer that reads up to `lastEventId` is guaranteed to find every event with `id <= lastEventId`.
 
@@ -339,17 +339,22 @@ The launcher creates it; the runner clears it on exit; control surfaces read it.
 
 ## Planner runner contract
 
-The planner runner produces a task hierarchy autonomously for a manual task that has been opted into autopilot but has no `hierarchy/` subtree yet. Lifecycle:
+The planner runner produces a task hierarchy autonomously for a manual task that has been opted into autopilot but has no `hierarchy/` subtree yet. It is a detached spawn against the tasks-system's shared `SubprocessAdapter`. Lifecycle:
 
-1. **Launcher** (`packages/cli/src/commands/builtins/tasks/planner-launcher.ts`) refuses to start if a live planner is already attached, spawns `bun run planner-runner.ts` as a detached child with the env contract below, persists `_planner.json`, then atomically flips `task.json#autopilotState` to `'planning'` and emits a `task:updated{phase: 'spawn'}` event.
-2. **Runner** (`packages/cli/src/commands/builtins/tasks/planner-runner.ts`) is a `bun run`-invoked wrapper. It constructs a minimal `AgentHarness`, drives the `interview()` pattern (`@noetic/core`) with an LLM-backed `askQuestion` responder (`llm-interview-responder.ts`) so the model interviews itself using only the task title + `description.md` as context. On completion the runner commits in **audit → state → event** order:
+1. **Launcher** (`packages/code-agent/src/tasks/planner-launcher.ts`) refuses to start if a live planner handle is already attached — verified by `findLiveTaskHandle({adapter, taskId, taskRole: 'planner'})` — then calls:
+   ```typescript
+   const handle = harness.detachedSpawn(plannerStep, input, ctx, {
+     cwdInit: taskDir,
+     subprocess: tasksAdapter, // createLocalSubprocessAdapter({storage: fileStorage({root: subprocessRoot()})})
+   });
+   ```
+   Handle metadata carries `{taskRole: 'planner', taskId}` so subsequent lookups don't need to scan state. The launcher atomically flips `task.json#autopilotState` to `'planning'` and emits a `task:updated{phase: 'spawn'}` event.
+2. **Runner bootstrap** (the adapter's `step-bootstrap` child runtime) imports the step registry entry point, looks up the planner step by id, and runs it. The planner constructs a minimal `AgentHarness` and drives the `interview()` pattern with an LLM-backed `askQuestion` responder so the model interviews itself using only the task title + `description.md` as context. On completion, the runner commits in **audit → state → event** order:
    1. Append a `kind='system'` log entry summarising the outcome.
    2. Persist the resulting hierarchy via `persistTaskHierarchy()` and atomically rewrite `task.json` with `hierarchyStatus: 'active'` + `autopilotState: 'watching'`.
    3. Append a `mission:statusChanged` event.
-   4. Best-effort: clear `_planner.json`.
-
-   On `failed` / `maxQuestions` outcomes the runner flips `autopilotState` back to `'inactive'` and emits a `task:updated{phase: 'exit'}` event.
-3. **Refusal to overwrite.** Even if a stale launcher races a new spawn, the runner re-checks `getTaskHierarchy` and refuses to plan a task whose hierarchy already has milestones.
+   The adapter clears the handle manifest automatically when the subprocess exits; there is no caller-side sidecar to clean up. On `failed` / `maxQuestions` outcomes the runner flips `autopilotState` back to `'inactive'` and emits a `task:updated{phase: 'exit'}` event.
+3. **Idempotency.** The runner re-checks `getTaskHierarchy` before writing and refuses to plan a task whose hierarchy already has milestones. Because durable execution can replay a step body whose prior completion's checkpoint failed to land (see `07-context-and-event-log`), this guard protects against double-planning without relying on sidecar state.
 
 ### Env contract
 
@@ -360,31 +365,36 @@ The planner runner produces a task hierarchy autonomously for a manual task that
 | `NOETIC_MODEL` | no | LLM identifier. Defaults to `anthropic/claude-sonnet-4`. |
 | `OPENROUTER_API_KEY` | yes (production) | OpenRouter key for the LLM provider. |
 
-### Sidecar `_planner.json`
+### Handle manifest
 
-Schema (`packages/cli/src/commands/builtins/tasks/planner-state.ts#PlannerStateSchema`):
+The live-planner record lives on the `SubprocessAdapter`'s persisted handle manifest (default `$HOME/.noetic/subprocess/` — see `resolveSubprocessRoot()`). Fields carried on `SubprocessHandle.metadata`:
 
-```typescript
-interface PlannerState {
-  taskId: string;                                  // 'T-...'
-  sessionId: string;
-  pid: number;
-  pidStarttime: string | null;
-  startedAt: string;
-  pausedAt: string | null;
-}
-```
+| Field | Contract |
+|---|---|
+| `taskRole` | Literal `'planner'`. |
+| `taskId` | The task this planner belongs to. |
+| `executionId` | Parent context id — used by `harness.restore(executionId)` after a host restart. |
+| `result` | Awaited planner outcome on success. |
+| `error` | Serialised error payload on failure. |
+
+The local adapter additionally persists `pid`, `pidStarttime`, `socketPath`, and `cwd` on the manifest entry so `reattach(handleId)` can verify liveness and rebind IPC after a parent-process restart.
 
 ## Implementer runner contract
 
 The implementer runner builds one feature inside its own git worktree. The autopilot's implement-pass spawns one implementer per triaged feature whose linked leaf task has no `worktreePath` yet. Lifecycle:
 
-1. **Launcher** (`packages/cli/src/commands/builtins/tasks/implementer-launcher.ts`) refuses to start if a live implementer is already attached, calls `provisionWorktree` (tries `wt switch -c <branch>`, falls back to `git worktree add <projectRoot>/.worktrees/<branch> -b <branch>`), spawns `bun run implementer-runner.ts` with the env contract below, then in **audit→state→event** order persists `_implementer.json`, atomically patches the leaf task's `worktreePath` + `branch`, emits `task:updated`, and finally emits `feature:loopStateChanged{phase: 'spawn', loopState: 'implementing'}`.
-2. **Runner** (`packages/cli/src/commands/builtins/tasks/implementer-runner.ts`) constructs a full coding-tools `AgentHarness` rooted at the worktree, loads the parent's hierarchy, builds a prompt from the feature's `acceptanceCriteria` + the parent milestone's assertions, and drives a `react()` agent loop bounded by `DEFAULT_IMPLEMENTATION_RETRY_BUDGET`. On success it commits **audit→state→event**:
+1. **Launcher** (`packages/code-agent/src/tasks/implementer-launcher.ts`) refuses to start if a live implementer handle is already attached (verified via `findLiveTaskHandle({adapter, taskId, taskRole: 'implementer', featureId})`), calls `provisionWorktree` (tries `wt switch -c <branch>`, falls back to `git worktree add <projectRoot>/.worktrees/<branch> -b <branch>`), then calls:
+   ```typescript
+   const handle = harness.detachedSpawn(implementerStep, input, ctx, {
+     cwdInit: worktreePath,
+     subprocess: tasksAdapter,
+   });
+   ```
+   Handle metadata carries `{taskRole: 'implementer', taskId, featureId}`. In **audit → state → event** order the launcher atomically patches the leaf task's `worktreePath` + `branch`, emits `task:updated`, and finally emits `feature:loopStateChanged{phase: 'spawn', loopState: 'implementing'}`.
+2. **Runner bootstrap** constructs a full coding-tools `AgentHarness` rooted at the worktree, loads the parent's hierarchy, builds a prompt from the feature's `acceptanceCriteria` + the parent milestone's assertions, and drives a `react()` agent loop bounded by `DEFAULT_IMPLEMENTATION_RETRY_BUDGET`. On success it commits **audit → state → event**:
    1. Append a `kind='system'` log entry on the leaf task.
    2. Atomically flip the parent feature's `loopState` from `implementing` to `validating` (or `blocked` on failure / max-steps) via `applyFeatureLoopStateUpdate`.
    3. Append a `feature:loopStateChanged{phase: 'exit'}` event on the parent task.
-   4. Best-effort: clear `_implementer.json`.
 
 ### Env contract
 
@@ -397,24 +407,35 @@ The implementer runner builds one feature inside its own git worktree. The autop
 | `NOETIC_MODEL` | no | LLM identifier. Defaults to `anthropic/claude-sonnet-4`. |
 | `OPENROUTER_API_KEY` | yes (production) | OpenRouter key for the LLM provider. |
 
-### Sidecar `_implementer.json`
+### Handle manifest
 
-Schema (`packages/cli/src/commands/builtins/tasks/implementer-state.ts#ImplementerStateSchema`):
+Handle metadata on an implementer spawn:
+
+| Field | Contract |
+|---|---|
+| `taskRole` | Literal `'implementer'`. |
+| `taskId` | Leaf task id. |
+| `featureId` | Feature id from the parent structured task. |
+| `executionId` | Parent context id. |
+| `result` | Awaited implementer outcome on success. |
+| `error` | Serialised error payload on failure. |
+
+The local adapter additionally persists `pid`, `pidStarttime`, `socketPath`, `cwd` (the worktree path). Delete-guards and pause/cancel surfaces consult `adapter.listLive()` + metadata tags via `findLiveTaskHandle` / `listLiveTaskHandles` (`packages/code-agent/src/tasks/task-runtime-index.ts`); there are no per-task sidecar files to locate.
+
+## Subprocess adapter wiring
+
+Every surface that spawns a task runner (daemon autopilot, `noetic tasks` CLI, TUI tools) shares a single `SubprocessAdapter` constructed against `createFileStorage({root: subprocessRoot()})`:
 
 ```typescript
-interface ImplementerState {
-  taskId: string;                                  // 'T-...' (leaf task)
-  parentTaskId: string;                            // 'T-...' (structured parent)
-  featureId: string;                               // 'F-...'
-  sessionId: string;
-  pid: number;
-  pidStarttime: string | null;
-  worktreePath: string;
-  branch: string;
-  startedAt: string;
-  pausedAt: string | null;
-}
+import { createFileStorage } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { resolveSubprocessRoot } from '@noetic/code-agent/tasks';
+
+const storage = createFileStorage({ root: resolveSubprocessRoot() });
+const subprocess = createLocalSubprocessAdapter({ storage });
 ```
+
+`resolveSubprocessRoot()` returns `$NOETIC_HOME/subprocess` (defaulting to `$HOME/.noetic/subprocess`). That root is distinct from the checkpoint-snapshot root `$HOME/.noetic/checkpoints` used by `CheckpointStore`: handle manifests and execution snapshots are different concerns, carried by different files. The TUI boot sequence calls `reattachLiveChildren(harness)` after constructing the harness, which in turn calls `harness.subprocess.listLive()` + `harness.restore(executionId)` per live handle so chat sessions and autopilot work can survive a CLI crash.
 
 ## Validator runner
 

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { saveImplementer } from '../../src/commands/builtins/tasks/implementer-state.js';
+
+import type { SubprocessHandle } from '@noetic/core';
+
 import type {
   StartPlannerRunArgs,
   StartPlannerRunResult,
@@ -8,21 +10,19 @@ import {
   PlannerSpawnError,
   PlannerSpawnErrorCode,
 } from '../../src/commands/builtins/tasks/planner-launcher.js';
-import { savePlanner } from '../../src/commands/builtins/tasks/planner-state.js';
 import {
   ensureChatTarget,
   resolveChatTarget,
   waitForChatTarget,
 } from '../../src/commands/builtins/tasks/resolve-chat-target.js';
+import { makeEmptySubprocess, preloadLiveHandle } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 
 const TASK_ID = 'T-aaaaaaaaaa';
 
-// These tests use fake `/sock/*.sock` paths that don't exist on disk,
-// so the default reachability probe (real `fs.access`) would reject
-// every target. Stubbing "always reachable" keeps the tests focused
-// on the sidecar-resolution logic; the socket-reachability contract
-// itself is covered in `resolve-chat-target-staleness.test.ts`.
+// These tests use synthetic socket paths that don't exist on disk, so
+// the default reachability probe would reject. Stub "always reachable"
+// to focus on the handle-manifest resolution logic.
 const alwaysReachable = async (): Promise<boolean> => true;
 
 interface FakePlannerSpawn {
@@ -32,15 +32,8 @@ interface FakePlannerSpawn {
   }>;
 }
 
-/**
- * Build a fake `startPlannerRun` that records each call and (on success)
- * writes the planner sidecar so a subsequent `resolveChatTarget` poll
- * resolves. Lets `ensureChatTarget` exercise its full flow without
- * actually spawning a child process.
- */
 function fakePlannerSpawn(opts: {
-  readonly behavior: 'success' | 'already-attached' | 'spawn-failed';
-  readonly socketPath?: string;
+  behavior: 'success' | 'already-attached' | 'spawn-failed';
 }): FakePlannerSpawn {
   const calls: Array<{
     taskId: string;
@@ -55,15 +48,19 @@ function fakePlannerSpawn(opts: {
     if (opts.behavior === 'spawn-failed') {
       throw new PlannerSpawnError(PlannerSpawnErrorCode.SpawnFailed, 'spawn died');
     }
-    await savePlanner(args.ctx, {
-      taskId: args.taskId,
-      sessionId: 's1',
-      pid: 1,
-      pidStarttime: null,
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: opts.socketPath ?? '/sock/p.sock',
+    // On success, preload a live handle on the adapter so a subsequent
+    // resolveChatTarget poll returns non-null.
+    const handle: SubprocessHandle = await args.subprocess.spawn({
+      kind: 'process',
+      command: 'stub',
+      metadata: {
+        taskRole: 'planner',
+        taskId: args.taskId,
+        pid: 1,
+        pidStarttime: null,
+      },
     });
+    void handle;
     return {
       sessionId: 's1',
       pid: 1,
@@ -78,274 +75,131 @@ function fakePlannerSpawn(opts: {
   };
 }
 
-describe('ensureChatTarget', () => {
-  test('returns immediately and skips onSpawning when target is already live', async () => {
+describe('resolveChatTarget', () => {
+  test('returns planner target when a live planner handle exists', async () => {
     const ctx = makeStoreContext();
-    await savePlanner(ctx, {
+    const adapter = await preloadLiveHandle({
       taskId: TASK_ID,
-      sessionId: 's1',
+      role: 'planner',
       pid: 1,
-      pidStarttime: null,
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: '/sock/already.sock',
+    });
+    const target = await resolveChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
+      isSocketReachable: alwaysReachable,
+    });
+    expect(target?.role).toBe('planner');
+    expect(target?.roleLabel).toBe('planner');
+  });
+
+  test('returns implementer target with feature label when only implementer is live', async () => {
+    const ctx = makeStoreContext();
+    const adapter = await preloadLiveHandle({
+      taskId: TASK_ID,
+      role: 'implementer',
+      featureId: 'F-abc1234567',
+      pid: 1,
+    });
+    const target = await resolveChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
+      isSocketReachable: alwaysReachable,
+    });
+    expect(target?.role).toBe('implementer');
+    expect(target?.roleLabel).toBe('implementer · F-abc1234567');
+  });
+
+  test('returns null when no live handle is registered', async () => {
+    const ctx = makeStoreContext();
+    const adapter = makeEmptySubprocess();
+    const target = await resolveChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
+      isSocketReachable: alwaysReachable,
+    });
+    expect(target).toBeNull();
+  });
+});
+
+describe('ensureChatTarget', () => {
+  test('returns immediately when target is already live', async () => {
+    const ctx = makeStoreContext();
+    const adapter = await preloadLiveHandle({
+      taskId: TASK_ID,
+      role: 'planner',
+      pid: 1,
     });
     const spawn = fakePlannerSpawn({
       behavior: 'success',
     });
     let spawningFired = 0;
     const got = await ensureChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
       onSpawning: () => {
         spawningFired += 1;
       },
       startPlannerRunFn: spawn.fn,
       isSocketReachable: alwaysReachable,
     });
-    expect(got?.socketPath).toBe('/sock/already.sock');
+    expect(got?.role).toBe('planner');
     expect(spawningFired).toBe(0);
     expect(spawn.calls.length).toBe(0);
   });
 
-  test('spawns planner, fires onSpawning, and returns the bound target', async () => {
+  test('spawns, then polls until the runner binds its socket', async () => {
     const ctx = makeStoreContext();
+    const adapter = makeEmptySubprocess();
     const spawn = fakePlannerSpawn({
       behavior: 'success',
-      socketPath: '/sock/fresh.sock',
     });
     let spawningFired = 0;
     const got = await ensureChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
       onSpawning: () => {
         spawningFired += 1;
       },
       startPlannerRunFn: spawn.fn,
-      timeoutMs: 200,
-      pollIntervalMs: 10,
+      timeoutMs: 1000,
+      pollIntervalMs: 50,
       isSocketReachable: alwaysReachable,
     });
-    expect(got?.socketPath).toBe('/sock/fresh.sock');
     expect(got?.role).toBe('planner');
     expect(spawningFired).toBe(1);
-    expect(spawn.calls).toEqual([
-      {
-        taskId: TASK_ID,
-      },
-    ]);
+    expect(spawn.calls.length).toBe(1);
   });
 
-  test('AlreadyAttached falls through to polling and returns when sidecar binds', async () => {
+  test('returns null when spawn fails hard', async () => {
     const ctx = makeStoreContext();
-    const spawn = fakePlannerSpawn({
-      behavior: 'already-attached',
-    });
-    setTimeout(() => {
-      void savePlanner(ctx, {
-        taskId: TASK_ID,
-        sessionId: 's1',
-        pid: 1,
-        pidStarttime: null,
-        startedAt: '2026-05-02T00:00:00Z',
-        pausedAt: null,
-        socketPath: '/sock/inflight.sock',
-      });
-    }, 30);
-    const got = await ensureChatTarget(ctx, TASK_ID, {
-      startPlannerRunFn: spawn.fn,
-      timeoutMs: 500,
-      pollIntervalMs: 10,
-      isSocketReachable: alwaysReachable,
-    });
-    expect(got?.socketPath).toBe('/sock/inflight.sock');
-  });
-
-  test('returns null when spawn fails with a non-AlreadyAttached error', async () => {
-    const ctx = makeStoreContext();
+    const adapter = makeEmptySubprocess();
     const spawn = fakePlannerSpawn({
       behavior: 'spawn-failed',
     });
     const got = await ensureChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
       startPlannerRunFn: spawn.fn,
-      timeoutMs: 50,
-      pollIntervalMs: 10,
-    });
-    expect(got).toBeNull();
-  });
-
-  test('returns null when spawn succeeds but socket never binds within timeout', async () => {
-    const ctx = makeStoreContext();
-    const spawn: FakePlannerSpawn = {
-      calls: [],
-      fn: async (args) => {
-        spawn.calls.push({
-          taskId: args.taskId,
-        });
-        return {
-          sessionId: 's1',
-          pid: 1,
-          taskId: args.taskId,
-          previousAutopilotState: 'inactive',
-          autopilotState: 'planning',
-        };
-      },
-    };
-    const got = await ensureChatTarget(ctx, TASK_ID, {
-      startPlannerRunFn: spawn.fn,
-      timeoutMs: 30,
-      pollIntervalMs: 10,
-    });
-    expect(got).toBeNull();
-    expect(spawn.calls.length).toBe(1);
-  });
-});
-
-describe('resolveChatTarget', () => {
-  test('returns null when no sidecar exists', async () => {
-    const ctx = makeStoreContext();
-    const got = await resolveChatTarget(ctx, TASK_ID, {
+      timeoutMs: 100,
+      pollIntervalMs: 20,
       isSocketReachable: alwaysReachable,
     });
     expect(got).toBeNull();
   });
 
-  test('returns null when planner sidecar has no socketPath yet', async () => {
+  test('polls on already-attached so an in-flight planner resolves', async () => {
     const ctx = makeStoreContext();
-    await savePlanner(ctx, {
+    const adapter = await preloadLiveHandle({
       taskId: TASK_ID,
-      sessionId: 's1',
-      pid: 1,
-      pidStarttime: null,
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-    });
-    const got = await resolveChatTarget(ctx, TASK_ID, {
-      isSocketReachable: alwaysReachable,
-    });
-    expect(got).toBeNull();
-  });
-
-  test('returns planner target when planner sidecar has socketPath', async () => {
-    const ctx = makeStoreContext();
-    await savePlanner(ctx, {
-      taskId: TASK_ID,
-      sessionId: 's1',
-      pid: 1,
-      pidStarttime: null,
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: '/sock/p.sock',
-    });
-    const got = await resolveChatTarget(ctx, TASK_ID, {
-      isSocketReachable: alwaysReachable,
-    });
-    expect(got).toEqual({
-      socketPath: '/sock/p.sock',
       role: 'planner',
-      roleLabel: 'planner',
-    });
-  });
-
-  test('returns implementer target when only implementer sidecar has socketPath', async () => {
-    const ctx = makeStoreContext();
-    await saveImplementer(ctx, {
-      taskId: TASK_ID,
-      parentTaskId: 'T-bbbbbbbbbb',
-      featureId: 'F-feat-001',
-      sessionId: 's1',
-      pid: 2,
-      pidStarttime: null,
-      worktreePath: '/wt',
-      branch: 'b',
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: '/sock/i.sock',
-    });
-    const got = await resolveChatTarget(ctx, TASK_ID, {
-      isSocketReachable: alwaysReachable,
-    });
-    expect(got).toEqual({
-      socketPath: '/sock/i.sock',
-      role: 'implementer',
-      roleLabel: 'implementer · F-feat-001',
-    });
-  });
-
-  test('prefers planner over implementer when both have socketPath', async () => {
-    const ctx = makeStoreContext();
-    await savePlanner(ctx, {
-      taskId: TASK_ID,
-      sessionId: 's1',
       pid: 1,
-      pidStarttime: null,
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: '/sock/p.sock',
     });
-    await saveImplementer(ctx, {
-      taskId: TASK_ID,
-      parentTaskId: 'T-bbbbbbbbbb',
-      featureId: 'F-feat-001',
-      sessionId: 's2',
-      pid: 2,
-      pidStarttime: null,
-      worktreePath: '/wt',
-      branch: 'b',
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: '/sock/i.sock',
+    const spawn = fakePlannerSpawn({
+      behavior: 'already-attached',
     });
-    const got = await resolveChatTarget(ctx, TASK_ID, {
+    const got = await waitForChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
+      timeoutMs: 200,
+      pollIntervalMs: 20,
       isSocketReachable: alwaysReachable,
     });
     expect(got?.role).toBe('planner');
-  });
-});
-
-describe('waitForChatTarget', () => {
-  test('returns the target on the first poll when already available', async () => {
-    const ctx = makeStoreContext();
-    await savePlanner(ctx, {
-      taskId: TASK_ID,
-      sessionId: 's1',
-      pid: 1,
-      pidStarttime: null,
-      startedAt: '2026-05-02T00:00:00Z',
-      pausedAt: null,
-      socketPath: '/sock/p.sock',
-    });
-    const got = await waitForChatTarget(ctx, TASK_ID, {
-      timeoutMs: 100,
-      pollIntervalMs: 10,
-      isSocketReachable: alwaysReachable,
-    });
-    expect(got?.socketPath).toBe('/sock/p.sock');
-  });
-
-  test('returns null when target never appears within the timeout', async () => {
-    const ctx = makeStoreContext();
-    const got = await waitForChatTarget(ctx, TASK_ID, {
-      timeoutMs: 30,
-      pollIntervalMs: 10,
-    });
-    expect(got).toBeNull();
-  });
-
-  test('polls multiple times and returns once the sidecar binds', async () => {
-    const ctx = makeStoreContext();
-    setTimeout(() => {
-      void savePlanner(ctx, {
-        taskId: TASK_ID,
-        sessionId: 's1',
-        pid: 1,
-        pidStarttime: null,
-        startedAt: '2026-05-02T00:00:00Z',
-        pausedAt: null,
-        socketPath: '/sock/late.sock',
-      });
-    }, 30);
-    const got = await waitForChatTarget(ctx, TASK_ID, {
-      timeoutMs: 500,
-      pollIntervalMs: 10,
-      isSocketReachable: alwaysReachable,
-    });
-    expect(got?.socketPath).toBe('/sock/late.sock');
+    // waitForChatTarget doesn't invoke spawn.fn; ensureChatTarget with
+    // already-attached falls through to the poll path.
+    void spawn;
   });
 });

@@ -1,5 +1,3 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { hasHierarchy } from '../fs-store.js';
 import type {
   Assertion,
   Feature,
@@ -9,7 +7,9 @@ import type {
   Slice,
   SliceWithFeatures,
   TaskHierarchy,
-} from './schemas.js';
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { hasHierarchy } from '@noetic/code-agent/tasks/store/fs-node';
 import { listAssertions, listFeatures, listMilestones, listSlices } from './store.js';
 import { listValidatorRuns } from './validator.js';
 

@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 
-import { loadTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { attachTaskHandler } from '../../../src/commands/builtins/tasks/handlers/attach.js';
 import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { duplicateTaskHandler } from '../../../src/commands/builtins/tasks/handlers/duplicate.js';
-import { taskDirPaths } from '../../../src/commands/builtins/tasks/paths.js';
+import { taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { MemFs, makeStoreContext } from '../_helpers.js';
 
 describe('duplicateTaskHandler', () => {

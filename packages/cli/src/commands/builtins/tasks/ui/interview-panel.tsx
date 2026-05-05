@@ -14,13 +14,12 @@
  * just renders the current phase and forwards `Esc` to cancel.
  */
 
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-
 import { useTheme } from '../../../../tui/components/theme.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent } from '../fs-store.js';
 import type { InterviewResultLike } from '../hierarchy/live-interview.js';
 import { persistTaskHierarchy } from '../hierarchy/persist.js';
 

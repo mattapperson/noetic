@@ -1,9 +1,9 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent } from '../fs-store.js';
+import { EventKind } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
 import type { Assertion } from '../hierarchy/schemas.js';
 import { AssertionStatus, generateAssertionId } from '../hierarchy/schemas.js';
 import { listAssertions, loadMilestone, saveAssertion } from '../hierarchy/store.js';
-import { EventKind } from '../schemas.js';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

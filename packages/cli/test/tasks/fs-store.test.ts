@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createLocalFsAdapter } from '@noetic/core';
-import type { TaskStoreContext } from '../../src/commands/builtins/tasks/fs-store.js';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   appendLog,
@@ -18,9 +18,9 @@ import {
   tailEvents,
   tailLog,
   tryLoadTask,
-} from '../../src/commands/builtins/tasks/fs-store.js';
-import { taskDirPaths, taskRootPaths } from '../../src/commands/builtins/tasks/paths.js';
-import type { Event, LogEntry, Task } from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/store/fs-node';
+import { taskDirPaths, taskRootPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Event, LogEntry, Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -29,7 +29,7 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { MemFs, makeStoreContext } from './_helpers.js';
 
 //#region Helpers

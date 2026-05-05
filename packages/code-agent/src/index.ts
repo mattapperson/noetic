@@ -27,9 +27,9 @@ import type {
   SteeringDecision,
   Step,
   StorageAdapter,
-  SubprocessAdapter,
   StreamEvent,
   StreamingItem,
+  SubprocessAdapter,
   Tool,
   TraceExporter,
 } from '@noetic/core';
@@ -936,16 +936,15 @@ export async function createCodeAgent(
 }
 
 export {
+  createInMemoryFsAdapter,
+  createInMemoryShellAdapter,
+} from '@noetic/core/portable';
+export {
   type ChannelTransportAdapter,
   type ChannelTransportController,
   type ChannelTransportFrame,
   createInMemoryChannelTransportAdapter,
 } from './channels.js';
-
-export {
-  createInMemoryFsAdapter,
-  createInMemoryShellAdapter,
-} from '@noetic/core/portable';
 
 export { createTaskToolsPlugin } from './tasks/plugin.js';
 

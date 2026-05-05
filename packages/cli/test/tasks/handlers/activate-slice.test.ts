@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { listTasks, saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { listTasks, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { activateSliceHandler } from '../../../src/commands/builtins/tasks/handlers/activate-slice.js';
 import { addFeatureHandler } from '../../../src/commands/builtins/tasks/handlers/add-feature.js';
 import { addMilestoneHandler } from '../../../src/commands/builtins/tasks/handlers/add-milestone.js';

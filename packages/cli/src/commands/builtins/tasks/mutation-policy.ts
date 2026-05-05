@@ -12,18 +12,17 @@
  */
 
 import { resolve } from '@noetic/code-agent/tasks/path-utils';
+import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ShellAdapter } from '@noetic/core';
 import { createLocalFsAdapter } from '@noetic/core/adapters/node';
-
 import type {
   MutationPolicy,
   MutationPolicyDecision,
   MutationPolicyRequest,
 } from '../../../tools/mutation-policy.js';
 import { ALLOW_MUTATION, isProbablyMutatingShellCommand } from '../../../tools/mutation-policy.js';
-import type { TaskStoreContext } from './fs-store.js';
-import { listTasks } from './fs-store.js';
-import { TaskSource } from './schemas.js';
 
 //#region Types
 

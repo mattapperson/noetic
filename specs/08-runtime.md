@@ -101,88 +101,129 @@ The `SubprocessAdapter` interface abstracts long-lived child-process lifecycle a
 The interface speaks in opaque ids and capability flags rather than POSIX-specific concepts (pid, signals) so non-POSIX backends are first-class.
 
 ```typescript
-type SubprocessStdio = 'inherit' | 'pipe' | 'ignore';
-type SubprocessKillSignal = 'SIGTERM' | 'SIGKILL' | 'SIGINT';
+type SubprocessStatus =
+  | 'starting'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'stopped'
+  | 'stale';
 
-interface SubprocessIpcSchemas<Req, Res> {
-  request: ZodType<Req>;
-  response: ZodType<Res>;
+interface SerializedError {
+  message: string;
+  name?: string;
+  stack?: string;
+  noeticError?: unknown;     // structured NoeticError payload when present
 }
 
-interface SubprocessSpec<Req = unknown, Res = unknown> {
-  command: string;                       // executable, service binding, or DO class
+/** Launch an OS-level child process. */
+interface ProcessSubprocessRequest {
+  kind?: 'process';          // default when omitted — preserves backward compatibility
+  command: string;
   args?: ReadonlyArray<string>;
   cwd?: string;
-  env?: Record<string, string>;
+  env?: Record<string, string | undefined>;
   detached?: boolean;
-  stdio?: SubprocessStdio;
-  signal?: AbortSignal;
-  ipc?: SubprocessIpcSchemas<Req, Res>;
+  stdin?: string;
+  metadata?: Record<string, unknown>;
 }
 
-interface SubprocessExitInfo {
-  code: number | null;
-  signal: string | null;
-  reason?: string;
+/** Dispatch a registered Noetic step. */
+interface StepSubprocessRequest {
+  kind: 'step';
+  stepId: string;
+  serializedInput: unknown;
+  executionId: string;
+  overrides: {
+    threadId?: string;
+    resourceId?: string;
+    cwdInit?: string;
+  };
+  metadata?: Record<string, unknown>;
 }
 
-interface SubprocessIpcChannel<Req = unknown, Res = unknown> {
-  send(msg: Req): Promise<Res>;
-  readonly closed: boolean;
-  close(): Promise<void>;
+type SubprocessRequest = ProcessSubprocessRequest | StepSubprocessRequest;
+
+interface SubprocessHandleMetadata extends Record<string, unknown> {
+  result?: unknown;           // awaited step result on successful completion
+  error?: SerializedError;    // serialised error on failure
+  executionId?: string;       // echoed from StepSubprocessRequest
 }
 
-interface SubprocessServer<Req = unknown, Res = unknown> {
-  serve(handler: (req: Req) => Promise<Res>): Promise<void>;
-  close(): Promise<void>;
+interface SubprocessHandle {
+  id: string;
+  status: SubprocessStatus;
+  startedAt: string;
+  updatedAt?: string;
+  metadata?: SubprocessHandleMetadata;
 }
 
-interface SubprocessHandle<Req = unknown, Res = unknown> {
-  readonly id: string;                   // opaque (stringified pid locally; instance id on workers)
-  readonly startToken: string;           // identity token surviving id reuse
-  readonly detached: boolean;
-  readonly stdin?: WritableStream<Uint8Array>;
-  readonly stdout?: ReadableStream<Uint8Array>;
-  readonly stderr?: ReadableStream<Uint8Array>;
-  readonly ipc?: SubprocessIpcChannel<Req, Res>;
-  isAlive(): Promise<boolean>;
-  kill(signal?: SubprocessKillSignal): Promise<void>;
-  wait(): Promise<SubprocessExitInfo>;
-  pause?: () => Promise<void>;            // present when capabilities.pauseResume
-  resume?: () => Promise<void>;           // present when capabilities.pauseResume
-}
+type SubprocessControlResult =
+  | { kind: 'ok'; handle: SubprocessHandle }
+  | { kind: 'unsupported'; handle: SubprocessHandle; message: string }
+  | { kind: 'not_found'; handleId: string };
 
-interface SubprocessCapabilities {
-  readonly pauseResume: boolean;
-  readonly signals: boolean;
-  readonly detached: boolean;
-  readonly stdio: boolean;
-  readonly ipc: boolean;
+interface SubprocessStopResult {
+  kind: 'stopped' | 'not_found';
+  handleId: string;
+  handle?: SubprocessHandle;
 }
 
 interface SubprocessAdapter {
-  readonly capabilities: SubprocessCapabilities;
-  spawn<Req, Res>(spec: SubprocessSpec<Req, Res>): Promise<SubprocessHandle<Req, Res>>;
-  attach(id: string, startToken: string): Promise<SubprocessHandle | null>;
-  serve<Req, Res>(name: string, schemas: SubprocessIpcSchemas<Req, Res>): Promise<SubprocessServer<Req, Res>>;
+  spawn(request: SubprocessRequest): Promise<SubprocessHandle>;
+  get(handleId: string): Promise<SubprocessHandle | null>;
+  stop(handleId: string, reason?: string): Promise<SubprocessStopResult>;
+  pause(handleId: string): Promise<SubprocessControlResult>;
+  resume(handleId: string): Promise<SubprocessControlResult>;
+  isAlive(handle: SubprocessHandle): Promise<boolean>;
+  /**
+   * Rebind to a handle persisted across a host restart. Returns null when no
+   * manifest exists for the given id. Durability is an adapter-level
+   * concern — the in-memory adapter returns null by default (handles are
+   * ephemeral), while adapters configured with a durable StorageAdapter
+   * consult their persisted manifest. See 23-durable-execution.
+   */
+  reattach(handleId: string): Promise<SubprocessHandle | null>;
+  /**
+   * Enumerate every handle the adapter currently treats as live. Used by host
+   * recovery to rediscover running children on startup.
+   */
+  listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
 }
 ```
 
-`createLocalSubprocessAdapter()` returns the default implementation backed by `node:child_process.spawn` (process lifecycle), POSIX signals (kill / SIGSTOP / SIGCONT), `ps -p <pid> -o lstart=` (start-time identity), and unix-domain sockets with length-prefixed JSON framing for the typed RPC channel.
+`createInMemorySubprocessAdapter(opts?)` is the default test double. It dispatches step requests through the in-process execute pipeline via a closure the interpreter attaches to the request, records the handle in memory, and settles synchronously on the microtask queue. Options:
 
-The adapter is threaded through the same path as `FsAdapter` and `ShellAdapter`: `AgentHarness.subprocess` → `Context.subprocess` → `ToolExecutionContext.subprocess` → `ExecutionContext.subprocess`.
+- `storage?: StorageAdapter` — when supplied, the adapter persists handle manifests through the store so `listLive()` survives adapter re-creation within the process lifetime. `reattach()` is implemented as an idempotent replay of the persisted step request; "reattach" here is honestly a test-double semantic rather than a process resume, consistent with the adapter's role as the default in-process backend.
+- `metadataInjector?: (request: SubprocessRequest) => Partial<SubprocessHandleMetadata>` — test ergonomics hook. The returned fields are merged onto `handle.metadata` before the caller sees it, so unit tests can stamp `taskRole`, `taskId`, etc. without mutating the request surface.
 
-### Identity and `attach`
+`createLocalSubprocessAdapter(opts?)` is the OS-child-process backend. Internals: `node:child_process.spawn` for process lifecycle, POSIX signals for pause/resume, `ps -p <pid> -o lstart=` for `pidStarttime` identity, and unix-domain sockets with length-prefixed JSON framing for typed IPC. Options:
 
-`spawn()` returns a handle with an opaque `id` plus a `startToken` that uniquely identifies the running instance. Persistence layers (e.g. the CLI tasks SQLite db) store both, then later call `subprocess.attach(id, startToken)` to re-acquire a working handle. `attach` returns `null` when the underlying process is gone OR when the start token no longer matches (PID reuse on POSIX, instance regeneration on workers). This replaces ad-hoc liveness + start-time identity checks.
+- `storage?: StorageAdapter` — durable handle manifests. When set, every `spawn()` writes `{handleId, pid, pidStarttime, socketPath, cwd, stepId, serializedInput, executionId, metadata}` through the store; `reattach(handleId)` reads the manifest, verifies `pidStarttime` has not drifted (pid reuse), and returns a rehydrated handle; `listLive()` scans the manifest prefix and filters by liveness. Without storage, `listLive()` returns the empty set and `reattach()` returns null (no durability).
+- `signaller?: ProcessSignaller` — injection seam for testing signal delivery.
 
-### Capability flags
+The adapter is threaded through the harness: `AgentHarness.subprocess` → `Context.subprocess` → `ToolExecutionContext.subprocess` → `ExecutionContext.subprocess`.
 
-POSIX-only operations (signals, pause/resume) are advertised by `adapter.capabilities` and reflected as optional methods on `SubprocessHandle`. Consumers should consult `capabilities` once and degrade gracefully (hide UI, skip features) rather than try/catch on missing methods. On the Worker backend, for example, `capabilities.pauseResume` is `false` and `handle.pause` is `undefined`.
+### Request Dispatch
 
-### Typed RPC channel
+`adapter.spawn(request)` is the single entry point. `request.kind === 'process'` launches an OS child; `request.kind === 'step'` dispatches a registered Noetic step. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
 
-When `spec.ipc` is set with Zod schemas for request and response, the spawn pre-wires a bidirectional channel between parent and child. The child binds a named endpoint via `adapter.serve(name, schemas)` (locally, a unix socket path provided in the `NOETIC_SUBPROCESS_IPC_PATH` env var; on workers, a service binding or DO name). Both ends Zod-parse messages at the boundary; mismatched payloads short-circuit before they reach handler code.
+### Handle Metadata Contract
+
+`SubprocessHandle.metadata` is a plain object adapters populate during the handle's lifecycle. Well-known keys:
+
+| Key | Set when | Contract |
+|---|---|---|
+| `result` | Step request completes successfully | Awaited step return value; consumers unwrap. |
+| `error` | Step or process request fails | `SerializedError` payload; `DetachedHandle.await()` rehydrates into `NoeticError` where possible. |
+| `executionId` | Step request | Echoed from `StepSubprocessRequest.executionId` so hosts can correlate the handle with `harness.restore(executionId)`. |
+
+Callers may attach arbitrary additional keys via `request.metadata`; the adapter preserves them on the returned handle. The tasks runner uses this to tag planner / implementer handles with `taskRole`, `taskId`, and (for implementer) `featureId` so `findLiveTaskHandle({adapter, taskId, taskRole})` can resolve a live handle without a separate sidecar file.
+
+### Durability Contract (`reattach`, `listLive`)
+
+`reattach(handleId)` and `listLive()` are adapter-level durability hooks. An adapter configured with a durable `StorageAdapter` persists handle manifests on `spawn()` and consults them on reattach/list; a zero-config adapter returns empty results. The host boot flow (`reattachLiveChildren(harness)` in `@noetic/cli`) calls `harness.subprocess.listLive()` first and then `harness.restore(executionId)` per live handle. See `23-durable-execution` for the full model.
 
 ---
 
@@ -201,8 +242,21 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Shell abstraction
   readonly shell: ShellAdapter;
 
-  // Subprocess abstraction
+  /**
+   * Subprocess abstraction. Always present (non-optional internally).
+   * Defaults to createInMemorySubprocessAdapter() when the harness is
+   * constructed without an explicit `subprocess` option. All StepRun
+   * and StepSpawn dispatches route through this adapter unless the step
+   * or detachedSpawn override supplies one; see 04-spawn for precedence.
+   */
   readonly subprocess: SubprocessAdapter;
+
+  /**
+   * Typed wrapper over the harness's StorageAdapter used by checkpoint()
+   * / restore(). When absent, checkpoint/restore are no-ops and the
+   * harness has no durable-execution guarantees. See 23-durable-execution.
+   */
+  readonly checkpointStore?: CheckpointStore;
 
   // Primary execution — enqueues input on the session identified by
   // options.threadId and returns once the message is accepted. The session
@@ -234,7 +288,19 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     step: Step<I, O>,
     input: I,
     parentCtx: Context,
-    overrides?: { threadId?: string; resourceId?: string; cwdInit?: string },
+    overrides?: {
+      threadId?: string;
+      resourceId?: string;
+      cwdInit?: string;
+      /**
+       * Per-call subprocess adapter override. Takes precedence over both
+       * step.subprocess and harness.subprocess. Pass a custom adapter to
+       * dispatch this specific spawn through a different runtime (an
+       * out-of-process adapter for real isolation, or a test double that
+       * records the request).
+       */
+      subprocess?: SubprocessAdapter;
+    },
   ): DetachedHandle<O>;
 
   // Context management
@@ -269,8 +335,30 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   afterModelCall(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<SteeringDecision>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
 
-  // Durability (no-ops in AgentHarness)
+  // Durability
+  /**
+   * Snapshot the execution state (frontier, layer states, cwd, ask-user queue,
+   * item log) through the checkpointStore. Fires automatically at:
+   *   1. End of every execute() that mutated the item log.
+   *   2. After detachedSpawn() settles (success or failure).
+   *   3. After ask-user enqueue.
+   *   4. After runAppendPipeline().
+   * Keyed by ctx.id (the executionId); idempotent — successive snapshots
+   * overwrite. No-op when checkpointStore is absent. A failed save is
+   * logged via console.warn and swallowed; a failing checkpoint never
+   * aborts an otherwise-successful step. See 23-durable-execution.
+   */
   checkpoint(ctx: Context): Promise<void>;
+
+  /**
+   * Rebuild a Context from a previously-persisted snapshot. Returns null
+   * when no snapshot exists. Surfaces NoeticConfigError with
+   * code 'CHECKPOINT_SCHEMA_MISMATCH' when the snapshot's schemaVersion
+   * is unrecognised — the caller discards via checkpointStore.clear()
+   * and restarts with a fresh execution. The restored Context carries
+   * the original executionId so downstream readers observe continuity
+   * across a host restart.
+   */
   restore(executionId: string): Promise<Context | null>;
 
   // Lifecycle
@@ -481,7 +569,7 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
 - **`memory` on AgentConfig** are default memory layers applied to every context created via `createContext()`. When `createContext` is called with its own `memory` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up memory for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns. Optional `overrides.threadId` / `overrides.resourceId` decouple the child's session-scoped item log from the parent's — useful for background sub-agents whose accumulated items should NOT replay in the parent's next turn.
-- **`checkpoint`/`restore`** enable durable execution. `AgentHarness` implements them as no-ops. `DurableAgentHarness` serializes state (including memory layer state) to its backing store.
+- **`checkpoint`/`restore`** are the first-class durable-execution surface. `AgentHarness` implements them against an injected `CheckpointStore` (which wraps the harness's `StorageAdapter`). When no store is configured both calls are no-ops, preserving zero-config ergonomics. `DurableAgentHarness` uses the same contract with a distributed backend. The full lifecycle (snapshot boundaries, schema versioning, idempotency expectations, restart flow) is specified in `23-durable-execution`.
 - **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
 - **`createSpan`** lets the agent harness control the tracing backend.
 
@@ -501,13 +589,64 @@ The TUI calls `setRootCwd(nextCwd)` when the user issues a `!cd`, so the next ag
 
 ---
 
+## Durable Execution
+
+The harness exposes four surfaces that together enable crash-recovery: `subprocess.listLive()` / `subprocess.reattach()` (rediscover running children), `checkpoint()` / `restore()` (save and replay parent execution state), and the `StorageAdapter` + `CheckpointStore` wiring that persists them.
+
+### Checkpoint Lifecycle
+
+Snapshots fire automatically at four boundaries:
+
+1. **Post-`execute()`** — after each step completes and any item-log mutations have landed.
+2. **Post-`detachedSpawn()`** — when a child is sent and the adapter's handle is returned.
+3. **Ask-user enqueue** — when a pending prompt is persisted waiting for user input.
+4. **Post-`runAppendPipeline`** — layer state can mutate as items are appended; the snapshot follows.
+
+Any caller may also invoke `harness.checkpoint(ctx)` explicitly. Snapshots are keyed by `ctx.id` (the execution id) under `execution:<id>:snapshot` within the store's key namespace, and are idempotent — successive snapshots for the same execution overwrite prior data.
+
+Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
+
+- `schemaVersion` — literal `1` today; bumped on backward-incompatible change.
+- `executionId`, `threadId`, `resourceId` — identity.
+- `frontier` — stack of `FrontierFrame { stepId, input, state? }` entries (the execution frontier).
+- `layers` — `Record<layerId, state>` captured via `layerStateStore.get(executionId, layerId)`.
+- `cwd` — `{ current, previous }`.
+- `askUser` — pending ask-user requests (populated when the code-agent's `AskUserService` integrates with the store).
+- `itemLog` — `{ items: Item[] }`, the full item log.
+- `capturedAt` — ISO-8601 timestamp.
+
+### Restore Contract
+
+`harness.restore(executionId)` reads the snapshot and rebuilds a `Context`:
+
+1. Replays layer state into `layerStateStore` under the same executionId so memory projectors observe continuity.
+2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through).
+3. Seeds a new context with `threadId`, `resourceId`, and `cwdInit` from the snapshot.
+4. Returns a `Context` whose `.id` is overridden to the original `executionId` so downstream readers correlate across the restart.
+
+Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted schemaVersion is not the one the running runtime understands — callers discard via `checkpointStore.clear(executionId)` and restart the execution.
+
+### Durability Guarantees
+
+- **With a durable `StorageAdapter` + `CheckpointStore`** (e.g. `createFileStorage({root})` + `createCheckpointStore({storage})`): full snapshot/restore across host restarts.
+- **Without** (the default zero-config harness): `checkpoint()` is a no-op, `restore()` returns null, `listLive()` returns the empty set, `reattach()` returns null. All existing in-memory semantics are preserved bit-identically.
+- **Schema versioning**: `CheckpointSnapshot.schemaVersion` is validated on load. Incompatible versions surface a typed error rather than a silently-corrupt restored context.
+- **Checkpoint failures never abort a step.** A failing `store.save` is logged via `console.warn` and swallowed; the step's return value is unaffected.
+
+### Limitations
+
+- **LLM mid-stream** is re-issued on restart, not resumed. The item log's response-id dedupe guards against double-recording an identical response. See `07-context-and-event-log`.
+- **Non-idempotent `step.run` bodies** may run twice if a crash lands between execution and the following checkpoint. Write bodies that are safe to re-execute, or gate with an external idempotency key.
+
+See `23-durable-execution` for the full durable-execution model, including `SubprocessAdapter.reattach`/`listLive` semantics, the durable IPC outbound queue, protocol v2 frames, and the host-restart recovery flow.
+
 ## AgentHarness Backends
 
-| Backend                    | When to Use                                                     | Channel Handles |
-|----------------------------|-----------------------------------------------------------------|-----------------|
-| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-resolves LLM provider from `OPENROUTER_API_KEY` or `llm` config. | In-process handles |
-| `DurableAgentHarness`      | Production — backed by Temporal, Inngest, or custom event store | Translates to durable signals |
-| `DistributedAgentHarness`  | Multi-node — A2A, worker pools, cloud functions                 | Translates to network messages |
+| Backend                    | When to Use                                                     | Durability | Channel Handles |
+|----------------------------|-----------------------------------------------------------------|------------|-----------------|
+| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-resolves LLM provider from `OPENROUTER_API_KEY` or `llm` config. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
+| `DurableAgentHarness`      | Production — backed by Temporal, Inngest, or custom event store | Full durable execution via backing store | Translates to durable signals |
+| `DistributedAgentHarness`  | Multi-node — A2A, worker pools, cloud functions                 | Delegates to the distributed backend | Translates to network messages |
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic/core';

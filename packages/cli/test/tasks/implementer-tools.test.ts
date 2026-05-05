@@ -9,8 +9,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { ToolExecutionContext } from '@noetic/core';
-
-import { saveTask, tailEvents } from '../../src/commands/builtins/tasks/fs-store.js';
+import { createDetachedSignal } from '@noetic/core';
+import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ImplementerOutcome } from '../../src/commands/builtins/tasks/hierarchy/implementer-flow.js';
 import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
 import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
@@ -19,14 +19,13 @@ import {
   createImplementationBlockedTool,
   createImplementationDoneTool,
 } from '../../src/commands/builtins/tasks/implementer-tools.js';
-import { createRunnerSignal } from '../../src/commands/builtins/tasks/runner-harness.js';
 import {
   AutopilotState,
   EventKind,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './_helpers.js';
 
 const PARENT_ID = 'T-parent0000';
@@ -118,7 +117,7 @@ describe('implementer-tools', () => {
     it('flips the parent feature to Validating and resolves the signal as completed', async () => {
       const ctx = makeStoreContext();
       const { featureId } = await seedTasksAndHierarchy(ctx);
-      const signal = createRunnerSignal<ImplementerOutcome>();
+      const signal = createDetachedSignal<ImplementerOutcome>();
       const tool = createImplementationDoneTool({
         storeCtx: ctx,
         leafTaskId: LEAF_ID,
@@ -151,7 +150,7 @@ describe('implementer-tools', () => {
 
     it('rejects an empty summary', () => {
       const ctx = makeStoreContext();
-      const signal = createRunnerSignal<ImplementerOutcome>();
+      const signal = createDetachedSignal<ImplementerOutcome>();
       const tool = createImplementationDoneTool({
         storeCtx: ctx,
         leafTaskId: LEAF_ID,
@@ -171,7 +170,7 @@ describe('implementer-tools', () => {
     it('flips the parent feature to Blocked and resolves the signal as blocked', async () => {
       const ctx = makeStoreContext();
       const { featureId } = await seedTasksAndHierarchy(ctx);
-      const signal = createRunnerSignal<ImplementerOutcome>();
+      const signal = createDetachedSignal<ImplementerOutcome>();
       const tool = createImplementationBlockedTool({
         storeCtx: ctx,
         leafTaskId: LEAF_ID,
@@ -199,7 +198,7 @@ describe('implementer-tools', () => {
 
     it('rejects an empty reason', () => {
       const ctx = makeStoreContext();
-      const signal = createRunnerSignal<ImplementerOutcome>();
+      const signal = createDetachedSignal<ImplementerOutcome>();
       const tool = createImplementationBlockedTool({
         storeCtx: ctx,
         leafTaskId: LEAF_ID,

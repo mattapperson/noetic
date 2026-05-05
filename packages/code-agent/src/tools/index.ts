@@ -28,18 +28,6 @@ import {
 import type { MutationPolicy } from './mutation-policy.js';
 
 export {
-  type AskUserAnnotation,
-  AskUserAnnotationSchema,
-  type AskUserInput,
-  AskUserInputSchema,
-  type AskUserOption,
-  AskUserOptionSchema,
-  type AskUserOutput,
-  AskUserOutputSchema,
-  type AskUserQuestion,
-  AskUserQuestionSchema,
-} from './ask-user-types.js';
-export {
   BASH_TOOL_NAME,
   EDIT_TOOL_NAME,
   FIND_TOOL_NAME,

@@ -50,6 +50,15 @@ interface Context<TState = unknown> {
   tryRecv<T>(channel: Channel<T>): T | null;
 
   // Lifecycle
+  /**
+   * Snapshot the execution state (frontier, layer states, cwd, ask-user queue,
+   * item log) to the harness's StorageAdapter for crash recovery. Fires
+   * automatically at checkpoint boundaries (post-execute, post-spawn,
+   * post-ask-user-enqueue, post-append) and may be called explicitly.
+   * Keyed by `ctx.id` (the executionId); idempotent — successive snapshots
+   * overwrite. No-op when the harness was not constructed with a
+   * CheckpointStore. See 23-durable-execution.
+   */
   checkpoint(): Promise<void>;
   complete<T>(value: T): void;
   abort(reason?: string): void;
@@ -291,6 +300,42 @@ Layer tokens come from each layer's `recall()` self-reported `tokenCount` (see `
 ### Stability
 
 The snapshot reflects the most recent LLM call only; it is overwritten on the next call. Long-lived telemetry should be exported via `Span` attributes on the `ctx.span` (see `10-observability`).
+
+## Crash Recovery
+
+Long-running executions can survive a parent-process crash when the harness is configured with a durable `StorageAdapter` and a `CheckpointStore`. The context and item log expose the surface the recovery flow relies on; the end-to-end model is specified in `23-durable-execution`.
+
+### Item Log as the Conversation Record
+
+Each `Item` appended to the log carries a stable identifier set by the producer. Assistant responses carry the provider-supplied response id (on `MessageItem.id` / `FunctionCallItem.id` via the `@openrouter/sdk` types); framework-created items (`InputMessageItem`, `FunctionCallOutputItem`) carry a Noetic-assigned id. The runtime uses these ids to deduplicate writes when a checkpoint-and-replay round trip re-issues items that already landed.
+
+### Snapshot Boundaries
+
+`ctx.checkpoint()` fires automatically at four points:
+
+1. After each `execute()` call that mutates the item log.
+2. After `spawn()` and `detachedSpawn()` settle.
+3. When an ask-user prompt is enqueued (so a restarted TUI can replay it).
+4. After `runAppendPipeline()` — layer state can mutate as items land, and the snapshot must follow that mutation.
+
+Any caller may also call `ctx.checkpoint()` explicitly. The call is a no-op when no `CheckpointStore` is configured on the harness, so zero-config setups pay nothing for the machinery.
+
+### Replay Semantics
+
+On restart, `harness.restore(executionId)` returns a `Context` whose `itemLog.items` replay the snapshot's committed items in order. A host that wants to continue an interrupted turn re-issues the user input; the interpreter walks the re-constructed frontier and resumes. The item log's id-keyed dedupe guards prevent double-appending items that survived the crash.
+
+### LLM Mid-Stream Is Out of Scope
+
+If the host process dies while the model is actively streaming, there is no partial-response resume. On restart the turn is re-issued and the model is called again with the same input. The response id dedupe means:
+
+- If the model produces an identical response (same response id) — nothing new is appended; the prior response wins.
+- If the model produces a different response (new response id) — the new response is appended and drives the next turn.
+
+This is acceptable for interactive and batch workloads; it is not a resumable stream. Callers that need strict once-only token generation must gate with their own idempotency key outside the framework.
+
+### Non-Idempotent `step.run` Bodies
+
+Durable execution can replay a step body whose prior execution completed but whose completion checkpoint never landed. Arbitrary user code cannot be made idempotent by the framework. Use stable step ids, and write `step.run` bodies whose side effects are safe to re-execute (or guarded by an external idempotency key that the body consults).
 
 ## Circular Reference with Channels
 

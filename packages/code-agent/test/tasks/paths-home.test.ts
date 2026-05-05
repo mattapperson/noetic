@@ -60,12 +60,18 @@ describe('resolveTasksRoot', () => {
 
   test('ctx.tasksRoot overrides env and default', () => {
     process.env.NOETIC_HOME = '/tmp/from-env';
-    expect(resolveTasksRoot({ tasksRoot: '/tmp/from-ctx/tasks' })).toBe('/tmp/from-ctx/tasks');
+    expect(
+      resolveTasksRoot({
+        tasksRoot: '/tmp/from-ctx/tasks',
+      }),
+    ).toBe('/tmp/from-ctx/tasks');
   });
 });
 
 describe('taskRootPaths', () => {
-  const CTX = { tasksRoot: '/tmp/noetic-test/tasks' };
+  const CTX = {
+    tasksRoot: '/tmp/noetic-test/tasks',
+  };
 
   test('events and state sit at the tasks-root level (cross-task feeds)', () => {
     const paths = taskRootPaths(CTX);
@@ -76,7 +82,9 @@ describe('taskRootPaths', () => {
 });
 
 describe('taskDirPaths', () => {
-  const CTX = { tasksRoot: '/tmp/noetic-test/tasks' };
+  const CTX = {
+    tasksRoot: '/tmp/noetic-test/tasks',
+  };
   const TASK_ID = 'T-GdGS2Z0WC1';
 
   test('lays task artifacts out under <tasksRoot>/<taskId>/', () => {
@@ -98,7 +106,9 @@ describe('taskDirPaths', () => {
 });
 
 describe('runnerSocketPath', () => {
-  const CTX = { tasksRoot: '/tmp/noetic-test/tasks' };
+  const CTX = {
+    tasksRoot: '/tmp/noetic-test/tasks',
+  };
   const TASK_ID = 'T-GdGS2Z0WC1';
 
   test('planner socket sits at <taskDir>/sockets/planner.sock', () => {

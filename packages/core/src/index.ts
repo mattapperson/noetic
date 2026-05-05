@@ -86,6 +86,27 @@ export { isNoeticError, NoeticErrorImpl } from './errors/noetic-error';
 
 //#endregion
 
+//#region Ask-User Schemas
+
+/** @public */
+export type {
+  AskUserAnnotation,
+  AskUserInput,
+  AskUserOption,
+  AskUserOutput,
+  AskUserQuestion,
+} from './types/ask-user-types';
+/** @public */
+export {
+  AskUserAnnotationSchema,
+  AskUserInputSchema,
+  AskUserOptionSchema,
+  AskUserOutputSchema,
+  AskUserQuestionSchema,
+} from './types/ask-user-types';
+
+//#endregion
+
 //#region Execution
 
 /** @public */
@@ -141,7 +162,10 @@ export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
-
+/** @public */
+export type { CreateFileStorageOptions } from './runtime/durable';
+/** @public */
+export { createFileStorage } from './runtime/durable';
 /** @public */
 export { createInMemoryStorage } from './runtime/in-memory-storage';
 
@@ -179,6 +203,39 @@ export { react } from './patterns/react';
 
 /** @public */
 export { AgentHarness } from './runtime/agent-harness';
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+export type {
+  AfterFirstTurnContext,
+  CheckpointStore,
+  CreateCheckpointStoreOptions,
+  CreateNudgeMessageOpts,
+  DetachedSignal,
+  RunnableLoopHarness,
+  RunnableLoopOpts,
+  SessionSeedHarness,
+  StallNudgeOpts,
+} from './runtime/durable';
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+export {
+  CheckpointKeys,
+  createCheckpointStore,
+  createDetachedSignal,
+  createNudgeMessage,
+  createStallNudgeHook,
+  DEFAULT_NUDGE_MESSAGE_TEXT,
+  runnableLoop,
+  seedFromItems,
+} from './runtime/durable';
+/** @public */
+export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 
 //#endregion
 
@@ -240,6 +297,28 @@ export { DetachedStatus } from './types/detached';
 
 /** @public */
 export type { EmbedFn } from './types/embed';
+
+//#endregion
+
+//#region Types — Checkpoint
+
+/** @public */
+export type {
+  CheckpointSnapshot,
+  CwdSnapshot,
+  FrontierFrame,
+  ItemLogSnapshot,
+  PendingAskUserSnapshot,
+} from './types/checkpoint';
+/** @public */
+export {
+  CheckpointSchemaVersion,
+  CheckpointSnapshotSchema,
+  CwdSnapshotSchema,
+  FrontierFrameSchema,
+  ItemLogSnapshotSchema,
+  PendingAskUserSnapshotSchema,
+} from './types/checkpoint';
 
 //#endregion
 
@@ -420,9 +499,14 @@ export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/sh
 export { TIMEOUT_ERROR_PREFIX } from './types/shell-adapter';
 /** @public */
 export type {
+  ProcessSubprocessRequest,
+  SerializedError,
+  StepSubprocessOverrides,
+  StepSubprocessRequest,
   SubprocessAdapter,
   SubprocessControlResult,
   SubprocessHandle,
+  SubprocessHandleMetadata,
   SubprocessRequest,
   SubprocessStatus,
   SubprocessStopResult,

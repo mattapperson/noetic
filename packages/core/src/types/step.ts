@@ -4,6 +4,7 @@ import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from './memory';
+import type { SubprocessAdapter } from './subprocess-adapter';
 
 /**
  * Cumulative execution snapshot passed to loop `until` predicates.
@@ -83,6 +84,13 @@ export interface StepRun<TMemory = ContextMemory, I = unknown, O = unknown> {
   id: string;
   execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
   retry?: RetryPolicy;
+  /**
+   * Per-step subprocess adapter override. When set, the interpreter
+   * dispatches this step through the given adapter instead of the harness
+   * default. Resolution order at dispatch is
+   * `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+   */
+  subprocess?: SubprocessAdapter;
 }
 
 /** @public A step that sends a prompt to a language model and returns its response. */
@@ -175,6 +183,12 @@ export interface StepSpawn<TMemory = ContextMemory, I = unknown, O = unknown> {
   child: Step<TMemory, I, O>;
   memory?: MemoryConfig | MemoryLayer[];
   timeout?: number;
+  /**
+   * Per-step subprocess adapter override applied when the interpreter
+   * dispatches this spawn. Resolution order is
+   * `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+   */
+  subprocess?: SubprocessAdapter;
 }
 
 /**

@@ -12,14 +12,22 @@
  */
 
 import type { AskUserService } from '@noetic/code-agent/ask-user-service';
-import type { AgentHarness, InterviewQuestionAnswer, InterviewResult } from '@noetic/core';
+import type { InterviewSession, TaskHierarchyInput } from '@noetic/code-agent/tasks/schema';
+import {
+  generateInterviewSessionId,
+  InterviewSessionStatus,
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type {
+  AgentHarness,
+  AskUserInput,
+  AskUserQuestion,
+  InterviewQuestionAnswer,
+  InterviewResult,
+} from '@noetic/core';
 import { interview } from '@noetic/core';
 import { z } from 'zod';
-import type { AskUserInput, AskUserQuestion } from '../../../../tools/ask-user-types.js';
-import type { TaskStoreContext } from '../fs-store.js';
 import { INTERVIEW_SYSTEM_PROMPT } from './prompts.js';
-import type { InterviewSession, TaskHierarchyInput } from './schemas.js';
-import { generateInterviewSessionId, InterviewSessionStatus } from './schemas.js';
 import { loadInterviewSession, saveInterviewSession } from './store.js';
 
 //#region Schemas

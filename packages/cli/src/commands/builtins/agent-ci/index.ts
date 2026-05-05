@@ -5,17 +5,17 @@ import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 
 import type { Command, LocalCommandCall, LocalCommandResult } from '../../types.js';
 import { AgentCiSpawnError, startAgentCiRun } from '../tasks/agent-ci-launcher.js';
-import type { TaskStoreContext } from '../tasks/fs-store.js';
-import { saveTask, tryLoadTask } from '../tasks/fs-store.js';
-import type { ProjectWorktree } from '../tasks/git.js';
-import { loadProjectWorktrees } from '../tasks/git.js';
-import type { Task } from '../tasks/schemas.js';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
+import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 
 //#region Workflow resolution
 

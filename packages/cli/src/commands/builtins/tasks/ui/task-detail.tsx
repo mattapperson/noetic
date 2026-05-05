@@ -8,17 +8,15 @@
  * rendering Ink.
  */
 
+import type { LogEntry, Task } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { tailLog, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-
 import { useTheme } from '../../../../tui/components/theme.js';
-import { isEnoent } from '../_fs-errors.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { tailLog } from '../fs-store.js';
-import { taskDirPaths } from '../paths.js';
-import type { LogEntry, Task } from '../schemas.js';
+import { isEnoent } from '@noetic/code-agent/tasks/store/fs-node';
 
 //#region Types
 

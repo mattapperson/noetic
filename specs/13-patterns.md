@@ -7,6 +7,17 @@
 
 Every pattern is 15-30 lines of primitive composition. The implementations below are real, not pseudocode.
 
+Spawn-based patterns (`spawn`, `detachedSpawn`, `ralphWiggum`, `dualAgent`, etc.) route through the harness `SubprocessAdapter` — in-memory by default, out-of-process when the caller supplies a different adapter via `spawn({subprocess})` / `harness.detachedSpawn(..., {subprocess})`. The composition shapes below are unchanged; adapter routing is transparent. See `04-spawn` for the routing rules and `23-durable-execution` for durability when an out-of-process adapter is used.
+
+Long-lived runner loops — the tasks-system planner / implementer / agent-ci subprocesses and user code that wants the same shape — are built from four primitives that live in `@noetic/core` under `runtime/`:
+
+- `createDetachedSignal<T>()` — single-shot resolve/reject signal used by the runner loop to surface the final outcome.
+- `runnableLoop(opts)` — generic turn-driver: seed the session from prior items, run the first turn, and await the signal.
+- `createStallNudgeHook(opts)` — two-strike nudge composable with the runner loop.
+- `seedFromItems(harness, threadId, items)` — path-free session seeding that accepts an `Item[]` the caller has loaded.
+
+These are the generic composition parts the built-in tasks runners use under the hood; they are exported so third-party runners (custom agents, CI wrappers, daemons) can build the same shape against any `SubprocessAdapter`.
+
 ---
 
 ## ReAct

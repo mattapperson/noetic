@@ -1,13 +1,11 @@
 import { basename, format, join, parse } from '@noetic/code-agent/tasks/path-utils';
+import type { LogEntry } from '@noetic/code-agent/tasks/schema';
+import { LogEntryKind } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendLog, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
 import { createLocalFsAdapter } from '@noetic/core/adapters/node';
-
-import { isEnoent } from '../_fs-errors.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendLog } from '../fs-store.js';
-import { taskDirPaths } from '../paths.js';
-import type { LogEntry } from '../schemas.js';
-import { LogEntryKind } from '../schemas.js';
+import { isEnoent } from '@noetic/code-agent/tasks/store/fs-node';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Constants

@@ -1,6 +1,6 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { tailLog } from '../fs-store.js';
-import type { LogEntry } from '../schemas.js';
+import type { LogEntry } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { tailLog } from '@noetic/code-agent/tasks/store/fs-node';
 import { resolveTask } from './_shared.js';
 
 //#region Types

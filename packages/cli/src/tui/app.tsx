@@ -10,6 +10,7 @@ import type { SkillDefinition } from '@noetic/code-agent/skills';
 import { buildSkillCatalog } from '@noetic/code-agent/skills';
 import type {
   AgentHarness,
+  AskUserOutput,
   InputContentPart,
   InputMessageItem,
   Item,
@@ -51,7 +52,6 @@ import type { SaveResult } from '../sessions/store.js';
 import { saveSession } from '../sessions/store.js';
 import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
 import type { SessionFile } from '../sessions/types.js';
-import type { AskUserOutput } from '../tools/ask-user-types.js';
 import type { AgentRuntimeConfig } from '../types/config.js';
 import { getModelContextLimit } from '../types/model-context.js';
 import type { LocalBashResult } from './bash-command.js';
@@ -89,6 +89,7 @@ import {
   getItemId,
   isUserEntry,
 } from './item-utils.js';
+import { reattachLiveChildren } from './reattach-live-children.js';
 import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
 import { StreamMetricsProvider } from './stream-metrics-context.js';
 import { installSuspendResumeHandlers } from './suspend-resume.js';
@@ -461,6 +462,13 @@ function App({
 
   const harnessRef = useRef<AgentHarness | null>(null);
   const harnessDisposeRef = useRef<(() => Promise<void>) | null>(null);
+  /**
+   * Set to true after the first harness creation performs its one-shot
+   * `reattachLiveChildren` pass. Re-harnessing on /model or /plan must
+   * not re-run reattach — the adapter is shared across swaps and has
+   * already rebound any durable children.
+   */
+  const reattachDoneRef = useRef<boolean>(false);
   // Owned by the TUI (not the harness) so language-server subprocesses survive
   // /model and /plan swaps, which recreate the harness.
   const lspServiceRef = useRef<LspService | null>(null);
@@ -1003,6 +1011,15 @@ function App({
       // before the first turn or during a /model or /plan harness swap.
       // Without this, the next turn's tools reset to launch-time cwd.
       harness.setRootCwd(effectiveCwdRef.current);
+      // One-shot rediscovery of live subprocess children across a
+      // parent-process restart. Cheap no-op when no durable storage is
+      // configured on the adapter — see reattach-live-children.ts.
+      if (!reattachDoneRef.current) {
+        reattachDoneRef.current = true;
+        await reattachLiveChildren(harness).catch((err: unknown) => {
+          console.warn('reattachLiveChildren failed:', err);
+        });
+      }
       setSkills(resolvedSkills);
       if (resumedItemsRef.current !== null) {
         // Seed BEFORE wiring streams — wireStreams triggers lazy session
@@ -1326,7 +1343,8 @@ function App({
           ),
         ]);
       }
-      const hasAttachments = resolvedAttachments.attachments.length > 0;
+      const hasAttachments =
+        resolvedAttachments.attachments.length > 0 || message.attachments.length > 0;
 
       if (!isSlashCommand(text) || hasAttachments) {
         await sendUserMessage(text, hasAttachments ? resolvedAttachments.contentParts : undefined);
@@ -1512,7 +1530,12 @@ function App({
           fs: config.fs,
           projectRoot: config.cwd,
         };
+        const harness = harnessRef.current;
+        if (harness === null) {
+          return;
+        }
         const found = await ensureChatTarget(ctx, task.id, {
+          subprocess: harness.subprocess,
           onSpawning: () =>
             setViewMode({
               kind: 'taskChatSpawning',

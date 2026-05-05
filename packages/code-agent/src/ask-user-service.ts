@@ -13,9 +13,8 @@
  * runtime error.
  */
 
+import type { AskUserInput, AskUserOutput } from '@noetic/core';
 import { NoeticErrorImpl } from '@noetic/core';
-
-import type { AskUserInput, AskUserOutput } from './tools/ask-user-types.js';
 
 //#region Types
 

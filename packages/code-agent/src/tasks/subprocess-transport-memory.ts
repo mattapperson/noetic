@@ -6,10 +6,7 @@ export interface TaskRunTransportFrame {
 
 export interface TaskRunTransportAdapter {
   publish(frame: TaskRunTransportFrame): Promise<void> | void;
-  subscribe(
-    runId: string,
-    handler: (frame: TaskRunTransportFrame) => void,
-  ): () => void;
+  subscribe(runId: string, handler: (frame: TaskRunTransportFrame) => void): () => void;
   history(runId: string): Promise<ReadonlyArray<TaskRunTransportFrame>>;
   stop?(): Promise<void> | void;
 }
@@ -39,7 +36,9 @@ export function createInMemoryTaskRunTransport(): TaskRunTransportAdapter {
       };
     },
     async history(runId) {
-      return [...(frames.get(runId) ?? [])];
+      return [
+        ...(frames.get(runId) ?? []),
+      ];
     },
     stop() {
       subscribers.clear();

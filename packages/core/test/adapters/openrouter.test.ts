@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { OpenResponsesResult } from '@openrouter/agent';
+import type { OpenResponsesResult as OpenResponsesNonStreamingResponse } from '@openrouter/agent';
 
-type OpenResponsesNonStreamingResponse = OpenResponsesResult;
 type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
 
 import {
@@ -11,7 +10,7 @@ import {
   extractUsage,
   itemsToInput,
 } from '../../src/adapters/openrouter';
-import type { InputMessageItem, Item, ReasoningItem } from '../../src/types/items';
+import type { Item, ReasoningItem } from '../../src/types/items';
 import { frameworkCast } from '../../src/util/framework-cast';
 import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
@@ -52,19 +51,19 @@ describe('itemsToInput', () => {
   });
 
   it('preserves structured user message parts for provider input', () => {
-    const message: InputMessageItem = {
-      id: 'msg-structured',
+    const item: Item = {
+      id: 'msg-with-attachments',
       type: 'message',
       role: 'user',
       status: 'completed',
       content: [
         {
           type: 'input_text',
-          text: 'Inspect this screenshot',
+          text: 'inspect this',
         },
         {
           type: 'input_image',
-          imageUrl: 'data:image/png;base64,abcd',
+          imageUrl: 'data:image/png;base64,aGVsbG8=',
           detail: 'auto',
         },
         {
@@ -76,16 +75,16 @@ describe('itemsToInput', () => {
     };
 
     const input = itemsToInput([
-      message,
+      item,
     ]);
 
     expect(input).toHaveLength(1);
-    const converted = frameworkCast<{
-      content: Array<{
+    const message = frameworkCast<{
+      content: ReadonlyArray<{
         type: string;
       }>;
     }>(input[0]);
-    expect(converted.content.map((part) => part.type)).toEqual([
+    expect(message.content.map((part) => part.type)).toEqual([
       'input_text',
       'input_image',
       'input_file',

@@ -11,15 +11,17 @@
 
 ```typescript
 type Step<I, O> =
-  | { kind: 'run';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy }
+  | { kind: 'run';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy; subprocess?: SubprocessAdapter }
   | { kind: 'llm';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
   | { kind: 'tool';    id: string; tool: Tool; args?: unknown }
   | { kind: 'branch';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
-  | { kind: 'spawn';   id: string; child: Step<I, O>; memory?: MemoryLayer[]; timeout?: number }
+  | { kind: 'spawn';   id: string; child: Step<I, O>; memory?: MemoryLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'provide'; id: string; child: Step<I, O>; memory: MemoryConfig | MemoryLayer[] }
   | { kind: 'loop';    id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
+
+The optional `subprocess?: SubprocessAdapter` field on `run` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
 
 Each variant is specified in its own feature spec:
 
@@ -77,3 +79,4 @@ This means `Step<I, O>` is an honest contract: input `I`, output `O`, always. Th
 - `MemoryLayer` is defined in `11-memory-layer-system`
 - `Until`, `Verdict` are defined in `05-loop-and-until`
 - `NoeticError` is defined in `09-error-model`
+- `SubprocessAdapter` is defined in `08-runtime`; per-step override semantics and the shared step registry live in `04-spawn`, and durable execution in `23-durable-execution`.

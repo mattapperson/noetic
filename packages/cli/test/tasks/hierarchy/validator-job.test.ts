@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { loadState, saveTask, tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { loadState, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
 import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
@@ -17,7 +17,7 @@ import type {
   ValidatorJobDeps,
 } from '../../../src/commands/builtins/tasks/hierarchy/validator-job.js';
 import { _testRunValidatorTick } from '../../../src/commands/builtins/tasks/hierarchy/validator-job.js';
-import type { Event } from '../../../src/commands/builtins/tasks/schemas.js';
+import type { Event } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -25,7 +25,7 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

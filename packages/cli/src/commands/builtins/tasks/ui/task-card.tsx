@@ -4,12 +4,11 @@
  * indicator.
  */
 
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { TaskSource } from '@noetic/code-agent/tasks/schema';
 import { Box, Text } from 'ink';
 import type React from 'react';
-
 import { useTheme } from '../../../../tui/components/theme.js';
-import type { Task } from '../schemas.js';
-import { TaskSource } from '../schemas.js';
 
 //#region Types
 

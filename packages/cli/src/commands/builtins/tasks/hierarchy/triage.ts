@@ -1,16 +1,16 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { saveTask } from '../fs-store.js';
-import type { Task } from '../schemas.js';
+import type { Feature, Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
+  FeatureLoopState,
+  FeatureStatus,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../schemas.js';
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FeatureLoopStateChanged } from './feature-lifecycle.js';
-import type { Feature } from './schemas.js';
-import { FeatureLoopState, FeatureStatus } from './schemas.js';
 import { listFeatures, loadFeature, loadSlice, saveFeature } from './store.js';
 
 //#region Types

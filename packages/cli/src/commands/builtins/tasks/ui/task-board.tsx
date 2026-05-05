@@ -13,16 +13,15 @@
  * without rendering Ink.
  */
 
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { hasHierarchy, listTasks } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput, useStdout } from 'ink';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
 import { useTheme } from '../../../../tui/components/theme.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { hasHierarchy, listTasks } from '../fs-store.js';
 import { deriveColumn, KanbanColumn } from '../kanban.js';
-import type { Task } from '../schemas.js';
 import { TaskCard } from './task-card.js';
 import { TaskCreateForm } from './task-create-form.js';
 import { TaskDetail } from './task-detail.js';

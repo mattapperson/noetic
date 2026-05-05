@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic/core';
 
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { saveTask, tryLoadTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { AutopilotFlowDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot-flow.js';
 import {
   buildAutopilotEvery,
@@ -24,14 +24,14 @@ import {
   listMilestones,
   listSlices,
 } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { Task } from '../../../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   HierarchyStatus,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 
@@ -131,6 +131,7 @@ function makeDeps(seed: SeededTask): AutopilotFlowDeps {
       tasksRoot: seed.tasksRoot,
     },
     signaller: staticSignaller(),
+    subprocess: createInMemorySubprocessAdapter(),
   };
 }
 

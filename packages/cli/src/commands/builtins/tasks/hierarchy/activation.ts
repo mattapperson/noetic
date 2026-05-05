@@ -1,6 +1,6 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import type { Slice } from './schemas.js';
-import { SliceStatus } from './schemas.js';
+import type { Slice } from '@noetic/code-agent/tasks/schema';
+import { SliceStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { loadSlice, saveSlice } from './store.js';
 import type { TriageContext } from './triage.js';
 import { triageSlice } from './triage.js';

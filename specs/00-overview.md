@@ -57,6 +57,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
+| `22-cli-architecture` | `@noetic/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
+| `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
 
 ## Dependency Graph
 

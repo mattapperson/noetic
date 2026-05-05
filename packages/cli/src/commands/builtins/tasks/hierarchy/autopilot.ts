@@ -1,7 +1,32 @@
+import type {
+  Feature,
+  Milestone,
+  MilestoneWithChildren,
+  Slice,
+  SliceWithFeatures,
+  Task,
+} from '@noetic/code-agent/tasks/schema';
+import {
+  AutopilotState,
+  EventKind,
+  FeatureLoopState,
+  HierarchyStatus,
+  MilestoneStatus,
+  SliceStatus,
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  hasHierarchy,
+  listTasks,
+  saveTask,
+  tryLoadTask,
+} from '@noetic/code-agent/tasks/store/fs-node';
+import type { SubprocessAdapter } from '@noetic/core';
 import * as log from '../../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, hasHierarchy, listTasks, saveTask, tryLoadTask } from '../fs-store.js';
 import type {
   StartImplementerRunArgs,
   StartImplementerRunResult,
@@ -11,24 +36,8 @@ import {
   readPlannerAttemptsFromDisk,
 } from '../memory/planner-attempt-layer.js';
 import type { StartPlannerRunArgs, StartPlannerRunResult } from '../planner-launcher.js';
-import type { Task } from '../schemas.js';
-import {
-  AutopilotState,
-  EventKind,
-  HierarchyStatus,
-  TaskLifecycleStatus,
-  TaskReviewStatus,
-} from '../schemas.js';
 import { activateSlice } from './activation.js';
 import { getTaskHierarchy } from './aggregate.js';
-import type {
-  Feature,
-  Milestone,
-  MilestoneWithChildren,
-  Slice,
-  SliceWithFeatures,
-} from './schemas.js';
-import { FeatureLoopState, MilestoneStatus, SliceStatus } from './schemas.js';
 import { saveMilestone, saveSlice } from './store.js';
 
 //#region Types
@@ -47,6 +56,11 @@ export type StartImplementerRunFn = (
 export interface AutopilotDeps {
   readonly ctx: TaskStoreContext;
   readonly signaller: Signaller;
+  /**
+   * Shared subprocess adapter — launchers query its handle manifest to
+   * detect in-flight runners and spawn new ones via it.
+   */
+  readonly subprocess: SubprocessAdapter;
   /** Test seam — invoked once per eligible task in the plan-pass. */
   readonly startPlannerRun?: StartPlannerRunFn;
   /** Test seam — invoked once per eligible feature in the implement-pass. */
@@ -174,6 +188,7 @@ async function runPlanPass(args: RunPlanPassArgs): Promise<void> {
       await startPlannerRun({
         ctx: args.deps.ctx,
         taskId: task.id,
+        subprocess: args.deps.subprocess,
       });
       args.report.plannersStarted += 1;
     } catch (err) {
@@ -280,6 +295,7 @@ async function runImplementPass(args: RunImplementPassArgs): Promise<void> {
         parentTaskId: candidate.parentTaskId,
         featureId: candidate.feature.id,
         branch,
+        subprocess: args.deps.subprocess,
       });
       args.report.implementersStarted += 1;
     } catch (err) {

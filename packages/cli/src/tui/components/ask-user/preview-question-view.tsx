@@ -6,9 +6,9 @@
  * Ported from ~/Desktop/claude-code-main/src/components/permissions/AskUserQuestionPermissionRequest/PreviewQuestionView.tsx.
  */
 
+import type { AskUserQuestion } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
 import { useCallback, useState } from 'react';
-import type { AskUserQuestion } from '../../../tools/ask-user-types.js';
 import type { Option } from '../custom-select/index.js';
 import { Select } from '../custom-select/index.js';
 import { useTheme } from '../theme.js';

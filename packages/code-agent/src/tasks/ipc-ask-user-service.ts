@@ -12,13 +12,14 @@
  * Only one pending request at a time, mirroring the in-memory service.
  */
 
+import type { AskUserInput, AskUserOutput } from '@noetic/core';
+
 import type {
   AskUserListener,
   AskUserService,
   PendingAskUserRequest,
 } from '../ask-user-service.js';
 import { AskUserBusyError, createAskUserCancelledError } from '../ask-user-service.js';
-import type { AskUserInput, AskUserOutput } from '../tools/ask-user-types.js';
 
 //#region Types
 

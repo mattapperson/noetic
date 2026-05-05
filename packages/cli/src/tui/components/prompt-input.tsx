@@ -796,7 +796,7 @@ export function PromptInput({
       if (key.downArrow) {
         if (suggestionsRef.current.length > 0) {
           setSugI(Math.min(suggestionsRef.current.length - 1, sugIdxRef.current + 1));
-        } else if (enableHistory && historyStateRef.current.index >= 0) {
+        } else if (enableHistory && historyStateRef.current.index > 0) {
           const result = navigatePromptHistoryDown(historyStateRef.current);
           historyStateRef.current = result.state;
           setHistoryState(result.state);

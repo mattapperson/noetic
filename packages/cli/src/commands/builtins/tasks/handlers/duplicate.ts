@@ -1,9 +1,5 @@
 import { join } from '@noetic/code-agent/tasks/path-utils';
-
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, saveTask } from '../fs-store.js';
-import { taskDirPaths } from '../paths.js';
-import type { Task } from '../schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -11,7 +7,9 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../schemas.js';
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, saveTask, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

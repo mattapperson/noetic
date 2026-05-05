@@ -1,7 +1,7 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, saveTask } from '../fs-store.js';
-import type { Task } from '../schemas.js';
-import { AutopilotState, EventKind } from '../schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { AutopilotState, EventKind } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

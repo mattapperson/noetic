@@ -29,15 +29,18 @@ import { spawn } from 'node:child_process';
 
 import { fileUrlToPath, randomHex } from '@noetic/code-agent/tasks';
 import { basename, resolve } from '@noetic/code-agent/tasks/path-utils';
-
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { EventKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  loadTask,
+  saveTask,
+  taskDirPaths,
+} from '@noetic/code-agent/tasks/store/fs-node';
 import type { Signaller } from './agent-ci-control.js';
 import { defaultSignaller } from './agent-ci-control.js';
-import type { TaskStoreContext } from './fs-store.js';
-import { appendEvent, loadTask, saveTask } from './fs-store.js';
-import { taskDirPaths } from './paths.js';
 import { clearRunner, loadRunner, saveRunner } from './runner-state.js';
-import type { Task } from './schemas.js';
-import { EventKind, TaskReviewStatus } from './schemas.js';
 
 //#region Types
 

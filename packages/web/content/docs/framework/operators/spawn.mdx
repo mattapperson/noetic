@@ -34,6 +34,7 @@ This is the primitive for sub-agents, delegation, and sandboxed execution.
 | `child` | `Step<TMemory, I, O>` | Yes | The step to execute in isolation |
 | `memory` | `MemoryConfig \| MemoryLayer[]` | No | Spawn-local memory layers (use the `memory()` builder for typed access) |
 | `timeout` | `number` | No | Timeout in milliseconds |
+| `subprocess` | `SubprocessAdapter` | No | Per-step adapter override; see [SubprocessAdapter Routing](#subprocessadapter-routing) below. |
 
 ## Memory Layers
 
@@ -292,6 +293,45 @@ The LLM sees both tools and their descriptions, then decides per-task:
 - **"Research this while I handle other things"** → calls `launch_agent` (async, continues)
 
 When a background agent finishes, its result arrives via the inbox channel as a developer message. The loop wakes, the LLM sees the result, and incorporates it.
+
+## SubprocessAdapter Routing
+
+Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through a `SubprocessAdapter`. The harness defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their existing in-process behaviour; swap in a different adapter to change how a step actually runs.
+
+```ts
+import { spawn, step } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createFileStorage } from '@noetic/core';
+
+// Run this spawn out-of-process with durable handle manifests.
+const subprocess = createLocalSubprocessAdapter({
+  storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
+});
+
+const isolated = spawn({
+  id: 'sub-agent',
+  child: step.llm({ id: 'researcher', model: 'gpt-4o' }),
+  subprocess,                   // per-step override
+});
+```
+
+### Resolution Precedence
+
+When the interpreter dispatches a `run` or `spawn`, it resolves the adapter in this order:
+
+1. **Per-call override** — the `overrides.subprocess` argument to `harness.detachedSpawn(step, input, ctx, overrides)`.
+2. **Per-step override** — the `subprocess` field on `StepRun` or `StepSpawn`.
+3. **Harness default** — `harness.subprocess` (defaults to `createInMemorySubprocessAdapter()`).
+
+Other step kinds (`llm`, `tool`, `branch`, `fork`, `provide`, `loop`) always use the harness default.
+
+### Step Registry
+
+When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared registry (`@noetic/core/runtime/step-registry`). `lookupStep(stepId)` is the cross-process contract — the child process imports the same entry module as the parent and resolves the step by id before executing it.
+
+### Durable Handle Manifests
+
+Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId`, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.
 
 ## provide vs spawn
 

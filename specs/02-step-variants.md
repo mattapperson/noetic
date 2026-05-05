@@ -14,6 +14,16 @@ interface StepRunOpts<I, O> {
   id: string;
   execute: (input: I, ctx: Context) => Promise<O>;
   retry?: RetryPolicy;
+  /**
+   * Per-step subprocess adapter override. When set, the interpreter
+   * dispatches this step through the given adapter instead of the harness
+   * default. Resolution order at dispatch time is
+   * `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+   * Use an out-of-process adapter here to run this specific step in its own
+   * OS child; use an in-memory test adapter to intercept the request and
+   * assert on it from a unit test.
+   */
+  subprocess?: SubprocessAdapter;
 }
 
 interface RetryPolicy {
@@ -22,6 +32,8 @@ interface RetryPolicy {
   initialDelay: number;  // ms
 }
 ```
+
+The `subprocess` field is preserved verbatim across step registration and interpreter dispatch. The same adapter is consulted by `harness.run()`, `spawn()`, and `harness.detachedSpawn()` when the dispatched step has it set. See `04-spawn` for routing semantics and `23-durable-execution` for how adapters carry durable handle manifests.
 
 ```typescript
 const fetchData = step.run({

@@ -2,8 +2,6 @@ import type { Tool } from '@noetic/core';
 import { tool } from '@noetic/core/portable';
 import { z } from 'zod';
 import type { CodeAgentPlugin } from '../index.js';
-import type { TaskStoreAdapter } from './store-memory.js';
-import { createMemoryTaskStore } from './store-memory.js';
 import {
   AutopilotState,
   TaskLifecycleStatus,
@@ -11,6 +9,8 @@ import {
   TaskSchema,
   TaskSource,
 } from './schemas.js';
+import type { TaskStoreAdapter } from './store-memory.js';
+import { createMemoryTaskStore } from './store-memory.js';
 
 export interface TaskToolsPluginOptions {
   store?: TaskStoreAdapter;
@@ -84,7 +84,9 @@ function taskTools(store: TaskStoreAdapter, cwd: string): Tool[] {
       output: TaskListOutputSchema,
       async execute() {
         return {
-          tasks: [...(await store.listTasks())],
+          tasks: [
+            ...(await store.listTasks()),
+          ],
         };
       },
     }),

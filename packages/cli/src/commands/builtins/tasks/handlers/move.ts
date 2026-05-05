@@ -1,8 +1,8 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent } from '../fs-store.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { EventKind } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
 import { deriveColumn, KanbanColumn, moveTask } from '../kanban.js';
-import type { Task } from '../schemas.js';
-import { EventKind } from '../schemas.js';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

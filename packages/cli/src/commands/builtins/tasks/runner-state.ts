@@ -8,12 +8,11 @@
  */
 
 import * as path from '@noetic/code-agent/tasks/path-utils';
+import { TaskIdSchema } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { taskDirPaths, tempPath } from '@noetic/code-agent/tasks/store/fs-node';
 import { z } from 'zod';
-
-import { isEnoent } from './_fs-errors.js';
-import type { TaskStoreContext } from './fs-store.js';
-import { taskDirPaths, tempPath } from './paths.js';
-import { TaskIdSchema } from './schemas.js';
+import { isEnoent } from '@noetic/code-agent/tasks/store/fs-node';
 
 //#region Schema
 

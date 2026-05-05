@@ -10,17 +10,17 @@ import {
   findActiveAgentCiRunner,
   togglePauseAgentCiRun,
 } from '../src/commands/builtins/tasks/agent-ci-control.js';
-import type { TaskStoreContext } from '../src/commands/builtins/tasks/fs-store.js';
-import { loadTask, saveTask } from '../src/commands/builtins/tasks/fs-store.js';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { loadRunner, saveRunner } from '../src/commands/builtins/tasks/runner-state.js';
-import type { Task } from '../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './tasks/_helpers.js';
 
 //#region Mock helpers

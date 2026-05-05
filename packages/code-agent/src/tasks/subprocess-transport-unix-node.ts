@@ -126,7 +126,9 @@ export function createUnixSocketTaskRunTransportNode(
       };
     },
     async history(runId) {
-      return [...(frames.get(runId) ?? [])];
+      return [
+        ...(frames.get(runId) ?? []),
+      ];
     },
     async stop() {
       for (const socket of sockets) {

@@ -1,7 +1,7 @@
-import type { TaskStoreContext } from './fs-store.js';
-import { loadTask, saveTask } from './fs-store.js';
-import type { Task } from './schemas.js';
-import { TaskLifecycleStatus, TaskReviewStatus } from './schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { TaskLifecycleStatus, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 
 //#region Kanban column enum
 

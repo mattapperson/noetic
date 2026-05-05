@@ -12,13 +12,12 @@
  * the runner signal so the runner loop exits.
  */
 
-import type { Tool } from '@noetic/core';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type { DetachedSignal, Tool } from '@noetic/core';
 import { z } from 'zod';
-
-import type { TaskStoreContext } from './fs-store.js';
 import type { ImplementerOutcome } from './hierarchy/implementer-flow.js';
 import { commitExitWrites } from './implementer-runner.js';
-import type { RunnerSignal } from './runner-harness.js';
+import { createTerminalTool } from './terminal-tool.js';
 
 //#region Schemas
 
@@ -47,7 +46,7 @@ export interface ImplementerToolDeps {
   readonly leafTaskId: string;
   readonly parentTaskId: string;
   readonly featureId: string;
-  readonly signal: RunnerSignal<ImplementerOutcome>;
+  readonly signal: DetachedSignal<ImplementerOutcome>;
 }
 
 /**
@@ -58,7 +57,11 @@ export interface ImplementerToolDeps {
 export function createImplementationDoneTool(
   deps: ImplementerToolDeps,
 ): Tool<typeof ImplementationDoneInputSchema, typeof ImplementationDoneOutputSchema> {
-  return {
+  return createTerminalTool<
+    typeof ImplementationDoneInputSchema,
+    typeof ImplementationDoneOutputSchema,
+    ImplementerOutcome
+  >({
     name: 'signal_implementation_done',
     description:
       'Signal that the feature is implemented and the work should be handed off ' +
@@ -66,7 +69,8 @@ export function createImplementationDoneTool(
       'why. Call this exactly once when the acceptance criteria are met.',
     input: ImplementationDoneInputSchema,
     output: ImplementationDoneOutputSchema,
-    execute: async (args) => {
+    signal: deps.signal,
+    commit: async (args) => {
       const outcome: ImplementerOutcome = {
         status: 'completed',
         summary: args.summary,
@@ -78,12 +82,14 @@ export function createImplementationDoneTool(
         featureId: deps.featureId,
         outcome,
       });
-      deps.signal.resolve(outcome);
       return {
-        status: 'completed',
+        outcome,
+        output: {
+          status: 'completed',
+        },
       };
     },
-  };
+  });
 }
 
 /**
@@ -94,7 +100,11 @@ export function createImplementationDoneTool(
 export function createImplementationBlockedTool(
   deps: ImplementerToolDeps,
 ): Tool<typeof ImplementationBlockedInputSchema, typeof ImplementationBlockedOutputSchema> {
-  return {
+  return createTerminalTool<
+    typeof ImplementationBlockedInputSchema,
+    typeof ImplementationBlockedOutputSchema,
+    ImplementerOutcome
+  >({
     name: 'signal_implementation_blocked',
     description:
       'Signal that the feature cannot be implemented in this attempt. Provide ' +
@@ -102,7 +112,8 @@ export function createImplementationBlockedTool(
       'unresolvable test failure, etc.). The parent feature is marked Blocked.',
     input: ImplementationBlockedInputSchema,
     output: ImplementationBlockedOutputSchema,
-    execute: async (args) => {
+    signal: deps.signal,
+    commit: async (args) => {
       const outcome: ImplementerOutcome = {
         status: 'blocked',
         summary: args.reason,
@@ -115,12 +126,14 @@ export function createImplementationBlockedTool(
         featureId: deps.featureId,
         outcome,
       });
-      deps.signal.resolve(outcome);
       return {
-        status: 'blocked',
+        outcome,
+        output: {
+          status: 'blocked',
+        },
       };
     },
-  };
+  });
 }
 
 //#endregion

@@ -20,6 +20,38 @@ describe('createInMemorySubprocessAdapter', () => {
     expect(stopped.kind).toBe('stopped');
     expect((await adapter.get(handle.id))?.status).toBe('stopped');
   });
+
+  it('metadataInjector stamps synchronous fields on the returned handle', async () => {
+    const adapter = createInMemorySubprocessAdapter({
+      metadataInjector: (request) =>
+        request.kind === 'step'
+          ? {
+              stepInjected: true,
+            }
+          : {
+              pid: 4242,
+              pidStarttime: 'Mon Jan  1 00:00:00 2026',
+            },
+      run: async () => {
+        // Never resolves — keeps the handle running so post-spawn assertions
+        // observe pid without racing auto-completion.
+        await new Promise<void>(() => {});
+      },
+    });
+
+    const handle = await adapter.spawn({
+      kind: 'process',
+      command: 'bun',
+      metadata: {
+        taskRole: 'planner',
+      },
+    });
+
+    expect(handle.metadata?.pid).toBe(4242);
+    expect(handle.metadata?.pidStarttime).toBe('Mon Jan  1 00:00:00 2026');
+    expect(handle.metadata?.taskRole).toBe('planner');
+    expect(handle.status).toBe('running');
+  });
 });
 
 describe('AgentHarness subprocess adapter', () => {

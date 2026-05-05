@@ -21,13 +21,12 @@
 import type { ChildProcess, SpawnOptions, StdioOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { EventKind, LogEntryKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, appendLog, loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createLocalFsAdapter } from '@noetic/core';
-
-import type { TaskStoreContext } from './fs-store.js';
-import { appendEvent, appendLog, loadTask, saveTask } from './fs-store.js';
 import { clearRunner, loadRunner } from './runner-state.js';
-import type { Task } from './schemas.js';
-import { EventKind, LogEntryKind, TaskReviewStatus } from './schemas.js';
 
 //#region Types
 

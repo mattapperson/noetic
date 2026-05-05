@@ -1,4 +1,5 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
+import { getDefaultRegistrar } from '../types/step-registrar';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { Step, StepProvide } from '../types/step';
 
@@ -34,8 +35,10 @@ export function provide<TMemory = ContextMemory, I = unknown, O = unknown>(opts:
       hint: 'Provide a child step to execute with the provided memory layers.',
     });
   }
-  return {
+  const built: StepProvide<TMemory, I, O> = {
     kind: 'provide',
     ...opts,
   };
+  getDefaultRegistrar().register(built);
+  return built;
 }

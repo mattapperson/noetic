@@ -15,8 +15,8 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 
-import { tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
-import { taskDirPaths, taskRootPaths } from '../../../src/commands/builtins/tasks/paths.js';
+import { tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { taskDirPaths, taskRootPaths } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   buildManualTask,
   submitNewTask,

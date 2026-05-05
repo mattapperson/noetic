@@ -41,10 +41,7 @@ function buildActiveWorktreePathSet(worktrees: ProjectWorktree[]): Set<string> {
   return set;
 }
 
-function shouldMarkRemoved(args: {
-  task: Task;
-  activePaths: Set<string>;
-}): boolean {
+function shouldMarkRemoved(args: { task: Task; activePaths: Set<string> }): boolean {
   const { task, activePaths } = args;
   if (task.source !== TaskSource.Worktree) {
     return false;

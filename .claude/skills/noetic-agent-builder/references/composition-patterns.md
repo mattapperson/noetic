@@ -504,23 +504,190 @@ Properties of the projection:
 - **Mid-round flow uncapped.** Within a single `callModel` invocation's tool loop, that round's own `function_call` / `function_call_output` items keep accumulating in the wire payload. The cap fires at turn boundaries, not mid-call.
 - **Opt-in for the CLI.** When `AgentConfig.history.maxItems` is unset, the layer is not installed and history is uncapped. Set the value via `noetic.config.ts` or the `/config` editor's Memory tab to enable capping.
 
-## Subprocess-spawned task agent (planner / implementer / agent-ci)
+## Run an agent out-of-process
 
-Spawn a long-running agent as a detached `bun run` subprocess that owns its own `AgentHarness`. The pattern is used by all three task-system runners (`planner-runner.ts`, `implementer-runner.ts`, `agent-ci-runner.ts`):
+Swap the adapter to run a specific spawn in its own OS child process. The step composition is unchanged; only the dispatch path differs.
 
-**When to use**: when the agent needs isolation from the parent process (its own LLM client, its own working directory, its own crash boundary) AND a known long lifetime, AND you want pause/cancel via OS signals.
+```typescript
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/core';
+// Note: the Node-specific adapter factory lives under the `node` subpath:
+import { createLocalSubprocessAdapter as createLocalSubprocessAdapterNode }
+  from '@noetic/core/adapters/node';
 
-**Shape**:
+// One adapter per process, reused across spawns. Persists handle manifests
+// through file storage so a host crash can later reattach.
+const subprocess = createLocalSubprocessAdapterNode({
+  storage: createFileStorage({
+    root: `${process.env.HOME}/.noetic/subprocess`,
+  }),
+});
 
-1. **Launcher** writes a `_<runner>.json` sidecar with `{taskId, sessionId, pid, pidStarttime, ...}` BEFORE the spawn lands the process state, in order **spawn → sidecar → state-mutation → event** so a crash never produces a "task points at running pid" without the sidecar being recoverable.
-2. **Runner script** reads its identity from `NOETIC_*` env vars, constructs an `AgentHarness` (lazy: skill catalog, plugins, tools, LLM client all per-runner), drives a `react()` or `interview()` step, and on exit commits in **audit → state → event** order:
-   - `appendLog` a `kind='system'` line (audit always survives even if state mutation fails).
-   - Atomically rewrite the canonical state file (`task.json` or feature record).
-   - Append the matching `_events.jsonl` row.
-   - Best-effort `clearSidecar()`.
-3. **`Signaller` from `agent-ci-control.ts`** does pid-liveness checks (`isAlive(pid)` + optional `startTime(pid)` snapshot) so launchers and delete-guards never misfire on a recycled pid. Sidecars carry `pidStarttime` for that round-trip.
-4. **`findLiveSidecars(ctx, taskId)`** in `handlers/delete.ts` is a single source of truth for "what subprocess is attached to this task" — extends with new `SidecarKind` values when adding a fourth runner.
+// Option A — default for every spawn on this harness:
+const harness = new AgentHarness({
+  name: 'out-of-process',
+  initialStep: agent,
+  params: {},
+  subprocess,
+});
 
-**Why subprocess instead of in-process**: the daemon harness is intentionally lean (no LLM client, no plugins). LLM-driven work runs in a child harness whose memory + tools + cost tracking are scoped to one feature / one task. The parent observes outcomes via the durable event log + the sidecar's pid lifecycle, not via in-memory channels (the event-bridge `every` step in `daemon-flow.ts` tails `_events.jsonl` and re-publishes onto `externalTaskEventsChan` for in-process subscribers).
+// Option B — per-step override (only this spawn goes out-of-process):
+const researchStep = spawn({
+  id: 'research',
+  child: researchAgent,
+  subprocess,
+});
+
+// Option C — per-call override on detachedSpawn:
+const handle = harness.detachedSpawn(agent, input, ctx, {
+  subprocess,
+  cwdInit: '/tmp/workspace',
+});
+```
+
+**When to use**: the child needs a clean crash boundary from the parent (its own pid, its own memory pressure, its own LLM client), or will run long enough that a parent restart during its lifetime is plausible.
+
+**What the adapter does**: spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the parent's entry module, passes the serialised input via stdin, and captures `handle.metadata.result` / `handle.metadata.error` from stdout. The child re-imports the same step registry and looks up the step by id — which is why step builders auto-register at construction.
+
+## Survive a host crash
+
+When the host that launched a long-running child can crash, configure durable storage so the child survives independently and the parent context can be rebuilt on restart.
+
+```typescript
+import {
+  AgentHarness,
+  createFileStorage,
+  createCheckpointStore,
+} from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { reattachLiveChildren } from '@noetic/cli';
+
+// Three roots: subprocess manifests, checkpoint snapshots, per-project task state.
+const subprocessStorage = createFileStorage({
+  root: `${process.env.HOME}/.noetic/subprocess`,
+});
+const checkpointStorage = createFileStorage({
+  root: `${process.env.HOME}/.noetic/checkpoints`,
+});
+
+const harness = new AgentHarness({
+  name: 'crash-proof',
+  initialStep: agent,
+  params: {},
+  subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
+  checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
+});
+
+// Anything the harness spawns + every turn's state is durably recorded.
+const handle = harness.detachedSpawn(backgroundWorkerStep, input, parentCtx);
+
+// ... process crashes ...
+
+// On second boot, construct the same harness against the same roots and:
+const { handles, contexts } = await reattachLiveChildren(harness);
+for (const [handleId, restoredCtx] of contexts) {
+  // restoredCtx has the pre-crash item log, layer state, and cwd.
+  // Re-subscribe to the handle's IPC stream, replay pending ask-user
+  // modals, keep going.
+}
+```
+
+**Key points**:
+
+- `reattachLiveChildren` is a thin helper — under the hood it calls `harness.subprocess.listLive()` and then `harness.restore(executionId)` per live handle. Third-party hosts can call those directly without importing `@noetic/cli`.
+- Subprocess manifests and checkpoint snapshots live at distinct roots (`~/.noetic/subprocess` vs `~/.noetic/checkpoints`). Override both via `NOETIC_HOME=/some/dir` if needed.
+- `checkpoint()` is a no-op when `checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
+- The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
+
+## Durable IPC server (tasks-system pattern)
+
+Long-lived task runners (planner, implementer, agent-ci) expose their harness over a unix socket so the TUI can chat with them live. The IPC server composes a `DurableOutboundQueue` so chat survives a parent-process crash without losing or duplicating frames.
+
+```typescript
+import {
+  AgentIpcServer,
+  createDurableOutboundQueue,
+} from '@noetic/core/adapters/node';
+import { createFileStorage } from '@noetic/core';
+
+const storage = createFileStorage({
+  root: `${process.env.HOME}/.noetic/subprocess`,
+});
+
+// The server composes the queue automatically when you hand it a storage.
+// Outbound frames are wrapped in `{type: 'durable', seq, frame}` envelopes.
+// On client reconnect, the server handles `durableResume { ackedThrough }` by
+// replaying queue.frameRange(ackedThrough + 1). On `durableAck { throughSeq }`
+// it calls queue.ackUpTo(throughSeq) to compact.
+const server = new AgentIpcServer({
+  socketPath,
+  chatHistoryStore,
+  taskLogger,
+  askUserService,
+  storage,  // <-- opt in to durable outbound
+});
+
+await server.start();
+```
+
+**When to compose `DurableOutboundQueue` manually** (without `AgentIpcServer`): any framed byte stream — WebSocket, TCP, plain JSONL file — can use the same pattern.
+
+```typescript
+import { createDurableOutboundQueue } from '@noetic/core/adapters/node';
+
+const queue = await createDurableOutboundQueue({ storage, socketPath });
+
+// Producer (server):
+const encoded = JSON.stringify(originalFrame);
+const { seq } = await queue.append(encoded);
+socket.write(encodeFrame({ type: 'durable', seq, frame: originalFrame }));
+
+// On client durableAck { throughSeq }:
+await queue.ackUpTo(ack.throughSeq);
+
+// On client durableResume { ackedThrough } (after server hello):
+for (const entry of await queue.frameRange(resume.ackedThrough + 1)) {
+  socket.write(encodeFrame({
+    type: 'durable',
+    seq: entry.seq,
+    frame: JSON.parse(entry.frame),
+  }));
+}
+```
+
+`PROTOCOL_VERSION = 2` in `@noetic/core/adapters/node/agent-ipc-protocol.ts`. The v2 frames (`durable`, `durableResume`, `durableAck`) are backwards compatible — peers that don't opt in neither emit nor receive them.
+
+## Subprocess-spawned task agent (planner / implementer)
+
+The tasks system (`@noetic/code-agent/tasks`) uses a thin wrapper over the generic "run an agent out-of-process" + "survive a host crash" patterns above. Each runner is a `harness.detachedSpawn` call against the shared tasks `SubprocessAdapter`:
+
+```typescript
+import { findLiveTaskHandle } from '@noetic/code-agent/tasks';
+
+// Launcher: refuse to start if a live runner is already attached.
+const existing = await findLiveTaskHandle({
+  adapter: subprocess,
+  taskId,
+  taskRole: 'planner',
+});
+if (existing !== null) {
+  throw new Error(`planner already attached: ${existing.id}`);
+}
+
+// Spawn. Metadata tags are how delete-guards, pause/cancel, and live-chat
+// resolve the right handle later — no sidecar files needed.
+const handle = harness.detachedSpawn(plannerStep, input, ctx, {
+  subprocess,
+  cwdInit: taskDir,
+  // metadata goes on the StepSubprocessRequest internally; the adapter
+  // merges it onto handle.metadata.
+});
+```
+
+Key points:
+
+- The adapter's `listLive()` + `metadata.taskRole` / `taskId` / `featureId` tags are the single source of truth for "what is still running for this task". `findLiveTaskHandle({adapter, taskId, taskRole})` and `listLiveTaskHandles(adapter, taskId)` are the centralised queries.
+- Delete-guards, pause/cancel, kanban lookups, and live-chat routing all go through those queries — no `_planner.json` / `_implementer.json` sidecars to maintain.
+- The runner bootstrap (the child runtime spawned by `createLocalSubprocessAdapter`) constructs its own `AgentHarness` with task-scoped tools and drives a `react()` or `interview()` step. On success it commits in **audit → state → event** order; the adapter clears its manifest on exit automatically.
+- Durability is inherited from the shared adapter's file storage at `~/.noetic/subprocess/` — no hand-rolled `pidStarttime` sidecars.
 
 **Reusable helpers**: `verifyPidIdentity` (`agent-ci-control.ts`), `provisionWorktree` (`worktree-provision.ts`), `createShellValidator` (`hierarchy/daemon-validator.ts`), `createLlmInterviewResponder` (`llm-interview-responder.ts`).

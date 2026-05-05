@@ -15,7 +15,10 @@ export function createNodeTaskCommandAdapter(
   return {
     async run(request) {
       const result = await options.shell.exec(
-        [request.command, ...(request.args ?? []).map(shellQuote)].join(' '),
+        [
+          request.command,
+          ...(request.args ?? []).map(shellQuote),
+        ].join(' '),
         {
           cwd: request.cwd,
           timeout: request.timeoutMs === undefined ? undefined : request.timeoutMs / 1000,

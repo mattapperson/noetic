@@ -2,19 +2,19 @@ import { describe, expect, it } from 'bun:test';
 
 import { AgentHarness } from '@noetic/core';
 
-import { loadTask, saveTask } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   buildReconcileEvery,
   buildReconcileTickStep,
 } from '../../../src/commands/builtins/tasks/hierarchy/reconcile-flow.js';
-import type { Task } from '../../../src/commands/builtins/tasks/schemas.js';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 const NOW = '2026-04-30T00:00:00.000Z';

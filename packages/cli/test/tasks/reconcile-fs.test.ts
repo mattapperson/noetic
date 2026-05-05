@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 
-import { loadTask, saveTask } from '../../src/commands/builtins/tasks/fs-store.js';
-import type { ProjectWorktree } from '../../src/commands/builtins/tasks/git.js';
-import { reconcileTasksFs } from '../../src/commands/builtins/tasks/reconcile-fs.js';
-import type { Task } from '../../src/commands/builtins/tasks/schemas.js';
+import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
+import { reconcileTasksFs } from '@noetic/code-agent/tasks';
+import type { Task } from '@noetic/code-agent/tasks/schema';
 import {
   AutopilotState,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '../../src/commands/builtins/tasks/schemas.js';
+} from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from './_helpers.js';
 
 //#region Fixtures

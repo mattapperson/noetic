@@ -21,14 +21,13 @@
  * blocks.
  */
 
+import { externalTaskEventsChan } from '@noetic/code-agent/tasks/ipc-node';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step } from '@noetic/core';
 import { every, fork, spawn, step, workingMemory } from '@noetic/core';
 import { z } from 'zod';
-
 import { createSteeringFileLayer } from '../../../../memory/steering-file-layer.js';
-import { externalTaskEventsChan } from '../channels.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { tailEvents } from '../fs-store.js';
 import type { AutopilotFlowDeps } from './autopilot-flow.js';
 import { buildAutopilotEvery } from './autopilot-flow.js';
 import type { HealthFlowDeps } from './health-flow.js';

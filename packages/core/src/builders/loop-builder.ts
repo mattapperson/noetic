@@ -1,4 +1,5 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
+import { getDefaultRegistrar } from '../types/step-registrar';
 import type { ContextMemory } from '../types/memory';
 import type { StepLoop } from '../types/step';
 
@@ -50,8 +51,10 @@ export function loop<TMemory = ContextMemory, I = unknown, O = unknown>(
       hint: 'Provide an until predicate, e.g. until.maxSteps(10).',
     });
   }
-  return {
+  const built: StepLoop<TMemory, I, O> = {
     kind: 'loop',
     ...opts,
   };
+  getDefaultRegistrar().register(built);
+  return built;
 }

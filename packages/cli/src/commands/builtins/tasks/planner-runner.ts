@@ -1,31 +1,51 @@
 /**
  * Wrapper script that owns the autonomous planner subprocess for one
- * manual task. Spawned by `planner-launcher.ts` via `bun run`. Reads
+ * manual task. Spawned by the planner launcher via `bun run`. Reads
  * `NOETIC_TASK_DIR` (the leaf task) and `NOETIC_TASK_CWD` (the project
  * root) from env. Constructs a chat-shaped `AgentHarness` (see
  * `runner-harness.ts`) wired with the planner's role-specific terminal
  * tools and drives it through one or more turns until the agent calls
- * `submit_hierarchy` or `abandon_planning`. The IPC server (started in
- * a follow-up commit) keeps the runner addressable while the agent
- * works, so the TUI can chat with it live.
+ * `submit_hierarchy` or `abandon_planning`. The IPC server keeps the
+ * runner addressable while the agent works, so the TUI can chat with
+ * it live.
  */
 
+import {
+  appendChatItem,
+  createIpcAskUserService,
+  createRunnerHarness,
+  readChatHistory,
+} from '@noetic/code-agent/tasks';
 import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
-import { createLocalFsAdapter } from '@noetic/core/adapters/node';
+import { EventKind, LogEntryKind, TaskPauseReason } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  appendLog,
+  loadTask,
+  runnerSocketPath,
+  saveTask,
+  taskDirPaths,
+} from '@noetic/code-agent/tasks/store/fs-node';
+import type { Item } from '@noetic/core';
+import {
+  createDetachedSignal,
+  createNudgeMessage,
+  createStallNudgeHook,
+  runnableLoop,
+} from '@noetic/core';
+import {
+  AgentIpcServer,
+  createLocalFsAdapter,
+  createLocalShellAdapter,
+  unlinkSocketSync,
+} from '@noetic/core/adapters/node';
 import { createSteeringFileLayer } from '../../../memory/steering-file-layer.js';
 import { createCodingTools } from '../../../tools/index.js';
-import { AgentIpcServer, unlinkSocketSync } from './agent-ipc-server.js';
 import { DEFAULT_MODEL } from './defaults.js';
-import type { TaskStoreContext } from './fs-store.js';
-import { appendLog, loadTask } from './fs-store.js';
-import { createIpcAskUserService } from './ipc-ask-user-service.js';
 import { createPlannerAttemptLayer } from './memory/planner-attempt-layer.js';
-import { taskDirPaths } from './paths.js';
-import { clearPlanner, loadPlanner, savePlanner } from './planner-state.js';
 import type { PlannerOutcome } from './planner-tools.js';
 import { createAbandonPlanningTool, createSubmitHierarchyTool } from './planner-tools.js';
-import { createRunnerHarness, createRunnerSignal, runRunnerLoop } from './runner-harness.js';
-import { LogEntryKind } from './schemas.js';
 
 //#region Types
 
@@ -73,9 +93,6 @@ async function loadDescription(args: {
   readonly ctx: TaskStoreContext;
   readonly taskId: string;
 }): Promise<string> {
-  // Description lives at `<taskDir>/description.md`. Missing file is
-  // common for tasks created without `--description` — return empty
-  // string rather than throwing.
   const { description } = taskDirPaths(args.ctx, args.taskId);
   try {
     return await args.ctx.fs.readFileText(description);
@@ -123,6 +140,29 @@ function buildInitialPrompt(args: {
   return lines.join('\n');
 }
 
+async function escalateStalledPlanner(args: {
+  readonly ctx: TaskStoreContext;
+  readonly taskId: string;
+}): Promise<void> {
+  const ts = nowIso();
+  const task = await loadTask(args.ctx, args.taskId);
+  await saveTask(args.ctx, {
+    ...task,
+    paused: true,
+    pauseReason: TaskPauseReason.AgentStalled,
+    updatedAt: ts,
+  });
+  await appendEvent(args.ctx, {
+    kind: EventKind.TaskUpdated,
+    taskId: args.taskId,
+    payload: {
+      phase: 'agent_stalled',
+      role: 'planner',
+    },
+    ts,
+  });
+}
+
 //#endregion
 
 //#region Public API
@@ -135,29 +175,20 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
   const cwd = opts.cwd ?? readEnv(ENV_CWD) ?? process.cwd();
   const taskId = taskIdFromTaskDir(taskDir);
   const tasksRoot = tasksRootFromTaskDir(taskDir);
-  // `NOETIC_TASK_CWD` is the launcher-provided project root; if the
-  // caller supplied a full `ctx`, honour it, otherwise stitch one from
-  // the env + a real fs adapter. `projectRoot` is the project the task
-  // was created from (used as the default child-process cwd, nothing
-  // else at this layer); `tasksRoot` anchors every `taskDirPaths()`
-  // lookup to the user-global task state.
   const ctx: TaskStoreContext = opts.ctx ?? {
     fs: createLocalFsAdapter(),
     projectRoot: cwd,
     tasksRoot,
   };
 
-  const sidecar = await loadPlanner(ctx, taskId);
-  if (sidecar !== null) {
-    await appendLog(ctx, {
-      taskId,
-      entry: {
-        kind: LogEntryKind.System,
-        ts: nowIso(),
-        message: `planner started (pid=${sidecar.pid})`,
-      },
-    });
-  }
+  await appendLog(ctx, {
+    taskId,
+    entry: {
+      kind: LogEntryKind.System,
+      ts: nowIso(),
+      message: `planner started (pid=${process.pid})`,
+    },
+  });
 
   const task = await loadTask(ctx, taskId);
   const description = await loadDescription({
@@ -168,7 +199,7 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
   const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
   const model = opts.model ?? process.env.NOETIC_MODEL ?? DEFAULT_MODEL;
 
-  const signal = createRunnerSignal<PlannerOutcome>();
+  const signal = createDetachedSignal<PlannerOutcome>();
 
   const submitTool = createSubmitHierarchyTool({
     storeCtx: ctx,
@@ -181,12 +212,10 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     signal,
   });
 
-  // Construct the IPC-backed ask-user service before tools so the
-  // `AskUserQuestion` tool gets registered. The broadcaster is wired
-  // up after the IPC server is constructed (server holds the client
-  // set the broadcaster fans out to). Calls before that wiring become
-  // no-ops, which is safe because the agent can't ask anything before
-  // its first turn anyway.
+  // Ask-user service with broadcaster wired after the IPC server is
+  // constructed (server holds the client set the broadcaster fans out
+  // to). Calls before that wiring become no-ops, which is safe because
+  // the agent can't ask anything before its first turn anyway.
   let serverRef: AgentIpcServer | null = null;
   const askUserService = createIpcAskUserService({
     broadcastRequest: (request) => {
@@ -225,6 +254,7 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
       steeringLayer,
     ],
     fs: ctx.fs,
+    shell: createLocalShellAdapter(),
   });
 
   const initialPromptText = buildInitialPrompt({
@@ -232,8 +262,7 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     description,
   });
   // The IPC server's stream pump appends the framing item to chat.jsonl
-  // when the harness emits it, so we don't write to disk here. The id
-  // is stable per-task so re-spawns recognise it as the same framing.
+  // when the harness emits it, so we don't write to disk here.
   const initialMessage = {
     id: `planner-init-${taskId}`,
     type: 'message' as const,
@@ -247,41 +276,42 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     ],
   };
 
-  const ipcServer = new AgentIpcServer({
-    harness,
-    storeCtx: ctx,
+  const socketPath = runnerSocketPath(ctx, {
     taskId,
     role: 'planner',
-    // Planner is a singleton per task — there is no need to disambiguate
-    // concurrent runners, so the runnerId matches the role and the
-    // socket filename collapses to `planner.sock` under the per-task
-    // sockets/ dir (saving ~12 bytes vs `planner-<taskId>.sock`, which
-    // matters on macOS's 104-byte sun_path limit).
+  });
+
+  const ipcServer = new AgentIpcServer({
+    harness,
+    chatHistoryStore: {
+      readChatHistory: (id) => readChatHistory(ctx, id),
+      appendChatItem: (id, item) => appendChatItem(ctx, id, item),
+    },
+    logger: async (id, entry) => {
+      const kind = matchLogKind(entry.kind);
+      await appendLog(ctx, {
+        taskId: id,
+        entry: {
+          kind,
+          ts: entry.ts,
+          message: entry.message,
+          meta: entry.meta,
+        },
+      });
+    },
+    taskId,
+    role: 'planner',
     runnerId: 'planner',
     threadId,
+    socketPath,
     askUserService,
+    fs: ctx.fs,
   });
   serverRef = ipcServer;
   await ipcServer.listen();
-  // Re-read the sidecar before adding `socketPath` so we don't clobber
-  // any control-surface mutation (pause/cancel/delete-guard) that may
-  // have updated it between the runner's startup `loadPlanner` above
-  // and now. If the sidecar was cleared while listen() was binding,
-  // skip the write entirely — the runner is already orphaned.
-  const currentSidecar = await loadPlanner(ctx, taskId);
-  if (currentSidecar !== null) {
-    await savePlanner(ctx, {
-      ...currentSidecar,
-      socketPath: ipcServer.getSocketPath(),
-    });
-  }
 
   const installSignalHandlers = (): (() => void) => {
     const onSignal = (signalName: string): void => {
-      // Reject the runner signal so `runRunnerLoop`'s `await signal.done`
-      // unwinds and the surrounding finally block can close the IPC
-      // server cleanly. Without this rejection the await would block
-      // forever and the OS would kill the process before unlink runs.
       signal.reject(new Error(`runner aborted by ${signalName}`));
       void ipcServer.close(`process-signal:${signalName}`);
     };
@@ -298,31 +328,40 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
 
   // Belt-and-suspenders: if the process exits via an uncaught throw the
   // try/finally below doesn't run, so this 'exit' handler unlinks the
-  // socket synchronously as a last resort. We use the top-level
-  // `unlinkSocketSync` helper rather than an inline require so the
-  // import surface stays in one place.
+  // socket synchronously as a last resort.
   const onExit = (): void => {
     unlinkSocketSync(ipcServer.getSocketPath());
   };
   process.on('exit', onExit);
 
   try {
-    const outcome = await runRunnerLoop({
+    const priorItems: ReadonlyArray<Item> = await readChatHistory(ctx, taskId);
+    const nudge = createStallNudgeHook({
       harness,
       threadId,
+      signal,
+      nudgeMessage: createNudgeMessage({
+        id: `runner-nudge-${taskId}-${Date.now()}`,
+      }),
+      hasPendingExternal: () => askUserService.peek() !== null,
+      onStall: () =>
+        escalateStalledPlanner({
+          ctx,
+          taskId,
+        }),
+      buildStalledOutcome: (): PlannerOutcome => ({
+        status: 'failed',
+        reason:
+          'planner stalled — finished its turn without calling submit_hierarchy or AskUserQuestion',
+      }),
+    });
+    const outcome = await runnableLoop<PlannerOutcome>({
+      harness,
+      threadId,
+      priorItems,
       initialMessage,
       signal,
-      storeCtx: ctx,
-      taskId,
-      nudge: {
-        role: 'planner',
-        askUserService,
-        buildStalledOutcome: (): PlannerOutcome => ({
-          status: 'failed',
-          reason:
-            'planner stalled — finished its turn without calling submit_hierarchy or AskUserQuestion',
-        }),
-      },
+      afterFirstTurn: nudge,
     });
     return {
       taskId,
@@ -332,18 +371,25 @@ export async function runPlanner(opts: RunPlannerOptions = {}): Promise<RunPlann
     process.off('exit', onExit);
     removeSignalHandlers();
     await ipcServer.close('runner-exit');
-    // Always clear the sidecar on exit — without this, a stalled /
-    // killed / crashed runner leaves `_planner.json` pointing at the
-    // socket path `ipcServer.close()` just unlinked. The TUI would
-    // then hand that dead path to its IPC client and surface
-    // "disconnected: connect ENOENT <path>". The happy paths
-    // (`submit_hierarchy` / `abandon_planning`) clear the sidecar too,
-    // via `planner-flow.ts`, so this call is redundant but idempotent
-    // (`rm --force` on a missing file is a no-op) on those paths.
-    await clearPlanner(ctx, taskId).catch(() => {
-      /* swallow — sidecar will be evicted by the next launcher's pid check */
-    });
   }
+}
+
+//#endregion
+
+//#region Helpers
+
+type AllowedLogKind = (typeof LogEntryKind)[keyof typeof LogEntryKind];
+
+function matchLogKind(kind: string): AllowedLogKind {
+  if (
+    kind === LogEntryKind.Log ||
+    kind === LogEntryKind.Comment ||
+    kind === LogEntryKind.Steer ||
+    kind === LogEntryKind.System
+  ) {
+    return kind;
+  }
+  return LogEntryKind.System;
 }
 
 //#endregion

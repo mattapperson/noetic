@@ -1,7 +1,7 @@
-import type { TaskStoreContext } from '../fs-store.js';
-import { listTasks } from '../fs-store.js';
+import type { Task, TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
 import { deriveColumn, KanbanColumn } from '../kanban.js';
-import type { Task, TaskSource } from '../schemas.js';
 
 //#region Types
 

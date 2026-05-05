@@ -7,13 +7,16 @@
  * audit→state→event commit sequence to the helpers exported here.
  */
 
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, appendLog, loadTask, saveTask } from '../fs-store.js';
-import { clearPlanner } from '../planner-state.js';
-import type { Task } from '../schemas.js';
-import { AutopilotState, EventKind, HierarchyStatus, LogEntryKind } from '../schemas.js';
+import type { Task, TaskHierarchyInput } from '@noetic/code-agent/tasks/schema';
+import {
+  AutopilotState,
+  EventKind,
+  HierarchyStatus,
+  LogEntryKind,
+} from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, appendLog, loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { persistTaskHierarchy } from './persist.js';
-import type { TaskHierarchyInput } from './schemas.js';
 
 //#region Helpers
 
@@ -66,9 +69,8 @@ export async function commitSuccess(args: CommitSuccessArgs): Promise<void> {
     },
     ts,
   });
-  await clearPlanner(args.storeCtx, args.taskId).catch(() => {
-    /* swallow — sidecar will be evicted by the next launcher's pid check */
-  });
+  // Handle lifecycle is tracked by the subprocess adapter's manifest,
+  // which the runner process cleans up on exit. No sidecar to clear.
 }
 
 export interface CommitFailureArgs {
@@ -112,9 +114,8 @@ export async function commitFailure(args: CommitFailureArgs): Promise<void> {
     },
     ts,
   });
-  await clearPlanner(args.storeCtx, args.taskId).catch(() => {
-    /* swallow */
-  });
+  // Handle lifecycle is tracked by the subprocess adapter's manifest;
+  // the runner clears its manifest entry on process exit.
 }
 
 //#endregion

@@ -22,3 +22,38 @@ export {
   type ProcessSignaller,
   type SubprocessSignal,
 } from './local-subprocess-adapter';
+export {
+  AgentIpcClient,
+  type AgentIpcClientOpts,
+  type AskUserStreamEvent,
+  type HelloInfo,
+} from './node/agent-ipc-client';
+export {
+  type AskUserPendingFrame,
+  AskUserPendingFrameSchema,
+  type ClientFrame,
+  ClientFrameSchema,
+  encodeFrame,
+  PROTOCOL_VERSION,
+  parseClientFrame,
+  parseServerFrame,
+  type ServerFrame,
+  ServerFrameSchema,
+} from './node/agent-ipc-protocol';
+export {
+  type AgentHarnessContract,
+  AgentIpcServer,
+  type AgentIpcServerOpts,
+  type ChatHistoryStore,
+  type IpcAskUserService,
+  type IpcHarness,
+  type TaskLogEntry,
+  type TaskLogger,
+  unlinkSocketSync,
+} from './node/agent-ipc-server';
+export {
+  type CreateDurableOutboundQueueOptions,
+  createDurableOutboundQueue,
+  type DurableFrameEntry,
+  type DurableOutboundQueue,
+} from './node/durable-outbound-queue';

@@ -2,10 +2,10 @@ import { describe, expect, it } from 'bun:test';
 
 import type { ShellAdapter, ShellExecResult } from '@noetic/core';
 
-import { loadTask, saveTask, tailEvents } from '../../../src/commands/builtins/tasks/fs-store.js';
+import { loadTask, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { mergeTaskHandler } from '../../../src/commands/builtins/tasks/handlers/merge.js';
-import { EventKind, TaskLifecycleStatus } from '../../../src/commands/builtins/tasks/schemas.js';
+import { EventKind, TaskLifecycleStatus } from '@noetic/code-agent/tasks/schema';
 import { makeStoreContext } from '../_helpers.js';
 
 interface RecordedExec {

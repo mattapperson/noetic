@@ -3,45 +3,36 @@
  * child for a triaged feature.
  *
  *   1. Reject if a live implementer is already attached to the leaf
- *      task (verified pid + matching `pidStarttime`).
+ *      task (detected via the adapter's handle manifest — the
+ *      in-memory `listLive()` + local-adapter pidStarttime drift check
+ *      replace the old sidecar-based detection).
  *   2. Provision (or reuse) a git worktree for the feature's branch via
  *      {@link provisionWorktree}.
  *   3. Patch the leaf task's `worktreePath` / `branch` so reconcile
  *      and the kanban can locate the checkout.
  *   4. Spawn the wrapper with `NOETIC_*` env so the child can locate
  *      its task, parent, feature and worktree without sharing in-memory
- *      state.
- *   5. Persist `_implementer.json`.
- *   6. Append a `feature:loopStateChanged{phase: 'spawn'}` event on the
+ *      state. The adapter persists the handle manifest at `spawn()`
+ *      time so peer callers + restarts can find the live child.
+ *   5. Append a `feature:loopStateChanged{phase: 'spawn'}` event on the
  *      parent task (where the feature lives) so daemon subscribers
  *      observe the spawn before the runner starts mutating the graph.
  *
- * On any failure after the spawn the child is torn down and the
- * sidecar removed so we never leave an orphan tracked by a half-written
- * record.
+ * On any failure after the spawn the child is torn down so we never
+ * leave an orphan tracked by a half-written record.
  */
 
-import type {
-  ProcessSignaller,
-  ShellAdapter,
-  SubprocessAdapter,
-  SubprocessHandle,
-} from '@noetic/core';
-
-import {
-  requireNodeProcessSignaller,
-  requireNodeSubprocessAdapter,
-} from './subprocess-required.js';
+import type { ShellAdapter, SubprocessAdapter, SubprocessHandle } from '@noetic/core';
 
 import { fileUrlToPath } from './file-url-to-path.js';
 import type { TaskStoreContext } from './fs-store.js';
 import { appendEvent, loadTask, saveTask } from './fs-store.js';
 import { FeatureLoopState } from './hierarchy/schemas.js';
-import { clearImplementer, loadImplementer, saveImplementer } from './implementer-state.js';
 import { taskDirPaths } from './paths.js';
 import { randomHex } from './random.js';
 import type { Task } from './schemas.js';
 import { EventKind } from './schemas.js';
+import { findLiveTaskHandle, TaskRole } from './task-runtime-index.js';
 import type { ProvisionWorktreeResult } from './worktree-provision.js';
 import { provisionWorktree } from './worktree-provision.js';
 
@@ -60,7 +51,7 @@ export type ProvisionWorktreeFn = (
 
 export interface StartImplementerRunArgs {
   readonly ctx: TaskStoreContext;
-  /** Leaf (worktree-source) task id whose `_implementer.json` we manage. */
+  /** Leaf (worktree-source) task id whose live handle we track. */
   readonly taskId: string;
   /** Structured-task id that owns the feature's hierarchy. */
   readonly parentTaskId: string;
@@ -68,10 +59,13 @@ export interface StartImplementerRunArgs {
   readonly featureId: string;
   /** Branch the worktree should land on. */
   readonly branch: string;
-  /** Test seams. */
-  readonly subprocess?: SubprocessAdapter;
+  /**
+   * Subprocess adapter used to dispatch the runner process AND to check
+   * for an existing live implementer via its handle manifest. Required —
+   * callers construct one per host and thread it through.
+   */
+  readonly subprocess: SubprocessAdapter;
   readonly provisionFn?: ProvisionWorktreeFn;
-  readonly signaller?: ProcessSignaller;
   readonly now?: string;
   readonly runnerScript?: string;
   /** Extra env passed through to the runner child. */
@@ -121,35 +115,12 @@ function makeSessionId(taskId: string): string {
 
 //#region Helpers
 
-interface IsLiveImplementerArgs {
-  readonly ctx: TaskStoreContext;
-  readonly taskId: string;
-  readonly signaller: ProcessSignaller;
-}
-
-async function isLiveImplementer(args: IsLiveImplementerArgs): Promise<boolean> {
-  const existing = await loadImplementer(args.ctx, args.taskId);
-  if (existing === null) {
-    return false;
-  }
-  if (!args.signaller.isAlive(existing.pid)) {
-    return false;
-  }
-  if (existing.pidStarttime === null) {
-    return true;
-  }
-  const current = args.signaller.startTime(existing.pid);
-  if (current === null) {
-    return false;
-  }
-  return current === existing.pidStarttime;
-}
-
 interface SpawnRunnerArgs {
   readonly subprocess: SubprocessAdapter;
   readonly runnerScript: string;
   readonly cwd: string;
   readonly taskDir: string;
+  readonly taskId: string;
   readonly parentTaskId: string;
   readonly featureId: string;
   readonly extraEnv: Record<string, string | undefined> | undefined;
@@ -158,7 +129,6 @@ interface SpawnRunnerArgs {
 interface SpawnRunnerOk {
   readonly kind: 'ok';
   readonly pid: number;
-  readonly pidStarttime: string | null;
   readonly handle: SubprocessHandle;
 }
 
@@ -187,11 +157,6 @@ function handlePid(handle: SubprocessHandle): number | null {
   return pid;
 }
 
-function handlePidStarttime(handle: SubprocessHandle): string | null {
-  const pidStarttime = handle.metadata?.pidStarttime;
-  return typeof pidStarttime === 'string' ? pidStarttime : null;
-}
-
 async function spawnRunner(args: SpawnRunnerArgs): Promise<SpawnRunnerResult> {
   let handle: SubprocessHandle;
   try {
@@ -205,7 +170,8 @@ async function spawnRunner(args: SpawnRunnerArgs): Promise<SpawnRunnerResult> {
       detached: true,
       env: buildRunnerEnv(args),
       metadata: {
-        taskRole: 'implementer',
+        taskRole: TaskRole.Implementer,
+        taskId: args.taskId,
         parentTaskId: args.parentTaskId,
         featureId: args.featureId,
       },
@@ -245,7 +211,6 @@ async function spawnRunner(args: SpawnRunnerArgs): Promise<SpawnRunnerResult> {
   return {
     kind: 'ok',
     pid,
-    pidStarttime: handlePidStarttime(handle),
     handle,
   };
 }
@@ -312,7 +277,6 @@ export async function startImplementerRun(
   if (featureId.length === 0) {
     throw new ImplementerSpawnError('featureId is required');
   }
-  const subprocess = args.subprocess ?? requireNodeSubprocessAdapter();
   const shell = args.shell;
   const provisionFn: ProvisionWorktreeFn =
     args.provisionFn ??
@@ -328,18 +292,18 @@ export async function startImplementerRun(
         shell,
       });
     });
-  const signaller = args.signaller ?? requireNodeProcessSignaller;
   const now = args.now ?? new Date().toISOString();
   const runnerScript = args.runnerScript ?? defaultRunnerScript();
 
   const taskDir = taskDirPaths(args.ctx, args.taskId).dir;
 
-  const live = await isLiveImplementer({
-    ctx: args.ctx,
+  const existing = await findLiveTaskHandle({
+    adapter: args.subprocess,
     taskId: args.taskId,
-    signaller,
+    taskRole: TaskRole.Implementer,
+    featureId,
   });
-  if (live) {
+  if (existing !== null) {
     throw new ImplementerSpawnError(`implementer already attached to task ${args.taskId}`);
   }
 
@@ -358,10 +322,11 @@ export async function startImplementerRun(
   // pid: no observable half-state where the leaf task points at a
   // worktree but no agent is running.
   const spawned = await spawnRunner({
-    subprocess,
+    subprocess: args.subprocess,
     runnerScript,
     cwd: worktreePath,
     taskDir,
+    taskId: args.taskId,
     parentTaskId: args.parentTaskId,
     featureId,
     extraEnv: args.env,
@@ -371,27 +336,6 @@ export async function startImplementerRun(
   }
 
   const sessionId = makeSessionId(args.taskId);
-  try {
-    await saveImplementer(args.ctx, {
-      taskId: args.taskId,
-      parentTaskId: args.parentTaskId,
-      featureId,
-      sessionId,
-      pid: spawned.pid,
-      pidStarttime: spawned.pidStarttime,
-      worktreePath,
-      branch,
-      startedAt: now,
-      pausedAt: null,
-    });
-  } catch (err) {
-    await abortChild({
-      subprocess,
-      handle: spawned.handle,
-    });
-    throw err;
-  }
-
   try {
     await patchLeafWorktree({
       ctx: args.ctx,
@@ -427,11 +371,8 @@ export async function startImplementerRun(
     });
   } catch (err) {
     await abortChild({
-      subprocess,
+      subprocess: args.subprocess,
       handle: spawned.handle,
-    });
-    await clearImplementer(args.ctx, args.taskId).catch(() => {
-      /* swallow — best-effort cleanup */
     });
     throw err;
   }

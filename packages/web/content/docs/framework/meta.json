@@ -11,6 +11,7 @@
     "---Infrastructure---",
     "context",
     "runtime",
+    "durability",
     "errors",
     "observability",
     "---Memory---",

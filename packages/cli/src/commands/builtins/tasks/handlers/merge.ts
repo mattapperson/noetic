@@ -1,11 +1,10 @@
+import type { Task } from '@noetic/code-agent/tasks/schema';
+import { EventKind, TaskLifecycleStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { appendEvent, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { execTolerantOfMissing, isShellMissing } from '@noetic/code-agent/tasks/worktree-node';
 import type { ShellAdapter, ShellExecResult } from '@noetic/core';
 import { createLocalShellAdapter } from '@noetic/core/adapters/node';
-
-import type { TaskStoreContext } from '../fs-store.js';
-import { appendEvent, saveTask } from '../fs-store.js';
-import type { Task } from '../schemas.js';
-import { EventKind, TaskLifecycleStatus } from '../schemas.js';
-import { execTolerantOfMissing, isShellMissing } from '../shell-utils.js';
 import { nowIso, resolveTask } from './_shared.js';
 
 //#region Types

@@ -12,11 +12,13 @@
  * cannot stumble into them via permission errors.
  */
 
+import { TaskIdSchema, TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import type { Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import { createFileStorage, tool } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
 import { z } from 'zod';
-
-import type { TaskStoreContext } from './fs-store.js';
 import { activateSliceHandler } from './handlers/activate-slice.js';
 import { addAssertionHandler } from './handlers/add-assertion.js';
 import { addFeatureHandler } from './handlers/add-feature.js';
@@ -43,7 +45,6 @@ import { unpauseTaskHandler } from './handlers/unpause.js';
 import type { TaskHierarchyInput } from './hierarchy/schemas.js';
 import { FeatureIdSchema, MilestoneIdSchema, SliceIdSchema } from './hierarchy/schemas.js';
 import { KanbanColumn } from './kanban.js';
-import { TaskIdSchema, TaskSource } from './schemas.js';
 
 //#region Types
 
@@ -421,11 +422,21 @@ function makeDeleteTool(ctx: TaskStoreContext): Tool {
     }),
     output: ResultEnvelopeSchema,
     execute: async (args) =>
-      safeRun(() =>
-        deleteTaskHandler(ctx, {
+      safeRun(() => {
+        // Consult the shared durable subprocess manifest so the
+        // delete-guard sees runners spawned by the TUI/daemon. Matches
+        // the `~/.noetic/subprocess` root configured by
+        // harness/factory.ts and daemon-bootstrap.ts.
+        const subprocess = createLocalSubprocessAdapter({
+          storage: createFileStorage({
+            root: resolveSubprocessRoot(),
+          }),
+        });
+        return deleteTaskHandler(ctx, {
           taskId: args.taskId,
-        }),
-      ),
+          subprocess,
+        });
+      }),
   });
 }
 

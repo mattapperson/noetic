@@ -71,6 +71,60 @@ Sentrux enforces rules 1–3 via the `[[layers]]` ordering in
 `.sentrux/rules.toml`; rule 4 is enforced by the CLI's `package.json`
 workspace-dep list.
 
+## Subprocess adapter wiring
+
+The CLI instantiates exactly one `SubprocessAdapter` per harness and one
+additional adapter inside the hierarchy daemon. Both are built against
+`createFileStorage({root: resolveSubprocessRoot()})` so every long-lived
+child (planner, implementer, agent-ci, TUI teammates) shares one durable
+handle manifest. The root resolution function lives in
+`packages/code-agent/src/tasks/paths.ts` (`resolveSubprocessRoot`) and
+defaults to `$HOME/.noetic/subprocess`.
+
+| Constructor site | File | Purpose |
+|---|---|---|
+| TUI harness | `packages/cli/src/harness/factory.ts` (`buildHarness`) | Every interactive session's spawns go through this adapter. |
+| Daemon harness | `packages/cli/src/commands/builtins/tasks/hierarchy/daemon-bootstrap.ts` | Autopilot plan-pass and implement-pass spawns. |
+| CLI commands | `packages/cli/src/commands/builtins/tasks/cli.ts`, `packages/cli/src/commands/builtins/tasks/tools.ts` | Ad-hoc `noetic tasks` runs that need to spawn a planner/implementer or consult the live handle list. |
+
+### Separation of roots
+
+Three on-disk concerns live under three distinct roots so crash-recovery
+tooling can locate them without guessing:
+
+| Concern | Default root | Used by |
+|---|---|---|
+| Subprocess handle manifests | `$HOME/.noetic/subprocess/` | `SubprocessAdapter.reattach` / `listLive` |
+| Checkpoint snapshots | `$HOME/.noetic/checkpoints/` | `harness.checkpoint` / `harness.restore` via `CheckpointStore` |
+| Task state (canonical, per-project) | `<projectRoot>/.noetic/tasks/` | FS-only task store (see `21-tasks`) |
+
+Subprocess manifests and checkpoints are machine-wide; task state is
+per-project and tracked in git if the project chooses. Keeping them
+separate means a host can reattach to a running planner whose task
+state lives on a different filesystem root (a worktree, a remote mount)
+from the manifest.
+
+### Host restart recovery
+
+The TUI boot sequence in `packages/cli/src/tui/app.tsx` calls
+`reattachLiveChildren(harness)` (`packages/cli/src/cli/reattach-live-children.ts`)
+once per harness construction. That helper calls `harness.subprocess.listLive()`,
+walks each handle carrying an `executionId`, invokes `harness.restore(executionId)`,
+and returns a `Map<handleId, Context>` so the TUI can target each restored
+context with its pending ask-user replay.
+
+### Post-sidecar flows
+
+Several flows previously keyed on `<taskDir>/_planner.json` /
+`_implementer.json` sidecar reads. After the Phase F rewrite they key
+on the adapter's manifest:
+
+| Flow | Source | Behaviour |
+|---|---|---|
+| Delete-guard (`task delete`) | `packages/cli/src/commands/builtins/tasks/handlers/delete.ts` via `listLiveTaskHandles(adapter, taskId)` | Refuses deletion when any handle tagged with the task id is live. |
+| Resolve chat target (TUI / CLI chat) | `packages/cli/src/tui/task-chat/use-task-chat.ts` | Uses `findLiveTaskHandle({adapter, taskId, taskRole})` to locate the right socket for live chat. |
+| Pause / cancel | `packages/cli/src/commands/builtins/tasks/handlers/pause.ts`, `cancel.ts` | Consult the adapter's handle (and its `metadata.executionId`) instead of reading sidecar JSON. |
+
 ## Non-goals
 
 - This spec does not constrain which external npm dependencies each layer

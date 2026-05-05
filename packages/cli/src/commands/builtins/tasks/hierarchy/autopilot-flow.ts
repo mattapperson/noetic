@@ -17,14 +17,18 @@
  * so it also wakes early on any feature loop-state transition.
  */
 
+import type { ValidatorRequest } from '@noetic/code-agent/tasks/ipc-node';
+import { featureLoopStateChan, validatorRequestChan } from '@noetic/code-agent/tasks/ipc-node';
+import type {
+  Feature,
+  MilestoneWithChildren,
+  SliceWithFeatures,
+} from '@noetic/code-agent/tasks/schema';
+import { FeatureLoopState, HierarchyStatus, SliceStatus } from '@noetic/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step, StepBranch } from '@noetic/core';
 import { branch, every, step } from '@noetic/core';
-
-import type { ValidatorRequest } from '../channels.js';
-import { featureLoopStateChan, validatorRequestChan } from '../channels.js';
-import type { TaskStoreContext } from '../fs-store.js';
-import { listTasks } from '../fs-store.js';
-import { HierarchyStatus } from '../schemas.js';
 import { getTaskHierarchy } from './aggregate.js';
 import type {
   AutopilotDeps,
@@ -37,8 +41,6 @@ import {
   groupFeaturesByLoopState,
   runAutopilotTick,
 } from './autopilot.js';
-import type { Feature, MilestoneWithChildren, SliceWithFeatures } from './schemas.js';
-import { FeatureLoopState, SliceStatus } from './schemas.js';
 
 //#region Constants
 

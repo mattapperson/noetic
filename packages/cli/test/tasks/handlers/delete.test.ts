@@ -1,16 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-
+import { EventKind } from '@noetic/code-agent/tasks/schema';
+import { listTasks, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { SubprocessAdapter } from '@noetic/core';
 import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import {
-  listTasks,
-  tailEvents,
-  tryLoadTask,
-} from '../../../src/commands/builtins/tasks/fs-store.js';
 import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/create.js';
 import { deleteTaskHandler } from '../../../src/commands/builtins/tasks/handlers/delete.js';
-import { saveImplementer } from '../../../src/commands/builtins/tasks/implementer-state.js';
 import { saveRunner } from '../../../src/commands/builtins/tasks/runner-state.js';
-import { EventKind } from '../../../src/commands/builtins/tasks/schemas.js';
+import { makeEmptySubprocess, preloadLiveHandle } from '../_adapter-helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 
 interface FakeSignallerOptions {
@@ -26,6 +22,27 @@ function makeFakeSignaller(opts: FakeSignallerOptions): Signaller {
   };
 }
 
+/**
+ * Subprocess adapter preloaded with a single "live" implementer handle
+ * for the given task. Tests use this to assert that the delete guard
+ * sees an attached implementer through the adapter manifest rather
+ * than through the old sidecar file.
+ */
+async function makeSubprocessWithImplementer(opts: {
+  taskId: string;
+  parentTaskId: string;
+  featureId: string;
+  pid: number;
+}): Promise<SubprocessAdapter> {
+  return preloadLiveHandle({
+    taskId: opts.taskId,
+    role: 'implementer',
+    featureId: opts.featureId,
+    parentTaskId: opts.parentTaskId,
+    pid: opts.pid,
+  });
+}
+
 describe('deleteTaskHandler', () => {
   it('emits TaskDeleted (not TaskArchived) and removes the task directory', async () => {
     const ctx = makeStoreContext();
@@ -34,6 +51,7 @@ describe('deleteTaskHandler', () => {
     });
     const result = await deleteTaskHandler(ctx, {
       taskId: created.task.id,
+      subprocess: makeEmptySubprocess(),
     });
     expect(result.taskId).toBe(created.task.id);
     expect(await tryLoadTask(ctx, created.task.id)).toBeNull();
@@ -43,8 +61,6 @@ describe('deleteTaskHandler', () => {
     const deleted = events.filter((e) => e.kind === EventKind.TaskDeleted);
     expect(deleted.length).toBe(1);
     expect(deleted[0]?.payload?.reason).toBe('deleted');
-    // Hard-delete must NOT masquerade as archive — listeners watching
-    // `task:archived` need to be able to distinguish.
     const archived = events.filter((e) => e.kind === EventKind.TaskArchived);
     expect(archived.length).toBe(0);
   });
@@ -54,6 +70,7 @@ describe('deleteTaskHandler', () => {
     await expect(
       deleteTaskHandler(ctx, {
         taskId: 'T-zzzzzzzzzz',
+        subprocess: makeEmptySubprocess(),
       }),
     ).rejects.toThrow();
   });
@@ -87,9 +104,9 @@ describe('deleteTaskHandler', () => {
       deleteTaskHandler(ctx, {
         taskId: created.task.id,
         signaller,
+        subprocess: makeEmptySubprocess(),
       }),
     ).rejects.toThrow(/agent-ci runner pid=4242 still attached/);
-    // Task survived the failed delete.
     expect(await tryLoadTask(ctx, created.task.id)).not.toBeNull();
   });
 
@@ -116,6 +133,7 @@ describe('deleteTaskHandler', () => {
       taskId: created.task.id,
       force: true,
       signaller,
+      subprocess: makeEmptySubprocess(),
     });
     expect(result.taskId).toBe(created.task.id);
     expect(await tryLoadTask(ctx, created.task.id)).toBeNull();
@@ -141,6 +159,7 @@ describe('deleteTaskHandler', () => {
     const result = await deleteTaskHandler(ctx, {
       taskId: created.task.id,
       signaller,
+      subprocess: makeEmptySubprocess(),
     });
     expect(result.taskId).toBe(created.task.id);
   });
@@ -173,14 +192,12 @@ describe('deleteTaskHandler', () => {
     const result = await deleteTaskHandler(ctx, {
       taskId: created.task.id,
       signaller,
+      subprocess: makeEmptySubprocess(),
     });
     expect(result.taskId).toBe(created.task.id);
   });
 
   it('treats a live pid whose startTime probe returns null as not blocking', async () => {
-    // Sidecar has a recorded pidStarttime, pid is alive, but `ps` failed
-    // (signaller.startTime returns null). Mirrors verifyPidIdentity's
-    // explicit "ps failed → treat as dead" guard.
     const ctx = makeStoreContext();
     const created = await createTaskHandler(ctx, {
       title: 'ps failed',
@@ -198,18 +215,16 @@ describe('deleteTaskHandler', () => {
       liveSet: new Set([
         4242,
       ]),
-      // No entry in startTimes → fake returns null.
     });
     const result = await deleteTaskHandler(ctx, {
       taskId: created.task.id,
       signaller,
+      subprocess: makeEmptySubprocess(),
     });
     expect(result.taskId).toBe(created.task.id);
   });
 
   it('refuses to delete when sidecar has null pidStarttime and pid is alive', async () => {
-    // pidStarttime can legitimately be null when ps was unavailable at
-    // spawn time; in that case bare liveness is enough to block.
     const ctx = makeStoreContext();
     const created = await createTaskHandler(ctx, {
       title: 'No starttime',
@@ -232,42 +247,26 @@ describe('deleteTaskHandler', () => {
       deleteTaskHandler(ctx, {
         taskId: created.task.id,
         signaller,
+        subprocess: makeEmptySubprocess(),
       }),
     ).rejects.toThrow(/agent-ci runner pid=4242 still attached/);
   });
 
-  it('refuses to delete when an implementer sidecar is alive', async () => {
+  it('refuses to delete when an implementer subprocess handle is live', async () => {
     const ctx = makeStoreContext();
     const created = await createTaskHandler(ctx, {
       title: 'Implementer attached',
     });
-    await saveImplementer(ctx, {
+    const subprocess = await makeSubprocessWithImplementer({
       taskId: created.task.id,
       parentTaskId: 'T-parent0000',
       featureId: 'F-abc1234567',
-      sessionId: 'S-impl',
       pid: 5151,
-      pidStarttime: 'Mon Jan  1 00:00:00 2026',
-      worktreePath: '/repo/.worktrees/feat-x',
-      branch: 'feat/x',
-      startedAt: '2026-05-01T00:00:00.000Z',
-      pausedAt: null,
-    });
-    const signaller = makeFakeSignaller({
-      liveSet: new Set([
-        5151,
-      ]),
-      startTimes: new Map([
-        [
-          5151,
-          'Mon Jan  1 00:00:00 2026',
-        ],
-      ]),
     });
     await expect(
       deleteTaskHandler(ctx, {
         taskId: created.task.id,
-        signaller,
+        subprocess,
       }),
     ).rejects.toThrow(/implementer runner pid=5151 still attached/);
     expect(await tryLoadTask(ctx, created.task.id)).not.toBeNull();
