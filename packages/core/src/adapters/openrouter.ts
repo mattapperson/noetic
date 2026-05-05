@@ -2,7 +2,7 @@ import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
 import { isAssistantMessage } from '../interpreter/typeguards';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
-import type { LLMResponse, Tool } from '../types/common';
+import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
 import type {
@@ -17,6 +17,7 @@ import type {
 import type { MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
+import type { Tool } from '../types/tool';
 import { frameworkCast } from '../util/framework-cast';
 
 //#region Provider Types

@@ -1,6 +1,6 @@
-import type { Tool, ToolMemoryDeclaration } from '../../types/common';
 import type { MemoryLayer, MemoryScope } from '../../types/memory';
 import { Slot } from '../../types/memory';
+import type { Tool, ToolMemoryDeclaration } from '../../types/tool';
 
 interface ToolMemoryLayerOpts {
   slot?: number;

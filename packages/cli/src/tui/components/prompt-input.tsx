@@ -3,6 +3,7 @@ import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
+import type { ChatStatus } from '../chat-status.js';
 import type { PromptAttachment } from '../utils/prompt-attachments.js';
 import { resolvePromptEscapeAction } from '../utils/prompt-escape.js';
 import {
@@ -14,8 +15,7 @@ import {
 } from '../utils/prompt-history.js';
 import { useTheme } from './theme';
 
-/** Chat lifecycle status. Compatible with any AI SDK. */
-export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error';
+export type { ChatStatus } from '../chat-status.js';
 
 export interface Suggestion {
   text: string;

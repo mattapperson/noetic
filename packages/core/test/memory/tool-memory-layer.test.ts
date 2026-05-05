@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import { createLayerStateStore, initLayers, recallLayers } from '../../src/memory/layer-lifecycle';
 import { toolMemoryLayer } from '../../src/memory/layers/tool-memory-layer';
-import type { Tool, ToolMemoryDeclaration } from '../../src/types/common';
 import { Slot } from '../../src/types/memory';
+import type { Tool, ToolMemoryDeclaration } from '../../src/types/tool';
 import { frameworkCast } from '../../src/util/framework-cast';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 

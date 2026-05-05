@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
 import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
 import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
-import type { LLMResponse, Tool } from '../src/types/common';
+import type { LLMResponse } from '../src/types/common';
 import type { Context, ItemLog } from '../src/types/context';
 import type { EmbedFn } from '../src/types/embed';
 import type {
@@ -21,6 +21,7 @@ import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/typ
 import type { AgentHarnessContract, CallModelRequest } from '../src/types/runtime';
 import { SteeringAction } from '../src/types/steering';
 import type { ExecuteStepFn, Step } from '../src/types/step';
+import type { Tool } from '../src/types/tool';
 import type { ToolExecutionContext } from '../src/types/tool-context';
 import { frameworkCast } from '../src/util/framework-cast';
 

@@ -16,7 +16,7 @@ import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import type { DetachedSignal, Tool } from '@noetic/core';
 import { z } from 'zod';
 import type { ImplementerOutcome } from './hierarchy/implementer-flow.js';
-import { commitExitWrites } from './implementer-runner.js';
+import { commitExitWrites } from './implementer-commit.js';
 import { createTerminalTool } from './terminal-tool.js';
 
 //#region Schemas

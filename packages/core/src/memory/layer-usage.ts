@@ -1,6 +1,6 @@
-import type { Tool } from '../types/common';
 import type { Context, LastLayerUsage, LayerUsageEntry } from '../types/context';
 import type { RecallLayerOutput } from '../types/runtime';
+import type { Tool } from '../types/tool';
 import { estimateTokens } from '../util/message-helpers';
 
 /**

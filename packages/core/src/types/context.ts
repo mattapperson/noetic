@@ -1,6 +1,6 @@
 import type { ItemSchemaRegistry } from '../schemas/item';
 import type { Channel } from './channel';
-import type { StepMeta, TokenUsage, Tool } from './common';
+import type { StepMeta, TokenUsage } from './common';
 import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { ContextMemory, MemoryLayer } from './memory';
@@ -8,6 +8,7 @@ import type { Span } from './observability';
 import type { AgentHarnessContract } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 import type { SubprocessAdapter } from './subprocess-adapter';
+import type { Tool } from './tool';
 
 /** @public Append-only log of conversation items accumulated during execution. */
 export interface ItemLog {

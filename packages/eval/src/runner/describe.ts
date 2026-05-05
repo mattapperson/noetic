@@ -2,8 +2,10 @@ import type { Step } from '@noetic/core';
 import { frameworkCast } from '@noetic/core/unstable';
 
 import type { EvalSuiteOptions } from '../types/eval';
-import type { EvalContext } from './eval-context';
 import { registerSuite } from './registry';
+import type { CaseDefinition } from './suite-types';
+
+export type { CaseDefinition, SuiteDefinition } from './suite-types';
 
 //#region Types
 
@@ -12,17 +14,6 @@ export type DescribeStep = {
   kind: Step['kind'];
   id: string;
 };
-
-export interface SuiteDefinition {
-  step: Step;
-  options: EvalSuiteOptions;
-  cases: CaseDefinition[];
-}
-
-export interface CaseDefinition {
-  name: string;
-  fn: (ctx: EvalContext) => Promise<void>;
-}
 
 //#endregion
 

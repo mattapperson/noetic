@@ -263,9 +263,9 @@ export type {
   RetryPolicy,
   StepMeta,
   TokenUsage,
-  Tool,
-  ToolMemoryDeclaration,
 } from './types/common';
+/** @public */
+export type { Tool, ToolMemoryDeclaration } from './types/tool';
 
 //#endregion
 

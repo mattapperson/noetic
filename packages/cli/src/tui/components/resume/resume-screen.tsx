@@ -4,7 +4,6 @@
  * `ResumeConversation` (src/screens/ResumeConversation.tsx).
  */
 
-import type { Key } from 'ink';
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -17,7 +16,10 @@ import {
 } from '../../../sessions/store.js';
 import type { SessionFile, SessionMetadata } from '../../../sessions/types.js';
 import { useTheme } from '../theme.js';
+import { shouldCancelOnKey } from './cancel-key.js';
 import { LogSelector } from './log-selector.js';
+
+export { shouldCancelOnKey } from './cancel-key.js';
 
 //#region Types
 
@@ -88,17 +90,6 @@ function ErrorView({ message }: { message: string }): ReactNode {
       <Text dimColor>Press Esc to exit.</Text>
     </Box>
   );
-}
-
-/** Esc and Ctrl+C both cancel — matches `log-selector.tsx`'s inline check. */
-export function shouldCancelOnKey(input: string, key: Pick<Key, 'escape' | 'ctrl'>): boolean {
-  if (key.escape) {
-    return true;
-  }
-  if (key.ctrl && input === 'c') {
-    return true;
-  }
-  return false;
 }
 
 /** Local useInput so Esc/Ctrl+C actually exit this view when LogSelector is unmounted. */

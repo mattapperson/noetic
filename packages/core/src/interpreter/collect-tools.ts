@@ -1,5 +1,5 @@
-import type { Tool } from '../types/common';
 import type { Step } from '../types/step';
+import type { Tool } from '../types/tool';
 import { frameworkCast } from '../util/framework-cast';
 
 /**

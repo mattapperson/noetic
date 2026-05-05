@@ -1,4 +1,4 @@
-import type { ChatStatus } from '../components/prompt-input.js';
+import type { ChatStatus } from '../chat-status.js';
 
 //#region Types
 

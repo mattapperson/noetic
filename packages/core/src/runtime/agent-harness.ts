@@ -38,7 +38,7 @@ import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import { ItemSchemaRegistry, mergeExtensions } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
-import type { LLMResponse, LlmProviderConfig, Tool } from '../types/common';
+import type { LLMResponse, LlmProviderConfig } from '../types/common';
 import type { Context, CwdState } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { FsAdapter } from '../types/fs-adapter';
@@ -62,6 +62,7 @@ import type { SteeringDecision } from '../types/steering';
 import { SteeringAction } from '../types/steering';
 import type { Step } from '../types/step';
 import type { SubprocessAdapter } from '../types/subprocess-adapter';
+import type { Tool } from '../types/tool';
 import { frameworkCast } from '../util/framework-cast';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ChannelStore } from './channel-store';
@@ -69,15 +70,13 @@ import { ContextImpl } from './context-impl';
 import { snapshotCwdState } from './cwd-helpers';
 import type { CheckpointStore } from './durable';
 import { captureCheckpoint, restoreFromCheckpoint } from './durable/harness-checkpoints';
-import {
-  type DetachedSpawnOverrides,
-  dispatchStepThroughAdapter,
-} from './step-dispatcher';
 import type { EventBroadcaster } from './event-broadcaster';
 import { createInMemoryStorage } from './in-memory-storage';
 import type { MessageQueue, QueuedMessage } from './message-queue';
 import { SessionRunner } from './session-runner';
 import { buildItemStream, filterReasoningStream, filterTextStream } from './session-streams';
+import type { DetachedSpawnOverrides } from './step-dispatcher';
+import { dispatchStepThroughAdapter } from './step-dispatcher';
 
 //#region Types
 

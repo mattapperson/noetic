@@ -54,6 +54,12 @@ export interface ScoreResult {
   metadata?: Record<string, unknown>;
 }
 
+export interface Baseline {
+  suiteResult: SuiteResult;
+  createdAt: string;
+  version: string;
+}
+
 //#endregion
 
 export { OptimizeScope };

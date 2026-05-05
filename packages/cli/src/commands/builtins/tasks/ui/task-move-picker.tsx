@@ -15,7 +15,7 @@ import { useTheme } from '../../../../tui/components/theme.js';
 import { moveTaskHandler } from '../handlers/move.js';
 import type { KanbanColumn } from '../kanban.js';
 import { deriveColumn } from '../kanban.js';
-import { columnLabel, VISIBLE_COLUMNS } from './task-board.js';
+import { columnLabel, VISIBLE_COLUMNS } from './columns.js';
 
 //#region Types
 

@@ -1,10 +1,11 @@
 import type { ZodType } from 'zod';
 import type { Channel } from './channel';
-import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
+import type { ModelParams, RetryPolicy, StepMeta } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from './memory';
 import type { SubprocessAdapter } from './subprocess-adapter';
+import type { Tool } from './tool';
 
 /**
  * Cumulative execution snapshot passed to loop `until` predicates.

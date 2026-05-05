@@ -1,7 +1,6 @@
 import type { ZodTypeAny, z } from 'zod';
 
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { Tool } from '../types/common';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -9,6 +8,7 @@ import type {
   ItemSchemaExtensions,
   ToolResultExtensionItem,
 } from '../types/items';
+import type { Tool } from '../types/tool';
 import type { ToolExecutionContext } from '../types/tool-context';
 
 //#region Types

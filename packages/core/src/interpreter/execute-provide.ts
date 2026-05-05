@@ -1,8 +1,8 @@
 import { resolveLayerTools } from '../memory/layer-api';
-import type { Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
 import type { ExecuteStepFn, StepProvide } from '../types/step';
+import type { Tool } from '../types/tool';
 import { frameworkCast } from '../util/framework-cast';
 import { deduplicateTools } from './collect-tools';
 

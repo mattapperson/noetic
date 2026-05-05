@@ -22,6 +22,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from '../../../../tui/components/theme.js';
 import { deriveColumn, KanbanColumn } from '../kanban.js';
+import { columnLabel, VISIBLE_COLUMNS } from './columns.js';
 import { TaskCard } from './task-card.js';
 import { TaskCreateForm } from './task-create-form.js';
 import { TaskDetail } from './task-detail.js';
@@ -95,35 +96,10 @@ export interface BoardSelection {
 
 //#region Helpers
 
-/**
- * Stable column ordering shown in the UI. Only active pre-merge
- * columns are surfaced here — Done and the terminal-state columns
- * (Cleanup Blocked, Removed, Archived) are intentionally omitted so
- * tasks in those states drop off the board and the move picker.
- */
-export const VISIBLE_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  KanbanColumn.Triage,
-  KanbanColumn.InProgress,
-  KanbanColumn.NeedsChanges,
-  KanbanColumn.ReadyToMerge,
-];
-
 /** Minimum per-column width below which the kanban looks unreadable. */
 const MIN_COLUMN_WIDTH = 16;
 
-const COLUMN_LABELS: Record<KanbanColumn, string> = {
-  [KanbanColumn.Triage]: 'Triage',
-  [KanbanColumn.InProgress]: 'In Progress',
-  [KanbanColumn.NeedsChanges]: 'Needs Changes',
-  [KanbanColumn.ReadyToMerge]: 'Ready to PR',
-  [KanbanColumn.CleanupBlocked]: 'Cleanup Blocked',
-  [KanbanColumn.Removed]: 'Removed',
-  [KanbanColumn.Archived]: 'Archived',
-};
-
-export function columnLabel(column: KanbanColumn): string {
-  return COLUMN_LABELS[column];
-}
+export { columnLabel, VISIBLE_COLUMNS };
 
 /** Bucket tasks by column, preserving input order within each bucket. */
 export function groupTasksByColumn(

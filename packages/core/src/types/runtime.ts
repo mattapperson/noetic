@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
-import type { LLMResponse, ModelParams, Tool } from './common';
+import type { LLMResponse, ModelParams } from './common';
 import type { Context, CwdState } from './context';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
@@ -12,6 +12,7 @@ import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
 import type { Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
+import type { Tool } from './tool';
 
 /** @public Optional lifecycle hooks invoked before and after each step execution. */
 export interface AgentHooks {

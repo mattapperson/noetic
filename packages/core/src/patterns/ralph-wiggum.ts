@@ -1,8 +1,8 @@
 import { loop } from '../builders/loop-builder';
 import { spawn } from '../builders/spawn-builder';
-import type { Tool } from '../types/common';
 import type { ContextMemory } from '../types/memory';
 import type { StepLoop } from '../types/step';
+import type { Tool } from '../types/tool';
 import { any } from '../until/combinators';
 import type { VerifyFn } from '../until/predicates';
 import { until } from '../until/predicates';
