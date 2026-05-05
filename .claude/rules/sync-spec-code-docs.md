@@ -28,8 +28,9 @@ They are mandatory, not optional.
 | `13-patterns.md` | `patterns/` | `patterns/` |
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
+| `22-cli-architecture.md` | `packages/cli/src/` | (cli docs TBD) |
 
-**Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/`, Docs → `packages/web/content/docs/`
+**Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 
 ## Skill Mapping
 

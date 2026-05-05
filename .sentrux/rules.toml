@@ -1,0 +1,248 @@
+# Sentrux rules for the noetic monorepo.
+#
+# Encodes the architectural intent from specs/00-overview.md (package
+# dependency graph) and specs/22-cli-architecture.md (CLI internal layers).
+#
+# Sentrux `order` convention (observed empirically from sentrux 0.5.7):
+# LOWER order = architecturally HIGHER (consumer, top of stack);
+# HIGHER order = architecturally LOWER (foundation, bottom of stack).
+# A file in a lower-order layer may import from higher-order layers;
+# reverse edges (higher-order → lower-order) violate the hierarchy.
+#
+# Within each package we reserve a band of order numbers so cross-package
+# and within-package rules can coexist without collisions.
+#
+# Paths are relative to the repo root.
+
+[constraints]
+max_cycles = 0
+max_coupling = "B"
+max_cc = 25
+no_god_files = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier A — top-level consumers
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "plugins"
+paths = ["packages/plugin-*/src/**"]
+order = 0
+
+[[layers]]
+name = "web"
+paths = ["packages/web/**"]
+order = 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier B — CLI-internal layers (packages/cli/src/**)
+# See specs/22-cli-architecture.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "cli-entry"
+paths = ["packages/cli/src/cli/**"]
+order = 10
+
+[[layers]]
+name = "cli-presentation"
+paths = ["packages/cli/src/tui/**"]
+order = 11
+
+[[layers]]
+name = "cli-orchestration"
+paths = [
+  "packages/cli/src/harness/**",
+  "packages/cli/src/sessions/**",
+  "packages/cli/src/plan/**",
+  "packages/cli/src/daemon-runtime/**",
+]
+order = 12
+
+[[layers]]
+name = "cli-domain"
+paths = [
+  "packages/cli/src/tools/**",
+  "packages/cli/src/agents/**",
+  "packages/cli/src/skills/**",
+  "packages/cli/src/plugins/**",
+  "packages/cli/src/commands/**",
+]
+order = 13
+
+[[layers]]
+name = "cli-infra"
+paths = [
+  "packages/cli/src/adapters/**",
+  "packages/cli/src/ai/**",
+  "packages/cli/src/lsp/**",
+  "packages/cli/src/config/**",
+  "packages/cli/src/memory/**",
+]
+order = 14
+
+[[layers]]
+name = "cli-foundations"
+paths = [
+  "packages/cli/src/types/**",
+  "packages/cli/src/errors/**",
+  "packages/cli/src/util/**",
+]
+order = 15
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier C — peer packages that depend only on @noetic/core
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "chat-sdk"
+paths = ["packages/chat-sdk/src/**"]
+order = 50
+
+[[layers]]
+name = "code-agent"
+paths = ["packages/code-agent/src/**"]
+order = 50
+
+[[layers]]
+name = "eval"
+paths = ["packages/eval/src/**"]
+order = 50
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier D — core-internal layers (packages/core/src/**)
+# Ordered per the dependency graph in specs/00-overview.md: patterns →
+# adapters → interpreter → runtime → primitives → memory/observability →
+# foundations.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "core-patterns"
+paths = ["packages/core/src/patterns/**"]
+order = 80
+
+[[layers]]
+name = "core-adapters"
+paths = ["packages/core/src/adapters/**"]
+order = 81
+
+[[layers]]
+name = "core-interpreter"
+paths = ["packages/core/src/interpreter/**"]
+order = 82
+
+[[layers]]
+name = "core-runtime"
+paths = ["packages/core/src/runtime/**"]
+order = 83
+
+[[layers]]
+name = "core-primitives"
+paths = [
+  "packages/core/src/builders/**",
+  "packages/core/src/conditions/**",
+  "packages/core/src/until/**",
+]
+order = 84
+
+[[layers]]
+name = "core-memory"
+paths = ["packages/core/src/memory/**"]
+order = 85
+
+[[layers]]
+name = "core-observability"
+paths = ["packages/core/src/observability/**"]
+order = 85
+
+[[layers]]
+name = "core-foundations"
+paths = [
+  "packages/core/src/types/**",
+  "packages/core/src/errors/**",
+  "packages/core/src/schemas/**",
+]
+order = 86
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory tree-shakability — each of the files in
+# packages/core/src/memory/layers/ is an independently exported API.
+# Keeping memory/** free of imports from interpreter/runtime/adapters/patterns
+# is what lets bundlers drop unused layers. The layer-direction rule above
+# already forbids these edges via the ordering, but these boundaries give
+# specific tree-shakability error messages when triggered.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[boundaries]]
+from = "packages/core/src/memory/**"
+to = "packages/core/src/interpreter/**"
+reason = "memory layers must be tree-shakable; importing a layer must not pull in the interpreter"
+
+[[boundaries]]
+from = "packages/core/src/memory/**"
+to = "packages/core/src/runtime/**"
+reason = "memory layers must be tree-shakable; importing a layer must not pull in the runtime"
+
+[[boundaries]]
+from = "packages/core/src/memory/**"
+to = "packages/core/src/adapters/**"
+reason = "memory layers are platform-independent; adapters are platform-specific"
+
+[[boundaries]]
+from = "packages/core/src/memory/**"
+to = "packages/core/src/patterns/**"
+reason = "patterns compose memory, not the other way"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Peer-package isolation at tier 50 — chat-sdk, code-agent, and eval are
+# siblings that depend only on @noetic/core; they must not reach across.
+# Same-order layers are otherwise unconstrained, so these have to be
+# explicit.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/code-agent/src/**"
+reason = "eval is a peer of code-agent; both depend only on @noetic/core"
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/cli/src/**"
+reason = "eval must not depend on cli"
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "eval must not depend on chat-sdk"
+
+[[boundaries]]
+from = "packages/code-agent/src/**"
+to = "packages/eval/src/**"
+reason = "code-agent must not depend on eval"
+
+[[boundaries]]
+from = "packages/code-agent/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "code-agent must not depend on chat-sdk"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/code-agent/src/**"
+reason = "chat-sdk must not depend on code-agent"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/eval/src/**"
+reason = "chat-sdk must not depend on eval"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/cli/src/**"
+reason = "chat-sdk must not depend on cli"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docs-site isolation (@noetic/web) is enforced via packages/web/package.json
+# workspace deps, NOT via rules.toml — the .typecheck-snippets-shims/ dir has
+# a legitimate type-only import of @noetic/core for MDX snippet typechecking
+# that any file-path-level boundary would flag as a false positive.
+# ─────────────────────────────────────────────────────────────────────────────
