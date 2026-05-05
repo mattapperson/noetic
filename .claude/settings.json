@@ -23,6 +23,30 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/sentrux-gate-save.sh",
+            "timeout": 30,
+            "statusMessage": "Saving sentrux quality baseline..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/sentrux-gate-check.sh",
+            "timeout": 30,
+            "statusMessage": "Checking sentrux quality gate..."
+          }
+        ]
+      }
     ]
   }
 }
