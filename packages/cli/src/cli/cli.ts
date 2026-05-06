@@ -10,18 +10,33 @@ import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import { loadPlugins } from '../plugins/loader.js';
 import { findMostRecentSession, loadSession, loadSessionByIdAnywhere } from '../sessions/store.js';
-import type { SessionFile } from '../types/session.js';
 import { runAgent } from '../tui/app.js';
 import { runPicker } from '../tui/run-picker.js';
+import { installInterruptSafetyNet } from '../tui/terminal/interrupt-safety-net.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
+import type { SessionFile } from '../types/session.js';
 import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
-import { installInterruptSafetyNet } from '../tui/terminal/interrupt-safety-net.js';
 import { installWorkspaceProxy } from './workspace-proxy.js';
 
 if (process.argv[2] === 'tasks') {
   const { runTasksCli } = await import('../tasks/runtime/cli.js');
-  const exitCode = await runTasksCli(process.argv.slice(3));
+  const { ensureDaemon } = await import('../daemon-runtime/runtime.js');
+  const exitCode = await runTasksCli(process.argv.slice(3), {
+    ensureTaskRuntime(projectRoot) {
+      if (process.env.NOETIC_DAEMON === '1') {
+        return {};
+      }
+      try {
+        ensureDaemon(projectRoot);
+        return {};
+      } catch (err) {
+        return {
+          warning: formatCliError(err),
+        };
+      }
+    },
+  });
   process.exit(exitCode);
 }
 
@@ -159,4 +174,8 @@ function daemonCwdFromArgs(argv: string[]): string | null {
     return null;
   }
   return argv[idx + 1] ?? null;
+}
+
+function formatCliError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

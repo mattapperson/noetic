@@ -46,6 +46,7 @@ Every directory under `packages/cli/src/` belongs to exactly one layer.
 | `skills/`          | `cli-domain`        |
 | `plugins/`         | `cli-domain`        |
 | `commands/`        | `cli-domain`        |
+| `tasks/`           | `cli-domain`        |
 | `adapters/`        | `cli-infra`         |
 | `ai/`              | `cli-infra`         |
 | `lsp/`             | `cli-infra`         |
@@ -84,8 +85,8 @@ defaults to `$HOME/.noetic/subprocess`.
 | Constructor site | File | Purpose |
 |---|---|---|
 | TUI harness | `packages/cli/src/harness/factory.ts` (`buildHarness`) | Every interactive session's spawns go through this adapter. |
-| Daemon harness | `packages/cli/src/commands/builtins/tasks/hierarchy/daemon-bootstrap.ts` | Autopilot plan-pass and implement-pass spawns. |
-| CLI commands | `packages/cli/src/commands/builtins/tasks/cli.ts`, `packages/cli/src/commands/builtins/tasks/tools.ts` | Ad-hoc `noetic tasks` runs that need to spawn a planner/implementer or consult the live handle list. |
+| Daemon harness | `packages/cli/src/tasks/runtime/hierarchy/daemon-bootstrap.ts` | Autopilot plan-pass and implement-pass spawns. |
+| CLI commands | `packages/cli/src/tasks/runtime/cli.ts`, `packages/cli/src/tasks/runtime/tools.ts` | Ad-hoc `noetic tasks` runs that need to spawn a planner/implementer or consult the live handle list. |
 
 ### Separation of roots
 
@@ -121,9 +122,9 @@ on the adapter's manifest:
 
 | Flow | Source | Behaviour |
 |---|---|---|
-| Delete-guard (`task delete`) | `packages/cli/src/commands/builtins/tasks/handlers/delete.ts` via `listLiveTaskHandles(adapter, taskId)` | Refuses deletion when any handle tagged with the task id is live. |
+| Delete-guard (`task delete`) | `packages/cli/src/tasks/runtime/handlers/lifecycle.ts` via `listLiveTaskHandles(adapter, taskId)` | Refuses deletion when any handle tagged with the task id is live. |
 | Resolve chat target (TUI / CLI chat) | `packages/cli/src/tui/task-chat/use-task-chat.ts` | Uses `findLiveTaskHandle({adapter, taskId, taskRole})` to locate the right socket for live chat. |
-| Pause / cancel | `packages/cli/src/commands/builtins/tasks/handlers/pause.ts`, `cancel.ts` | Consult the adapter's handle (and its `metadata.executionId`) instead of reading sidecar JSON. |
+| Pause / cancel | `packages/cli/src/tasks/runtime/handlers/state.ts` | Consult the adapter's handle (and its `metadata.executionId`) instead of reading sidecar JSON. |
 
 ## Non-goals
 
@@ -135,9 +136,9 @@ on the adapter's manifest:
 
 ## Future Considerations
 
-- The `tasks` system under `packages/cli/src/commands/builtins/tasks/`
-  currently spans both `cli-domain` and `cli-orchestration` concerns. If
-  it grows further, it may warrant promotion to its own top-level `tasks/`
-  directory with an explicit layer assignment.
+- The `tasks` system now lives under `packages/cli/src/tasks/` as a
+  `cli-domain` module. Runtime hosts such as `cli/`, `tui/`, `harness/`, and
+  `daemon-runtime/` may compose it, but `tasks/` must not import from those
+  higher layers.
 - If planning (`plan/`) becomes general-purpose enough to serve consumers
   outside the CLI, it may move into `@noetic/core`.

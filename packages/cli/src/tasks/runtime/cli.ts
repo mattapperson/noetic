@@ -7,13 +7,13 @@
  * `if (import.meta.main)` foot guards a direct `bun run` invocation.
  */
 
+import { fileURLToPath } from 'node:url';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
 import { createFileStorage } from '@noetic/core';
 import { createLocalFsAdapter, createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
-import { ensureDaemon } from '../../daemon-runtime/runtime.js';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
 import { autopilotHandler, steerTaskHandler } from './handlers/autopilot.js';
 import {
@@ -72,6 +72,14 @@ export interface RunTasksCliOptions {
   readonly tasksRoot?: string;
   /** Override the FsAdapter. Defaults to `createLocalFsAdapter()`. */
   readonly fs?: FsAdapter;
+  /** Optional host hook for starting task orchestration before a verb runs. */
+  readonly ensureTaskRuntime?: (
+    projectRoot: string,
+  ) => TaskRuntimeStartup | Promise<TaskRuntimeStartup>;
+}
+
+export interface TaskRuntimeStartup {
+  readonly warning?: string;
 }
 
 type Verb = (
@@ -728,19 +736,13 @@ export async function runTasksCli(
     tasksRoot: options.tasksRoot,
   };
 
-  // Auto-start the background daemon (autopilot / validator / health /
-  // reconcile) so CLI verbs see the same orchestration as the
-  // interactive TUI. Skipped when we ARE the daemon child (avoids a
-  // recursive spawn) or when tests inject a custom fs/projectRoot.
-  if (process.env.NOETIC_DAEMON !== '1' && options.projectRoot === undefined) {
-    try {
-      ensureDaemon(projectRoot);
-    } catch (err) {
-      write(streams.stderr, `[warn] [tasks daemon] startup failed: ${formatError(err)}\n`);
-    }
-  }
-
   try {
+    if (options.ensureTaskRuntime) {
+      const startup = await options.ensureTaskRuntime(projectRoot);
+      if (startup?.warning) {
+        write(streams.stderr, `[warn] [tasks daemon] startup failed: ${startup.warning}\n`);
+      }
+    }
     await descriptor.run(ctx, argv.slice(1), streams);
     return 0;
   } catch (err) {
@@ -754,7 +756,7 @@ export async function runTasksCli(
 //#region Script entry point
 
 if (import.meta.main) {
-  runTasksCli(process.argv.slice(2)).then(
+  runDirectTasksCli(process.argv.slice(2)).then(
     (code) => {
       process.exit(code);
     },
@@ -766,3 +768,23 @@ if (import.meta.main) {
 }
 
 //#endregion
+
+async function runDirectTasksCli(argv: ReadonlyArray<string>): Promise<number> {
+  const cliEntry = fileURLToPath(new URL('../../cli/cli.ts', import.meta.url));
+  const child = Bun.spawn(
+    [
+      'bun',
+      'run',
+      cliEntry,
+      'tasks',
+      ...argv,
+    ],
+    {
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+      env: process.env,
+    },
+  );
+  return child.exited;
+}

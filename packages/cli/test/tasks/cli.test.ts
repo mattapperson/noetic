@@ -71,6 +71,49 @@ describe('runTasksCli — help & dispatch', () => {
     expect(code).toBe(1);
     expect(cap.stderr).toContain('Unknown verb');
   });
+
+  it('returns 1 when task runtime startup throws', async () => {
+    const ctx = makeStoreContext();
+    const cap = captureStreams();
+    const code = await runTasksCli(
+      [
+        'list',
+      ],
+      {
+        streams: cap.streams,
+        projectRoot: ctx.projectRoot,
+        tasksRoot: ctx.tasksRoot,
+        fs: ctx.fs,
+        ensureTaskRuntime: () => {
+          throw new Error('daemon unavailable');
+        },
+      },
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain('daemon unavailable');
+  });
+
+  it('prints task runtime startup warnings and still runs the verb', async () => {
+    const ctx = makeStoreContext();
+    const cap = captureStreams();
+    const code = await runTasksCli(
+      [
+        'list',
+      ],
+      {
+        streams: cap.streams,
+        projectRoot: ctx.projectRoot,
+        tasksRoot: ctx.tasksRoot,
+        fs: ctx.fs,
+        ensureTaskRuntime: () => ({
+          warning: 'socket unavailable',
+        }),
+      },
+    );
+    expect(code).toBe(0);
+    expect(cap.stderr).toContain('socket unavailable');
+    expect(JSON.parse(cap.stdout)).toEqual([]);
+  });
 });
 
 describe('runTasksCli — verbs', () => {

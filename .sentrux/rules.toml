@@ -68,6 +68,7 @@ paths = [
   "packages/cli/src/skills/**",
   "packages/cli/src/plugins/**",
   "packages/cli/src/commands/**",
+  "packages/cli/src/tasks/**",
 ]
 order = 13
 
@@ -112,10 +113,15 @@ order = 50
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tier D — core-internal layers (packages/core/src/**)
-# Ordered per the dependency graph in specs/00-overview.md: patterns →
-# adapters → interpreter → runtime → primitives → memory/observability →
-# foundations.
+# Ordered per the dependency graph in specs/00-overview.md: harness →
+# patterns → adapters → interpreter → runtime → primitives →
+# memory/observability → foundations.
 # ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "core-harness"
+paths = ["packages/core/src/harness/**"]
+order = 79
 
 [[layers]]
 name = "core-patterns"
