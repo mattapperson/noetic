@@ -18,7 +18,7 @@ import { tailEvents, taskDirPaths, taskRootPaths } from '@noetic/code-agent/task
 import {
   buildManualTask,
   submitNewTask,
-} from '../../../src/commands/builtins/tasks/ui/task-create-form.js';
+} from '../../../src/tui/tasks/runtime-ui/task-create-form.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('buildManualTask', () => {

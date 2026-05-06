@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createStreamIdleWatchdog } from '../../src/runtime/agent-harness';
+import { createStreamIdleWatchdog } from '../../src/harness/agent-harness';
 import { sleep } from '../_helpers';
 
 describe('createStreamIdleWatchdog', () => {

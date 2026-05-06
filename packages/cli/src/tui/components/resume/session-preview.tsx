@@ -9,7 +9,7 @@
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
-import type { SessionMetadata } from '../../../sessions/types.js';
+import type { SessionMetadata } from '../../../types/session.js';
 import { useTheme } from '../theme.js';
 import { formatRelativeTimeAgo, truncateFirstPrompt } from './format.js';
 

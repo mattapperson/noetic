@@ -8,7 +8,8 @@ import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subpr
 import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
 import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
 import type { LLMResponse } from '../src/types/common';
-import type { Context, ItemLog } from '../src/types/context';
+import type { Context } from '../src/types/context';
+import type { ItemLog } from '../src/types/context-parts/item-log';
 import type { EmbedFn } from '../src/types/embed';
 import type {
   FunctionCallItem,

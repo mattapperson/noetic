@@ -4,7 +4,7 @@ import { loadTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import {
   archiveTaskHandler,
   createTaskHandler,
-} from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+} from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('archiveTaskHandler', () => {

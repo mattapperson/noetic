@@ -5,16 +5,16 @@ import type { SubprocessHandle } from '@noetic/core';
 import type {
   StartPlannerRunArgs,
   StartPlannerRunResult,
-} from '../../src/commands/builtins/tasks/planner-launcher.js';
+} from '../../src/tasks/runtime/planner-launcher.js';
 import {
   PlannerSpawnError,
   PlannerSpawnErrorCode,
-} from '../../src/commands/builtins/tasks/planner-launcher.js';
+} from '../../src/tasks/runtime/planner-launcher.js';
 import {
   ensureChatTarget,
   resolveChatTarget,
   waitForChatTarget,
-} from '../../src/commands/builtins/tasks/resolve-chat-target.js';
+} from '../../src/tasks/runtime/resolve-chat-target.js';
 import { makeEmptySubprocess, preloadLiveHandle } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 

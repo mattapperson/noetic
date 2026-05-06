@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import type { MemoryLayer } from '../../src/types/memory';
 import { Slot } from '../../src/types/memory';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';

@@ -1,10 +1,26 @@
-import type { MemoryLayer, StorageAdapter, Tool } from '@noetic/core';
+import type { FsAdapter, MemoryLayer, ShellAdapter, Step, StorageAdapter, Tool } from '@noetic/core';
 import type { CallModel } from '../ai/plugin-call-model.js';
 import type { LspServerContribution } from '../lsp/types.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';
-import type { SubagentPreset } from '../plan/subagents.js';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentConfig } from '../types/config.js';
+
+export interface SubagentArgs {
+  /** Free-form natural-language prompt describing the task. */
+  prompt: string;
+  /** Working directory for read-only tool resolution. */
+  cwd: string;
+  /** Model identifier passed through to the underlying `step.llm`. */
+  model: string;
+  /** Optional unique id for the spawned step. Auto-generated when omitted. */
+  id?: string;
+  /** Optional fs adapter; defaults to local fs (via `createReadOnlyTools` defaults). */
+  fs?: FsAdapter;
+  /** Optional shell adapter; defaults to local shell. */
+  shell?: ShellAdapter;
+}
+
+export type SubagentPreset = (args: SubagentArgs) => Step<unknown, string, string>;
 
 /**
  * Capabilities an agent host injects into every SDK plugin hook. This context

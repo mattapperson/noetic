@@ -12,7 +12,7 @@ import {
   formatLogLine,
   logEntryKey,
   truncateLogTail,
-} from '../../../src/commands/builtins/tasks/ui/task-detail.js';
+} from '../../../src/tui/tasks/runtime-ui/task-detail.js';
 
 //#region Fixtures
 

@@ -17,110 +17,147 @@ export interface ParsedArgs {
   flags: CliFlags;
 }
 
-export function parseArgs(argv: string[]): ParsedArgs {
-  const args = argv.slice(2);
-  let model = DEFAULT_MODEL;
-  let cwd = process.cwd();
-  let apiKey = process.env.OPENROUTER_API_KEY ?? '';
-  let maxTurns = DEFAULT_MAX_TURNS;
-  const flags: CliFlags = {
-    ...DEFAULT_CLI_FLAGS,
+interface ParseState {
+  model: string;
+  cwd: string;
+  apiKey: string;
+  maxTurns: number;
+  flags: CliFlags;
+}
+
+function createInitialParseState(): ParseState {
+  return {
+    model: DEFAULT_MODEL,
+    cwd: process.cwd(),
+    apiKey: process.env.OPENROUTER_API_KEY ?? '',
+    maxTurns: DEFAULT_MAX_TURNS,
+    flags: {
+      ...DEFAULT_CLI_FLAGS,
+    },
   };
+}
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+function requireNext(args: ReadonlyArray<string>, index: number): string | undefined {
+  return index + 1 < args.length ? args[index + 1] : undefined;
+}
 
-    if (arg === '--model' && i + 1 < args.length) {
-      model = args[++i];
-      flags.modelExplicit = true;
-      continue;
-    }
-
-    if (arg === '--cwd' && i + 1 < args.length) {
-      cwd = args[++i];
-      continue;
-    }
-
-    if (arg === '--api-key' && i + 1 < args.length) {
-      apiKey = args[++i];
-      continue;
-    }
-
-    if (arg === '--max-turns' && i + 1 < args.length) {
-      maxTurns = Number.parseInt(args[++i], 10);
-      continue;
-    }
-
-    if (arg === '--continue' || arg === '-c') {
-      flags.continueLatest = true;
-      continue;
-    }
-
-    if (arg === '--resume' || arg === '-r') {
-      // --resume can be bare (picker) or followed by a UUID. Only consume the
-      // next token if it looks like a UUID; otherwise leave it for the rest
-      // of the parser.
-      const next = args[i + 1];
-      if (next !== undefined && UUID_RE.test(next)) {
-        flags.resume = next;
-        i++;
-        continue;
-      }
-      flags.resume = true;
-      continue;
-    }
-
-    if (arg === '--fork-session') {
-      flags.forkSession = true;
-      continue;
-    }
-
-    if (arg === '--session-id' && i + 1 < args.length) {
-      const id = args[++i];
-      if (!UUID_RE.test(id)) {
-        process.stderr.write(`Error: --session-id must be a valid UUID (got: ${id})\n`);
-        process.exit(1);
-      }
-      flags.sessionId = id;
-      continue;
-    }
-
-    if ((arg === '--name' || arg === '-n') && i + 1 < args.length) {
-      flags.name = args[++i];
-      continue;
-    }
-
-    if (arg === '--no-session-persistence') {
-      flags.noSessionPersistence = true;
-      continue;
-    }
-
-    if (arg === '--help' || arg === '-h') {
-      printHelp();
-      process.exit(0);
-    }
+function parseResumeArg(args: ReadonlyArray<string>, index: number, flags: CliFlags): number {
+  const next = requireNext(args, index);
+  if (next !== undefined && UUID_RE.test(next)) {
+    flags.resume = next;
+    return index + 1;
   }
+  flags.resume = true;
+  return index;
+}
 
-  if (flags.forkSession && !flags.continueLatest && flags.resume === false) {
+function parseSessionId(args: ReadonlyArray<string>, index: number, flags: CliFlags): number {
+  const id = requireNext(args, index);
+  if (id === undefined) {
+    return index;
+  }
+  if (!UUID_RE.test(id)) {
+    process.stderr.write(`Error: --session-id must be a valid UUID (got: ${id})\n`);
+    process.exit(1);
+  }
+  flags.sessionId = id;
+  return index + 1;
+}
+
+function parseValueOption(state: ParseState, arg: string, value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  if (arg === '--model') {
+    state.model = value;
+    state.flags.modelExplicit = true;
+    return true;
+  }
+  if (arg === '--cwd') {
+    state.cwd = value;
+    return true;
+  }
+  if (arg === '--api-key') {
+    state.apiKey = value;
+    return true;
+  }
+  if (arg === '--max-turns') {
+    state.maxTurns = Number.parseInt(value, 10);
+    return true;
+  }
+  if (arg === '--name' || arg === '-n') {
+    state.flags.name = value;
+    return true;
+  }
+  return false;
+}
+
+function parseFlagOption(state: ParseState, arg: string): boolean {
+  if (arg === '--continue' || arg === '-c') {
+    state.flags.continueLatest = true;
+    return true;
+  }
+  if (arg === '--fork-session') {
+    state.flags.forkSession = true;
+    return true;
+  }
+  if (arg === '--no-session-persistence') {
+    state.flags.noSessionPersistence = true;
+    return true;
+  }
+  if (arg === '--help' || arg === '-h') {
+    printHelp();
+    process.exit(0);
+  }
+  return false;
+}
+
+function parseArgAt(args: ReadonlyArray<string>, index: number, state: ParseState): number {
+  const arg = args[index];
+  if (arg === '--resume' || arg === '-r') {
+    return parseResumeArg(args, index, state.flags);
+  }
+  if (arg === '--session-id') {
+    return parseSessionId(args, index, state.flags);
+  }
+  if (parseValueOption(state, arg, requireNext(args, index))) {
+    return index + 1;
+  }
+  parseFlagOption(state, arg);
+  return index;
+}
+
+function validateParsedState(state: ParseState): void {
+  if (state.flags.forkSession && !state.flags.continueLatest && state.flags.resume === false) {
     process.stderr.write('Error: --fork-session requires --continue or --resume\n');
     process.exit(1);
   }
-
-  if (!apiKey) {
+  if (!state.apiKey) {
     process.stderr.write('Error: OPENROUTER_API_KEY not set. Use --api-key or set the env var.\n');
     process.exit(1);
   }
+}
+
+export function parseArgs(argv: string[]): ParsedArgs {
+  const args = argv.slice(2);
+  const state = createInitialParseState();
+
+  for (let i = 0; i < args.length; i++) {
+    i = parseArgAt(args, i, state);
+  }
+
+  validateParsedState(state);
 
   const config = AgentConfigSchema.parse({
-    model,
-    cwd,
-    apiKey,
-    maxTurns,
+    model: state.model,
+    cwd: state.cwd,
+    apiKey: state.apiKey,
+    maxTurns: state.maxTurns,
   });
 
   return {
     config,
-    flags,
+    flags: state.flags,
   };
 }
 

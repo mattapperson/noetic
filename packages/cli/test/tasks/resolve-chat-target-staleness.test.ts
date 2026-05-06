@@ -15,7 +15,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { resolveChatTarget } from '../../src/commands/builtins/tasks/resolve-chat-target.js';
+import { resolveChatTarget } from '../../src/tasks/runtime/resolve-chat-target.js';
 import { preloadLiveHandles } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 

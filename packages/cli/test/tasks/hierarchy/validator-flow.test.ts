@@ -11,23 +11,23 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import { loadState, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import { AgentHarness } from '@noetic/core';
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
-import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
-import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
+import { activateSlice } from '../../../src/tasks/runtime/hierarchy/activation.js';
+import { applyFeatureLoopStateUpdate } from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';
+import { persistTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/persist.js';
 import {
   FeatureLoopState,
   FeatureStatus,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature, saveFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import { listValidatorRuns } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
-import type { ValidatorFlowDeps } from '../../../src/commands/builtins/tasks/hierarchy/validator-flow.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature, saveFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
+import { listValidatorRuns } from '../../../src/tasks/runtime/hierarchy/validator.js';
+import type { ValidatorFlowDeps } from '../../../src/tasks/runtime/hierarchy/validator-flow.js';
 import {
   buildValidatorEvery,
   buildValidatorIterationStep,
-} from '../../../src/commands/builtins/tasks/hierarchy/validator-flow.js';
-import type { RunValidatorFn } from '../../../src/commands/builtins/tasks/hierarchy/validator-job.js';
+} from '../../../src/tasks/runtime/hierarchy/validator-flow.js';
+import type { RunValidatorFn } from '../../../src/tasks/runtime/hierarchy/validator-job.js';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

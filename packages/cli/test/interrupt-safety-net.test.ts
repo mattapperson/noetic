@@ -1,10 +1,10 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
-import type { SignalDeps } from '../src/cli/interrupt-safety-net.js';
+import type { SignalDeps } from '../src/tui/terminal/interrupt-safety-net.js';
 import {
   buildTerminalRestoreSequence,
   installInterruptSafetyNet,
-} from '../src/cli/interrupt-safety-net.js';
+} from '../src/tui/terminal/interrupt-safety-net.js';
 
 type Signal = 'SIGINT' | 'SIGTERM';
 

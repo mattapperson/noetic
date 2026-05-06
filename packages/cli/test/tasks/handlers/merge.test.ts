@@ -3,8 +3,8 @@ import { EventKind, TaskLifecycleStatus } from '@noetic/code-agent/tasks/schema'
 
 import { loadTask, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ShellAdapter, ShellExecResult } from '@noetic/core';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
-import { mergeTaskHandler } from '../../../src/commands/builtins/tasks/handlers/state.js';
+import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
+import { mergeTaskHandler } from '../../../src/tasks/runtime/handlers/state.js';
 import { makeStoreContext } from '../_helpers.js';
 
 interface RecordedExec {

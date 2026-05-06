@@ -6,7 +6,7 @@
 
 import { render } from 'ink';
 
-import type { SessionFile } from '../sessions/types.js';
+import type { SessionFile } from '../types/session.js';
 import { InkProvider } from './components/index.js';
 import { ResumeScreen } from './components/resume/resume-screen.js';
 

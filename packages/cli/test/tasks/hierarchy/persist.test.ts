@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 
-import { getTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/aggregate.js';
+import { getTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/aggregate.js';
 import {
   linkFeatureToTask,
   persistTaskHierarchy,
-} from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
-import type { TaskHierarchyInput } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/persist.js';
+import type { TaskHierarchyInput } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   AssertionStatus,
   FeatureLoopState,
   FeatureStatus,
   MilestoneStatus,
   SliceStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

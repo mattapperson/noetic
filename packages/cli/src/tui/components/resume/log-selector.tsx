@@ -10,7 +10,7 @@ import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
-import type { SessionMetadata } from '../../../sessions/types.js';
+import type { SessionMetadata } from '../../../types/session.js';
 import { useTheme } from '../theme.js';
 import { shouldCancelOnKey } from './cancel-key.js';
 import { formatRelativeTimeAgo, truncateFirstPrompt } from './format.js';

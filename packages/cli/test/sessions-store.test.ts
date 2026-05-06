@@ -12,7 +12,7 @@ import {
   loadSessionByIdAnywhere,
   saveSession,
 } from '../src/sessions/store.js';
-import type { SessionFile } from '../src/sessions/types.js';
+import type { SessionFile } from '../src/types/session.js';
 
 const originalOverride = process.env.NOETIC_SESSIONS_DIR;
 const createdDirs: string[] = [];

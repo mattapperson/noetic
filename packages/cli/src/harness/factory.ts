@@ -1,42 +1,30 @@
-import { createCodeAgent } from '@noetic/code-agent';
-import { TeammateRegistry } from '@noetic/code-agent/agents';
-import type { AskUserService } from '@noetic/code-agent/ask-user-service';
-import type { LspServerContribution } from '@noetic/code-agent/lsp';
-import { createBuiltinLspServers, LspService } from '@noetic/code-agent/lsp';
-import type { ReminderTrigger } from '@noetic/code-agent/memory';
 import {
   agentMdLayer,
   BUILTIN_TRIGGERS,
-  createReminderRegistry,
-  createSteeringFileLayer,
-  reminderLayer,
-  skillsLayer,
-  teammateInboxLayer,
-} from '@noetic/code-agent/memory';
-import type { PluginContextBuilder } from '@noetic/code-agent/plugins';
-import type { SkillDefinition } from '@noetic/code-agent/skills';
-import { buildSkillCatalog } from '@noetic/code-agent/skills';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
-import {
+  buildSkillCatalog,
   createActivateSkillTool,
   createAgentTool,
+  createBuiltinLspServers,
   createCheckAgentTool,
+  createCodeAgent,
   createCodingTools,
   createReadOnlyTools,
+  createReminderRegistry,
   createSendMessageTool,
-} from '@noetic/code-agent/tools/node';
-import type {
-  AgentHarness,
-  FsAdapter,
-  MemoryLayer,
-  PlanEnterSessionCallback,
-  PlanExitCallback,
-  ShellAdapter,
-  StorageAdapter,
-  SubprocessAdapter,
-  Tool,
-} from '@noetic/core';
+  createSteeringFileLayer,
+  LspService,
+  reminderLayer,
+  resolveSubprocessRoot,
+  skillsLayer,
+  teammateInboxLayer,
+  TeammateRegistry,
+  type AskUserService,
+  type LspServerContribution,
+  type PluginContextBuilder,
+  type ReminderTrigger,
+  type SkillDefinition,
+  type TaskStoreContext,
+} from './deps/code-agent';
 import {
   createFileStorage,
   createLocalSubprocessAdapter,
@@ -47,11 +35,20 @@ import {
   planMemory,
   toolMemoryLayer,
   workingMemory,
-} from '@noetic/core';
+  type AgentHarness,
+  type FsAdapter,
+  type MemoryLayer,
+  type PlanEnterSessionCallback,
+  type PlanExitCallback,
+  type ShellAdapter,
+  type StorageAdapter,
+  type SubprocessAdapter,
+  type Tool,
+} from './deps/core';
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
-import { createTaskMutationPolicy } from '../commands/builtins/tasks/mutation-policy.js';
-import { taskTools } from '../commands/builtins/tasks/tools.js';
+import { createTaskMutationPolicy } from '../tasks/runtime/mutation-policy.js';
+import { taskTools } from '../tasks/runtime/tools.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import type { AgentConfig } from '../types/config.js';

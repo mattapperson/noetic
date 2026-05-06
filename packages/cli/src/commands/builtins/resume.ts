@@ -5,7 +5,6 @@
  * With a UUID: loads that session directly from disk and restarts the TUI.
  */
 
-import { loadSession, loadSessionByIdAnywhere } from '../../sessions/store.js';
 import type { Command, LocalCommandCall } from '../types.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -26,17 +25,16 @@ const call: LocalCommandCall = async (args, ctx) => {
       value: `"${trimmed}" is not a valid session id.`,
     };
   }
-  const file = (await loadSession(ctx.cwd, trimmed)) ?? (await loadSessionByIdAnywhere(trimmed));
-  if (file === null) {
+  const failure = await ctx.restartWithSession({
+    kind: 'id',
+    sessionId: trimmed,
+  });
+  if (failure) {
     return {
       type: 'text',
-      value: `Session ${trimmed} not found.`,
+      value: failure,
     };
   }
-  ctx.restartWithSession({
-    kind: 'file',
-    file,
-  });
   return {
     type: 'skip',
   };

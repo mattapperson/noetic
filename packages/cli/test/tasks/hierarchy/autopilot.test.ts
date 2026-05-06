@@ -15,21 +15,21 @@ import {
   tryLoadTask,
 } from '@noetic/code-agent/tasks/store/fs-node';
 import { createInMemorySubprocessAdapter } from '@noetic/core';
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
-import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
-import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
-import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
+import type { AutopilotDeps } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
+import { runAutopilotTick } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
+import { applyFeatureLoopStateUpdate } from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';
+import { persistTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/persist.js';
 import {
   FeatureLoopState,
   FeatureStatus,
   MilestoneStatus,
   SliceStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   listMilestones,
   listSlices,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 
@@ -214,7 +214,7 @@ describe('runAutopilotTick (active slice with all features passed)', () => {
       projectRoot: seed.projectRoot,
       tasksRoot: seed.tasksRoot,
     };
-    const features = await import('../../../src/commands/builtins/tasks/hierarchy/store.js').then(
+    const features = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
       (m) => m.listFeatures(ctx, seed.taskId),
     );
     const firstSliceFeature = features[0];
@@ -288,7 +288,7 @@ describe('runAutopilotTick (slice fully blocked)', () => {
       projectRoot: seed.projectRoot,
       tasksRoot: seed.tasksRoot,
     };
-    const features = await import('../../../src/commands/builtins/tasks/hierarchy/store.js').then(
+    const features = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
       (m) => m.listFeatures(ctx, seed.taskId),
     );
     const firstFeature = features[0];
@@ -327,7 +327,7 @@ describe('runAutopilotTick (milestone completion)', () => {
     };
     // Tick 1: activates S1.
     await runAutopilotTick(makeDeps(seed));
-    const feats = await import('../../../src/commands/builtins/tasks/hierarchy/store.js').then(
+    const feats = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
       (m) => m.listFeatures(ctx, seed.taskId),
     );
     const f1 = feats[0];
@@ -347,7 +347,7 @@ describe('runAutopilotTick (milestone completion)', () => {
     );
     // Tick 2: completes S1, activates S2 (and triages F2).
     await runAutopilotTick(makeDeps(seed));
-    const feats2 = await import('../../../src/commands/builtins/tasks/hierarchy/store.js').then(
+    const feats2 = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
       (m) => m.listFeatures(ctx, seed.taskId),
     );
     const f2 = feats2.find((f) => f.id !== f1.id);

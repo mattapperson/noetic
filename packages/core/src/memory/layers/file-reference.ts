@@ -385,6 +385,343 @@ Score:`;
 
 //#endregion
 
+//#region Layer Hooks
+
+interface FileReferenceRuntime {
+  baseDir: string;
+  slot: number;
+  scoringModel: string;
+  readOpts: ReadFileOptions;
+}
+
+function createFileReferenceRuntime(opts?: FileReferenceOptions): FileReferenceRuntime {
+  const baseDir = opts?.baseDir ?? currentWorkingDirectory();
+  const maxFileSize = opts?.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
+  const followSymlinks = opts?.followSymlinks ?? false;
+  const allowedExtensions = opts?.allowedExtensions ?? DEFAULT_ALLOWED_EXTENSIONS;
+  return {
+    baseDir,
+    slot: opts?.slot ?? Slot.RAG,
+    scoringModel: opts?.scoringModel ?? 'anthropic/claude-haiku-4-5-20251001',
+    readOpts: {
+      maxFileSize,
+      followSymlinks,
+      baseDir,
+      allowedExtensions,
+    },
+  };
+}
+
+async function initFileReferenceState(baseDir: string): Promise<{ state: FileReferenceState }> {
+  return {
+    state: {
+      files: new Map<string, TrackedFile>(),
+      baseDir,
+    },
+  };
+}
+
+function absolutePathReference(ref: string): TrackedFile {
+  return {
+    absolutePath: ref,
+    referencePath: ref,
+    content: null,
+    priority: 0,
+    contentHash: '',
+    deleted: false,
+    tokenCount: 0,
+    error: 'ABSOLUTE_PATH: Only relative paths are allowed',
+  };
+}
+
+async function trackNewReference(args: {
+  ref: string;
+  state: FileReferenceState;
+  readOpts: ReadFileOptions;
+  ctx: ExecutionContext;
+  userQuery: string;
+  scoringModel: string;
+}): Promise<TrackedFile> {
+  if (isAbsolutePath(args.ref)) {
+    return absolutePathReference(args.ref);
+  }
+  const absolutePath = resolvePath(args.state.baseDir, args.ref);
+  const result = await readFileContent(absolutePath, args.readOpts, args.ctx.fs);
+  const priority = result.content
+    ? await scoreFileRelevance({
+        filePath: args.ref,
+        fileContent: result.content,
+        userQuery: args.userQuery,
+        ctx: args.ctx,
+        model: args.scoringModel,
+      })
+    : 0;
+  return {
+    absolutePath,
+    referencePath: args.ref,
+    content: result.content,
+    priority,
+    contentHash: result.content ? simpleHash(result.content) : '',
+    deleted: result.deleted,
+    tokenCount: result.content ? estimateTokens(result.content) : 0,
+    error: result.error,
+  };
+}
+
+async function addNewReferences(args: {
+  refs: ReadonlyArray<string>;
+  files: Map<string, TrackedFile>;
+  state: FileReferenceState;
+  readOpts: ReadFileOptions;
+  ctx: ExecutionContext;
+  userQuery: string;
+  scoringModel: string;
+}): Promise<boolean> {
+  let hasChanges = false;
+  for (const ref of args.refs) {
+    if (args.files.has(ref)) {
+      continue;
+    }
+    args.files.set(ref, await trackNewReference({ ...args, ref }));
+    hasChanges = true;
+  }
+  return hasChanges;
+}
+
+function transformItemReferences(item: Item, refs: ReadonlyArray<string>): Item {
+  if (refs.length === 0 || !isInputMessage(item)) {
+    return item;
+  }
+  const transformedContent: InputTextPart[] = item.content.map((c) => ({
+    type: 'input_text',
+    text: transformReferencesToAnchors(c.text),
+  }));
+  return {
+    ...item,
+    content: transformedContent,
+  } satisfies InputMessageItem;
+}
+
+async function processAppendedItems(args: {
+  items: Item[];
+  files: Map<string, TrackedFile>;
+  state: FileReferenceState;
+  readOpts: ReadFileOptions;
+  ctx: ExecutionContext;
+  scoringModel: string;
+}): Promise<{ transformedItems: Item[]; hasChanges: boolean; userQuery: string }> {
+  const transformedItems: Item[] = [];
+  let hasChanges = false;
+  let userQuery = '';
+  for (const item of args.items) {
+    const text = extractTextFromItem(item);
+    if (!text) {
+      transformedItems.push(item);
+      continue;
+    }
+    if (item.type === 'message' && 'role' in item && item.role === 'user') {
+      userQuery = text;
+    }
+    const refs = extractFileReferences(text);
+    const added = await addNewReferences({
+      refs,
+      files: args.files,
+      state: args.state,
+      readOpts: args.readOpts,
+      ctx: args.ctx,
+      userQuery,
+      scoringModel: args.scoringModel,
+    });
+    hasChanges = hasChanges || added;
+    transformedItems.push(transformItemReferences(item, refs));
+  }
+  return { transformedItems, hasChanges, userQuery };
+}
+
+async function refreshTrackedFile(args: {
+  ref: string;
+  tracked: TrackedFile;
+  readOpts: ReadFileOptions;
+  ctx: ExecutionContext;
+  userQuery: string;
+  scoringModel: string;
+}): Promise<TrackedFile | null> {
+  if (args.tracked.error) {
+    return null;
+  }
+  const result = await readFileContent(args.tracked.absolutePath, args.readOpts, args.ctx.fs);
+  if (result.deleted && !args.tracked.deleted) {
+    return {
+      ...args.tracked,
+      content: null,
+      deleted: true,
+    };
+  }
+  if (result.error && !args.tracked.error) {
+    return {
+      ...args.tracked,
+      content: null,
+      error: result.error,
+    };
+  }
+  if (result.deleted || !result.content) {
+    return null;
+  }
+  const newHash = simpleHash(result.content);
+  if (newHash === args.tracked.contentHash) {
+    return null;
+  }
+  const priority = args.userQuery
+    ? await scoreFileRelevance({
+        filePath: args.ref,
+        fileContent: result.content,
+        userQuery: args.userQuery,
+        ctx: args.ctx,
+        model: args.scoringModel,
+      })
+    : args.tracked.priority;
+  return {
+    ...args.tracked,
+    content: result.content,
+    contentHash: newHash,
+    deleted: false,
+    tokenCount: estimateTokens(result.content),
+    priority,
+    error: undefined,
+  };
+}
+
+async function refreshTrackedFiles(args: {
+  files: Map<string, TrackedFile>;
+  readOpts: ReadFileOptions;
+  ctx: ExecutionContext;
+  userQuery: string;
+  scoringModel: string;
+}): Promise<boolean> {
+  let hasChanges = false;
+  for (const [ref, tracked] of args.files) {
+    const next = await refreshTrackedFile({ ...args, ref, tracked });
+    if (next === null) {
+      continue;
+    }
+    args.files.set(ref, next);
+    hasChanges = true;
+  }
+  return hasChanges;
+}
+
+async function onFileReferenceItemAppend(
+  args: { items: Item[]; ctx: ExecutionContext; state: FileReferenceState },
+  runtime: FileReferenceRuntime,
+) {
+  const newFiles = new Map(args.state.files);
+  const currentReadOpts: ReadFileOptions = {
+    ...runtime.readOpts,
+    baseDir: args.state.baseDir,
+  };
+  const processed = await processAppendedItems({
+    items: args.items,
+    files: newFiles,
+    state: args.state,
+    readOpts: currentReadOpts,
+    ctx: args.ctx,
+    scoringModel: runtime.scoringModel,
+  });
+  const refreshed = await refreshTrackedFiles({
+    files: newFiles,
+    readOpts: currentReadOpts,
+    ctx: args.ctx,
+    userQuery: processed.userQuery,
+    scoringModel: runtime.scoringModel,
+  });
+  return {
+    items: processed.transformedItems,
+    state: {
+      ...args.state,
+      files: newFiles,
+    },
+    rerender: processed.hasChanges || refreshed,
+    timing: 'immediate' as const,
+    scope: 'self' as const,
+  };
+}
+
+function buildDeletedOrErrorBlock(file: TrackedFile): string | null {
+  if (file.deleted) {
+    return `## ${file.referencePath}\n\n[FILE DELETED: ${file.absolutePath}]`;
+  }
+  if (file.error) {
+    return `## ${file.referencePath}\n\n[ERROR: ${file.error}]`;
+  }
+  return null;
+}
+
+function truncateFileContent(file: TrackedFile, remainingBudget: number): string {
+  if (!file.content || file.tokenCount <= remainingBudget) {
+    return file.content ?? '';
+  }
+  const lines = file.content.split('\n');
+  const headLines = Math.floor(lines.length * 0.6);
+  const tailLines = Math.floor(lines.length * 0.3);
+  const head = lines.slice(0, headLines).join('\n');
+  const tail = lines.slice(-tailLines).join('\n');
+  return `${head}\n\n... [truncated ${lines.length - headLines - tailLines} lines] ...\n\n${tail}`;
+}
+
+function buildContentBlock(file: TrackedFile, totalTokens: number, budget: number): string | null {
+  const statusBlock = buildDeletedOrErrorBlock(file);
+  if (statusBlock !== null) {
+    return totalTokens + estimateTokens(statusBlock) <= budget ? statusBlock : null;
+  }
+  if (!file.content) {
+    return null;
+  }
+  const header = `## ${file.referencePath}`;
+  const headerTokens = estimateTokens(header);
+  if (totalTokens + headerTokens >= budget) {
+    return null;
+  }
+  const remainingBudget = budget - totalTokens - headerTokens - 10;
+  const contentToInclude = truncateFileContent(file, remainingBudget);
+  return `${header}\n\n\`\`\`\n${contentToInclude}\n\`\`\``;
+}
+
+async function recallFileReferences({ state, budget }: { state: FileReferenceState; budget: number }) {
+  if (state.files.size === 0) {
+    return {
+      items: [],
+      tokenCount: 0,
+    };
+  }
+  const sortedFiles = [...state.files.values()].sort((a, b) => b.priority - a.priority);
+  const blocks: string[] = [];
+  let totalTokens = 0;
+  for (const file of sortedFiles) {
+    const block = buildContentBlock(file, totalTokens, budget);
+    if (block === null) {
+      continue;
+    }
+    const blockTokens = estimateTokens(block);
+    blocks.push(block);
+    totalTokens += blockTokens;
+  }
+  if (blocks.length === 0) {
+    return {
+      items: [],
+      tokenCount: 0,
+    };
+  }
+  const content = `# Referenced Files\n\n${blocks.join('\n\n')}`;
+  return {
+    items: [
+      createMessage(content, 'developer'),
+    ],
+    tokenCount: estimateTokens(content),
+  };
+}
+
+//#endregion
+
 //#region Layer Factory
 
 /**
@@ -402,291 +739,18 @@ Score:`;
  * @public
  */
 export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileReferenceState> {
-  const baseDir = opts?.baseDir ?? currentWorkingDirectory();
-  const slot = opts?.slot ?? Slot.RAG;
-  const scoringModel = opts?.scoringModel ?? 'anthropic/claude-haiku-4-5-20251001';
-  const maxFileSize = opts?.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
-  const followSymlinks = opts?.followSymlinks ?? false;
-  const allowedExtensions = opts?.allowedExtensions ?? DEFAULT_ALLOWED_EXTENSIONS;
-
-  // Pre-compute read options for reuse
-  const readOpts: ReadFileOptions = {
-    maxFileSize,
-    followSymlinks,
-    baseDir,
-    allowedExtensions,
-  };
-
+  const runtime = createFileReferenceRuntime(opts);
   return {
     id: 'file-reference',
     name: 'File Reference',
-    slot,
+    slot: runtime.slot,
     scope: 'thread',
     budget: 'auto',
     rerenderTiming: 'immediate',
-
     hooks: {
-      async init() {
-        return {
-          state: {
-            files: new Map<string, TrackedFile>(),
-            baseDir,
-          },
-        };
-      },
-
-      async onItemAppend({ items, ctx, state }) {
-        const newFiles = new Map(state.files);
-        let hasChanges = false;
-        let userQuery = '';
-
-        // Update readOpts with current state's baseDir
-        const currentReadOpts: ReadFileOptions = {
-          ...readOpts,
-          baseDir: state.baseDir,
-        };
-
-        // Process each item
-        const transformedItems: Item[] = [];
-
-        for (const item of items) {
-          const text = extractTextFromItem(item);
-          if (!text) {
-            transformedItems.push(item);
-            continue;
-          }
-
-          // Extract user query for scoring
-          if (item.type === 'message' && 'role' in item && item.role === 'user') {
-            userQuery = text;
-          }
-
-          // Extract file references
-          const refs = extractFileReferences(text);
-
-          // Process new references
-          for (const ref of refs) {
-            if (!newFiles.has(ref)) {
-              // Security: Reject absolute paths - all paths must be relative to baseDir
-              if (isAbsolutePath(ref)) {
-                newFiles.set(ref, {
-                  absolutePath: ref,
-                  referencePath: ref,
-                  content: null,
-                  priority: 0,
-                  contentHash: '',
-                  deleted: false,
-                  tokenCount: 0,
-                  error: 'ABSOLUTE_PATH: Only relative paths are allowed',
-                });
-                hasChanges = true;
-                continue;
-              }
-
-              const absolutePath = resolvePath(state.baseDir, ref);
-              const result = await readFileContent(absolutePath, currentReadOpts, ctx.fs);
-
-              const priority = result.content
-                ? await scoreFileRelevance({
-                    filePath: ref,
-                    fileContent: result.content,
-                    userQuery,
-                    ctx,
-                    model: scoringModel,
-                  })
-                : 0;
-
-              newFiles.set(ref, {
-                absolutePath,
-                referencePath: ref,
-                content: result.content,
-                priority,
-                contentHash: result.content ? simpleHash(result.content) : '',
-                deleted: result.deleted,
-                tokenCount: result.content ? estimateTokens(result.content) : 0,
-                error: result.error,
-              });
-
-              hasChanges = true;
-            }
-          }
-
-          // Transform references to anchor links
-          if (refs.length > 0 && isInputMessage(item)) {
-            const transformedContent: InputTextPart[] = item.content.map((c) => {
-              const part: InputTextPart = {
-                type: 'input_text',
-                text: transformReferencesToAnchors(c.text),
-              };
-              return part;
-            });
-            const transformedItem: InputMessageItem = {
-              ...item,
-              content: transformedContent,
-            };
-            transformedItems.push(transformedItem);
-          } else {
-            transformedItems.push(item);
-          }
-        }
-
-        // Check existing files for changes
-        for (const [ref, tracked] of newFiles) {
-          // Skip files with errors - they won't change
-          if (tracked.error) {
-            continue;
-          }
-
-          const result = await readFileContent(tracked.absolutePath, currentReadOpts, ctx.fs);
-
-          if (result.deleted && !tracked.deleted) {
-            // File was deleted
-            newFiles.set(ref, {
-              ...tracked,
-              content: null,
-              deleted: true,
-            });
-            hasChanges = true;
-          } else if (result.error && !tracked.error) {
-            // File now has error (e.g., permission changed)
-            newFiles.set(ref, {
-              ...tracked,
-              content: null,
-              error: result.error,
-            });
-            hasChanges = true;
-          } else if (!result.deleted && result.content) {
-            const newHash = simpleHash(result.content);
-            if (newHash !== tracked.contentHash) {
-              // File content changed
-              const priority = userQuery
-                ? await scoreFileRelevance({
-                    filePath: ref,
-                    fileContent: result.content,
-                    userQuery,
-                    ctx,
-                    model: scoringModel,
-                  })
-                : tracked.priority;
-
-              newFiles.set(ref, {
-                ...tracked,
-                content: result.content,
-                contentHash: newHash,
-                deleted: false,
-                tokenCount: estimateTokens(result.content),
-                priority,
-                error: undefined,
-              });
-              hasChanges = true;
-            }
-          }
-        }
-
-        return {
-          items: transformedItems,
-          state: {
-            ...state,
-            files: newFiles,
-          },
-          rerender: hasChanges,
-          timing: 'immediate',
-          scope: 'self',
-        };
-      },
-
-      async recall({ state, budget }) {
-        if (state.files.size === 0) {
-          return {
-            items: [],
-            tokenCount: 0,
-          };
-        }
-
-        // Sort files by priority (highest first)
-        const sortedFiles = [
-          ...state.files.values(),
-        ].sort((a, b) => b.priority - a.priority);
-
-        // Build content blocks within budget
-        const blocks: string[] = [];
-        let totalTokens = 0;
-
-        for (const file of sortedFiles) {
-          // Handle deleted files
-          if (file.deleted) {
-            const block = `## ${file.referencePath}\n\n[FILE DELETED: ${file.absolutePath}]`;
-            const tokens = estimateTokens(block);
-            if (totalTokens + tokens <= budget) {
-              blocks.push(block);
-              totalTokens += tokens;
-            }
-            continue;
-          }
-
-          // Handle files with errors (security, size, permission)
-          if (file.error) {
-            const block = `## ${file.referencePath}\n\n[ERROR: ${file.error}]`;
-            const tokens = estimateTokens(block);
-            if (totalTokens + tokens <= budget) {
-              blocks.push(block);
-              totalTokens += tokens;
-            }
-            continue;
-          }
-
-          if (!file.content) {
-            continue;
-          }
-
-          const header = `## ${file.referencePath}`;
-          const headerTokens = estimateTokens(header);
-
-          if (totalTokens + headerTokens >= budget) {
-            // Can't fit even the header
-            break;
-          }
-
-          const remainingBudget = budget - totalTokens - headerTokens - 10; // Buffer for formatting
-          let contentToInclude = file.content;
-
-          if (file.tokenCount > remainingBudget) {
-            // Truncate content - show head + tail
-            const lines = file.content.split('\n');
-            const headLines = Math.floor(lines.length * 0.6);
-            const tailLines = Math.floor(lines.length * 0.3);
-
-            const head = lines.slice(0, headLines).join('\n');
-            const tail = lines.slice(-tailLines).join('\n');
-
-            contentToInclude = `${head}\n\n... [truncated ${lines.length - headLines - tailLines} lines] ...\n\n${tail}`;
-          }
-
-          const block = `${header}\n\n\`\`\`\n${contentToInclude}\n\`\`\``;
-          const blockTokens = estimateTokens(block);
-
-          if (totalTokens + blockTokens <= budget) {
-            blocks.push(block);
-            totalTokens += blockTokens;
-          }
-        }
-
-        if (blocks.length === 0) {
-          return {
-            items: [],
-            tokenCount: 0,
-          };
-        }
-
-        const content = `# Referenced Files\n\n${blocks.join('\n\n')}`;
-
-        return {
-          items: [
-            createMessage(content, 'developer'),
-          ],
-          tokenCount: estimateTokens(content),
-        };
-      },
+      init: () => initFileReferenceState(runtime.baseDir),
+      onItemAppend: (args) => onFileReferenceItemAppend(args, runtime),
+      recall: recallFileReferences,
     },
   } satisfies MemoryLayer<FileReferenceState>;
 }

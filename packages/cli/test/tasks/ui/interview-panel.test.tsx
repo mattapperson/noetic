@@ -17,13 +17,13 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import type { InterviewResultLike } from '../../../src/commands/builtins/tasks/hierarchy/live-interview.js';
-import type { Phase } from '../../../src/commands/builtins/tasks/ui/interview-panel.js';
+import type { InterviewResultLike } from '../../../src/tasks/runtime/hierarchy/live-interview.js';
+import type { Phase } from '../../../src/tui/tasks/runtime-ui/interview-panel.js';
 import {
   describePhase,
   drivePlanInterview,
   formatMaxQuestionsSummary,
-} from '../../../src/commands/builtins/tasks/ui/interview-panel.js';
+} from '../../../src/tui/tasks/runtime-ui/interview-panel.js';
 
 //#region Helpers
 

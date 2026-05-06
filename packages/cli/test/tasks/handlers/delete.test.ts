@@ -2,12 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { EventKind } from '@noetic/code-agent/tasks/schema';
 import { listTasks, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { SubprocessAdapter } from '@noetic/core';
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import {
   createTaskHandler,
   deleteTaskHandler,
-} from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
-import { saveRunner } from '../../../src/commands/builtins/tasks/runner-state.js';
+} from '../../../src/tasks/runtime/handlers/lifecycle.js';
+import { saveRunner } from '../../../src/tasks/runtime/runner-state.js';
 import { makeEmptySubprocess, preloadLiveHandle } from '../_adapter-helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

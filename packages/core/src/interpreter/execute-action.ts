@@ -4,33 +4,44 @@
 
 import { ZodError } from 'zod';
 import { NoeticErrorImpl } from '../errors/noetic-error';
-import { contextToExecCtx } from '../memory/exec-context-factory';
-import { resolveLayerTools } from '../memory/layer-api';
-import type { LayerStateStore } from '../memory/layer-lifecycle';
-import { returnLayers, spawnLayers } from '../memory/layer-lifecycle';
-import { commitLayerUsage, computeLayerUsage } from '../memory/layer-usage';
-import { assembleView } from '../memory/projector';
-import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import { ContextImpl } from '../runtime/context-impl';
-import { snapshotCwdState } from '../runtime/cwd-helpers';
-import { buildToolExecutionContext } from '../runtime/tool-memory';
-import type { ItemSchemaRegistry } from '../schemas/item';
-import { defaultItemSchemaRegistry } from '../schemas/item';
-import type { RetryPolicy, StepMeta } from '../types/common';
-import type { Context } from '../types/context';
-import type { FunctionCallItem, Item } from '../types/items';
-import type { ContextMemory, ExecutionContext, MemoryConfig, MemoryLayer } from '../types/memory';
-import type { AgentHarnessContract, RecallLayerOutput } from '../types/runtime';
-import { SteeringAction } from '../types/steering';
-import type {
-  ExecuteStepFn,
-  StepLLM,
-  StepProvide,
-  StepRun,
-  StepSpawn,
-  StepTool,
-} from '../types/step';
-import type { Tool } from '../types/tool';
+import {
+  assembleView,
+  buildToolExecutionContext,
+  commitLayerUsage,
+  computeLayerUsage,
+  contextToExecCtx,
+  ContextImpl,
+  defaultItemSchemaRegistry,
+  emitFrameworkEvent,
+  getBroadcaster,
+  resolveLayerTools,
+  returnLayers,
+  snapshotCwdState,
+  spawnLayers,
+  type ItemSchemaRegistry,
+  type LayerStateStore,
+} from './action-deps';
+import {
+  SteeringAction,
+  type AgentHarnessContract,
+  type Context,
+  type ContextMemory,
+  type ExecuteStepFn,
+  type ExecutionContext,
+  type FunctionCallItem,
+  type Item,
+  type MemoryConfig,
+  type MemoryLayer,
+  type RecallLayerOutput,
+  type RetryPolicy,
+  type StepLLM,
+  type StepMeta,
+  type StepProvide,
+  type StepRun,
+  type StepSpawn,
+  type StepTool,
+  type Tool,
+} from './action-types';
 import { frameworkCast } from '../util/framework-cast';
 import { createMessage, extractAssistantText } from '../util/message-helpers';
 import { cloneWithGuard } from './clone-guard';

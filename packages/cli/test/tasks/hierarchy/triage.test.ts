@@ -5,7 +5,7 @@ import type {
   Feature,
   Milestone,
   Slice,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
@@ -14,17 +14,17 @@ import {
   generateSliceId,
   MilestoneStatus,
   SliceStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   loadFeature,
   saveFeature,
   saveMilestone,
   saveSlice,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
 import {
   triageFeature,
   triageSlice,
-} from '../../../src/commands/builtins/tasks/hierarchy/triage.js';
+} from '../../../src/tasks/runtime/hierarchy/triage.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const PARENT_TASK_ID = 'T-abcdefghij';

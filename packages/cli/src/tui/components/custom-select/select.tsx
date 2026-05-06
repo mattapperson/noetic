@@ -58,6 +58,56 @@ function findValueIndex<T>(options: ReadonlyArray<Option<T>>, value: T | undefin
 
 //#endregion
 
+function handleInputModeKey<T>(args: {
+  readonly key: { downArrow?: boolean; upArrow?: boolean; escape?: boolean };
+  readonly moveFocus: (delta: number) => void;
+  readonly onInputModeToggle?: (value: T) => void;
+  readonly onCancel?: () => void;
+  readonly focusedValue: T | undefined;
+}): boolean {
+  if (args.key.downArrow) {
+    args.moveFocus(1);
+    return true;
+  }
+  if (args.key.upArrow) {
+    args.moveFocus(-1);
+    return true;
+  }
+  if (!args.key.escape) {
+    return true;
+  }
+  if (args.onInputModeToggle && args.focusedValue !== undefined) {
+    args.onInputModeToggle(args.focusedValue);
+  } else {
+    args.onCancel?.();
+  }
+  return true;
+}
+
+function handleNumberShortcut<T>(args: {
+  readonly input: string;
+  readonly options: ReadonlyArray<Option<T>>;
+  readonly setFocusedIndex: (index: number) => void;
+  readonly setSelectedValue: (value: T) => void;
+  readonly onChange?: (value: T) => void;
+}): boolean {
+  if (!/^[1-9]$/.test(args.input)) {
+    return false;
+  }
+  const idx = Number.parseInt(args.input, 10) - 1;
+  const target = args.options[idx];
+  if (!target || target.disabled) {
+    return true;
+  }
+  args.setFocusedIndex(idx);
+  if (target.type !== 'input') {
+    args.setSelectedValue(target.value);
+    args.onChange?.(target.value);
+  }
+  return true;
+}
+
+
 //#region Component
 
 export function Select<T>({
@@ -178,30 +228,15 @@ export function Select<T>({
   useInput(
     (input, key) => {
       if (inInputMode) {
-        // Arrows still navigate even while typing; other keys pass through to
-        // the TextInput component.
-        if (key.downArrow) {
-          moveFocus(1);
-          return;
-        }
-        if (key.upArrow) {
-          moveFocus(-1);
-          return;
-        }
-        // Two-stage Escape: first Esc inside the input exits input mode and
-        // returns control to the option list. A second Esc (now outside
-        // input mode) cancels the dialog.
-        if (key.escape) {
-          if (onInputModeToggle && focusedValue !== undefined) {
-            onInputModeToggle(focusedValue);
-          } else {
-            onCancel?.();
-          }
-          return;
-        }
+        handleInputModeKey({
+          key,
+          moveFocus,
+          onInputModeToggle,
+          onCancel,
+          focusedValue,
+        });
         return;
       }
-
       if (key.escape) {
         onCancel?.();
         return;
@@ -222,22 +257,13 @@ export function Select<T>({
         selectCurrent();
         return;
       }
-      // Number keys 1–9 jump directly.
-      if (/^[1-9]$/.test(input)) {
-        const idx = Number.parseInt(input, 10) - 1;
-        const target = options[idx];
-        if (!target || target.disabled) {
-          return;
-        }
-        if (target.type === 'input') {
-          setFocusedIndex(idx);
-          return;
-        }
-        // Move the visual cursor too so the selection echoes the change.
-        setFocusedIndex(idx);
-        setSelectedValue(target.value);
-        onChange?.(target.value);
-      }
+      handleNumberShortcut({
+        input,
+        options,
+        setFocusedIndex,
+        setSelectedValue,
+        onChange,
+      });
     },
     {
       isActive: !isDisabled,
@@ -246,54 +272,94 @@ export function Select<T>({
 
   return (
     <Box flexDirection="column">
-      {options.map((option, index) => {
-        const isFocused = index === focusedIndex;
-        const isSelected = selectedValue === option.value;
-        const indexLabel = hideIndexes ? undefined : `${index + 1}.`;
-        if (option.type === 'input') {
-          return (
-            <SelectOption
-              key={`opt-${String(option.value)}`}
-              isFocused={isFocused}
-              isSelected={isSelected}
-              disabled={option.disabled}
-              indexLabel={indexLabel}
-              inlineDescription={inlineDescription}
-              description={option.description}
-            >
-              <InputOptionEditor
-                focused={isFocused && inInputMode}
-                initialValue={option.initialValue}
-                placeholder={option.placeholder}
-                onChange={option.onChange}
-                onSubmit={(value) => {
-                  if (value.length === 0 && !option.allowEmptySubmitToCancel) {
-                    onCancel?.();
-                    return;
-                  }
-                  setSelectedValue(option.value);
-                  onChange?.(option.value);
-                }}
-                label={typeof option.label === 'string' ? option.label : ''}
-              />
-            </SelectOption>
-          );
-        }
-        return (
-          <SelectOption
-            key={`opt-${String(option.value)}`}
-            isFocused={isFocused}
-            isSelected={isSelected}
-            disabled={option.disabled}
-            indexLabel={indexLabel}
-            inlineDescription={inlineDescription}
-            description={option.description}
-          >
-            {option.label}
-          </SelectOption>
-        );
-      })}
+      {options.map((option, index) => (
+        <RenderedSelectOption
+          key={`opt-${String(option.value)}`}
+          option={option}
+          index={index}
+          isFocused={index === focusedIndex}
+          isSelected={selectedValue === option.value}
+          inInputMode={inInputMode}
+          hideIndexes={hideIndexes}
+          inlineDescription={inlineDescription}
+          onCancel={onCancel}
+          onChange={onChange}
+          setSelectedValue={setSelectedValue}
+        />
+      ))}
     </Box>
+  );
+}
+
+//#endregion
+
+//#region Render helpers
+
+interface RenderedSelectOptionProps<T> {
+  readonly option: Option<T>;
+  readonly index: number;
+  readonly isFocused: boolean;
+  readonly isSelected: boolean;
+  readonly inInputMode: boolean;
+  readonly hideIndexes?: boolean;
+  readonly inlineDescription?: boolean;
+  readonly onCancel?: () => void;
+  readonly onChange?: (value: T) => void;
+  readonly setSelectedValue: (value: T) => void;
+}
+
+function RenderedSelectOption<T>({
+  option,
+  index,
+  isFocused,
+  isSelected,
+  inInputMode,
+  hideIndexes,
+  inlineDescription,
+  onCancel,
+  onChange,
+  setSelectedValue,
+}: RenderedSelectOptionProps<T>) {
+  const indexLabel = hideIndexes ? undefined : `${index + 1}.`;
+  if (option.type === 'input') {
+    return (
+      <SelectOption
+        isFocused={isFocused}
+        isSelected={isSelected}
+        disabled={option.disabled}
+        indexLabel={indexLabel}
+        inlineDescription={inlineDescription}
+        description={option.description}
+      >
+        <InputOptionEditor
+          focused={isFocused && inInputMode}
+          initialValue={option.initialValue}
+          placeholder={option.placeholder}
+          onChange={option.onChange}
+          onSubmit={(value) => {
+            if (value.length === 0 && !option.allowEmptySubmitToCancel) {
+              onCancel?.();
+              return;
+            }
+            setSelectedValue(option.value);
+            onChange?.(option.value);
+          }}
+          label={typeof option.label === 'string' ? option.label : ''}
+        />
+      </SelectOption>
+    );
+  }
+  return (
+    <SelectOption
+      isFocused={isFocused}
+      isSelected={isSelected}
+      disabled={option.disabled}
+      indexLabel={indexLabel}
+      inlineDescription={inlineDescription}
+      description={option.description}
+    >
+      {option.label}
+    </SelectOption>
   );
 }
 

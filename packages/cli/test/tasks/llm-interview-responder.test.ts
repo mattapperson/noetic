@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { InterviewQuestionEnvelope } from '../../src/commands/builtins/tasks/hierarchy/live-interview.js';
+import type { InterviewQuestionEnvelope } from '../../src/tasks/runtime/hierarchy/live-interview.js';
 import {
   buildAnswerPrompt,
   buildResponderVerdict,
   buildRetryPrompt,
   formatParseError,
-} from '../../src/commands/builtins/tasks/llm-interview-responder.js';
+} from '../../src/tasks/runtime/llm-interview-responder.js';
 
 function makeEnvelope(
   overrides: Partial<InterviewQuestionEnvelope> = {},

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 
-import { getTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/aggregate.js';
-import { hierarchyPaths } from '../../../src/commands/builtins/tasks/hierarchy/paths.js';
+import { getTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/aggregate.js';
+import { hierarchyPaths } from '../../../src/tasks/runtime/hierarchy/paths.js';
 import type {
   Assertion,
   Feature,
   Milestone,
   Slice,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   AssertionStatus,
   FeatureLoopState,
@@ -19,14 +19,14 @@ import {
   MilestoneStatus,
   SliceStatus,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   saveAssertion,
   saveFeature,
   saveMilestone,
   saveSlice,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import { recordValidatorRun } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
+import { recordValidatorRun } from '../../../src/tasks/runtime/hierarchy/validator.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

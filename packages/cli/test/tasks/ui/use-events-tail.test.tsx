@@ -18,7 +18,7 @@ import { appendEvent, taskRootPaths } from '@noetic/code-agent/tasks/store/fs-no
 import {
   readEventsSize,
   shouldBumpRevision,
-} from '../../../src/commands/builtins/tasks/ui/use-events-tail.js';
+} from '../../../src/tui/tasks/runtime-ui/use-events-tail.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('readEventsSize', () => {

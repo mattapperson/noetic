@@ -8,9 +8,9 @@ import {
 
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createInMemorySubprocessAdapter } from '@noetic/core';
-import type { AutopilotDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
-import { runAutopilotTick } from '../../../src/commands/builtins/tasks/hierarchy/autopilot.js';
-import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
+import type { AutopilotDeps } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
+import { runAutopilotTick } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
+import { persistTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/persist.js';
 import { makeStoreContext } from '../_helpers.js';
 
 interface FakeSignaller {
@@ -333,7 +333,7 @@ describe('runAutopilotTick — implement-pass', () => {
     if (featureId === undefined) {
       throw new Error('seed failed');
     }
-    const { saveFeature } = await import('../../../src/commands/builtins/tasks/hierarchy/store.js');
+    const { saveFeature } = await import('../../../src/tasks/runtime/hierarchy/store.js');
     await saveFeature(ctx, PARENT, {
       ...persisted.features[0]!,
       taskId: LEAF,
@@ -409,7 +409,7 @@ describe('runAutopilotTick — implement-pass', () => {
     if (featureId === undefined) {
       throw new Error('seed failed');
     }
-    const { saveFeature } = await import('../../../src/commands/builtins/tasks/hierarchy/store.js');
+    const { saveFeature } = await import('../../../src/tasks/runtime/hierarchy/store.js');
     await saveFeature(ctx, PARENT, {
       ...persisted.features[0]!,
       taskId: LEAF,

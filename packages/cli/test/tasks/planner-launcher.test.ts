@@ -11,7 +11,7 @@ import { createInMemorySubprocessAdapter } from '@noetic/core';
 import {
   PlannerSpawnError,
   startPlannerRun,
-} from '../../src/commands/builtins/tasks/planner-launcher.js';
+} from '../../src/tasks/runtime/planner-launcher.js';
 import { makeTrackingAdapter, preloadLiveHandle } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 

@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ShellAdapter, Tool } from '@noetic/core';
+import type { ShellAdapter, Tool, ToolExecutionContext } from '@noetic/core';
 import { getToolCwd, setToolCwd, TIMEOUT_ERROR_PREFIX, toolWithGenerator } from '@noetic/core';
 import { z } from 'zod';
 import { handleCd, isPlainCdCommand, parseCdArg } from './cd-helper.js';
@@ -240,6 +240,253 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
   return null;
 }
 
+
+interface CdInterceptParams {
+  command: string;
+  timeout: number;
+  liveCwd: string;
+  toolCtx: ToolExecutionContext;
+}
+
+function handleCdIntercept(params: CdInterceptParams): BashOutput | null {
+  const { command, timeout, liveCwd, toolCtx } = params;
+  if (!isPlainCdCommand(command) || !toolCtx.ctx?.cwdState) {
+    return null;
+  }
+  const cd = handleCd({
+    arg: parseCdArg(command),
+    effectiveCwd: liveCwd,
+    prevCwd: toolCtx.ctx.cwdState.previousCwd ?? null,
+  });
+  if (cd.kind === 'error') {
+    return {
+      output: `Error: ${cd.message}`,
+      command,
+      exitCode: 1,
+      cancelled: false,
+      truncated: false,
+      timeout,
+    };
+  }
+  setToolCwd(toolCtx.ctx, cd.newCwd);
+  return {
+    output: `${CD_INTERCEPT_PREFIX} cwd is now ${cd.newCwd}`,
+    command,
+    exitCode: 0,
+    cancelled: false,
+    truncated: false,
+    timeout,
+  };
+}
+
+async function enforceBashPreflight(args: {
+  command: string;
+  timeout: number;
+  liveCwd: string;
+  mutationPolicy?: MutationPolicy;
+}): Promise<BashOutput | null> {
+  const validation = validateCommand(args.command);
+  if (!validation.valid) {
+    return {
+      output: `Error: ${validation.error}`,
+      command: args.command,
+      cancelled: false,
+      truncated: false,
+      timeout: args.timeout,
+    };
+  }
+  const decision = isProbablyMutatingShellCommand(args.command)
+    ? await args.mutationPolicy?.check({
+        kind: 'bash',
+        cwd: args.liveCwd,
+        command: args.command,
+      })
+    : undefined;
+  if (!decision || decision.allowed) {
+    return null;
+  }
+  return {
+    output: `Error: ${decision.message}`,
+    command: args.command,
+    cancelled: false,
+    truncated: false,
+    timeout: args.timeout,
+  };
+}
+
+interface BashExecutionBuffers {
+  tempFilePath?: string;
+  tempFileStream?: ReturnType<typeof createWriteStream>;
+  totalBytes: number;
+  chunks: Buffer[];
+  chunksBytes: number;
+  maxChunksBytes: number;
+}
+
+function createBashExecutionBuffers(): BashExecutionBuffers {
+  return {
+    totalBytes: 0,
+    chunks: [],
+    chunksBytes: 0,
+    maxChunksBytes: DEFAULT_MAX_BYTES * 2,
+  };
+}
+
+function appendOutputChunk(buffers: BashExecutionBuffers, data: Buffer): void {
+  buffers.totalBytes += data.length;
+  if (buffers.totalBytes > DEFAULT_MAX_BYTES && !buffers.tempFilePath) {
+    buffers.tempFilePath = getTempFilePath();
+    buffers.tempFileStream = createWriteStream(buffers.tempFilePath);
+    for (const chunk of buffers.chunks) {
+      buffers.tempFileStream.write(chunk);
+    }
+  }
+  buffers.tempFileStream?.write(data);
+  buffers.chunks.push(data);
+  buffers.chunksBytes += data.length;
+  while (buffers.chunksBytes > buffers.maxChunksBytes && buffers.chunks.length > 1) {
+    const removed = buffers.chunks.shift();
+    if (removed) {
+      buffers.chunksBytes -= removed.length;
+    }
+  }
+}
+
+function buildProgressEvent(buffers: BashExecutionBuffers): BashEvent {
+  const fullBuffer = Buffer.concat(buffers.chunks);
+  return {
+    type: 'progress',
+    partialOutput: truncateTail(fullBuffer.toString('utf-8')).content || '',
+    bytesReceived: buffers.totalBytes,
+  };
+}
+
+interface DataQueueState {
+  resolveData: ((value: Buffer | null) => void) | null;
+  dataQueue: (Buffer | null)[];
+  execState: ExecState;
+}
+
+function createDataQueueState(): DataQueueState {
+  return {
+    resolveData: null,
+    dataQueue: [],
+    execState: {
+      result: null,
+      error: null,
+      done: false,
+    },
+  };
+}
+
+function pushData(queue: DataQueueState, data: Buffer | null): void {
+  if (queue.resolveData) {
+    queue.resolveData(data);
+    queue.resolveData = null;
+  } else {
+    queue.dataQueue.push(data);
+  }
+}
+
+function nextDataChunk(queue: DataQueueState): Promise<Buffer | null> {
+  if (queue.dataQueue.length > 0) {
+    return Promise.resolve(queue.dataQueue.shift() ?? null);
+  }
+  if (queue.execState.done) {
+    return Promise.resolve(null);
+  }
+  return new Promise<Buffer | null>((resolve) => {
+    queue.resolveData = resolve;
+  });
+}
+
+function interactiveTuiResult(command: string, timeout: number): BashOutput {
+  return {
+    output:
+      "Command appears to be an interactive TUI program (it tried to enter alternate-screen mode). Interactive programs aren't supported through this tool — use Read/Edit for files, or invoke the program with non-interactive flags (e.g. `git --no-pager`, `<repl> -c '<expr>'`).",
+    command,
+    cancelled: true,
+    truncated: false,
+    timeout,
+  };
+}
+
+interface ExecuteBashCommandArgs {
+  command: string;
+  timeout: number;
+  liveCwd: string;
+  shell: ShellAdapter;
+}
+
+async function* executeBashCommand(args: ExecuteBashCommandArgs): AsyncGenerator<BashEvent, BashOutput> {
+  const { command, timeout, liveCwd, shell } = args;
+  const buffers = createBashExecutionBuffers();
+  const queue = createDataQueueState();
+  const abortController = new AbortController();
+  const execPromise = shell
+    .exec(command, {
+      cwd: liveCwd,
+      timeout,
+      signal: abortController.signal,
+      onData: (data: Buffer) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        if (containsAltScreenEntry(data)) {
+          abortController.abort();
+          return;
+        }
+        pushData(queue, data);
+      },
+    })
+    .then((r) => {
+      queue.execState.result = {
+        exitCode: r.exitCode,
+      };
+      queue.execState.done = true;
+      pushData(queue, null);
+    })
+    .catch((err: Error) => {
+      queue.execState.error = err;
+      queue.execState.done = true;
+      pushData(queue, null);
+    });
+
+  while (!abortController.signal.aborted) {
+    const data = await nextDataChunk(queue);
+    if (data === null) {
+      break;
+    }
+    appendOutputChunk(buffers, data);
+    yield buildProgressEvent(buffers);
+  }
+
+  await execPromise;
+  buffers.tempFileStream?.end();
+  if (abortController.signal.aborted) {
+    return interactiveTuiResult(command, timeout);
+  }
+  if (queue.execState.error) {
+    const errorResult = buildErrorResult({
+      command,
+      chunks: buffers.chunks,
+      error: queue.execState.error,
+      timeout,
+    });
+    if (errorResult) {
+      return errorResult;
+    }
+    throw queue.execState.error;
+  }
+  return buildFinalResult({
+    command,
+    chunks: buffers.chunks,
+    tempFilePath: buffers.tempFilePath,
+    exitCode: queue.execState.result ? queue.execState.result.exitCode : null,
+    timeout,
+  });
+}
+
 //#endregion
 
 //#region Public API
@@ -261,217 +508,29 @@ export function createBashTool(
       const { command, timeout: userTimeout } = params;
       const timeout = Math.min(userTimeout ?? DEFAULT_BASH_TIMEOUT, 6e2);
       const liveCwd = getToolCwd(toolCtx.ctx, cwd);
-
-      // Intercept plain `cd <path>` so the cwd persists for subsequent tool
-      // calls. Compound forms (`cd foo && bar`) still go through the shell —
-      // the shell's cwd evaporates with the subprocess (POSIX), matching the
-      // behavior described in the tool description. Skip when the test
-      // scaffold passes an empty toolCtx without a Context.
-      if (isPlainCdCommand(command) && toolCtx.ctx?.cwdState) {
-        const cd = handleCd({
-          arg: parseCdArg(command),
-          effectiveCwd: liveCwd,
-          prevCwd: toolCtx.ctx.cwdState.previousCwd ?? null,
-        });
-        if (cd.kind === 'error') {
-          return {
-            output: `Error: ${cd.message}`,
-            command,
-            exitCode: 1,
-            cancelled: false,
-            truncated: false,
-            timeout,
-          };
-        }
-        setToolCwd(toolCtx.ctx, cd.newCwd);
-        return {
-          output: `${CD_INTERCEPT_PREFIX} cwd is now ${cd.newCwd}`,
-          command,
-          exitCode: 0,
-          cancelled: false,
-          truncated: false,
-          timeout,
-        };
-      }
-
-      const validation = validateCommand(command);
-      if (!validation.valid) {
-        return {
-          output: `Error: ${validation.error}`,
-          command,
-          cancelled: false,
-          truncated: false,
-          timeout,
-        };
-      }
-
-      const decision = isProbablyMutatingShellCommand(command)
-        ? await mutationPolicy?.check({
-            kind: 'bash',
-            cwd: liveCwd,
-            command,
-          })
-        : undefined;
-      if (decision && !decision.allowed) {
-        return {
-          output: `Error: ${decision.message}`,
-          command,
-          cancelled: false,
-          truncated: false,
-          timeout,
-        };
-      }
-
-      let tempFilePath: string | undefined;
-      let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
-      let totalBytes = 0;
-      const chunks: Buffer[] = [];
-      let chunksBytes = 0;
-      const maxChunksBytes = DEFAULT_MAX_BYTES * 2;
-
-      let resolveData: ((value: Buffer | null) => void) | null = null;
-      const dataQueue: (Buffer | null)[] = [];
-      const execState: ExecState = {
-        result: null,
-        error: null,
-        done: false,
-      };
-
-      const abortController = new AbortController();
-
-      const execPromise = shell
-        .exec(command, {
-          cwd: liveCwd,
-          timeout,
-          signal: abortController.signal,
-          onData: (data: Buffer) => {
-            if (abortController.signal.aborted) {
-              return;
-            }
-            if (containsAltScreenEntry(data)) {
-              abortController.abort();
-              return;
-            }
-            if (resolveData) {
-              resolveData(data);
-              resolveData = null;
-            } else {
-              dataQueue.push(data);
-            }
-          },
-        })
-        .then((r) => {
-          execState.result = {
-            exitCode: r.exitCode,
-          };
-          execState.done = true;
-          if (resolveData) {
-            resolveData(null);
-            resolveData = null;
-          } else {
-            dataQueue.push(null);
-          }
-        })
-        .catch((err: Error) => {
-          execState.error = err;
-          execState.done = true;
-          if (resolveData) {
-            resolveData(null);
-            resolveData = null;
-          }
-        });
-
-      const getNextChunk = (): Promise<Buffer | null> => {
-        if (dataQueue.length > 0) {
-          return Promise.resolve(dataQueue.shift() ?? null);
-        }
-        if (execState.done) {
-          return Promise.resolve(null);
-        }
-        return new Promise<Buffer | null>((resolve) => {
-          resolveData = resolve;
-        });
-      };
-
-      while (true) {
-        if (abortController.signal.aborted) {
-          break;
-        }
-        const data = await getNextChunk();
-        if (data === null) {
-          break;
-        }
-
-        totalBytes += data.length;
-
-        if (totalBytes > DEFAULT_MAX_BYTES && !tempFilePath) {
-          tempFilePath = getTempFilePath();
-          tempFileStream = createWriteStream(tempFilePath);
-          for (const chunk of chunks) {
-            tempFileStream.write(chunk);
-          }
-        }
-
-        if (tempFileStream) {
-          tempFileStream.write(data);
-        }
-
-        chunks.push(data);
-        chunksBytes += data.length;
-        while (chunksBytes > maxChunksBytes && chunks.length > 1) {
-          const removed = chunks.shift();
-          if (removed) {
-            chunksBytes -= removed.length;
-          }
-        }
-
-        const fullBuffer = Buffer.concat(chunks);
-        const partialOutput = truncateTail(fullBuffer.toString('utf-8')).content || '';
-        yield {
-          type: 'progress' as const,
-          partialOutput,
-          bytesReceived: totalBytes,
-        };
-      }
-
-      await execPromise;
-
-      if (tempFileStream) {
-        tempFileStream.end();
-      }
-
-      const finalExitCode = execState.result ? execState.result.exitCode : null;
-
-      if (abortController.signal.aborted) {
-        return {
-          output:
-            "Command appears to be an interactive TUI program (it tried to enter alternate-screen mode). Interactive programs aren't supported through this tool — use Read/Edit for files, or invoke the program with non-interactive flags (e.g. `git --no-pager`, `<repl> -c '<expr>'`).",
-          command,
-          cancelled: true,
-          truncated: false,
-          timeout,
-        };
-      }
-
-      if (execState.error) {
-        const errorResult = buildErrorResult({
-          command,
-          chunks,
-          error: execState.error,
-          timeout,
-        });
-        if (errorResult) {
-          return errorResult;
-        }
-        throw execState.error;
-      }
-
-      return buildFinalResult({
+      const cdResult = handleCdIntercept({
         command,
-        chunks,
-        tempFilePath,
-        exitCode: finalExitCode,
         timeout,
+        liveCwd,
+        toolCtx,
+      });
+      if (cdResult) {
+        return cdResult;
+      }
+      const preflight = await enforceBashPreflight({
+        command,
+        timeout,
+        liveCwd,
+        mutationPolicy,
+      });
+      if (preflight) {
+        return preflight;
+      }
+      return yield* executeBashCommand({
+        command,
+        timeout,
+        liveCwd,
+        shell,
       });
     },
   });

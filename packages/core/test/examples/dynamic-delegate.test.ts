@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildDynamicDelegateAgent, delegateInbox } from '../../examples/dynamic-delegate';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('dynamic delegate demo', () => {

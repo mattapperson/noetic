@@ -3,13 +3,13 @@ import assert from 'node:assert';
 
 import type { ExecutionContext, ScopedStorage } from '@noetic/core';
 import { createLocalShellAdapter } from '@noetic/core';
-import type { PlannerAttemptState } from '../../../src/commands/builtins/tasks/memory/planner-attempt-layer.js';
+import type { PlannerAttemptState } from '../../../src/tasks/runtime/memory/planner-attempt-layer.js';
 import {
   createPlannerAttemptLayer,
   hasBudgetRemaining,
   MAX_PLANNER_ATTEMPTS,
   PLANNER_ATTEMPT_LAYER_ID,
-} from '../../../src/commands/builtins/tasks/memory/planner-attempt-layer.js';
+} from '../../../src/tasks/runtime/memory/planner-attempt-layer.js';
 import { MemFs } from '../_helpers.js';
 
 //#region Test helpers

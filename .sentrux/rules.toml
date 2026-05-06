@@ -12,7 +12,8 @@
 # Within each package we reserve a band of order numbers so cross-package
 # and within-package rules can coexist without collisions.
 #
-# Paths are relative to the repo root.
+# Paths are relative to the repo root. Keep layer paths directory/glob-based;
+# do not add exact file-name carve-outs.
 
 [constraints]
 max_cycles = 0

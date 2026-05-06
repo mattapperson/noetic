@@ -26,7 +26,7 @@ import {
   Mode,
   Pane,
   reducer,
-} from '../../src/commands/builtins/diff-review/ui/state.js';
+} from '../../src/tui/commands/diff-review-ui/state.js';
 
 function file(id: string, path: string): ReviewFile {
   return {

@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { z } from 'zod';
 import { tool } from '../../src/builders/tool-builder';
 import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import {
   buildItemStream,

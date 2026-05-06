@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
-import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
+import { activateSlice } from '../../../src/tasks/runtime/hierarchy/activation.js';
 import type {
   Feature,
   Milestone,
   Slice,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
@@ -14,14 +14,14 @@ import {
   generateSliceId,
   MilestoneStatus,
   SliceStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   loadFeature,
   loadSlice,
   saveFeature,
   saveMilestone,
   saveSlice,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

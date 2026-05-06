@@ -17,14 +17,14 @@ import {
 import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ToolExecutionContext } from '@noetic/core';
 import { createDetachedSignal } from '@noetic/core';
-import type { ImplementerOutcome } from '../../src/commands/builtins/tasks/hierarchy/implementer-flow.js';
-import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
-import { FeatureLoopState } from '../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature } from '../../src/commands/builtins/tasks/hierarchy/store.js';
+import type { ImplementerOutcome } from '../../src/tasks/runtime/hierarchy/implementer-flow.js';
+import { persistTaskHierarchy } from '../../src/tasks/runtime/hierarchy/persist.js';
+import { FeatureLoopState } from '../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature } from '../../src/tasks/runtime/hierarchy/store.js';
 import {
   createImplementationBlockedTool,
   createImplementationDoneTool,
-} from '../../src/commands/builtins/tasks/implementer-tools.js';
+} from '../../src/tasks/runtime/implementer-tools.js';
 import { makeStoreContext } from './_helpers.js';
 
 const PARENT_ID = 'T-parent0000';

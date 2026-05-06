@@ -283,6 +283,251 @@ function resolveStatusHintText(options: StatusHintTextOptions): string {
   return options.disabledText;
 }
 
+
+interface PromptKeyboardRefs {
+  value: React.MutableRefObject<string>;
+  suggestions: React.MutableRefObject<Suggestion[]>;
+  sugIdx: React.MutableRefObject<number>;
+  historyState: React.MutableRefObject<ReturnType<typeof createPromptHistoryState>>;
+}
+
+interface PromptKeyboardActions {
+  updateValue: (next: string) => void;
+  setSug: (next: Suggestion[]) => void;
+  setSugI: (next: number) => void;
+  setHistoryState: (next: ReturnType<typeof createPromptHistoryState>) => void;
+}
+
+interface PromptKeyboardOptions {
+  status?: ChatStatus;
+  isModalOpen: boolean;
+  onModalClose?: () => void;
+  onStop?: () => void;
+  onToggleMode?: () => void;
+  disabled: boolean;
+  enableHistory: boolean;
+}
+
+function completeSuggestion(refs: PromptKeyboardRefs, actions: PromptKeyboardActions): void {
+  const sel = refs.suggestions.current[refs.sugIdx.current];
+  if (!sel) {
+    return;
+  }
+  if (refs.value.current.startsWith('/')) {
+    actions.updateValue(sel.text);
+    actions.setSug([]);
+    return;
+  }
+  const base = refs.value.current.slice(0, refs.value.current.lastIndexOf('@'));
+  actions.updateValue(base + sel.text + ' ');
+  actions.setSug([]);
+}
+
+function handlePromptEscape(
+  refs: PromptKeyboardRefs,
+  actions: PromptKeyboardActions,
+  options: PromptKeyboardOptions,
+): void {
+  const action = resolvePromptEscapeAction({
+    value: refs.value.current,
+    status: options.status,
+    suggestionCount: refs.suggestions.current.length,
+    isModalOpen: options.isModalOpen,
+    hasModalClose: options.onModalClose !== undefined,
+    hasStop: options.onStop !== undefined,
+  });
+  if (action === 'close-modal') {
+    options.onModalClose?.();
+  } else if (action === 'clear-input') {
+    actions.updateValue('');
+    const nextHistory = resetPromptHistoryNavigation(refs.historyState.current);
+    refs.historyState.current = nextHistory;
+    actions.setHistoryState(nextHistory);
+  } else if (action === 'dismiss-suggestions') {
+    actions.setSug([]);
+  } else if (action === 'stop') {
+    options.onStop?.();
+  }
+}
+
+function handlePromptArrow(
+  direction: 'up' | 'down',
+  refs: PromptKeyboardRefs,
+  actions: PromptKeyboardActions,
+  enableHistory: boolean,
+): void {
+  if (refs.suggestions.current.length > 0) {
+    const delta = direction === 'up' ? -1 : 1;
+    const next = Math.max(0, Math.min(refs.suggestions.current.length - 1, refs.sugIdx.current + delta));
+    actions.setSugI(next);
+    return;
+  }
+  if (!enableHistory) {
+    return;
+  }
+  if (direction === 'up' && refs.historyState.current.entries.length > 0) {
+    const result = navigatePromptHistoryUp(refs.historyState.current, refs.value.current);
+    refs.historyState.current = result.state;
+    actions.setHistoryState(result.state);
+    actions.updateValue(result.value);
+  } else if (direction === 'down' && refs.historyState.current.index > 0) {
+    const result = navigatePromptHistoryDown(refs.historyState.current);
+    refs.historyState.current = result.state;
+    actions.setHistoryState(result.state);
+    actions.updateValue(result.value);
+  }
+}
+
+interface PromptSubmitHandlersArgs {
+  onSubmit?: (message: PromptInputMessage) => void | Promise<void>;
+  attachments: PromptAttachment[];
+  usingProvider: boolean;
+  controller: PromptInputControllerProps | null;
+  isControlled: boolean;
+  setLocalValue: (next: string) => void;
+  onChange?: (text: string) => void;
+  enableHistory: boolean;
+  refs: PromptKeyboardRefs;
+  actions: PromptKeyboardActions;
+}
+
+function usePromptSubmitHandlers(args: PromptSubmitHandlersArgs): {
+  handleInputSubmit: (text: string) => void;
+} {
+  const clearInput = useCallback(() => {
+    if (args.usingProvider) {
+      args.controller?.textInput.clear();
+    } else if (!args.isControlled) {
+      args.setLocalValue('');
+    }
+    args.onChange?.('');
+  }, [
+    args,
+  ]);
+
+  const handleSubmit = useCallback(
+    (text: string) => {
+      if (!args.onSubmit) {
+        return;
+      }
+      const result = args.onSubmit({
+        text,
+        attachments: args.attachments,
+      });
+      if (result instanceof Promise) {
+        result.then(
+          () => clearInput(),
+          () => {
+            /* Don't clear on error so user may want to retry */
+          },
+        );
+      } else {
+        clearInput();
+      }
+    },
+    [
+      args,
+      clearInput,
+    ],
+  );
+
+  const handleInputSubmit = useCallback(
+    (text: string) => {
+      if (submitSelectedSuggestion(args, handleSubmit)) {
+        return;
+      }
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return;
+      }
+      recordHistoryIfEnabled(args, trimmed);
+      args.actions.updateValue('');
+      handleSubmit(trimmed);
+    },
+    [
+      args,
+      handleSubmit,
+    ],
+  );
+
+  return { handleInputSubmit };
+}
+
+function submitSelectedSuggestion(
+  args: PromptSubmitHandlersArgs,
+  handleSubmit: (text: string) => void,
+): boolean {
+  if (args.refs.suggestions.current.length === 0) {
+    return false;
+  }
+  const sel = args.refs.suggestions.current[args.refs.sugIdx.current];
+  if (!sel) {
+    return false;
+  }
+  if (args.refs.value.current.startsWith('/')) {
+    args.actions.updateValue('');
+    recordHistoryIfEnabled(args, sel.text);
+    handleSubmit(sel.text);
+    return true;
+  }
+  const base = args.refs.value.current.slice(0, args.refs.value.current.lastIndexOf('@'));
+  args.actions.updateValue(base + sel.text + ' ');
+  args.actions.setSug([]);
+  return true;
+}
+
+function recordHistoryIfEnabled(args: PromptSubmitHandlersArgs, text: string): void {
+  if (!args.enableHistory) {
+    return;
+  }
+  const nextHistory = recordPromptHistoryEntry(args.refs.historyState.current, text);
+  args.refs.historyState.current = nextHistory;
+  args.actions.setHistoryState(nextHistory);
+}
+
+function usePromptKeyboardHandler(args: {
+  focus: boolean;
+  disabled: boolean;
+  status?: ChatStatus;
+  isModalOpen: boolean;
+  onModalClose?: () => void;
+  onStop?: () => void;
+  onToggleMode?: () => void;
+  enableHistory: boolean;
+  refs: PromptKeyboardRefs;
+  actions: PromptKeyboardActions;
+}): void {
+  useInput(
+    (_input, key) => {
+      if (key.escape) {
+        handlePromptEscape(args.refs, args.actions, args);
+        return;
+      }
+      if (key.tab && key.shift && args.onToggleMode) {
+        args.onToggleMode();
+        return;
+      }
+      if (args.disabled) {
+        return;
+      }
+      if (key.tab && !key.shift && args.refs.suggestions.current.length > 0) {
+        completeSuggestion(args.refs, args.actions);
+        return;
+      }
+      if (key.upArrow) {
+        handlePromptArrow('up', args.refs, args.actions, args.enableHistory);
+        return;
+      }
+      if (key.downArrow) {
+        handlePromptArrow('down', args.refs, args.actions, args.enableHistory);
+      }
+    },
+    {
+      isActive: args.focus,
+    },
+  );
+}
+
 // ============================================================================
 // Subcomponents
 // ============================================================================
@@ -621,194 +866,67 @@ export function PromptInput({
     ],
   );
 
-  // ── Submit handler (auto-clears on success, preserves on error) ────────
-
-  const clearInput = useCallback(() => {
-    if (usingProvider) {
-      controller.textInput.clear();
-    } else if (!isControlled) {
-      setLocalValue('');
-    }
-    onChange?.('');
-  }, [
-    usingProvider,
-    controller,
-    isControlled,
-    onChange,
-  ]);
-
-  const handleSubmit = useCallback(
-    (text: string) => {
-      if (!onSubmit) {
-        return;
-      }
-
-      const result = onSubmit({
-        text,
-        attachments,
-      });
-
-      // Handle async onSubmit: clear on resolve, preserve on reject
-      if (result instanceof Promise) {
-        result.then(
-          () => clearInput(),
-          () => {
-            /* Don't clear on error so user may want to retry */
-          },
-        );
-      } else {
-        // Sync onSubmit completed without throwing, clear
-        clearInput();
-      }
-    },
+  const refs = useMemo<PromptKeyboardRefs>(
+    () => ({
+      value: valueRef,
+      suggestions: suggestionsRef,
+      sugIdx: sugIdxRef,
+      historyState: historyStateRef,
+    }),
+    [],
+  );
+  const actions = useMemo<PromptKeyboardActions>(
+    () => ({
+      updateValue,
+      setSug,
+      setSugI,
+      setHistoryState,
+    }),
+    [
+      updateValue,
+      setSug,
+      setSugI,
+    ],
+  );
+  const submitArgs = useMemo<PromptSubmitHandlersArgs>(
+    () => ({
+      onSubmit,
+      attachments,
+      usingProvider,
+      controller,
+      isControlled,
+      setLocalValue,
+      onChange,
+      enableHistory,
+      refs,
+      actions,
+    }),
     [
       onSubmit,
-      clearInput,
       attachments,
-    ],
-  );
-
-  // ── Input handlers ───────────────────────────────────────────────────
-
-  const handleInputSubmit = useCallback(
-    (text: string) => {
-      // If there are suggestions and one is selected, handle that
-      if (suggestionsRef.current.length > 0) {
-        const sel = suggestionsRef.current[sugIdxRef.current];
-        if (sel) {
-          if (valueRef.current.startsWith('/')) {
-            // Slash commands: submit immediately on selection
-            updateValue('');
-            if (enableHistory) {
-              const nextHistory = recordPromptHistoryEntry(historyStateRef.current, sel.text);
-              historyStateRef.current = nextHistory;
-              setHistoryState(nextHistory);
-            }
-            handleSubmit(sel.text);
-          } else {
-            const base = valueRef.current.slice(0, valueRef.current.lastIndexOf('@'));
-            updateValue(base + sel.text + ' ');
-            setSug([]);
-          }
-          return;
-        }
-      }
-
-      const trimmed = text.trim();
-      if (!trimmed) {
-        return;
-      }
-      if (enableHistory) {
-        const nextHistory = recordPromptHistoryEntry(historyStateRef.current, trimmed);
-        historyStateRef.current = nextHistory;
-        setHistoryState(nextHistory);
-      }
-      updateValue('');
-      handleSubmit(trimmed);
-    },
-    [
+      usingProvider,
+      controller,
+      isControlled,
+      onChange,
       enableHistory,
-      handleSubmit,
-      setSug,
-      updateValue,
+      refs,
+      actions,
     ],
   );
+  const { handleInputSubmit } = usePromptSubmitHandlers(submitArgs);
 
-  // ── Keyboard handler via useInput ───────────────────────────────────
-  // Always active when focused OR when we need to handle Escape for stopping
-  const isKeyboardActive = focus;
-
-  useInput(
-    (_input, key) => {
-      if (key.escape) {
-        const action = resolvePromptEscapeAction({
-          value: valueRef.current,
-          status,
-          suggestionCount: suggestionsRef.current.length,
-          isModalOpen,
-          hasModalClose: onModalClose !== undefined,
-          hasStop: onStop !== undefined,
-        });
-        if (action === 'close-modal') {
-          onModalClose?.();
-          return;
-        }
-        if (action === 'clear-input') {
-          updateValue('');
-          const nextHistory = resetPromptHistoryNavigation(historyStateRef.current);
-          historyStateRef.current = nextHistory;
-          setHistoryState(nextHistory);
-          return;
-        }
-        if (action === 'dismiss-suggestions') {
-          setSug([]);
-          return;
-        }
-        if (action === 'stop') {
-          onStop?.();
-        }
-        return;
-      }
-
-      // works even while disabled, e.g. mid-stream
-      if (key.tab && key.shift && onToggleMode) {
-        onToggleMode();
-        return;
-      }
-
-      // When disabled, ignore all other keys
-      if (disabled) {
-        return;
-      }
-
-      // Tab: auto-complete current suggestion
-      if (key.tab && !key.shift && suggestionsRef.current.length > 0) {
-        const sel = suggestionsRef.current[sugIdxRef.current];
-        if (sel) {
-          if (valueRef.current.startsWith('/')) {
-            // For slash commands, complete with the full command
-            updateValue(sel.text);
-            setSug([]);
-          } else {
-            // For @ mentions, complete after the @ symbol
-            const base = valueRef.current.slice(0, valueRef.current.lastIndexOf('@'));
-            updateValue(base + sel.text + ' ');
-            setSug([]);
-          }
-        }
-        return;
-      }
-
-      // Up arrow: navigate suggestions or history
-      if (key.upArrow) {
-        if (suggestionsRef.current.length > 0) {
-          setSugI(Math.max(0, sugIdxRef.current - 1));
-        } else if (enableHistory && historyStateRef.current.entries.length > 0) {
-          const result = navigatePromptHistoryUp(historyStateRef.current, valueRef.current);
-          historyStateRef.current = result.state;
-          setHistoryState(result.state);
-          updateValue(result.value);
-        }
-        return;
-      }
-
-      // Down arrow: navigate suggestions or history
-      if (key.downArrow) {
-        if (suggestionsRef.current.length > 0) {
-          setSugI(Math.min(suggestionsRef.current.length - 1, sugIdxRef.current + 1));
-        } else if (enableHistory && historyStateRef.current.index > 0) {
-          const result = navigatePromptHistoryDown(historyStateRef.current);
-          historyStateRef.current = result.state;
-          setHistoryState(result.state);
-          updateValue(result.value);
-        }
-        return;
-      }
-    },
-    {
-      isActive: isKeyboardActive,
-    },
-  );
+  usePromptKeyboardHandler({
+    focus,
+    disabled,
+    status,
+    isModalOpen,
+    onModalClose,
+    onStop,
+    onToggleMode,
+    enableHistory,
+    refs,
+    actions,
+  });
 
   // ── Build context for subcomponents ────────────────────────────────────
 

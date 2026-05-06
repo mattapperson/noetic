@@ -9,28 +9,10 @@
 import type { FsAdapter, ShellAdapter, Step } from '@noetic/core';
 import { spawn, step } from '@noetic/core';
 
+import type { SubagentArgs, SubagentPreset } from '../plugins/types.js';
 import { createReadOnlyTools } from '../tools/index.js';
 
-//#region Types
-
-export interface SubagentArgs {
-  /** Free-form natural-language prompt describing the task. */
-  prompt: string;
-  /** Working directory for read-only tool resolution. */
-  cwd: string;
-  /** Model identifier passed through to the underlying `step.llm`. */
-  model: string;
-  /** Optional unique id for the spawned step. Auto-generated when omitted. */
-  id?: string;
-  /** Optional fs adapter; defaults to local fs (via `createReadOnlyTools` defaults). */
-  fs?: FsAdapter;
-  /** Optional shell adapter; defaults to local shell. */
-  shell?: ShellAdapter;
-}
-
-export type SubagentPreset = (args: SubagentArgs) => Step<unknown, string, string>;
-
-//#endregion
+export type { SubagentArgs, SubagentPreset } from '../plugins/types.js';
 
 //#region Prompts
 

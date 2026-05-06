@@ -12,7 +12,7 @@ import { AgentHarness } from '@noetic/core';
 import {
   buildReconcileEvery,
   buildReconcileTickStep,
-} from '../../../src/commands/builtins/tasks/hierarchy/reconcile-flow.js';
+} from '../../../src/tasks/runtime/hierarchy/reconcile-flow.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const NOW = '2026-04-30T00:00:00.000Z';

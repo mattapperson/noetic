@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+import type { Feature } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
@@ -7,14 +7,14 @@ import {
   generateSliceId,
   generateValidatorRunId,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature, saveFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature, saveFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
 import {
   listValidatorRuns,
   loadValidatorRun,
   recordValidatorRun,
   updateValidatorRun,
-} from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
+} from '../../../src/tasks/runtime/hierarchy/validator.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

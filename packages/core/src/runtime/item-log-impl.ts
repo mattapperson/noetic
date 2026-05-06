@@ -1,6 +1,6 @@
 import type { ItemSchemaRegistry } from '../schemas/item';
 import { defaultItemSchemaRegistry } from '../schemas/item';
-import type { ItemLog } from '../types/context';
+import type { ItemLog } from '../types/context-parts/item-log';
 import type { Item } from '../types/items';
 
 export class ItemLogImpl implements ItemLog {

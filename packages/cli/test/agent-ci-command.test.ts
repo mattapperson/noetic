@@ -8,7 +8,7 @@ import { runAgentCiCommand } from '../src/commands/builtins/agent-ci/index.js';
 import type {
   StartAgentCiRunArgs,
   StartAgentCiRunResult,
-} from '../src/commands/builtins/tasks/agent-ci-launcher.js';
+} from '../src/tasks/runtime/agent-ci-launcher.js';
 import { makeStoreContext } from './tasks/_helpers.js';
 
 interface MockHarness {

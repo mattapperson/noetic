@@ -124,7 +124,7 @@ function defaultBootstrapPath(): string {
   // The compiled bootstrap lives alongside this file in the node barrel.
   // Keep the resolution lazy so consumers that never invoke step-kind
   // requests don't pay the `fileURLToPath` cost.
-  return path.resolve(new URL('./node/step-bootstrap.ts', import.meta.url).pathname);
+  return path.resolve(new URL('../harness/step-bootstrap.ts', import.meta.url).pathname);
 }
 
 function buildStepMetadata(

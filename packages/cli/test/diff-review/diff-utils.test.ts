@@ -15,7 +15,7 @@ import {
   flattenHunks,
   gutterWidth,
   markerFor,
-} from '../../src/commands/builtins/diff-review/ui/diff-utils.js';
+} from '../../src/tui/commands/diff-review-ui/diff-utils.js';
 
 const { classifyFilePath, isIncludedReviewPath } = __testing;
 

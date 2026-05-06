@@ -64,123 +64,103 @@ const TYPES = new Set([
   'Runtime',
 ]);
 
+function readWhile(code: string, start: number, test: (char: string) => boolean): [string, number] {
+  let i = start;
+  let text = '';
+  while (i < code.length && test(code[i])) {
+    text += code[i];
+    i++;
+  }
+  return [text, i];
+}
+
+function readLineComment(code: string, start: number): [Token, number] {
+  const [text, index] = readWhile(code, start, (char) => char !== '\n');
+  return [
+    {
+      text,
+      type: 'comment',
+    },
+    index,
+  ];
+}
+
+function readString(code: string, start: number): [Token, number] {
+  const quote = code[start];
+  let i = start + 1;
+  let text = quote;
+  while (i < code.length && code[i] !== quote) {
+    if (code[i] === '\\') {
+      text += code.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    text += code[i];
+    i++;
+  }
+  if (i < code.length) {
+    text += code[i];
+    i++;
+  }
+  return [
+    {
+      text,
+      type: 'string',
+    },
+    i,
+  ];
+}
+
+function tokenForWord(word: string): Token {
+  if (KEYWORDS.has(word)) {
+    return {
+      text: word,
+      type: 'keyword',
+    };
+  }
+  if (TYPES.has(word) || /^[A-Z]/.test(word)) {
+    return {
+      text: word,
+      type: 'type',
+    };
+  }
+  return {
+    text: word,
+    type: 'default',
+  };
+}
+
 function tokenize(code: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
 
   while (i < code.length) {
     const char = code[i];
-
-    // Comments
+    let token: Token;
     if (char === '/' && code[i + 1] === '/') {
-      let comment = '';
-      while (i < code.length && code[i] !== '\n') {
-        comment += code[i];
-        i++;
-      }
-      tokens.push({
-        text: comment,
-        type: 'comment',
-      });
-      continue;
-    }
-
-    // Strings (single and double quotes, template literals)
-    if (char === '"' || char === "'" || char === '`') {
-      const quote = char;
-      let str = char;
+      [token, i] = readLineComment(code, i);
+    } else if (char === '"' || char === "'" || char === '`') {
+      [token, i] = readString(code, i);
+    } else if (/\s/.test(char)) {
+      const [text, next] = readWhile(code, i, (c) => /\s/.test(c));
+      token = { text, type: 'default' };
+      i = next;
+    } else if (/[a-zA-Z_$]/.test(char)) {
+      const [word, next] = readWhile(code, i, (c) => /[a-zA-Z0-9_$]/.test(c));
+      token = tokenForWord(word);
+      i = next;
+    } else if (/[=+\-*/<>!&|:;.,?()[\]{}]/.test(char)) {
+      token = { text: char, type: 'operator' };
       i++;
-      while (i < code.length && code[i] !== quote) {
-        if (code[i] === '\\') {
-          str += code[i] + code[i + 1];
-          i += 2;
-        } else {
-          str += code[i];
-          i++;
-        }
-      }
-      if (i < code.length) {
-        str += code[i];
-        i++;
-      }
-      tokens.push({
-        text: str,
-        type: 'string',
-      });
-      continue;
-    }
-
-    // Whitespace
-    if (/\s/.test(char)) {
-      let whitespace = '';
-      while (i < code.length && /\s/.test(code[i])) {
-        whitespace += code[i];
-        i++;
-      }
-      tokens.push({
-        text: whitespace,
-        type: 'default',
-      });
-      continue;
-    }
-
-    // Identifiers and keywords
-    if (/[a-zA-Z_$]/.test(char)) {
-      let word = '';
-      while (i < code.length && /[a-zA-Z0-9_$]/.test(code[i])) {
-        word += code[i];
-        i++;
-      }
-
-      if (KEYWORDS.has(word)) {
-        tokens.push({
-          text: word,
-          type: 'keyword',
-        });
-      } else if (TYPES.has(word) || /^[A-Z]/.test(word)) {
-        tokens.push({
-          text: word,
-          type: 'type',
-        });
-      } else {
-        tokens.push({
-          text: word,
-          type: 'default',
-        });
-      }
-      continue;
-    }
-
-    // Operators and punctuation
-    if (/[=+\-*/<>!&|:;.,?()[\]{}]/.test(char)) {
-      tokens.push({
-        text: char,
-        type: 'operator',
-      });
+    } else if (/\d/.test(char)) {
+      const [text, next] = readWhile(code, i, (c) => /[\d.]/.test(c));
+      token = { text, type: 'default' };
+      i = next;
+    } else {
+      token = { text: char, type: 'default' };
       i++;
-      continue;
     }
-
-    // Numbers
-    if (/\d/.test(char)) {
-      let num = '';
-      while (i < code.length && /[\d.]/.test(code[i])) {
-        num += code[i];
-        i++;
-      }
-      tokens.push({
-        text: num,
-        type: 'default',
-      });
-      continue;
-    }
-
-    // Default case
-    tokens.push({
-      text: char,
-      type: 'default',
-    });
-    i++;
+    tokens.push(token);
   }
 
   return tokens;

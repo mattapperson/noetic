@@ -1,4 +1,4 @@
-import type { LastLayerUsage } from './context';
+import type { LastLayerUsage } from './context-parts/layer-usage';
 import type { Item } from './items';
 
 //#region Stream Event Types

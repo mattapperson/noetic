@@ -4,8 +4,8 @@ import type { ToolExecutionContext } from '@noetic/core';
 import { AgentHarness } from '@noetic/core';
 import type { z } from 'zod';
 
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import type { Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
+import type { Feature } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
@@ -13,15 +13,15 @@ import {
   generateSliceId,
   generateValidatorRunId,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { saveFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { ValidatorContext } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { saveFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
+import type { ValidatorContext } from '../../../src/tasks/runtime/hierarchy/validator.js';
 import {
   listValidatorRuns,
   recordValidatorRun,
-} from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
-import type { ValidatorSpawn } from '../../../src/commands/builtins/tasks/hierarchy/validator-launcher.js';
-import { createValidatorLauncherTool } from '../../../src/commands/builtins/tasks/hierarchy/validator-launcher-tool.js';
+} from '../../../src/tasks/runtime/hierarchy/validator.js';
+import type { ValidatorSpawn } from '../../../src/tasks/runtime/hierarchy/validator-launcher.js';
+import { createValidatorLauncherTool } from '../../../src/tasks/runtime/hierarchy/validator-launcher-tool.js';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

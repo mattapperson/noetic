@@ -7,7 +7,6 @@ import assert from 'node:assert/strict';
 
 import { AGENT_READINESS_PROMPT } from '../src/commands/builtins/agent-readiness.js';
 import {
-  BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
   findCommand,
   generateCommandSuggestions,
@@ -20,6 +19,7 @@ import {
   parseBashCommand,
   parseSlashCommand,
 } from '../src/commands/index.js';
+import { BUILTIN_COMMANDS } from '../src/tui/commands/index.js';
 
 describe('parseSlashCommand', () => {
   test('returns null for non-slash input', () => {

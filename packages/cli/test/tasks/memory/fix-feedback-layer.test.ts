@@ -3,15 +3,15 @@ import assert from 'node:assert';
 
 import type { ExecutionContext, Item, ItemLog, ScopedStorage } from '@noetic/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
-import type { AssertionOutcome } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { AssertionStatus } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import type { FixFeedbackState } from '../../../src/commands/builtins/tasks/memory/fix-feedback-layer.js';
+import type { AssertionOutcome } from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { AssertionStatus } from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import type { FixFeedbackState } from '../../../src/tasks/runtime/memory/fix-feedback-layer.js';
 import {
   applyFixFeedbackUpdate,
   createFixFeedbackLayer,
   FIX_FEEDBACK_LAYER_ID,
   formatFixFeedback,
-} from '../../../src/commands/builtins/tasks/memory/fix-feedback-layer.js';
+} from '../../../src/tasks/runtime/memory/fix-feedback-layer.js';
 
 //#region Test helpers
 

@@ -14,7 +14,7 @@ import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
 import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 import type { Command, LocalCommandCall, LocalCommandResult } from '../../types.js';
-import { AgentCiSpawnError, startAgentCiRun } from '../tasks/agent-ci-launcher.js';
+import { AgentCiSpawnError, startAgentCiRun } from '../../../tasks/runtime/agent-ci-launcher.js';
 
 //#region Workflow resolution
 

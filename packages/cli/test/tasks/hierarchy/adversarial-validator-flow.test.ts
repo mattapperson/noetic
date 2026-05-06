@@ -11,18 +11,18 @@ import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type {
   AdversarialReviewOutput,
   ValidatorShellSpawn,
-} from '../../../src/commands/builtins/tasks/hierarchy/adversarial-validator-flow.js';
+} from '../../../src/tasks/runtime/hierarchy/adversarial-validator-flow.js';
 import {
   buildAdversarialPrompt,
   combineOutcomes,
   createDefaultRunAgentCi,
-} from '../../../src/commands/builtins/tasks/hierarchy/adversarial-validator-flow.js';
-import type { Assertion, Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/adversarial-validator-flow.js';
+import type { Assertion, Feature } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   AssertionStatus,
   FeatureLoopState,
   FeatureStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import { makeStoreContext } from '../_helpers.js';
 
 //#region Helpers

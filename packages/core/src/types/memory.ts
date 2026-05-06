@@ -1,10 +1,8 @@
 import type { ZodType } from 'zod';
+import type { ItemLog } from './context-parts/item-log';
 import type { LLMResponse } from './common';
-import type { ItemLog } from './context';
-import type { FsAdapter } from './fs-adapter';
 import type { Item, ItemSchemaExtensions } from './items';
-import type { CallModelRequest } from './runtime';
-import type { ShellAdapter } from './shell-adapter';
+import type { ExecutionContext, ExecutionOutcome, MemoryCallModelRequest, MemoryScope } from './memory-context';
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
@@ -12,7 +10,37 @@ import type {
   BeforeToolCallResult,
 } from './steering';
 
-//#region Layer Provides
+
+export type {
+  ExecutionContext,
+  ExecutionOutcome,
+  MemoryCallModelRequest,
+  MemoryScope,
+} from './memory-context';
+
+/** @public Isolation scope controlling how a memory layer's state is keyed and shared. */
+export type BudgetConfig =
+  | number
+  | {
+      min: number;
+      max: number;
+    }
+  | 'auto';
+
+/** @public Per-hook timeout overrides in milliseconds for a memory layer. */
+export interface LayerTimeouts {
+  init?: number;
+  recall?: number;
+  store?: number;
+  onSpawn?: number;
+  onReturn?: number;
+  onComplete?: number;
+  dispose?: number;
+  beforeToolCall?: number;
+  afterModelCall?: number;
+  onItemAppend?: number;
+  projectHistory?: number;
+}
 
 /** @public A read-only data projection from layer state, accessible via `ctx.memory['layerId'].prop`. */
 export interface LayerDataDecl<T = unknown, TState = unknown> {
@@ -115,73 +143,6 @@ export const Slot = {
   RAG: 350,
   SEMANTIC_RECALL: 400,
 } as const satisfies Record<string, number>;
-
-/** @public Isolation scope controlling how a memory layer's state is keyed and shared. */
-export type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
-
-/** @public Token budget specification for a memory layer: fixed number, min/max range, or automatic. */
-export type BudgetConfig =
-  | number
-  | {
-      min: number;
-      max: number;
-    }
-  | 'auto';
-
-/** @public Per-hook timeout overrides in milliseconds for a memory layer. */
-export interface LayerTimeouts {
-  init?: number;
-  recall?: number;
-  store?: number;
-  onSpawn?: number;
-  onReturn?: number;
-  onComplete?: number;
-  dispose?: number;
-  beforeToolCall?: number;
-  afterModelCall?: number;
-  onItemAppend?: number;
-  projectHistory?: number;
-}
-
-/** @public Terminal outcome of an execution run, reported to memory layers on completion. */
-export type ExecutionOutcome = 'success' | 'failure' | 'aborted';
-
-/** @public Runtime metadata available to memory layer hooks during each lifecycle phase. */
-export interface ExecutionContext {
-  executionId: string;
-  threadId: string;
-  resourceId?: string;
-  depth: number;
-  stepNumber: number;
-  tokenUsage: {
-    input: number;
-    output: number;
-  };
-  cost: number;
-  /** Filesystem adapter for virtual or real filesystem access. */
-  fs: FsAdapter;
-  /** Shell adapter for virtual or real shell command execution. */
-  shell: ShellAdapter;
-  callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
-  tokenize(text: string): number;
-  trace: {
-    setAttribute(key: string, value: string | number | boolean): void;
-    addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
-  };
-  /**
-   * Snapshot a sibling memory layer's state by its `layer.id`.
-   * Returns `undefined` if no layer with that ID has stored state in this execution.
-   * Enables cross-layer coordination (e.g., a reminder layer reading a planning layer's mode flag).
-   *
-   * **Type safety:** The generic `T` is an author-assertion — it is NOT
-   * runtime-validated. Any layer may register under the queried id with an
-   * arbitrary state shape, so callers MUST add a runtime shape guard (e.g.
-   * `Array.isArray`, a Zod parse, or a narrow `typeof` check) before
-   * dereferencing fields. See `reminder-triggers.ts` (`hasSources`) in
-   * `@noetic/cli` for the canonical pattern.
-   */
-  readLayerState<T>(layerId: string): T | undefined;
-}
 
 /** @public Low-level key-value persistence backend used by scoped storage and memory layers. */
 export interface StorageAdapter {

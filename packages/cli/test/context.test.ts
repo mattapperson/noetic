@@ -11,7 +11,7 @@ import {
   formatTokens,
   getModelContextLimit,
   summarizeItem,
-} from '../src/commands/builtins/context.js';
+} from '../src/tui/commands/context.js';
 
 //#region Fixtures
 

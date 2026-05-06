@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/delegate-tools';
 import { channel } from '../../src/builders/channel-builder';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import type { DetachedHandle } from '../../src/types/detached';
 import type { AgentHarnessContract } from '../../src/types/runtime';
 import type { ToolExecutionContext } from '../../src/types/tool-context';

@@ -14,15 +14,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
-import type { DecoratedTask } from '../../../src/commands/builtins/tasks/ui/task-board.js';
+import { KanbanColumn } from '../../../src/tasks/runtime/kanban.js';
+import type { DecoratedTask } from '../../../src/tui/tasks/runtime-ui/task-board.js';
 import {
   columnLabel,
   groupTasksByColumn,
   selectedTask,
   selectionAfterKey,
   VISIBLE_COLUMNS,
-} from '../../../src/commands/builtins/tasks/ui/task-board.js';
+} from '../../../src/tui/tasks/runtime-ui/task-board.js';
 
 //#region Fixtures
 

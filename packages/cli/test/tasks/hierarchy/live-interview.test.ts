@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { InterviewQuestion } from '../../../src/commands/builtins/tasks/hierarchy/live-interview.js';
+import type { InterviewQuestion } from '../../../src/tasks/runtime/hierarchy/live-interview.js';
 import {
   buildAskUserQuestion,
   closeInterviewSession,
@@ -8,9 +8,9 @@ import {
   mapAutopilotAnswer,
   toInterviewResultLike,
   toTaskHierarchyInput,
-} from '../../../src/commands/builtins/tasks/hierarchy/live-interview.js';
-import { InterviewSessionStatus } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadInterviewSession } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/live-interview.js';
+import { InterviewSessionStatus } from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadInterviewSession } from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

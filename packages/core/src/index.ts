@@ -202,7 +202,7 @@ export { react } from './patterns/react';
 //#region Runtime
 
 /** @public */
-export { AgentHarness } from './runtime/agent-harness';
+export { AgentHarness } from './harness/agent-harness';
 /** @public */
 /** @public */
 /** @public */
@@ -276,11 +276,13 @@ export { getToolCwd, setToolCwd, snapshotCwdState } from './runtime/cwd-helpers'
 /** @public */
 export type {
   Context,
+  ContextHarness,
   CwdState,
-  ItemLog,
-  LastLayerUsage,
-  LayerUsageEntry,
 } from './types/context';
+/** @public */
+export type { ItemLog } from './types/context-parts/item-log';
+/** @public */
+export type { LastLayerUsage, LayerUsageEntry } from './types/context-parts/layer-usage';
 
 //#endregion
 
@@ -372,8 +374,6 @@ export type {
   CompleteParams,
   ContextMemory,
   DisposeParams,
-  ExecutionContext,
-  ExecutionOutcome,
   InferMemory,
   InferMemoryShape,
   InitParams,
@@ -385,7 +385,6 @@ export type {
   MemoryConfig,
   MemoryHooks,
   MemoryLayer,
-  MemoryScope,
   ProjectionPolicy,
   RecallParams,
   RecallResult,
@@ -398,6 +397,13 @@ export type {
   StoreParams,
   StoreResult,
 } from './types/memory';
+/** @public */
+export type {
+  ExecutionContext,
+  ExecutionOutcome,
+  MemoryCallModelRequest,
+  MemoryScope,
+} from './types/memory-context';
 /** @public */
 export { Slot } from './types/memory';
 

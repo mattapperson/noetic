@@ -5,7 +5,7 @@ import {
   buildValidationSystemPrompt,
   INTERVIEW_SYSTEM_PROMPT,
   TRIAGE_SYSTEM_PROMPT,
-} from '../../../src/commands/builtins/tasks/hierarchy/prompts.js';
+} from '../../../src/tasks/runtime/hierarchy/prompts.js';
 
 describe('INTERVIEW_SYSTEM_PROMPT', () => {
   it('targets the unified task hierarchy shape (TaskHierarchyInput)', () => {

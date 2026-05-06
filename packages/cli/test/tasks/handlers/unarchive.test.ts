@@ -5,7 +5,7 @@ import {
   archiveTaskHandler,
   createTaskHandler,
   unarchiveTaskHandler,
-} from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+} from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('unarchiveTaskHandler', () => {

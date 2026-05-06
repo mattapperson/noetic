@@ -3,16 +3,16 @@ import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { getFieldValue, setFieldValue } from '../src/commands/builtins/config/accessors.js';
-import { saveConfig } from '../src/commands/builtins/config/save.js';
-import { serializeConfig } from '../src/commands/builtins/config/serialization.js';
+import { getFieldValue, setFieldValue } from '../src/tui/commands/config/accessors.js';
+import { saveConfig } from '../src/tui/commands/config/save.js';
+import { serializeConfig } from '../src/tui/commands/config/serialization.js';
 import {
   commitEdit,
   createInitialState,
   resetFocusedField,
   startEditing,
-} from '../src/commands/builtins/config/state.js';
-import { ConfigTab } from '../src/commands/builtins/config/types.js';
+} from '../src/tui/commands/config/state.js';
+import { ConfigTab } from '../src/tui/commands/config/types.js';
 import type { AgentConfig } from '../src/types/config.js';
 
 const baseConfig: AgentConfig = {

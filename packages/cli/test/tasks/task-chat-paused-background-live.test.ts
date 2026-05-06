@@ -44,7 +44,7 @@ import { TaskPauseReason } from '@noetic/code-agent/tasks/schema';
 import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createLocalFsAdapter } from '@noetic/core';
 import { z } from 'zod';
-import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
 
 //#region Schemas
 

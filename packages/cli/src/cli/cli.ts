@@ -10,17 +10,17 @@ import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
 import { createPluginContextBuilder } from '../plugins/context.js';
 import { loadPlugins } from '../plugins/loader.js';
 import { findMostRecentSession, loadSession, loadSessionByIdAnywhere } from '../sessions/store.js';
-import type { SessionFile } from '../sessions/types.js';
+import type { SessionFile } from '../types/session.js';
 import { runAgent } from '../tui/app.js';
 import { runPicker } from '../tui/run-picker.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
-import { installInterruptSafetyNet } from './interrupt-safety-net.js';
+import { installInterruptSafetyNet } from '../tui/terminal/interrupt-safety-net.js';
 import { installWorkspaceProxy } from './workspace-proxy.js';
 
 if (process.argv[2] === 'tasks') {
-  const { runTasksCli } = await import('../commands/builtins/tasks/cli.js');
+  const { runTasksCli } = await import('../tasks/runtime/cli.js');
   const exitCode = await runTasksCli(process.argv.slice(3));
   process.exit(exitCode);
 }

@@ -11,16 +11,16 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { saveTask, tailEvents, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
-import type { Signaller } from '../../src/commands/builtins/tasks/agent-ci-control.js';
+import type { Signaller } from '../../src/tasks/runtime/agent-ci-control.js';
 import type {
   AgentCiSpawn,
   StartAgentCiRunArgs,
-} from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
+} from '../../src/tasks/runtime/agent-ci-launcher.js';
 import {
   AgentCiSpawnError,
   startAgentCiRun,
-} from '../../src/commands/builtins/tasks/agent-ci-launcher.js';
-import { loadRunner, saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
+} from '../../src/tasks/runtime/agent-ci-launcher.js';
+import { loadRunner, saveRunner } from '../../src/tasks/runtime/runner-state.js';
 import { makeStoreContext } from './_helpers.js';
 
 //#region Helpers

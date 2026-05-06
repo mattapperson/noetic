@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { hierarchyPaths } from '../../../src/commands/builtins/tasks/hierarchy/paths.js';
+import { hierarchyPaths } from '../../../src/tasks/runtime/hierarchy/paths.js';
 import type {
   Assertion,
   Feature,
   InterviewSession,
   Milestone,
   Slice,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   AssertionStatus,
   FeatureLoopState,
@@ -19,7 +19,7 @@ import {
   InterviewSessionStatus,
   MilestoneStatus,
   SliceStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   clearTaskHierarchy,
   deleteAssertion,
@@ -41,7 +41,7 @@ import {
   saveInterviewSession,
   saveMilestone,
   saveSlice,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 //#region Factories

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
-import { AgentHarness } from '../src/runtime/agent-harness';
+import { AgentHarness } from '../src/harness/agent-harness';
 
 describe('createInMemorySubprocessAdapter', () => {
   it('tracks subprocess handles and supports stop', async () => {

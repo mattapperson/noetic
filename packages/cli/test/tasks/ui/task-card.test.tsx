@@ -12,7 +12,7 @@ import {
   hierarchyIcon,
   sourceBadge,
   statusIcon,
-} from '../../../src/commands/builtins/tasks/ui/task-card.js';
+} from '../../../src/tui/tasks/runtime-ui/task-card.js';
 
 //#region Fixtures
 

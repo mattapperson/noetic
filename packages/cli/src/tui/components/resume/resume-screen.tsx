@@ -14,7 +14,7 @@ import {
   loadSession,
   loadSessionByIdAnywhere,
 } from '../../../sessions/store.js';
-import type { SessionFile, SessionMetadata } from '../../../sessions/types.js';
+import type { SessionFile, SessionMetadata } from '../../../types/session.js';
 import { useTheme } from '../theme.js';
 import { shouldCancelOnKey } from './cancel-key.js';
 import { LogSelector } from './log-selector.js';

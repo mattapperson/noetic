@@ -20,8 +20,8 @@ import { join } from 'node:path';
 import { createFileStorage, createLocalFsAdapter } from '@noetic/core';
 import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
 
-import { createTaskHandler } from '../../src/commands/builtins/tasks/handlers/lifecycle.js';
-import { ensureChatTarget } from '../../src/commands/builtins/tasks/resolve-chat-target.js';
+import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
+import { ensureChatTarget } from '../../src/tasks/runtime/resolve-chat-target.js';
 
 describe('chat on a task end-to-end', () => {
   let projectRoot: string;

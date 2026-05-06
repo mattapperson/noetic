@@ -86,6 +86,10 @@ function makeCtx(partial: Partial<SessionSnapshot> = {}): FakeCtx {
     },
     restartWithSession: (target) => {
       state.restarts.push(target);
+      if (target.kind === 'id') {
+        return `Session ${target.sessionId} not found.`;
+      }
+      return undefined;
     },
   };
   return {
@@ -219,5 +223,11 @@ describe('/resume', () => {
       throw new Error('expected text');
     }
     expect(result.value).toContain('not found');
+    expect(fake.restarts).toEqual([
+      {
+        kind: 'id',
+        sessionId: 'ffffffff-0000-4000-8000-000000000000',
+      },
+    ]);
   });
 });

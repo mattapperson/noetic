@@ -46,7 +46,7 @@ export { workingMemory } from './memory/layers/working-memory';
 //#region Runtime
 
 /** @public */
-export { AgentHarness } from './runtime/agent-harness';
+export { AgentHarness } from './harness/agent-harness';
 
 /** @public */
 export { createInMemoryStorage } from './runtime/in-memory-storage';

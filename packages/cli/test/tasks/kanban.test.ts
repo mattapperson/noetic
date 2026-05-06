@@ -8,7 +8,7 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { deriveColumn, KanbanColumn, moveTask } from '../../src/commands/builtins/tasks/kanban.js';
+import { deriveColumn, KanbanColumn, moveTask } from '../../src/tasks/runtime/kanban.js';
 import { makeStoreContext } from './_helpers.js';
 
 //#region Fixtures

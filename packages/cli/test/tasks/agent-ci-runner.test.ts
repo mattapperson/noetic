@@ -19,9 +19,9 @@ import {
   tailEvents,
   taskDirPaths,
 } from '@noetic/code-agent/tasks/store/fs-node';
-import type { RunnerSpawn } from '../../src/commands/builtins/tasks/agent-ci-runner.js';
-import { runAgentCi } from '../../src/commands/builtins/tasks/agent-ci-runner.js';
-import { saveRunner } from '../../src/commands/builtins/tasks/runner-state.js';
+import type { RunnerSpawn } from '../../src/tasks/runtime/agent-ci-runner.js';
+import { runAgentCi } from '../../src/tasks/runtime/agent-ci-runner.js';
+import { saveRunner } from '../../src/tasks/runtime/runner-state.js';
 import { MemFs, makeStoreContext } from './_helpers.js';
 
 //#region Helpers

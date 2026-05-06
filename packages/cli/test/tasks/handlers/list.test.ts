@@ -7,9 +7,9 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { listTasksHandler } from '../../../src/commands/builtins/tasks/handlers/inspection.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
+import { listTasksHandler } from '../../../src/tasks/runtime/handlers/inspection.js';
+import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
+import { KanbanColumn } from '../../../src/tasks/runtime/kanban.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('listTasksHandler', () => {

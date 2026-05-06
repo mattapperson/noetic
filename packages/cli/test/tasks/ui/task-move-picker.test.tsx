@@ -11,11 +11,11 @@ import { describe, expect, test } from 'bun:test';
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import { KanbanColumn } from '../../../src/commands/builtins/tasks/kanban.js';
+import { KanbanColumn } from '../../../src/tasks/runtime/kanban.js';
 import {
   clampCursor,
   commitMove,
-} from '../../../src/commands/builtins/tasks/ui/task-move-picker.js';
+} from '../../../src/tui/tasks/runtime-ui/task-move-picker.js';
 import { makeStoreContext } from '../_helpers.js';
 
 //#region Fixtures

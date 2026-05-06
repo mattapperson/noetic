@@ -12,7 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { buildHierarchyDaemonHarness } from '../commands/builtins/tasks/hierarchy/daemon-bootstrap.js';
+import { buildHierarchyDaemonHarness } from '../tasks/runtime/hierarchy/daemon-bootstrap.js';
 import * as log from '../util/log.js';
 import {
   acquireDaemonLock,

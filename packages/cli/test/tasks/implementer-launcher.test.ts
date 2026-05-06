@@ -8,11 +8,11 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createInMemorySubprocessAdapter } from '@noetic/core';
-import { persistTaskHierarchy } from '../../src/commands/builtins/tasks/hierarchy/persist.js';
+import { persistTaskHierarchy } from '../../src/tasks/runtime/hierarchy/persist.js';
 import {
   ImplementerSpawnError,
   startImplementerRun,
-} from '../../src/commands/builtins/tasks/implementer-launcher.js';
+} from '../../src/tasks/runtime/implementer-launcher.js';
 import { fakeProvision, makeTrackingAdapter, preloadLiveHandle } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 

@@ -23,7 +23,7 @@ import {
   SliceStatus,
   ValidatorRunSchema,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 
 //#region ID generation
 

@@ -6,8 +6,8 @@ import {
   BudgetExhaustedError,
   fixFeatureFlow,
   readFixLineage,
-} from '../../../src/commands/builtins/tasks/hierarchy/fix-feature.js';
-import type { Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/fix-feature.js';
+import type { Feature } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   DEFAULT_IMPLEMENTATION_RETRY_BUDGET,
   FeatureLoopState,
@@ -15,9 +15,9 @@ import {
   generateFeatureId,
   generateSliceId,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature, saveFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import { recordValidatorRun } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature, saveFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
+import { recordValidatorRun } from '../../../src/tasks/runtime/hierarchy/validator.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

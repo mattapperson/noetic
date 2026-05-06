@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import type { LLMResponse } from '../../src/types/common';
 import type { StreamEvent } from '../../src/types/harness-result';
 import type { ContextMemory } from '../../src/types/memory';

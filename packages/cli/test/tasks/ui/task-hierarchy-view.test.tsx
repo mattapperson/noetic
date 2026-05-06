@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { statusGlyph } from '../../../src/commands/builtins/tasks/ui/task-hierarchy-view.js';
+import { statusGlyph } from '../../../src/tui/tasks/runtime-ui/task-hierarchy-view.js';
 
 describe('statusGlyph', () => {
   test('active milestones/slices/features render the play glyph', () => {

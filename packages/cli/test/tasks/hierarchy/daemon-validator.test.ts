@@ -8,18 +8,18 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ValidatorShellSpawn } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
-import { createShellValidator } from '../../../src/commands/builtins/tasks/hierarchy/daemon-validator.js';
+import type { ValidatorShellSpawn } from '../../../src/tasks/runtime/hierarchy/daemon-validator.js';
+import { createShellValidator } from '../../../src/tasks/runtime/hierarchy/daemon-validator.js';
 import type {
   Feature,
   ValidatorRun,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   AssertionStatus,
   FeatureLoopState,
   FeatureStatus,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import { makeStoreContext } from '../_helpers.js';
 
 interface FakeChildOptions {

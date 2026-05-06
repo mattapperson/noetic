@@ -13,13 +13,13 @@ import type {
   AgentCiActionResult,
   ControlSignal,
   Signaller,
-} from '../src/commands/builtins/tasks/agent-ci-control.js';
+} from '../src/tasks/runtime/agent-ci-control.js';
 import {
   cancelAgentCiRun,
   findActiveAgentCiRunner,
   togglePauseAgentCiRun,
-} from '../src/commands/builtins/tasks/agent-ci-control.js';
-import { loadRunner, saveRunner } from '../src/commands/builtins/tasks/runner-state.js';
+} from '../src/tasks/runtime/agent-ci-control.js';
+import { loadRunner, saveRunner } from '../src/tasks/runtime/runner-state.js';
 import { makeStoreContext } from './tasks/_helpers.js';
 
 //#region Mock helpers

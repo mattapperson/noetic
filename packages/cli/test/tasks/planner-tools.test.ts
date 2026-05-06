@@ -21,12 +21,12 @@ import {
 import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ToolExecutionContext } from '@noetic/core';
 import { createDetachedSignal } from '@noetic/core';
-import { listMilestones } from '../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { PlannerOutcome } from '../../src/commands/builtins/tasks/planner-tools.js';
+import { listMilestones } from '../../src/tasks/runtime/hierarchy/store.js';
+import type { PlannerOutcome } from '../../src/tasks/runtime/planner-tools.js';
 import {
   createAbandonPlanningTool,
   createSubmitHierarchyTool,
-} from '../../src/commands/builtins/tasks/planner-tools.js';
+} from '../../src/tasks/runtime/planner-tools.js';
 import { makeStoreContext } from './_helpers.js';
 
 const TASK_ID = 'T-plan000000';

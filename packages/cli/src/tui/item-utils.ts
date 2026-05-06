@@ -6,8 +6,8 @@
  * helpers (item-id stability, text extraction, dedup, skill activation).
  */
 
-import type { AssistantEntry, ConversationEntry } from '../sessions/types.js';
-import { isErrorEntry, isSystemEntry, isUserEntry } from '../sessions/types.js';
+import type { AssistantEntry, ConversationEntry } from '../types/session.js';
+import { isErrorEntry, isSystemEntry, isUserEntry } from '../types/session.js';
 
 export type {
   AssistantEntry,
@@ -15,13 +15,13 @@ export type {
   ErrorEntry,
   SystemEntry,
   UserEntry,
-} from '../sessions/types.js';
+} from '../types/session.js';
 export {
   ConversationEntrySchema,
   isErrorEntry,
   isSystemEntry,
   isUserEntry,
-} from '../sessions/types.js';
+} from '../types/session.js';
 
 type MessageContentPart = Extract<
   AssistantEntry,

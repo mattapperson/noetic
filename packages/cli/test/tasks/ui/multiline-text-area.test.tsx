@@ -9,8 +9,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import type { Key } from 'ink';
-import type { EditorState } from '../../../src/commands/builtins/tasks/ui/multiline-text-area.js';
-import { applyKey } from '../../../src/commands/builtins/tasks/ui/multiline-text-area.js';
+import type { EditorState } from '../../../src/tui/tasks/runtime-ui/multiline-text-area.js';
+import { applyKey } from '../../../src/tui/tasks/runtime-ui/multiline-text-area.js';
 
 const BLANK_KEY: Key = {
   upArrow: false,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionFile } from '../src/sessions/types.js';
-import { SessionFileV1Schema, toSessionMetadata } from '../src/sessions/types.js';
+import type { SessionFile } from '../src/types/session.js';
+import { SessionFileV1Schema, toSessionMetadata } from '../src/types/session.js';
 
 function validSession(): SessionFile {
   const now = new Date().toISOString();

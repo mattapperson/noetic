@@ -3,13 +3,13 @@ import {
   addFeatureHandler,
   addMilestoneHandler,
   addSliceHandler,
-} from '../../../src/commands/builtins/tasks/handlers/hierarchy.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+} from '../../../src/tasks/runtime/handlers/hierarchy.js';
+import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import {
   FeatureLoopState,
   FeatureStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { listFeatures } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { listFeatures } from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('addFeatureHandler', () => {

@@ -9,27 +9,27 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic/core';
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import type { AutopilotFlowDeps } from '../../../src/commands/builtins/tasks/hierarchy/autopilot-flow.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
+import type { AutopilotFlowDeps } from '../../../src/tasks/runtime/hierarchy/autopilot-flow.js';
 import {
   buildAutopilotEvery,
   buildAutopilotTickStep,
   sliceDecisionBranch,
   tickOneTaskStep,
-} from '../../../src/commands/builtins/tasks/hierarchy/autopilot-flow.js';
-import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
-import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
+} from '../../../src/tasks/runtime/hierarchy/autopilot-flow.js';
+import { applyFeatureLoopStateUpdate } from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';
+import { persistTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/persist.js';
 import {
   FeatureLoopState,
   FeatureStatus,
   MilestoneStatus,
   SliceStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   listFeatures,
   listMilestones,
   listSlices,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

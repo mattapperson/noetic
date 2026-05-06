@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
 import { listTasks, loadTask, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('createTaskHandler', () => {

@@ -7,23 +7,23 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import { activateSlice } from '../../../src/commands/builtins/tasks/hierarchy/activation.js';
-import { applyFeatureLoopStateUpdate } from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
-import type { HealthJobDeps } from '../../../src/commands/builtins/tasks/hierarchy/health-job.js';
-import { _testRunHealthTick } from '../../../src/commands/builtins/tasks/hierarchy/health-job.js';
-import { persistTaskHierarchy } from '../../../src/commands/builtins/tasks/hierarchy/persist.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
+import { activateSlice } from '../../../src/tasks/runtime/hierarchy/activation.js';
+import { applyFeatureLoopStateUpdate } from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';
+import type { HealthJobDeps } from '../../../src/tasks/runtime/hierarchy/health-job.js';
+import { _testRunHealthTick } from '../../../src/tasks/runtime/hierarchy/health-job.js';
+import { persistTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/persist.js';
 import {
   FeatureLoopState,
   FeatureStatus,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
 import {
   listValidatorRuns,
   recordValidatorRun,
   updateValidatorRun,
-} from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
+} from '../../../src/tasks/runtime/hierarchy/validator.js';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 

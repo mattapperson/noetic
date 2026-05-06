@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { LogEntryKind } from '@noetic/code-agent/tasks/schema';
 import { readLog } from '@noetic/code-agent/tasks/store/fs-node';
-import { commentTaskHandler } from '../../../src/commands/builtins/tasks/handlers/inspection.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { commentTaskHandler } from '../../../src/tasks/runtime/handlers/inspection.js';
+import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('commentTaskHandler', () => {

@@ -2,208 +2,115 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import type { TeammateRegistry } from '@noetic/code-agent/agents';
-import type { PendingAskUserRequest } from '@noetic/code-agent/ask-user-service';
-import { createAskUserService } from '@noetic/code-agent/ask-user-service';
-import type { LspService } from '@noetic/code-agent/lsp';
-import type { SkillDefinition } from '@noetic/code-agent/skills';
-import { buildSkillCatalog } from '@noetic/code-agent/skills';
-import type {
-  AgentHarness,
-  AskUserOutput,
-  InputContentPart,
-  InputMessageItem,
-  Item,
-  LastLayerUsage,
-  MemoryLayer,
-  PlanState,
-  ShellAdapter,
-  StreamEvent,
-} from '@noetic/core';
-import { createLocalShellAdapter } from '@noetic/core';
+import {
+  buildSkillCatalog,
+  createAskUserService,
+  createLocalShellAdapter,
+  type AgentHarness,
+  type AskUserOutput,
+  type InputContentPart,
+  type InputMessageItem,
+  type Item,
+  type LastLayerUsage,
+  type LspService,
+  type MemoryLayer,
+  type PendingAskUserRequest,
+  type PlanState,
+  type ShellAdapter,
+  type SkillDefinition,
+  type StreamEvent,
+  type TeammateRegistry,
+} from './app-parts/deps.js';
 import { render } from 'ink';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ensureChatTarget } from '../commands/builtins/tasks/resolve-chat-target.js';
-import { TaskBoard } from '../commands/builtins/tasks/ui/task-board.js';
 import {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
+  ensureChatTarget,
+  ensureDaemon,
   executeCommand,
   findCommand,
   isSlashCommand,
   parseBashCommand,
   parseSlashCommand,
-} from '../commands/index.js';
-import type {
-  Command,
-  CommandContext,
-  SessionRestartTarget,
-  SessionSnapshot,
-  ViewMode,
-} from '../commands/types.js';
-import { ensureDaemon } from '../daemon-runtime/runtime.js';
-import type { AgentMode, PlanHooks } from '../harness/factory.js';
-import { createAgentHarness, createLspService } from '../harness/factory.js';
-import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
-import { createPluginContextBuilder } from '../plugins/context.js';
-import type { FooterContext, NoeticPlugin } from '../plugins/types.js';
-import type { SaveResult } from '../sessions/store.js';
-import { saveSession } from '../sessions/store.js';
-import { stripUnresolvedToolCalls } from '../sessions/strip-unresolved.js';
-import type { SessionFile } from '../sessions/types.js';
-import type { AgentRuntimeConfig } from '../types/config.js';
-import { getModelContextLimit } from '../types/model-context.js';
-import type { LocalBashResult } from './bash-command.js';
+  type Command,
+  type CommandContext,
+  type SessionRestartTarget,
+  type SessionSnapshot,
+  type ViewMode,
+} from './app-parts/commands.js';
 import {
+  createAgentHarness,
+  createLspService,
+  createPlanSession,
+  createPluginContextBuilder,
+  getModelContextLimit,
+  loadSession,
+  loadSessionByIdAnywhere,
+  saveSession,
+  stripUnresolvedToolCalls,
+  writeFlow,
+  writePrd,
+  type AgentMode,
+  type AgentRuntimeConfig,
+  type FooterContext,
+  type NoeticPlugin,
+  type PlanHooks,
+  type SaveResult,
+  type SessionFile,
+} from './app-parts/services.js';
+import {
+  appendOrUpdateEntry,
+  AskUserModal,
   buildBashCommandEntry,
   buildCdBashResult,
   buildCdEntry,
   buildCdErrorEntry,
   buildCdSplitNoticeEntry,
-  formatLocalStdoutBlock,
-  getFirstCommand,
-  handleCd,
-  LOCAL_COMMAND_CAVEAT,
-  parseCdArg,
-  runUserShellCommand,
-} from './bash-command.js';
-import { AskUserModal } from './components/ask-user/index.js';
-import type { ChatStatus, PromptInputMessage } from './components/index.js';
-import { InkProvider, ResponsesChat } from './components/index.js';
-import { PlanApprovalModal } from './components/plan-approval-modal.js';
-import { FooterContextProvider } from './footer-context.js';
-import type { ExitActionStatus } from './input/exit-action.js';
-import { useExitOnInterrupt } from './input/use-exit-on-interrupt.js';
-import type {
-  AssistantEntry,
-  ConversationEntry,
-  ErrorEntry,
-  SystemEntry,
-  UserEntry,
-} from './item-utils.js';
-import {
-  appendOrUpdateEntry,
   extractActivatedSkills,
   extractTextContent,
+  FooterContextProvider,
+  getDefaultImageStore,
+  getFirstCommand,
   getItemId,
+  handleCd,
+  InkProvider,
+  installSuspendResumeHandlers,
   isUserEntry,
-} from './item-utils.js';
-import { reattachLiveChildren } from './reattach-live-children.js';
-import type { LiveTokens, StreamMetricsRefs } from './stream-metrics-context.js';
-import { StreamMetricsProvider } from './stream-metrics-context.js';
-import { installSuspendResumeHandlers } from './suspend-resume.js';
-import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
-import { getDefaultImageStore } from './utils/image-store.js';
-import { resolvePromptAttachments } from './utils/prompt-attachments.js';
-
-//#region Helpers
-
-function buildErrorEntry(error: unknown): ErrorEntry {
-  return {
-    role: 'system',
-    type: 'error',
-    content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-  };
-}
-
-function isFrameworkEvent(event: StreamEvent): event is Extract<
-  StreamEvent,
-  {
-    source: 'framework';
-  }
-> {
-  return event.source === 'framework';
-}
-
-function extractEventSuffix(type: string): string {
-  const idx = type.indexOf(':');
-  if (idx < 0) {
-    return type;
-  }
-  return type.slice(idx + 1);
-}
-
-/**
- * On resume, strip `deliveryStatus: 'queued'` from restored UserEntries —
- * a queued message was either delivered (followed by assistant items) or
- * will never be delivered now that the session is loading fresh. Treat it
- * as sent so the UI doesn't claim it's still pending forever.
- */
-function normalizeEntriesForResume(raw: ReadonlyArray<ConversationEntry>): ConversationEntry[] {
-  const out: ConversationEntry[] = [];
-  for (const entry of raw) {
-    if (isUserEntry(entry) && entry.deliveryStatus === 'queued') {
-      const next: UserEntry = {
-        ...entry,
-        deliveryStatus: 'sent',
-      };
-      out.push(next);
-      continue;
-    }
-    out.push(entry);
-  }
-  return out;
-}
-
-/** Derive the first user message's text, truncated. Returns empty string if none. */
-function deriveFirstPrompt(entries: ReadonlyArray<ConversationEntry>): string {
-  for (const entry of entries) {
-    if (isUserEntry(entry)) {
-      return entry.content.length > 200 ? `${entry.content.slice(0, 200)}…` : entry.content;
-    }
-  }
-  return '';
-}
-
-/** Count distinct user messages. */
-function countUserMessages(entries: ReadonlyArray<ConversationEntry>): number {
-  let n = 0;
-  for (const entry of entries) {
-    if (isUserEntry(entry)) {
-      n += 1;
-    }
-  }
-  return n;
-}
-
-/** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
- *  entry was updated; otherwise returns the input reference. */
-function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
-  const idx = entries.findIndex((e) => isUserEntry(e) && e.id === id);
-  if (idx < 0) {
-    return entries;
-  }
-  const entry = entries[idx];
-  if (!entry || !isUserEntry(entry)) {
-    return entries;
-  }
-  const updated: UserEntry = {
-    ...entry,
-    deliveryStatus: 'sent',
-  };
-  const next = [
-    ...entries,
-  ];
-  next[idx] = updated;
-  return next;
-}
-
-/**
- * Prepend any pending local-bash outputs (from `!` / auto-detected commands)
- * as a `<local-command-caveat>` + `<local-command-stdout>` block in front of
- * the user's text, so the next model turn sees the shell output but treats
- * it as context rather than a user message.
- */
-function augmentTextWithPendingBash(text: string, pending: ReadonlyArray<LocalBashResult>): string {
-  if (pending.length === 0) {
-    return text;
-  }
-  const blocks = pending.map(formatLocalStdoutBlock).join('\n');
-  return `${LOCAL_COMMAND_CAVEAT}\n${blocks}\n\n${text}`;
-}
-
-//#endregion
+  parseCdArg,
+  PlanApprovalModal,
+  reattachLiveChildren,
+  resolvePromptAttachments,
+  ResponsesChat,
+  runUserShellCommand,
+  StreamMetricsProvider,
+  TaskBoard,
+  TaskChatSpawningView,
+  TaskChatView,
+  useExitOnInterrupt,
+  type AssistantEntry,
+  type ChatStatus,
+  type ConversationEntry,
+  type ErrorEntry,
+  type ExitActionStatus,
+  type LiveTokens,
+  type LocalBashResult,
+  type PromptInputMessage,
+  type StreamMetricsRefs,
+  type SystemEntry,
+  type UserEntry,
+} from './app-parts/ui.js';
+import {
+  augmentTextWithPendingBash,
+  buildErrorEntry,
+  countUserMessages,
+  deriveFirstPrompt,
+  extractEventSuffix,
+  isFrameworkEvent,
+  markUserEntrySent,
+  normalizeEntriesForResume,
+} from './app-parts/helpers.js';
 
 //#region Types
 
@@ -680,6 +587,30 @@ function App({
     [
       config.cwd,
       disablePersistence,
+    ],
+  );
+
+  const restartWithSession = useCallback(
+    async (target: SessionRestartTarget): Promise<string | undefined> => {
+      if (target.kind !== 'id') {
+        onRestart(target);
+        return undefined;
+      }
+      const file =
+        (await loadSession(config.cwd, target.sessionId)) ??
+        (await loadSessionByIdAnywhere(target.sessionId));
+      if (file === null) {
+        return `Session ${target.sessionId} not found.`;
+      }
+      onRestart({
+        kind: 'file',
+        file,
+      });
+      return undefined;
+    },
+    [
+      config.cwd,
+      onRestart,
     ],
   );
 
@@ -1385,7 +1316,7 @@ function App({
         setCustomTitle,
         setTag,
         clearSession,
-        restartWithSession: onRestart,
+        restartWithSession,
         setViewMode,
       };
 

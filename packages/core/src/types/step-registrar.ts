@@ -9,7 +9,7 @@
  * tests that never touch the interpreter) don't throw.
  *
  * The registry itself lives in `packages/core/src/runtime/step-registry.ts`
- * and is consulted only by `packages/core/src/adapters/node/step-bootstrap.ts`
+ * and is consulted only by `packages/core/src/harness/step-bootstrap.ts`
  * when an out-of-process child needs to look up a step by id. In-process
  * execution walks the step tree directly and never touches either side.
  */

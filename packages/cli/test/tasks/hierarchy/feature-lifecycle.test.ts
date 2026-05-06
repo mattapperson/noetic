@@ -4,15 +4,15 @@ import {
   applyFeatureLoopStateUpdate,
   markFeatureBlocked,
   markFeaturePassed,
-} from '../../../src/commands/builtins/tasks/hierarchy/feature-lifecycle.js';
-import type { Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+} from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';
+import type { Feature } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
   generateFeatureId,
   generateSliceId,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { loadFeature, saveFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { loadFeature, saveFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';

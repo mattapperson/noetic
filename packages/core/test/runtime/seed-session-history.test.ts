@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { ItemSchema, ItemSchemaRegistry } from '../../src/schemas/item';
 import type { LLMResponse } from '../../src/types/common';
 import type { Item } from '../../src/types/items';

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { HierarchyStatus } from '@noetic/code-agent/tasks/schema';
 import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { planTaskHandler } from '../../../src/commands/builtins/tasks/handlers/autopilot.js';
-import { createTaskHandler } from '../../../src/commands/builtins/tasks/handlers/lifecycle.js';
+import { planTaskHandler } from '../../../src/tasks/runtime/handlers/autopilot.js';
+import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import {
   listInterviewSessions,
   listMilestones,
-} from '../../../src/commands/builtins/tasks/hierarchy/store.js';
+} from '../../../src/tasks/runtime/hierarchy/store.js';
 import { makeStoreContext } from '../_helpers.js';
 
 describe('planTaskHandler', () => {

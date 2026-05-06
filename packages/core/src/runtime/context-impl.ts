@@ -1,18 +1,25 @@
-import { buildContextMemory } from '../memory/layer-api';
-import type { ItemSchemaRegistry } from '../schemas/item';
-import { defaultItemSchemaRegistry } from '../schemas/item';
-import type { Channel } from '../types/channel';
-import type { FrontierFrame } from '../types/checkpoint';
-import type { StepMeta, TokenUsage } from '../types/common';
-import type { Context, CwdState, ItemLog, LastLayerUsage } from '../types/context';
-import type { FsAdapter } from '../types/fs-adapter';
-import type { Item } from '../types/items';
-import type { ContextMemory, MemoryLayer } from '../types/memory';
-import type { Span } from '../types/observability';
-import type { AgentHarnessContract } from '../types/runtime';
-import type { Tool } from '../types/tool';
-import type { ChannelStore } from './channel-store';
-import type { EventBroadcaster } from './event-broadcaster';
+import {
+  buildContextMemory,
+  defaultItemSchemaRegistry,
+  type AgentHarnessContract,
+  type Channel,
+  type ChannelStore,
+  type Context,
+  type ContextMemory,
+  type CwdState,
+  type EventBroadcaster,
+  type FrontierFrame,
+  type FsAdapter,
+  type Item,
+  type ItemLog,
+  type ItemSchemaRegistry,
+  type LastLayerUsage,
+  type MemoryLayer,
+  type Span,
+  type StepMeta,
+  type TokenUsage,
+  type Tool,
+} from './context-deps';
 import { ItemLogImpl } from './item-log-impl';
 
 const EMPTY_MEMORY: ContextMemory = Object.freeze({});

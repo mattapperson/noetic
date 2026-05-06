@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildHierarchyDaemonHarness } from '../../../src/commands/builtins/tasks/hierarchy/daemon-bootstrap.js';
+import { buildHierarchyDaemonHarness } from '../../../src/tasks/runtime/hierarchy/daemon-bootstrap.js';
 
 describe('buildHierarchyDaemonHarness', () => {
   it('builds an AgentHarness, the composed flow, and the channel triple', async () => {

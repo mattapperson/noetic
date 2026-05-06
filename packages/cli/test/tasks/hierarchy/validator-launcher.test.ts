@@ -1,23 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 
-import type { Signaller } from '../../../src/commands/builtins/tasks/agent-ci-control.js';
-import type { Feature } from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
+import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
+import type { Feature } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
   generateFeatureId,
   generateSliceId,
   ValidatorRunStatus,
-} from '../../../src/commands/builtins/tasks/hierarchy/schemas.js';
-import { saveFeature } from '../../../src/commands/builtins/tasks/hierarchy/store.js';
-import type { ValidatorContext } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
-import { listValidatorRuns } from '../../../src/commands/builtins/tasks/hierarchy/validator.js';
-import type { ValidatorSpawn } from '../../../src/commands/builtins/tasks/hierarchy/validator-launcher.js';
+} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import { saveFeature } from '../../../src/tasks/runtime/hierarchy/store.js';
+import type { ValidatorContext } from '../../../src/tasks/runtime/hierarchy/validator.js';
+import { listValidatorRuns } from '../../../src/tasks/runtime/hierarchy/validator.js';
+import type { ValidatorSpawn } from '../../../src/tasks/runtime/hierarchy/validator-launcher.js';
 import {
   startExternalValidatorRun,
   ValidatorSpawnError,
-} from '../../../src/commands/builtins/tasks/hierarchy/validator-launcher.js';
+} from '../../../src/tasks/runtime/hierarchy/validator-launcher.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const TASK_ID = 'T-abcdefghij';
