@@ -35,6 +35,8 @@ import type {
 } from '@noetic/core';
 import {
   AgentHarness,
+  branch,
+  loop,
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemoryStorage,
@@ -42,9 +44,11 @@ import {
   historyWindow,
   observationalMemory,
   planMemory,
+  spawn,
   step,
   tool,
   toolMemoryLayer,
+  until,
   workingMemory,
 } from '@noetic/core/portable';
 import { z } from 'zod';
@@ -151,6 +155,19 @@ export interface CreateCodeAgentOptions {
   traceExporter?: TraceExporter;
   defaultDeliveryMode?: DeliveryMode;
   streamIdleTimeoutMs?: number;
+}
+
+export type CodeAgentMode = 'plan' | 'act';
+
+export interface CodeAgentPlanApprovalQuestion {
+  question: string;
+  header: string;
+}
+
+export interface CodeAgentFlowState {
+  mode?: CodeAgentMode;
+  awaitingPlanApproval?: boolean;
+  approvalQuestion?: CodeAgentPlanApprovalQuestion;
 }
 
 export interface CodeAgentSessionSnapshot {
@@ -494,6 +511,248 @@ function createSubagentController(): SubagentController {
       handles.push(handle);
     },
   };
+}
+
+function getTool(tools: ReadonlyArray<Tool>, name: string): Tool | undefined {
+  return tools.find((agentTool) => agentTool.name === name);
+}
+
+function answerLooksApproved(value: unknown): boolean {
+  return String(value ?? '')
+    .toLowerCase()
+    .startsWith('approve');
+}
+
+function createPlanApprovalTool(): Tool {
+  return tool({
+    name: 'requestPlanApproval',
+    description:
+      'Request user approval for the current implementation plan. This marks the workflow as awaiting approval; the workflow asks the user and switches to act mode only after approval.',
+    input: z.object({
+      question: z
+        .string()
+        .min(1)
+        .default('Approve this plan and switch to act mode?'),
+      header: z.string().min(1).max(12).default('Approve'),
+    }),
+    output: z.object({
+      awaitingApproval: z.boolean(),
+      question: z.string(),
+    }),
+    async execute(input, toolCtx) {
+      const ctx = (toolCtx as { ctx: Context<ContextMemory> }).ctx;
+      writeWorkflowState(ctx, {
+        ...readWorkflowState(ctx),
+        mode: 'plan',
+        awaitingPlanApproval: true,
+        approvalQuestion: {
+          question: input.question,
+          header: input.header,
+        },
+      });
+      return {
+        awaitingApproval: true,
+        question: input.question,
+      };
+    },
+  });
+}
+
+function createCodeAgentFlowMemory(): MemoryLayer<CodeAgentFlowState> {
+  return {
+    id: 'code-agent-flow',
+    name: 'Code Agent Flow',
+    slot: 95,
+    scope: 'thread',
+    hooks: {
+      async init({ storage }) {
+        return {
+          state: (await storage.get<CodeAgentFlowState>('state')) ?? {
+            mode: 'plan',
+          },
+        };
+      },
+      async recall({ state }) {
+        const mode = state.mode === 'act' ? 'act' : 'plan';
+        const waiting = state.awaitingPlanApproval === true ? '\nAwaiting plan approval.' : '';
+        return `<code_agent_flow mode="${mode}">${waiting}</code_agent_flow>`;
+      },
+      async store({ state }) {
+        return {
+          state,
+        };
+      },
+      async onSpawn({ parentState }) {
+        return {
+          childState: {
+            ...parentState,
+          },
+        };
+      },
+      async onReturn({ childState, parentState }) {
+        return {
+          parentState: {
+            ...parentState,
+            ...childState,
+          },
+        };
+      },
+    },
+  };
+}
+
+function readWorkflowState(ctx: Context<ContextMemory>): CodeAgentFlowState {
+  return (ctx.memory['code-agent-flow'] as CodeAgentFlowState | undefined) ?? {};
+}
+
+function writeWorkflowState(ctx: Context<ContextMemory>, state: CodeAgentFlowState): void {
+  ctx.harness.setLayerState(ctx.id, 'code-agent-flow', state);
+}
+
+function createPlanApprovalStep(tools: ReadonlyArray<Tool>): Step<ContextMemory, string, string> {
+  const id = `noetic-code-agent-plan-approval-${crypto.randomUUID()}`;
+  return step.run<ContextMemory, string, string>({
+    id,
+    async execute(input, ctx) {
+      const state = readWorkflowState(ctx);
+      if (state?.awaitingPlanApproval !== true) {
+        return input;
+      }
+      const askUser = getTool(tools, 'AskUserQuestion');
+      if (!askUser) {
+        return input;
+      }
+      const recentPlan = typeof input === 'string' && input.trim().length > 0 ? input.trim() : null;
+      const approvalQuestion =
+        state.approvalQuestion?.question ?? 'Approve this plan and switch to act mode?';
+      const result = await ctx.harness.run(
+        step.tool({
+          id: `${id}-ask`,
+          tool: askUser,
+          args: {
+            questions: [
+              {
+                question: approvalQuestion,
+                header: state.approvalQuestion?.header ?? 'Approve',
+                options: [
+                  {
+                    label: 'Approve (Recommended)',
+                    description: 'The workflow records act mode and the act agent can start implementation.',
+                    ...(recentPlan
+                      ? {
+                          preview: recentPlan,
+                        }
+                      : {}),
+                  },
+                  {
+                    label: 'Revise',
+                    description: 'The workflow stays in plan mode so the plan agent can revise the approach.',
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        {},
+        ctx,
+      );
+      if (answerLooksApproved((result as { answers?: Record<string, string> }).answers?.[approvalQuestion])) {
+        writeWorkflowState(ctx, {
+          ...state,
+          mode: 'act',
+          awaitingPlanApproval: false,
+        });
+        return 'Plan approved. Act mode is now active.';
+      }
+      writeWorkflowState(ctx, {
+        ...state,
+        mode: 'plan',
+        awaitingPlanApproval: false,
+      });
+      return 'Plan approval was not granted. Stay in plan mode and revise the plan.';
+    },
+  });
+}
+
+function createCodeAgentWorkflow(args: {
+  model: string;
+  instructions?: string;
+  planTools: ReadonlyArray<Tool>;
+  actTools: ReadonlyArray<Tool>;
+}): Step<ContextMemory, string, string> {
+  const suffix = crypto.randomUUID();
+  const requestPlanApproval = createPlanApprovalTool();
+  const planTools = [
+    ...args.planTools,
+    requestPlanApproval,
+  ];
+  const planAgent = spawn<ContextMemory, string, string>({
+    id: `noetic-code-agent-plan-agent-${suffix}`,
+    child: loop<ContextMemory, string, string>({
+      id: `noetic-code-agent-plan-loop-${suffix}`,
+      steps: [
+        step.llm<ContextMemory, string, string>({
+          id: `noetic-code-agent-plan-chat-${suffix}`,
+          model: args.model,
+          instructions: [
+            args.instructions,
+            'You are the top-level plan agent. Stay in plan mode until the user approves the plan. Use read-only tools, AskUserQuestion for requirement choices, and sub-agents for bounded exploration or planning work. When the plan is ready, call requestPlanApproval; the workflow will ask the user and switch to act mode only after approval.',
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+          tools: [
+            ...planTools,
+          ],
+        }),
+        createPlanApprovalStep(planTools),
+      ],
+      until: (snapshot) => ({
+        stop: true,
+        reason: snapshot.lastText.includes('Act mode is now active.')
+          ? 'Plan approved; workflow state switched to act mode'
+          : 'Plan turn completed; awaiting approval or revision',
+      }),
+      maxIterations: 1,
+    }),
+  });
+
+  const actAgent = spawn<ContextMemory, string, string>({
+    id: `noetic-code-agent-act-agent-${suffix}`,
+    child: loop<ContextMemory, string, string>({
+      id: `noetic-code-agent-act-loop-${suffix}`,
+      steps: [
+        step.llm<ContextMemory, string, string>({
+          id: `noetic-code-agent-act-chat-${suffix}`,
+          model: args.model,
+          instructions: [
+            args.instructions,
+            'You are the top-level act agent. Implement the approved plan, use sub-agents for bounded parallel work when useful, and verify changes before reporting completion.',
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+          tools: [
+            ...args.actTools,
+          ],
+        }),
+      ],
+      until: until.noToolCalls(),
+      maxIterations: 20,
+    }),
+  });
+
+  return loop<ContextMemory, string, string>({
+    id: `noetic-code-agent-workflow-${suffix}`,
+    steps: [
+      branch<ContextMemory, string, string>({
+        id: `noetic-code-agent-mode-branch-${suffix}`,
+        route: (_input, ctx) => (readWorkflowState(ctx).mode === 'act' ? actAgent : planAgent),
+        _optimizable: [],
+      }),
+    ],
+    until: until.noToolCalls(),
+    maxIterations: 20,
+    prepareNext: (output) => output,
+  });
 }
 
 //#endregion
@@ -866,13 +1125,21 @@ export async function createCodeAgent(
     ...(options.tools ?? []),
     ...pluginTools,
   ];
+  const initialStep = createCodeAgentWorkflow({
+    model: options.model,
+    instructions: options.instructions,
+    planTools: tools,
+    actTools: tools,
+  });
   const memory =
     options.defaultMemory === false
       ? [
+          createCodeAgentFlowMemory(),
           ...(options.memory ?? []),
           ...pluginMemory,
         ]
       : [
+          createCodeAgentFlowMemory(),
           planMemory(),
           workingMemory(),
           observationalMemory(),
@@ -896,12 +1163,7 @@ export async function createCodeAgent(
     shell,
     subprocess: options.adapters?.subprocess,
     initialCwd: cwd,
-    initialStep: step.llm({
-      id: 'chat',
-      model: options.model,
-      instructions: options.instructions,
-      tools,
-    }),
+    initialStep,
     memory,
     llm: options.llm,
     itemSchemas: options.itemSchemas,

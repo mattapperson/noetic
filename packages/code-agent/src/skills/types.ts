@@ -72,6 +72,9 @@ interface SkillDefinition {
 
   /** Skip injecting CLAUDE.md into the teammate's context (saves tokens for read-only agents). */
   agentOmitClaudeMd?: boolean;
+
+  /** Allow this teammate to see the `agent` tool and spawn nested teammates. */
+  agentCanSpawn?: boolean;
 }
 
 //#endregion
@@ -129,6 +132,7 @@ interface SkillFrontmatter {
   'agent-background'?: boolean | null;
   'agent-max-steps'?: number | null;
   'agent-omit-claude-md'?: boolean | null;
+  'agent-can-spawn'?: boolean | null;
 }
 
 //#endregion

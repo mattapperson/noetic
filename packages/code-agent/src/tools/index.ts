@@ -17,6 +17,7 @@ import { createUnsupportedResult, detectRuntimeCapabilities } from '../runtime-c
 import { createRuntimeGeneratorTool, createRuntimeTool } from '../runtime-tool.js';
 import { basename, byteLength, joinAdapterPath, resolveAdapterPath } from '../utils.js';
 import type { AskUserService } from './ask-user.js';
+import { createAskUserTool } from './ask-user.js';
 import {
   EDIT_TOOL_NAME,
   FIND_TOOL_NAME,
@@ -689,6 +690,9 @@ export function createCodingTools(opts: CreateToolsOptions): Tool[] {
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
   }
+  if (opts.askUserService) {
+    tools.push(createAskUserTool(opts.askUserService));
+  }
   return tools;
 }
 
@@ -708,6 +712,9 @@ export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
   ];
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
+  }
+  if (opts.askUserService) {
+    tools.push(createAskUserTool(opts.askUserService));
   }
   return tools;
 }
