@@ -3,7 +3,7 @@ import { NoeticConfigError } from '../errors/noetic-config-error';
 import type { ModelParams, RetryPolicy } from '../types/common';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
-import type { StepLLM, StepRun, StepTool } from '../types/step';
+import type { Lazy, StepLLM, StepRun, StepTool } from '../types/step';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import type { SubprocessAdapter } from '../types/subprocess-adapter';
 import type { Tool } from '../types/tool';
@@ -22,11 +22,14 @@ interface StepRunOpts<TMemory, I, O> {
   subprocess?: SubprocessAdapter;
 }
 
-interface StepLLMOpts<O> {
+interface StepLLMOpts<TMemory, O> {
   id: string;
-  model: string;
-  instructions?: string;
-  tools?: Tool[];
+  /** Model id. Eager string or `(ctx) => string` getter (resolved at step execution). */
+  model: Lazy<string, TMemory>;
+  /** Optional instructions; eager string or `(ctx) => string | undefined` getter. */
+  instructions?: Lazy<string | undefined, TMemory>;
+  /** Optional tools; eager array or `(ctx) => Tool[] | undefined` getter. */
+  tools?: Lazy<Tool[] | undefined, TMemory>;
   output?: ZodType<O>;
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -88,18 +91,18 @@ export const step = {
    *
    * @public
    * @param opts.id - Unique step identifier used in traces and error messages.
-   * @param opts.model - Model identifier string (e.g. `'anthropic/claude-sonnet-4-20250514'`).
-   * @param opts.instructions - Optional system prompt / instructions for the model.
-   * @param opts.tools - Optional tools available to the model during this call.
+   * @param opts.model - Model identifier, eager string or `(ctx) => string` getter (resolved at step execution time).
+   * @param opts.instructions - Optional system prompt; eager string or `(ctx) => string | undefined` getter.
+   * @param opts.tools - Optional tools; eager array or `(ctx) => Tool[] | undefined` getter.
    * @param opts.output - Optional Zod schema enabling structured output parsing.
    * @param opts.params - Optional model parameters (temperature, topP, maxTokens, stopSequences).
    * @returns A `StepLLM` that can be composed into larger pipelines. The step
    *   is auto-registered in the shared step registry.
    * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
-   * @throws `NoeticConfigError` with code `MISSING_MODEL` if `model` is empty.
+   * @throws `NoeticConfigError` with code `MISSING_MODEL` if an eager `model` string is empty. Function-form models are validated at step execution.
    */
   llm<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepLLMOpts<O>,
+    opts: StepLLMOpts<TMemory, O>,
   ): StepLLM<TMemory, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
@@ -108,7 +111,10 @@ export const step = {
         hint: 'Pass a unique string as the id field, e.g. step.llm({ id: "my-llm", ... }).',
       });
     }
-    if (!opts.model || opts.model.trim() === '') {
+    // Only validate eager models here. Function-form models are validated
+    // post-resolution in executeLLM so the same MISSING_MODEL error surfaces
+    // whether the caller passes a string or a getter.
+    if (typeof opts.model === 'string' && opts.model.trim() === '') {
       throw new NoeticConfigError({
         code: 'MISSING_MODEL',
         message: 'step.llm() requires a non-empty model.',

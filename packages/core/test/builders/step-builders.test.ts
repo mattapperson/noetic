@@ -79,8 +79,12 @@ describe('step builders', () => {
         tool,
       ],
     });
-    expect(s.tools).toHaveLength(1);
-    expect(s.tools![0]).toBe(tool);
+    // `tools` is `Lazy<Tool[] | undefined>`; narrow to the eager-array branch
+    // before indexing.
+    expect(Array.isArray(s.tools)).toBe(true);
+    const eagerTools = Array.isArray(s.tools) ? s.tools : [];
+    expect(eagerTools).toHaveLength(1);
+    expect(eagerTools[0]).toBe(tool);
   });
 
   it('step.tool() produces correct shape', () => {

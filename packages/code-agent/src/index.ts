@@ -2,8 +2,6 @@ import type {
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
-  AskUserInput,
-  AskUserOutput,
   CallModelRequest,
   Channel,
   ChannelHandle,
@@ -37,19 +35,15 @@ import type {
 } from '@noetic/core';
 import {
   AgentHarness,
-  AskUserOutputSchema,
   branch,
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemoryStorage,
   durableTaskState,
   historyWindow,
-  layerData,
   loop,
   observationalMemory,
   planMemory,
-  Slot,
-  spawn,
   step,
   tool,
   toolMemoryLayer,
@@ -58,13 +52,18 @@ import {
 } from '@noetic/core/portable';
 import { frameworkCast } from '@noetic/core/unstable';
 import { z } from 'zod';
+import { actAgent } from './agents/act.js';
+import { fixAgent } from './agents/fix.js';
+import { flowMemory, readFlowState } from './agents/flow-state.js';
+import { planAgent } from './agents/plan.js';
+import { CODE_AGENT_DONE_SENTINEL, MAX_INNER_LOOP_ITERATIONS } from './agents/shared.js';
+import { verifyAgent, verifyAndCheck } from './agents/verify.js';
 import type {
   ChannelTransportAdapter,
   ChannelTransportController,
   ChannelTransportFrame,
 } from './channels.js';
 import { createInMemoryChannelTransportAdapter } from './channels.js';
-import type { AskUserTool } from './tools/ask-user.js';
 
 //#region Types
 
@@ -162,20 +161,17 @@ export interface CreateCodeAgentOptions {
   traceExporter?: TraceExporter;
   defaultDeliveryMode?: DeliveryMode;
   streamIdleTimeoutMs?: number;
+  /** Line-count threshold (insertions + deletions) above which the act agent's output is routed to verify. Default 5. */
+  verifyThreshold?: number;
+  /** Hard ceiling on verify→fix iterations before giving up. Default 3. */
+  maxFixAttempts?: number;
 }
 
-export type CodeAgentMode = 'plan' | 'act';
-
-export interface CodeAgentPlanApprovalQuestion {
-  question: string;
-  header: string;
-}
-
-export interface CodeAgentFlowState {
-  mode?: CodeAgentMode;
-  awaitingPlanApproval?: boolean;
-  approvalQuestion?: CodeAgentPlanApprovalQuestion;
-}
+export type {
+  CodeAgentFlowState,
+  CodeAgentMode,
+  CodeAgentPlanApprovalQuestion,
+} from './agents/flow-state.js';
 
 export interface CodeAgentSessionSnapshot {
   id: string;
@@ -520,470 +516,114 @@ function createSubagentController(): SubagentController {
   };
 }
 
-//#region Plan-Act Flow
-
-/** Maximum iterations for the plan and act sub-loops. */
-const PLAN_ACT_MAX_ITERATIONS = 20;
-
-/** Layer id for the code-agent plan/act mode memory layer. */
-const CODE_AGENT_FLOW_LAYER_ID = 'code-agent-flow';
-
-/** Name of the built-in AskUserQuestion tool (registered when an AskUserService is configured). */
-const ASK_USER_TOOL_NAME = 'AskUserQuestion';
-
-/** Label prefix used for the approve option; `answerLooksApproved` matches case-insensitive. */
-const APPROVE_OPTION_LABEL = 'Approve (Recommended)';
-const REVISE_OPTION_LABEL = 'Revise';
+//#region Plan-Act-Verify-Fix Workflow
 
 /**
- * Tool names the plan agent is permitted to call. Restricted to read-only
- * exploration, user interaction, sub-agent orchestration, and the approval
- * tool. Excludes Write / Edit / Bash and anything else that mutates the
- * filesystem or shell state before the plan is approved.
+ * Terminal step: returns the sentinel string that the inner loop's
+ * `until.outputEquals` recognizes. The sentinel never enters the item log
+ * or assistant text — it exists only to transition the loop to its exit.
  */
-const PLAN_MODE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'Read',
-  'Grep',
-  'Find',
-  'Ls',
-  'AskUserQuestion',
-  'activateSkill',
-  'agent',
-  'sendMessage',
-  'checkAgent',
-]);
-
-/** Hard ceiling on approval-question length so the tool args survive validation. */
-const DEFAULT_APPROVAL_QUESTION = 'Approve this plan and switch to act mode?';
-const DEFAULT_APPROVAL_HEADER = 'Approve';
-
-/** Zod schema for workflow state, used at the ctx.memory read boundary (issue #2). */
-const CodeAgentFlowStateSchema: z.ZodType<CodeAgentFlowState> = z.object({
-  mode: z
-    .enum([
-      'plan',
-      'act',
-    ])
-    .optional(),
-  awaitingPlanApproval: z.boolean().optional(),
-  approvalQuestion: z
-    .object({
-      question: z.string(),
-      header: z.string(),
-    })
-    .optional(),
-});
-
-const RequestPlanApprovalInputSchema = z.object({
-  question: z.string().min(1).default(DEFAULT_APPROVAL_QUESTION),
-  header: z.string().min(1).max(12).default(DEFAULT_APPROVAL_HEADER),
-});
-
-const RequestPlanApprovalOutputSchema = z.object({
-  awaitingApproval: z.boolean(),
-  question: z.string(),
-});
-
-function answerLooksApproved(value: string): boolean {
-  return value.toLowerCase().startsWith('approve');
-}
-
-/**
- * Typed, defensive read of the workflow state from `ctx.memory`. The layer
- * exposes `provides.state` as a `layerData` projection; parsing via
- * `CodeAgentFlowStateSchema` keeps the call site type-safe without reaching
- * into `ctx.harness.getLayerState` or casting the opaque memory handle.
- */
-function readFlowState(ctx: Context<ContextMemory>): CodeAgentFlowState {
-  const handle = ctx.memory[CODE_AGENT_FLOW_LAYER_ID];
-  const raw = handle?.state;
-  const parsed = CodeAgentFlowStateSchema.safeParse(raw);
-  return parsed.success ? parsed.data : {};
-}
-
-/**
- * Typed write that updates the workflow state via `ctx.harness.setLayerState`
- * — the sanctioned runtime API for step-level state writes (see spec 11).
- * Tools use `toolCtx.memory.set(...)` (see `createPlanApprovalTool`).
- */
-function writeFlowState(ctx: Context<ContextMemory>, state: CodeAgentFlowState): void {
-  ctx.harness.setLayerState<CodeAgentFlowState>(ctx.id, CODE_AGENT_FLOW_LAYER_ID, state);
-}
-
-/**
- * Tool via which the plan-mode LLM signals that it wants user approval. The
- * tool mutates memory through the typed `toolCtx.memory.set` helper (the
- * `ToolMemory` API from `@noetic/core`) rather than reaching into
- * `ctx.harness.setLayerState` through a cast.
- */
-function createPlanApprovalTool(): Tool {
-  return tool({
-    name: 'requestPlanApproval',
-    description:
-      'Request user approval for the current implementation plan. This marks the workflow as awaiting approval; the workflow asks the user and switches to act mode only after approval.',
-    input: RequestPlanApprovalInputSchema,
-    output: RequestPlanApprovalOutputSchema,
-    async execute(input, toolCtx) {
-      const existing = toolCtx.memory.get<CodeAgentFlowState>(CODE_AGENT_FLOW_LAYER_ID) ?? {};
-      toolCtx.memory.set<CodeAgentFlowState>(CODE_AGENT_FLOW_LAYER_ID, {
-        ...existing,
-        mode: 'plan',
-        awaitingPlanApproval: true,
-        approvalQuestion: {
-          question: input.question,
-          header: input.header,
-        },
-      });
-      return {
-        awaitingApproval: true,
-        question: input.question,
-      };
-    },
-  });
-}
-
-/**
- * Memory layer tracking the top-level plan/act mode and any outstanding plan
- * approval request. `provides.state` exposes a typed read projection on
- * `ctx.memory['code-agent-flow'].state` (data-kind provides are not surfaced
- * to the LLM as tools — see layer-api's `resolveLayerTools`).
- */
-function createCodeAgentFlowMemory(): MemoryLayer<CodeAgentFlowState> {
-  return {
-    id: CODE_AGENT_FLOW_LAYER_ID,
-    name: 'Code Agent Flow',
-    // The mode advisory sits just above the steering slot so it is recalled
-    // as steering context (ahead of working memory / observations) without
-    // fighting built-in steering layers for the same slot.
-    slot: Slot.STEERING + 5,
-    scope: 'thread',
-    provides: {
-      state: layerData<CodeAgentFlowState, CodeAgentFlowState>({
-        read: (state) => state,
-      }),
-    },
-    hooks: {
-      async init({ storage }) {
-        const saved = await storage.get<CodeAgentFlowState>('state');
-        return {
-          state: saved ?? {
-            mode: 'plan',
-          },
-        };
-      },
-      async recall({ state }) {
-        const mode = state.mode === 'act' ? 'act' : 'plan';
-        const waiting = state.awaitingPlanApproval === true ? '\nAwaiting plan approval.' : '';
-        return `<code_agent_flow mode="${mode}">${waiting}</code_agent_flow>`;
-      },
-      async store({ state }) {
-        return {
-          state,
-        };
-      },
-      async onSpawn({ parentState }) {
-        return {
-          childState: {
-            ...parentState,
-          },
-        };
-      },
-      async onReturn({ childState, parentState }) {
-        // Propagate only the three known flow fields, and only when the child
-        // actually set them. Spawned plan agents need to flip mode plan → act
-        // after approval, so the child's assignment wins when defined — but an
-        // exploration teammate that never touched the flow state shouldn't
-        // erase anything the parent set in the meantime.
-        return {
-          parentState: {
-            ...parentState,
-            ...(childState.mode !== undefined && {
-              mode: childState.mode,
-            }),
-            ...(childState.awaitingPlanApproval !== undefined && {
-              awaitingPlanApproval: childState.awaitingPlanApproval,
-            }),
-            ...(childState.approvalQuestion !== undefined && {
-              approvalQuestion: childState.approvalQuestion,
-            }),
-          },
-        };
-      },
-    },
-  };
-}
-
-/**
- * Builds the AskUserQuestion tool input for the plan-approval prompt. Sourced
- * from the flow state so the question text matches exactly what the LLM
- * requested via `requestPlanApproval` — no string-comparison against a
- * hard-coded prompt elsewhere in the file (issue #1, #3).
- */
-function buildApprovalAskInput(state: CodeAgentFlowState, previousPlanText: string): AskUserInput {
-  const question = state.approvalQuestion?.question ?? DEFAULT_APPROVAL_QUESTION;
-  const header = state.approvalQuestion?.header ?? DEFAULT_APPROVAL_HEADER;
-  const trimmed = previousPlanText.trim();
-  const preview = trimmed.length > 0 ? trimmed : undefined;
-  return {
-    questions: [
-      {
-        question,
-        header,
-        options: [
-          {
-            label: APPROVE_OPTION_LABEL,
-            description:
-              'The workflow records act mode and the act agent can start implementation.',
-            ...(preview
-              ? {
-                  preview,
-                }
-              : {}),
-          },
-          {
-            label: REVISE_OPTION_LABEL,
-            description:
-              'The workflow stays in plan mode so the plan agent can revise the approach.',
-          },
-        ],
-        multiSelect: false,
-      },
-    ],
-  };
-}
-
-/**
- * Extracts the first (and, by construction, only) answer from the AskUser
- * output. Looking up by position avoids coupling the approval record to the
- * exact question text (issue #3) — `buildApprovalAskInput` emits one
- * question, so `answers` has exactly one entry.
- */
-function extractApprovalAnswer(output: AskUserOutput): string {
-  const first = Object.values(output.answers)[0];
-  return typeof first === 'string' ? first : '';
-}
-
-interface PlanApprovalStepArgs {
-  planLoopId: string;
-  askUserTool: AskUserTool | undefined;
-  flowMemory: MemoryLayer<CodeAgentFlowState>;
-}
-
-/** Empty LLMResponse used to trigger a `storeLayers` pass solely to persist
- *  the flow-state mutation. The store hook reads from layer state, not from
- *  this response, so the empty shape is inert. */
-const EMPTY_STORE_RESPONSE: LLMResponse = {
-  items: [],
-  usage: {
-    inputTokens: 0,
-    outputTokens: 0,
+const doneStep: Step<ContextMemory, string, string> = step.run({
+  id: 'code-agent/done',
+  async execute() {
+    return CODE_AGENT_DONE_SENTINEL;
   },
+});
+
+/**
+ * Inner-loop mode routing. Only reached when the outer branch saw a non-plan
+ * mode; `plan` is not a valid inner mode. If somehow `mode === 'plan'` leaks
+ * (e.g., via a revise outcome that the outer branch already handled), fall
+ * through to act as a conservative default.
+ */
+const INNER_MODE_ROUTES: Record<
+  'act' | 'verify' | 'fix' | 'done',
+  Step<ContextMemory, string, string>
+> = {
+  act: actAgent,
+  verify: verifyAndCheck,
+  fix: fixAgent,
+  done: doneStep,
 };
 
 /**
- * Flushes the current in-memory flow state to durable storage via the layer's
- * store hook. Required after the approval step mutates state — the plan LLM's
- * own `storeLayers` pass already ran with the pre-approval snapshot, so the
- * post-approval mutation would otherwise be lost on the next turn's rehydrate.
+ * The act/verify/fix inner loop. Exits when `doneStep` emits the sentinel;
+ * bounded by `MAX_INNER_LOOP_ITERATIONS` as a safety net.
  */
-async function persistFlowState(
-  ctx: Context<ContextMemory>,
-  flowMemory: MemoryLayer<CodeAgentFlowState>,
-): Promise<void> {
-  await ctx.harness.storeLayers(
-    [
-      flowMemory,
-    ],
-    EMPTY_STORE_RESPONSE,
-    ctx,
-  );
-}
+const actVerifyFixLoop: Step<ContextMemory, string, string> = loop({
+  id: 'code-agent/act-verify-fix-loop',
+  steps: [
+    branch({
+      id: 'code-agent/inner-dispatch',
+      route: (_input, ctx) => {
+        const mode = readFlowState(ctx).mode ?? 'act';
+        if (mode === 'plan') {
+          return actAgent;
+        }
+        return INNER_MODE_ROUTES[mode];
+      },
+      _optimizable: frameworkCast<Step<ContextMemory>[]>([
+        actAgent,
+        verifyAndCheck,
+        fixAgent,
+        doneStep,
+      ]),
+    }),
+  ],
+  until: until.outputEquals(CODE_AGENT_DONE_SENTINEL),
+  maxIterations: MAX_INNER_LOOP_ITERATIONS,
+});
 
 /**
- * Narrows a generic `Tool` to `AskUserTool` by checking its registered name.
- * Identity check is sufficient — `AskUserQuestion` is the stable, framework-
- * level identifier for the ask-user tool and the only tool registered under
- * that name.
+ * Wrapper that intercepts the sentinel and substitutes the accumulated
+ * `lastUserText`. Ensures `HarnessResponse.text` never contains the sentinel
+ * string and always reflects the most recent user-relevant output.
  */
-function isAskUserTool(t: Tool): t is AskUserTool {
-  return t.name === ASK_USER_TOOL_NAME;
-}
-
-function getAskUserTool(tools: ReadonlyArray<Tool>): AskUserTool | undefined {
-  return tools.find(isAskUserTool);
-}
-
 /**
- * The "approval dispatch" step that runs after the plan LLM turn. When the
- * LLM called `requestPlanApproval`, this step fires the pre-built
- * `step.tool(askUser)` with dynamic args via `ctx.harness.run`, then updates
- * memory based on the user's answer.
- *
- * A pure step-composition expression (step.tool as a direct sibling in the
- * loop's `steps` array) isn't viable here because the loop body must be
- * `Step<string, string>` while `step.tool(askUser)` is
- * `Step<AskUserInput, AskUserOutput>`. `ctx.harness.run` is the typed,
- * public adapter for dispatching a step with a different I/O signature.
- * The askUser tool is still visible to the tool collector via the plan
- * LLM's `tools` array (see `collectAllTools` in core) — this step is only
- * the composition-level hand-off.
+ * Fallback surfaced to the user when the workflow completes but no
+ * mode-transition step recorded a meaningful `lastUserText`. Prefer a short,
+ * non-empty acknowledgment over an empty assistant message — an empty
+ * `HarnessResponse.text` reads as a silent failure in most UIs.
  */
-function createPlanApprovalStep(args: PlanApprovalStepArgs): Step<ContextMemory, string, string> {
-  const askUserStep = args.askUserTool
-    ? step.tool<ContextMemory, AskUserInput, AskUserOutput>({
-        id: `${args.planLoopId}-ask`,
-        tool: args.askUserTool,
-      })
-    : null;
-  return step.run<ContextMemory, string, string>({
-    id: `${args.planLoopId}-approval`,
-    async execute(input, ctx) {
+const EMPTY_RESULT_FALLBACK = 'Done.';
+
+const actVerifyFixWrapper: Step<ContextMemory, string, string> = step.run({
+  id: 'code-agent/act-verify-fix-wrapper',
+  async execute(input, ctx) {
+    const result = await ctx.harness.run(actVerifyFixLoop, input, ctx);
+    if (result === CODE_AGENT_DONE_SENTINEL) {
       const state = readFlowState(ctx);
-      if (state.awaitingPlanApproval !== true) {
-        return input;
-      }
-      if (!askUserStep) {
-        // Fail-open: no interactive approval service available — auto-approve
-        // and advance to act mode. Leaving mode=plan here would strand the
-        // workflow (issue #4).
-        writeFlowState(ctx, {
-          ...state,
-          mode: 'act',
-          awaitingPlanApproval: false,
-          approvalQuestion: undefined,
-        });
-        await persistFlowState(ctx, args.flowMemory);
-        return 'Plan approved automatically (no interactive approval service available). Act mode is now active.';
-      }
-      const askInput = buildApprovalAskInput(state, input);
-      const rawResult = await ctx.harness.run(askUserStep, askInput, ctx);
-      const result = AskUserOutputSchema.parse(rawResult);
-      const approved = answerLooksApproved(extractApprovalAnswer(result));
-      writeFlowState(ctx, {
-        ...state,
-        mode: approved ? 'act' : 'plan',
-        awaitingPlanApproval: false,
-        approvalQuestion: undefined,
-      });
-      await persistFlowState(ctx, args.flowMemory);
-      return approved
-        ? 'Plan approved. Act mode is now active.'
-        : 'Plan approval was not granted. Stay in plan mode and revise the plan.';
-    },
-  });
-}
+      const text = state.lastUserText ?? '';
+      return text.trim().length > 0 ? text : EMPTY_RESULT_FALLBACK;
+    }
+    return result;
+  },
+});
 
-interface BuildSubAgentArgs {
-  id: string;
-  model: string;
-  instructions: string[];
-  tools: ReadonlyArray<Tool>;
-  bodyExtraSteps?: ReadonlyArray<Step<ContextMemory, string, string>>;
-}
-
-function buildSubAgent(args: BuildSubAgentArgs): Step<ContextMemory, string, string> {
-  const chatId = `${args.id}-chat`;
-  const loopId = `${args.id}-loop`;
-  const extraSteps = args.bodyExtraSteps ?? [];
-  const innerLoop = loop<ContextMemory, string, string>({
-    id: loopId,
-    steps: [
-      step.llm<ContextMemory, string, string>({
-        id: chatId,
-        model: args.model,
-        instructions: args.instructions.filter(Boolean).join('\n\n'),
-        tools: [
-          ...args.tools,
-        ],
-      }),
-      ...extraSteps,
-    ],
-    until: until.noToolCalls(),
-    maxIterations: PLAN_ACT_MAX_ITERATIONS,
-  });
-  return spawn<ContextMemory, string, string>({
-    id: args.id,
-    child: innerLoop,
-  });
-}
-
-function createCodeAgentWorkflow(args: {
-  model: string;
-  instructions?: string;
-  planTools: ReadonlyArray<Tool>;
-  actTools: ReadonlyArray<Tool>;
-  flowMemory: MemoryLayer<CodeAgentFlowState>;
-}): Step<ContextMemory, string, string> {
-  const suffix = crypto.randomUUID();
-  const planAgentId = `noetic-code-agent-plan-agent-${suffix}`;
-  const actAgentId = `noetic-code-agent-act-agent-${suffix}`;
-  const askUserTool = getAskUserTool(args.planTools);
-  // Headless mode (no AskUserQuestion registered): skip registering
-  // `requestPlanApproval` entirely. The plan LLM has no way to request
-  // approval from a user that can't respond, and registering the tool
-  // would leave `awaitingPlanApproval: true` half-set across turns.
-  const planTools: ReadonlyArray<Tool> = askUserTool
-    ? [
-        ...args.planTools,
-        createPlanApprovalTool(),
-      ]
-    : [
-        ...args.planTools,
-      ];
-
-  const planLoopId = `noetic-code-agent-plan-agent-${suffix}-loop`;
-  const approvalStep = createPlanApprovalStep({
-    planLoopId,
-    askUserTool,
-    flowMemory: args.flowMemory,
-  });
-  const planInstructions = [
-    args.instructions,
-    'You are the top-level plan agent. Stay in plan mode until the user approves the plan. Use read-only tools, AskUserQuestion for requirement choices, and sub-agents for bounded exploration or planning work. When the plan is ready, call requestPlanApproval; the workflow will ask the user and switch to act mode only after approval.',
-  ].filter((line): line is string => Boolean(line));
-  const planAgent = buildSubAgent({
-    id: planAgentId,
-    model: args.model,
-    instructions: planInstructions,
-    tools: planTools,
-    bodyExtraSteps: [
-      approvalStep,
-    ],
-  });
-
-  const actInstructions = [
-    args.instructions,
-    'You are the top-level act agent. Implement the approved plan, use sub-agents for bounded parallel work when useful, and verify changes before reporting completion.',
-  ].filter((line): line is string => Boolean(line));
-  const actAgent = buildSubAgent({
-    id: actAgentId,
-    model: args.model,
-    instructions: actInstructions,
-    tools: args.actTools,
-  });
-
-  // Top-level dispatcher: a per-turn branch on the current mode. The
-  // containing harness invokes this step once per user message, so there is
-  // no outer loop — each sub-agent does its own LLM looping until
-  // `noToolCalls`. `_optimizable` carries the concrete branches so
-  // `collectAllTools` can walk into them when building the unified tool set.
-  return branch<ContextMemory, string, string>({
-    id: `noetic-code-agent-mode-branch-${suffix}`,
-    route: (_input, ctx) => (readFlowState(ctx).mode === 'act' ? actAgent : planAgent),
-    // `_optimizable` is typed `Step<TMemory>[]` (I=O=unknown) for structural
-    // traversal by `collectAllTools` (see packages/core/src/interpreter/
-    // collect-tools.ts). The array is iterated, never invoked, so the widening
-    // is sound. `frameworkCast` isolates this single coercion per
-    // `.claude/rules/type-safety.md`.
-    _optimizable: frameworkCast<Step<ContextMemory>[]>([
-      planAgent,
-      actAgent,
-    ]),
-  });
-}
+/**
+ * The top-level workflow. A single branch dispatches to the plan path (single-
+ * turn) or the act/verify/fix wrapper (inner multi-mode loop). Mode routing
+ * happens via memory state, not LLM output, so every transition is
+ * deterministic. `verifyAgent` is included in `_optimizable` so
+ * `collectAllTools` walks into its tool set even though it's routed to via
+ * `verifyAndCheck`.
+ */
+export const codeAgentWorkflow: Step<ContextMemory, string, string> = branch({
+  id: 'code-agent/mode-dispatch',
+  route: (_input, ctx) => {
+    const mode = readFlowState(ctx).mode ?? 'plan';
+    return mode === 'plan' ? planAgent : actVerifyFixWrapper;
+  },
+  _optimizable: frameworkCast<Step<ContextMemory>[]>([
+    planAgent,
+    actAgent,
+    verifyAgent,
+    fixAgent,
+    doneStep,
+  ]),
+});
 
 //#endregion
-
 //#endregion
 
 //#region CodeAgentImpl
@@ -1354,15 +994,6 @@ export async function createCodeAgent(
     ...(options.tools ?? []),
     ...pluginTools,
   ];
-  const planTools = tools.filter((t) => PLAN_MODE_TOOL_NAMES.has(t.name));
-  const flowMemory = createCodeAgentFlowMemory();
-  const initialStep = createCodeAgentWorkflow({
-    model: options.model,
-    instructions: options.instructions,
-    planTools,
-    actTools: tools,
-    flowMemory,
-  });
   const memory =
     options.defaultMemory === false
       ? [
@@ -1388,6 +1019,9 @@ export async function createCodeAgent(
     name: options.name ?? 'noetic-code-agent',
     params: {
       model: options.model,
+      instructions: options.instructions,
+      verifyThreshold: options.verifyThreshold,
+      maxFixAttempts: options.maxFixAttempts,
     },
     hooks: options.hooks,
     storage: options.adapters?.storage,
@@ -1395,7 +1029,8 @@ export async function createCodeAgent(
     shell,
     subprocess: options.adapters?.subprocess,
     initialCwd: cwd,
-    initialStep,
+    initialStep: codeAgentWorkflow,
+    tools,
     memory,
     llm: options.llm,
     itemSchemas: options.itemSchemas,

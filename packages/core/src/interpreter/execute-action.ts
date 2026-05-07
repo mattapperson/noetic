@@ -3,14 +3,18 @@
  */
 
 import { ZodError } from 'zod';
+import { NoeticConfigError } from '../errors/noetic-config-error';
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import { frameworkCast } from '../util/framework-cast';
+import { createMessage, extractAssistantText } from '../util/message-helpers';
+import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import {
   assembleView,
   buildToolExecutionContext,
+  ContextImpl,
   commitLayerUsage,
   computeLayerUsage,
   contextToExecCtx,
-  ContextImpl,
   defaultItemSchemaRegistry,
   emitFrameworkEvent,
   getBroadcaster,
@@ -18,32 +22,28 @@ import {
   returnLayers,
   snapshotCwdState,
   spawnLayers,
-  type ItemSchemaRegistry,
-  type LayerStateStore,
 } from './action-deps';
-import {
-  SteeringAction,
-  type AgentHarnessContract,
-  type Context,
-  type ContextMemory,
-  type ExecuteStepFn,
-  type ExecutionContext,
-  type FunctionCallItem,
-  type Item,
-  type MemoryConfig,
-  type MemoryLayer,
-  type RecallLayerOutput,
-  type RetryPolicy,
-  type StepLLM,
-  type StepMeta,
-  type StepProvide,
-  type StepRun,
-  type StepSpawn,
-  type StepTool,
-  type Tool,
+import type {
+  AgentHarnessContract,
+  Context,
+  ContextMemory,
+  ExecuteStepFn,
+  ExecutionContext,
+  FunctionCallItem,
+  Item,
+  MemoryConfig,
+  MemoryLayer,
+  RecallLayerOutput,
+  RetryPolicy,
+  StepLLM,
+  StepMeta,
+  StepProvide,
+  StepRun,
+  StepSpawn,
+  StepTool,
+  Tool,
 } from './action-types';
-import { frameworkCast } from '../util/framework-cast';
-import { createMessage, extractAssistantText } from '../util/message-helpers';
+import { SteeringAction } from './action-types';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import { trackUsage } from './message-helpers';
@@ -111,6 +111,29 @@ interface ResolvedTools {
 }
 
 /**
+ * Resolves a `Lazy<T>` step field. If the value is a function, it is invoked
+ * with the current context; otherwise the value is returned as-is. Supports
+ * both sync and async getters.
+ *
+ * Lazy fields let a step inspect `ctx.harness.config.params`, `ctx.unifiedTools`,
+ * or memory layer state to produce per-execution values (model, instructions,
+ * tools) without baking them in at build time.
+ */
+async function resolveLazy<T, TMemory>(
+  value: T | ((ctx: Context<TMemory>) => T | Promise<T>),
+  ctx: Context<TMemory>,
+): Promise<T> {
+  if (typeof value !== 'function') {
+    return value;
+  }
+  // The `function` narrowing collapses to `T & Function` when `T` itself can
+  // be a function, so we defer to `frameworkCast` — the single sanctioned
+  // unsafe coercion helper. Runtime check above guarantees safety.
+  const getter = frameworkCast<(ctx: Context<TMemory>) => T | Promise<T>>(value);
+  return await getter(ctx);
+}
+
+/**
  * Resolves which tools to send and what restrictions to apply.
  *
  * When a unified tool set exists on the context (collected before execution),
@@ -125,12 +148,12 @@ interface ResolvedTools {
  * merge step tools with layer tools as before.
  */
 function resolveToolsAndRestrictions(
-  step: StepLLM,
+  stepTools: Tool[] | undefined,
   layers: MemoryLayer[] | undefined,
   ctx: Context,
 ): ResolvedTools {
-  // step.tools = [] → explicit opt-out
-  if (step.tools && step.tools.length === 0) {
+  // stepTools = [] → explicit opt-out
+  if (stepTools && stepTools.length === 0) {
     return {
       tools: undefined,
       allowedToolNames: undefined,
@@ -139,7 +162,7 @@ function resolveToolsAndRestrictions(
 
   const unified = ctx.unifiedTools;
   if (unified && unified.length > 0) {
-    const allowedToolNames = step.tools ? step.tools.map((t) => t.name) : undefined;
+    const allowedToolNames = stepTools ? stepTools.map((t) => t.name) : undefined;
     return {
       tools: [
         ...unified,
@@ -150,14 +173,14 @@ function resolveToolsAndRestrictions(
 
   // Fallback: no unified set (direct harness.run() path)
   const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, ctx.harness, ctx) : [];
-  if (layerTools.length === 0 && !step.tools) {
+  if (layerTools.length === 0 && !stepTools) {
     return {
       tools: undefined,
       allowedToolNames: undefined,
     };
   }
   const merged = [
-    ...(step.tools ?? []),
+    ...(stepTools ?? []),
     ...layerTools,
   ];
   return {
@@ -195,6 +218,20 @@ export async function executeLLM<TMemory, I, O>(
   const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
   const hasLayers = layers !== undefined && layers.length > 0;
 
+  // Resolve lazy step fields up-front. Function-form getters run once per
+  // step execution with the live context, so `ctx.harness.config.params`,
+  // `ctx.unifiedTools`, and memory layer state are all visible at resolution.
+  const resolvedModel = await resolveLazy(step.model, ctx);
+  if (!resolvedModel || resolvedModel.trim() === '') {
+    throw new NoeticConfigError({
+      code: 'MISSING_MODEL',
+      message: `step.llm(${JSON.stringify(step.id)}) resolved model to an empty string.`,
+      hint: "Ensure `model` (or your `(ctx) => string` getter) returns a non-empty identifier, e.g. 'anthropic/claude-sonnet-4-20250514'.",
+    });
+  }
+  const resolvedInstructions = await resolveLazy(step.instructions, ctx);
+  const resolvedStepTools = await resolveLazy(step.tools, ctx);
+
   // Append user input — through layer pipeline if layers exist, otherwise direct.
   if (typeof input === 'string' && input.length > 0) {
     if (hasLayers) {
@@ -209,7 +246,7 @@ export async function executeLLM<TMemory, I, O>(
   }
 
   const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(
-    step,
+    resolvedStepTools,
     layers,
     baseCtx,
   );
@@ -248,9 +285,9 @@ export async function executeLLM<TMemory, I, O>(
 
     const request = resolvedTools
       ? {
-          model: step.model,
+          model: resolvedModel,
           items: assembledItems,
-          instructions: step.instructions,
+          instructions: resolvedInstructions,
           tools: resolvedTools,
           params: step.params,
           outputSchema: step.output,
@@ -260,9 +297,9 @@ export async function executeLLM<TMemory, I, O>(
           allowedToolNames,
         }
       : {
-          model: step.model,
+          model: resolvedModel,
           items: assembledItems,
-          instructions: step.instructions,
+          instructions: resolvedInstructions,
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,
@@ -312,8 +349,8 @@ export async function executeLLM<TMemory, I, O>(
       baseCtx,
       computeLayerUsage({
         ctx: baseCtx,
-        modelId: step.model,
-        instructions: step.instructions,
+        modelId: resolvedModel,
+        instructions: resolvedInstructions,
         tools: resolvedTools,
         recallResults,
       }),

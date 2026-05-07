@@ -22,11 +22,15 @@ The optional `subprocess` field makes this specific step run through a different
 Model call with optional tools and structured output.
 
 ```typescript
+type Lazy<T, TMemory = ContextMemory> =
+  | T
+  | ((ctx: Context<TMemory>) => T | Promise<T>);
+
 step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
-  model: string;
-  instructions?: string;
-  tools?: Tool[];             // allowed tool subset (undefined = all, [] = none)
+  model: Lazy<string, TMemory>;                    // eager string or (ctx) => string
+  instructions?: Lazy<string | undefined, TMemory>;
+  tools?: Lazy<Tool[] | undefined, TMemory>;       // allowed tool subset (undefined = all, [] = none)
   output?: ZodType<O>;
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -34,6 +38,17 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
 ```
 
 `tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every LLM step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
+
+**Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
+
+```typescript
+step.llm({
+  id: 'plan-chat',
+  model: (ctx) => ctx.harness.config.params.model as string,
+  instructions: (ctx) => composeInstructions(ctx),
+  tools: (ctx) => (ctx.unifiedTools ?? []).filter((t) => PLAN_MODE_TOOL_NAMES.has(t.name)),
+});
+```
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
@@ -766,6 +781,19 @@ const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 ### Stream Idle Timeout
 
 `AgentHarnessOpts.streamIdleTimeoutMs` (default `120_000`; set `0` or negative to disable) aborts an in-flight provider call if its SSE stream emits no events for that many milliseconds. On timeout, the harness emits `{name}:llm_call_stalled` and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`. Use a smaller value for snappier recovery in interactive UIs, a larger value for long-running batch runs with slow models.
+
+### Harness-wide Tools
+
+`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool merged with tools collected from `initialStep` into every context's `ctx.unifiedTools`. Dedupe is **name-based, first-wins** — the merge order is `[...stepCollectedTools, ...harnessTools]`, so on a name collision the step-collected instance wins. This is the supported way to provide tools when the workflow graph is fully static and `step.llm.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter — function-form `step.tools` cannot be walked by `collectAllTools`, so the harness option is the only way to make those tools visible to the pool.
+
+```typescript
+const harness = new AgentHarness({
+  name: 'my-agent',
+  initialStep: myStaticWorkflow,
+  tools: [readTool, writeTool, bashTool],
+  params: { model: 'anthropic/claude-sonnet-4-20250514' },
+});
+```
 
 ### Session Accessors
 
