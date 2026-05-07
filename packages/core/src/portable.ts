@@ -17,6 +17,9 @@ export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess
 export { branch, fork } from './builders/control-flow-builders';
 
 /** @public */
+export { layerData, layerFn } from './builders/layer-provides-builders';
+
+/** @public */
 export { loop } from './builders/loop-builder';
 
 /** @public */
@@ -27,6 +30,13 @@ export { step } from './builders/step-builders';
 
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
+
+//#endregion
+
+//#region Memory Slots
+
+/** @public */
+export { Slot } from './types/memory';
 
 //#endregion
 
