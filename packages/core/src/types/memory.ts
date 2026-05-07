@@ -1,15 +1,14 @@
 import type { ZodType } from 'zod';
-import type { ItemLog } from './context-parts/item-log';
 import type { LLMResponse } from './common';
+import type { ItemLog } from './context-parts/item-log';
 import type { Item, ItemSchemaExtensions } from './items';
-import type { ExecutionContext, ExecutionOutcome, MemoryCallModelRequest, MemoryScope } from './memory-context';
+import type { ExecutionContext, ExecutionOutcome, MemoryScope } from './memory-context';
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
   BeforeToolCallParams,
   BeforeToolCallResult,
 } from './steering';
-
 
 export type {
   ExecutionContext,

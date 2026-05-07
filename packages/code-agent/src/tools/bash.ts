@@ -240,7 +240,6 @@ function buildErrorResult(params: BuildErrorResultParams): BashOutput | null {
   return null;
 }
 
-
 interface CdInterceptParams {
   command: string;
   timeout: number;
@@ -418,7 +417,9 @@ interface ExecuteBashCommandArgs {
   shell: ShellAdapter;
 }
 
-async function* executeBashCommand(args: ExecuteBashCommandArgs): AsyncGenerator<BashEvent, BashOutput> {
+async function* executeBashCommand(
+  args: ExecuteBashCommandArgs,
+): AsyncGenerator<BashEvent, BashOutput> {
   const { command, timeout, liveCwd, shell } = args;
   const buffers = createBashExecutionBuffers();
   const queue = createDataQueueState();

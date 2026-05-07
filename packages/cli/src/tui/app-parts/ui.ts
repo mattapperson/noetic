@@ -1,4 +1,3 @@
-export { TaskBoard } from '../tasks/runtime-ui/task-board.js';
 export type { LocalBashResult } from '../bash-command.js';
 export {
   buildBashCommandEntry,
@@ -37,5 +36,6 @@ export type { LiveTokens, StreamMetricsRefs } from '../stream-metrics-context.js
 export { StreamMetricsProvider } from '../stream-metrics-context.js';
 export { installSuspendResumeHandlers } from '../suspend-resume.js';
 export { TaskChatSpawningView, TaskChatView } from '../task-chat/task-chat-view.js';
+export { TaskBoard } from '../tasks/runtime-ui/task-board.js';
 export { getDefaultImageStore } from '../utils/image-store.js';
 export { resolvePromptAttachments } from '../utils/prompt-attachments.js';

@@ -8,9 +8,8 @@
  */
 
 import type { ReactNode } from 'react';
-
-import { ModelPicker } from '../components/model-picker.js';
 import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
+import { ModelPicker } from '../components/model-picker.js';
 
 //#region Implementation
 

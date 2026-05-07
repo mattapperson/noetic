@@ -41,7 +41,9 @@ function extractLlmFields(
   path: string,
   fields: OptimizableField[],
 ): void {
-  if (step.instructions) {
+  // Function-form Lazy<T> fields resolve at execution time against a live
+  // context; they cannot be optimized by static candidate substitution.
+  if (typeof step.instructions === 'string') {
     fields.push({
       path: `${path}.instructions`,
       value: step.instructions,
@@ -49,7 +51,7 @@ function extractLlmFields(
       fieldKind: FieldKind.Instructions,
     });
   }
-  if (!step.tools) {
+  if (!Array.isArray(step.tools)) {
     return;
   }
   for (const t of step.tools) {

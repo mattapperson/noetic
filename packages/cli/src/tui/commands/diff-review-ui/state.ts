@@ -229,31 +229,108 @@ function withMap<K, V>(map: ReadonlyMap<K, V>, key: K, value: V): ReadonlyMap<K,
   return next;
 }
 
-type ScopeAction = Extract<Action, { type: 'set-scope' }>;
-type CommitAction = Extract<Action, { type: 'select-commit' }>;
-type FileAction = Extract<Action, { type: 'select-file' }>;
-type PaneAction = Extract<Action, { type: 'set-active-pane' }>;
-type CursorAction = Extract<Action, { type: 'set-cursor-index' }>;
-type LayoutAction = Extract<Action, { type: 'set-layout' }>;
-type ModeAction = Extract<Action, { type: 'set-mode' }>;
-type OpenCommentAction = Extract<Action, { type: 'open-comment-input' }>;
-type SubmitCommentAction = Extract<Action, { type: 'submit-comment' }>;
-type DeleteCommentAction = Extract<Action, { type: 'delete-comment' }>;
-type OverallAction = Extract<Action, { type: 'set-overall' }>;
+type ScopeAction = Extract<
+  Action,
+  {
+    type: 'set-scope';
+  }
+>;
+type CommitAction = Extract<
+  Action,
+  {
+    type: 'select-commit';
+  }
+>;
+type FileAction = Extract<
+  Action,
+  {
+    type: 'select-file';
+  }
+>;
+type PaneAction = Extract<
+  Action,
+  {
+    type: 'set-active-pane';
+  }
+>;
+type CursorAction = Extract<
+  Action,
+  {
+    type: 'set-cursor-index';
+  }
+>;
+type LayoutAction = Extract<
+  Action,
+  {
+    type: 'set-layout';
+  }
+>;
+type ModeAction = Extract<
+  Action,
+  {
+    type: 'set-mode';
+  }
+>;
+type OpenCommentAction = Extract<
+  Action,
+  {
+    type: 'open-comment-input';
+  }
+>;
+type SubmitCommentAction = Extract<
+  Action,
+  {
+    type: 'submit-comment';
+  }
+>;
+type DeleteCommentAction = Extract<
+  Action,
+  {
+    type: 'delete-comment';
+  }
+>;
+type OverallAction = Extract<
+  Action,
+  {
+    type: 'set-overall';
+  }
+>;
 type FileLoadAction = Extract<
   Action,
-  | { type: 'load-file-contents-start' }
-  | { type: 'load-file-contents-success' }
-  | { type: 'load-file-contents-failure' }
+  | {
+      type: 'load-file-contents-start';
+    }
+  | {
+      type: 'load-file-contents-success';
+    }
+  | {
+      type: 'load-file-contents-failure';
+    }
 >;
 type CommitLoadAction = Extract<
   Action,
-  | { type: 'load-commit-files-start' }
-  | { type: 'load-commit-files-success' }
-  | { type: 'load-commit-files-failure' }
+  | {
+      type: 'load-commit-files-start';
+    }
+  | {
+      type: 'load-commit-files-success';
+    }
+  | {
+      type: 'load-commit-files-failure';
+    }
 >;
-type RefreshAction = Extract<Action, { type: 'refresh-review-data' }>;
-type ToastAction = Extract<Action, { type: 'set-toast' }>;
+type RefreshAction = Extract<
+  Action,
+  {
+    type: 'refresh-review-data';
+  }
+>;
+type ToastAction = Extract<
+  Action,
+  {
+    type: 'set-toast';
+  }
+>;
 
 function reduceScope(state: State, action: ScopeAction): State {
   if (action.scope === state.scope) {
@@ -291,19 +368,40 @@ function reduceSelection(state: State, action: ScopeAction | CommitAction | File
   };
 }
 
-function reduceView(state: State, action: PaneAction | CursorAction | LayoutAction | ModeAction): State {
+function reduceView(
+  state: State,
+  action: PaneAction | CursorAction | LayoutAction | ModeAction,
+): State {
   if (action.type === 'set-active-pane') {
-    return action.pane === state.activePane ? state : { ...state, activePane: action.pane };
+    return action.pane === state.activePane
+      ? state
+      : {
+          ...state,
+          activePane: action.pane,
+        };
   }
   if (action.type === 'set-cursor-index') {
     return action.index < 0 || action.index === state.cursorIndex
       ? state
-      : { ...state, cursorIndex: action.index };
+      : {
+          ...state,
+          cursorIndex: action.index,
+        };
   }
   if (action.type === 'set-layout') {
-    return action.layout === state.layout ? state : { ...state, layout: action.layout };
+    return action.layout === state.layout
+      ? state
+      : {
+          ...state,
+          layout: action.layout,
+        };
   }
-  return action.mode === state.mode ? state : { ...state, mode: action.mode };
+  return action.mode === state.mode
+    ? state
+    : {
+        ...state,
+        mode: action.mode,
+      };
 }
 
 function reduceComments(
@@ -334,7 +432,12 @@ function reduceComments(
       comments: state.comments.filter((c) => c.id !== action.commentId),
     };
   }
-  return action.value === state.overallComment ? state : { ...state, overallComment: action.value };
+  return action.value === state.overallComment
+    ? state
+    : {
+        ...state,
+        overallComment: action.value,
+      };
 }
 
 function reduceFileLoading(state: State, action: FileLoadAction): State {
@@ -387,7 +490,12 @@ function reduceRefresh(state: State, action: RefreshAction): State {
 }
 
 function reduceToast(state: State, action: ToastAction): State {
-  return action.toast === state.toast ? state : { ...state, toast: action.toast };
+  return action.toast === state.toast
+    ? state
+    : {
+        ...state,
+        toast: action.toast,
+      };
 }
 
 export function reducer(state: State, action: Action): State {

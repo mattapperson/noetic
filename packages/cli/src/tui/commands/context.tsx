@@ -2,10 +2,10 @@ import type { Item, LastLayerUsage, LayerUsageEntry, MemoryLayer } from '@noetic
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useContext } from 'react';
+import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
+import { formatTokens, getModelContextLimit } from '../../types/model-context.js';
 import type { ScrollableRow } from '../components/tabs/index.js';
 import { ScrollableBox, Tab, Tabs, TabsContext } from '../components/tabs/index.js';
-import { formatTokens, getModelContextLimit } from '../../types/model-context.js';
-import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
 
 export { formatTokens, getModelContextLimit };
 

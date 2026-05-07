@@ -10,10 +10,7 @@ import {
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ValidatorShellSpawn } from '../../../src/tasks/runtime/hierarchy/daemon-validator.js';
 import { createShellValidator } from '../../../src/tasks/runtime/hierarchy/daemon-validator.js';
-import type {
-  Feature,
-  ValidatorRun,
-} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import type { Feature, ValidatorRun } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   AssertionStatus,
   FeatureLoopState,

@@ -1,10 +1,10 @@
-import { executeNoAdapter } from './execute';
+import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type { Context } from '../types/context';
 import type { DetachedHandle } from '../types/detached';
 import type { ContextMemory } from '../types/memory';
 import type { Step } from '../types/step';
 import type { StepSubprocessRequest, SubprocessAdapter } from '../types/subprocess-adapter';
-import { DetachedHandleImpl } from '../runtime/detached-handle';
+import { executeNoAdapter } from './execute';
 
 //#region Adapter resolution
 

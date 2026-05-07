@@ -4,9 +4,9 @@
 
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
+import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
 import type { SkillDefinition } from '../../skills/types.js';
 import { SkillSource } from '../../skills/types.js';
-import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
 
 //#region Types
 

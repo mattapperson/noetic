@@ -1,20 +1,19 @@
-import type { ItemSchemaRegistry } from '../schemas/item';
-import type { Channel } from './channel';
-import type { LLMResponse, ModelParams, StepMeta, TokenUsage } from './common';
 import type { ZodType } from 'zod';
-import type { FsAdapter } from './fs-adapter';
+import type { ItemSchemaRegistry } from '../schemas/item';
+import type { Channel, ChannelHandle, ExternalChannel } from './channel';
+import type { LLMResponse, ModelParams, StepMeta, TokenUsage } from './common';
 import type { ItemLog } from './context-parts/item-log';
-import type { DetachedHandle } from './detached';
 import type { LastLayerUsage } from './context-parts/layer-usage';
+import type { DetachedHandle } from './detached';
+import type { FsAdapter } from './fs-adapter';
+import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
+import type { ExecuteInput } from './items';
 import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { ShellAdapter } from './shell-adapter';
-import type { SubprocessAdapter } from './subprocess-adapter';
 import type { SteeringDecision } from './steering';
+import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
-import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
-import type { ExecuteInput } from './items';
-import type { ChannelHandle, ExternalChannel } from './channel';
 
 /**
  * @public Mutable working-directory state shared among the tools attached to a
@@ -29,9 +28,18 @@ export interface CwdState {
 }
 
 export type ContextHarnessStatus =
-  | { readonly kind: 'idle' }
-  | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
-  | { readonly kind: 'aborting'; readonly turnId: string };
+  | {
+      readonly kind: 'idle';
+    }
+  | {
+      readonly kind: 'generating';
+      readonly startedAt: number;
+      readonly turnId: string;
+    }
+  | {
+      readonly kind: 'aborting';
+      readonly turnId: string;
+    };
 
 interface ContextCallModelRequestBase {
   model: string;
@@ -108,7 +116,10 @@ export type ContextStep<TMemory = ContextMemory, I = unknown, O = unknown> =
 
 /** @public Runtime surface exposed on Context without coupling Context's definition to the runtime type module. */
 export interface ContextHarness {
-  readonly config: { readonly name: string; readonly params: Record<string, unknown> };
+  readonly config: {
+    readonly name: string;
+    readonly params: Record<string, unknown>;
+  };
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
   readonly subprocess: SubprocessAdapter;
@@ -168,7 +179,13 @@ export interface ContextHarness {
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   previewRequestItems(scope?: unknown): Promise<ReadonlyArray<import('./items').Item>>;
   send<T>(channel: Channel<T>, value: T, ctx: Context): void;
-  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  recv<T>(
+    channel: Channel<T>,
+    ctx: Context,
+    opts?: {
+      timeout?: number;
+    },
+  ): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;

@@ -10,10 +10,17 @@
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-
+import type {
+  DiffReviewComment,
+  ReviewFile,
+  ReviewFileContents,
+} from '../../../commands/builtins/diff-review/types.js';
+import {
+  ChangeStatus,
+  CommentSide,
+  ReviewFileKind,
+} from '../../../commands/builtins/diff-review/types.js';
 import { useTheme } from '../../components/theme.js';
-import type { DiffReviewComment, ReviewFile, ReviewFileContents } from '../../../commands/builtins/diff-review/types.js';
-import { ChangeStatus, CommentSide, ReviewFileKind } from '../../../commands/builtins/diff-review/types.js';
 import type { DiffLine, ParsedDiff } from './diff-utils.js';
 import { buildDiff, DiffLineKind, flattenHunks, gutterWidth, markerFor } from './diff-utils.js';
 import type { State } from './state.js';

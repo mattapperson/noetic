@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { activateSlice } from '../../../src/tasks/runtime/hierarchy/activation.js';
-import type {
-  Feature,
-  Milestone,
-  Slice,
-} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import type { Feature, Milestone, Slice } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,

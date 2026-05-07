@@ -398,14 +398,14 @@ export type {
   StoreResult,
 } from './types/memory';
 /** @public */
+export { Slot } from './types/memory';
+/** @public */
 export type {
   ExecutionContext,
   ExecutionOutcome,
   MemoryCallModelRequest,
   MemoryScope,
 } from './types/memory-context';
-/** @public */
-export { Slot } from './types/memory';
 
 //#endregion
 

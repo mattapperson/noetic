@@ -8,10 +8,7 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import { createInMemorySubprocessAdapter } from '@noetic/core';
-import {
-  PlannerSpawnError,
-  startPlannerRun,
-} from '../../src/tasks/runtime/planner-launcher.js';
+import { PlannerSpawnError, startPlannerRun } from '../../src/tasks/runtime/planner-launcher.js';
 import { makeTrackingAdapter, preloadLiveHandle } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 

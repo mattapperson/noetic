@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import type {
-  ControlSignal,
-  Signaller,
-} from '../../../src/tasks/runtime/agent-ci-control.js';
+import type { ControlSignal, Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { pauseTaskHandler } from '../../../src/tasks/runtime/handlers/state.js';
 import { saveRunner } from '../../../src/tasks/runtime/runner-state.js';

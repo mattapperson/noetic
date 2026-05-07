@@ -1,4 +1,3 @@
-export { ensureChatTarget } from '../../tasks/runtime/resolve-chat-target.js';
 export {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
@@ -16,3 +15,4 @@ export type {
   ViewMode,
 } from '../../commands/types.js';
 export { ensureDaemon } from '../../daemon-runtime/runtime.js';
+export { ensureChatTarget } from '../../tasks/runtime/resolve-chat-target.js';

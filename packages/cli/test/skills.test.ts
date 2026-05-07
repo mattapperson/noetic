@@ -5,9 +5,9 @@ import * as path from 'node:path';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
 
 import { discoverSkills } from '../src/skills/discovery.js';
-import { processSkillContent } from '../src/util/skill-processor.js';
 import type { SkillDefinition } from '../src/skills/types.js';
 import { SkillSource } from '../src/skills/types.js';
+import { processSkillContent } from '../src/util/skill-processor.js';
 
 const testFs = createLocalFsAdapter();
 const testShell = createLocalShellAdapter();

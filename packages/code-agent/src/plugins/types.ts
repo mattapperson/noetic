@@ -1,4 +1,11 @@
-import type { FsAdapter, MemoryLayer, ShellAdapter, Step, StorageAdapter, Tool } from '@noetic/core';
+import type {
+  FsAdapter,
+  MemoryLayer,
+  ShellAdapter,
+  Step,
+  StorageAdapter,
+  Tool,
+} from '@noetic/core';
 import type { CallModel } from '../ai/plugin-call-model.js';
 import type { LspServerContribution } from '../lsp/types.js';
 import type { ReminderTrigger } from '../memory/reminder-triggers.js';

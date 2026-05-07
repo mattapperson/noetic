@@ -16,10 +16,7 @@ import type {
   AgentCiSpawn,
   StartAgentCiRunArgs,
 } from '../../src/tasks/runtime/agent-ci-launcher.js';
-import {
-  AgentCiSpawnError,
-  startAgentCiRun,
-} from '../../src/tasks/runtime/agent-ci-launcher.js';
+import { AgentCiSpawnError, startAgentCiRun } from '../../src/tasks/runtime/agent-ci-launcher.js';
 import { loadRunner, saveRunner } from '../../src/tasks/runtime/runner-state.js';
 import { makeStoreContext } from './_helpers.js';
 

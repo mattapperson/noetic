@@ -10,18 +10,18 @@ import {
   extractUsage,
   itemsToInput,
 } from '../adapters/openrouter';
-import { ItemSchemaRegistry } from '../schemas/item';
 import { NoeticConfigError } from '../errors/noetic-config-error';
+import { isFunctionCall } from '../interpreter/typeguards';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
+import type { ItemSchemaRegistry } from '../schemas/item';
 import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
 import type { InputMessageItem, Item } from '../types/items';
 import type { AgentHarnessContract, CallModelRequest } from '../types/runtime';
 import type { Tool } from '../types/tool';
-import { isFunctionCall } from '../interpreter/typeguards';
 import { frameworkCast } from '../util/framework-cast';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
-import type { EventBroadcaster } from '../runtime/event-broadcaster';
-import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
@@ -261,7 +261,6 @@ function hasSessionQueue(ctx: Context): ctx is Context & Required<SessionCtxExte
 
 //#endregion
 
-
 interface PreparedModelRequest {
   instructions?: string;
   remaining: ReadonlyArray<Item>;
@@ -288,7 +287,11 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
     remaining,
     broadcaster,
     sdkTools:
-      filteredTools && filteredTools.length > 0 ? convertTools({ tools: filteredTools }) : undefined,
+      filteredTools && filteredTools.length > 0
+        ? convertTools({
+            tools: filteredTools,
+          })
+        : undefined,
     emitIfAllowed(eventType, data) {
       if (!shouldEmit(request.emit, eventType, data)) {
         return;
@@ -377,7 +380,12 @@ export class AgentHarnessModelCaller {
       const recoveryContinuation = useEphemeralContinue;
       useEphemeralContinue = false;
       if (round > 0 && request.ctx && hasSessionQueue(request.ctx)) {
-        this.injectBetweenRoundMessages(request.ctx, conversationInput, round, prepared.emitIfAllowed);
+        this.injectBetweenRoundMessages(
+          request.ctx,
+          conversationInput,
+          round,
+          prepared.emitIfAllowed,
+        );
       }
 
       const roundController = new AbortController();
@@ -389,13 +397,17 @@ export class AgentHarnessModelCaller {
         : roundController.signal;
       let firstEventSeen = false;
       let idleStalled = false;
-      const watchdog = createStreamIdleWatchdog(this.opts.streamIdleTimeoutMs, roundController, () => {
-        idleStalled = true;
-        prepared.emitIfAllowed('llm_call_stalled', {
-          round,
-          idleTimeoutMs: this.opts.streamIdleTimeoutMs,
-        });
-      });
+      const watchdog = createStreamIdleWatchdog(
+        this.opts.streamIdleTimeoutMs,
+        roundController,
+        () => {
+          idleStalled = true;
+          prepared.emitIfAllowed('llm_call_stalled', {
+            round,
+            idleTimeoutMs: this.opts.streamIdleTimeoutMs,
+          });
+        },
+      );
       const modelInput: OpenRouterAgent.Item[] = recoveryContinuation
         ? withEphemeralContinueInput(conversationInput)
         : frameworkCast<OpenRouterAgent.Item[]>(conversationInput);
@@ -416,7 +428,11 @@ export class AgentHarnessModelCaller {
           temperature: request.params?.temperature,
           maxOutputTokens: request.params?.maxTokens,
           topP: request.params?.topP,
-          ...(textFormat ? { text: textFormat } : {}),
+          ...(textFormat
+            ? {
+                text: textFormat,
+              }
+            : {}),
         },
         {
           signal: roundSignal,
@@ -432,7 +448,9 @@ export class AgentHarnessModelCaller {
           watchdog.reset();
           if (!firstEventSeen) {
             firstEventSeen = true;
-            prepared.emitIfAllowed('llm_call_first_event', { round });
+            prepared.emitIfAllowed('llm_call_first_event', {
+              round,
+            });
           }
         },
       });
@@ -533,7 +551,6 @@ export class AgentHarnessModelCaller {
     };
   }
 
-
   private injectBetweenRoundMessages(
     ctx: Context & Required<SessionCtxExtension>,
     conversationInput: ReturnType<typeof itemsToInput>,
@@ -582,10 +599,19 @@ export class AgentHarnessModelCaller {
     round: number;
     invalidRecoveryContinuations: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): { kind: 'continue'; invalidRecoveryContinuations: number } | { kind: 'ok' } {
+  }):
+    | {
+        kind: 'continue';
+        invalidRecoveryContinuations: number;
+      }
+    | {
+        kind: 'ok';
+      } {
     const terminalError = providerTerminalError(params.sdkResponse);
     if (!terminalError) {
-      return { kind: 'ok' };
+      return {
+        kind: 'ok',
+      };
     }
     params.emitIfAllowed('llm_call_failed', {
       round: params.round,
@@ -603,7 +629,10 @@ export class AgentHarnessModelCaller {
       attempt: next,
       maxAttempts: MAX_RECOVERY_CONTINUATIONS,
     });
-    return { kind: 'continue', invalidRecoveryContinuations: next };
+    return {
+      kind: 'continue',
+      invalidRecoveryContinuations: next,
+    };
   }
 
   private handleEmptyOutputRecovery(params: {
@@ -612,9 +641,18 @@ export class AgentHarnessModelCaller {
     round: number;
     invalidRecoveryContinuations: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): { kind: 'continue'; invalidRecoveryContinuations: number } | { kind: 'ok' } {
+  }):
+    | {
+        kind: 'continue';
+        invalidRecoveryContinuations: number;
+      }
+    | {
+        kind: 'ok';
+      } {
     if (hasUsableResponseOutput(params.sdkResponse, params.roundItems)) {
-      return { kind: 'ok' };
+      return {
+        kind: 'ok',
+      };
     }
     const message = 'LLM response completed with no output items';
     params.emitIfAllowed('llm_call_failed', {
@@ -633,11 +671,19 @@ export class AgentHarnessModelCaller {
       attempt: next,
       maxAttempts: MAX_RECOVERY_CONTINUATIONS,
     });
-    return { kind: 'continue', invalidRecoveryContinuations: next };
+    return {
+      kind: 'continue',
+      invalidRecoveryContinuations: next,
+    };
   }
 
   private async executeToolRound(params: {
-    functionCalls: Extract<Item, { type: 'function_call' }>[];
+    functionCalls: Extract<
+      Item,
+      {
+        type: 'function_call';
+      }
+    >[];
     request: CallModelRequest;
     roundItemSchemas: ItemSchemaRegistry;
     allItems: Item[];
@@ -679,7 +725,12 @@ export class AgentHarnessModelCaller {
   }
 
   private async executeFunctionCall(params: {
-    fc: Extract<Item, { type: 'function_call' }>;
+    fc: Extract<
+      Item,
+      {
+        type: 'function_call';
+      }
+    >;
     request: CallModelRequest;
     roundItemSchemas: ItemSchemaRegistry;
     allItems: Item[];
@@ -695,15 +746,27 @@ export class AgentHarnessModelCaller {
     try {
       parsedArgs = JSON.parse(fc.arguments);
     } catch {
-      this.recordMalformedToolCall({ fc, request, roundItemSchemas, allItems, conversationInput, emitIfAllowed: params.emitIfAllowed });
+      this.recordMalformedToolCall({
+        fc,
+        request,
+        roundItemSchemas,
+        allItems,
+        conversationInput,
+        emitIfAllowed: params.emitIfAllowed,
+      });
       return;
     }
-    const toolForCall = request.tools?.find((tool) => tool.name === fc.name);
+    if (!request.tools) {
+      throw new Error(
+        `executeFunctionCall invoked without tools on CallModelRequest (tool name: ${fc.name}).`,
+      );
+    }
+    const toolForCall = request.tools.find((tool) => tool.name === fc.name);
     const toolResult = await executeToolCall({
       toolName: fc.name,
       args: parsedArgs,
-      tools: request.tools ?? [],
-      context: request.ctx as Context,
+      tools: request.tools,
+      context: request.ctx,
       harness: this.opts.harness,
       layers: request.layers,
     });
@@ -731,7 +794,12 @@ export class AgentHarnessModelCaller {
   }
 
   private recordMalformedToolCall(params: {
-    fc: Extract<Item, { type: 'function_call' }>;
+    fc: Extract<
+      Item,
+      {
+        type: 'function_call';
+      }
+    >;
     request: CallModelRequest;
     roundItemSchemas: ItemSchemaRegistry;
     allItems: Item[];
@@ -766,9 +834,18 @@ export class AgentHarnessModelCaller {
     round: number;
     toolLimitRecoveryContinuations: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): { kind: 'continue'; toolLimitRecoveryContinuations: number } | { kind: 'ok' } {
+  }):
+    | {
+        kind: 'continue';
+        toolLimitRecoveryContinuations: number;
+      }
+    | {
+        kind: 'ok';
+      } {
     if (params.round < MAX_TOOL_ROUNDS) {
-      return { kind: 'ok' };
+      return {
+        kind: 'ok',
+      };
     }
     params.emitIfAllowed('tool_round_limit_exceeded', {
       maxToolRounds: MAX_TOOL_ROUNDS,
@@ -783,8 +860,6 @@ export class AgentHarnessModelCaller {
       toolLimitRecoveryContinuations: params.toolLimitRecoveryContinuations + 1,
     };
   }
-
-
 
   /** @internal Drain only messages tagged `between-rounds` from the queue. */
   private drainBetweenRoundsMessages(queue: MessageQueue): QueuedMessage[] {
@@ -813,7 +888,11 @@ function itemToText(msg: QueuedMessage): string {
   if (typeof msg.input === 'string') {
     return msg.input;
   }
-  const items = Array.isArray(msg.input) ? msg.input : [msg.input];
+  const items = Array.isArray(msg.input)
+    ? msg.input
+    : [
+        msg.input,
+      ];
   const texts: string[] = [];
   for (const item of items) {
     if (item.type !== 'message') {

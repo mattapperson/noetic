@@ -9,9 +9,10 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
-
-import { useTheme } from '../../components/theme.js';
-import { getCommitFiles, loadReviewFileContents } from '../../../commands/builtins/diff-review/git.js';
+import {
+  getCommitFiles,
+  loadReviewFileContents,
+} from '../../../commands/builtins/diff-review/git.js';
 import { composeReviewPrompt } from '../../../commands/builtins/diff-review/prompt.js';
 import type {
   DiffReviewComment,
@@ -20,6 +21,7 @@ import type {
   ReviewWindowData,
 } from '../../../commands/builtins/diff-review/types.js';
 import { CommentSide, ReviewScope } from '../../../commands/builtins/diff-review/types.js';
+import { useTheme } from '../../components/theme.js';
 import { CommentInput } from './comment-input.js';
 import { CommentsStrip, OverallCommentEditor } from './comments-pane.js';
 import { DiffPane } from './diff-pane.js';
@@ -358,7 +360,8 @@ function handleBrowseMoveKey(input: string, key: BrowseInputKey, deps: KeymapDep
   if (!isUp && !isDown) {
     return false;
   }
-  const len = deps.state.activePane === Pane.Files ? deps.visibleListLength : deps.visibleDiffLength;
+  const len =
+    deps.state.activePane === Pane.Files ? deps.visibleListLength : deps.visibleDiffLength;
   if (len <= 0) {
     return true;
   }

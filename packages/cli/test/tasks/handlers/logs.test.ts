@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  logsTaskHandler,
-  logTaskHandler,
-} from '../../../src/tasks/runtime/handlers/inspection.js';
+import { logsTaskHandler, logTaskHandler } from '../../../src/tasks/runtime/handlers/inspection.js';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';
 

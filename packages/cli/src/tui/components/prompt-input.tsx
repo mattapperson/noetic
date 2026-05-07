@@ -283,7 +283,6 @@ function resolveStatusHintText(options: StatusHintTextOptions): string {
   return options.disabledText;
 }
 
-
 interface PromptKeyboardRefs {
   value: React.MutableRefObject<string>;
   suggestions: React.MutableRefObject<Suggestion[]>;
@@ -350,15 +349,21 @@ function handlePromptEscape(
   }
 }
 
-function handlePromptArrow(
-  direction: 'up' | 'down',
-  refs: PromptKeyboardRefs,
-  actions: PromptKeyboardActions,
-  enableHistory: boolean,
-): void {
+interface PromptArrowArgs {
+  direction: 'up' | 'down';
+  refs: PromptKeyboardRefs;
+  actions: PromptKeyboardActions;
+  enableHistory: boolean;
+}
+
+function handlePromptArrow(args: PromptArrowArgs): void {
+  const { direction, refs, actions, enableHistory } = args;
   if (refs.suggestions.current.length > 0) {
     const delta = direction === 'up' ? -1 : 1;
-    const next = Math.max(0, Math.min(refs.suggestions.current.length - 1, refs.sugIdx.current + delta));
+    const next = Math.max(
+      0,
+      Math.min(refs.suggestions.current.length - 1, refs.sugIdx.current + delta),
+    );
     actions.setSugI(next);
     return;
   }
@@ -450,7 +455,9 @@ function usePromptSubmitHandlers(args: PromptSubmitHandlersArgs): {
     ],
   );
 
-  return { handleInputSubmit };
+  return {
+    handleInputSubmit,
+  };
 }
 
 function submitSelectedSuggestion(
@@ -515,11 +522,21 @@ function usePromptKeyboardHandler(args: {
         return;
       }
       if (key.upArrow) {
-        handlePromptArrow('up', args.refs, args.actions, args.enableHistory);
+        handlePromptArrow({
+          direction: 'up',
+          refs: args.refs,
+          actions: args.actions,
+          enableHistory: args.enableHistory,
+        });
         return;
       }
       if (key.downArrow) {
-        handlePromptArrow('down', args.refs, args.actions, args.enableHistory);
+        handlePromptArrow({
+          direction: 'down',
+          refs: args.refs,
+          actions: args.actions,
+          enableHistory: args.enableHistory,
+        });
       }
     },
     {

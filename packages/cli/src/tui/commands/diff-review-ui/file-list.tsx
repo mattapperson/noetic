@@ -11,10 +11,9 @@
 
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
-
-import { useTheme } from '../../components/theme.js';
 import type { ReviewCommitInfo, ReviewFile } from '../../../commands/builtins/diff-review/types.js';
 import { ChangeStatus, ReviewScope } from '../../../commands/builtins/diff-review/types.js';
+import { useTheme } from '../../components/theme.js';
 import type { State } from './state.js';
 import { Pane } from './state.js';
 

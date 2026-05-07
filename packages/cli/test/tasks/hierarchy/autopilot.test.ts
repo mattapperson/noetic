@@ -26,10 +26,7 @@ import {
   MilestoneStatus,
   SliceStatus,
 } from '../../../src/tasks/runtime/hierarchy/schemas.js';
-import {
-  listMilestones,
-  listSlices,
-} from '../../../src/tasks/runtime/hierarchy/store.js';
+import { listMilestones, listSlices } from '../../../src/tasks/runtime/hierarchy/store.js';
 import type { MemFs } from '../_helpers.js';
 import { makeStoreContext } from '../_helpers.js';
 
@@ -214,8 +211,8 @@ describe('runAutopilotTick (active slice with all features passed)', () => {
       projectRoot: seed.projectRoot,
       tasksRoot: seed.tasksRoot,
     };
-    const features = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
-      (m) => m.listFeatures(ctx, seed.taskId),
+    const features = await import('../../../src/tasks/runtime/hierarchy/store.js').then((m) =>
+      m.listFeatures(ctx, seed.taskId),
     );
     const firstSliceFeature = features[0];
     if (firstSliceFeature === undefined) {
@@ -288,8 +285,8 @@ describe('runAutopilotTick (slice fully blocked)', () => {
       projectRoot: seed.projectRoot,
       tasksRoot: seed.tasksRoot,
     };
-    const features = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
-      (m) => m.listFeatures(ctx, seed.taskId),
+    const features = await import('../../../src/tasks/runtime/hierarchy/store.js').then((m) =>
+      m.listFeatures(ctx, seed.taskId),
     );
     const firstFeature = features[0];
     if (firstFeature === undefined) {
@@ -327,8 +324,8 @@ describe('runAutopilotTick (milestone completion)', () => {
     };
     // Tick 1: activates S1.
     await runAutopilotTick(makeDeps(seed));
-    const feats = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
-      (m) => m.listFeatures(ctx, seed.taskId),
+    const feats = await import('../../../src/tasks/runtime/hierarchy/store.js').then((m) =>
+      m.listFeatures(ctx, seed.taskId),
     );
     const f1 = feats[0];
     if (f1 === undefined) {
@@ -347,8 +344,8 @@ describe('runAutopilotTick (milestone completion)', () => {
     );
     // Tick 2: completes S1, activates S2 (and triages F2).
     await runAutopilotTick(makeDeps(seed));
-    const feats2 = await import('../../../src/tasks/runtime/hierarchy/store.js').then(
-      (m) => m.listFeatures(ctx, seed.taskId),
+    const feats2 = await import('../../../src/tasks/runtime/hierarchy/store.js').then((m) =>
+      m.listFeatures(ctx, seed.taskId),
     );
     const f2 = feats2.find((f) => f.id !== f1.id);
     if (f2 === undefined) {

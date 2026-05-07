@@ -6,6 +6,6 @@ export type { FooterContext, NoeticPlugin } from '../../plugins/types.js';
 export type { SaveResult } from '../../sessions/store.js';
 export { loadSession, loadSessionByIdAnywhere, saveSession } from '../../sessions/store.js';
 export { stripUnresolvedToolCalls } from '../../sessions/strip-unresolved.js';
-export type { SessionFile } from '../../types/session.js';
 export type { AgentRuntimeConfig } from '../../types/config.js';
 export { getModelContextLimit } from '../../types/model-context.js';
+export type { SessionFile } from '../../types/session.js';

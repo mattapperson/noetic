@@ -59,7 +59,11 @@ function findValueIndex<T>(options: ReadonlyArray<Option<T>>, value: T | undefin
 //#endregion
 
 function handleInputModeKey<T>(args: {
-  readonly key: { downArrow?: boolean; upArrow?: boolean; escape?: boolean };
+  readonly key: {
+    downArrow?: boolean;
+    upArrow?: boolean;
+    escape?: boolean;
+  };
   readonly moveFocus: (delta: number) => void;
   readonly onInputModeToggle?: (value: T) => void;
   readonly onCancel?: () => void;
@@ -106,7 +110,6 @@ function handleNumberShortcut<T>(args: {
   }
   return true;
 }
-
 
 //#region Component
 
