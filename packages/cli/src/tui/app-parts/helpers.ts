@@ -12,7 +12,12 @@ export function buildErrorEntry(error: unknown): ErrorEntry {
   };
 }
 
-export function isFrameworkEvent(event: StreamEvent): event is Extract<StreamEvent, { source: 'framework' }> {
+export function isFrameworkEvent(event: StreamEvent): event is Extract<
+  StreamEvent,
+  {
+    source: 'framework';
+  }
+> {
   return event.source === 'framework';
 }
 
@@ -24,7 +29,9 @@ export function extractEventSuffix(type: string): string {
   return type.slice(idx + 1);
 }
 
-export function normalizeEntriesForResume(raw: ReadonlyArray<ConversationEntry>): ConversationEntry[] {
+export function normalizeEntriesForResume(
+  raw: ReadonlyArray<ConversationEntry>,
+): ConversationEntry[] {
   const out: ConversationEntry[] = [];
   for (const entry of raw) {
     if (isUserEntry(entry) && entry.deliveryStatus === 'queued') {
@@ -72,12 +79,17 @@ export function markUserEntrySent(entries: ConversationEntry[], id: string): Con
     ...entry,
     deliveryStatus: 'sent',
   };
-  const next = [...entries];
+  const next = [
+    ...entries,
+  ];
   next[idx] = updated;
   return next;
 }
 
-export function augmentTextWithPendingBash(text: string, pending: ReadonlyArray<LocalBashResult>): string {
+export function augmentTextWithPendingBash(
+  text: string,
+  pending: ReadonlyArray<LocalBashResult>,
+): string {
   if (pending.length === 0) {
     return text;
   }

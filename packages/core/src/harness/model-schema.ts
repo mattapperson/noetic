@@ -1,4 +1,5 @@
-import { ItemSchemaRegistry, mergeExtensions } from '../schemas/item';
+import type { ItemSchemaRegistry } from '../schemas/item';
+import { mergeExtensions } from '../schemas/item';
 import type { Item, ItemSchemaExtensions } from '../types/items';
 import type { MemoryLayer } from '../types/memory';
 import type { Tool } from '../types/tool';
@@ -81,4 +82,3 @@ export function createToolResultItem({
       : baseItem;
   return roundItemSchemas.parseWithCategory(decorated, 'toolResults');
 }
-

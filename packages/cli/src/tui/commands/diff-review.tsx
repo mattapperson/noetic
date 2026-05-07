@@ -8,10 +8,9 @@
  */
 
 import type { ReactNode } from 'react';
-
-import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
 import { getReviewWindowData } from '../../commands/builtins/diff-review/git.js';
 import type { ReviewWindowData } from '../../commands/builtins/diff-review/types.js';
+import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
 import { DiffReviewModal } from './diff-review-ui/diff-review-modal.js';
 
 //#region Implementation

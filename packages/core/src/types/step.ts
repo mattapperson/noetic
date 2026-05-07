@@ -53,6 +53,14 @@ export interface Verdict {
 export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
 /**
+ * Field type that accepts either an eager value or a `(ctx) => value` getter.
+ * Used by `step.llm` for params that may vary per execution (model, instructions,
+ * tool list). The getter runs at step execution time with the live context.
+ * @public
+ */
+export type Lazy<T, TMemory = ContextMemory> = T | ((ctx: Context<TMemory>) => T | Promise<T>);
+
+/**
  * Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`).
  * @public
  */
@@ -95,12 +103,15 @@ export interface StepRun<TMemory = ContextMemory, I = unknown, O = unknown> {
 }
 
 /** @public A step that sends a prompt to a language model and returns its response. */
-export interface StepLLM<_TMemory = ContextMemory, _I = unknown, O = unknown> {
+export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
   kind: 'llm';
   id: string;
-  model: string;
-  instructions?: string;
-  tools?: Tool[];
+  /** Model id. Accepts either an eager string or a `(ctx) => string` getter. */
+  model: Lazy<string, TMemory>;
+  /** System instructions. Eager string or `(ctx) => string | undefined` getter. */
+  instructions?: Lazy<string | undefined, TMemory>;
+  /** Tools exposed to the LLM. Eager array or `(ctx) => Tool[] | undefined` getter. Function-form tools do not contribute to the pre-computed `ctx.unifiedTools`; they are resolved per execution. */
+  tools?: Lazy<Tool[] | undefined, TMemory>;
   output?: ZodType<O>;
   params?: ModelParams;
   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */

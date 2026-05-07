@@ -14,6 +14,9 @@
  *   - named (`name: ...`, implies background): as above plus a per-name
  *     inbound queue addressable via the `sendMessage` tool. The teammate
  *     consumes its inbound queue via `teammateInboundLayer`.
+ *   - nested spawning: disabled by default for child agents; skills opt in
+ *     with `agent-can-spawn: true` so top-level plan/act agents can delegate
+ *     without making every teammate recursively agentic.
  *   - worktree isolation (`isolation: 'worktree'`): allocate a git worktree.
  *     The child's tools are the same instances as the parent's — they resolve
  *     paths from the live `ctx.cwdState.cwd`, which is initialized to the
@@ -56,7 +59,7 @@ export const TEAMMATE_NAME_PATTERN = new RegExp(
 
 //#region Types
 
-interface CreateAgentToolArgs {
+export interface CreateAgentToolArgs {
   catalog: ReadonlyArray<SkillDefinition>;
   teammates: TeammateRegistry;
   /**
@@ -82,6 +85,8 @@ interface CreateAgentToolArgs {
    * Sourced from `noetic.config.ts`'s `agents` field.
    */
   agentOverrides?: Record<string, AgentOverride>;
+  /** Tool names that provide teammate orchestration and enable nested spawning. */
+  teammateToolNames?: ReadonlyArray<string>;
 }
 
 interface ResolvedAgent {
@@ -93,7 +98,7 @@ interface ResolvedAgent {
   instructions: string;
 }
 
-const AgentInputSchema = z.object({
+export const AgentInputSchema = z.object({
   description: z
     .string()
     .min(1)
@@ -137,7 +142,7 @@ const AgentInputSchema = z.object({
     ),
 });
 
-const AgentOutputSchema = z.union([
+export const AgentOutputSchema = z.union([
   z.object({
     status: z.literal('completed'),
     agentId: z.string(),
@@ -152,8 +157,8 @@ const AgentOutputSchema = z.union([
   }),
 ]);
 
-type AgentInput = z.infer<typeof AgentInputSchema>;
-type AgentOutput = z.infer<typeof AgentOutputSchema>;
+export type AgentInput = z.infer<typeof AgentInputSchema>;
+export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
 //#endregion
 
@@ -165,6 +170,7 @@ interface ResolveAgentArgs {
   parentTools: ReadonlyArray<Tool>;
   parentModel: string;
   agentOverrides?: Record<string, AgentOverride>;
+  teammateToolNames?: ReadonlyArray<string>;
 }
 
 export function resolveAgent(args: ResolveAgentArgs): ResolvedAgent {
@@ -187,7 +193,12 @@ export function resolveAgent(args: ResolveAgentArgs): ResolvedAgent {
   const instructions = applyInstructionsOverride(skill.instructions, override);
 
   const allowList = override?.tools ?? skill.allowedTools;
-  const tools = filterTools(args.parentTools, allowList);
+  const tools = resolveChildTools({
+    parentTools: args.parentTools,
+    allowList,
+    teammateToolNames: new Set(args.teammateToolNames ?? []),
+    canSpawn: skill.agentCanSpawn === true,
+  });
 
   const background = args.input.run_in_background === true || skill.agentBackground === true;
 
@@ -215,6 +226,13 @@ function applyInstructionsOverride(base: string, override: AgentOverride | undef
   return `${base}\n\n${override.instructions}`;
 }
 
+function withoutTeammateTools(
+  tools: ReadonlyArray<Tool>,
+  teammateToolNames: ReadonlySet<string>,
+): Tool[] {
+  return tools.filter((agentTool) => !teammateToolNames.has(agentTool.name));
+}
+
 /**
  * If the skill declares an `allowed-tools` list, filter the parent's tool pool
  * down to those names. Empty array means "no tools" (LLM-only). When the field
@@ -234,6 +252,18 @@ export function filterTools(
   }
   const allowSet = new Set(allowed);
   return parentTools.filter((t) => allowSet.has(t.name));
+}
+
+function resolveChildTools(args: {
+  parentTools: ReadonlyArray<Tool>;
+  allowList: ReadonlyArray<string> | undefined;
+  teammateToolNames: ReadonlySet<string>;
+  canSpawn: boolean;
+}): Tool[] {
+  const availableTools = args.canSpawn
+    ? args.parentTools
+    : withoutTeammateTools(args.parentTools, args.teammateToolNames);
+  return filterTools(availableTools, args.allowList);
 }
 
 //#endregion
@@ -395,6 +425,7 @@ export function createAgentTool(args: CreateAgentToolArgs): Tool {
         parentTools: args.parentTools,
         parentModel: args.parentModel,
         agentOverrides: args.agentOverrides,
+        teammateToolNames: args.teammateToolNames,
       });
 
       const inheritContext = input.inherit_context === true;

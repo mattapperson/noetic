@@ -3,9 +3,8 @@
  */
 
 import type { ReactNode } from 'react';
-
-import { discoverConfig } from '../../config/discovery.js';
 import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
+import { discoverConfig } from '../../config/discovery.js';
 import { ConfigEditor } from './config/editor.js';
 import { CONFIG_TAB_ORDER, ConfigTab } from './config/types.js';
 

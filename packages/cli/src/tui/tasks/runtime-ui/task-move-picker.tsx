@@ -11,10 +11,10 @@ import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
 import type { ReactElement } from 'react';
 import { useCallback, useState } from 'react';
-import { useTheme } from '../../components/theme.js';
 import { moveTaskHandler } from '../../../tasks/runtime/handlers/state.js';
 import type { KanbanColumn } from '../../../tasks/runtime/kanban.js';
 import { deriveColumn } from '../../../tasks/runtime/kanban.js';
+import { useTheme } from '../../components/theme.js';
 import { columnLabel, VISIBLE_COLUMNS } from './columns.js';
 
 //#region Types

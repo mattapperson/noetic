@@ -12,7 +12,6 @@ import type { FsAdapter } from '@noetic/core';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { useTheme } from '../../components/theme.js';
 import { getTaskHierarchy } from '../../../tasks/runtime/hierarchy/aggregate.js';
 import type {
   FeatureStatus,
@@ -20,6 +19,7 @@ import type {
   SliceStatus,
   TaskHierarchy,
 } from '../../../tasks/runtime/hierarchy/schemas.js';
+import { useTheme } from '../../components/theme.js';
 
 //#region Types
 

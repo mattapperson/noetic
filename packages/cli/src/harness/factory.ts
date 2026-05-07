@@ -1,3 +1,18 @@
+import type { SystemPromptInputs } from '../ai/system-prompt.js';
+import { composeSystemPrompt } from '../ai/system-prompt.js';
+import { loadAgentInstructions } from '../config/agent-md-loader.js';
+import type { NoeticPlugin } from '../plugins/types.js';
+import { createTaskMutationPolicy } from '../tasks/runtime/mutation-policy.js';
+import { taskTools } from '../tasks/runtime/tools.js';
+import type { AgentConfig } from '../types/config.js';
+import type {
+  AskUserService,
+  LspServerContribution,
+  PluginContextBuilder,
+  ReminderTrigger,
+  SkillDefinition,
+  TaskStoreContext,
+} from './deps/code-agent';
 import {
   agentMdLayer,
   BUILTIN_TRIGGERS,
@@ -16,15 +31,20 @@ import {
   reminderLayer,
   resolveSubprocessRoot,
   skillsLayer,
-  teammateInboxLayer,
   TeammateRegistry,
-  type AskUserService,
-  type LspServerContribution,
-  type PluginContextBuilder,
-  type ReminderTrigger,
-  type SkillDefinition,
-  type TaskStoreContext,
+  teammateInboxLayer,
 } from './deps/code-agent';
+import type {
+  AgentHarness,
+  FsAdapter,
+  MemoryLayer,
+  PlanEnterSessionCallback,
+  PlanExitCallback,
+  ShellAdapter,
+  StorageAdapter,
+  SubprocessAdapter,
+  Tool,
+} from './deps/core';
 import {
   createFileStorage,
   createLocalSubprocessAdapter,
@@ -35,23 +55,7 @@ import {
   planMemory,
   toolMemoryLayer,
   workingMemory,
-  type AgentHarness,
-  type FsAdapter,
-  type MemoryLayer,
-  type PlanEnterSessionCallback,
-  type PlanExitCallback,
-  type ShellAdapter,
-  type StorageAdapter,
-  type SubprocessAdapter,
-  type Tool,
 } from './deps/core';
-import type { SystemPromptInputs } from '../ai/system-prompt.js';
-import { composeSystemPrompt } from '../ai/system-prompt.js';
-import { createTaskMutationPolicy } from '../tasks/runtime/mutation-policy.js';
-import { taskTools } from '../tasks/runtime/tools.js';
-import { loadAgentInstructions } from '../config/agent-md-loader.js';
-import type { NoeticPlugin } from '../plugins/types.js';
-import type { AgentConfig } from '../types/config.js';
 import { createDefaultShellAdapter } from './shell-adapter-bootstrap.js';
 
 //#region Types
@@ -347,6 +351,11 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       cwd: config.cwd,
       historyMaxItems: config.history?.maxItems,
       agentOverrides: config.agents,
+      teammateToolNames: [
+        'agent',
+        'sendMessage',
+        'checkAgent',
+      ],
     }),
     createSendMessageTool({
       teammates,

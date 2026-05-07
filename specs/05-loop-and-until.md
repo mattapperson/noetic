@@ -115,7 +115,8 @@ const until = {
   never:          () => Until,                    // never stops; pair with `every` or external cancellation
   verified:       (fn: VerifyFn) => Until,        // Ralph Wiggum external check
   converged:      (opts: ConvergeConfig) => Until,  // recursive self-refinement
-  outputContains: (marker: string) => Until,      // completion promise marker
+  outputContains: (marker: string) => Until,      // completion promise marker (substring match)
+  outputEquals:   (sentinel: string) => Until,    // exit sentinel (exact equality; avoids substring collisions)
   custom:         (fn: Until) => Until,           // escape hatch
 };
 

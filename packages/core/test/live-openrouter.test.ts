@@ -227,7 +227,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const pipeline = step.run<ContextMemory, string, string>({
       id: 'pipeline',
       execute: async (input, ctx) => {
-        const classification = (await ctx.harness.run(classifyStep, input, ctx)) as { topic: string; wordCount: number };
+        const classification = await ctx.harness.run(classifyStep, input, ctx);
         const prompt = `Topic: ${classification.topic} (${classification.wordCount} words). User said: ${input}`;
         const response = await ctx.harness.run(llmStep, prompt, ctx);
         return `[${classification.topic}] ${response}`;

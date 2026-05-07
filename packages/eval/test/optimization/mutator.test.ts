@@ -7,14 +7,24 @@ function getLlmInstructions(s: Step): string | undefined {
   if (s.kind !== 'llm') {
     throw new Error(`Expected llm step, got ${s.kind}`);
   }
-  return s.instructions;
+  const { instructions } = s;
+  if (typeof instructions === 'function') {
+    throw new Error(
+      'Expected eager string instructions on llm step, got function-form Lazy getter',
+    );
+  }
+  return instructions;
 }
 
 function getLlmModel(s: Step): string {
   if (s.kind !== 'llm') {
     throw new Error(`Expected llm step, got ${s.kind}`);
   }
-  return s.model;
+  const { model } = s;
+  if (typeof model === 'function') {
+    throw new Error('Expected eager string model on llm step, got function-form Lazy getter');
+  }
+  return model;
 }
 
 function getSpawnChild(s: Step): Step {

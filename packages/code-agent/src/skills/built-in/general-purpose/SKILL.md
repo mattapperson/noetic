@@ -6,6 +6,7 @@ user-invocable: false
 model-invocable: false
 agent-type: general-purpose
 agent-model: inherit
+agent-can-spawn: true
 ---
 
 # General-purpose teammate

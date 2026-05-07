@@ -19,9 +19,9 @@ import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import { useTheme } from '../../components/theme.js';
 import type { InterviewResultLike } from '../../../tasks/runtime/hierarchy/live-interview.js';
 import { persistTaskHierarchy } from '../../../tasks/runtime/hierarchy/persist.js';
+import { useTheme } from '../../components/theme.js';
 
 //#region Types
 

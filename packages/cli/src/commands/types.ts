@@ -9,8 +9,8 @@ import type { AskUserService } from '@noetic/code-agent/ask-user-service';
 import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic/core';
 import type { ReactNode } from 'react';
 import type { SkillDefinition } from '../skills/types.js';
-import type { ConversationEntry } from '../types/session.js';
 import type { AgentConfig } from '../types/config.js';
+import type { ConversationEntry } from '../types/session.js';
 
 //#region Command Context
 
@@ -81,7 +81,9 @@ interface CommandContext {
    * Restart the TUI against a different session, or return a user-facing
    * failure message when the target cannot be resolved. Used by `/resume`.
    */
-  restartWithSession: (target: SessionRestartTarget) => Promise<string | undefined> | string | undefined;
+  restartWithSession: (
+    target: SessionRestartTarget,
+  ) => Promise<string | undefined> | string | undefined;
   /**
    * Switch the TUI's primary view mode. The chat view ('chat') is the
    * default; 'taskBoard' renders the kanban board fullscreen instead of

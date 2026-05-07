@@ -1,6 +1,22 @@
-import { OpenRouter, createInMemoryFsAdapter, createInMemoryShellAdapter, createInMemorySubprocessAdapter } from './deps/adapters';
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { collectAllTools, deduplicateTools, execute, isFunctionCall } from './deps/interpreter';
+import { SpanImpl } from '../observability/span-impl';
+import { NoopExporter } from '../observability/trace-exporter';
+import { ItemSchemaRegistry } from '../schemas/item';
+import { frameworkCast } from '../util/framework-cast';
+import {
+  createInMemoryFsAdapter,
+  createInMemoryShellAdapter,
+  createInMemorySubprocessAdapter,
+  OpenRouter,
+} from './deps/adapters';
+import type { DetachedSpawnOverrides } from './deps/interpreter';
+import {
+  collectAllTools,
+  deduplicateTools,
+  dispatchStepThroughAdapter,
+  execute,
+} from './deps/interpreter';
+import type { LayerStateStore } from './deps/memory';
 import {
   afterModelCallLayers,
   assembleView,
@@ -16,70 +32,64 @@ import {
   resolveLayerTools,
   runAppendPipeline,
   storeLayers,
-  type LayerStateStore,
 } from './deps/memory';
-import { SpanImpl } from '../observability/span-impl';
-import { NoopExporter } from '../observability/trace-exporter';
-import { ItemSchemaRegistry } from '../schemas/item';
-import {
-  SteeringAction,
-  type AgentConfig,
-  type AgentHarnessContract,
-  type AgentHooks,
-  type CallModelRequest,
-  type Channel,
-  type ChannelHandle,
-  type Context,
-  type ContextMemory,
-  type CwdState,
-  type DeliveryMode,
-  type DetachedHandle,
-  type ExecuteInput,
-  type ExecuteOptions,
-  type ExecutionContext,
-  type ExternalChannel,
-  type FsAdapter,
-  type HarnessResponse,
-  type HarnessStatus,
-  type Item,
-  type ItemSchemaExtensions,
-  type LLMResponse,
-  type LlmProviderConfig,
-  type MemoryLayer,
-  type RecallLayerOutput,
-  type SessionScope,
-  type ShellAdapter,
-  type Span,
-  type SteeringDecision,
-  type Step,
-  type StorageAdapter,
-  type StreamEvent,
-  type StreamingItem,
-  type SubprocessAdapter,
-  type Tool,
-  type TraceExporter,
-  type ZodType,
-} from './deps/types';
-import { frameworkCast } from '../util/framework-cast';
+import type { CheckpointStore, EventBroadcaster, QueuedMessage } from './deps/runtime';
 import {
   buildItemStream,
-  captureCheckpoint,
   ChannelStore,
   ContextImpl,
+  captureCheckpoint,
   createInMemoryStorage,
   filterReasoningStream,
   filterTextStream,
   restoreFromCheckpoint,
   SessionRunner,
   snapshotCwdState,
-  type CheckpointStore,
-  type EventBroadcaster,
-  type QueuedMessage,
 } from './deps/runtime';
-import { dispatchStepThroughAdapter, type DetachedSpawnOverrides } from './deps/interpreter';
-import { AgentHarnessModelCaller } from './model-call';
+import type {
+  AgentConfig,
+  AgentHarnessContract,
+  AgentHooks,
+  CallModelRequest,
+  Channel,
+  ChannelHandle,
+  Context,
+  ContextMemory,
+  CwdState,
+  DeliveryMode,
+  DetachedHandle,
+  ExecuteInput,
+  ExecuteOptions,
+  ExecutionContext,
+  ExternalChannel,
+  FsAdapter,
+  HarnessResponse,
+  HarnessStatus,
+  Item,
+  ItemSchemaExtensions,
+  LLMResponse,
+  LlmProviderConfig,
+  MemoryLayer,
+  RecallLayerOutput,
+  SessionScope,
+  ShellAdapter,
+  Span,
+  SteeringDecision,
+  Step,
+  StorageAdapter,
+  StreamEvent,
+  StreamingItem,
+  SubprocessAdapter,
+  Tool,
+  TraceExporter,
+  ZodType,
+} from './deps/types';
+import { SteeringAction } from './deps/types';
 import type { SessionCtxExtension } from './model-call';
+import { AgentHarnessModelCaller } from './model-call';
+
 export { createStreamIdleWatchdog } from './model-call';
+
 import { buildItemSchemaRegistry } from './model-schema';
 
 //#region Types
@@ -91,6 +101,13 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   memory?: MemoryLayer[];
   storage?: StorageAdapter;
   hooks?: AgentHooks;
+  /**
+   * Harness-wide tool pool. Merged (identity-deduplicated) with tools
+   * collected from `initialStep` to form every context's `unifiedTools`.
+   * Use this when the workflow step tree is static and tools are supplied
+   * per harness instance rather than baked into individual `step.llm` calls.
+   */
+  tools?: Tool[];
   params: TParams;
   paramsSchema?: ZodType<TParams>;
   /** Filesystem adapter. Defaults to local node:fs when not provided. */
@@ -217,6 +234,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    */
   readonly checkpointStore?: CheckpointStore;
   private readonly initialStep?: Step<ContextMemory, string, string>;
+  /** Harness-wide tool pool merged into every context's `unifiedTools`. */
+  private readonly harnessTools: ReadonlyArray<Tool>;
   /** @internal Memory layers configured for this harness. Exposed non-private
    *  so free functions in `runtime/durable/` (checkpoint/restore) can read it
    *  without friend-class gymnastics. Do not access from outside core. */
@@ -256,6 +275,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.subprocess = opts.subprocess ?? createInMemorySubprocessAdapter();
     this.checkpointStore = opts.checkpointStore;
     this.initialStep = opts.initialStep;
+    this.harnessTools = opts.tools ?? [];
     this._memory = opts.memory;
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm);
@@ -417,8 +437,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           ext._sessionQueue = session.runner.queue;
           ext._sessionBetweenRounds = true;
           ext._sessionRunnerAgentName = this.config.name;
-          if (this.initialStep) {
-            this.setUnifiedTools(ctx, collectAllTools(this.initialStep));
+          if (this.initialStep || this.harnessTools.length > 0) {
+            const stepTools = this.initialStep ? collectAllTools(this.initialStep) : [];
+            this.setUnifiedTools(ctx, [
+              ...stepTools,
+              ...this.harnessTools,
+            ]);
           }
           return ctx;
         },

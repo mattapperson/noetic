@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { TaskLifecycleStatus, TaskSource } from '@noetic/code-agent/tasks/schema';
 import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type {
-  Feature,
-  Milestone,
-  Slice,
-} from '../../../src/tasks/runtime/hierarchy/schemas.js';
+import type { Feature, Milestone, Slice } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,
   FeatureStatus,
@@ -21,10 +17,7 @@ import {
   saveMilestone,
   saveSlice,
 } from '../../../src/tasks/runtime/hierarchy/store.js';
-import {
-  triageFeature,
-  triageSlice,
-} from '../../../src/tasks/runtime/hierarchy/triage.js';
+import { triageFeature, triageSlice } from '../../../src/tasks/runtime/hierarchy/triage.js';
 import { makeStoreContext } from '../_helpers.js';
 
 const PARENT_TASK_ID = 'T-abcdefghij';

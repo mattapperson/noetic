@@ -6,7 +6,7 @@
  * underlying primitives, so serialisation, tracing, memory isolation all work unchanged.
  */
 
-import type { FsAdapter, ShellAdapter, Step } from '@noetic/core';
+import type { Step } from '@noetic/core';
 import { spawn, step } from '@noetic/core';
 
 import type { SubagentArgs, SubagentPreset } from '../plugins/types.js';

@@ -9,10 +9,9 @@
 
 import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-
-import { sessionFilePath, sessionsDirFor, sessionsRootDir } from './paths.js';
 import type { SessionFile, SessionMetadata } from '../types/session.js';
 import { SessionFileV1Schema, toSessionMetadata } from '../types/session.js';
+import { sessionFilePath, sessionsDirFor, sessionsRootDir } from './paths.js';
 
 //#region Errors
 

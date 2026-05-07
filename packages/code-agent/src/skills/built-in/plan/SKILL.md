@@ -6,11 +6,15 @@ user-invocable: false
 model-invocable: false
 agent-type: plan
 agent-model: inherit
+agent-can-spawn: true
 allowed-tools:
   - read
   - grep
   - find
   - ls
+  - agent
+  - sendMessage
+  - checkAgent
 agent-omit-claude-md: true
 ---
 

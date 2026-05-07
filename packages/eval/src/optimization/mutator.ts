@@ -32,8 +32,13 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
 
   switch (step.kind) {
     case 'llm': {
+      // Only rewrite eager (string / array) forms. Function-form Lazy<T> fields
+      // resolve at execution time against a live context, so optimizer candidate
+      // substitution cannot apply to them — pass them through unchanged.
       const instructions = candidate[`${path}.instructions`] ?? step.instructions;
-      const tools = step.tools ? replaceToolListFields(step.tools, candidate, path) : undefined;
+      const tools = Array.isArray(step.tools)
+        ? replaceToolListFields(step.tools, candidate, path)
+        : step.tools;
       return {
         ...step,
         instructions,

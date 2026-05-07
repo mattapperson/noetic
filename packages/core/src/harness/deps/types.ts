@@ -6,7 +6,12 @@ export type { DetachedHandle } from '../../types/detached';
 export type { FsAdapter } from '../../types/fs-adapter';
 export type { HarnessResponse, StreamEvent, StreamingItem } from '../../types/harness-result';
 export type { ExecuteInput, Item, ItemSchemaExtensions } from '../../types/items';
-export type { ContextMemory, ExecutionContext, MemoryLayer, StorageAdapter } from '../../types/memory';
+export type {
+  ContextMemory,
+  ExecutionContext,
+  MemoryLayer,
+  StorageAdapter,
+} from '../../types/memory';
 export type { Span, TraceExporter } from '../../types/observability';
 export type {
   AgentConfig,

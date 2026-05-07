@@ -8,10 +8,9 @@
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-
-import { useTheme } from '../../components/theme.js';
 import type { ReviewFile } from '../../../commands/builtins/diff-review/types.js';
 import { CommentSide } from '../../../commands/builtins/diff-review/types.js';
+import { useTheme } from '../../components/theme.js';
 import type { PendingComment } from './state.js';
 
 //#region Props

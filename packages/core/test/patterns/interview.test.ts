@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import type { InterviewQuestionAnswer } from '../../src/patterns/interview';
 import { interview } from '../../src/patterns/interview';
-import { AgentHarness } from '../../src/harness/agent-harness';
 import type { LLMResponse } from '../../src/types/common';
 import type { MessageItem } from '../../src/types/items';
 import { createScriptedCallModel } from '../_helpers';

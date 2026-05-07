@@ -35,19 +35,29 @@ import type {
 } from '@noetic/core';
 import {
   AgentHarness,
+  branch,
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemoryStorage,
   durableTaskState,
   historyWindow,
+  loop,
   observationalMemory,
   planMemory,
   step,
   tool,
   toolMemoryLayer,
+  until,
   workingMemory,
 } from '@noetic/core/portable';
+import { frameworkCast } from '@noetic/core/unstable';
 import { z } from 'zod';
+import { actAgent } from './agents/act.js';
+import { fixAgent } from './agents/fix.js';
+import { flowMemory, readFlowState } from './agents/flow-state.js';
+import { planAgent } from './agents/plan.js';
+import { CODE_AGENT_DONE_SENTINEL } from './agents/shared.js';
+import { verifyAgent, verifyAndCheck } from './agents/verify.js';
 import type {
   ChannelTransportAdapter,
   ChannelTransportController,
@@ -151,7 +161,17 @@ export interface CreateCodeAgentOptions {
   traceExporter?: TraceExporter;
   defaultDeliveryMode?: DeliveryMode;
   streamIdleTimeoutMs?: number;
+  /** Line-count threshold (insertions + deletions) above which the act agent's output is routed to verify. Default 5. */
+  verifyThreshold?: number;
+  /** Hard ceiling on verify→fix iterations before giving up. Default 3. */
+  maxFixAttempts?: number;
 }
+
+export type {
+  CodeAgentFlowState,
+  CodeAgentMode,
+  CodeAgentPlanApprovalQuestion,
+} from './agents/flow-state.js';
 
 export interface CodeAgentSessionSnapshot {
   id: string;
@@ -496,6 +516,116 @@ function createSubagentController(): SubagentController {
   };
 }
 
+//#region Plan-Act-Verify-Fix Workflow
+
+/**
+ * Terminal step: returns the sentinel string that the inner loop's
+ * `until.outputEquals` recognizes. The sentinel never enters the item log
+ * or assistant text — it exists only to transition the loop to its exit.
+ */
+const doneStep: Step<ContextMemory, string, string> = step.run({
+  id: 'code-agent/done',
+  async execute() {
+    return CODE_AGENT_DONE_SENTINEL;
+  },
+});
+
+/**
+ * Inner-loop mode routing. Only reached when the outer branch saw a non-plan
+ * mode; `plan` is not a valid inner mode. If somehow `mode === 'plan'` leaks
+ * (e.g., via a revise outcome that the outer branch already handled), fall
+ * through to act as a conservative default.
+ */
+const INNER_MODE_ROUTES: Record<
+  'act' | 'verify' | 'fix' | 'done',
+  Step<ContextMemory, string, string>
+> = {
+  act: actAgent,
+  verify: verifyAndCheck,
+  fix: fixAgent,
+  done: doneStep,
+};
+
+/**
+ * The act/verify/fix inner loop. Exits when `doneStep` emits the sentinel.
+ * Termination is driven by the state machine itself — `verifyCheckStep`
+ * enforces the fix-loop attempt cap and findings-hash divergence check,
+ * so no explicit iteration cap is needed here. The loop builder's default
+ * safety ceiling (1000) remains as the ultimate backstop.
+ */
+const actVerifyFixLoop: Step<ContextMemory, string, string> = loop({
+  id: 'code-agent/act-verify-fix-loop',
+  steps: [
+    branch({
+      id: 'code-agent/inner-dispatch',
+      route: (_input, ctx) => {
+        const mode = readFlowState(ctx).mode ?? 'act';
+        if (mode === 'plan') {
+          return actAgent;
+        }
+        return INNER_MODE_ROUTES[mode];
+      },
+      _optimizable: frameworkCast<Step<ContextMemory>[]>([
+        actAgent,
+        verifyAndCheck,
+        fixAgent,
+        doneStep,
+      ]),
+    }),
+  ],
+  until: until.outputEquals(CODE_AGENT_DONE_SENTINEL),
+});
+
+/**
+ * Wrapper that intercepts the sentinel and substitutes the accumulated
+ * `lastUserText`. Ensures `HarnessResponse.text` never contains the sentinel
+ * string and always reflects the most recent user-relevant output.
+ */
+/**
+ * Fallback surfaced to the user when the workflow completes but no
+ * mode-transition step recorded a meaningful `lastUserText`. Prefer a short,
+ * non-empty acknowledgment over an empty assistant message — an empty
+ * `HarnessResponse.text` reads as a silent failure in most UIs.
+ */
+const EMPTY_RESULT_FALLBACK = 'Done.';
+
+const actVerifyFixWrapper: Step<ContextMemory, string, string> = step.run({
+  id: 'code-agent/act-verify-fix-wrapper',
+  async execute(input, ctx) {
+    const result = await ctx.harness.run(actVerifyFixLoop, input, ctx);
+    if (result === CODE_AGENT_DONE_SENTINEL) {
+      const state = readFlowState(ctx);
+      const text = state.lastUserText ?? '';
+      return text.trim().length > 0 ? text : EMPTY_RESULT_FALLBACK;
+    }
+    return result;
+  },
+});
+
+/**
+ * The top-level workflow. A single branch dispatches to the plan path (single-
+ * turn) or the act/verify/fix wrapper (inner multi-mode loop). Mode routing
+ * happens via memory state, not LLM output, so every transition is
+ * deterministic. `verifyAgent` is included in `_optimizable` so
+ * `collectAllTools` walks into its tool set even though it's routed to via
+ * `verifyAndCheck`.
+ */
+export const codeAgentWorkflow: Step<ContextMemory, string, string> = branch({
+  id: 'code-agent/mode-dispatch',
+  route: (_input, ctx) => {
+    const mode = readFlowState(ctx).mode ?? 'plan';
+    return mode === 'plan' ? planAgent : actVerifyFixWrapper;
+  },
+  _optimizable: frameworkCast<Step<ContextMemory>[]>([
+    planAgent,
+    actAgent,
+    verifyAgent,
+    fixAgent,
+    doneStep,
+  ]),
+});
+
+//#endregion
 //#endregion
 
 //#region CodeAgentImpl
@@ -869,10 +999,12 @@ export async function createCodeAgent(
   const memory =
     options.defaultMemory === false
       ? [
+          flowMemory,
           ...(options.memory ?? []),
           ...pluginMemory,
         ]
       : [
+          flowMemory,
           planMemory(),
           workingMemory(),
           observationalMemory(),
@@ -889,6 +1021,9 @@ export async function createCodeAgent(
     name: options.name ?? 'noetic-code-agent',
     params: {
       model: options.model,
+      instructions: options.instructions,
+      verifyThreshold: options.verifyThreshold,
+      maxFixAttempts: options.maxFixAttempts,
     },
     hooks: options.hooks,
     storage: options.adapters?.storage,
@@ -896,12 +1031,8 @@ export async function createCodeAgent(
     shell,
     subprocess: options.adapters?.subprocess,
     initialCwd: cwd,
-    initialStep: step.llm({
-      id: 'chat',
-      model: options.model,
-      instructions: options.instructions,
-      tools,
-    }),
+    initialStep: codeAgentWorkflow,
+    tools,
     memory,
     llm: options.llm,
     itemSchemas: options.itemSchemas,

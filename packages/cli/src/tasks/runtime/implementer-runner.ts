@@ -19,6 +19,10 @@
  * manifest — no per-leaf sidecar file to manage.
  */
 
+import { createSteeringFileLayer } from '../../memory/steering-file-layer.js';
+import { createCodingTools } from '../../tools/index.js';
+import { DEFAULT_MODEL } from './defaults.js';
+import type { TaskStoreContext } from './implementer-runner-parts/code-agent.js';
 import {
   appendChatItem,
   appendEvent,
@@ -28,15 +32,15 @@ import {
   createRunnerHarness,
   dirname,
   EventKind,
-  loadTask,
   LogEntryKind,
+  loadTask,
   readChatHistory,
   runnerSocketPath,
   saveTask,
-  taskDirPaths,
   TaskPauseReason,
-  type TaskStoreContext,
+  taskDirPaths,
 } from './implementer-runner-parts/code-agent.js';
+import type { Item } from './implementer-runner-parts/core.js';
 import {
   AgentIpcServer,
   createDetachedSignal,
@@ -46,8 +50,14 @@ import {
   createStallNudgeHook,
   runnableLoop,
   unlinkSocketSync,
-  type Item,
 } from './implementer-runner-parts/core.js';
+import type {
+  Assertion,
+  Feature,
+  FeatureLifecycleContext,
+  ImplementerOutcome,
+  MilestoneWithChildren,
+} from './implementer-runner-parts/hierarchy.js';
 import {
   buildFixFeedbackSeed,
   DEFAULT_IMPLEMENTATION_RETRY_BUDGET,
@@ -55,15 +65,7 @@ import {
   getTaskHierarchy,
   loadAccumulatedIssues,
   markFeatureBlocked,
-  type Assertion,
-  type Feature,
-  type FeatureLifecycleContext,
-  type ImplementerOutcome,
-  type MilestoneWithChildren,
 } from './implementer-runner-parts/hierarchy.js';
-import { createSteeringFileLayer } from '../../memory/steering-file-layer.js';
-import { createCodingTools } from '../../tools/index.js';
-import { DEFAULT_MODEL } from './defaults.js';
 import {
   createImplementationBlockedTool,
   createImplementationDoneTool,

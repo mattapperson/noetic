@@ -23,9 +23,9 @@
  * never sees a silent crash.
  */
 
-import { AgentHarness } from './agent-harness';
 import { lookupStep } from '../runtime/step-registry';
 import type { StepSubprocessOverrides } from '../types/subprocess-adapter';
+import { AgentHarness } from './agent-harness';
 
 //#region Types
 

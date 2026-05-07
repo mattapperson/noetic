@@ -193,7 +193,7 @@ export function interview<Q, C>(
   return step.run<ContextMemory, string, InterviewResult<Q, C>>({
     id: 'interview',
     execute: async (input: string, ctx: Context<ContextMemory>) => {
-      const final = (await ctx.harness.run(loopStep, input, ctx)) as IterState<Q, C>;
+      const final = await ctx.harness.run(loopStep, input, ctx);
       if (final.status === 'complete') {
         return {
           status: 'complete',

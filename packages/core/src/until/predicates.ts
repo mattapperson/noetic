@@ -155,6 +155,21 @@ export const until = {
     });
   },
 
+  /**
+   * Stops the loop when the last output text exactly equals the given
+   * sentinel string. Prefer this over `outputContains` when the marker is a
+   * dedicated exit sentinel produced by a terminator step — exact equality
+   * avoids substring collisions with unrelated step output that happens to
+   * quote the sentinel.
+   * @public
+   */
+  outputEquals(sentinel: string): Until {
+    return (snap: Snapshot): Verdict => ({
+      stop: snap.lastText === sentinel,
+      reason: snap.lastText === sentinel ? `Output matched sentinel: ${sentinel}` : undefined,
+    });
+  },
+
   /** Wraps an arbitrary `Until` function as a named predicate. @public */
   custom(fn: Until): Until {
     return fn;

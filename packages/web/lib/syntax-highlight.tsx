@@ -64,17 +64,33 @@ const TYPES = new Set([
   'Runtime',
 ]);
 
-function readWhile(code: string, start: number, test: (char: string) => boolean): [string, number] {
+function readWhile(
+  code: string,
+  start: number,
+  test: (char: string) => boolean,
+): [
+  string,
+  number,
+] {
   let i = start;
   let text = '';
   while (i < code.length && test(code[i])) {
     text += code[i];
     i++;
   }
-  return [text, i];
+  return [
+    text,
+    i,
+  ];
 }
 
-function readLineComment(code: string, start: number): [Token, number] {
+function readLineComment(
+  code: string,
+  start: number,
+): [
+  Token,
+  number,
+] {
   const [text, index] = readWhile(code, start, (char) => char !== '\n');
   return [
     {
@@ -85,7 +101,13 @@ function readLineComment(code: string, start: number): [Token, number] {
   ];
 }
 
-function readString(code: string, start: number): [Token, number] {
+function readString(
+  code: string,
+  start: number,
+): [
+  Token,
+  number,
+] {
   const quote = code[start];
   let i = start + 1;
   let text = quote;
@@ -143,21 +165,33 @@ function tokenize(code: string): Token[] {
       [token, i] = readString(code, i);
     } else if (/\s/.test(char)) {
       const [text, next] = readWhile(code, i, (c) => /\s/.test(c));
-      token = { text, type: 'default' };
+      token = {
+        text,
+        type: 'default',
+      };
       i = next;
     } else if (/[a-zA-Z_$]/.test(char)) {
       const [word, next] = readWhile(code, i, (c) => /[a-zA-Z0-9_$]/.test(c));
       token = tokenForWord(word);
       i = next;
     } else if (/[=+\-*/<>!&|:;.,?()[\]{}]/.test(char)) {
-      token = { text: char, type: 'operator' };
+      token = {
+        text: char,
+        type: 'operator',
+      };
       i++;
     } else if (/\d/.test(char)) {
       const [text, next] = readWhile(code, i, (c) => /[\d.]/.test(c));
-      token = { text, type: 'default' };
+      token = {
+        text,
+        type: 'default',
+      };
       i = next;
     } else {
-      token = { text: char, type: 'default' };
+      token = {
+        text: char,
+        type: 'default',
+      };
       i++;
     }
     tokens.push(token);

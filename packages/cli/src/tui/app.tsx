@@ -2,28 +2,16 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import {
-  buildSkillCatalog,
-  createAskUserService,
-  createLocalShellAdapter,
-  type AgentHarness,
-  type AskUserOutput,
-  type InputContentPart,
-  type InputMessageItem,
-  type Item,
-  type LastLayerUsage,
-  type LspService,
-  type MemoryLayer,
-  type PendingAskUserRequest,
-  type PlanState,
-  type ShellAdapter,
-  type SkillDefinition,
-  type StreamEvent,
-  type TeammateRegistry,
-} from './app-parts/deps.js';
 import { render } from 'ink';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  Command,
+  CommandContext,
+  SessionRestartTarget,
+  SessionSnapshot,
+  ViewMode,
+} from './app-parts/commands.js';
 import {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
@@ -34,12 +22,46 @@ import {
   isSlashCommand,
   parseBashCommand,
   parseSlashCommand,
-  type Command,
-  type CommandContext,
-  type SessionRestartTarget,
-  type SessionSnapshot,
-  type ViewMode,
 } from './app-parts/commands.js';
+import type {
+  AgentHarness,
+  AskUserOutput,
+  InputContentPart,
+  InputMessageItem,
+  Item,
+  LastLayerUsage,
+  LspService,
+  MemoryLayer,
+  PendingAskUserRequest,
+  PlanState,
+  ShellAdapter,
+  SkillDefinition,
+  TeammateRegistry,
+} from './app-parts/deps.js';
+import {
+  buildSkillCatalog,
+  createAskUserService,
+  createLocalShellAdapter,
+} from './app-parts/deps.js';
+import {
+  augmentTextWithPendingBash,
+  buildErrorEntry,
+  countUserMessages,
+  deriveFirstPrompt,
+  extractEventSuffix,
+  isFrameworkEvent,
+  markUserEntrySent,
+  normalizeEntriesForResume,
+} from './app-parts/helpers.js';
+import type {
+  AgentMode,
+  AgentRuntimeConfig,
+  FooterContext,
+  NoeticPlugin,
+  PlanHooks,
+  SaveResult,
+  SessionFile,
+} from './app-parts/services.js';
 import {
   createAgentHarness,
   createLspService,
@@ -52,17 +74,23 @@ import {
   stripUnresolvedToolCalls,
   writeFlow,
   writePrd,
-  type AgentMode,
-  type AgentRuntimeConfig,
-  type FooterContext,
-  type NoeticPlugin,
-  type PlanHooks,
-  type SaveResult,
-  type SessionFile,
 } from './app-parts/services.js';
+import type {
+  AssistantEntry,
+  ChatStatus,
+  ConversationEntry,
+  ErrorEntry,
+  ExitActionStatus,
+  LiveTokens,
+  LocalBashResult,
+  PromptInputMessage,
+  StreamMetricsRefs,
+  SystemEntry,
+  UserEntry,
+} from './app-parts/ui.js';
 import {
-  appendOrUpdateEntry,
   AskUserModal,
+  appendOrUpdateEntry,
   buildBashCommandEntry,
   buildCdBashResult,
   buildCdEntry,
@@ -77,40 +105,18 @@ import {
   handleCd,
   InkProvider,
   installSuspendResumeHandlers,
-  isUserEntry,
-  parseCdArg,
   PlanApprovalModal,
+  parseCdArg,
+  ResponsesChat,
   reattachLiveChildren,
   resolvePromptAttachments,
-  ResponsesChat,
   runUserShellCommand,
   StreamMetricsProvider,
   TaskBoard,
   TaskChatSpawningView,
   TaskChatView,
   useExitOnInterrupt,
-  type AssistantEntry,
-  type ChatStatus,
-  type ConversationEntry,
-  type ErrorEntry,
-  type ExitActionStatus,
-  type LiveTokens,
-  type LocalBashResult,
-  type PromptInputMessage,
-  type StreamMetricsRefs,
-  type SystemEntry,
-  type UserEntry,
 } from './app-parts/ui.js';
-import {
-  augmentTextWithPendingBash,
-  buildErrorEntry,
-  countUserMessages,
-  deriveFirstPrompt,
-  extractEventSuffix,
-  isFrameworkEvent,
-  markUserEntrySent,
-  normalizeEntriesForResume,
-} from './app-parts/helpers.js';
 
 //#region Types
 
@@ -1403,8 +1409,8 @@ function App({
       setCustomTitle,
       setTag,
       clearSession,
-      onRestart,
       askUserService,
+      restartWithSession,
     ],
   );
 

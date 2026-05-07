@@ -35,7 +35,11 @@ export function deduplicateTools(tools: ReadonlyArray<Tool>): Tool[] {
 function walkStep(step: Step, out: Tool[]): void {
   switch (step.kind) {
     case 'llm':
-      if (step.tools) {
+      // Skip function-form tools: they're resolved per execution from `ctx`
+      // and cannot contribute to the pre-computed unified set. Consumers that
+      // need those tools in the pool should register them via
+      // `AgentHarness.tools` instead.
+      if (Array.isArray(step.tools)) {
         out.push(...step.tools);
       }
       return;

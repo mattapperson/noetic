@@ -21,7 +21,12 @@ export interface ParsedSkillFile {
 /** Subset of `SkillDefinition` carrying only the agent-related fields. */
 type AgentFields = Pick<
   SkillDefinition,
-  'agentType' | 'agentModel' | 'agentBackground' | 'agentMaxSteps' | 'agentOmitClaudeMd'
+  | 'agentType'
+  | 'agentModel'
+  | 'agentBackground'
+  | 'agentMaxSteps'
+  | 'agentOmitClaudeMd'
+  | 'agentCanSpawn'
 >;
 
 //#endregion
@@ -45,6 +50,7 @@ const SkillFrontmatterSchema = z.object({
   'agent-background': z.boolean().nullish(),
   'agent-max-steps': z.number().nullish(),
   'agent-omit-claude-md': z.boolean().nullish(),
+  'agent-can-spawn': z.boolean().nullish(),
 });
 
 //#endregion
@@ -120,6 +126,7 @@ export function mapFrontmatterToAgentFields(frontmatter: SkillFrontmatter): Agen
     agentBackground: nullToUndefined(frontmatter['agent-background']),
     agentMaxSteps: nullToUndefined(frontmatter['agent-max-steps']),
     agentOmitClaudeMd: nullToUndefined(frontmatter['agent-omit-claude-md']),
+    agentCanSpawn: nullToUndefined(frontmatter['agent-can-spawn']),
   };
 }
 

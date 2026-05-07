@@ -412,7 +412,9 @@ function createFileReferenceRuntime(opts?: FileReferenceOptions): FileReferenceR
   };
 }
 
-async function initFileReferenceState(baseDir: string): Promise<{ state: FileReferenceState }> {
+async function initFileReferenceState(baseDir: string): Promise<{
+  state: FileReferenceState;
+}> {
   return {
     state: {
       files: new Map<string, TrackedFile>(),
@@ -482,7 +484,13 @@ async function addNewReferences(args: {
     if (args.files.has(ref)) {
       continue;
     }
-    args.files.set(ref, await trackNewReference({ ...args, ref }));
+    args.files.set(
+      ref,
+      await trackNewReference({
+        ...args,
+        ref,
+      }),
+    );
     hasChanges = true;
   }
   return hasChanges;
@@ -509,7 +517,11 @@ async function processAppendedItems(args: {
   readOpts: ReadFileOptions;
   ctx: ExecutionContext;
   scoringModel: string;
-}): Promise<{ transformedItems: Item[]; hasChanges: boolean; userQuery: string }> {
+}): Promise<{
+  transformedItems: Item[];
+  hasChanges: boolean;
+  userQuery: string;
+}> {
   const transformedItems: Item[] = [];
   let hasChanges = false;
   let userQuery = '';
@@ -535,7 +547,11 @@ async function processAppendedItems(args: {
     hasChanges = hasChanges || added;
     transformedItems.push(transformItemReferences(item, refs));
   }
-  return { transformedItems, hasChanges, userQuery };
+  return {
+    transformedItems,
+    hasChanges,
+    userQuery,
+  };
 }
 
 async function refreshTrackedFile(args: {
@@ -600,7 +616,11 @@ async function refreshTrackedFiles(args: {
 }): Promise<boolean> {
   let hasChanges = false;
   for (const [ref, tracked] of args.files) {
-    const next = await refreshTrackedFile({ ...args, ref, tracked });
+    const next = await refreshTrackedFile({
+      ...args,
+      ref,
+      tracked,
+    });
     if (next === null) {
       continue;
     }
@@ -611,7 +631,11 @@ async function refreshTrackedFiles(args: {
 }
 
 async function onFileReferenceItemAppend(
-  args: { items: Item[]; ctx: ExecutionContext; state: FileReferenceState },
+  args: {
+    items: Item[];
+    ctx: ExecutionContext;
+    state: FileReferenceState;
+  },
   runtime: FileReferenceRuntime,
 ) {
   const newFiles = new Map(args.state.files);
@@ -686,14 +710,22 @@ function buildContentBlock(file: TrackedFile, totalTokens: number, budget: numbe
   return `${header}\n\n\`\`\`\n${contentToInclude}\n\`\`\``;
 }
 
-async function recallFileReferences({ state, budget }: { state: FileReferenceState; budget: number }) {
+async function recallFileReferences({
+  state,
+  budget,
+}: {
+  state: FileReferenceState;
+  budget: number;
+}) {
   if (state.files.size === 0) {
     return {
       items: [],
       tokenCount: 0,
     };
   }
-  const sortedFiles = [...state.files.values()].sort((a, b) => b.priority - a.priority);
+  const sortedFiles = [
+    ...state.files.values(),
+  ].sort((a, b) => b.priority - a.priority);
   const blocks: string[] = [];
   let totalTokens = 0;
   for (const file of sortedFiles) {
