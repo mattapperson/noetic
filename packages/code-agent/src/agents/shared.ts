@@ -11,12 +11,6 @@ import type { AskUserTool } from '../tools/ask-user.js';
 
 //#region Constants
 
-/** Maximum iterations for any sub-agent's inner loop (plan/act/verify/fix). */
-export const PLAN_ACT_MAX_ITERATIONS = 20;
-
-/** Hard ceiling on act→verify→fix iterations inside one user turn. */
-export const MAX_INNER_LOOP_ITERATIONS = 10;
-
 /** Default threshold (insertions + deletions) above which act's output is verified. */
 export const DEFAULT_VERIFY_THRESHOLD_LINES = 5;
 

@@ -16,7 +16,6 @@ import {
   DEFAULT_VERIFY_THRESHOLD_LINES,
   isNumber,
   isString,
-  PLAN_ACT_MAX_ITERATIONS,
   readParam,
   readUnifiedTools,
 } from './shared.js';
@@ -100,7 +99,6 @@ export const actAgent: Step<ContextMemory, string, string> = spawn({
       postActCheckStep,
     ],
     until: until.noToolCalls(),
-    maxIterations: PLAN_ACT_MAX_ITERATIONS,
   }),
 });
 

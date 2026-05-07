@@ -11,8 +11,8 @@
  *   - Otherwise → mode=fix; `verifyFindings` is saved to seed the fix agent.
  *
  * `verifyAndCheck` composes the verify agent with `verifyCheckStep` as a
- * trivial two-step sequence (`loop` with `maxIterations: 1` + unconditional
- * stop is the current primitive-set idiom for "run these two in order").
+ * trivial two-step sequence (a `loop` with an unconditional `stop: true` is
+ * the current primitive-set idiom for "run these two in order").
  */
 
 import type { Context, ContextMemory, Step } from '@noetic/core';
@@ -23,7 +23,6 @@ import {
   filterToolsByNames,
   isNumber,
   isString,
-  PLAN_ACT_MAX_ITERATIONS,
   readParam,
   readUnifiedTools,
 } from './shared.js';
@@ -144,16 +143,15 @@ const verifyAgentInner: Step<ContextMemory, string, string> = spawn({
       }),
     ],
     until: until.noToolCalls(),
-    maxIterations: PLAN_ACT_MAX_ITERATIONS,
   }),
 });
 
 /**
  * `verifyAndCheck` composes the verify sub-agent's LLM loop with the
- * `verifyCheckStep` that decides what mode comes next. The outer `loop` with
- * `maxIterations: 1` + unconditional stop is the current primitive-set idiom
- * for "run these two steps in sequence" when no dedicated sequence builder
- * exists.
+ * `verifyCheckStep` that decides what mode comes next. The outer `loop` is
+ * the current primitive-set idiom for "run these two steps in sequence"
+ * when no dedicated sequence builder exists — the unconditional `stop: true`
+ * guarantees a single pass through the body.
  */
 export const verifyAndCheck: Step<ContextMemory, string, string> = loop({
   id: 'code-agent/verify-and-check',
@@ -165,7 +163,6 @@ export const verifyAndCheck: Step<ContextMemory, string, string> = loop({
     stop: true,
     reason: 'one verify pass complete',
   }),
-  maxIterations: 1,
 });
 
 /**

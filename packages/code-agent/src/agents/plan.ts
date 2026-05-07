@@ -25,7 +25,6 @@ import {
   getAskUserTool,
   hasAskUserQuestion,
   isString,
-  PLAN_ACT_MAX_ITERATIONS,
   readParam,
   readUnifiedTools,
 } from './shared.js';
@@ -290,7 +289,6 @@ export const planAgent: Step<ContextMemory, string, string> = spawn({
       planApprovalBranchStep,
     ],
     until: until.noToolCalls(),
-    maxIterations: PLAN_ACT_MAX_ITERATIONS,
   }),
 });
 

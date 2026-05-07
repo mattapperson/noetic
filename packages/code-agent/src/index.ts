@@ -56,7 +56,7 @@ import { actAgent } from './agents/act.js';
 import { fixAgent } from './agents/fix.js';
 import { flowMemory, readFlowState } from './agents/flow-state.js';
 import { planAgent } from './agents/plan.js';
-import { CODE_AGENT_DONE_SENTINEL, MAX_INNER_LOOP_ITERATIONS } from './agents/shared.js';
+import { CODE_AGENT_DONE_SENTINEL } from './agents/shared.js';
 import { verifyAgent, verifyAndCheck } from './agents/verify.js';
 import type {
   ChannelTransportAdapter,
@@ -547,8 +547,11 @@ const INNER_MODE_ROUTES: Record<
 };
 
 /**
- * The act/verify/fix inner loop. Exits when `doneStep` emits the sentinel;
- * bounded by `MAX_INNER_LOOP_ITERATIONS` as a safety net.
+ * The act/verify/fix inner loop. Exits when `doneStep` emits the sentinel.
+ * Termination is driven by the state machine itself — `verifyCheckStep`
+ * enforces the fix-loop attempt cap and findings-hash divergence check,
+ * so no explicit iteration cap is needed here. The loop builder's default
+ * safety ceiling (1000) remains as the ultimate backstop.
  */
 const actVerifyFixLoop: Step<ContextMemory, string, string> = loop({
   id: 'code-agent/act-verify-fix-loop',
@@ -571,7 +574,6 @@ const actVerifyFixLoop: Step<ContextMemory, string, string> = loop({
     }),
   ],
   until: until.outputEquals(CODE_AGENT_DONE_SENTINEL),
-  maxIterations: MAX_INNER_LOOP_ITERATIONS,
 });
 
 /**

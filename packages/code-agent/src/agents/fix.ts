@@ -10,7 +10,7 @@
 import type { Context, ContextMemory, Step } from '@noetic/core';
 import { loop, spawn, step, until } from '@noetic/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
-import { isString, PLAN_ACT_MAX_ITERATIONS, readParam, readUnifiedTools } from './shared.js';
+import { isString, readParam, readUnifiedTools } from './shared.js';
 
 //#region Constants
 
@@ -69,7 +69,6 @@ export const fixAgent: Step<ContextMemory, string, string> = spawn({
       fixCompleteStep,
     ],
     until: until.noToolCalls(),
-    maxIterations: PLAN_ACT_MAX_ITERATIONS,
   }),
 });
 
