@@ -50,6 +50,10 @@ step.llm({
 });
 ```
 
+**Generic-param order.** The signature is `step.llm<TMemory, I, O>`, NOT `<I, O>`. Writing `step.llm<string, unknown>(...)` silently sets `TMemory = string`, which yields misleading errors when the step is composed into a harness whose context memory is anything else. Either pass all three (`step.llm<MyMemory, string, string>(...)`) or pass none and let inference drive from the object literal.
+
+**Lazy params disable eval-optimizer rewrites.** `@noetic/eval`'s optimizer walks the step tree and swaps candidate strings into `instructions` / tool `name` / tool `description`. It skips fields whose value is a function because there is no way to substitute a string for a getter without dropping the getter's runtime logic. Use eager values for any field you want the optimizer to tune; reserve function-form only for fields that genuinely need per-execution context.
+
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
@@ -177,13 +181,15 @@ channel<T>(name: string, {
 ## Termination Predicates
 
 ```typescript
-until.maxSteps(n)        // Stop after n iterations
-until.maxCost(n)         // Stop when cumulative cost exceeds n
-until.maxDuration(ms)    // Stop after ms milliseconds
-until.noToolCalls()      // Stop when LLM doesn't call any tools
-until.verified(fn)       // Stop when verification passes
-until.never()            // Never stop (for `every` / forever-loops with external abort)
-until.converged(opts)    // Stop when output stabilizes
+until.maxSteps(n)              // Stop after n iterations
+until.maxCost(n)               // Stop when cumulative cost exceeds n
+until.maxDuration(ms)          // Stop after ms milliseconds
+until.noToolCalls()            // Stop when LLM doesn't call any tools
+until.verified(fn)             // Stop when verification passes
+until.never()                  // Never stop (for `every` / forever-loops with external abort)
+until.converged(opts)          // Stop when output stabilizes
+until.outputContains(marker)   // Stop when last output text contains `marker` (substring)
+until.outputEquals(sentinel)   // Stop when last output text === `sentinel` (exact match)
 
 // Combinators
 any(...predicates)       // Stop when ANY predicate fires

@@ -691,3 +691,75 @@ Key points:
 - Durability is inherited from the shared adapter's file storage at `~/.noetic/subprocess/` — no hand-rolled `pidStarttime` sidecars.
 
 **Reusable helpers**: `verifyPidIdentity` (`agent-ci-control.ts`), `provisionWorktree` (`worktree-provision.ts`), `createShellValidator` (`hierarchy/daemon-validator.ts`), `createLlmInterviewResponder` (`llm-interview-responder.ts`).
+
+## Pattern: Static Mode-Routing Workflow
+
+When a workflow has several distinct modes (e.g. plan → act → verify → fix → done) and the transition between modes is deterministic, express it as a single static step tree that routes on **memory state**, not on LLM output. This keeps the graph walkable by `collectAllTools` and the eval optimizer, while retaining per-mode sub-agents with different tool sets and instructions.
+
+Three building blocks do the work:
+
+1. **A flow-state memory layer** carrying a `mode` field plus whatever bookkeeping the transitions need (attempt counts, findings, approval questions).
+2. **Sub-agents as module-level `Step` consts** — each mode is a `spawn()` around a `loop()` that reads `mode`-specific tools / instructions via lazy `(ctx) => ...` getters.
+3. **A `branch()` router** that reads `readFlowState(ctx).mode` and returns the matching sub-agent. Pair the outer `loop()` with `until.outputEquals(SENTINEL)` and a trailing `doneStep` that emits the sentinel to exit cleanly.
+
+```typescript
+// 1. Flow-state memory layer (schema omitted for brevity)
+export const flowMemory: MemoryLayer<FlowState> = { /* ... */ };
+
+export function readFlowState(ctx: Context<ContextMemory>): FlowState {
+  const raw = ctx.memory[FLOW_LAYER_ID]?.state;
+  return FlowStateSchema.safeParse(raw).data ?? {};
+}
+
+// 2. Per-mode sub-agents — lazy instructions + filtered tools
+const planAgent: Step<ContextMemory, string, string> = spawn({
+  id: 'plan-agent',
+  child: loop({
+    id: 'plan-loop',
+    steps: [
+      step.llm({
+        id: 'plan-chat',
+        model: (ctx) => readParam(ctx, 'model', '', isString),
+        instructions: (ctx) => PLAN_INSTRUCTIONS,
+        tools: (ctx) =>
+          (ctx.unifiedTools ?? []).filter((t) => PLAN_MODE_TOOL_NAMES.has(t.name)),
+      }),
+      postPlanCheckStep, // inspects output, flips flow-state mode
+    ],
+    until: until.noToolCalls(),
+  }),
+});
+
+// 3. Router + sentinel-driven exit
+const DONE_SENTINEL = '<<<workflow-done>>>';
+const doneStep: Step<ContextMemory, string, string> = step.run({
+  id: 'done',
+  async execute() { return DONE_SENTINEL; },
+});
+
+const workflow = loop({
+  id: 'mode-loop',
+  steps: [
+    branch({
+      id: 'mode-dispatch',
+      route: (_input, ctx) => {
+        const mode = readFlowState(ctx).mode ?? 'plan';
+        return { plan: planAgent, act: actAgent, done: doneStep }[mode];
+      },
+      // Exposes all routes to collectAllTools so their unified tool pool
+      // includes every sub-agent's tools, even the ones not currently reached.
+      _optimizable: frameworkCast<Step<ContextMemory>[]>([planAgent, actAgent, doneStep]),
+    }),
+  ],
+  until: until.outputEquals(DONE_SENTINEL),
+});
+```
+
+Key points:
+
+- Tools needed across modes must be supplied via `AgentHarness.tools` (since each step's `tools` is a `(ctx) => ...` getter, `collectAllTools` skips them). The per-step getter then filters `ctx.unifiedTools` down to that mode's allow-list.
+- `until.outputEquals` (not `outputContains`) is the right predicate for sentinels — exact equality avoids substring collisions when sub-agent output happens to quote the marker.
+- Each step that mutates flow state must call both `ctx.harness.setLayerState` (via `writeFlowState`) AND flush via `ctx.harness.storeLayers` so the next turn's rehydrate sees the post-mutation value instead of the stale pre-LLM snapshot.
+- The `_optimizable` list on `branch()` tells `collectAllTools` which routes exist — without it, tools in not-currently-routed sub-agents are invisible to the unified pool and their tool calls will be rejected as unknown.
+
+Reference implementation: `packages/code-agent/src/agents/{plan,act,verify,fix,flow-state}.ts` + the `codeAgentWorkflow` export in `packages/code-agent/src/index.ts`.
