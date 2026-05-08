@@ -9,6 +9,7 @@ import {
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
+  sanitizeToolNameForWire,
 } from '../adapters/openrouter';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { isFunctionCall } from '../interpreter/typeguards';
@@ -761,7 +762,9 @@ export class AgentHarnessModelCaller {
         `executeFunctionCall invoked without tools on CallModelRequest (tool name: ${fc.name}).`,
       );
     }
-    const toolForCall = request.tools.find((tool) => tool.name === fc.name);
+    const toolForCall = request.tools.find(
+      (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
+    );
     const toolResult = await executeToolCall({
       toolName: fc.name,
       args: parsedArgs,

@@ -72,6 +72,28 @@ export interface PlanHooks {
 
 //#region Helpers
 
+/**
+ * Skills whose listing in `<available_skills>` only makes sense in planning
+ * mode. In act mode, their descriptions ("...during noetic plan mode...")
+ * mislead the model into thinking plan mode is active. The skills are still
+ * available via `activateSkill`; they're only hidden from the recall listing.
+ */
+const PLANNING_ONLY_SKILLS: ReadonlySet<string> = new Set([
+  'plan-mode',
+]);
+
+function filterSkillsForMode(
+  skills: ReadonlyArray<SkillDefinition>,
+  mode: AgentMode,
+): SkillDefinition[] {
+  if (mode === 'planning') {
+    return [
+      ...skills,
+    ];
+  }
+  return skills.filter((s) => !PLANNING_ONLY_SKILLS.has(s.name));
+}
+
 async function collectPluginTools(
   plugins: ReadonlyArray<NoeticPlugin>,
   buildCtx: PluginContextBuilder,
@@ -465,7 +487,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     ...pluginMemory,
     ...(allSkills.length > 0
       ? [
-          skillsLayer(allSkills, {
+          skillsLayer(filterSkillsForMode(allSkills, mode), {
             cwd: config.cwd,
           }),
         ]
@@ -516,6 +538,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     memory,
     instructions,
     defaultMemory: false,
+    initialMode: mode === 'planning' ? 'plan' : 'act',
     llm: {
       provider: 'openrouter',
       apiKey: config.apiKey,

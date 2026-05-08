@@ -506,6 +506,9 @@ export async function executeSpawn<TMemory, I, O>(
   ]);
 
   // Create child context — empty by default, layers provide items via onSpawn.
+  // `id: childId` keeps the ContextImpl's id in sync with the executionId
+  // used by spawnLayers/returnLayers in the layer-state store, so writes via
+  // `ctx.memory[layerId]` and spawn-boundary hooks read from the same key.
   const childCtx = new ContextImpl({
     harness: baseCtx.harness,
     parent: baseCtx,
@@ -517,6 +520,7 @@ export async function executeSpawn<TMemory, I, O>(
     layers: layers.length > 0 ? layers : undefined,
     unifiedTools: childUnifiedTools.length > 0 ? childUnifiedTools : undefined,
     cwdState: snapshotCwdState(baseCtx),
+    id: childId,
   });
 
   try {

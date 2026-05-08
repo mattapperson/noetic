@@ -160,12 +160,13 @@ Focus text output on:
 If you can say it in one sentence, don't use three. Prefer short, direct sentences over long explanations. This does not apply to code or tool calls.`;
 }
 
-function buildPlanModeSection(inputs: SystemPromptInputs): string | null {
-  if (inputs.mode !== 'planning') {
-    return null;
-  }
-  return `# Plan mode active
+function buildModeSection(inputs: SystemPromptInputs): string | null {
+  if (inputs.mode === 'planning') {
+    return `# Plan mode active
 You are currently in plan mode — a read-only phase for exploration, design, and PRD authoring. Mutating tools (${WRITE_TOOL_NAME}, ${EDIT_TOOL_NAME}, destructive ${BASH_TOOL_NAME} commands) are disabled. Focus on understanding the codebase, proposing a plan via the plan-mode skill, and getting user approval before any implementation begins.`;
+  }
+  return `# Act mode active
+You are currently in act mode — the default working mode. The full toolset is available, including ${WRITE_TOOL_NAME}, ${EDIT_TOOL_NAME}, and ${BASH_TOOL_NAME}. You are NOT in plan mode. Any skills listed below whose descriptions reference "plan mode" (e.g. the \`plan-mode\` skill) describe a *different* mode that is not currently active — do not claim to be in plan mode, and do not restrict yourself to read-only behavior unless the user explicitly asks you to enter plan mode via \`/plan\` or \`/mode plan\`.`;
 }
 
 function buildEnvironmentSection(inputs: SystemPromptInputs): string {
@@ -230,8 +231,8 @@ const SECTIONS: ReadonlyArray<PromptSection> = [
     build: buildOutputEfficiencySection,
   },
   {
-    id: 'plan_mode',
-    build: buildPlanModeSection,
+    id: 'mode',
+    build: buildModeSection,
   },
   {
     id: 'environment',

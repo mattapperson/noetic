@@ -271,13 +271,24 @@ export function extractUsage(
 // This prevents the SDK from handling tool calls internally, which would
 // make tool interactions invisible to Noetic's itemLog, token tracking,
 // and observability. Instead, the AgentHarness manages the tool loop.
+/**
+ * Provider APIs (Anthropic via OpenRouter) enforce tool names match
+ * `^[a-zA-Z0-9_-]{1,64}$`. Noetic's internal layer-tool names use `layerId/fn`
+ * which contains a forbidden `/`. We translate to a wire-safe form only at
+ * the SDK boundary; internal tool-name identity (and every codebase reference
+ * to names like `plan/updatePrd`) is preserved.
+ */
+export function sanitizeToolNameForWire(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 /** @internal */
 export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
       function: {
-        name: t.name,
+        name: sanitizeToolNameForWire(t.name),
         description: t.description,
         inputSchema: t.input,
       },
@@ -320,7 +331,14 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
   result?: unknown;
   error?: boolean;
 }> {
-  const matchedTool = params.tools.find((t) => t.name === params.toolName);
+  // Model sees sanitised tool names (see `sanitizeToolNameForWire`). Match
+  // against both the original and sanitised name so internal identity (e.g.
+  // `plan/updatePrd` used by steering whitelists, skill docs, and the
+  // `planMemory.beforeToolCall` hook) stays intact while the wire name is
+  // provider-compliant.
+  const matchedTool = params.tools.find(
+    (t) => t.name === params.toolName || sanitizeToolNameForWire(t.name) === params.toolName,
+  );
   if (!matchedTool) {
     return {
       output: `Error: unknown tool '${params.toolName}'`,

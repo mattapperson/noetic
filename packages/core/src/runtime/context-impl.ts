@@ -99,8 +99,16 @@ export class ContextImpl implements Context<ContextMemory> {
     itemSchemas?: ItemSchemaRegistry;
     cwdState?: CwdState;
     _broadcaster?: EventBroadcaster;
+    /**
+     * Pre-chosen context id. When set, the ContextImpl adopts this id instead
+     * of generating a fresh UUID. Used by `executeSpawn` so the child's
+     * `ctx.id` matches the `executionId` keyed into the layer-state store —
+     * otherwise writes via `ctx.memory[layerId].state` land on one id while
+     * spawn's `onReturn` reads from another, silently losing the update.
+     */
+    id?: string;
   }) {
-    this.id = crypto.randomUUID();
+    this.id = opts.id ?? crypto.randomUUID();
     this._createdAt = Date.now();
     this.harness = opts.harness;
     this.state = opts.state ?? {};

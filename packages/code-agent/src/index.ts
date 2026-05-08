@@ -54,7 +54,8 @@ import { frameworkCast } from '@noetic/core/unstable';
 import { z } from 'zod';
 import { actAgent } from './agents/act.js';
 import { fixAgent } from './agents/fix.js';
-import { flowMemory, readFlowState } from './agents/flow-state.js';
+import type { CodeAgentMode } from './agents/flow-state.js';
+import { flowMemory, readFlowState, setFlowMemoryDefaultMode } from './agents/flow-state.js';
 import { planAgent } from './agents/plan.js';
 import { CODE_AGENT_DONE_SENTINEL } from './agents/shared.js';
 import { verifyAgent, verifyAndCheck } from './agents/verify.js';
@@ -165,6 +166,12 @@ export interface CreateCodeAgentOptions {
   verifyThreshold?: number;
   /** Hard ceiling on verify→fix iterations before giving up. Default 3. */
   maxFixAttempts?: number;
+  /**
+   * Starting workflow mode for fresh sessions. Only applies when no prior
+   * flow state is persisted; resumed sessions keep their saved mode. Defaults
+   * to `'plan'` to preserve the historical plan-first workflow.
+   */
+  initialMode?: CodeAgentMode;
 }
 
 export type {
@@ -888,6 +895,10 @@ export async function createCodeAgent(
   const fs = options.adapters?.fs ?? createInMemoryFsAdapter();
   const shell = options.adapters?.shell ?? createInMemoryShellAdapter();
   const sessionId = createSessionId();
+
+  if (options.initialMode !== undefined) {
+    setFlowMemoryDefaultMode(options.initialMode);
+  }
 
   let harness: AgentHarness<CodeAgentParams>;
   let channelController: ChannelController;

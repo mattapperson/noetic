@@ -23,6 +23,7 @@ describe('composeSystemPrompt', () => {
       '# Using your tools',
       '# Tone and style',
       '# Output efficiency',
+      '# Act mode active',
       '# Environment',
     ];
     let cursor = 0;
@@ -96,18 +97,21 @@ describe('composeSystemPrompt', () => {
     expect(out).not.toContain('OS Version:');
   });
 
-  it('omits the plan-mode section in act mode', () => {
+  it('emits the act-mode section and omits the plan-mode section in act mode', () => {
     const out = composeSystemPrompt(baseInputs);
     expect(out).not.toContain('# Plan mode active');
+    expect(out).toContain('# Act mode active');
+    expect(out).toContain('You are NOT in plan mode');
   });
 
-  it('adds the plan-mode section in planning mode', () => {
+  it('emits the plan-mode section and omits the act-mode section in planning mode', () => {
     const out = composeSystemPrompt({
       ...baseInputs,
       mode: 'planning',
     });
     expect(out).toContain('# Plan mode active');
     expect(out).toContain('Mutating tools (Write, Edit, destructive Bash commands) are disabled');
+    expect(out).not.toContain('# Act mode active');
   });
 
   it('substitutes the user-supplied intro line when provided', () => {

@@ -1,9 +1,10 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
+import type { LayerStateStore } from '../memory/layer-lifecycle';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type { Context } from '../types/context';
-import type { ContextMemory } from '../types/memory';
+import type { ContextMemory, MemoryLayer } from '../types/memory';
 import type { Step, StepRun, StepSpawn } from '../types/step';
 import type { StepSubprocessRequest, SubprocessAdapter } from '../types/subprocess-adapter';
 import { frameworkCast } from '../util/framework-cast';
@@ -33,6 +34,37 @@ const MAX_DEPTH = 64;
  */
 function asContextImpl(ctx: Context): ContextImpl | null {
   return ctx instanceof ContextImpl ? ctx : null;
+}
+
+/**
+ * Extract the parent's memory layers and layer-state store so `executeSpawn`
+ * can propagate them to the child context per `specs/04-spawn.md`: when a
+ * spawn step has no explicit `memory` config, parent layers inherit and their
+ * `onSpawn`/`onReturn` hooks run across the boundary.
+ *
+ * `ctx.harness.layerStateStore` is not on the public `AgentHarnessContract`
+ * (it's an internal runtime surface). Accessing it via `frameworkCast`
+ * matches the internal-only pattern used elsewhere in the interpreter.
+ */
+interface HarnessWithLayerStore {
+  layerStateStore: LayerStateStore;
+}
+
+function harnessWithLayerStore<TMemory>(ctx: Context<TMemory>): HarnessWithLayerStore {
+  return frameworkCast<HarnessWithLayerStore>(ctx.harness);
+}
+
+function buildSpawnOpts<TMemory>(ctx: Context<TMemory>): {
+  itemSchemas: Context['itemSchemas'];
+  parentLayers: MemoryLayer[] | undefined;
+  layerStore: LayerStateStore;
+} {
+  const baseCtx = frameworkCast<Context>(ctx);
+  return {
+    itemSchemas: baseCtx.itemSchemas,
+    parentLayers: baseCtx.layers,
+    layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
+  };
 }
 
 /**
@@ -104,14 +136,11 @@ export async function executeNoAdapter<TMemory, I, O>(
   input: I,
   ctx: Context<TMemory>,
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context>(ctx);
   switch (step.kind) {
     case 'run':
       return executeRun(step, input, ctx);
     case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), {
-        itemSchemas: baseCtx.itemSchemas,
-      });
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx));
     default:
       // Kinds that don't currently route through the adapter (llm, tool,
       // branch, fork, provide, loop, every). Delegate back to `execute()`
@@ -211,9 +240,7 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
         break;
       case 'spawn':
         result = await dispatchViaAdapter(step, input, ctx, () =>
-          executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), {
-            itemSchemas: baseCtx.itemSchemas,
-          }),
+          executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx)),
         );
         break;
       case 'provide':

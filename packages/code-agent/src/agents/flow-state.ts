@@ -127,6 +127,24 @@ export async function persistFlowState(ctx: Context<ContextMemory>): Promise<voi
 //#region Memory layer
 
 /**
+ * Mutable module-level default applied by `flowMemory.init` when no prior
+ * state is persisted. Hosts (e.g. `@noetic/cli`) call `setFlowMemoryDefaultMode`
+ * before the first turn runs so fresh sessions boot in the right mode. The
+ * legacy default stays `'plan'` so existing embedders retain plan-first
+ * routing unless they opt in.
+ */
+let DEFAULT_INITIAL_MODE: CodeAgentMode = 'act';
+
+/**
+ * @public Set the default starting mode for fresh `flowMemory` sessions.
+ * Called once at harness construction time by the host. No effect on sessions
+ * whose state was already persisted.
+ */
+export function setFlowMemoryDefaultMode(mode: CodeAgentMode): void {
+  DEFAULT_INITIAL_MODE = mode;
+}
+
+/**
  * Memory layer tracking the top-level workflow mode, outstanding approval
  * requests, and fix-loop bookkeeping. `provides.state` exposes a typed read
  * projection on `ctx.memory['code-agent-flow'].state`.
@@ -149,12 +167,12 @@ export const flowMemory: MemoryLayer<CodeAgentFlowState> = {
       const saved = await storage.get<CodeAgentFlowState>('state');
       return {
         state: saved ?? {
-          mode: 'plan',
+          mode: DEFAULT_INITIAL_MODE,
         },
       };
     },
     async recall({ state }) {
-      const mode = state.mode ?? 'plan';
+      const mode = state.mode ?? DEFAULT_INITIAL_MODE;
       const waiting = state.awaitingPlanApproval === true ? '\nAwaiting plan approval.' : '';
       return `<code_agent_flow mode="${mode}">${waiting}</code_agent_flow>`;
     },
