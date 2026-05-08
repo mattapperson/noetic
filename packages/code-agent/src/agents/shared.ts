@@ -6,7 +6,7 @@
  * name sets, schemas) live with their agent.
  */
 
-import type { Context, ContextMemory, Tool } from '@noetic/core';
+import type { Context, ContextMemory, FunctionCallItem, Tool } from '@noetic/core';
 import type { AskUserTool } from '../tools/ask-user.js';
 
 //#region Constants
@@ -19,6 +19,35 @@ export const DEFAULT_MAX_FIX_ATTEMPTS = 3;
 
 /** Name of the built-in AskUserQuestion tool (registered when an AskUserService is configured). */
 export const ASK_USER_TOOL_NAME = 'AskUserQuestion';
+
+/**
+ * Tool names that mutate (or can mutate) the filesystem. Used as a secondary
+ * signal alongside the git-diff line delta: verify is only triggered when
+ * both the delta exceeds threshold AND the LLM actually invoked a mutating
+ * tool in this phase.
+ *
+ * The set is deliberately coarse — any tool whose INTENT includes possibly
+ * writing to disk is included, to avoid the dangerous silent-skip failure
+ * mode where a real change leaves the gate closed:
+ *
+ *  - `Edit`, `Write`: direct writes.
+ *  - `Bash`: shell redirection, `sed -i`, `mv`, running `npm install`, etc.
+ *  - `agent`: delegates to a sub-agent whose Edit/Write calls land in the
+ *    child's `lastStepMeta`, not the parent's — so without this entry, a
+ *    delegated edit would escape detection.
+ *  - `InteractiveTerminal`: drives TUIs through pilotty; can launch editors,
+ *    run shell commands, or trigger file IO indirectly.
+ *
+ * Pure-read tools (`Read`, `Grep`, `Find`, `Ls`, `AskUserQuestion`, `browser`,
+ * `lsp`, `activateSkill`, `sendMessage`, `checkAgent`) stay out.
+ */
+export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'Edit',
+  'Write',
+  'Bash',
+  'agent',
+  'InteractiveTerminal',
+]);
 
 /**
  * Sentinel returned by the `done` step to signal the act/verify/fix loop that
@@ -88,6 +117,47 @@ export function filterToolsByNames(
   allowed: ReadonlySet<string>,
 ): Tool[] {
   return tools.filter((t) => allowed.has(t.name));
+}
+
+//#endregion
+
+//#region Change-detection helpers
+
+/**
+ * Extracts insertion + deletion counts from a `git diff --shortstat` line like
+ * " 3 files changed, 12 insertions(+), 4 deletions(-)". Returns total lines
+ * changed; returns 0 on empty or unparseable output.
+ */
+export function parseDiffLineCount(stdout: string): number {
+  const insertionsMatch = stdout.match(/(\d+)\s+insertions?\(\+\)/);
+  const deletionsMatch = stdout.match(/(\d+)\s+deletions?\(-\)/);
+  const insertions = insertionsMatch ? Number(insertionsMatch[1]) : 0;
+  const deletions = deletionsMatch ? Number(deletionsMatch[1]) : 0;
+  return insertions + deletions;
+}
+
+/**
+ * Runs `git diff HEAD --shortstat` against the harness root cwd and returns
+ * the total insertion + deletion line count. Diffs against HEAD (not the
+ * index) so both staged and unstaged changes contribute — if a tool call
+ * `git add`s a file mid-phase, those changes still count toward the delta.
+ */
+export async function countDiffLines(ctx: Context<ContextMemory>): Promise<number> {
+  const cwd = ctx.harness.rootCwdState.cwd;
+  const diff = await ctx.harness.shell.exec('git diff HEAD --shortstat', {
+    cwd,
+  });
+  return parseDiffLineCount(diff.stdout);
+}
+
+/**
+ * True when the most recent LLM step invoked any tool in `MUTATING_TOOL_NAMES`.
+ * Reads `ctx.lastStepMeta.toolCalls`, which the interpreter populates after
+ * each LLM step and before the next step body runs.
+ */
+export function didCallMutatingTools(ctx: Context<ContextMemory>): boolean {
+  const calls: ReadonlyArray<FunctionCallItem> = ctx.lastStepMeta?.toolCalls ?? [];
+  return calls.some((call) => MUTATING_TOOL_NAMES.has(call.name));
 }
 
 //#endregion

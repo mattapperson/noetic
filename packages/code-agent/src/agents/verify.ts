@@ -79,6 +79,11 @@ export function djb2Hash(s: string): string {
  * Processes verify agent output. PASS → mode=done; FAIL with repeated hash or
  * exhausted attempts → mode=done with giving-up note; otherwise → mode=fix
  * with findings saved for the fix agent's instructions.
+ *
+ * Phase-boundary bookkeeping: the `fix` branch clears the act + fix baselines
+ * so `preFixCaptureStep` re-captures on entry to the new fix phase. The two
+ * `done` branches rely on `doneStep` (in `index.ts`) to clear baselines on
+ * workflow completion, keeping the cleanup in one place.
  */
 export const verifyCheckStep: Step<ContextMemory, string, string> = step.run({
   id: 'code-agent/verify-check',
@@ -119,6 +124,10 @@ export const verifyCheckStep: Step<ContextMemory, string, string> = step.run({
       fixAttempts: attempts,
       lastFindingsHash: hash,
       verifyFindings: findings,
+      actBaselineLines: undefined,
+      actDidMutateTools: undefined,
+      fixBaselineLines: undefined,
+      fixDidMutateTools: undefined,
     });
     await persistFlowState(ctx);
     return findings;

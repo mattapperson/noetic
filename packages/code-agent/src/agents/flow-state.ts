@@ -35,6 +35,14 @@ export interface CodeAgentFlowState {
   verifyFindings?: string;
   /** The most recent user-visible text produced by act/verify/fix. Surfaces as `HarnessResponse.text` when mode → done. */
   lastUserText?: string;
+  /** Diff line count captured at the start of the act phase; used to compute the act-phase delta. */
+  actBaselineLines?: number;
+  /** Set once any act iteration invokes a mutating tool (Edit/Write/Bash). Accumulates across the phase. */
+  actDidMutateTools?: boolean;
+  /** Diff line count captured at the start of the fix phase; used to compute the fix-phase delta. */
+  fixBaselineLines?: number;
+  /** Set once any fix iteration invokes a mutating tool. Accumulates across the phase. */
+  fixDidMutateTools?: boolean;
 }
 
 //#endregion
@@ -66,6 +74,10 @@ export const CodeAgentFlowStateSchema: z.ZodType<CodeAgentFlowState> = z.object(
   lastFindingsHash: z.string().optional(),
   verifyFindings: z.string().optional(),
   lastUserText: z.string().optional(),
+  actBaselineLines: z.number().optional(),
+  actDidMutateTools: z.boolean().optional(),
+  fixBaselineLines: z.number().optional(),
+  fixDidMutateTools: z.boolean().optional(),
 });
 
 /**
@@ -217,6 +229,18 @@ export const flowMemory: MemoryLayer<CodeAgentFlowState> = {
           }),
           ...(childState.lastUserText !== undefined && {
             lastUserText: childState.lastUserText,
+          }),
+          ...(childState.actBaselineLines !== undefined && {
+            actBaselineLines: childState.actBaselineLines,
+          }),
+          ...(childState.actDidMutateTools !== undefined && {
+            actDidMutateTools: childState.actDidMutateTools,
+          }),
+          ...(childState.fixBaselineLines !== undefined && {
+            fixBaselineLines: childState.fixBaselineLines,
+          }),
+          ...(childState.fixDidMutateTools !== undefined && {
+            fixDidMutateTools: childState.fixDidMutateTools,
           }),
         },
       };

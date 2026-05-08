@@ -55,7 +55,13 @@ import { z } from 'zod';
 import { actAgent } from './agents/act.js';
 import { fixAgent } from './agents/fix.js';
 import type { CodeAgentMode } from './agents/flow-state.js';
-import { flowMemory, readFlowState, setFlowMemoryDefaultMode } from './agents/flow-state.js';
+import {
+  flowMemory,
+  persistFlowState,
+  readFlowState,
+  setFlowMemoryDefaultMode,
+  writeFlowState,
+} from './agents/flow-state.js';
 import { planAgent } from './agents/plan.js';
 import { CODE_AGENT_DONE_SENTINEL } from './agents/shared.js';
 import { verifyAgent, verifyAndCheck } from './agents/verify.js';
@@ -526,13 +532,37 @@ function createSubagentController(): SubagentController {
 //#region Plan-Act-Verify-Fix Workflow
 
 /**
- * Terminal step: returns the sentinel string that the inner loop's
+ * Terminal step: clears per-phase ephemeral state (baselines + mutation
+ * flags) and returns the sentinel string that the inner loop's
  * `until.outputEquals` recognizes. The sentinel never enters the item log
  * or assistant text — it exists only to transition the loop to its exit.
+ *
+ * Baseline clearing lives here (not in `postActCheckStep` /
+ * `fixCompleteStep`) because those check steps run on every inner-loop
+ * iteration — clearing mid-loop would make the second iteration's
+ * `preCapture` re-capture against post-first-iteration state, losing the
+ * phase-entry invariant. `doneStep` runs exactly once per workflow
+ * completion, making it the correct place to reset.
  */
-const doneStep: Step<ContextMemory, string, string> = step.run({
+export const doneStep: Step<ContextMemory, string, string> = step.run({
   id: 'code-agent/done',
-  async execute() {
+  async execute(_input, ctx) {
+    const state = readFlowState(ctx);
+    if (
+      state.actBaselineLines !== undefined ||
+      state.actDidMutateTools !== undefined ||
+      state.fixBaselineLines !== undefined ||
+      state.fixDidMutateTools !== undefined
+    ) {
+      writeFlowState(ctx, {
+        ...state,
+        actBaselineLines: undefined,
+        actDidMutateTools: undefined,
+        fixBaselineLines: undefined,
+        fixDidMutateTools: undefined,
+      });
+      await persistFlowState(ctx);
+    }
     return CODE_AGENT_DONE_SENTINEL;
   },
 });
