@@ -13,7 +13,7 @@ import {
   createCheckpointStore,
   createFileStorage,
 } from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 // Two distinct on-disk roots: subprocess manifests vs checkpoint snapshots.
 const subprocessStorage = createFileStorage({
@@ -135,7 +135,7 @@ The helper calls `harness.subprocess.listLive()`, then `harness.restore(executio
 A server that composes `DurableOutboundQueue` wraps every outbound frame in a `durable` envelope keyed by a monotonic sequence number. The client tracks the highest seq it has durably consumed and sends `durableResume { ackedThrough }` on every reconnect. The server replays any frames the client has not acked, resumes live emission, and compacts the queue when `durableAck { throughSeq }` arrives.
 
 ```ts
-import { createDurableOutboundQueue } from '@noetic/core/adapters/node';
+import { createDurableOutboundQueue } from '@noetic/platform-node';
 
 const queue = await createDurableOutboundQueue({ storage, socketPath });
 
@@ -187,7 +187,7 @@ Subprocess manifests and IPC queues can share a root because both are owned by t
 Switch a specific spawn to run in its own OS child by passing a local adapter as a per-call override:
 
 ```ts
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 import { createFileStorage } from '@noetic/core';
 
 const localAdapter = createLocalSubprocessAdapter({

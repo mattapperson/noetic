@@ -3,10 +3,63 @@
  */
 
 import { expect } from 'bun:test';
+import * as fsp from 'node:fs/promises';
 import { z } from 'zod';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
-import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
-import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
+import type { FsAdapter, FsStats } from '../src/types/fs-adapter';
+import type { ShellAdapter } from '../src/types/shell-adapter';
+
+//#region Test-only Node adapters
+//
+// Core is runtime-agnostic and ships no `node:*` adapters; those live in
+// `@noetic/platform-node`. Core tests that exercise filesystem-dependent
+// memory layers need real disk access, so we inline a minimal
+// Node-backed `FsAdapter` and a no-op `ShellAdapter` here. Keeping these
+// helpers local to `test/` prevents the production bundle from pulling
+// `node:fs/promises`.
+
+function toFsStats(s: {
+  size: number;
+  isDirectory: () => boolean;
+  isSymbolicLink: () => boolean;
+  isFile: () => boolean;
+}): FsStats {
+  return {
+    size: s.size,
+    isDirectory: () => s.isDirectory(),
+    isSymbolicLink: () => s.isSymbolicLink(),
+    isFile: () => s.isFile(),
+  };
+}
+
+function createNodeFsAdapter(): FsAdapter {
+  return {
+    readFile: async (p) => fsp.readFile(p),
+    readFileText: async (p) => fsp.readFile(p, 'utf-8'),
+    writeFile: async (p, content) => fsp.writeFile(p, content, 'utf-8'),
+    writeFileBytes: async (p, content) => fsp.writeFile(p, content),
+    appendFile: async (p, content) => fsp.appendFile(p, content, 'utf-8'),
+    mkdir: async (dir) => {
+      await fsp.mkdir(dir, { recursive: true });
+    },
+    rename: async (o, n) => fsp.rename(o, n),
+    rm: async (p, options) => {
+      await fsp.rm(p, options);
+    },
+    access: async (p, mode) => fsp.access(p, mode),
+    stat: async (p) => toFsStats(await fsp.stat(p)),
+    lstat: async (p) => toFsStats(await fsp.lstat(p)),
+    readdir: async (p) => fsp.readdir(p),
+  };
+}
+
+function createNoopShellAdapter(): ShellAdapter {
+  return {
+    exec: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+  };
+}
+
+//#endregion
 import type { LLMResponse } from '../src/types/common';
 import type { Context } from '../src/types/context';
 import type { ItemLog } from '../src/types/context-parts/item-log';
@@ -75,8 +128,8 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       output: 0,
     },
     cost: 0,
-    fs: createLocalFsAdapter(),
-    shell: createLocalShellAdapter(),
+    fs: createNodeFsAdapter(),
+    shell: createNoopShellAdapter(),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute() {},
@@ -345,8 +398,8 @@ export function makeMockHarness(): AgentHarnessContract {
       name: 'test-harness',
       params: {},
     },
-    fs: createLocalFsAdapter(),
-    shell: createLocalShellAdapter(),
+    fs: createNodeFsAdapter(),
+    shell: createNoopShellAdapter(),
     subprocess: createInMemorySubprocessAdapter(),
     callModel: async () => {
       throw new Error('not impl');

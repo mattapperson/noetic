@@ -16,4 +16,4 @@ export type {
   ShellAdapter,
   StreamEvent,
 } from '@noetic/core';
-export { createLocalShellAdapter } from '@noetic/core';
+export { createLocalShellAdapter } from '@noetic/platform-node';

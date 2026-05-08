@@ -12,8 +12,8 @@ import { TaskSource } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic/core';
-import { createFileStorage } from '@noetic/core';
-import { createLocalFsAdapter, createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createFileStorage } from '@noetic/platform-node';
+import { createLocalFsAdapter, createLocalSubprocessAdapter } from '@noetic/platform-node';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
 import { autopilotHandler, steerTaskHandler } from './handlers/autopilot.js';
 import {

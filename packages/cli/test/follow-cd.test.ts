@@ -14,7 +14,7 @@ import type {
   ShellExecResult,
   ToolExecutionContext,
 } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 import type { BashOutput } from '../src/tools/bash.js';
 import { BashOutputSchema, createBashTool } from '../src/tools/bash.js';
 import { createEditTool } from '../src/tools/edit.js';

@@ -1,13 +1,13 @@
 export type { Item } from '@noetic/core';
 export {
   createDetachedSignal,
-  createLocalFsAdapter,
   createNudgeMessage,
   createStallNudgeHook,
   runnableLoop,
 } from '@noetic/core';
 export {
   AgentIpcServer,
+  createLocalFsAdapter,
   createLocalShellAdapter,
   unlinkSocketSync,
-} from '@noetic/core/adapters/node';
+} from '@noetic/platform-node';

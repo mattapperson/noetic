@@ -39,7 +39,7 @@ import {
   createLocalFsAdapter,
   createLocalShellAdapter,
   unlinkSocketSync,
-} from '@noetic/core/adapters/node';
+} from '@noetic/platform-node';
 import { createSteeringFileLayer } from '../../memory/steering-file-layer.js';
 import { createCodingTools } from '../../tools/index.js';
 import { DEFAULT_MODEL } from './defaults.js';

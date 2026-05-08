@@ -16,8 +16,9 @@ import { TaskIdSchema, TaskSource } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import type { Tool } from '@noetic/core';
-import { createFileStorage, tool } from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { tool } from '@noetic/core';
+import { createFileStorage } from '@noetic/platform-node';
+import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 import { z } from 'zod';
 import { autopilotHandler, planTaskHandler, steerTaskHandler } from './handlers/autopilot.js';
 import {

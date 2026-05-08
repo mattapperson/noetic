@@ -9,7 +9,7 @@
 import type { StartImplementerRunResult } from '@noetic/code-agent/tasks';
 import * as sdk from '@noetic/code-agent/tasks';
 import { fileUrlToPath } from '@noetic/code-agent/tasks';
-import { createLocalShellAdapter } from '@noetic/core/adapters/node';
+import { createLocalShellAdapter } from '@noetic/platform-node';
 
 export type {
   LauncherProvisionRequest,

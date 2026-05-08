@@ -6,23 +6,6 @@ export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
 export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
 /** @public */
 export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
-/** @public */
-export { createLocalFsAdapter } from './adapters/local-fs-adapter';
-
-/** @public */
-export {
-  type CreateLocalShellAdapterOptions,
-  createLocalShellAdapter,
-  type LocalShellAdapter,
-} from './adapters/local-shell-adapter';
-/** @public */
-export {
-  type CreateLocalSubprocessAdapterOptions,
-  createLocalSubprocessAdapter,
-  defaultProcessSignaller,
-  type ProcessSignaller,
-  type SubprocessSignal,
-} from './adapters/local-subprocess-adapter';
 
 /** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
@@ -162,10 +145,6 @@ export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
-/** @public */
-export type { CreateFileStorageOptions } from './runtime/durable';
-/** @public */
-export { createFileStorage } from './runtime/durable';
 /** @public */
 export { createInMemoryStorage } from './runtime/in-memory-storage';
 
@@ -499,6 +478,8 @@ export type { FsAdapter, FsStats } from './types/fs-adapter';
 
 //#region Types — Shell
 
+/** @public Reusable error-serialiser used by custom SubprocessAdapter implementations. */
+export { serializeError } from './adapters/in-memory-subprocess/metadata';
 /** @public */
 export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
 /** @public */

@@ -1,0 +1,36 @@
+{
+  "name": "@noetic/platform-browser",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@noetic/core": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@struktoai/mirage-browser": "0.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@struktoai/mirage-browser": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --coverage --coverage-reporter=json",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix ."
+  }
+}

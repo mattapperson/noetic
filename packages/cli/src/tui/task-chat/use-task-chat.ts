@@ -11,8 +11,8 @@
 
 import type { AskUserOutput, StreamingItem } from '@noetic/core';
 import { ItemSchema } from '@noetic/core';
-import type { AskUserPendingFrame, AskUserStreamEvent } from '@noetic/core/adapters/node';
-import { AgentIpcClient } from '@noetic/core/adapters/node';
+import type { AskUserPendingFrame, AskUserStreamEvent } from '@noetic/platform-node';
+import { AgentIpcClient } from '@noetic/platform-node';
 import { useEffect, useRef, useState } from 'react';
 import type { ConversationEntry } from '../item-utils.js';
 import { appendOrUpdateEntry } from '../item-utils.js';

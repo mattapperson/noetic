@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 
 import type { LspClientApi } from '../src/lsp/client.js';
 import { LspService } from '../src/lsp/service.js';

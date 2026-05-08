@@ -16,7 +16,7 @@ import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
 import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
 import type { ContextMemory, ShellAdapter, Step } from '@noetic/core';
 import { every, step } from '@noetic/core';
-import { createLocalShellAdapter } from '@noetic/core/adapters/node';
+import { createLocalShellAdapter } from '@noetic/platform-node';
 
 //#region Types
 

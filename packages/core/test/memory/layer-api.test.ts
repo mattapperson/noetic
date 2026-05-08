@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import { createLocalFsAdapter } from '../../src/adapters/local-fs-adapter';
-import { createLocalShellAdapter } from '../../src/adapters/local-shell-adapter';
+import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
+import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
 import { layerData, layerFn } from '../../src/builders/layer-provides-builders';
 import { resolveLayerTools } from '../../src/memory/layer-api';
 import { workingMemory } from '../../src/memory/layers/working-memory';
@@ -464,8 +464,8 @@ describe('workingMemory provides', () => {
           output: 0,
         },
         cost: 0,
-        fs: createLocalFsAdapter(),
-        shell: createLocalShellAdapter(),
+        fs: createInMemoryFsAdapter(),
+        shell: createInMemoryShellAdapter(),
         tokenize: () => 0,
         trace: {
           setAttribute() {},

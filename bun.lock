@@ -51,6 +51,7 @@
       "dependencies": {
         "@noetic/code-agent": "workspace:*",
         "@noetic/core": "workspace:*",
+        "@noetic/platform-node": "workspace:*",
         "@openrouter/agent": "0.3.1",
         "agent-browser": "0.26.0",
         "chalk": "5.6.2",
@@ -86,6 +87,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@noetic/core": "workspace:*",
+        "@noetic/platform-node": "workspace:*",
         "diff": "7.0.0",
         "glob": "11.0.3",
         "pilotty": "0.0.7",
@@ -140,6 +142,60 @@
       "optionalPeers": [
         "@ax-llm/ax",
         "@mariozechner/pi-coding-agent",
+      ],
+    },
+    "packages/mirage": {
+      "name": "@noetic/mirage",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic/core": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@struktoai/mirage-browser": "0.0.1",
+        "@struktoai/mirage-core": "0.0.1",
+        "@struktoai/mirage-node": "0.0.1",
+      },
+      "optionalPeers": [
+        "@struktoai/mirage-browser",
+        "@struktoai/mirage-core",
+        "@struktoai/mirage-node",
+      ],
+    },
+    "packages/platform-browser": {
+      "name": "@noetic/platform-browser",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic/core": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@struktoai/mirage-browser": "0.0.1",
+      },
+      "optionalPeers": [
+        "@struktoai/mirage-browser",
+      ],
+    },
+    "packages/platform-node": {
+      "name": "@noetic/platform-node",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic/core": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@struktoai/mirage-node": "0.0.1",
+      },
+      "optionalPeers": [
+        "@struktoai/mirage-node",
       ],
     },
     "packages/plugin-design-deck": {
@@ -466,6 +522,12 @@
     "@noetic/core": ["@noetic/core@workspace:packages/core"],
 
     "@noetic/eval": ["@noetic/eval@workspace:packages/eval"],
+
+    "@noetic/mirage": ["@noetic/mirage@workspace:packages/mirage"],
+
+    "@noetic/platform-browser": ["@noetic/platform-browser@workspace:packages/platform-browser"],
+
+    "@noetic/platform-node": ["@noetic/platform-node@workspace:packages/platform-node"],
 
     "@noetic/plugin-design-deck": ["@noetic/plugin-design-deck@workspace:packages/plugin-design-deck"],
 

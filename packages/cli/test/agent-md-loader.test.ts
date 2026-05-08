@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { FsAdapter, FsStats, ShellAdapter, ShellExecResult } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 
 import { loadAgentInstructions } from '../src/config/agent-md-loader.js';
 

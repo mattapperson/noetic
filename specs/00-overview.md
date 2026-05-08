@@ -20,9 +20,19 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 ```
 @noetic/core  ←  @noetic/eval
+      ↑
+      ├── @noetic/platform-node
+      ├── @noetic/platform-browser
+      └── @noetic/mirage
 ```
 
-- **`@noetic/core`** — Step primitives, execution infrastructure, and the memory system. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
+- **`@noetic/core`** — Step primitives, execution infrastructure, and the memory system. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
+
+- **`@noetic/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic/cli`, `@noetic/code-agent`, and any Node-target user code. See `25-platform-packages`.
+
+- **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
+
+- **`@noetic/mirage`** — Runtime-neutral bridge that wraps a user-constructed Mirage `Workspace` (from `@struktoai/mirage-node` or `@struktoai/mirage-browser`) in `FsAdapter` + `ShellAdapter` implementations. Declares all three Mirage packages as optional peers. See `24-mirage-resources`.
 
 - **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
 

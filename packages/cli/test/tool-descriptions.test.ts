@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 
 import { createBashTool } from '../src/tools/bash.js';
 import { createEditTool } from '../src/tools/edit.js';

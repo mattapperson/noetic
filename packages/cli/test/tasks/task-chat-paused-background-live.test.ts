@@ -42,7 +42,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TaskPauseReason } from '@noetic/code-agent/tasks/schema';
 import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 import { z } from 'zod';
 import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
 

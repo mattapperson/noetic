@@ -12,7 +12,7 @@ import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
 import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
 import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 import { AgentCiSpawnError, startAgentCiRun } from '../../../tasks/runtime/agent-ci-launcher.js';
 import type { Command, LocalCommandCall, LocalCommandResult } from '../../types.js';
 

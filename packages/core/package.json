@@ -13,10 +13,6 @@
       "types": "./src/portable.ts",
       "default": "./src/portable.ts"
     },
-    "./adapters/node": {
-      "types": "./src/adapters/node.ts",
-      "default": "./src/adapters/node.ts"
-    },
     "./unstable": {
       "types": "./src/unstable.ts",
       "default": "./src/unstable.ts"

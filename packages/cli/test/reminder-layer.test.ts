@@ -11,7 +11,8 @@ import type {
   MessageItem,
   ScopedStorage,
 } from '@noetic/core';
-import { createLocalFsAdapter, createLocalShellAdapter, Slot } from '@noetic/core';
+import { Slot } from '@noetic/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 
 import { reminderLayer } from '../src/memory/reminder-layer.js';
 import type { ReminderLayerState } from '../src/memory/reminder-triggers.js';

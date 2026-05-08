@@ -16,7 +16,7 @@ import {
 } from '@noetic/code-agent/tasks/store/fs-node';
 import { execTolerantOfMissing, isShellMissing } from '@noetic/code-agent/tasks/worktree-node';
 import type { FsAdapter, ShellAdapter, ShellExecResult } from '@noetic/core';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core/adapters/node';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 import type { AgentCiActionResult, Signaller } from '../agent-ci-control.js';
 import { togglePauseAgentCiRun } from '../agent-ci-control.js';
 import { deriveColumn, KanbanColumn, moveTask } from '../kanban.js';

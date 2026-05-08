@@ -29,7 +29,7 @@ import {
   taskRootPaths,
   tryLoadTask,
 } from '@noetic/code-agent/tasks/store/fs-node';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 import { MemFs, makeStoreContext } from './_helpers.js';
 
 //#region Helpers

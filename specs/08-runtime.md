@@ -94,6 +94,14 @@ Other embedders of `@noetic/core` keep the raw shell semantics unless they expli
 
 ---
 
+## Virtual Filesystem Backends
+
+`FsAdapter` and `ShellAdapter` are contracts, not backends. Harnesses may plug in any implementation that satisfies them — including ones that present a *unified* filesystem composed of multiple heterogeneous resources (local disk, RAM, S3, GitHub, Slack, Redis, SSH, …) mounted at POSIX-style paths.
+
+`createMirageAdapters({ workspace })` is the built-in factory for this mode. It is exported by `@noetic/mirage` — a runtime-neutral peer package that types against Mirage's structural `Workspace` contract and declares all three `@struktoai/mirage-*` packages as optional peer dependencies. Core itself ships only in-memory adapters and has no Mirage dependency. Consumers construct a concrete `Workspace` from `@struktoai/mirage-node` (Node) or `@struktoai/mirage-browser` (browser / edge) and pass it to `createMirageAdapters`, which returns a paired `FsAdapter` + `ShellAdapter` over it. Every existing file tool (Read, Write, Edit, Grep, Find, Ls) and the Bash tool just work — bash pipelines can even traverse mount boundaries (`cat /s3/x.csv | grep foo | head > /local/out.txt`) because Mirage's in-process executor resolves each stage against the correct backend. Full semantics, mount layout, error codes, and scope live in `24-mirage-resources`.
+
+---
+
 ## Subprocess Abstraction
 
 The `SubprocessAdapter` interface abstracts long-lived child-process lifecycle and inter-process RPC. Tools, memory layers, and CLI features that need to spawn helper processes (agent-ci runs, daemons, sub-agents, RPC services) call through this adapter rather than `node:child_process` or `node:net` directly. This enables the harness to run inside non-POSIX runtimes (Cloudflare Worker isolates, Durable Objects, remote workers) where a "subprocess" maps to a service binding or a separately-deployed worker.

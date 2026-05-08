@@ -310,7 +310,7 @@ The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`,
 
 ```ts
 import { AgentHarness, createFileStorage } from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 const subprocess = createLocalSubprocessAdapter({
   storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),

@@ -2,8 +2,6 @@ export type { CheckpointStore, CreateCheckpointStoreOptions } from './checkpoint
 export { CheckpointKeys, createCheckpointStore } from './checkpoint-store';
 export type { DetachedSignal } from './detached-signal';
 export { createDetachedSignal } from './detached-signal';
-export type { CreateFileStorageOptions } from './file-storage';
-export { createFileStorage } from './file-storage';
 export type { AfterFirstTurnContext, RunnableLoopHarness, RunnableLoopOpts } from './runnable-loop';
 export { runnableLoop } from './runnable-loop';
 export type { SessionSeedHarness } from './session-seed';

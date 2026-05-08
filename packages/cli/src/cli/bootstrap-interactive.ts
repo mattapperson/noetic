@@ -6,7 +6,7 @@
  * and hands control to the Ink app.
  */
 
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 
 import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
 import { createPluginContextBuilder } from '../plugins/context.js';

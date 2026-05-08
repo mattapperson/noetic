@@ -25,7 +25,7 @@ import type { Task } from '@noetic/code-agent/tasks/schema';
 import { EventKind, LogEntryKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { appendEvent, appendLog, loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 import { clearRunner, loadRunner } from './runner-state.js';
 
 //#region Types

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { ExecutionContext, FsAdapter, ItemLog, ScopedStorage } from '@noetic/core';
-import { createLocalShellAdapter, Slot } from '@noetic/core';
+import { Slot } from '@noetic/core';
+import { createLocalShellAdapter } from '@noetic/platform-node';
 
 import { createSteeringFileLayer } from '../src/memory/steering-file-layer.js';
 import { MemFs } from './tasks/_helpers.js';

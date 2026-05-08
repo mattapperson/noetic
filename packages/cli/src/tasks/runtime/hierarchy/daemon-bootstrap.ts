@@ -30,8 +30,8 @@ import {
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
 import type { AgentHarness, StorageAdapter, SubprocessAdapter } from '@noetic/core';
-import { createFileStorage, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createFileStorage, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
+import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 import { defaultSignaller } from '../agent-ci-control.js';
 import { DEFAULT_MODEL } from '../defaults.js';
 import { startImplementerRun } from '../implementer-launcher.js';
