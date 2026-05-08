@@ -17,6 +17,7 @@ import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import type { SessionFile } from '../types/session.js';
 import { parseArgs } from './args.js';
 import { composeRuntimeModel } from './compose-runtime-config.js';
+import { runSetupFlow } from './run-setup-flow.js';
 import { installWorkspaceProxy } from './workspace-proxy.js';
 
 if (process.argv[2] === 'tasks') {
@@ -70,6 +71,15 @@ const initialSession = await resolveInitialSession(baseConfig.cwd, flags);
 // session's original project.
 const runtimeCwd = initialSession?.cwd ?? baseConfig.cwd;
 
+// Interactive check for the binaries the agent's tools depend on (rtk,
+// pilotty, agent-browser). If any are missing and not ignored, this renders
+// a pre-TUI setup screen; in non-TTY mode it emits one stderr notice per
+// missing binary and proceeds. The returned map tells the harness which
+// tools to drop or degrade.
+const binaryAvailability = await runSetupFlow({
+  config: baseConfig,
+});
+
 const runtimeConfig: AgentRuntimeConfig = {
   ...baseConfig,
   cwd: runtimeCwd,
@@ -80,6 +90,7 @@ const runtimeConfig: AgentRuntimeConfig = {
     sessionModel: initialSession?.model,
     configFileModel: discovered?.config.model,
   }),
+  binaryAvailability,
 };
 
 installInterruptSafetyNet({

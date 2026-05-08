@@ -6,6 +6,7 @@ export const AgentSdkConfigSchema = CodeAgentConfig.AgentConfigSchema;
 export const AgentOverrideSchema = CodeAgentConfig.AgentOverrideSchema;
 export const HistoryConfigSchema = CodeAgentConfig.HistoryConfigSchema;
 export const PluginSpecSchema = CodeAgentConfig.PluginSpecSchema;
+export const SetupConfigSchema = CodeAgentConfig.SetupConfigSchema;
 export const ShellConfigSchema = CodeAgentConfig.ShellConfigSchema;
 export const WorktreeConfigSchema = CodeAgentConfig.WorktreeConfigSchema;
 export const WorktreeHookSchema = CodeAgentConfig.WorktreeHookSchema;
@@ -17,6 +18,7 @@ export type AgentSdkRuntimeConfig = AgentSdkConfig & {
 };
 export type HistoryConfig = z.infer<typeof HistoryConfigSchema>;
 export type PluginSpec = z.infer<typeof PluginSpecSchema>;
+export type SetupConfig = z.infer<typeof SetupConfigSchema>;
 export type ShellConfig = z.infer<typeof ShellConfigSchema>;
 export type WorktreeConfig = z.infer<typeof WorktreeConfigSchema>;
 export type WorktreeHook = z.infer<typeof WorktreeHookSchema>;
@@ -39,6 +41,14 @@ export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 
 export interface AgentRuntimeConfig extends AgentConfig {
   fs: FsAdapter;
+  /**
+   * Post-setup-flow snapshot of which binaries are usable. Keys are binary
+   * ids (`'rtk'`, `'pilotty'`, `'agent-browser'`); values are either
+   * `'present'` (usable) or `'ignored'` (user opted out — the harness gates
+   * or degrades the corresponding tool). Omit this map in non-CLI embedders
+   * to keep defaults (every tool registered, rtk attempted then fallback).
+   */
+  binaryAvailability?: ReadonlyMap<string, 'present' | 'ignored'>;
 }
 
 /**

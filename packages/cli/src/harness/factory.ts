@@ -239,6 +239,12 @@ interface CreateAgentHarnessOpts {
    * input rendered as a modal. Headless harnesses omit it.
    */
   askUserService?: AskUserService;
+  /**
+   * Post-setup-flow snapshot of which binaries are usable. Supplied by the
+   * CLI; non-CLI embedders can omit it to keep defaults (every tool
+   * registered; rtk attempted then fallback).
+   */
+  binaryAvailability?: ReadonlyMap<string, 'present' | 'ignored'>;
 }
 
 /**
@@ -247,9 +253,20 @@ interface CreateAgentHarnessOpts {
  */
 export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<HarnessWithSkills> {
   const { config, plugins, fs, buildContext } = opts;
-  const shell = opts.shell ?? createDefaultShellAdapter(config);
+  const availability = opts.binaryAvailability;
+  const rtkIgnored = availability?.get('rtk') === 'ignored';
+  const shell =
+    opts.shell ??
+    createDefaultShellAdapter(config, {
+      rtkIgnored,
+    });
   const mode: AgentMode = opts.mode ?? 'normal';
   const planHooks = opts.planHooks;
+
+  const availableTools = {
+    interactiveTerminal: availability === undefined || availability.get('pilotty') === 'present',
+    browser: availability === undefined || availability.get('agent-browser') === 'present',
+  };
 
   // Build canonical skill catalog (single source of truth)
   const allSkills = await buildSkillCatalog({
@@ -301,6 +318,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
           lspService,
           askUserService: opts.askUserService,
           mutationPolicy,
+          availableTools,
         })
       : createCodingTools({
           cwd: config.cwd,
@@ -309,6 +327,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
           lspService,
           askUserService: opts.askUserService,
           mutationPolicy,
+          availableTools,
         });
   // Built-in `task_*` tools are default-on. Users opt out via
   // `tools.tasks: false` in their noetic.config.ts. In planning mode we

@@ -47,13 +47,13 @@ describe('createDefaultShellAdapter', () => {
     expect(adapter.rtkAvailable).toBe(false);
   });
 
-  it('falls back to raw shell when useRtk is the default and rtk is missing', () => {
+  it('falls back to raw shell silently when useRtk is the default and rtk is missing', () => {
     process.env.PATH = '/nonexistent';
     const adapter = createDefaultShellAdapter(makeConfig({}));
     // Adapter still reports `useRtk: true` (the requested mode) but
     // `rtkAvailable: false` — at exec time it silently falls through to `sh -c`.
-    // This lets the CLI boot in environments without rtk (Cloudflare Workers,
-    // CI without the binary) rather than hard-failing on startup.
+    // The setup flow (not this bootstrap) is responsible for surfacing the
+    // missing-rtk hint to the user.
     expect(adapter.useRtk).toBe(true);
     expect(adapter.rtkAvailable).toBe(false);
   });
@@ -75,5 +75,27 @@ describe('createDefaultShellAdapter', () => {
     );
     expect(adapter.rtkAvailable).toBe(true);
     expect(adapter.rtkPath).toBe(rtkPath);
+  });
+
+  it('forces useRtk=false when rtkIgnored is set, even with useRtk=true in config', () => {
+    fakeBinDir = mkdtempSync(join(tmpdir(), 'rtk-shim-'));
+    const rtkPath = join(fakeBinDir, 'rtk');
+    writeFileSync(rtkPath, '#!/bin/sh\nexit 0\n', {
+      mode: 0o755,
+    });
+    process.env.PATH = `${fakeBinDir}:${originalPath ?? ''}`;
+
+    const adapter = createDefaultShellAdapter(
+      makeConfig({
+        shell: {
+          useRtk: true,
+        },
+      }),
+      {
+        rtkIgnored: true,
+      },
+    );
+    expect(adapter.useRtk).toBe(false);
+    expect(adapter.rtkAvailable).toBe(false);
   });
 });

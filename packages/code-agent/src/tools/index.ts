@@ -661,6 +661,18 @@ export function createLspTool(service: LspService, cwd: string): LspTool {
   );
 }
 
+/**
+ * Per-tool availability flags. Defaults to every tool enabled so existing
+ * callers and tests see no behaviour change; the CLI setup flow passes an
+ * explicit map when the user has ignored the binary that backs a tool.
+ */
+export interface AvailableTools {
+  /** When `false`, `InteractiveTerminal` (pilotty-backed) is omitted. */
+  interactiveTerminal?: boolean;
+  /** When `false`, the `browser` tool (agent-browser-backed) is omitted. */
+  browser?: boolean;
+}
+
 export interface CreateToolsOptions {
   cwd: string;
   fs?: FsAdapter;
@@ -668,12 +680,23 @@ export interface CreateToolsOptions {
   lspService?: LspService;
   askUserService?: AskUserService;
   mutationPolicy?: MutationPolicy;
+  /**
+   * Gate tools whose external binary may be missing/ignored. Unset flags
+   * default to `true` — the tool is registered — so this is purely an
+   * opt-out layer.
+   */
+  availableTools?: AvailableTools;
+}
+
+function isEnabled(flag: boolean | undefined): boolean {
+  return flag !== false;
 }
 
 export function createCodingTools(opts: CreateToolsOptions): Tool[] {
   const { cwd, lspService } = opts;
   const fs = opts.fs ?? createInMemoryFsAdapter();
   const shell = opts.shell ?? createInMemoryShellAdapter();
+  const available = opts.availableTools ?? {};
   const tools: Tool[] = [
     createReadTool(cwd, fs),
     createWriteTool(cwd, fs, opts.mutationPolicy),
@@ -682,11 +705,17 @@ export function createCodingTools(opts: CreateToolsOptions): Tool[] {
     createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
-    createInteractiveTerminalTool(cwd, shell, {
-      mutationPolicy: opts.mutationPolicy,
-    }),
-    createBrowserTool(cwd, shell),
   ];
+  if (isEnabled(available.interactiveTerminal)) {
+    tools.push(
+      createInteractiveTerminalTool(cwd, shell, {
+        mutationPolicy: opts.mutationPolicy,
+      }),
+    );
+  }
+  if (isEnabled(available.browser)) {
+    tools.push(createBrowserTool(cwd, shell));
+  }
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
   }
@@ -700,16 +729,21 @@ export function createReadOnlyTools(opts: CreateToolsOptions): Tool[] {
   const { cwd, lspService } = opts;
   const fs = opts.fs ?? createInMemoryFsAdapter();
   const shell = opts.shell ?? createInMemoryShellAdapter();
+  const available = opts.availableTools ?? {};
   const tools: Tool[] = [
     createReadTool(cwd, fs),
     createGrepTool(cwd, fs, shell),
     createFindTool(cwd, fs),
     createLsTool(cwd, fs),
-    createInteractiveTerminalTool(cwd, shell, {
-      readonly: true,
-      mutationPolicy: opts.mutationPolicy,
-    }),
   ];
+  if (isEnabled(available.interactiveTerminal)) {
+    tools.push(
+      createInteractiveTerminalTool(cwd, shell, {
+        readonly: true,
+        mutationPolicy: opts.mutationPolicy,
+      }),
+    );
+  }
   if (lspService) {
     tools.push(createLspTool(lspService, cwd));
   }

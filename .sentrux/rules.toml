@@ -80,6 +80,7 @@ paths = [
   "packages/cli/src/lsp/**",
   "packages/cli/src/config/**",
   "packages/cli/src/memory/**",
+  "packages/cli/src/setup/**",
 ]
 order = 14
 

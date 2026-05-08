@@ -101,6 +101,23 @@ export const ShellConfigSchema = z.object({
 export type ShellConfig = z.infer<typeof ShellConfigSchema>;
 
 /**
+ * Setup namespace: persisted answers to the interactive startup binary check.
+ *
+ * `ignoredBinaries` lists binary ids the user has chosen to permanently skip
+ * (e.g. `"rtk"`, `"pilotty"`, `"agent-browser"`). The CLI setup flow consults
+ * this list before prompting; tools whose binary is ignored either run in a
+ * degraded mode (rtk → raw shell) or are dropped from the agent's tool list
+ * (pilotty → no interactive-terminal; agent-browser → no browser). This lives
+ * in the user-global config (`~/.config/noetic/config.ts`) so the decision
+ * persists across projects.
+ */
+export const SetupConfigSchema = z.object({
+  ignoredBinaries: z.array(z.string()).default([]),
+});
+
+export type SetupConfig = z.infer<typeof SetupConfigSchema>;
+
+/**
  * Per-sub-agent override applied when the parent agent invokes a teammate via
  * the `agent` tool. Keys in `agents` are agent-type ids (e.g. `explore`,
  * `plan`, `verification`) — they match the `agent-type` field on a SKILL.md.
@@ -168,6 +185,7 @@ export const AgentConfigSchema = z.object({
   worktree: WorktreeConfigSchema.optional(),
   history: HistoryConfigSchema.optional(),
   shell: ShellConfigSchema.optional(),
+  setup: SetupConfigSchema.optional(),
   /**
    * Per-sub-agent overrides keyed by `agent-type` (e.g. `explore`, `plan`,
    * `verification`). Beats the matching SKILL.md frontmatter. Surfaced via

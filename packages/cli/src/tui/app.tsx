@@ -932,6 +932,7 @@ function App({
         buildContext: buildCtx,
         lspService: lspServiceRef.current,
         askUserService,
+        binaryAvailability: config.binaryAvailability,
       });
       // Dispose any previously-held harness resources before swapping.
       const previousDispose = harnessDisposeRef.current;
