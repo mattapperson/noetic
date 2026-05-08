@@ -11,6 +11,7 @@ import type {
   SubprocessRequest,
   SubprocessStopResult,
 } from '../types/subprocess-adapter';
+import { serializeError } from './in-memory-subprocess/metadata';
 import {
   clearDurableManifest,
   hydrateFromManifest,
@@ -251,9 +252,76 @@ export function createLocalSubprocessAdapter(
     return handle;
   }
 
+  async function spawnStepHandleInProcess(
+    request: StepSubprocessRequest,
+    executor: NonNullable<StepSubprocessRequest['_localExecutor']>,
+  ): Promise<SubprocessHandle> {
+    const now = nowIso();
+    const handle = await save({
+      id: `subprocess-${crypto.randomUUID()}`,
+      status: 'running',
+      startedAt: now,
+      updatedAt: now,
+      metadata: {
+        ...(request.metadata ?? {}),
+        runtime: 'local',
+        kind: 'step',
+        stepId: request.stepId,
+        executionId: request.executionId,
+      },
+    });
+    void settleStepHandleInProcess(handle, executor);
+    return handle;
+  }
+
+  async function settleStepHandleInProcess(
+    handle: SubprocessHandle,
+    executor: NonNullable<StepSubprocessRequest['_localExecutor']>,
+  ): Promise<void> {
+    try {
+      const result = await executor();
+      const latest = handles.get(handle.id);
+      if (!latest || latest.status !== 'running') {
+        return;
+      }
+      active.delete(handle.id);
+      await save({
+        ...latest,
+        status: 'completed',
+        updatedAt: nowIso(),
+        metadata: {
+          ...(latest.metadata ?? {}),
+          result,
+        },
+      });
+    } catch (err) {
+      active.delete(handle.id);
+      const latest = handles.get(handle.id) ?? handle;
+      await save({
+        ...latest,
+        status: 'failed',
+        updatedAt: nowIso(),
+        metadata: {
+          ...(latest.metadata ?? {}),
+          error: serializeError(err),
+        },
+      });
+    }
+  }
+
   async function spawnStepHandle(request: StepSubprocessRequest): Promise<SubprocessHandle> {
+    // In-process fast path. When the caller supplies `_localExecutor`
+    // (the interpreter always does for same-process dispatches) and no
+    // `registryEntry` is configured for out-of-process bootstrapping,
+    // run the step here. This mirrors `in-memory-subprocess-adapter` and
+    // lets hosts use the local adapter for process-lifecycle handles
+    // without forcing every in-process spawn through a child bun runtime.
     const registryEntry = options.registryEntry;
     if (!registryEntry) {
+      const executor = request._localExecutor;
+      if (executor) {
+        return spawnStepHandleInProcess(request, executor);
+      }
       throw new Error(
         'Local subprocess adapter cannot dispatch step requests without a registryEntry. ' +
           'Pass `registryEntry` when constructing the adapter so the child can import agent modules.',

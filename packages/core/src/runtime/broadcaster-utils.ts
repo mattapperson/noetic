@@ -44,16 +44,21 @@ function hasBroadcaster(ctx: Context): ctx is Context & {
 }
 
 /**
- * Get the EventBroadcaster from a context if available.
+ * Get the EventBroadcaster from a context if available. Walks up the parent
+ * chain so spawned child contexts inherit the session-level broadcaster — the
+ * interpreter never re-installs `_broadcaster` on spawn children, so without
+ * this traversal every LLM call inside a `spawn()` step would be invisible to
+ * the UI stream.
  * Uses property check rather than instanceof to support mock contexts in tests.
  * @internal
  */
 export function getBroadcaster(ctx?: Context): EventBroadcaster | undefined {
-  if (!ctx) {
-    return undefined;
-  }
-  if (hasBroadcaster(ctx)) {
-    return ctx._broadcaster;
+  let current: Context | null | undefined = ctx;
+  while (current) {
+    if (hasBroadcaster(current)) {
+      return current._broadcaster;
+    }
+    current = current.parent ?? null;
   }
   return undefined;
 }
