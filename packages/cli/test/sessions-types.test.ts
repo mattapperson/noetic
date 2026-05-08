@@ -10,7 +10,7 @@ function validSession(): SessionFile {
     cwd: '/tmp/x',
     effectiveCwd: '/tmp/x',
     model: 'anthropic/claude-sonnet-4',
-    agentMode: 'normal',
+    agentMode: 'act',
     createdAt: now,
     modifiedAt: now,
     firstPrompt: 'hello',

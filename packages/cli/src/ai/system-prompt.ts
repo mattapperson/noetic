@@ -23,7 +23,7 @@ import {
 //#region Types
 
 /** Execution mode the agent is operating in. */
-export type AgentMode = 'normal' | 'planning';
+export type AgentMode = 'act' | 'planning';
 
 /** Inputs used by the section builders to interpolate environment details. */
 export interface SystemPromptInputs {
@@ -272,7 +272,7 @@ export async function buildSystemPrompt(cwd: string): Promise<string> {
     shell: process.env.SHELL ?? 'unknown',
     model: process.env.NOETIC_MODEL ?? 'unspecified',
     isGitRepo,
-    mode: 'normal',
+    mode: 'act',
   });
 }
 

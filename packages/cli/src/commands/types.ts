@@ -50,12 +50,12 @@ interface CommandContext {
   /** Memory layers registered with the harness — includes layers that did not contribute on the last run. */
   memoryLayers: ReadonlyArray<MemoryLayer>;
   /** Current agent mode. */
-  agentMode: 'normal' | 'planning';
+  agentMode: 'act' | 'planning';
   /**
    * Switch the active agent mode. Triggers harness recreation so the model
    * sees the correct toolset (full vs read-only) on the next turn.
    */
-  setAgentMode: (mode: 'normal' | 'planning') => Promise<void>;
+  setAgentMode: (mode: 'act' | 'planning') => Promise<void>;
   /**
    * Switch the active LLM to the given OpenRouter model slug (e.g.
    * `anthropic/claude-sonnet-4`). Triggers harness recreation so the next

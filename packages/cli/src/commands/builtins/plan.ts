@@ -1,10 +1,10 @@
 /**
- * /plan command — alias for `/mode plan` (and `/mode normal` via `/plan cancel`).
+ * /plan command — alias for `/mode plan` (and `/mode act` via `/plan cancel`).
  *
  * Subcommands:
  *   /plan          - enter plan mode
  *   /plan status   - show current mode
- *   /plan cancel   - exit plan mode (return to normal)
+ *   /plan cancel   - exit plan mode (return to act)
  */
 
 import type { Command, CommandContext, LocalCommandCall, LocalCommandResult } from '../types.js';
@@ -35,16 +35,16 @@ async function handleStatus(ctx: CommandContext): Promise<LocalCommandResult> {
 }
 
 async function handleCancel(ctx: CommandContext): Promise<LocalCommandResult> {
-  if (ctx.agentMode === 'normal') {
+  if (ctx.agentMode === 'act') {
     return {
       type: 'text',
       value: 'Not currently in plan mode.',
     };
   }
-  await ctx.setAgentMode('normal');
+  await ctx.setAgentMode('act');
   return {
     type: 'text',
-    value: 'Plan mode cancelled. Returned to normal mode.',
+    value: 'Plan mode cancelled. Returned to act mode.',
   };
 }
 

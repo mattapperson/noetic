@@ -356,7 +356,7 @@ function App({
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
-  const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'normal');
+  const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'act');
   const [viewMode, setViewMode] = useState<ViewMode>({
     kind: 'chat',
   });
@@ -385,7 +385,7 @@ function App({
   // Owned by the TUI (not the harness) so language-server subprocesses survive
   // /model and /plan swaps, which recreate the harness.
   const lspServiceRef = useRef<LspService | null>(null);
-  const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'normal');
+  const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'act');
   const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(initialSession?.lastLayerUsage);
   const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(
     initialSession?.lastLayerUsage,
@@ -1438,7 +1438,7 @@ function App({
   );
 
   const handleToggleAgentMode = useCallback((): void => {
-    const next: AgentMode = agentMode === 'planning' ? 'normal' : 'planning';
+    const next: AgentMode = agentMode === 'planning' ? 'act' : 'planning';
     setAgentMode(next).catch(() => {});
   }, [
     agentMode,

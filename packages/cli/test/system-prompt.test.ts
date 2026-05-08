@@ -9,7 +9,7 @@ const baseInputs: SystemPromptInputs = {
   model: 'anthropic/claude-sonnet-4',
   knowledgeCutoff: 'January 2026',
   isGitRepo: true,
-  mode: 'normal',
+  mode: 'act',
 };
 
 describe('composeSystemPrompt', () => {
@@ -96,7 +96,7 @@ describe('composeSystemPrompt', () => {
     expect(out).not.toContain('OS Version:');
   });
 
-  it('omits the plan-mode section in normal mode', () => {
+  it('omits the plan-mode section in act mode', () => {
     const out = composeSystemPrompt(baseInputs);
     expect(out).not.toContain('# Plan mode active');
   });

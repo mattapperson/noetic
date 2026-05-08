@@ -51,7 +51,7 @@ function makeSession(overrides: Partial<SessionFile> = {}): SessionFile {
     cwd: '/tmp/fake-project',
     effectiveCwd: '/tmp/fake-project',
     model: 'anthropic/claude-sonnet-4',
-    agentMode: 'normal',
+    agentMode: 'act',
     createdAt: now,
     modifiedAt: now,
     firstPrompt: 'hello world',

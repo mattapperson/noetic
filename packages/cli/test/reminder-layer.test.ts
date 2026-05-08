@@ -715,7 +715,7 @@ describe('built-in triggers', () => {
         return JSON.parse(
           JSON.stringify({
             session: {
-              mode: 'normal',
+              mode: 'act',
             },
           }),
         );

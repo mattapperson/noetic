@@ -130,7 +130,7 @@ export const SessionFileV1Schema = z.object({
   effectiveCwd: z.string().min(1),
   model: z.string().min(1),
   agentMode: z.enum([
-    'normal',
+    'act',
     'planning',
   ]),
   createdAt: z.string().datetime(),

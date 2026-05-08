@@ -60,7 +60,7 @@ import { createDefaultShellAdapter } from './shell-adapter-bootstrap.js';
 
 //#region Types
 
-export type AgentMode = 'normal' | 'planning';
+export type AgentMode = 'act' | 'planning';
 
 export interface PlanHooks {
   onEnterSession?: PlanEnterSessionCallback;
@@ -222,7 +222,7 @@ interface CreateAgentHarnessOpts {
   fs: FsAdapter;
   shell?: ShellAdapter;
   buildContext: PluginContextBuilder;
-  /** Initial agent mode. Defaults to `'normal'`. */
+  /** Initial agent mode. Defaults to `'act'`. */
   mode?: AgentMode;
   /** Optional plan-mode lifecycle hooks (session creation, approval gate, extra instructions). */
   planHooks?: PlanHooks;
@@ -260,7 +260,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     createDefaultShellAdapter(config, {
       rtkIgnored,
     });
-  const mode: AgentMode = opts.mode ?? 'normal';
+  const mode: AgentMode = opts.mode ?? 'act';
   const planHooks = opts.planHooks;
 
   const availableTools = {

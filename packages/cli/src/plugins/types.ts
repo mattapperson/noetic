@@ -17,7 +17,7 @@ export interface FooterContext {
   threadId: string;
   sessionStartedAt: number;
   entryCount: number;
-  agentMode: 'normal' | 'planning';
+  agentMode: 'act' | 'planning';
 }
 
 export interface CliPluginContext extends AgentPluginContext {}

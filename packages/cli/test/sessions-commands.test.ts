@@ -71,7 +71,7 @@ function makeCtx(partial: Partial<SessionSnapshot> = {}): FakeCtx {
     commands: [],
     clearEntries: () => {},
     memoryLayers: [],
-    agentMode: 'normal',
+    agentMode: 'act',
     setAgentMode: async () => {},
     setModel: async () => {},
     sessionSnapshot: snapshot,
