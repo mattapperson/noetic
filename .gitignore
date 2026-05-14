@@ -1,4 +1,6 @@
 node_modules/
+dist/
+dist-bin/
 .next/
 packages/web/.next/
 packages/web/.source/

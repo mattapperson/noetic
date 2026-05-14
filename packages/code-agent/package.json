@@ -141,13 +141,136 @@
     "@types/diff": "^8.0.0",
     "bun-types": "latest"
   },
+  "files": ["dist"],
   "scripts": {
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
     "build:browser": "bun build ./test/fixtures/browser-entry.ts --target browser --outfile /tmp/noetic-code-agent-browser.js",
+    "build": "bun run scripts/build.ts && bun run build:types",
+    "build:types": "bunx tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run clean && bun run build",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format ."
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./tools": {
+        "types": "./dist/tools/index.d.ts",
+        "default": "./dist/tools/index.js"
+      },
+      "./tools/node": {
+        "types": "./dist/tools/node.d.ts",
+        "default": "./dist/tools/node.js"
+      },
+      "./skills": {
+        "types": "./dist/skills/index.d.ts",
+        "default": "./dist/skills/index.js"
+      },
+      "./agents": {
+        "types": "./dist/agents/index.d.ts",
+        "default": "./dist/agents/index.js"
+      },
+      "./plan": {
+        "types": "./dist/plan/index.d.ts",
+        "default": "./dist/plan/index.js"
+      },
+      "./memory": {
+        "types": "./dist/memory/index.d.ts",
+        "default": "./dist/memory/index.js"
+      },
+      "./tasks": {
+        "types": "./dist/tasks/index.d.ts",
+        "default": "./dist/tasks/index.js"
+      },
+      "./tasks/schema": {
+        "types": "./dist/tasks/schema.d.ts",
+        "default": "./dist/tasks/schema.js"
+      },
+      "./tasks/plugin": {
+        "types": "./dist/tasks/plugin.d.ts",
+        "default": "./dist/tasks/plugin.js"
+      },
+      "./tasks/store/memory": {
+        "types": "./dist/tasks/store-memory.d.ts",
+        "default": "./dist/tasks/store-memory.js"
+      },
+      "./tasks/store/fs-node": {
+        "types": "./dist/tasks/fs-node.d.ts",
+        "default": "./dist/tasks/fs-node.js"
+      },
+      "./tasks/execution": {
+        "types": "./dist/tasks/execution.d.ts",
+        "default": "./dist/tasks/execution.js"
+      },
+      "./tasks/transport/memory": {
+        "types": "./dist/tasks/subprocess-transport-memory.d.ts",
+        "default": "./dist/tasks/subprocess-transport-memory.js"
+      },
+      "./tasks/transport/unix-node": {
+        "types": "./dist/tasks/subprocess-transport-unix-node.d.ts",
+        "default": "./dist/tasks/subprocess-transport-unix-node.js"
+      },
+      "./tasks/worktree-node": {
+        "types": "./dist/tasks/worktree-node.d.ts",
+        "default": "./dist/tasks/worktree-node.js"
+      },
+      "./tasks/worktree": {
+        "types": "./dist/tasks/worktree.d.ts",
+        "default": "./dist/tasks/worktree.js"
+      },
+      "./tasks/command": {
+        "types": "./dist/tasks/command.d.ts",
+        "default": "./dist/tasks/command.js"
+      },
+      "./tasks/command-node": {
+        "types": "./dist/tasks/command-node.d.ts",
+        "default": "./dist/tasks/command-node.js"
+      },
+      "./tasks/ipc-node": {
+        "types": "./dist/tasks/ipc-node.d.ts",
+        "default": "./dist/tasks/ipc-node.js"
+      },
+      "./tasks/memory": {
+        "types": "./dist/tasks/memory.d.ts",
+        "default": "./dist/tasks/memory.js"
+      },
+      "./channels": {
+        "types": "./dist/channels.d.ts",
+        "default": "./dist/channels.js"
+      },
+      "./channels/node": {
+        "types": "./dist/channels-node.d.ts",
+        "default": "./dist/channels-node.js"
+      },
+      "./lsp": {
+        "types": "./dist/lsp/index.d.ts",
+        "default": "./dist/lsp/index.js"
+      },
+      "./plugins": {
+        "types": "./dist/plugins/index.d.ts",
+        "default": "./dist/plugins/index.js"
+      },
+      "./utils": {
+        "types": "./dist/utils.d.ts",
+        "default": "./dist/utils.js"
+      },
+      "./config": {
+        "types": "./dist/types/config.d.ts",
+        "default": "./dist/types/config.js"
+      },
+      "./worktree": {
+        "types": "./dist/worktree.d.ts",
+        "default": "./dist/worktree.js"
+      }
+    }
   }
 }

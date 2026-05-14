@@ -40,6 +40,7 @@
     "@types/react": "^19.2.14",
     "bun-types": "latest"
   },
+  "files": ["dist"],
   "scripts": {
     "postinstall": "agent-browser install || true",
     "dev": "bun run src/cli/cli.ts",
@@ -49,9 +50,27 @@
     "test:e2e": "bunx tui-test 'e2e'",
     "test:e2e:live": "bunx tui-test 'live\\.test\\.ts$'",
     "typecheck": "bunx tsc --noEmit",
+    "build": "bun run scripts/build.ts && bun run build:types",
+    "build:types": "bunx tsc -p tsconfig.build.json",
+    "build:binary": "bun run scripts/build-binary.ts",
+    "clean": "rm -rf dist dist-bin",
+    "prepublishOnly": "bun run clean && bun run build",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format ."
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+      "noetic": "./dist/cli/cli.js"
+    },
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
   }
 }
