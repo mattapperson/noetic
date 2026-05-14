@@ -10,8 +10,8 @@
  * driven by `harness.detachedSpawn(...)` from the daemon entry.
  */
 
-import type { ContextMemory, Step } from '@noetic/core';
-import { every, step } from '@noetic/core';
+import type { ContextMemory, Step } from '@noetic-tools/core';
+import { every, step } from '@noetic-tools/core';
 
 import type { HealthJobDeps } from './health-job.js';
 import { runHealthTick } from './health-job.js';

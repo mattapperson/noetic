@@ -13,8 +13,8 @@
  * a Channel because the teammate consumes it as a step.
  */
 
-import type { Item, MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { Item, MemoryLayer } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
 import { createDeveloperMessage } from './system-reminder.js';
 

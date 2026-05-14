@@ -1,6 +1,6 @@
 import net from 'node:net';
 
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { dirname } from './path-utils.js';
@@ -14,7 +14,7 @@ export interface UnixTaskRunTransportOptions {
   role: 'server' | 'client';
   /**
    * FsAdapter used to prepare the socket directory (mkdir) and clear a
-   * stale socket (rm) before listening. Defaulting to `@noetic/core`'s
+   * stale socket (rm) before listening. Defaulting to `@noetic-tools/core`'s
    * local adapter would pull it into every consumer's bundle; callers
    * pass their own.
    */

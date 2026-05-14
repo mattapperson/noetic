@@ -7,14 +7,14 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createInMemorySubprocessAdapter } from '@noetic/core';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import { PlannerSpawnError, startPlannerRun } from '../../src/tasks/runtime/planner-launcher.js';
 import { makeTrackingAdapter, preloadLiveHandle } from './_adapter-helpers.js';
 import { makeStoreContext } from './_helpers.js';
 
 async function seedManualTask(
   ctx: {
-    fs: import('@noetic/core').FsAdapter;
+    fs: import('@noetic-tools/core').FsAdapter;
     projectRoot: string;
   },
   id: string,

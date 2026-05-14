@@ -12,7 +12,7 @@
  * Only one pending request at a time, mirroring the in-memory service.
  */
 
-import type { AskUserInput, AskUserOutput } from '@noetic/core';
+import type { AskUserInput, AskUserOutput } from '@noetic-tools/core';
 
 import type {
   AskUserListener,

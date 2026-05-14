@@ -7,7 +7,7 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import { activateSlice } from '../../../src/tasks/runtime/hierarchy/activation.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';

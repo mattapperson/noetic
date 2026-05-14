@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { SubprocessHandle } from '@noetic/core';
+import type { SubprocessHandle } from '@noetic-tools/core';
 
 import type {
   StartPlannerRunArgs,

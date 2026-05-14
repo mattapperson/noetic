@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 
-import type { ExecutionContext, ScopedStorage } from '@noetic/core';
+import type { ExecutionContext, ScopedStorage } from '@noetic-tools/core';
 import { createLocalShellAdapter } from '@noetic/platform-node';
 import type { PlannerAttemptState } from '../../../src/tasks/runtime/memory/planner-attempt-layer.js';
 import {

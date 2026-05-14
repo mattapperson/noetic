@@ -6,7 +6,7 @@ description: Run multiple steps in parallel with race, all, or settle semantics.
 ## Quick Example
 
 ```ts
-import { fork, step } from '@noetic/core';
+import { fork, step } from '@noetic-tools/core';
 
 const fastest = fork({
   id: 'fastest-response',
@@ -35,7 +35,7 @@ const fastest = fork({
 Returns the output of the first step to complete. All other paths are discarded.
 
 ```ts
-import { fork, step } from '@noetic/core';
+import { fork, step } from '@noetic-tools/core';
 
 const raceExample = fork({
   id: 'race-providers',
@@ -60,7 +60,7 @@ No `merge` function is needed -- the winner's output is used directly.
 Waits for every path to complete, then calls `merge` with an array of all results.
 
 ```ts
-import { fork, step } from '@noetic/core';
+import { fork, step } from '@noetic-tools/core';
 
 const allExample = fork({
   id: 'gather-research',
@@ -90,9 +90,9 @@ If any path throws, the entire fork throws.
 Like `all`, but collects both successes and failures. Each result is a `SettleResult` with a `status` field.
 
 ```ts
-import type { SettleResult } from '@noetic/core';
+import type { SettleResult } from '@noetic-tools/core';
 
-import { fork, step } from '@noetic/core';
+import { fork, step } from '@noetic-tools/core';
 
 const settleExample = fork({
   id: 'resilient-search',
@@ -148,7 +148,7 @@ const settleExample = fork({
 Limit how many paths run at once with `concurrency`.
 
 ```ts
-import { fork, step } from '@noetic/core';
+import { fork, step } from '@noetic-tools/core';
 
 const throttled = fork({
   id: 'throttled-fork',

@@ -8,7 +8,7 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 import {
   buildReconcileEvery,
   buildReconcileTickStep,

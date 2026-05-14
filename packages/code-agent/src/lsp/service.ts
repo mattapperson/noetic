@@ -7,7 +7,7 @@
 
 import { pathToFileURL } from 'node:url';
 
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import type { Diagnostic } from 'vscode-languageserver-protocol';
 
 import type { LspClientApi } from './client.js';

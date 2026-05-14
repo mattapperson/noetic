@@ -19,7 +19,7 @@ import {
   type Item,
   type StreamEvent,
   type StreamingItem,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import { AgentIpcClient } from '../src/agent-ipc-client';
 import {
   AgentIpcServer,

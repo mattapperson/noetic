@@ -1,4 +1,4 @@
-import type { SubprocessAdapter, SubprocessHandle, SubprocessRequest } from '@noetic/core';
+import type { SubprocessAdapter, SubprocessHandle, SubprocessRequest } from '@noetic-tools/core';
 import { EventKind, LogEntryKind } from './schemas.js';
 import type { TaskStoreAdapter } from './store-memory.js';
 

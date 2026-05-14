@@ -11,7 +11,7 @@
     }
   },
   "dependencies": {
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
     "zod": "^4.0.0"
   },
   "peerDependencies": {

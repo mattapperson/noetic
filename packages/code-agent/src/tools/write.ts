@@ -5,8 +5,8 @@
  */
 
 import { dirname } from 'node:path';
-import type { FsAdapter, Tool } from '@noetic/core';
-import { getToolCwd, tool } from '@noetic/core';
+import type { FsAdapter, Tool } from '@noetic-tools/core';
+import { getToolCwd, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { MutationPolicy } from './mutation-policy.js';
 import { resolveToCwd } from './path-utils.js';

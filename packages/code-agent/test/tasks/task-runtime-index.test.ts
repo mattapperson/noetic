@@ -9,8 +9,8 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import type { SubprocessHandle } from '@noetic/core';
-import { createInMemoryStorage, createInMemorySubprocessAdapter } from '@noetic/core';
+import type { SubprocessHandle } from '@noetic-tools/core';
+import { createInMemoryStorage, createInMemorySubprocessAdapter } from '@noetic-tools/core';
 
 import {
   findLiveTaskHandle,

@@ -311,8 +311,8 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 ### Survive a host crash: file-backed storage
 
 ```typescript
-import { AgentHarness, createFileStorage, createCheckpointStore } from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { AgentHarness, createFileStorage, createCheckpointStore } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
 
 const storage = createFileStorage({ root: `${process.env.HOME}/.noetic/checkpoints` });
 const subprocess = createLocalSubprocessAdapter({
@@ -334,7 +334,7 @@ Any `detachedSpawn` through this harness lands a manifest entry; any `execute()`
 ### Durable IPC server
 
 ```typescript
-import { createDurableOutboundQueue } from '@noetic/core/adapters/node';
+import { createDurableOutboundQueue } from '@noetic-tools/core/adapters/node';
 
 const queue = await createDurableOutboundQueue({ storage, socketPath });
 

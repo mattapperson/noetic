@@ -6,7 +6,7 @@ description: The AgentHarness executes agent steps, manages context, and coordin
 ## Quick Example
 
 ```ts
-import { react, AgentHarness } from '@noetic/core';
+import { react, AgentHarness } from '@noetic-tools/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -31,7 +31,7 @@ Calls to `execute()` enqueue the input on the session identified by `options.thr
 ## Constructor Options
 
 ```ts
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'my-agent',
@@ -309,7 +309,7 @@ The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Tas
 The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
 
 ```ts
-import { AgentHarness, createFileStorage } from '@noetic/core';
+import { AgentHarness, createFileStorage } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 const subprocess = createLocalSubprocessAdapter({

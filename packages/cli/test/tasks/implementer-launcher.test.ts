@@ -7,7 +7,7 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createInMemorySubprocessAdapter } from '@noetic/core';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import { persistTaskHierarchy } from '../../src/tasks/runtime/hierarchy/persist.js';
 import {
   ImplementerSpawnError,
@@ -18,7 +18,7 @@ import { makeStoreContext } from './_helpers.js';
 
 async function seedLeafTask(
   ctx: {
-    fs: import('@noetic/core').FsAdapter;
+    fs: import('@noetic-tools/core').FsAdapter;
     projectRoot: string;
   },
   id: string,
@@ -49,7 +49,7 @@ async function seedLeafTask(
 
 async function seedStructuredTaskWithFeature(
   ctx: {
-    fs: import('@noetic/core').FsAdapter;
+    fs: import('@noetic-tools/core').FsAdapter;
     projectRoot: string;
   },
   structuredTaskId: string,

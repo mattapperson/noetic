@@ -11,7 +11,7 @@
  * resulting path.
  */
 
-import type { ShellAdapter, ShellExecResult } from '@noetic/core';
+import type { ShellAdapter, ShellExecResult } from '@noetic-tools/core';
 
 import { parseWorktreeList } from './git.js';
 import { join, resolve } from './path-utils.js';

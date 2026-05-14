@@ -16,7 +16,7 @@ import type {
   ShellExecOptions,
   ShellExecResult,
   ToolExecutionContext,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import type { BashOutput } from '../src/tools/bash.js';
 import { BashOutputSchema, createBashTool } from '../src/tools/bash.js';
 

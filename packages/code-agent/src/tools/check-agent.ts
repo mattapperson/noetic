@@ -6,8 +6,8 @@
  * waiting for the auto-injected completion notice.
  */
 
-import type { Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import type { Tool } from '@noetic-tools/core';
+import { tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { TeammateRegistry } from '../agents/registry-runtime.js';
 

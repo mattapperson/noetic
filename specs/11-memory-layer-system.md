@@ -1,14 +1,14 @@
 # Memory Layer System
 
-> **Module:** `@noetic/core` (sub-module at `core/src/memory/**`)
+> **Module:** `@noetic-tools/core` (sub-module at `core/src/memory/**`)
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
 > **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
 
 ## Module Boundary
 
-Memory is a sub-module of `@noetic/core` at `core/src/memory/**`. It has a strict import boundary so that consumers who only use the memory contract (custom layer authors) can tree-shake the interpreter and runtime code out of their bundle.
+Memory is a sub-module of `@noetic-tools/core` at `core/src/memory/**`. It has a strict import boundary so that consumers who only use the memory contract (custom layer authors) can tree-shake the interpreter and runtime code out of their bundle.
 
-| Lives in `core/src/memory/**` | Lives elsewhere in `@noetic/core` |
+| Lives in `core/src/memory/**` | Lives elsewhere in `@noetic-tools/core` |
 |---|---|
 | `MemoryLayer` interface and all hook types | Layer lifecycle orchestration is in `memory/` too (`initLayers`, `recallLayers`, etc.) |
 | `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) lives in `memory/projector.ts` |
@@ -19,7 +19,7 @@ Memory is a sub-module of `@noetic/core` at `core/src/memory/**`. It has a stric
 
 **Boundary rule:** files under `core/src/memory/**` MUST NOT import from `core/src/interpreter/**` or `core/src/runtime/**`. Pure helpers needed by both sides (`frameworkCast`, `createMessage`, `estimateTokens`, `isAssistantMessage`, `isUserMessage`, `isOutputText`) live under `core/src/util/**`. This keeps the memory sub-module tree-shakable from the interpreter/runtime graph; importing a memory layer factory does not pull in `ContextImpl`.
 
-**Custom layer authors** import from `@noetic/core`. Their bundle contains only the memory contract, the layer factories they use, and the `util/` helpers — not the interpreter or runtime.
+**Custom layer authors** import from `@noetic-tools/core`. Their bundle contains only the memory contract, the layer factories they use, and the `util/` helpers — not the interpreter or runtime.
 
 ---
 

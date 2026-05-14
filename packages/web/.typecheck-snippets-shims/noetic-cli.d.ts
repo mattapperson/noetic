@@ -4,7 +4,7 @@
  * snippet harness, so we expose just the public types referenced by documentation.
  */
 
-import type { MemoryLayer, Tool } from '@noetic/core';
+import type { MemoryLayer, Tool } from '@noetic-tools/core';
 
 export interface AgentConfig {
   model?: string;

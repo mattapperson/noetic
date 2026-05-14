@@ -12,7 +12,7 @@ import {
   AgentHarness,
   createCheckpointStore,
   createFileStorage,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 // Two distinct on-disk roots: subprocess manifests vs checkpoint snapshots.
@@ -60,7 +60,7 @@ Any caller can also invoke `harness.checkpoint(ctx)` explicitly — it's an ordi
 ### What's in a Snapshot
 
 ```ts
-import type { CheckpointSnapshot } from '@noetic/core';
+import type { CheckpointSnapshot } from '@noetic-tools/core';
 
 interface CheckpointSnapshot {
   schemaVersion: 1;
@@ -188,7 +188,7 @@ Switch a specific spawn to run in its own OS child by passing a local adapter as
 
 ```ts
 import { createLocalSubprocessAdapter } from '@noetic/platform-node';
-import { createFileStorage } from '@noetic/core';
+import { createFileStorage } from '@noetic-tools/core';
 
 const localAdapter = createLocalSubprocessAdapter({
   storage: createFileStorage({

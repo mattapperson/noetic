@@ -19,8 +19,8 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ToolExecutionContext } from '@noetic/core';
-import { createDetachedSignal } from '@noetic/core';
+import type { ToolExecutionContext } from '@noetic-tools/core';
+import { createDetachedSignal } from '@noetic-tools/core';
 import { listMilestones } from '../../src/tasks/runtime/hierarchy/store.js';
 import type { PlannerOutcome } from '../../src/tasks/runtime/planner-tools.js';
 import {

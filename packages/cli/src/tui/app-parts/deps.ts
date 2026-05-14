@@ -15,5 +15,5 @@ export type {
   PlanState,
   ShellAdapter,
   StreamEvent,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 export { createLocalShellAdapter } from '@noetic/platform-node';

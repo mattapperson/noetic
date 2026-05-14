@@ -1,4 +1,4 @@
-import type { FsAdapter, ShellAdapter } from '@noetic/core';
+import type { FsAdapter, ShellAdapter } from '@noetic-tools/core';
 import { createMirageFsAdapter } from './fs-adapter';
 import { createMirageShellAdapter } from './shell-adapter';
 import type { MirageAdaptersOpts, MirageWorkspace } from './types';

@@ -7,7 +7,7 @@ description: Typed communication channels for inter-step and inter-process messa
 
 ```ts
 import { z } from 'zod';
-import { channel, step } from '@noetic/core';
+import { channel, step } from '@noetic-tools/core';
 
 const notifications = channel('notifications', {
   schema: z.object({ message: z.string(), level: z.enum(['info', 'warn', 'error']) }),
@@ -35,7 +35,7 @@ Use the `channel()` builder to define a channel. Every channel has a name, a Zod
 
 ```ts
 import { z } from 'zod';
-import { channel } from '@noetic/core';
+import { channel } from '@noetic-tools/core';
 
 const progress = channel('progress', {
   schema: z.number().min(0).max(100),
@@ -199,7 +199,7 @@ A typical human-in-the-loop pattern:
 
 ```ts
 import { z } from 'zod';
-import { channel, step, loop, until } from '@noetic/core';
+import { channel, step, loop, until } from '@noetic-tools/core';
 
 const approval = channel('approval', {
   schema: z.enum(['approve', 'reject']),

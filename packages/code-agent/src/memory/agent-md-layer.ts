@@ -6,8 +6,8 @@
  * that instruction files establish context before runtime observations do.
  */
 
-import type { MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 export interface AgentInstructionResult {
   text: string;

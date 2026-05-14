@@ -127,7 +127,7 @@
     }
   },
   "dependencies": {
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
     "@noetic/platform-node": "workspace:*",
     "diff": "7.0.0",
     "glob": "11.0.3",

@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { createInMemoryStorage } from '@noetic/core';
+import { createInMemoryStorage } from '@noetic-tools/core';
 import type {
   CreateLocalSubprocessAdapterOptions,
   ProcessSignaller,

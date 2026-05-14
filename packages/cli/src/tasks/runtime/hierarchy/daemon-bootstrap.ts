@@ -29,7 +29,7 @@ import {
 } from '@noetic/code-agent/tasks/ipc-node';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
-import type { AgentHarness, StorageAdapter, SubprocessAdapter } from '@noetic/core';
+import type { AgentHarness, StorageAdapter, SubprocessAdapter } from '@noetic-tools/core';
 import { createFileStorage, createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 import { createLocalSubprocessAdapter } from '@noetic/platform-node';
 import { defaultSignaller } from '../agent-ci-control.js';

@@ -6,11 +6,11 @@
  * passed through as `unknown` because the core `Item` / `StreamEvent` types
  * are open-ended tagged unions whose extension shapes the protocol layer
  * doesn't own. Consumers cast to the core types — both sides of the socket
- * share the same `@noetic/core` version, so the wire encoding is a faithful
+ * share the same `@noetic-tools/core` version, so the wire encoding is a faithful
  * JSON round-trip of those types.
  */
 
-import { AskUserInputSchema, AskUserOutputSchema } from '@noetic/core';
+import { AskUserInputSchema, AskUserOutputSchema } from '@noetic-tools/core';
 import { z } from 'zod';
 
 //#region Constants

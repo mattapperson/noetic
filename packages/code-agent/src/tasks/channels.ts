@@ -8,7 +8,7 @@
  * the message-bus surface easy to audit.
  */
 
-import { channel } from '@noetic/core';
+import { channel } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { FeatureLoopState } from './hierarchy/schemas.js';

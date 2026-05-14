@@ -24,8 +24,8 @@ Routes input to the most semantically similar case using cosine similarity on em
 **Simple form** -- string keys map directly to steps:
 
 ```ts
-import { branch, semanticSwitch, step } from '@noetic/core';
-import type { EmbedFn } from '@noetic/core';
+import { branch, semanticSwitch, step } from '@noetic-tools/core';
+import type { EmbedFn } from '@noetic-tools/core';
 
 declare const embed: EmbedFn;
 
@@ -81,7 +81,7 @@ When no case exceeds the threshold and no `default` is provided, the route retur
 Evaluates condition clauses in order and returns the first match. Built from [`when`](#when) and [`otherwise`](#otherwise) clauses.
 
 ```ts
-import { branch, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic/core';
+import { branch, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
 const router = branch({
   id: 'smart-router',
@@ -102,7 +102,7 @@ Returns `null` if no `when` matches and no `otherwise` is present.
 Creates a conditional clause. The condition is evaluated; if `true`, the associated step is selected.
 
 ```ts
-import { when } from '@noetic/core';
+import { when } from '@noetic-tools/core';
 
 when(condition, step);
 ```
@@ -117,7 +117,7 @@ when(condition, step);
 Creates a fallback clause. Used as the last argument to `semanticRoute`.
 
 ```ts
-import { otherwise } from '@noetic/core';
+import { otherwise } from '@noetic-tools/core';
 
 otherwise(fallbackStep);
 ```
@@ -131,7 +131,7 @@ Returns `true` when the input is semantically similar to a label (or set of labe
 **Simple form:**
 
 ```ts
-import { embeddingMatch } from '@noetic/core';
+import { embeddingMatch } from '@noetic-tools/core';
 
 const isGreeting = embeddingMatch(embed, 'greeting or salutation', 0.8);
 ```
@@ -161,7 +161,7 @@ const isTechSupport = embeddingMatch({
 Uses an LLM as a boolean classifier. The model receives the input and answers a yes/no question with structured JSON output.
 
 ```ts
-import { aiCondition } from '@noetic/core';
+import { aiCondition } from '@noetic-tools/core';
 
 const isUrgent = aiCondition({
   model: 'gpt-4o-mini',
@@ -183,7 +183,7 @@ The model is called with `temperature: 0` and a JSON response schema (`{ answer:
 Logical OR -- returns `true` if **any** condition is true. Short-circuits on the first `true`.
 
 ```ts
-import { anyCondition, embeddingMatch, aiCondition } from '@noetic/core';
+import { anyCondition, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
 const isGreetingOrUrgent = anyCondition(
   embeddingMatch(embed, 'greeting', 0.8),
@@ -196,7 +196,7 @@ const isGreetingOrUrgent = anyCondition(
 Logical AND -- returns `true` if **all** conditions are true. Short-circuits on the first `false`.
 
 ```ts
-import { allCondition, embeddingMatch, aiCondition } from '@noetic/core';
+import { allCondition, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
 const isUrgentGreeting = allCondition(
   embeddingMatch(embed, 'greeting', 0.8),
@@ -209,7 +209,7 @@ const isUrgentGreeting = allCondition(
 Any function matching `Condition<I>` works with `when`, `anyCondition`, and `allCondition`:
 
 ```ts
-import type { Condition } from '@noetic/core';
+import type { Condition } from '@noetic-tools/core';
 
 const containsKeyword: Condition<string> = async (input) => {
   return input.toLowerCase().includes('help');

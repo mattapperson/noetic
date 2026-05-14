@@ -1,4 +1,4 @@
-import type { InputMessageItem, Item, MessageItem } from '@noetic/core';
+import type { InputMessageItem, MessageItem } from '@noetic-tools/core';
 import type { Message } from 'chat';
 
 //#region Helper
@@ -47,8 +47,10 @@ function toUserItem(msg: Message): InputMessageItem {
  *
  * @public
  */
-export function toNoeticItems(messages: ReadonlyArray<Message>): Item[] {
-  const items: Item[] = [];
+export function toNoeticItems(
+  messages: ReadonlyArray<Message>,
+): Array<InputMessageItem | MessageItem> {
+  const items: Array<InputMessageItem | MessageItem> = [];
 
   for (const msg of messages) {
     if (!msg.text || msg.text.trim() === '') {

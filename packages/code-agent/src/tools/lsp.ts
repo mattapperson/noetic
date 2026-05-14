@@ -5,8 +5,8 @@
  * correct language server.
  */
 
-import type { Tool } from '@noetic/core';
-import { getToolCwd, tool } from '@noetic/core';
+import type { Tool } from '@noetic-tools/core';
+import { getToolCwd, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import {

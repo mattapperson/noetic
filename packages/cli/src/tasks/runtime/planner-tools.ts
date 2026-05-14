@@ -17,7 +17,7 @@
  */
 
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import type { DetachedSignal, Tool } from '@noetic/core';
+import type { DetachedSignal, Tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { CommitFailureArgs, CommitSuccessArgs } from './hierarchy/planner-flow.js';
 import { commitFailure, commitSuccess } from './hierarchy/planner-flow.js';

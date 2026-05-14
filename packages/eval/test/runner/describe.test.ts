@@ -1,5 +1,5 @@
 import * as bun from 'bun:test';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 import { describe } from '../../src/runner/describe';
 import { it } from '../../src/runner/it';
 import { clearSuites, getSuites } from '../../src/runner/registry';

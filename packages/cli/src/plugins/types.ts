@@ -1,5 +1,5 @@
 import type { AgentPlugin, AgentPluginContext } from '@noetic/code-agent/plugins';
-import type { LastLayerUsage } from '@noetic/core';
+import type { LastLayerUsage } from '@noetic-tools/core';
 import type { ReactNode } from 'react';
 import type { Command } from '../commands/types.js';
 

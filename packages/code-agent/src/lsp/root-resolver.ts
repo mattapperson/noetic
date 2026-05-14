@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, parse } from 'node:path';
 
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 
 //#region Helpers
 

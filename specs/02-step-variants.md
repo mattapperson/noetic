@@ -122,7 +122,7 @@ interface LlmProviderConfig {
 The agent harness constructs and manages the OpenRouter client internally. There is no user-facing `CallModelFn` — the adapter seam is the `LlmProviderConfig` on the harness.
 
 ```typescript
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import type { ToolExecutionContext } from '@noetic/core';
-import { AgentHarness } from '@noetic/core';
+import type { ToolExecutionContext } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
 import type { z } from 'zod';
 
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';

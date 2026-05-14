@@ -16,7 +16,7 @@ Validates architectural rules defined in `.sentrux/rules.toml` via the `plugin:s
    - For a handful of representative violations (no more than 5, highest-signal first), read the offending file and 20 lines of context around the import statement.
    - Suggest a fix:
      - **Memory → interpreter/runtime** (tree-shakability): offer to move the referenced helper inline into `packages/core/src/memory/` or duplicate a narrow utility to avoid pulling the larger module.
-     - **Sibling-package imports** (e.g. eval → code-agent): offer to move the shared code into `@noetic/core` or refactor the caller to not need it.
+     - **Sibling-package imports** (e.g. eval → code-agent): offer to move the shared code into `@noetic-tools/core` or refactor the caller to not need it.
      - **Layer_direction drift within cli/**: offer to invert the dependency (e.g. extract the shared type into `cli-foundations`) or accept the drift and adjust `specs/22-cli-architecture.md` if the intent has changed.
 4. Group the report by `reason` field so the user sees the architectural theme, not just file pairs.
 

@@ -90,7 +90,7 @@ export default {
 };
 ```
 
-Other embedders of `@noetic/core` keep the raw shell semantics unless they explicitly enable rtk.
+Other embedders of `@noetic-tools/core` keep the raw shell semantics unless they explicitly enable rtk.
 
 ---
 
@@ -665,8 +665,8 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 | `DistributedAgentHarness`  | Multi-node — A2A, worker pools, cloud functions                 | Delegates to the distributed backend | Translates to network messages |
 
 ```typescript
-import { setHarness, AgentHarness } from '@noetic/core';
-import { workingMemory, semanticRecall } from '@noetic/core';
+import { setHarness, AgentHarness } from '@noetic-tools/core';
+import { workingMemory, semanticRecall } from '@noetic-tools/core';
 
 setHarness(new AgentHarness({
   name: 'my-agent',
@@ -699,7 +699,7 @@ Recommended pattern:
 
 ```ts
 // entry.ts — first file evaluated
-import { setHarness, AgentHarness } from '@noetic/core';
+import { setHarness, AgentHarness } from '@noetic-tools/core';
 setHarness(new AgentHarness({
   name: 'my-agent',
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
@@ -715,7 +715,7 @@ await runAgent();
 Bun runs each test file in a fresh module environment. Call `setHarness()` at module scope (top of the test file) — it will execute once per file and will not conflict across files.
 
 ```ts
-import { setHarness, AgentHarness } from '@noetic/core';
+import { setHarness, AgentHarness } from '@noetic-tools/core';
 
 setHarness(new AgentHarness({ name: 'test', params: {} }));
 

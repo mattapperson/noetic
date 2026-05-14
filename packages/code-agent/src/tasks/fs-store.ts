@@ -1,4 +1,4 @@
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 
 import { isEnoent } from './_fs-errors.js';
 import * as path from './path-utils.js';

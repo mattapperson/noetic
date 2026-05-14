@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { AgentHarness, isNoeticError } from '@noetic/core';
+import { AgentHarness, isNoeticError } from '@noetic-tools/core';
 
 import {
   BudgetExhaustedError,

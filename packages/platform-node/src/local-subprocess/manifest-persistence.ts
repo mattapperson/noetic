@@ -17,7 +17,7 @@ import type {
   StorageAdapter,
   SubprocessHandle,
   SubprocessHandleMetadata,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import type { ProcessSignaller } from './types';
 
 //#region Manifest types

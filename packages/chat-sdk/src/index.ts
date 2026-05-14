@@ -1,6 +1,6 @@
 // Re-export everything from chat-sdk.
 // Note: chat-sdk exports its own StreamEvent type; users needing Noetic's
-// StreamEvent should import it from @noetic/core directly.
+// StreamEvent should import it from @noetic-tools/core directly.
 export * from 'chat';
 
 // Noetic adapter exports

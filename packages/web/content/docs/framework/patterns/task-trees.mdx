@@ -59,7 +59,7 @@ interface PlanConstraints {
 ## Example
 
 ```ts
-import { compilePlan, react } from '@noetic/core';
+import { compilePlan, react } from '@noetic-tools/core';
 
 const agents = {
   researcher: (prompt: string) => react({
@@ -112,7 +112,7 @@ const step = compilePlan(plan, agents);
 The `PlanNodeSchema` Zod schema is also exported, so you can have an LLM generate plans and validate them at runtime:
 
 ```ts
-import { PlanNodeSchema } from '@noetic/core';
+import { PlanNodeSchema } from '@noetic-tools/core';
 
 const plan = PlanNodeSchema.parse(llmOutput);
 ```

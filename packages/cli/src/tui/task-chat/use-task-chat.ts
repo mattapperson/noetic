@@ -9,8 +9,8 @@
  * `submitAskUser` / `cancelAskUser`) so the TUI can render the modal.
  */
 
-import type { AskUserOutput, StreamingItem } from '@noetic/core';
-import { ItemSchema } from '@noetic/core';
+import type { AskUserOutput, StreamingItem } from '@noetic-tools/core';
+import { ItemSchema } from '@noetic-tools/core';
 import type { AskUserPendingFrame, AskUserStreamEvent } from '@noetic/platform-node';
 import { AgentIpcClient } from '@noetic/platform-node';
 import { useEffect, useRef, useState } from 'react';

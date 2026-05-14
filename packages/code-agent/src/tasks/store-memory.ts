@@ -1,4 +1,4 @@
-import type { SubprocessHandle } from '@noetic/core';
+import type { SubprocessHandle } from '@noetic-tools/core';
 import type { Event, LogEntry, Task } from './schemas.js';
 import {
   AutopilotState,

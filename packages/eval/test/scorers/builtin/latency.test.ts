@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { AgentHarness } from '@noetic/core';
-import { ContextImpl, SpanImpl } from '@noetic/core/internal/test';
+import { AgentHarness } from '@noetic-tools/core';
+import { ContextImpl, SpanImpl } from '@noetic-tools/core/internal/test';
 import { latency } from '../../../src/scorers/builtin/latency';
 import type { EvalExecution, ScoreResult, ScorerFn } from '../../../src/scorers/types';
 

@@ -4,8 +4,8 @@
  * Ported from: https://github.com/OpenRouterTeam/sky
  */
 
-import type { FsAdapter, Tool } from '@noetic/core';
-import { getToolCwd, tool } from '@noetic/core';
+import type { FsAdapter, Tool } from '@noetic-tools/core';
+import { getToolCwd, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import {
   applyReplacement,

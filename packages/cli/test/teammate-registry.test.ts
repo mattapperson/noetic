@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { DetachedHandle } from '@noetic/core';
+import type { DetachedHandle } from '@noetic-tools/core';
 import { TeammateRegistry } from '../src/agents/registry-runtime.js';
 
 function makeFakeHandle(id: string): DetachedHandle<string> {

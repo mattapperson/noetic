@@ -32,7 +32,7 @@
  * whose seq becomes `Math.max(headSeq, scannedSeq)`.
  */
 
-import type { StorageAdapter } from '@noetic/core';
+import type { StorageAdapter } from '@noetic-tools/core';
 
 //#region Types
 

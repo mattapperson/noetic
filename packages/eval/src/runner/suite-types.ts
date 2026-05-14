@@ -1,4 +1,4 @@
-import type { Step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
 
 import type { EvalSuiteOptions } from '../types/eval';
 import type { EvalContext } from './eval-context';

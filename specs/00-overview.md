@@ -19,14 +19,14 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Packages
 
 ```
-@noetic/core  ←  @noetic/eval
+@noetic-tools/core  ←  @noetic/eval
       ↑
       ├── @noetic/platform-node
       ├── @noetic/platform-browser
       └── @noetic/mirage
 ```
 
-- **`@noetic/core`** — Step primitives, execution infrastructure, and the memory system. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
+- **`@noetic-tools/core`** — Step primitives, execution infrastructure, and the memory system. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic-tools/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
 
 - **`@noetic/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic/cli`, `@noetic/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
@@ -34,11 +34,11 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic/mirage`** — Runtime-neutral bridge that wraps a user-constructed Mirage `Workspace` (from `@struktoai/mirage-node` or `@struktoai/mirage-browser`) in `FsAdapter` + `ShellAdapter` implementations. Declares all three Mirage packages as optional peers. See `24-mirage-resources`.
 
-- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
+- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
 
 ## Architecture
 
-`@noetic/core` is structured around three layers:
+`@noetic-tools/core` is structured around three layers:
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 
@@ -73,7 +73,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Dependency Graph
 
 ```
-── @noetic/core ────────────────────────────────────────────────
+── @noetic-tools/core ────────────────────────────────────────────────
                     01-step-type
                    /    |    \
           02-variants 03-flow  05-loop

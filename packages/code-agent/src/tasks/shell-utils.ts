@@ -11,7 +11,7 @@
  *      branch-on-result code at the call site stays flat.
  */
 
-import type { ShellAdapter, ShellExecResult } from '@noetic/core';
+import type { ShellAdapter, ShellExecResult } from '@noetic-tools/core';
 
 import { isErrorWithCode } from './_fs-errors.js';
 

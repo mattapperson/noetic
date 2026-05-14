@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { FsAdapter, FsStats } from '@noetic/core';
+import type { FsAdapter, FsStats } from '@noetic-tools/core';
 
 //#region Stat helper
 

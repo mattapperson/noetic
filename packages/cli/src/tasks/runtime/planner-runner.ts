@@ -27,13 +27,13 @@ import {
   saveTask,
   taskDirPaths,
 } from '@noetic/code-agent/tasks/store/fs-node';
-import type { Item } from '@noetic/core';
+import type { Item } from '@noetic-tools/core';
 import {
   createDetachedSignal,
   createNudgeMessage,
   createStallNudgeHook,
   runnableLoop,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import {
   AgentIpcServer,
   createLocalFsAdapter,

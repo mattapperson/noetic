@@ -6,7 +6,7 @@
  * tool call and adds the skill to activatedSkills.
  */
 
-import { tool } from '@noetic/core';
+import { tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import type { SkillDefinition } from '../skills/types.js';

@@ -46,6 +46,7 @@ const agentPaths = [
   join(__dirname, '../node_modules/@openrouter/agent'),
   join(__dirname, '../node_modules/.bun/@openrouter+agent@0.3.0/node_modules/@openrouter/agent'),
   join(__dirname, '../node_modules/.bun/@openrouter+agent@0.3.1/node_modules/@openrouter/agent'),
+  join(__dirname, '../node_modules/.bun/@openrouter+agent@0.6.0/node_modules/@openrouter/agent'),
 ];
 
 for (const agentPath of agentPaths) {

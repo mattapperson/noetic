@@ -36,7 +36,7 @@ Factory function that creates an `EmbedFn` implementation backed by the `@openro
 Creates an `EmbedFn` that calls the OpenRouter embeddings endpoint.
 
 ```ts
-import { createOpenRouterEmbed } from '@noetic/core';
+import { createOpenRouterEmbed } from '@noetic-tools/core';
 
 const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 ```
@@ -49,7 +49,7 @@ const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 ### Usage with Semantic Routing
 
 ```ts
-import { branch, createOpenRouterEmbed, semanticSwitch, step } from '@noetic/core';
+import { branch, createOpenRouterEmbed, semanticSwitch, step } from '@noetic-tools/core';
 
 const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 

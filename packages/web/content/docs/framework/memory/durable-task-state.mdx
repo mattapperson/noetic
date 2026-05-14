@@ -15,7 +15,7 @@ Durable Task State tracks checkpoints, file artifacts, and arbitrary key-value d
 ## Usage
 
 ```ts
-import { durableTaskState } from '@noetic/core';
+import { durableTaskState } from '@noetic-tools/core';
 
 const layer = durableTaskState({
   baseDir: './task-output',
@@ -107,7 +107,7 @@ You can use the built-in `AgentHarness` for development or implement a persisten
 ## Example: Task Recovery
 
 ```ts
-import { durableTaskState } from '@noetic/core';
+import { durableTaskState } from '@noetic-tools/core';
 
 const layer = durableTaskState();
 

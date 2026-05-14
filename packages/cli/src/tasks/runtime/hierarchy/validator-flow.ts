@@ -23,8 +23,8 @@ import { featureLoopStateChan, validatorRequestChan } from '@noetic/code-agent/t
 import type { Feature } from '@noetic/code-agent/tasks/schema';
 import { FeatureLoopState } from '@noetic/code-agent/tasks/schema';
 import { tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ContextMemory, Step } from '@noetic/core';
-import { every, step } from '@noetic/core';
+import type { ContextMemory, Step } from '@noetic-tools/core';
+import { every, step } from '@noetic-tools/core';
 import * as log from '../../../util/log.js';
 import type { StructuredTask, ValidatorJobDeps } from './validator-job.js';
 import { gatherStructuredTasks, runFeatureValidation } from './validator-job.js';

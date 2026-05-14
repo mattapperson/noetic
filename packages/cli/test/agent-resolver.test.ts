@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Tool } from '@noetic/core';
-import { tool } from '@noetic/core';
+import type { Tool } from '@noetic-tools/core';
+import { tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { SkillDefinition } from '../src/skills/types.js';
 import { SkillSource } from '../src/skills/types.js';

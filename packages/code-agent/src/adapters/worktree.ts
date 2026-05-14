@@ -10,7 +10,7 @@
  */
 
 import * as path from 'node:path';
-import type { ShellAdapter, ShellExecResult } from '@noetic/core';
+import type { ShellAdapter, ShellExecResult } from '@noetic-tools/core';
 import {
   worktreeAddFailed,
   worktreeHookFailed,

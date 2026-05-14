@@ -5,7 +5,7 @@
  * used by both the harness and the UI.
  */
 
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import type { PluginContextBuilder } from '../plugins/context.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 

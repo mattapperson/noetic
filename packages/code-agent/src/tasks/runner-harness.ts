@@ -3,7 +3,7 @@
  * the core `runnableLoop` primitive.
  *
  * Since Phase B, the generic "single-shot deferred" and "seed + drive one
- * turn" primitives live in `@noetic/core` as `createDetachedSignal` and
+ * turn" primitives live in `@noetic-tools/core` as `createDetachedSignal` and
  * `runnableLoop`. What remains here is task-domain:
  *
  *   - `createRunnerHarness(opts)` builds a chat-shaped `AgentHarness` via
@@ -37,13 +37,13 @@ import type {
   RunnableLoopHarness,
   ShellAdapter,
   Tool,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import {
   createDetachedSignal,
   createNudgeMessage,
   createStallNudgeHook,
   runnableLoop,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 
 import type { AskUserService } from '../ask-user-service.js';
 import { createCodeAgent } from '../index.js';
@@ -60,7 +60,7 @@ export type RunnerRole = 'planner' | 'implementer' | 'validator';
  * Deferred signal a role's terminal tool resolves to end the runner loop.
  * Kept as a name alias over the canonical `DetachedSignal` so existing
  * callers keep compiling; new code should prefer `DetachedSignal` from
- * `@noetic/core`.
+ * `@noetic-tools/core`.
  */
 export type RunnerSignal<TOutcome> = DetachedSignal<TOutcome>;
 

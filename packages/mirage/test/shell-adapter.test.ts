@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { TIMEOUT_ERROR_PREFIX } from '@noetic/core';
+import { TIMEOUT_ERROR_PREFIX } from '@noetic-tools/core';
 import { createMirageShellAdapter } from '../src/shell-adapter';
 import type { MirageExecuteOptions, MirageExecuteResult, MirageWorkspace } from '../src/types';
 

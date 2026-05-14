@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 /**
- * One-off rewrite: split `@noetic/core` imports that co-reference Node-only
- * adapter symbols into (a) the remaining `@noetic/core` import and (b) a new
- * `@noetic/platform-node` import. Also fixes bare `from '@noetic/core'`
+ * One-off rewrite: split `@noetic-tools/core` imports that co-reference Node-only
+ * adapter symbols into (a) the remaining `@noetic-tools/core` import and (b) a new
+ * `@noetic/platform-node` import. Also fixes bare `from '@noetic-tools/core'`
  * imports that only referenced Node-only symbols.
  *
  * Removed here: createLocalFsAdapter, createLocalShellAdapter,
@@ -64,7 +64,7 @@ const PLATFORM_NODE_NAMES = new Set([
   'CreateLocalSubprocessAdapterOptions',
 ]);
 
-// Match: import { A, type B, C } from '@noetic/core';
+// Match: import { A, type B, C } from '@noetic-tools/core';
 // Capture the specifier list (group 1) so we can split it.
 const importRe = /import\s+\{([^}]+)\}\s+from\s+['"]@noetic\/core['"];?/g;
 
@@ -99,7 +99,7 @@ function rewriteFile(path: string): boolean {
     changed = true;
     const parts: string[] = [];
     if (stay.length > 0) {
-      parts.push(`import { ${stay.join(', ')} } from '@noetic/core';`);
+      parts.push(`import { ${stay.join(', ')} } from '@noetic-tools/core';`);
     }
     parts.push(`import { ${move.join(', ')} } from '@noetic/platform-node';`);
     return parts.join('\n');
@@ -110,9 +110,9 @@ function rewriteFile(path: string): boolean {
   return changed;
 }
 
-// Find every ts/tsx in packages/cli + packages/code-agent that imports @noetic/core.
+// Find every ts/tsx in packages/cli + packages/code-agent that imports @noetic-tools/core.
 const filesOutput = execSync(
-  `grep -rl "from '@noetic/core'" packages/cli packages/code-agent --include="*.ts" --include="*.tsx"`,
+  `grep -rl "from '@noetic-tools/core'" packages/cli packages/code-agent --include="*.ts" --include="*.tsx"`,
   {
     encoding: 'utf-8',
   },

@@ -9,8 +9,8 @@
  * implementations.
  */
 
-import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
-import { createInMemoryFsAdapter, createInMemoryShellAdapter, tool } from '@noetic/core/portable';
+import type { FsAdapter, ShellAdapter, Tool } from '@noetic-tools/core';
+import { createInMemoryFsAdapter, createInMemoryShellAdapter, tool } from '@noetic-tools/core/portable';
 import { z } from 'zod';
 import type { LspService } from '../lsp/service.js';
 import { createUnsupportedResult, detectRuntimeCapabilities } from '../runtime-capabilities.js';

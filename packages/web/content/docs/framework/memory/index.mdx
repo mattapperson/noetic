@@ -146,7 +146,7 @@ interface MemoryHooks<TState = unknown> {
 The standalone `assembleView()` function (from `memory/projector.ts`) merges all layer `recall` outputs into a single list of `Item` objects, ordered by slot number. This list is prepended to the conversation history before the LLM call.
 
 ```ts
-import { assembleView } from '@noetic/core';
+import { assembleView } from '@noetic-tools/core';
 
 const items = await assembleView(layers, userInput, ctx);
 // items contains memory items from all layers, sorted by slot
@@ -177,7 +177,7 @@ Layers can expose typed data and functions via the `provides` field. Provided en
 Use the `memory()` builder and `InferMemory<>` utility type for compile-time type safety:
 
 ```ts
-import { memory, workingMemory, type InferMemory } from '@noetic/core';
+import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
 
 const mem = memory([workingMemory()]);
 type Mem = InferMemory<typeof mem>;

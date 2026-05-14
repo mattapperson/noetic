@@ -19,8 +19,8 @@ Unlike other memory layers that operate on structured state, Semantic Recall int
 Noetic does not ship a built-in vector store. Instead, you implement the `MemoryHooks` interface with your preferred vector database. Here is the general shape:
 
 ```ts
-import type { MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 interface VectorStore {
   upsert(id: string, embedding: number[], text: string, metadata?: Record<string, unknown>): Promise<void>;

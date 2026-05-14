@@ -13,7 +13,7 @@ import type {
   InputMessageItem,
   Item,
   MessageItem,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 
 //#region Typeguards
 

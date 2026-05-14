@@ -9,7 +9,7 @@
  * session-scoped `effectiveCwd` held by the caller.
  */
 
-import type { ShellAdapter } from '@noetic/core';
+import type { ShellAdapter } from '@noetic-tools/core';
 import type { ErrorEntry, SystemEntry } from './item-utils';
 
 export type { CdFailure, CdResult, CdSuccess, HandleCdArgs } from '../tools/cd-helper';

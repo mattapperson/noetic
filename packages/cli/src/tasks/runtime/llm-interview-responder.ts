@@ -3,7 +3,7 @@
  *
  * The TUI's planner uses `AskUserService` to render multiple-choice
  * questions; the daemon's planner has no human in the loop, so the
- * `interview()` pattern (`@noetic/core/patterns/interview`) needs an
+ * `interview()` pattern (`@noetic-tools/core/patterns/interview`) needs an
  * LLM to answer on the user's behalf using only the manual task's
  * title + description as context.
  *
@@ -26,8 +26,8 @@
  * doesn't burn tokens indefinitely.
  */
 
-import type { Context, ContextMemory, InterviewQuestionAnswer, Step } from '@noetic/core';
-import { any, isNoeticError, loop, step, until } from '@noetic/core';
+import type { Context, ContextMemory, InterviewQuestionAnswer, Step } from '@noetic-tools/core';
+import { any, isNoeticError, loop, step, until } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import type { InterviewQuestionEnvelope } from './hierarchy/live-interview.js';

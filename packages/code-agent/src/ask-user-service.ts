@@ -13,8 +13,8 @@
  * runtime error.
  */
 
-import type { AskUserInput, AskUserOutput } from '@noetic/core';
-import { NoeticErrorImpl } from '@noetic/core';
+import type { AskUserInput, AskUserOutput } from '@noetic-tools/core';
+import { NoeticErrorImpl } from '@noetic-tools/core';
 
 //#region Types
 

@@ -5,7 +5,7 @@ description: noetic — the interactive terminal coding agent built on the frame
 
 `noetic` is an interactive coding agent that runs in your terminal. You drop a `noetic.config.ts` in your repo, run `noetic`, and chat with an LLM that has read/write/edit/bash/grep/find/ls/lsp tools, plus a sub-agent system, persistent sessions, and a background daemon for long-running task automation.
 
-It is built on top of `@noetic/core` — every long-lived behavior (the autopilot loop, validator queue, worktree reaper, file-watcher reconciler) is a `Step` composition. You can extend it without forking by writing a plugin.
+It is built on top of `@noetic-tools/core` — every long-lived behavior (the autopilot loop, validator queue, worktree reaper, file-watcher reconciler) is a `Step` composition. You can extend it without forking by writing a plugin.
 
 ## Install
 
@@ -45,7 +45,7 @@ See [Configuration](/docs/code-agent-cli/configuration) for the full schema.
 Three layers stack to make up a session:
 
 1. **The TUI** (Ink + React) renders the chat, autocomplete, slash commands, and modals (ask-user, plan approval, model picker, session resume).
-2. **The harness** is a [`AgentHarness`](/docs/framework/runtime) from `@noetic/core` configured with a tool pool, memory layers, skills, and an OpenRouter LLM client. Each user turn drives one harness execution.
+2. **The harness** is a [`AgentHarness`](/docs/framework/runtime) from `@noetic-tools/core` configured with a tool pool, memory layers, skills, and an OpenRouter LLM client. Each user turn drives one harness execution.
 3. **The daemon** (optional) is a separate long-lived process that runs the [task system](/docs/code-agent-cli/tasks) — autopilot, validator, health, reconcile flows — alongside your interactive sessions.
 
 ## What you can configure

@@ -4,7 +4,7 @@ import type {
   FunctionCallOutputItem,
   InputMessageItem,
   Item,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 
 import { stripUnresolvedToolCalls } from '../src/sessions/strip-unresolved.js';
 

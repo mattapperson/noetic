@@ -13,7 +13,7 @@
  *     injected alongside the triggering input item(s).
  */
 
-import type { ExecutionContext, ItemLog } from '@noetic/core';
+import type { ExecutionContext, ItemLog } from '@noetic-tools/core';
 
 //#region State (used by the layer; exported so triggers can type their context)
 

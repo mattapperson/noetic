@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic/core';
+import type { ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic-tools/core';
 
 import { isPlainCdCommand } from '../src/tools/cd-helper.js';
 import {

@@ -1,6 +1,6 @@
 import type { AxGEPAAdapter, AxGEPAEvaluationBatch } from '@ax-llm/ax';
 import { AxGEPA, ai, ax } from '@ax-llm/ax';
-import type { Step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
 
 import type { Candidate, OptimizableField, OptimizationResult } from '../types/optimizer';
 import { averageNumbers } from '../utils/scores';

@@ -8,7 +8,7 @@
  * Ported from ~/Desktop/claude-code-main/src/components/permissions/AskUserQuestionPermissionRequest/AskUserQuestionPermissionRequest.tsx.
  */
 
-import type { AskUserAnnotation, AskUserInput, AskUserOutput, AskUserQuestion } from '@noetic/core';
+import type { AskUserAnnotation, AskUserInput, AskUserOutput, AskUserQuestion } from '@noetic-tools/core';
 import { Box, Text, useStdout } from 'ink';
 import { useMemo, useState } from 'react';
 import { useTheme } from '../theme.js';

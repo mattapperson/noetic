@@ -11,19 +11,19 @@ import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 const INSTALL_COMMANDS = [
   {
     prefix: '$ bun add ',
-    package: '@noetic/core',
+    package: '@noetic-tools/core',
   },
   {
     prefix: '$ npm install ',
-    package: '@noetic/core',
+    package: '@noetic-tools/core',
   },
   {
     prefix: '$ pnpm add ',
-    package: '@noetic/core',
+    package: '@noetic-tools/core',
   },
 ] as const;
 
-const HERO_CODE = `import { AgentHarness, react } from '@noetic/core';
+const HERO_CODE = `import { AgentHarness, react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'gpt-4o',

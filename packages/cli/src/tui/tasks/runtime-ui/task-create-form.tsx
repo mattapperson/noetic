@@ -25,7 +25,7 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { appendEvent, saveTask, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type React from 'react';

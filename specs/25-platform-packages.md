@@ -9,7 +9,7 @@
 
 ## Overview
 
-`@noetic/core` is the minimal, runtime-agnostic package. It defines the `FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, and `StorageAdapter` contracts, and ships **in-memory adapters only** as built-in implementations. Every concrete backend that requires a specific runtime — Node's `fs/promises`, `child_process`, unix sockets, IPC framing, or browser APIs like OPFS — lives in a platform package.
+`@noetic-tools/core` is the minimal, runtime-agnostic package. It defines the `FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, and `StorageAdapter` contracts, and ships **in-memory adapters only** as built-in implementations. Every concrete backend that requires a specific runtime — Node's `fs/promises`, `child_process`, unix sockets, IPC framing, or browser APIs like OPFS — lives in a platform package.
 
 Two platform packages ship:
 
@@ -22,17 +22,17 @@ The Mirage-backed virtual filesystem is **not** in either platform package — i
 
 ## Motivation
 
-Prior to this split, Node-only code lived inside `@noetic/core` under the `@noetic/core/adapters/node` subpath export. Browser consumers either imported that subpath (and paid for `node:child_process` bundler shims) or hand-rolled their own adapters. Each package now carries exactly the deps it needs:
+Prior to this split, Node-only code lived inside `@noetic-tools/core` under the `@noetic-tools/core/adapters/node` subpath export. Browser consumers either imported that subpath (and paid for `node:child_process` bundler shims) or hand-rolled their own adapters. Each package now carries exactly the deps it needs:
 
-- `@noetic/core` — zero runtime-specific deps, zero third-party peers beyond `zod` and the OpenRouter SDK. Safe in every environment. Exports only contracts, in-memory adapters, and the agent harness.
+- `@noetic-tools/core` — zero runtime-specific deps, zero third-party peers beyond `zod` and the OpenRouter SDK. Safe in every environment. Exports only contracts, in-memory adapters, and the agent harness.
 - `@noetic/platform-node` — Node APIs only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`). No Mirage peer — the Mirage bridge lives in `@noetic/mirage`.
 - `@noetic/platform-browser` — web platform APIs only (`navigator.storage`, `BroadcastChannel`, `fetch`); no `node:*` imports. No Mirage peer — the bridge lives in `@noetic/mirage`.
 
-Consumers opt into the surface they want. Test suites that need the Node subprocess adapter add `@noetic/platform-node` to their devDependencies; code-agent and cli (which are Node-only by nature) depend on it directly. Browser apps and edge workers depend on `@noetic/platform-browser`. Runtime-agnostic consumers (eval, chat-sdk) stay on `@noetic/core` alone and inject whichever adapters the caller supplies.
+Consumers opt into the surface they want. Test suites that need the Node subprocess adapter add `@noetic/platform-node` to their devDependencies; code-agent and cli (which are Node-only by nature) depend on it directly. Browser apps and edge workers depend on `@noetic/platform-browser`. Runtime-agnostic consumers (eval, chat-sdk) stay on `@noetic-tools/core` alone and inject whichever adapters the caller supplies.
 
 ## Package Layout
 
-### `@noetic/core`
+### `@noetic-tools/core`
 
 Only in-memory adapter implementations ship in core. Everything else is a contract or part of the agent harness / interpreter / memory stack.
 
@@ -95,17 +95,17 @@ export {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemorySubprocessAdapter,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 ```
 
 Peer dependencies: none. Runtime imports: browser platform APIs only. No `node:*` imports — bundlers targeting browsers succeed without polyfills. For a Mirage-backed VFS, install `@noetic/mirage` alongside `@struktoai/mirage-browser`.
 
-### Migrating `@noetic/core/adapters/node`
+### Migrating `@noetic-tools/core/adapters/node`
 
-The existing `@noetic/core/adapters/node` subpath export is removed. Consumers update imports:
+The existing `@noetic-tools/core/adapters/node` subpath export is removed. Consumers update imports:
 
 ```diff
-- import { createLocalFsAdapter } from '@noetic/core/adapters/node';
+- import { createLocalFsAdapter } from '@noetic-tools/core/adapters/node';
 + import { createLocalFsAdapter } from '@noetic/platform-node';
 ```
 
@@ -113,7 +113,7 @@ The existing `@noetic/core/adapters/node` subpath export is removed. Consumers u
 
 ```
 @noetic/plugin-*  ──→  @noetic/cli  ──→  @noetic/code-agent  ──┐
-                                                                ├──→  @noetic/platform-node  ──→  @noetic/core
+                                                                ├──→  @noetic/platform-node  ──→  @noetic-tools/core
                                                                 │                                     ↑
                                                                 └─────────────────────────────────────┘
                                                                                                       ↑
@@ -122,10 +122,10 @@ browser/edge consumer  ──→  @noetic/platform-browser  ──────�
 @noetic/eval, @noetic/chat-sdk  ──────────────────────────────────────────────────────────────────────┘
 ```
 
-- `@noetic/core` has no dependency on either platform package.
-- Platform packages depend only on `@noetic/core` (plus their runtime's built-ins and any declared peers).
+- `@noetic-tools/core` has no dependency on either platform package.
+- Platform packages depend only on `@noetic-tools/core` (plus their runtime's built-ins and any declared peers).
 - Node-only consumers (`@noetic/cli`, `@noetic/code-agent`, `@noetic/plugin-*`) depend on `@noetic/platform-node`.
-- Runtime-agnostic consumers (`@noetic/eval`, `@noetic/chat-sdk`) depend only on `@noetic/core` and inject whichever adapters they need via their API surface.
+- Runtime-agnostic consumers (`@noetic/eval`, `@noetic/chat-sdk`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
 - Browser consumers depend on `@noetic/platform-browser`.
 
 ## Sentrux Rules
@@ -184,11 +184,11 @@ reason = "memory layers are platform-independent; platform packages are platform
 
 ## Migration Path
 
-The split replaces the `@noetic/core/adapters/node` subpath export with `@noetic/platform-node`. There is no transitional shim: callers update their imports in a single pass.
+The split replaces the `@noetic-tools/core/adapters/node` subpath export with `@noetic/platform-node`. There is no transitional shim: callers update their imports in a single pass.
 
 Mechanical migration:
 
-1. Replace `from '@noetic/core/adapters/node'` with `from '@noetic/platform-node'` in every import.
+1. Replace `from '@noetic-tools/core/adapters/node'` with `from '@noetic/platform-node'` in every import.
 2. Add `@noetic/platform-node` (or `@noetic/platform-browser`) to the package's `dependencies`.
 3. For a Mirage-backed VFS, import `createMirageAdapters` from `@noetic/mirage` directly (not from a platform package). Keep `@struktoai/mirage-node` or `@struktoai/mirage-browser` in the consumer's `dependencies` exactly as before.
 
@@ -196,7 +196,7 @@ Mechanical migration:
 
 ## Tree-shakability Guarantees
 
-- Importing `@noetic/core` into a browser bundle must produce no `node:*` references in the output. Enforced by a CI test that bundles `@noetic/core` with a browser target and fails on any `node:` specifier.
+- Importing `@noetic-tools/core` into a browser bundle must produce no `node:*` references in the output. Enforced by a CI test that bundles `@noetic-tools/core` with a browser target and fails on any `node:` specifier.
 - Importing `@noetic/platform-browser` similarly produces no `node:*` references.
 - Importing `@noetic/platform-node` may reference `node:*`; bundling for a browser target surfaces the mismatch as a build-time error, which is the desired behaviour.
 

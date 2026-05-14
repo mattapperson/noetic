@@ -7,7 +7,7 @@
  *
  * Also extracts string literals from packages/web/components/landing/{hero,code-peek}.tsx
  * (any backtick-template assigned with `=`) so the homepage's rendered code samples are
- * validated against @noetic/core just like docs fences are.
+ * validated against @noetic-tools/core just like docs fences are.
  *
  * Usage: bun scripts/extract-doc-snippets.ts
  */
@@ -53,7 +53,7 @@ import type {
   StorageAdapter, SteeringConfig, SteeringRule,
   Tool, ToolExecutionContext, ToolMemoryDeclaration, TraceExporter,
   Until, Verdict, VerifyFn,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import {
   adaptivePlan, aiCondition, all, any, branch, channel,
   compilePlan, cosineSimilarity, durableTaskState,
@@ -64,7 +64,7 @@ import {
   semanticRoute, semanticSwitch, Slot, spawn,
   staticContent, steering, step, tool,
   toolMemoryLayer, until, when, workingMemory,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 
 declare const searchTool: Tool;
 declare const calcTool: Tool;

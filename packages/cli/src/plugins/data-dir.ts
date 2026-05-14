@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { PluginStorageScope } from '@noetic/code-agent/plugins';
 import { safePluginNameSegment } from '@noetic/code-agent/utils';
-import type { StorageAdapter } from '@noetic/core';
+import type { StorageAdapter } from '@noetic-tools/core';
 
 export type DataDirScope = PluginStorageScope;
 

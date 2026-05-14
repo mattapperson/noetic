@@ -6,7 +6,7 @@ description: Noetic uses structured NoeticError objects with error codes and rec
 ## Quick Example
 
 ```ts
-import { isNoeticError } from '@noetic/core';
+import { isNoeticError } from '@noetic-tools/core';
 
 try {
   const result = await harness.execute('Do something');
@@ -75,7 +75,7 @@ Step 'fetch-data' failed: Connection refused
 Use `isNoeticError()` to narrow an `unknown` catch value:
 
 ```ts
-import { isNoeticError } from '@noetic/core';
+import { isNoeticError } from '@noetic-tools/core';
 
 function isNoeticError(e: unknown): e is NoeticErrorImpl;
 ```
@@ -87,7 +87,7 @@ This is an `instanceof` check against `NoeticErrorImpl`.
 Loops accept an `onError` callback that receives the structured error and returns a recovery action:
 
 ```ts
-import { step, loop, until } from '@noetic/core';
+import { step, loop, until } from '@noetic-tools/core';
 
 const resilientLoop = loop({
   id: 'retry-loop',

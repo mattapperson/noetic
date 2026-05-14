@@ -2,7 +2,7 @@ import type { DiscordAdapter } from '@chat-adapter/discord';
 import { createDiscordAdapter } from '@chat-adapter/discord';
 import { createMemoryState } from '@chat-adapter/state-memory';
 import { chatStream, NoeticChat } from '@noetic/chat-sdk';
-import { AgentHarness, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic-tools/core';
 import { Card, CardText } from 'chat';
 import type { Env } from './env';
 

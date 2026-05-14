@@ -15,7 +15,7 @@ Observational Memory accumulates conversation text into a buffer, and when the b
 ## Usage
 
 ```ts
-import { observationalMemory } from '@noetic/core';
+import { observationalMemory } from '@noetic-tools/core';
 
 const layer = observationalMemory({
   bufferThreshold: 2000,
@@ -92,7 +92,7 @@ Deep-clones the parent state to the child, so spawned agents inherit existing ob
 ## Example: LLM-Powered Observer
 
 ```ts
-import { observationalMemory } from '@noetic/core';
+import { observationalMemory } from '@noetic-tools/core';
 
 const layer = observationalMemory({
   observer: async (buffer) => {

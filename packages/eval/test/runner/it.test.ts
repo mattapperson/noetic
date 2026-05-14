@@ -1,5 +1,5 @@
 import * as bun from 'bun:test';
-import { AgentHarness, step } from '@noetic/core';
+import { AgentHarness, step } from '@noetic-tools/core';
 import { describe } from '../../src/runner/describe';
 import type { EvalContext } from '../../src/runner/eval-context';
 import { it } from '../../src/runner/it';

@@ -6,7 +6,7 @@ description: Repeat a step until a termination predicate says stop.
 ## Quick Example
 
 ```ts
-import { loop, step, until } from '@noetic/core';
+import { loop, step, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'chat-loop',
@@ -70,7 +70,7 @@ Noetic ships with several ready-made predicates on the `until` object.
 Stop when the LLM responds without calling any tools. This is the core of the ReAct pattern.
 
 ```ts
-import { until } from '@noetic/core';
+import { until } from '@noetic-tools/core';
 
 const predicate = until.noToolCalls();
 ```
@@ -159,7 +159,7 @@ Combine multiple predicates with logical operators.
 Stop when **any one** of the predicates says stop. This is a logical OR.
 
 ```ts
-import { any, until } from '@noetic/core';
+import { any, until } from '@noetic-tools/core';
 
 const stopCondition = any(
   until.noToolCalls(),
@@ -173,7 +173,7 @@ const stopCondition = any(
 Stop when **every** predicate says stop. This is a logical AND.
 
 ```ts
-import { all, until } from '@noetic/core';
+import { all, until } from '@noetic-tools/core';
 
 const stopCondition = all(
   until.maxSteps(3),
@@ -188,7 +188,7 @@ const stopCondition = all(
 By default, the last step's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
 
 ```ts
-import { loop, step, until } from '@noetic/core';
+import { loop, step, until } from '@noetic-tools/core';
 
 const refiner = loop({
   id: 'refine-loop',
@@ -230,7 +230,7 @@ When `until` returns `{ stop: true }` and `inbox` is set:
 3. If no message is found (or timeout expires), the loop truly stops
 
 ```ts
-import { channel, loop, step, until } from '@noetic/core';
+import { channel, loop, step, until } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
@@ -263,7 +263,7 @@ The `onError` callback lets you decide what happens when the body steps throws.
 | `'abort'` | Re-throw the error, terminating the loop |
 
 ```ts
-import { loop, until } from '@noetic/core';
+import { loop, until } from '@noetic-tools/core';
 
 const resilientLoop = loop({
   id: 'resilient-loop',
@@ -285,7 +285,7 @@ If `onError` is not provided, errors propagate immediately.
 The built-in `react()` helper is just a loop with `until.noToolCalls()`.
 
 ```ts
-import { react } from '@noetic/core';
+import { react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -299,7 +299,7 @@ const agent = react({
 This is equivalent to:
 
 ```ts
-import { any, loop, step, until } from '@noetic/core';
+import { any, loop, step, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'react-loop',

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic/core';
-import { isNoeticConfigError } from '@noetic/core';
+import type { ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic-tools/core';
+import { isNoeticConfigError } from '@noetic-tools/core';
 import { createAgentWorktree } from '../src/adapters/worktree.js';
 
 //#region Mock shell

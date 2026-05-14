@@ -7,8 +7,8 @@
  * `writeFlowState` + `persistFlowState`.
  */
 
-import type { Context, ContextMemory, LLMResponse, MemoryLayer } from '@noetic/core';
-import { layerData, Slot } from '@noetic/core/portable';
+import type { Context, ContextMemory, LLMResponse, MemoryLayer } from '@noetic-tools/core';
+import { layerData, Slot } from '@noetic-tools/core/portable';
 import { z } from 'zod';
 
 //#region Types

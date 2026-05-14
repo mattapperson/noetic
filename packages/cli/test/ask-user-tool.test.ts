@@ -6,8 +6,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { AskUserService } from '@noetic/code-agent/ask-user-service';
 import { AskUserBusyError, createAskUserService } from '@noetic/code-agent/ask-user-service';
-import type { AskUserInput, ToolExecutionContext } from '@noetic/core';
-import { AskUserInputSchema, AskUserOutputSchema, isNoeticError } from '@noetic/core';
+import type { AskUserInput, ToolExecutionContext } from '@noetic-tools/core';
+import { AskUserInputSchema, AskUserOutputSchema, isNoeticError } from '@noetic-tools/core';
 import { createAskUserTool } from '../src/tools/ask-user.js';
 
 // Minimal stub — our ask-user tool's execute body doesn't read from ctx, so

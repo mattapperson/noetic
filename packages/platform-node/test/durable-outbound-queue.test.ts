@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { createInMemoryStorage } from '@noetic/core';
+import { createInMemoryStorage } from '@noetic-tools/core';
 import { createDurableOutboundQueue } from '../src/durable-outbound-queue';
 
 describe('DurableOutboundQueue', () => {

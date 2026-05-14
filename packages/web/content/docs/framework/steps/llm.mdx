@@ -6,7 +6,7 @@ description: Call a language model with tools, structured output, and system pro
 ## Quick Example
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const chat = step.llm({
   id: 'chat',
@@ -51,7 +51,7 @@ Provide a Zod schema to `output` and the model response will be parsed and valid
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const extract = step.llm({
   id: 'extract-entities',
@@ -71,7 +71,7 @@ If the model response does not match the schema, a validation error is thrown.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const searchTool = {
   name: 'search',
@@ -114,7 +114,7 @@ Functions declared in a memory layer's `provides` field are automatically includ
 ## Tuning Generation
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const creative = step.llm({
   id: 'brainstorm',

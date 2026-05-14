@@ -1,6 +1,6 @@
 # FlowSchema reference
 
-The `FlowSchema` (exported from `@noetic/core`) validates the plan-tree passed to `plan/setPlanTree`. This file documents every node kind in detail.
+The `FlowSchema` (exported from `@noetic-tools/core`) validates the plan-tree passed to `plan/setPlanTree`. This file documents every node kind in detail.
 
 A plan-tree is a single root `FlowNode`. Every node must match the Zod schema — extra fields are preserved but unknown top-level kinds are rejected.
 

@@ -5,7 +5,7 @@
  * Renders each item type with Claude Code-style presentation.
  */
 
-import type { Item } from '@noetic/core';
+import type { Item } from '@noetic-tools/core';
 import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';

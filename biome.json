@@ -29,7 +29,8 @@
       "!.vercel",
       "!packages/cli/.tui-test",
       "!packages/web/lib/*.generated.ts",
-      "!packages/web/.typecheck-snippets"
+      "!packages/web/.typecheck-snippets",
+      "!**/dist"
     ]
   },
   "formatter": {

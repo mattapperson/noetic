@@ -10,8 +10,8 @@ import type {
   LLMResponse,
   MessageItem,
   ScopedStorage,
-} from '@noetic/core';
-import { Slot } from '@noetic/core';
+} from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 
 import { reminderLayer } from '../src/memory/reminder-layer.js';

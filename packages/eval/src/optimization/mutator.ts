@@ -1,4 +1,4 @@
-import type { Step, Tool } from '@noetic/core';
+import type { Step, Tool } from '@noetic-tools/core';
 
 import type { Candidate } from '../types/optimizer';
 

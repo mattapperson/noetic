@@ -12,8 +12,8 @@
     "baseUrl": ".",
     "types": ["../../node_modules/.bun/bun-types@1.3.13/node_modules/bun-types"],
     "paths": {
-      "@noetic/core": ["../core/src/index.ts"],
-      "@noetic/core/*": ["../core/src/*"],
+      "@noetic-tools/core": ["../core/src/index.ts"],
+      "@noetic-tools/core/*": ["../core/src/*"],
       "@noetic/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
       "@noetic/eval": ["../eval/src/index.ts"]
     }

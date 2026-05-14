@@ -7,7 +7,7 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 
 import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createInMemorySubprocessAdapter } from '@noetic/core';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import type { AutopilotDeps } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
 import { runAutopilotTick } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
 import { persistTaskHierarchy } from '../../../src/tasks/runtime/hierarchy/persist.js';

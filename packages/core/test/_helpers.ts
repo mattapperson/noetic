@@ -40,7 +40,9 @@ function createNodeFsAdapter(): FsAdapter {
     writeFileBytes: async (p, content) => fsp.writeFile(p, content),
     appendFile: async (p, content) => fsp.appendFile(p, content, 'utf-8'),
     mkdir: async (dir) => {
-      await fsp.mkdir(dir, { recursive: true });
+      await fsp.mkdir(dir, {
+        recursive: true,
+      });
     },
     rename: async (o, n) => fsp.rename(o, n),
     rm: async (p, options) => {
@@ -55,7 +57,11 @@ function createNodeFsAdapter(): FsAdapter {
 
 function createNoopShellAdapter(): ShellAdapter {
   return {
-    exec: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    exec: async () => ({
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+    }),
   };
 }
 

@@ -20,7 +20,7 @@
  * in the default zero-config path. No allocation, no side effects, and
  * no impact on CLI startup time.
  */
-import type { AgentHarness, Context, SubprocessHandle } from '@noetic/core';
+import type { AgentHarness, Context, SubprocessHandle } from '@noetic-tools/core';
 
 //#region Types
 

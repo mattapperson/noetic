@@ -17,7 +17,7 @@
  */
 
 import { taskRootPaths } from '@noetic/code-agent/tasks/store/fs-node';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { useEffect, useState } from 'react';
 
 //#region Types

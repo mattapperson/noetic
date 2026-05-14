@@ -5,8 +5,8 @@
  */
 
 import path from 'node:path';
-import type { FsAdapter, ShellAdapter, Tool } from '@noetic/core';
-import { getToolCwd, tool } from '@noetic/core';
+import type { FsAdapter, ShellAdapter, Tool } from '@noetic-tools/core';
+import { getToolCwd, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import { normalizeToLf } from './edit-diff.js';
 import { resolveToCwd } from './path-utils.js';

@@ -1,5 +1,5 @@
 import * as CodeAgentConfig from '@noetic/code-agent/config';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { z } from 'zod';
 
 export const AgentSdkConfigSchema = CodeAgentConfig.AgentConfigSchema;

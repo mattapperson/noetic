@@ -1,4 +1,4 @@
-import { react, tool } from '@noetic/core';
+import { react, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { describe, it, scorer } from '../src';

@@ -19,7 +19,7 @@
  *      the spawn.
  */
 
-import type { SubprocessAdapter, SubprocessHandle } from '@noetic/core';
+import type { SubprocessAdapter, SubprocessHandle } from '@noetic-tools/core';
 
 import { fileUrlToPath } from './file-url-to-path.js';
 import type { TaskStoreContext } from './fs-store.js';

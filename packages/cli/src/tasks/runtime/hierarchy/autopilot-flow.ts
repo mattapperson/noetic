@@ -27,8 +27,8 @@ import type {
 import { FeatureLoopState, HierarchyStatus, SliceStatus } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ContextMemory, Step, StepBranch } from '@noetic/core';
-import { branch, every, step } from '@noetic/core';
+import type { ContextMemory, Step, StepBranch } from '@noetic-tools/core';
+import { branch, every, step } from '@noetic-tools/core';
 import { getTaskHierarchy } from './aggregate.js';
 import type {
   AutopilotDeps,

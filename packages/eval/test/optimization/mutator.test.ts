@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Step } from '@noetic/core';
-import { spawn, step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
+import { spawn, step } from '@noetic-tools/core';
 import { applyCandidate } from '../../src/optimization/mutator';
 
 function getLlmInstructions(s: Step): string | undefined {

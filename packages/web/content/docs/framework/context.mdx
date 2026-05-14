@@ -6,7 +6,7 @@ description: The Context object tracks execution state, metrics, and conversatio
 ## Quick Example
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const greet = step.run({ id: 'greet', execute: async (input: string, ctx) => {
   console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
@@ -69,7 +69,7 @@ At runtime, data entries use getters (reading live state on each access), while 
 When layers are wrapped with the `memory()` builder, use `InferMemory<typeof config>` to get compile-time types:
 
 ```ts
-import { memory, workingMemory, type InferMemory } from '@noetic/core';
+import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
 
 const mem = memory([workingMemory()]);
 type Mem = InferMemory<typeof mem>;
@@ -112,8 +112,8 @@ Context exposes three methods for communicating over [Channels](/docs/framework/
 | `tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 
 ```ts
-import { channel } from '@noetic/core';
-import type { Context } from '@noetic/core';
+import { channel } from '@noetic-tools/core';
+import type { Context } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const approvals = channel('approvals', {

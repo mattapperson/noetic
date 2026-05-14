@@ -8,7 +8,7 @@ export type {
   StorageAdapter,
   SubprocessAdapter,
   Tool,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 export {
   durableTaskState,
   fileReference,
@@ -17,5 +17,5 @@ export {
   planMemory,
   toolMemoryLayer,
   workingMemory,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 export { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';

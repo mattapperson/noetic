@@ -3,8 +3,8 @@
  * is a redundant TUI view persisted for faster render on resume.
  */
 
-import type { Item, LastLayerUsage, StreamingItem } from '@noetic/core';
-import { ItemSchema } from '@noetic/core';
+import type { Item, LastLayerUsage, StreamingItem } from '@noetic-tools/core';
+import { ItemSchema } from '@noetic-tools/core';
 import { z } from 'zod';
 
 //#region Entry Types
@@ -108,7 +108,7 @@ const LayerUsageEntrySchema = z.object({
 });
 
 /**
- * Persisted shape of `LastLayerUsage` from `@noetic/core`. The core type is
+ * Persisted shape of `LastLayerUsage` from `@noetic-tools/core`. The core type is
  * `readonly`, so we mirror it as a plain object schema and let Zod's inferred
  * output (mutable) be assignable anywhere the core `readonly` type is
  * expected (readonly is bivariant for indexed access).

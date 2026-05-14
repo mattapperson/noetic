@@ -1,4 +1,4 @@
-import type { Context, Span } from '@noetic/core';
+import type { Context, Span } from '@noetic-tools/core';
 import type { ZodType } from 'zod';
 
 import type { ScoreResult } from './eval';

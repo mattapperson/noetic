@@ -6,8 +6,8 @@ import type {
   CallModelRequest,
   LLMResponse,
   MessageItem,
-} from '@noetic/core';
-import { channel } from '@noetic/core';
+} from '@noetic-tools/core';
+import { channel } from '@noetic-tools/core';
 import { z } from 'zod';
 import { createCodeAgent, createCodingToolsPlugin, createTaskToolsPlugin } from '../src/index';
 

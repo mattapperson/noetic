@@ -29,7 +29,7 @@ export interface ToolMemoryDeclaration<TState = unknown> {
  *
  * The runtime passes a `ToolExecutionContext` (from `./tool-context`) as
  * the second argument to `execute`. Callers that need the concrete type
- * should import `Tool` from the package root (`@noetic/core`), which
+ * should import `Tool` from the package root (`@noetic-tools/core`), which
  * re-exports it with `ToolExecutionContext` substituted in.
  * @public
  */

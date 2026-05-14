@@ -11,7 +11,7 @@
  * - Each exec call creates a fresh Bash instance to avoid shared-state races
  */
 
-import type { FsAdapter, ShellAdapter, ShellExecResult } from '@noetic/core';
+import type { FsAdapter, ShellAdapter, ShellExecResult } from '@noetic-tools/core';
 import { Bash } from 'just-bash';
 import { createBridgedFs } from './fs-adapter-bridge.js';
 

@@ -107,7 +107,7 @@ paths = [
 order = 15
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tier C — peer packages that depend only on @noetic/core
+# Tier C — peer packages that depend only on @noetic-tools/core
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[layers]]
@@ -232,7 +232,7 @@ reason = "patterns compose memory, not the other way"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Peer-package isolation at tier 50 — chat-sdk, code-agent, and eval are
-# siblings that depend only on @noetic/core; they must not reach across.
+# siblings that depend only on @noetic-tools/core; they must not reach across.
 # Same-order layers are otherwise unconstrained, so these have to be
 # explicit.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -240,7 +240,7 @@ reason = "patterns compose memory, not the other way"
 [[boundaries]]
 from = "packages/eval/src/**"
 to = "packages/code-agent/src/**"
-reason = "eval is a peer of code-agent; both depend only on @noetic/core"
+reason = "eval is a peer of code-agent; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/eval/src/**"
@@ -279,7 +279,7 @@ reason = "chat-sdk must not depend on cli"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform packages: runtime-isolated, peer-isolated, and core is forbidden
-# from reaching into either. The invariant is that @noetic/core carries no
+# from reaching into either. The invariant is that @noetic-tools/core carries no
 # runtime-specific code — only contracts + in-memory adapters — and that the
 # two platform packages never see each other so bundlers can drop one
 # entirely from a target's output.
@@ -318,17 +318,17 @@ reason = "memory layers are platform-independent; platform packages are platform
 [[boundaries]]
 from = "packages/platform-node/src/**"
 to = "packages/chat-sdk/src/**"
-reason = "platform-node is a peer of chat-sdk; both depend only on @noetic/core"
+reason = "platform-node is a peer of chat-sdk; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-node/src/**"
 to = "packages/code-agent/src/**"
-reason = "platform-node is a peer of code-agent; both depend only on @noetic/core"
+reason = "platform-node is a peer of code-agent; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-node/src/**"
 to = "packages/eval/src/**"
-reason = "platform-node is a peer of eval; both depend only on @noetic/core"
+reason = "platform-node is a peer of eval; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-node/src/**"
@@ -338,17 +338,17 @@ reason = "platform-node must not depend on cli"
 [[boundaries]]
 from = "packages/platform-browser/src/**"
 to = "packages/chat-sdk/src/**"
-reason = "platform-browser is a peer of chat-sdk; both depend only on @noetic/core"
+reason = "platform-browser is a peer of chat-sdk; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-browser/src/**"
 to = "packages/code-agent/src/**"
-reason = "platform-browser is a peer of code-agent; both depend only on @noetic/core"
+reason = "platform-browser is a peer of code-agent; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-browser/src/**"
 to = "packages/eval/src/**"
-reason = "platform-browser is a peer of eval; both depend only on @noetic/core"
+reason = "platform-browser is a peer of eval; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-browser/src/**"
@@ -442,6 +442,6 @@ reason = "@noetic/mirage must not depend on chat-sdk"
 # ─────────────────────────────────────────────────────────────────────────────
 # Docs-site isolation (@noetic/web) is enforced via packages/web/package.json
 # workspace deps, NOT via rules.toml — the .typecheck-snippets-shims/ dir has
-# a legitimate type-only import of @noetic/core for MDX snippet typechecking
+# a legitimate type-only import of @noetic-tools/core for MDX snippet typechecking
 # that any file-path-level boundary would flag as a false positive.
 # ─────────────────────────────────────────────────────────────────────────────

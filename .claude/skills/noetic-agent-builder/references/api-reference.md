@@ -418,7 +418,7 @@ interface ToolMemory {
 Utility for function-call memory patterns. Searches items for the first `function_call` matching a name, returns parsed JSON arguments.
 
 ```typescript
-import { findFunctionCall } from '@noetic/core';
+import { findFunctionCall } from '@noetic-tools/core';
 
 const args = findFunctionCall(newItems, 'updateWorkingMemory');
 // Returns Record<string, unknown> | null
@@ -619,7 +619,7 @@ interface FsAdapter {
 Pass a custom adapter to the harness:
 
 ```typescript
-import { AgentHarness, createLocalFsAdapter } from '@noetic/core';
+import { AgentHarness, createLocalFsAdapter } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'my-agent',
@@ -693,12 +693,12 @@ interface LocalShellAdapter extends ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic/core` so non-CLI embedders keep raw shell semantics; `@noetic/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
+`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic-tools/core` so non-CLI embedders keep raw shell semantics; `@noetic/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
 
 Pass a custom adapter to the harness:
 
 ```typescript
-import { AgentHarness, createLocalShellAdapter } from '@noetic/core';
+import { AgentHarness, createLocalShellAdapter } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'my-agent',
@@ -833,8 +833,8 @@ const isolatedHandle = harness.detachedSpawn(step, input, ctx, {
 });
 
 // Per-call subprocess adapter override (run a specific spawn out-of-process)
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
-import { createFileStorage } from '@noetic/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
+import { createFileStorage } from '@noetic-tools/core';
 const localAdapter = createLocalSubprocessAdapter({
   storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
 });
@@ -954,7 +954,7 @@ Calls `harness.subprocess.listLive()` first, then `harness.restore(executionId)`
 
 ### Runtime primitives for long-lived runners
 
-`@noetic/core/runtime` exports four primitives the tasks-system runners (and third-party long-running agents) use to compose their loop:
+`@noetic-tools/core/runtime` exports four primitives the tasks-system runners (and third-party long-running agents) use to compose their loop:
 
 ```typescript
 // Single-shot resolve/reject signal.
@@ -989,7 +989,7 @@ Step builders auto-register at construction; `lookupStep` is the cross-process c
 
 ### Durable IPC (advanced)
 
-`@noetic/core/adapters/node` additionally exposes `AgentIpcServer`, `AgentIpcClient`, the v2 wire protocol, and a `DurableOutboundQueue` primitive. The server composes the queue when a `StorageAdapter` is supplied: outbound frames are numbered, persisted, and replayed from the client's last ack on reconnect. Protocol frames `durable`, `durableResume`, `durableAck` carry the wire envelope. See the framework/durability.mdx page for the full end-to-end pattern.
+`@noetic-tools/core/adapters/node` additionally exposes `AgentIpcServer`, `AgentIpcClient`, the v2 wire protocol, and a `DurableOutboundQueue` primitive. The server composes the queue when a `StorageAdapter` is supplied: outbound frames are numbered, persisted, and replayed from the client's last ack on reconnect. Protocol frames `durable`, `durableResume`, `durableAck` carry the wire envelope. See the framework/durability.mdx page for the full end-to-end pattern.
 
 ## Slot Constants
 

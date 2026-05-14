@@ -1,5 +1,5 @@
 /**
- * Re-export shim. The FlowSchema definition lives in `@noetic/core/patterns/flow`
+ * Re-export shim. The FlowSchema definition lives in `@noetic-tools/core/patterns/flow`
  * so the plan memory layer can validate `setPlanTree` inputs against it.
  */
 
@@ -10,5 +10,5 @@ export type {
   SequenceFlowNode,
   SpawnFlowNode,
   SubagentFlowNode,
-} from '@noetic/core';
-export { FlowSchema, flowDepth, validateFlow, walkFlow } from '@noetic/core';
+} from '@noetic-tools/core';
+export { FlowSchema, flowDepth, validateFlow, walkFlow } from '@noetic-tools/core';

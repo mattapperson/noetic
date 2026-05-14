@@ -45,8 +45,8 @@ The `feedback` string is prepended to the next iteration's input, giving the age
 ## Example
 
 ```ts
-import { ralphWiggum } from '@noetic/core';
-import type { Tool } from '@noetic/core';
+import { ralphWiggum } from '@noetic-tools/core';
+import type { Tool } from '@noetic-tools/core';
 
 declare const codeExecutionTool: Tool;
 
@@ -80,8 +80,8 @@ const agent = ralphWiggum({
 6. This repeats until `verify` returns `{ pass: true }` or `maxIterations` is reached.
 
 ```ts
-import { any, react, spawn, until } from '@noetic/core';
-import type { Tool, VerifyFn } from '@noetic/core';
+import { any, react, spawn, until } from '@noetic-tools/core';
+import type { Tool, VerifyFn } from '@noetic-tools/core';
 
 function ralphWiggumImpl(opts: {
   model: string;

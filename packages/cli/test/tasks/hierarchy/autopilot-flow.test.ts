@@ -8,7 +8,7 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic/core';
+import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import type { AutopilotFlowDeps } from '../../../src/tasks/runtime/hierarchy/autopilot-flow.js';
 import {

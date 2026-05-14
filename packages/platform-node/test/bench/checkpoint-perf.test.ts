@@ -18,7 +18,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { AgentHarness, createCheckpointStore } from '@noetic/core';
+import { AgentHarness, createCheckpointStore } from '@noetic-tools/core';
 import { createFileStorage } from '../../src/file-storage';
 
 const ITERATIONS = 200;

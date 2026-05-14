@@ -1,5 +1,5 @@
 /**
- * Live wiring of the @noetic/core `interview()` step to the chat-TUI's
+ * Live wiring of the @noetic-tools/core `interview()` step to the chat-TUI's
  * AskUserService. Produces the `runInterview` and `askAutopilot` callables
  * used by the task planning flow when invoked via `/tasks plan` from the
  * chat TUI.
@@ -24,8 +24,8 @@ import type {
   AskUserQuestion,
   InterviewQuestionAnswer,
   InterviewResult,
-} from '@noetic/core';
-import { interview } from '@noetic/core';
+} from '@noetic-tools/core';
+import { interview } from '@noetic-tools/core';
 import { z } from 'zod';
 import { INTERVIEW_SYSTEM_PROMPT } from './prompts.js';
 import { loadInterviewSession, saveInterviewSession } from './store.js';
@@ -106,7 +106,7 @@ export interface InterviewQuestionEnvelope {
 }
 
 /**
- * Result shape mirrors `@noetic/core`'s `InterviewResult` but typed at the
+ * Result shape mirrors `@noetic-tools/core`'s `InterviewResult` but typed at the
  * higher-level envelope so call sites do not depend on the question shape.
  */
 export type InterviewResultLike =

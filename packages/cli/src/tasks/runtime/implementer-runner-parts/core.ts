@@ -1,10 +1,10 @@
-export type { Item } from '@noetic/core';
+export type { Item } from '@noetic-tools/core';
 export {
   createDetachedSignal,
   createNudgeMessage,
   createStallNudgeHook,
   runnableLoop,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 export {
   AgentIpcServer,
   createLocalFsAdapter,

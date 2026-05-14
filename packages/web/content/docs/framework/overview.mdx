@@ -28,7 +28,7 @@ Noetic's entire execution model is built from seven primitives. Each one is a `S
 Primitives nest freely. A `loop` body can be an `llm` step, a `branch`, or even another `loop`. A `fork` can fan out into spawned sub-agents. The type system keeps inputs and outputs aligned at every boundary.
 
 ```ts
-import { branch, fork, spawn, step, until } from '@noetic/core';
+import { branch, fork, spawn, step, until } from '@noetic-tools/core';
 
 // A branch that picks between two LLM steps
 const router = branch({

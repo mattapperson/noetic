@@ -29,8 +29,8 @@ import type {
   SubprocessHandle,
   SubprocessHandleMetadata,
   SubprocessRequest,
-} from '@noetic/core';
-import { createInMemorySubprocessAdapter } from '@noetic/core';
+} from '@noetic-tools/core';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 
 //#region Tracking adapter
 

@@ -14,7 +14,7 @@ import {
   tailEvents,
   tryLoadTask,
 } from '@noetic/code-agent/tasks/store/fs-node';
-import { createInMemorySubprocessAdapter } from '@noetic/core';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import type { AutopilotDeps } from '../../../src/tasks/runtime/hierarchy/autopilot.js';
 import { runAutopilotTick } from '../../../src/tasks/runtime/hierarchy/autopilot.js';

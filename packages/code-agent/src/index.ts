@@ -32,7 +32,7 @@ import type {
   SubprocessAdapter,
   Tool,
   TraceExporter,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import {
   AgentHarness,
   branch,
@@ -49,8 +49,8 @@ import {
   toolMemoryLayer,
   until,
   workingMemory,
-} from '@noetic/core/portable';
-import { frameworkCast } from '@noetic/core/unstable';
+} from '@noetic-tools/core/portable';
+import { frameworkCast } from '@noetic-tools/core/unstable';
 import { z } from 'zod';
 import { actAgent } from './agents/act.js';
 import { fixAgent } from './agents/fix.js';
@@ -1110,7 +1110,7 @@ export async function createCodeAgent(
 export {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
-} from '@noetic/core/portable';
+} from '@noetic-tools/core/portable';
 export {
   type ChannelTransportAdapter,
   type ChannelTransportController,

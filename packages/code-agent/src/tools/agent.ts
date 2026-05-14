@@ -1,6 +1,6 @@
 /**
  * `agent` tool — spawn a sub-agent (teammate) with a per-type system prompt
- * and tool allowlist drawn from the skills catalog. Composes `@noetic/core`
+ * and tool allowlist drawn from the skills catalog. Composes `@noetic-tools/core`
  * primitives (`spawn`, `react`, `harness.run`, `harness.detachedSpawn`,
  * memory layers).
  *
@@ -24,10 +24,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic/core';
-import { historyWindow, NoeticConfigError, react, spawn, step, tool } from '@noetic/core';
+import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic-tools/core';
+import { historyWindow, NoeticConfigError, react, spawn, step, tool } from '@noetic-tools/core';
 import { createLocalFsAdapter } from '@noetic/platform-node';
-import { retargetCwdForSpawn } from '@noetic/core/unstable';
+import { retargetCwdForSpawn } from '@noetic-tools/core/unstable';
 import { z } from 'zod';
 
 import { createAgentWorktree } from '../adapters/worktree.js';

@@ -1,4 +1,4 @@
-import type { AgentHarness, ExecuteInput, HarnessResponse, Tool } from '@noetic/core';
+import type { AgentHarness, ExecuteInput, HarnessResponse, Tool } from '@noetic-tools/core';
 import type { Adapter, ChatConfig, ChatElement, Message, Thread } from 'chat';
 import type { ZodTypeAny } from 'zod';
 

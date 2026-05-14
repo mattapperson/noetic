@@ -35,7 +35,7 @@ declare function react(opts: {
 
 ```ts
 import { z } from 'zod';
-import { react, tool } from '@noetic/core';
+import { react, tool } from '@noetic-tools/core';
 
 const searchTool = tool({
   name: 'search',
@@ -66,8 +66,8 @@ Under the hood, `react()` composes three primitives:
 These are combined with `any()` (stop if any predicate fires):
 
 ```ts
-import { any, step, until } from '@noetic/core';
-import type { Tool } from '@noetic/core';
+import { any, step, until } from '@noetic-tools/core';
+import type { Tool } from '@noetic-tools/core';
 
 function reactImpl(opts: {
   model: string;
@@ -108,8 +108,8 @@ function reactImpl(opts: {
 When called without `memory`, `react()` returns a plain `StepLoop`, so you can mutate the returned step's loop hooks before handing it to the harness:
 
 ```ts
-import { react } from '@noetic/core';
-import type { ContextMemory, StepLoop, Tool } from '@noetic/core';
+import { react } from '@noetic-tools/core';
+import type { ContextMemory, StepLoop, Tool } from '@noetic-tools/core';
 
 declare const tools: Tool[];
 

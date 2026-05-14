@@ -16,7 +16,7 @@ const pkg = PackageJsonSchema.parse(
 
 const workspaceDeps = new Set([
   '@noetic/code-agent',
-  '@noetic/core',
+  '@noetic-tools/core',
 ]);
 
 const external = [

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { EventKind } from '@noetic/code-agent/tasks/schema';
 import { listTasks, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { SubprocessAdapter } from '@noetic/core';
+import type { SubprocessAdapter } from '@noetic-tools/core';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import {
   createTaskHandler,

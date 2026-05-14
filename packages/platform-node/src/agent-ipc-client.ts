@@ -22,7 +22,7 @@
 
 import type { Socket } from 'node:net';
 import { createConnection } from 'node:net';
-import type { AskUserOutput } from '@noetic/core';
+import type { AskUserOutput } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { AskUserPendingFrame, ServerFrame } from './agent-ipc-protocol';
 import { encodeFrame, parseServerFrame } from './agent-ipc-protocol';

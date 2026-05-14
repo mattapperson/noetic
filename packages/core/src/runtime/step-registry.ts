@@ -87,7 +87,7 @@ export function clearRegistry(): void {
 /**
  * Install this module's `registerStep` as the runtime default registrar.
  * Executes on first import — which happens transitively from
- * `agent-harness.ts` and from anywhere that imports `@noetic/core`'s
+ * `agent-harness.ts` and from anywhere that imports `@noetic-tools/core`'s
  * top-level barrel. Builders call `getDefaultRegistrar().register(step)`
  * from `../types/step-registrar` and get this concrete implementation
  * without depending on `core-runtime` themselves (fixes the

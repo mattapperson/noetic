@@ -6,7 +6,7 @@
  */
 
 import type { AskUserService } from '@noetic/code-agent/ask-user-service';
-import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic/core';
+import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic-tools/core';
 import type { ReactNode } from 'react';
 import type { SkillDefinition } from '../skills/types.js';
 import type { AgentConfig } from '../types/config.js';

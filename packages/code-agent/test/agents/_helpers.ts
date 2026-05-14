@@ -19,7 +19,7 @@ import type {
   ShellAdapter,
   Step,
   StepRun,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import type { CodeAgentFlowState } from '../../src/agents/flow-state.js';
 import { CODE_AGENT_FLOW_LAYER_ID } from '../../src/agents/flow-state.js';
 

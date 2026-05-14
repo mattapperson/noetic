@@ -16,8 +16,8 @@
  * the parent flow.
  */
 
-import type { MemoryLayer } from '@noetic/core';
-import { layerData, layerFn, Slot } from '@noetic/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+import { layerData, layerFn, Slot } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { AssertionOutcome } from '../hierarchy/schemas.js';
 import { AssertionStatus } from '../hierarchy/schemas.js';

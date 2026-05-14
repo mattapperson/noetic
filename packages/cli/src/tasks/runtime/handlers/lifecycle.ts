@@ -20,7 +20,7 @@ import {
   saveTask,
   taskDirPaths,
 } from '@noetic/code-agent/tasks/store/fs-node';
-import type { SubprocessAdapter, SubprocessHandle } from '@noetic/core';
+import type { SubprocessAdapter, SubprocessHandle } from '@noetic-tools/core';
 import type { Signaller } from '../agent-ci-control.js';
 import { defaultSignaller, verifyPidIdentity } from '../agent-ci-control.js';
 import { getTaskHierarchy } from '../hierarchy/aggregate.js';

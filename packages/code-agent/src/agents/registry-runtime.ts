@@ -10,11 +10,11 @@
  *
  * Both queues are plain arrays (not `Channel<T>`) because memory-layer hooks
  * receive `ExecutionContext`, which has no `tryRecv`. Composes only existing
- * `@noetic/core` types — `DetachedHandle` for handle reference, no new core
+ * `@noetic-tools/core` types — `DetachedHandle` for handle reference, no new core
  * concept.
  */
 
-import type { DetachedHandle } from '@noetic/core';
+import type { DetachedHandle } from '@noetic-tools/core';
 
 //#region Types
 

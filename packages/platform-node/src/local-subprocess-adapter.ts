@@ -10,8 +10,8 @@ import type {
   SubprocessHandleMetadata,
   SubprocessRequest,
   SubprocessStopResult,
-} from '@noetic/core';
-import { serializeError } from '@noetic/core';
+} from '@noetic-tools/core';
+import { serializeError } from '@noetic-tools/core';
 import {
   clearDurableManifest,
   hydrateFromManifest,

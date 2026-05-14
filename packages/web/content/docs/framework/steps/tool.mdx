@@ -7,7 +7,7 @@ description: Invoke a single tool directly as a typed step.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const calculator = {
   name: 'add',
@@ -67,7 +67,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `step.l
 ```ts
 import { z } from 'zod';
 
-import type { Tool } from '@noetic/core';
+import type { Tool } from '@noetic-tools/core';
 
 const fetchUrl: Tool<typeof UrlInput, typeof UrlOutput> = {
   name: 'fetch-url',

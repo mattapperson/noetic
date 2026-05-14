@@ -427,8 +427,8 @@ The local adapter additionally persists `pid`, `pidStarttime`, `socketPath`, `cw
 Every surface that spawns a task runner (daemon autopilot, `noetic tasks` CLI, TUI tools) shares a single `SubprocessAdapter` constructed against `createFileStorage({root: subprocessRoot()})`:
 
 ```typescript
-import { createFileStorage } from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+import { createFileStorage } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
 import { resolveSubprocessRoot } from '@noetic/code-agent/tasks';
 
 const storage = createFileStorage({ root: resolveSubprocessRoot() });

@@ -24,7 +24,7 @@ import { access } from 'node:fs/promises';
 import { findLiveTaskHandle, TaskRole } from '@noetic/code-agent/tasks';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { runnerSocketPath } from '@noetic/code-agent/tasks/store/fs-node';
-import type { SubprocessHandle } from '@noetic/core';
+import type { SubprocessHandle } from '@noetic-tools/core';
 import { PlannerSpawnError, PlannerSpawnErrorCode, startPlannerRun } from './planner-launcher.js';
 
 //#region Types
@@ -43,7 +43,7 @@ export interface ResolveChatTargetOptions {
    * Subprocess adapter used to enumerate live runner handles by task id
    * and role. Required — callers thread the host-wide adapter through.
    */
-  readonly subprocess: import('@noetic/core').SubprocessAdapter;
+  readonly subprocess: import('@noetic-tools/core').SubprocessAdapter;
   /**
    * Probe the runner socket before accepting it as a target. Default
    * is a real `fs.access()` check. Tests pass stubs to simulate the

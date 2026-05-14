@@ -8,10 +8,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import type { StorageAdapter } from '@noetic/core';
+import type { StorageAdapter } from '@noetic-tools/core';
 
 // Private replica of core's internal `frameworkCast` — kept local here
-// so the unsafe escape hatch does not become part of `@noetic/core`'s
+// so the unsafe escape hatch does not become part of `@noetic-tools/core`'s
 // public API surface. This is NOT a "safer" pattern than exporting
 // `frameworkCast`; it is the same identity coercion, just scoped to
 // this file. `JSON.parse` returns `unknown` and the `StorageAdapter`

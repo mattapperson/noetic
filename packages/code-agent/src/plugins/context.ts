@@ -3,7 +3,7 @@
  * stamps out a per-plugin context (with plugin-scoped `dataDir`) on demand.
  */
 
-import { createInMemoryStorage } from '@noetic/core/portable';
+import { createInMemoryStorage } from '@noetic-tools/core/portable';
 import { createCallModel } from '../ai/plugin-call-model.js';
 import type { AgentConfig } from '../types/config.js';
 import type { PluginContext } from './types.js';

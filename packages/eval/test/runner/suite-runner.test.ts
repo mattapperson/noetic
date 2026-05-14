@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 import type { SuiteDefinition } from '../../src/runner/describe';
 import { runSuite } from '../../src/runner/suite-runner';

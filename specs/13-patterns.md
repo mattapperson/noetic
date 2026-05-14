@@ -9,7 +9,7 @@ Every pattern is 15-30 lines of primitive composition. The implementations below
 
 Spawn-based patterns (`spawn`, `detachedSpawn`, `ralphWiggum`, `dualAgent`, etc.) route through the harness `SubprocessAdapter` — in-memory by default, out-of-process when the caller supplies a different adapter via `spawn({subprocess})` / `harness.detachedSpawn(..., {subprocess})`. The composition shapes below are unchanged; adapter routing is transparent. See `04-spawn` for the routing rules and `23-durable-execution` for durability when an out-of-process adapter is used.
 
-Long-lived runner loops — the tasks-system planner / implementer / agent-ci subprocesses and user code that wants the same shape — are built from four primitives that live in `@noetic/core` under `runtime/`:
+Long-lived runner loops — the tasks-system planner / implementer / agent-ci subprocesses and user code that wants the same shape — are built from four primitives that live in `@noetic-tools/core` under `runtime/`:
 
 - `createDetachedSignal<T>()` — single-shot resolve/reject signal used by the runner loop to surface the final outcome.
 - `runnableLoop(opts)` — generic turn-driver: seed the session from prior items, run the first turn, and await the signal.

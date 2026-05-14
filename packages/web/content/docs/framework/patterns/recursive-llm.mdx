@@ -10,7 +10,7 @@ The Recursive LLM pattern uses `spawn()` to create child agents that start with 
 ## Pattern
 
 ```ts
-import { spawn, react } from '@noetic/core';
+import { spawn, react } from '@noetic-tools/core';
 
 const subTaskAgent = react({
   model: 'gpt-4o',
@@ -69,7 +69,7 @@ const recursiveStep = spawn({
 ## Example: Divide and Conquer
 
 ```ts
-import { spawn, react, step, fork } from '@noetic/core';
+import { spawn, react, step, fork } from '@noetic-tools/core';
 
 // The main agent decides how to decompose the problem
 const mainAgent = step.run({

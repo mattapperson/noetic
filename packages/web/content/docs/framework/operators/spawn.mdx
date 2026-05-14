@@ -6,7 +6,7 @@ description: Run a child step in an isolated context with optional spawn-local m
 ## Quick Example
 
 ```ts
-import { spawn, step } from '@noetic/core';
+import { spawn, step } from '@noetic-tools/core';
 
 const isolated = spawn({
   id: 'sub-agent',
@@ -46,7 +46,7 @@ Spawn-local memory layers control what the child sees and how results are transf
 - **`onReturn` hooks** transform the child's results before they flow back to the parent. Layers can summarize, filter, or restructure the output.
 
 ```ts
-import { spawn, step } from '@noetic/core';
+import { spawn, step } from '@noetic-tools/core';
 
 const withMemory = spawn({
   id: 'research-agent',
@@ -102,7 +102,7 @@ const spawned = spawn({
 ## Real-World Example: Research Delegation with Memory
 
 ```ts
-import { spawn, step, until } from '@noetic/core';
+import { spawn, step, until } from '@noetic-tools/core';
 
 const researchAgent = spawn({
   id: 'delegated-research',
@@ -156,7 +156,7 @@ const researchAgent = spawn({
 For background sub-agents that run concurrently, use `harness.detachedSpawn()`. The parent continues immediately and receives a `DetachedHandle` to track the child.
 
 ```ts
-import type { DetachedHandle } from '@noetic/core';
+import type { DetachedHandle } from '@noetic-tools/core';
 
 const handle = harness.detachedSpawn(subAgentStep, input, ctx);
 // handle.status === 'running' — parent continues immediately
@@ -204,7 +204,7 @@ are unchanged.
 Combine detached spawn with the [loop inbox channel](/docs/framework/operators/loop-and-until#inbox-channel) for a full async delegation workflow:
 
 ```ts
-import { channel } from '@noetic/core';
+import { channel } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
@@ -231,8 +231,8 @@ const agentLoop = {
 Give the LLM both a sync and async delegation tool. The LLM decides at runtime which to use based on the task — blocking when it needs the result immediately, or launching in the background when it can continue working.
 
 ```ts
-import { channel, spawn, step, tool, until } from '@noetic/core';
-import type { Context } from '@noetic/core';
+import { channel, spawn, step, tool, until } from '@noetic-tools/core';
+import type { Context } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
@@ -299,9 +299,9 @@ When a background agent finishes, its result arrives via the inbox channel as a 
 Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through a `SubprocessAdapter`. The harness defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their existing in-process behaviour; swap in a different adapter to change how a step actually runs.
 
 ```ts
-import { spawn, step } from '@noetic/core';
+import { spawn, step } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '@noetic/platform-node';
-import { createFileStorage } from '@noetic/core';
+import { createFileStorage } from '@noetic-tools/core';
 
 // Run this spawn out-of-process with durable handle manifests.
 const subprocess = createLocalSubprocessAdapter({
@@ -327,7 +327,7 @@ Other step kinds (`llm`, `tool`, `branch`, `fork`, `provide`, `loop`) always use
 
 ### Step Registry
 
-When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared registry (`@noetic/core/runtime/step-registry`). `lookupStep(stepId)` is the cross-process contract — the child process imports the same entry module as the parent and resolves the step by id before executing it.
+When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared registry (`@noetic-tools/core/runtime/step-registry`). `lookupStep(stepId)` is the cross-process contract — the child process imports the same entry module as the parent and resolves the step by id before executing it.
 
 ### Durable Handle Manifests
 

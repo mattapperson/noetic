@@ -15,7 +15,7 @@ Evals are organized into suites via `describe()`. Each suite wraps an `AgentHarn
 
 ```typescript
 import { describe, it, scorer } from '@noetic/eval';
-import { react } from '@noetic/core';
+import { react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',

@@ -1,5 +1,5 @@
-import type { Tool, ToolExecutionContext } from '@noetic/core';
-import { tool, toolWithGenerator } from '@noetic/core/portable';
+import type { Tool, ToolExecutionContext } from '@noetic-tools/core';
+import { tool, toolWithGenerator } from '@noetic-tools/core/portable';
 import type { ZodTypeAny, z } from 'zod';
 
 export interface RuntimeToolOptions<I extends ZodTypeAny, O extends ZodTypeAny> {

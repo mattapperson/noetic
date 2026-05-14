@@ -17,4 +17,4 @@ export {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemorySubprocessAdapter,
-} from '@noetic/core';
+} from '@noetic-tools/core';

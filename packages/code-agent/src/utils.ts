@@ -1,4 +1,4 @@
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 
 export function resolveAdapterPath(cwd: string, input: string | undefined): string {
   const raw = (input ?? '.').trim();

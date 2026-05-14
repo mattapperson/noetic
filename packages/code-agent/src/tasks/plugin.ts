@@ -1,5 +1,5 @@
-import type { Tool } from '@noetic/core';
-import { tool } from '@noetic/core/portable';
+import type { Tool } from '@noetic-tools/core';
+import { tool } from '@noetic-tools/core/portable';
 import { z } from 'zod';
 import {
   AutopilotState,

@@ -23,7 +23,7 @@ interface MyLayerState {
 The slot determines where your layer's output appears in the assembled prompt. Lower slots appear first.
 
 ```ts
-import { Slot } from '@noetic/core';
+import { Slot } from '@noetic-tools/core';
 
 // Use a built-in constant...
 const slot = Slot.PROCEDURAL; // 250
@@ -60,7 +60,7 @@ Scope controls when state is shared or isolated:
 The budget controls how many tokens your layer can inject during `recall`:
 
 ```ts
-import type { BudgetConfig } from '@noetic/core';
+import type { BudgetConfig } from '@noetic-tools/core';
 
 const fixedBudget: BudgetConfig = 500;
 
@@ -74,7 +74,7 @@ const autoBudget: BudgetConfig = 'auto';
 Implement only the hooks you need. All hooks are optional.
 
 ```ts
-import type { MemoryLayer, MemoryHooks } from '@noetic/core';
+import type { MemoryLayer, MemoryHooks } from '@noetic-tools/core';
 
 function myCustomLayer(): MemoryLayer<MyLayerState> {
   return {
@@ -146,7 +146,7 @@ function myCustomLayer(): MemoryLayer<MyLayerState> {
 If any hook makes network calls or runs LLM inference, set a timeout to prevent hangs:
 
 ```ts
-import type { LayerTimeouts } from '@noetic/core';
+import type { LayerTimeouts } from '@noetic-tools/core';
 
 const timeouts: Partial<LayerTimeouts> = {
   store: 30_000,
@@ -252,8 +252,8 @@ Use the `layerData()` and `layerFn()` builders:
 
 ```ts
 import { z } from 'zod';
-import { layerData, layerFn } from '@noetic/core';
-import type { MemoryLayer } from '@noetic/core';
+import { layerData, layerFn } from '@noetic-tools/core';
+import type { MemoryLayer } from '@noetic-tools/core';
 
 interface MyLayerState {
   entries: string[];
@@ -318,7 +318,7 @@ Note the `as const` on the `id` field and the `satisfies MemoryLayer<MyLayerStat
 Wrap your layers in the `memory()` builder to get full type inference:
 
 ```ts
-import { memory, workingMemory, type InferMemory } from '@noetic/core';
+import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
 
 const mem = memory([workingMemory(), myCustomLayer()]);
 type Mem = InferMemory<typeof mem>;

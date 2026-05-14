@@ -22,7 +22,7 @@ Tools can declare a `memory` property. The runtime collects these declarations a
 ### ToolMemoryDeclaration
 
 ```ts
-import type { ToolMemoryDeclaration } from '@noetic/core';
+import type { ToolMemoryDeclaration } from '@noetic-tools/core';
 
 interface ToolMemoryDeclaration<TState = unknown> {
   /** Shared id -- tools with the same id share state. Defaults to tool.name. */
@@ -41,7 +41,7 @@ The `recall` function returns `string | null` -- a shorthand the runtime accepts
 Pass your tools to `toolMemoryLayer()` to generate the layers, then include both in your agent:
 
 ```ts
-import { react, toolMemoryLayer } from '@noetic/core';
+import { react, toolMemoryLayer } from '@noetic-tools/core';
 
 const tools = [writeTodos, updateTodo, listTodos];
 
@@ -77,8 +77,8 @@ Multiple tools share a single memory layer by declaring the same `memory.id`. Ea
 
 ```ts
 import { z } from 'zod';
-import { tool } from '@noetic/core';
-import type { ToolMemoryDeclaration } from '@noetic/core';
+import { tool } from '@noetic-tools/core';
+import type { ToolMemoryDeclaration } from '@noetic-tools/core';
 
 //#region Types
 
@@ -195,7 +195,7 @@ The built-in `workingMemory()` layer uses this pattern: the LLM calls `updateWor
 ### findFunctionCall Utility
 
 ```ts
-import { findFunctionCall } from '@noetic/core';
+import { findFunctionCall } from '@noetic-tools/core';
 
 // Searches newItems for the first function_call matching the name.
 // Returns parsed JSON arguments as Record<string, unknown>, or null.
@@ -207,9 +207,9 @@ const args = findFunctionCall(newItems, 'updateEntityMemory');
 A custom layer that lets the LLM store discovered entities by calling `updateEntities`:
 
 ```ts
-import type { MemoryLayer } from '@noetic/core';
-import { Slot, findFunctionCall } from '@noetic/core';
-import { createMessage, estimateTokens } from '@noetic/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+import { Slot, findFunctionCall } from '@noetic-tools/core';
+import { createMessage, estimateTokens } from '@noetic-tools/core';
 
 interface Entity {
   name: string;

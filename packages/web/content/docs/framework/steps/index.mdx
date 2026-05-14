@@ -10,7 +10,7 @@ Steps are the building blocks of every Noetic agent. Each step takes typed input
 Execute any async function. Use it for API calls, database queries, transformations, or anything that is not an LLM call.
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const fetchUser = step.run({
   id: 'fetch-user',
@@ -31,7 +31,7 @@ Call a language model with a system prompt, optional tools, and optional structu
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const classify = step.llm({
   id: 'classify-intent',
@@ -57,7 +57,7 @@ Invoke a single tool without going through an LLM. Useful when you know exactly 
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const weatherTool = {
   name: 'get-weather',

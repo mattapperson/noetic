@@ -1,5 +1,5 @@
-import type { ShellAdapter } from '@noetic/core';
-import { TIMEOUT_ERROR_PREFIX } from '@noetic/core';
+import type { ShellAdapter } from '@noetic-tools/core';
+import { TIMEOUT_ERROR_PREFIX } from '@noetic-tools/core';
 import type { MirageWorkspace } from './types';
 
 //#region Helpers

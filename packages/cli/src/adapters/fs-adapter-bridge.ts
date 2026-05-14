@@ -12,7 +12,7 @@
  */
 
 import path from 'node:path';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import type { IFileSystem } from 'just-bash';
 
 //#region Public API

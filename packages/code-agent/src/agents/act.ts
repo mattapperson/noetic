@@ -11,8 +11,8 @@
  * working trees from falsely triggering verify on no-op act turns.
  */
 
-import type { Context, ContextMemory, Step } from '@noetic/core';
-import { loop, spawn, step, until } from '@noetic/core/portable';
+import type { Context, ContextMemory, Step } from '@noetic-tools/core';
+import { loop, spawn, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   countDiffLines,

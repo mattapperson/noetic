@@ -7,7 +7,7 @@
  * manifest so `listLive()` doesn't return a phantom entry post-exit.
  */
 
-import type { SerializedError, SubprocessHandle } from '@noetic/core';
+import type { SerializedError, SubprocessHandle } from '@noetic-tools/core';
 
 //#region Types
 

@@ -5,7 +5,7 @@
 The simplest agent pattern. LLM calls tools in a loop until done.
 
 ```typescript
-import { react } from '@noetic/core';
+import { react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
@@ -43,7 +43,7 @@ When `memory` is provided, `react()` auto-wraps the loop in a `spawn` boundary.
 Use the steering layer to enforce policies on tool usage and model output.
 
 ```typescript
-import { react, steering, SteeringAction } from '@noetic/core';
+import { react, steering, SteeringAction } from '@noetic-tools/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4-20250514',
@@ -245,8 +245,8 @@ const instructions = staticContent({
 Let the LLM update memory layer state by emitting function calls. The `store()` hook intercepts via `findFunctionCall()`. No tool schema is registered -- instruct the LLM in the system prompt.
 
 ```typescript
-import { findFunctionCall, createMessage, estimateTokens, Slot } from '@noetic/core';
-import type { MemoryLayer } from '@noetic/core';
+import { findFunctionCall, createMessage, estimateTokens, Slot } from '@noetic-tools/core';
+import type { MemoryLayer } from '@noetic-tools/core';
 
 function notesMemory(): MemoryLayer<{ notes: string[] }> {
   return {
@@ -326,7 +326,7 @@ import { z } from 'zod';
 import {
   memory, step, loop, spawn, until, any, layerData, layerFn, Slot,
   type InferMemory, type MemoryLayer, type MemoryScope,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 
 interface TaskState {
   tasks: string[];
@@ -397,7 +397,7 @@ The `planMemory()` layer adds Claude Code-style plan mode to any agent. It restr
 ### Basic Usage
 
 ```typescript
-import { planMemory, react } from '@noetic/core';
+import { planMemory, react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4',
@@ -487,7 +487,7 @@ Use `ctx.readLayerState<T>(layerId)` to inspect another layer's state before dec
 Long sessions accumulate every assistant message and tool round-trip in `itemLog`. Without intervention, the entire transcript is replayed on every LLM call, eventually blowing the model's context window. `historyWindow` caps the trailing items projected to the LLM **without** mutating storage:
 
 ```typescript
-import { historyWindow, observationalMemory, workingMemory } from '@noetic/core';
+import { historyWindow, observationalMemory, workingMemory } from '@noetic-tools/core';
 
 const memory = [
   workingMemory(),
@@ -509,10 +509,10 @@ Properties of the projection:
 Swap the adapter to run a specific spawn in its own OS child process. The step composition is unchanged; only the dispatch path differs.
 
 ```typescript
-import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/core';
 // Note: the Node-specific adapter factory lives under the `node` subpath:
 import { createLocalSubprocessAdapter as createLocalSubprocessAdapterNode }
-  from '@noetic/core/adapters/node';
+  from '@noetic-tools/core/adapters/node';
 
 // One adapter per process, reused across spawns. Persists handle manifests
 // through file storage so a host crash can later reattach.
@@ -557,8 +557,8 @@ import {
   AgentHarness,
   createFileStorage,
   createCheckpointStore,
-} from '@noetic/core';
-import { createLocalSubprocessAdapter } from '@noetic/core/adapters/node';
+} from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
 import { reattachLiveChildren } from '@noetic/cli';
 
 // Three roots: subprocess manifests, checkpoint snapshots, per-project task state.
@@ -606,8 +606,8 @@ Long-lived task runners (planner, implementer, agent-ci) expose their harness ov
 import {
   AgentIpcServer,
   createDurableOutboundQueue,
-} from '@noetic/core/adapters/node';
-import { createFileStorage } from '@noetic/core';
+} from '@noetic-tools/core/adapters/node';
+import { createFileStorage } from '@noetic-tools/core';
 
 const storage = createFileStorage({
   root: `${process.env.HOME}/.noetic/subprocess`,
@@ -632,7 +632,7 @@ await server.start();
 **When to compose `DurableOutboundQueue` manually** (without `AgentIpcServer`): any framed byte stream — WebSocket, TCP, plain JSONL file — can use the same pattern.
 
 ```typescript
-import { createDurableOutboundQueue } from '@noetic/core/adapters/node';
+import { createDurableOutboundQueue } from '@noetic-tools/core/adapters/node';
 
 const queue = await createDurableOutboundQueue({ storage, socketPath });
 
@@ -654,7 +654,7 @@ for (const entry of await queue.frameRange(resume.ackedThrough + 1)) {
 }
 ```
 
-`PROTOCOL_VERSION = 2` in `@noetic/core/adapters/node/agent-ipc-protocol.ts`. The v2 frames (`durable`, `durableResume`, `durableAck`) are backwards compatible — peers that don't opt in neither emit nor receive them.
+`PROTOCOL_VERSION = 2` in `@noetic-tools/core/adapters/node/agent-ipc-protocol.ts`. The v2 frames (`durable`, `durableResume`, `durableAck`) are backwards compatible — peers that don't opt in neither emit nor receive them.
 
 ## Subprocess-spawned task agent (planner / implementer)
 

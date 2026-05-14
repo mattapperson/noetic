@@ -14,7 +14,7 @@
  * read, since a partial chat history is more useful than a hard failure.
  */
 
-import type { FsAdapter, Item } from '@noetic/core';
+import type { FsAdapter, Item } from '@noetic-tools/core';
 
 import { isEnoent } from './_fs-errors.js';
 import type { TasksRootCtx } from './paths.js';

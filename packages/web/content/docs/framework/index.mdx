@@ -6,14 +6,14 @@ description: Install Noetic and build your first agent in under 5 minutes.
 ## Installation
 
 ```package-install
-npm i @noetic/core
+npm i @noetic-tools/core
 ```
 
 Or with your preferred package manager:
 
 ```bash
-bun add @noetic/core
-pnpm add @noetic/core
+bun add @noetic-tools/core
+pnpm add @noetic-tools/core
 ```
 
 ## Your First Agent
@@ -22,7 +22,7 @@ Build a ReAct agent in under 10 lines. This agent loops over an LLM step, callin
 
 ```ts
 import { z } from 'zod';
-import { react, step, until } from '@noetic/core';
+import { react, step, until } from '@noetic-tools/core';
 
 const searchTool = {
   name: 'search',

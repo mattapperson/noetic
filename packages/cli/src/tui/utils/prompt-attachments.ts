@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { InputFilePart, InputImagePart, InputTextPart } from '@noetic/core';
+import type { InputFilePart, InputImagePart, InputTextPart } from '@noetic-tools/core';
 
 //#region Types
 

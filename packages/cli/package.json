@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@noetic/code-agent": "workspace:*",
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
     "@noetic/platform-node": "workspace:*",
-    "@openrouter/agent": "0.3.1",
+    "@openrouter/agent": "^0.6.0",
     "agent-browser": "0.26.0",
     "chalk": "5.6.2",
     "cli-highlight": "2.1.11",

@@ -8,7 +8,7 @@
  * streams, and submits user messages through the same
  * `harness.execute()` path the in-process chat uses.
  *
- * This module lives in `@noetic/core/adapters/node` because it
+ * This module lives in `@noetic-tools/core/adapters/node` because it
  * imports `node:net` and `node:path`. Non-Node consumers would
  * implement an alternative transport against the `agent-ipc-protocol`
  * wire shape.
@@ -34,7 +34,7 @@ import type {
   StorageAdapter,
   StreamEvent,
   StreamingItem,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import { ZodError } from 'zod';
 
 import type { AskUserPendingFrame, ClientFrame, ServerFrame } from './agent-ipc-protocol';

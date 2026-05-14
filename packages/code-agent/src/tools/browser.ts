@@ -14,8 +14,8 @@
 
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import type { ShellAdapter, Tool } from '@noetic/core';
-import { getToolCwd, tool } from '@noetic/core';
+import type { ShellAdapter, Tool } from '@noetic-tools/core';
+import { getToolCwd, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import { shellQuote } from './path-utils.js';
 import { DEFAULT_MAX_BYTES, formatSize, truncateTail } from './truncate.js';

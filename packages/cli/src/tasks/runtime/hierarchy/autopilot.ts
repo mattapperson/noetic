@@ -24,7 +24,7 @@ import {
   saveTask,
   tryLoadTask,
 } from '@noetic/code-agent/tasks/store/fs-node';
-import type { SubprocessAdapter } from '@noetic/core';
+import type { SubprocessAdapter } from '@noetic-tools/core';
 import * as log from '../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
 import type {

@@ -10,7 +10,7 @@
 
 import { homedir } from 'node:os';
 import * as path from 'node:path';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { mapFrontmatterToAgentFields, parseFrontmatter } from './frontmatter.js';
 import type { SkillDefinition } from './types.js';
 import { SkillSource } from './types.js';

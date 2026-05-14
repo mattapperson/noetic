@@ -28,7 +28,7 @@ Node example:
 ```typescript
 import { Workspace, Disk, S3Resource, GitHubResource } from '@struktoai/mirage-node';
 import { createMirageAdapters } from '@noetic/mirage';
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 
 const workspace = new Workspace({
   '/local':  new Disk({ root: process.cwd() }),
@@ -112,7 +112,7 @@ Mapping notes:
 
 ```typescript
 // @noetic/mirage
-import type { FsAdapter, ShellAdapter } from '@noetic/core';
+import type { FsAdapter, ShellAdapter } from '@noetic-tools/core';
 
 interface MirageExecuteOptions {
   cwd?: string;

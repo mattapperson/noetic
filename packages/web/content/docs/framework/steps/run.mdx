@@ -6,7 +6,7 @@ description: Execute arbitrary async code as a typed step.
 ## Quick Example
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const transform = step.run({
   id: 'normalize-input',
@@ -65,7 +65,7 @@ declare const stepRun: <TMemory, I, O>(
 ## Retry Example
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const fetchData = step.run({
   id: 'fetch-api',
@@ -90,7 +90,7 @@ const fetchData = step.run({
 The `Context` object provides access to runtime state inside your execute function.
 
 ```ts
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const contextAware = step.run({
   id: 'context-example',

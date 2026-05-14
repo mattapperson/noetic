@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { StepSubprocessRequest } from '@noetic/core';
+import type { StepSubprocessRequest } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '../src/local-subprocess-adapter';
 
 describe('local adapter in-process step dispatch', () => {

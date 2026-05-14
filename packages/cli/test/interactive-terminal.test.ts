@@ -11,7 +11,7 @@ import type {
   ShellExecOptions,
   ShellExecResult,
   ToolExecutionContext,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 import type {
   InteractiveTerminalInput,
   InteractiveTerminalOutput,

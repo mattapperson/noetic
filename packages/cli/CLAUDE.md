@@ -74,7 +74,7 @@ pilotty kill -s noetic
 
 ### Tool System (`src/tools/`)
 
-Tools are created with a `cwd` context and return `Tool` type from `@noetic/core`:
+Tools are created with a `cwd` context and return `Tool` type from `@noetic-tools/core`:
 
 | Tool | Description |
 |------|-------------|
@@ -93,7 +93,7 @@ Tools are created with a `cwd` context and return `Tool` type from `@noetic/core
 
 Use `createCodingTools(opts)` for full toolset or `createReadOnlyTools(opts)` for safe exploration. Both accept `{ cwd, fs?, shell?, lspService?, askUserService? }`; the TUI passes `askUserService` so the ask-user tool can render a modal.
 
-Teammate tools compose `@noetic/core` primitives (`spawn`, `react`, `detachedSpawn`, memory layers) via the per-harness `TeammateRegistry` in `src/agents/registry-runtime.ts`. Background/named teammates run on a fresh `threadId` (passed via `detachedSpawn` overrides) so they do not pollute the parent's session item log.
+Teammate tools compose `@noetic-tools/core` primitives (`spawn`, `react`, `detachedSpawn`, memory layers) via the per-harness `TeammateRegistry` in `src/agents/registry-runtime.ts`. Background/named teammates run on a fresh `threadId` (passed via `detachedSpawn` overrides) so they do not pollute the parent's session item log.
 
 ### Plugin System
 

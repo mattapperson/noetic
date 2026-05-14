@@ -6,7 +6,7 @@
  * `Bun.spawn`) import from here to get the local filesystem, shell,
  * subprocess, durable-storage, and per-task IPC implementations.
  *
- * `@noetic/core` ships only contracts and in-memory adapters; the
+ * `@noetic-tools/core` ships only contracts and in-memory adapters; the
  * Node-specific implementations live here so portable-runtime
  * consumers never pull `node:*` into their bundle.
  */

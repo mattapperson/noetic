@@ -1,4 +1,4 @@
-import type { Step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
 
 import { OptimizeScope } from '../types/eval';
 import type { OptimizableField } from '../types/optimizer';

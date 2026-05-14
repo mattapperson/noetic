@@ -6,8 +6,8 @@
  * underlying primitives, so serialisation, tracing, memory isolation all work unchanged.
  */
 
-import type { Step } from '@noetic/core';
-import { spawn, step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
+import { spawn, step } from '@noetic-tools/core';
 
 import type { SubagentArgs, SubagentPreset } from '../plugins/types.js';
 import { createReadOnlyTools } from '../tools/index.js';

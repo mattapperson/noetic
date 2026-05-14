@@ -6,7 +6,7 @@
  * name sets, schemas) live with their agent.
  */
 
-import type { Context, ContextMemory, FunctionCallItem, Tool } from '@noetic/core';
+import type { Context, ContextMemory, FunctionCallItem, Tool } from '@noetic-tools/core';
 import type { AskUserTool } from '../tools/ask-user.js';
 
 //#region Constants

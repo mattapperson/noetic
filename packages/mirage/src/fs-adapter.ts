@@ -1,4 +1,4 @@
-import type { FsAdapter, FsStats } from '@noetic/core';
+import type { FsAdapter, FsStats } from '@noetic-tools/core';
 import { MirageError } from './errors';
 import { shellQuote } from './path';
 import type { MirageWorkspace } from './types';

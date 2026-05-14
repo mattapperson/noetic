@@ -200,7 +200,7 @@ and calls `adapter.spawn(request)`. The adapter returns a `SubprocessHandle`; fo
 
 ### Step Registry and Cross-Process Lookup
 
-When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared **step registry** (`@noetic/core/runtime/step-registry`):
+When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared **step registry** (`@noetic-tools/core/runtime/step-registry`):
 
 - `registerStep(step)` — called automatically by `step.run()`, `step.llm()`, `step.tool()`, `spawn()`, `provide()`, `loop()`, and other constructors whenever `step.id` is non-empty.
 - `lookupStep(id)` — called by the child runtime (after importing the user's entry module) to retrieve the step definition.

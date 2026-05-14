@@ -15,8 +15,8 @@ import {
   TaskSource,
 } from '@noetic/code-agent/tasks/schema';
 import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ToolExecutionContext } from '@noetic/core';
-import { createDetachedSignal } from '@noetic/core';
+import type { ToolExecutionContext } from '@noetic-tools/core';
+import { createDetachedSignal } from '@noetic-tools/core';
 import type { ImplementerOutcome } from '../../src/tasks/runtime/hierarchy/implementer-flow.js';
 import { persistTaskHierarchy } from '../../src/tasks/runtime/hierarchy/persist.js';
 import { FeatureLoopState } from '../../src/tasks/runtime/hierarchy/schemas.js';

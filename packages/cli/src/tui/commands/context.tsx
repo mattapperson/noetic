@@ -1,4 +1,4 @@
-import type { Item, LastLayerUsage, LayerUsageEntry, MemoryLayer } from '@noetic/core';
+import type { Item, LastLayerUsage, LayerUsageEntry, MemoryLayer } from '@noetic-tools/core';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useContext } from 'react';

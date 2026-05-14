@@ -24,7 +24,7 @@ const TAB_FILES: Record<Tab, string> = {
 };
 
 const TAB_CODE: Record<Tab, string> = {
-  'ReAct reasoning loop': `import { any, loop, step, until } from '@noetic/core';
+  'ReAct reasoning loop': `import { any, loop, step, until } from '@noetic-tools/core';
 
 const reasonAndAct = loop({
   id: 'react-loop',
@@ -45,7 +45,7 @@ const reasonAndAct = loop({
   observationalMemory,
   planMemory,
   workingMemory,
-} from '@noetic/core';
+} from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'agent',
@@ -60,8 +60,8 @@ const harness = new AgentHarness({
   ],
 });`,
 
-  'Sandboxed harness': `import { AgentHarness } from '@noetic/core';
-import type { FsAdapter, ShellAdapter } from '@noetic/core';
+  'Sandboxed harness': `import { AgentHarness } from '@noetic-tools/core';
+import type { FsAdapter, ShellAdapter } from '@noetic-tools/core';
 
 // Swap any of these for an in-memory, remote, or sandboxed backend.
 const fs: FsAdapter = createSandboxFs({ root: '/work' });
@@ -79,8 +79,8 @@ const harness = new AgentHarness({
   llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
 });`,
 
-  'Extend any primitive': `import { step } from '@noetic/core';
-import type { Context } from '@noetic/core';
+  'Extend any primitive': `import { step } from '@noetic-tools/core';
+import type { Context } from '@noetic-tools/core';
 
 interface SessionMemory {
   userId: string;

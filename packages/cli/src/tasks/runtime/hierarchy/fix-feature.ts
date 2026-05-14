@@ -12,8 +12,8 @@ import {
 } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { isEnoent } from '@noetic/code-agent/tasks/store/fs-node';
-import type { AgentHarness, ContextMemory, Step } from '@noetic/core';
-import { branch, step } from '@noetic/core';
+import type { AgentHarness, ContextMemory, Step } from '@noetic-tools/core';
+import { branch, step } from '@noetic-tools/core';
 import { listFeatures, loadFeature, saveFeature } from './store.js';
 import { loadValidatorRun } from './validator.js';
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { execTolerantOfMissing, isShellMissing } from '@noetic/code-agent/tasks/worktree-node';
-import type { ShellAdapter } from '@noetic/core';
+import type { ShellAdapter } from '@noetic-tools/core';
 
 describe('isShellMissing', () => {
   it('returns true on exit 127 regardless of stderr', () => {

@@ -7,8 +7,8 @@
  * headless harness has no way to render the modal.
  */
 
-import type { Tool } from '@noetic/core';
-import { AskUserInputSchema, AskUserOutputSchema, tool } from '@noetic/core';
+import type { Tool } from '@noetic-tools/core';
+import { AskUserInputSchema, AskUserOutputSchema, tool } from '@noetic-tools/core';
 import type { z } from 'zod';
 
 export interface AskUserService {

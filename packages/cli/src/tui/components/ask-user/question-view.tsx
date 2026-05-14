@@ -7,7 +7,7 @@
  * Ported from ~/Desktop/claude-code-main/src/components/permissions/AskUserQuestionPermissionRequest/QuestionView.tsx.
  */
 
-import type { AskUserOption, AskUserQuestion } from '@noetic/core';
+import type { AskUserOption, AskUserQuestion } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import type { Option } from '../custom-select/index.js';
 import { Select, SelectMulti } from '../custom-select/index.js';

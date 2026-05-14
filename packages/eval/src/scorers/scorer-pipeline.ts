@@ -1,5 +1,5 @@
-import type { LlmProviderConfig } from '@noetic/core';
-import { AgentHarness, step } from '@noetic/core';
+import type { LlmProviderConfig } from '@noetic-tools/core';
+import { AgentHarness, step } from '@noetic-tools/core';
 import type { ZodType } from 'zod';
 
 import type { EvalExecution, ScoreResult, ScorerFn } from './types';

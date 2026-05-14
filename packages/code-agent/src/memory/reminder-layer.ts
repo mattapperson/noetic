@@ -15,8 +15,8 @@
  * is self-sufficient.
  */
 
-import type { Item, MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { Item, MemoryLayer } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 import type {
   ReminderLayerState,
   ReminderRegistry,

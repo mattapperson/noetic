@@ -1,4 +1,4 @@
-import type { StreamEvent } from '@noetic/core';
+import type { StreamEvent } from '@noetic-tools/core';
 import type { LocalBashResult } from '../bash-command.js';
 import { formatLocalStdoutBlock, LOCAL_COMMAND_CAVEAT } from '../bash-command.js';
 import type { ConversationEntry, ErrorEntry, UserEntry } from '../item-utils.js';

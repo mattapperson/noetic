@@ -6,7 +6,7 @@ description: Conditional routing -- pick one step to execute or skip entirely.
 ## Quick Example
 
 ```ts
-import { branch, step } from '@noetic/core';
+import { branch, step } from '@noetic-tools/core';
 
 const triageAgent = branch({
   id: 'triage',
@@ -51,7 +51,7 @@ This is the idiomatic way to add conditional logic to an Noetic pipeline. Instea
 When `route` returns `null`, the branch is skipped entirely. The input value is passed through as the output. This is useful for optional processing steps.
 
 ```ts
-import { branch, step } from '@noetic/core';
+import { branch, step } from '@noetic-tools/core';
 
 const maybeTranslate = branch({
   id: 'maybe-translate',
@@ -73,7 +73,7 @@ const maybeTranslate = branch({
 The `route` function creates steps at runtime, so you can parameterize them based on input.
 
 ```ts
-import { branch, step } from '@noetic/core';
+import { branch, step } from '@noetic-tools/core';
 
 const modelPicker = branch({
   id: 'model-picker',
@@ -93,7 +93,7 @@ const modelPicker = branch({
 Branches can return other branches, forks, or any other step type.
 
 ```ts
-import { branch, fork, step } from '@noetic/core';
+import { branch, fork, step } from '@noetic-tools/core';
 
 const nested = branch({
   id: 'outer',
@@ -128,7 +128,7 @@ const nested = branch({
 The `route` function can be async, enabling AI-powered and embedding-based routing. Noetic provides condition helpers like `semanticSwitch`, `semanticRoute`, `embeddingMatch`, and `aiCondition` that return async route functions:
 
 ```ts
-import { branch, semanticSwitch, step } from '@noetic/core';
+import { branch, semanticSwitch, step } from '@noetic-tools/core';
 
 const router = branch({
   id: 'semantic-router',

@@ -18,7 +18,7 @@
  * `as`, no `Tool<unknown, unknown>` escape hatches.
  */
 
-import type { DetachedSignal, Tool } from '@noetic/core';
+import type { DetachedSignal, Tool } from '@noetic-tools/core';
 import type { z } from 'zod';
 
 //#region Types

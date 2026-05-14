@@ -1,4 +1,4 @@
-import type { ShellAdapter } from '@noetic/core';
+import type { ShellAdapter } from '@noetic-tools/core';
 
 import { resolve } from './path-utils.js';
 

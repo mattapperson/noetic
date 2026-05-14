@@ -5,8 +5,8 @@
  */
 
 import path from 'node:path';
-import type { FsAdapter, Tool } from '@noetic/core';
-import { getToolCwd, tool } from '@noetic/core';
+import type { FsAdapter, Tool } from '@noetic-tools/core';
+import { getToolCwd, tool } from '@noetic-tools/core';
 import { globSync } from 'glob';
 import { z } from 'zod';
 import { resolveToCwd } from './path-utils.js';

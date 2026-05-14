@@ -22,7 +22,7 @@
  * leave an orphan tracked by a half-written record.
  */
 
-import type { ShellAdapter, SubprocessAdapter, SubprocessHandle } from '@noetic/core';
+import type { ShellAdapter, SubprocessAdapter, SubprocessHandle } from '@noetic-tools/core';
 
 import { fileUrlToPath } from './file-url-to-path.js';
 import type { TaskStoreContext } from './fs-store.js';

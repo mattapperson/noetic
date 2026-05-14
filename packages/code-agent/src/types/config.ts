@@ -2,7 +2,7 @@
  * Agent configuration types.
  */
 
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { z } from 'zod';
 
 /**

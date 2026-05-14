@@ -20,10 +20,10 @@ The `loop` runs 3 iterations. A `branch` routes to the correct stage based on a 
 ## Code
 
 ```ts
-import { branch } from '@noetic/core';
-import { loop } from '@noetic/core';
-import { step } from '@noetic/core';
-import { until } from '@noetic/core';
+import { branch } from '@noetic-tools/core';
+import { loop } from '@noetic-tools/core';
+import { step } from '@noetic-tools/core';
+import { until } from '@noetic-tools/core';
 
 const normalizeStage = step.run<string, string>({
   id: 'normalize-text',

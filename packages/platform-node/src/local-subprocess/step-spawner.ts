@@ -13,7 +13,7 @@
  */
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
-import type { StepSubprocessRequest, SubprocessHandle } from '@noetic/core';
+import type { StepSubprocessRequest, SubprocessHandle } from '@noetic-tools/core';
 import { handleStepCompletion } from './step-completion';
 import type { ProcessSignaller } from './types';
 

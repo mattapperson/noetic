@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All scripts run from the repo root unless noted.
 
 - `bun install` — install workspace deps (postinstall patches `@openrouter/agent`)
-- `bun test` — runs `@noetic/core`, `@noetic/code-agent`, `@noetic/eval` suites **sequentially** (does NOT include `@noetic/cli`)
+- `bun test` — runs `@noetic-tools/core`, `@noetic/code-agent`, `@noetic/eval` suites **sequentially** (does NOT include `@noetic/cli`)
 - `bun test:ci` — same plus coverage enforcement (diff gate from baseline)
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun scripts/check-export-tags.ts` — validates `@public` JSDoc tags on core's entry points
@@ -34,7 +34,7 @@ plugins ──→ cli ──→ code-agent ──→ core ←── eval
 web (standalone — no workspace deps)
 ```
 
-- **`@noetic/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, memory layer contract, error model, observability. Internal order (foundational → consumer): `types/schemas/errors` → `memory/observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `patterns`. Memory layers live at `packages/core/src/memory/` and must stay tree-shakable (no imports from `interpreter/`, `runtime/`, `adapters/`, `patterns/`).
+- **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, memory layer contract, error model, observability. Internal order (foundational → consumer): `types/schemas/errors` → `memory/observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `patterns`. Memory layers live at `packages/core/src/memory/` and must stay tree-shakable (no imports from `interpreter/`, `runtime/`, `adapters/`, `patterns/`).
 - **`@noetic/code-agent`** — tool implementations, plugin registry, skills, tasks, LSP, git worktree integration.
 - **`@noetic/cli`** — Ink-based TUI harness. Six internal layers per `specs/22-cli-architecture.md`: `foundations → infra → domain → orchestration → presentation → entry`.
 - **`@noetic/eval`** — eval framework, scorers, GEPA optimization, regression.

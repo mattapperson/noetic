@@ -14,7 +14,7 @@ Plan Memory manages a structured planning workflow: the agent enters a restricte
 ## Usage
 
 ```ts
-import { planMemory } from '@noetic/core';
+import { planMemory } from '@noetic-tools/core';
 
 const layer = planMemory();
 ```
@@ -75,7 +75,7 @@ Additional tools can be allowed via `additionalAllowedTools` in the config.
 The plan layer stores the `PlanNode` tree produced by the LLM. For programmatic execution, extract the tree and pass it to `compilePlan()`:
 
 ```ts
-import { compilePlan } from '@noetic/core';
+import { compilePlan } from '@noetic-tools/core';
 
 const compiled = compilePlan(planTree, agents, constraints);
 ```

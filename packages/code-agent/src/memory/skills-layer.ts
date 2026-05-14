@@ -6,8 +6,8 @@
  * Inline shell commands (!) are executed when skills are first activated.
  */
 
-import type { FunctionCallItem, Item, MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { FunctionCallItem, Item, MemoryLayer } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 import { processSkillContent } from '../skills/processor.js';
 import type {

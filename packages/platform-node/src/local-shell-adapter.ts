@@ -1,5 +1,5 @@
-import type { ShellAdapter, ShellExecResult } from '@noetic/core';
-import { TIMEOUT_ERROR_PREFIX } from '@noetic/core';
+import type { ShellAdapter, ShellExecResult } from '@noetic-tools/core';
+import { TIMEOUT_ERROR_PREFIX } from '@noetic-tools/core';
 
 //#region Types
 
@@ -126,7 +126,7 @@ async function rewriteWithRtk(rtkPath: string, command: string): Promise<string 
  * command through `rtk rewrite` for token efficiency — best-effort: any
  * failure (rtk missing, exit 1, timeout) falls through to the raw command.
  * The CLI opts in via `createDefaultShellAdapter`; other embedders of
- * `@noetic/core` keep raw shell semantics unless they explicitly enable rtk.
+ * `@noetic-tools/core` keep raw shell semantics unless they explicitly enable rtk.
  *
  * Call sites that want hard-fail semantics on missing rtk should read
  * `rtkAvailable` on the returned adapter and refuse to boot when it is

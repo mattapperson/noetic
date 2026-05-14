@@ -16,8 +16,8 @@
  * downstream block.
  */
 
-import type { MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 import { isEnoent } from '../tasks/_fs-errors.js';
 
 //#region Constants

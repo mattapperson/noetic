@@ -21,10 +21,10 @@ A support ticket router that classifies incoming tickets by keyword and routes t
 ## Code
 
 ```ts
-import { branch } from '@noetic/core';
-import { loop } from '@noetic/core';
-import { step } from '@noetic/core';
-import { until } from '@noetic/core';
+import { branch } from '@noetic-tools/core';
+import { loop } from '@noetic-tools/core';
+import { step } from '@noetic-tools/core';
+import { until } from '@noetic-tools/core';
 
 const BILLING_KEYWORDS = ['invoice', 'charge', 'refund', 'billing', 'payment', 'subscription'];
 const TECHNICAL_KEYWORDS = ['error', 'bug', 'crash', 'broken', 'fix', 'debug', 'logs'];

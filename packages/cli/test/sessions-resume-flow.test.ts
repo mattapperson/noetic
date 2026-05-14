@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { Item } from '@noetic/core';
+import type { Item } from '@noetic-tools/core';
 
 import { parseArgs } from '../src/cli/args.js';
 import { composeRuntimeModel } from '../src/cli/compose-runtime-config.js';

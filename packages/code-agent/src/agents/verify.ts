@@ -15,8 +15,8 @@
  * the current primitive-set idiom for "run these two in order").
  */
 
-import type { Context, ContextMemory, Step } from '@noetic/core';
-import { loop, spawn, step, until } from '@noetic/core/portable';
+import type { Context, ContextMemory, Step } from '@noetic-tools/core';
+import { loop, spawn, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   DEFAULT_MAX_FIX_ATTEMPTS,

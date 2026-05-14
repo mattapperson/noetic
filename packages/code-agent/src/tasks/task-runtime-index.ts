@@ -17,7 +17,7 @@
  * once every caller has migrated.
  */
 
-import type { SubprocessAdapter, SubprocessHandle } from '@noetic/core';
+import type { SubprocessAdapter, SubprocessHandle } from '@noetic-tools/core';
 
 //#region Types
 

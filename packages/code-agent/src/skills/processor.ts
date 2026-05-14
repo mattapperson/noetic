@@ -5,7 +5,7 @@
  * (lines starting with `!`) and replacing them with their output.
  */
 
-import type { ShellAdapter } from '@noetic/core';
+import type { ShellAdapter } from '@noetic-tools/core';
 
 //#region Constants
 

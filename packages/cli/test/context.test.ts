@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { Item, LastLayerUsage } from '@noetic/core';
+import type { Item, LastLayerUsage } from '@noetic-tools/core';
 import {
   buildBar,
   buildRows,

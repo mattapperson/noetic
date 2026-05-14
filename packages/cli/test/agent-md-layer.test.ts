@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { ExecutionContext, ItemLog, ScopedStorage } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { ExecutionContext, ItemLog, ScopedStorage } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
 
 import type { AgentInstructionResult } from '../src/config/agent-md-loader.js';

@@ -9,9 +9,9 @@
  * act sub-agent.
  */
 
-import type { AskUserInput, AskUserOutput, Context, ContextMemory, Step, Tool } from '@noetic/core';
-import { AskUserOutputSchema, branch, loop, spawn, step, tool, until } from '@noetic/core/portable';
-import { frameworkCast } from '@noetic/core/unstable';
+import type { AskUserInput, AskUserOutput, Context, ContextMemory, Step, Tool } from '@noetic-tools/core';
+import { AskUserOutputSchema, branch, loop, spawn, step, tool, until } from '@noetic-tools/core/portable';
+import { frameworkCast } from '@noetic-tools/core/unstable';
 import { z } from 'zod';
 import type { CodeAgentFlowState } from './flow-state.js';
 import {
@@ -134,7 +134,7 @@ function extractApprovalAnswer(output: AskUserOutput): string {
 /**
  * Tool via which the plan-mode LLM signals that it wants user approval. The
  * tool mutates memory through the typed `toolCtx.memory.set` helper (the
- * `ToolMemory` API from `@noetic/core`) rather than reaching into
+ * `ToolMemory` API from `@noetic-tools/core`) rather than reaching into
  * `ctx.harness.setLayerState` through a cast.
  */
 export const requestPlanApproval: Tool = tool({

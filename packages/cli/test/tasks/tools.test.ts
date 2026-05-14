@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ToolExecutionContext } from '@noetic/core';
+import type { ToolExecutionContext } from '@noetic-tools/core';
 import { z } from 'zod';
 import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
 import { READ_ONLY_TASK_TOOL_NAMES, taskTools } from '../../src/tasks/runtime/tools.js';

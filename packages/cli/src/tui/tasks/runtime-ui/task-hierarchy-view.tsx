@@ -8,7 +8,7 @@
 
 import type { Task } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';

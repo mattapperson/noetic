@@ -6,7 +6,7 @@
  * testing.md` invariant 1) and downstream UIs can render an actionable hint.
  */
 
-import { NoeticConfigError } from '@noetic/core';
+import { NoeticConfigError } from '@noetic-tools/core';
 
 //#region Codes
 
