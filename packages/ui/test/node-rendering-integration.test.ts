@@ -162,6 +162,89 @@ describe('node rendering integration', () => {
     expect(loopEdge!.target).toBe('handler-a');
   });
 
+  it('renders every as container with loop-back edge across iterations', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'every-1',
+      makeNode('every-1', {
+        kind: 'every',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'iter-1',
+      makeNode('iter-1', {
+        parentId: 'every-1',
+        kind: 'tool',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+    nodes.set(
+      'iter-2',
+      makeNode('iter-2', {
+        parentId: 'every-1',
+        kind: 'tool',
+        depth: 1,
+        startTime: 3000,
+      }),
+    );
+
+    const { positions, edges } = calculateSequentialLayout(nodes, 'every-1');
+
+    // Container + 2 leaf iterations
+    expect(positions).toHaveLength(3);
+
+    const everyPos = positions.find((p) => p.id === 'every-1');
+    const iter1Pos = positions.find((p) => p.id === 'iter-1');
+    const iter2Pos = positions.find((p) => p.id === 'iter-2');
+
+    expect(everyPos).toBeDefined();
+    expect(iter1Pos).toBeDefined();
+    expect(iter2Pos).toBeDefined();
+
+    // Every position is a container
+    expect(everyPos!.isContainer).toBe(true);
+
+    // Iterations stacked vertically inside container bounds
+    expect(iter1Pos!.x).toBeGreaterThan(everyPos!.x);
+    expect(iter1Pos!.y).toBeGreaterThan(everyPos!.y);
+    expect(iter2Pos!.y).toBeGreaterThan(iter1Pos!.y);
+
+    // Loop-back edge from last iteration to first (same shape as 'loop')
+    const loopEdge = edges.find((e) => e.type === 'loop');
+    expect(loopEdge).toBeDefined();
+    expect(loopEdge!.source).toBe('iter-2');
+    expect(loopEdge!.target).toBe('iter-1');
+  });
+
+  it('renders every with single child without a loop-back edge', () => {
+    const nodes = new Map<string, ExecutionNode>();
+    nodes.set(
+      'every-once',
+      makeNode('every-once', {
+        kind: 'every',
+        depth: 0,
+        startTime: 1000,
+      }),
+    );
+    nodes.set(
+      'iter-only',
+      makeNode('iter-only', {
+        parentId: 'every-once',
+        kind: 'run',
+        depth: 1,
+        startTime: 2000,
+      }),
+    );
+
+    const { edges } = calculateSequentialLayout(nodes, 'every-once');
+
+    // No loop-back edge — guard requires children.length > 1
+    expect(edges.find((e) => e.type === 'loop')).toBeUndefined();
+  });
+
   it('renders fork as container with children side by side', () => {
     const nodes = new Map<string, ExecutionNode>();
     nodes.set(

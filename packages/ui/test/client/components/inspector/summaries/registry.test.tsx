@@ -59,6 +59,20 @@ describe('Summary Renderer Registry', () => {
       expect(typeof renderer).toBe('function');
     });
 
+    it('has every renderer registered', () => {
+      const renderer = getSummaryRenderer('every');
+      expect(renderer).toBeDefined();
+      expect(typeof renderer).toBe('function');
+    });
+
+    it('every renderer is distinct from loop renderer (not the default fallback)', () => {
+      const everyRenderer = getSummaryRenderer('every');
+      const loopRenderer = getSummaryRenderer('loop');
+      const defaultRenderer = getSummaryRenderer('default');
+      expect(everyRenderer).not.toBe(loopRenderer);
+      expect(everyRenderer).not.toBe(defaultRenderer);
+    });
+
     it('has spawn renderer registered', () => {
       const renderer = getSummaryRenderer('spawn');
       expect(renderer).toBeDefined();

@@ -48,6 +48,10 @@ describe('Step Data Extractors', () => {
       expect(hasStepDataExtractor('loop')).toBe(true);
     });
 
+    it('has every extractor registered', () => {
+      expect(hasStepDataExtractor('every')).toBe(true);
+    });
+
     it('has spawn extractor registered', () => {
       expect(hasStepDataExtractor('spawn')).toBe(true);
     });
@@ -394,6 +398,140 @@ describe('Step Data Extractors', () => {
     });
   });
 
+  describe('every extractor', () => {
+    it('extracts ms, jitter, onError, bodyStepId, bodyStepKind, tokenUsage, cost', () => {
+      const extractor = getStepDataExtractor('every');
+      const tokens: TokenUsage = {
+        input: 5,
+        output: 2,
+        total: 7,
+      };
+      const result = extractor(
+        {
+          everyMs: 5000,
+          everyJitter: 250,
+          everyOnError: 'fail',
+          everyBodyStepId: 'poll-job',
+          everyBodyStepKind: 'tool',
+        },
+        tokens,
+        0.0001,
+      );
+
+      expect(result.ms).toBe(5000);
+      expect(result.jitter).toBe(250);
+      expect(result.onError).toBe('fail');
+      expect(result.bodyStepId).toBe('poll-job');
+      expect(result.bodyStepKind).toBe('tool');
+      expect(result.tokenUsage).toBe(tokens);
+      expect(result.cost).toBe(0.0001);
+    });
+
+    it('includes wakeOn channel name when present', () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor(
+        {
+          everyMs: 1000,
+          everyWakeOn: 'inbox',
+        },
+        ZERO_TOKENS,
+        0,
+      );
+
+      expect(result.wakeOn).toBe('inbox');
+    });
+
+    it('omits wakeOn when not provided', () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor(
+        {
+          everyMs: 1000,
+        },
+        ZERO_TOKENS,
+        0,
+      );
+
+      expect(result.wakeOn).toBeUndefined();
+    });
+
+    it("defaults onError to 'continue' when missing", () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor({}, ZERO_TOKENS, 0);
+      expect(result.onError).toBe('continue');
+    });
+
+    it("defaults onError to 'continue' when value is unrecognized", () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor(
+        {
+          everyOnError: 'sometimes',
+        },
+        ZERO_TOKENS,
+        0,
+      );
+      expect(result.onError).toBe('continue');
+    });
+
+    it('defaults numeric fields to 0 when missing', () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor({}, ZERO_TOKENS, 0);
+
+      expect(result.ms).toBe(0);
+      expect(result.jitter).toBe(0);
+    });
+
+    it('coerces non-numeric ms/jitter to 0', () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor(
+        {
+          everyMs: 'abc',
+          everyJitter: null,
+        },
+        ZERO_TOKENS,
+        0,
+      );
+
+      expect(result.ms).toBe(0);
+      expect(result.jitter).toBe(0);
+    });
+
+    it("defaults bodyStepId to '' and bodyStepKind to 'run' when missing", () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor({}, ZERO_TOKENS, 0);
+
+      expect(result.bodyStepId).toBe('');
+      expect(result.bodyStepKind).toBe('run');
+    });
+
+    it('ignores non-string bodyStepId/bodyStepKind values', () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor(
+        {
+          everyBodyStepId: 42,
+          everyBodyStepKind: false,
+        },
+        ZERO_TOKENS,
+        0,
+      );
+
+      expect(result.bodyStepId).toBe('');
+      expect(result.bodyStepKind).toBe('run');
+    });
+
+    it('ignores non-string wakeOn values', () => {
+      const extractor = getStepDataExtractor('every');
+      const result = extractor(
+        {
+          everyWakeOn: 123,
+        },
+        ZERO_TOKENS,
+        0,
+      );
+
+      expect(result.wakeOn).toBeUndefined();
+    });
+  });
+
   describe('spawn extractor', () => {
     it('extracts childStepId, childStepKind, tokenUsage, cost', () => {
       const extractor = getStepDataExtractor('spawn');
@@ -508,6 +646,7 @@ describe('Step Data Extractors', () => {
       expect(kinds).toContain('tool');
       expect(kinds).toContain('fork');
       expect(kinds).toContain('loop');
+      expect(kinds).toContain('every');
       expect(kinds).toContain('spawn');
       expect(kinds).toContain('branch');
       expect(kinds).toContain('run');
