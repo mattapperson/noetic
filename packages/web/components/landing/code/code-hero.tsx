@@ -111,11 +111,16 @@ export function CodeHero(): ReactNode {
             style={{
               fontSize: '11px',
               letterSpacing: '0.16em',
-              color: 'var(--color-tui-muted)',
+              padding: '4px 10px',
+              background: 'rgba(245, 158, 11, 0.15)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              borderRadius: '4px',
+              color: 'rgb(245, 158, 11)',
               textTransform: 'uppercase',
+              fontWeight: 600,
             }}
           >
-            v0.1 — public preview
+            Coming Soon
           </span>
         </motion.div>
 
