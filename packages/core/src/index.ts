@@ -38,6 +38,10 @@ export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
+/** @public */
+export type { HydrationContext } from './builders/workflow-hydrator';
+/** @public */
+export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
 
 //#endregion
 
@@ -153,6 +157,10 @@ export { createInMemoryStorage } from './runtime/in-memory-storage';
 //#region Patterns
 
 /** @public */
+export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './patterns/dynamic-workflow';
+/** @public */
+export { dynamicWorkflow, parseAndRunWorkflow } from './patterns/dynamic-workflow';
+/** @public */
 export type {
   FlowNode,
   ForkFlowNode,
@@ -183,10 +191,6 @@ export { react } from './patterns/react';
 /** @public */
 export { AgentHarness } from './harness/agent-harness';
 /** @public */
-/** @public */
-/** @public */
-/** @public */
-/** @public */
 export type {
   AfterFirstTurnContext,
   CheckpointStore,
@@ -198,10 +202,6 @@ export type {
   SessionSeedHarness,
   StallNudgeOpts,
 } from './runtime/durable';
-/** @public */
-/** @public */
-/** @public */
-/** @public */
 /** @public */
 export {
   CheckpointKeys,
@@ -222,6 +222,33 @@ export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 
 /** @public */
 export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from './schemas/item';
+/** @public */
+export type {
+  BranchRoute,
+  BranchWorkflowNode,
+  EveryWorkflowNode,
+  ForkWorkflowNode,
+  LlmWorkflowNode,
+  LoopWorkflowNode,
+  MergeStrategy,
+  ProvideWorkflowNode,
+  SequenceWorkflowNode,
+  SpawnWorkflowNode,
+  ToolWorkflowNode,
+  UntilPredicate,
+  WorkflowDocument,
+  WorkflowNode,
+} from './schemas/workflow';
+/** @public */
+export {
+  MergeStrategySchema,
+  UntilPredicateSchema,
+  validateWorkflow,
+  WorkflowDocumentSchema,
+  WorkflowNodeSchema,
+  walkWorkflow,
+  workflowDepth,
+} from './schemas/workflow';
 
 //#endregion
 

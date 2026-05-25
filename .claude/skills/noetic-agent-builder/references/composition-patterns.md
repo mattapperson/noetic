@@ -763,3 +763,50 @@ Key points:
 - The `_optimizable` list on `branch()` tells `collectAllTools` which routes exist — without it, tools in not-currently-routed sub-agents are invisible to the unified pool and their tool calls will be rejected as unknown.
 
 Reference implementation: `packages/code-agent/src/agents/{plan,act,verify,fix,flow-state}.ts` + the `codeAgentWorkflow` export in `packages/code-agent/src/index.ts`.
+
+## Pattern: Dynamic Workflow (LLM-Generated JSON)
+
+An LLM generates a complete workflow as JSON, which the harness hydrates and executes in the same session.
+
+```typescript
+import { dynamicWorkflow, AgentHarness } from '@noetic-tools/core';
+
+const agent = dynamicWorkflow({
+  model: 'openai/gpt-4o',
+  tools: [searchTool, calcTool],
+  instructions: 'Create an efficient multi-step workflow',
+  maxDepth: 5,
+  maxRevisions: 3,
+});
+
+const harness = new AgentHarness({
+  name: 'dynamic-planner',
+  initialStep: agent,
+  params: {},
+});
+
+await harness.execute('Research quantum computing and summarize');
+const response = await harness.getAgentResponse();
+```
+
+Key points:
+
+- The planner LLM receives instructions describing the JSON workflow schema and available tools, then generates a `WorkflowDocument` as structured output.
+- The document is validated against `WorkflowDocumentSchema`, hydrated into a native `Step` tree via `hydrateWorkflow`, then executed with the same interpreter as hand-written compositions.
+- `maxRevisions` controls retry attempts when the LLM produces invalid JSON. Each retry includes the previous validation error as feedback.
+- `maxDepth` caps workflow tree depth to prevent runaway nesting.
+- No `step.run` in JSON — closures aren't serialisable. JSON workflows compose from `llm`, `tool`, and structural operators (`sequence`, `fork`, `loop`, `branch`, `spawn`, `provide`, `every`).
+- Tools are referenced by name in JSON and resolved from the `HydrationContext.tools` registry at hydration time.
+
+For running pre-built JSON workflows without an LLM planner step:
+
+```typescript
+import { parseAndRunWorkflow } from '@noetic-tools/core';
+
+const result = await parseAndRunWorkflow({
+  json: workflowJsonFromDatabase,
+  harness,
+  ctx: harness.createContext(),
+  tools: [searchTool, calcTool],
+});
+```
