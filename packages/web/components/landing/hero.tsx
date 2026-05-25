@@ -71,7 +71,7 @@ export function Hero(): ReactNode {
     <section
       style={{
         position: 'sticky',
-        inset: '94px 0px 0px',
+        inset: '102px 0px 0px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',

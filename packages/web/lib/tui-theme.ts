@@ -19,8 +19,6 @@ export const WINDOW_DOT_RED = '#ff5f56';
 export const WINDOW_DOT_YELLOW = '#ffbd2e';
 export const WINDOW_DOT_GREEN = '#27c93f';
 
-export const NAV_BG = 'rgba(5, 5, 5, 0.8)';
-
 export const HOVER_BG = {
   backgroundColor: 'var(--color-tui-surface-hover)',
 } as const;
