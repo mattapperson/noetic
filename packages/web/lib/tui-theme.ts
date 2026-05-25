@@ -13,7 +13,7 @@ export const FRAME_FILL = BOX.horizontal.repeat(48);
 export const FRAME_TITLE_FILL = BOX.horizontal.repeat(40);
 export const FOOTER_RULE = BOX.horizontal.repeat(300);
 
-export const GITHUB_URL = 'https://github.com/noetic-tools/noetic';
+export const GITHUB_URL = 'https://github.com/mattapperson/noetic';
 
 export const WINDOW_DOT_RED = '#ff5f56';
 export const WINDOW_DOT_YELLOW = '#ffbd2e';
