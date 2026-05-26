@@ -817,4 +817,11 @@
     justify-content: flex-start;
     align-items: center;
   }
+  /* Match the landing-page .nav-brand treatment for the NOETIC wordmark. */
+  #nd-subnav > a:first-of-type {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--color-tui-green);
+    letter-spacing: 0.1em;
+  }
 }
