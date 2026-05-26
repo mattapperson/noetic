@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { ExecutionContext, Item, ItemLog } from '@noetic-tools/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
+import type { ExecutionContext, Item, ItemLog } from '@noetic-tools/core';
 import { TeammateRegistry } from '../src/agents/registry-runtime.js';
 import { teammateInboxLayer } from '../src/memory/teammate-inbox-layer.js';
 

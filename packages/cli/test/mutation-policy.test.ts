@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { FsAdapter, ShellAdapter, ShellExecOptions, ShellExecResult } from '@noetic-tools/core';
+import type {
+  FsAdapter,
+  ShellAdapter,
+  ShellExecOptions,
+  ShellExecResult,
+} from '@noetic-tools/core';
 import { BashOutputSchema, createBashTool } from '../src/tools/bash.js';
 import { createEditTool, EditOutputSchema } from '../src/tools/edit.js';
 import type { MutationPolicy } from '../src/tools/mutation-policy.js';

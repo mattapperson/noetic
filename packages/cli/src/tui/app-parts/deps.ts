@@ -4,6 +4,7 @@ export { createAskUserService } from '@noetic/code-agent/ask-user-service';
 export type { LspService } from '@noetic/code-agent/lsp';
 export type { SkillDefinition } from '@noetic/code-agent/skills';
 export { buildSkillCatalog } from '@noetic/code-agent/skills';
+export { createLocalShellAdapter } from '@noetic/platform-node';
 export type {
   AgentHarness,
   AskUserOutput,
@@ -16,4 +17,3 @@ export type {
   ShellAdapter,
   StreamEvent,
 } from '@noetic-tools/core';
-export { createLocalShellAdapter } from '@noetic/platform-node';

@@ -81,16 +81,19 @@ export function SetupManualWaiter({
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text bold>
-        Install {descriptor.displayName} manually
-      </Text>
+      <Text bold>Install {descriptor.displayName} manually</Text>
       <Box flexDirection="column" marginTop={1}>
-        {descriptor.manualInstructionsFor(os).split('\n').map((line, idx) => (
-          <Text key={`${idx}-${line.slice(0, 12)}`}>{line}</Text>
-        ))}
+        {descriptor
+          .manualInstructionsFor(os)
+          .split('\n')
+          .map((line) => (
+            <Text key={line}>{line}</Text>
+          ))}
       </Box>
       <Box marginTop={1}>
-        <Text color="cyan">… polling every {POLL_MS / 1_000}s (checked {attempts} times)</Text>
+        <Text color="cyan">
+          … polling every {POLL_MS / 1_000}s (checked {attempts} times)
+        </Text>
       </Box>
       <Box marginTop={1}>
         <Text dimColor>i ignore · b back</Text>

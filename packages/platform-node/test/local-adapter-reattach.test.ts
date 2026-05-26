@@ -12,8 +12,12 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { createInMemoryStorage, type SubprocessHandle } from '@noetic-tools/core';
-import { createLocalSubprocessAdapter, defaultProcessSignaller } from '../src/local-subprocess-adapter';
+import type { SubprocessHandle } from '@noetic-tools/core';
+import { createInMemoryStorage } from '@noetic-tools/core';
+import {
+  createLocalSubprocessAdapter,
+  defaultProcessSignaller,
+} from '../src/local-subprocess-adapter';
 
 const spawnedPids = new Set<number>();
 

@@ -1,6 +1,9 @@
 node_modules/
 dist/
 dist-bin/
+dist-server/
+coverage/
+docs/superpowers/
 .next/
 packages/web/.next/
 packages/web/.source/

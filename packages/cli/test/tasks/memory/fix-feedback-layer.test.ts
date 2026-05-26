@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-
-import type { ExecutionContext, Item, ItemLog, ScopedStorage } from '@noetic-tools/core';
 import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
+import type { ExecutionContext, Item, ItemLog, ScopedStorage } from '@noetic-tools/core';
 import type { AssertionOutcome } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import { AssertionStatus } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import type { FixFeedbackState } from '../../../src/tasks/runtime/memory/fix-feedback-layer.js';

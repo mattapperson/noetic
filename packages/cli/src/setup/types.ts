@@ -105,11 +105,17 @@ export interface BinaryDescriptor {
   /** Returns true if the binary is usable. */
   detect: () => Promise<boolean>;
   /** Ordered auto-install options for the detected (os, pms). */
-  installOptionsFor: (os: OsKind, pms: ReadonlyArray<PackageManager>) => ReadonlyArray<InstallOption>;
+  installOptionsFor: (
+    os: OsKind,
+    pms: ReadonlyArray<PackageManager>,
+  ) => ReadonlyArray<InstallOption>;
   /** Multi-line manual instructions rendered in the manual waiter screen. */
   manualInstructionsFor: (os: OsKind) => string;
   /** Tools affected when this binary is missing-and-ignored. */
-  affects: ReadonlyArray<{ toolId: 'interactive-terminal' | 'browser' | 'bash'; mode: 'omit' | 'degrade' }>;
+  affects: ReadonlyArray<{
+    toolId: 'interactive-terminal' | 'browser' | 'bash';
+    mode: 'omit' | 'degrade';
+  }>;
 }
 
 //#endregion

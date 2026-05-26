@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import {
-  createCodingTools,
-  createReadOnlyTools,
-} from '../src/tools/node-factory/core-tools.js';
+import { createCodingTools, createReadOnlyTools } from '../src/tools/node-factory/core-tools.js';
 
 describe('createCodingTools — availableTools gating', () => {
   it('registers every tool by default', () => {

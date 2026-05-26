@@ -18,9 +18,9 @@ import { BINARY_MANIFEST } from '../setup/binary-manifest.js';
 import { detectOs, detectPackageManagers } from '../setup/platform.js';
 import { resolveBinaryStatuses } from '../setup/resolver.js';
 import type { BinaryAvailability, BinaryId, BinaryStatus } from '../setup/types.js';
-import type { AgentConfig } from '../types/config.js';
 import { InkProvider } from '../tui/components/index.js';
 import { SetupScreen } from '../tui/screens/setup-screen.js';
+import type { AgentConfig } from '../types/config.js';
 
 //#region Types
 
@@ -45,7 +45,7 @@ export async function runSetupFlow(options: RunSetupFlowOptions): Promise<Binary
     return initial;
   }
 
-  const isInteractive = options.isInteractive ?? (process.stdin.isTTY === true);
+  const isInteractive = options.isInteractive ?? process.stdin.isTTY === true;
   if (!isInteractive) {
     emitNonTtyNotices(missing, options.writeNotice);
     return withDefaults(initial, missing, 'ignored');
@@ -96,10 +96,7 @@ function mergeAvailability(
   base: Map<BinaryId, 'present' | 'ignored'>,
   overlay: ReadonlyMap<BinaryId, 'present' | 'ignored'>,
 ): BinaryAvailability {
-  for (const [
-    k,
-    v,
-  ] of overlay) {
+  for (const [k, v] of overlay) {
     base.set(k, v);
   }
   return base;

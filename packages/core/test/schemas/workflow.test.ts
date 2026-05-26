@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import type { WorkflowNode } from '../../src/schemas/workflow';
 import {
   UntilPredicateSchema,
   validateWorkflow,
   WorkflowDocumentSchema,
-  type WorkflowNode,
   WorkflowNodeSchema,
   walkWorkflow,
   workflowDepth,

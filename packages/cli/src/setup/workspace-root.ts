@@ -26,7 +26,7 @@ function hasWorkspaceMarker(dir: string): boolean {
   try {
     const pkgPath = join(dir, 'package.json');
     const raw = readFileSync(pkgPath, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
     if (isPkgWithWorkspaces(parsed)) {
       return true;
     }
@@ -37,7 +37,9 @@ function hasWorkspaceMarker(dir: string): boolean {
   return false;
 }
 
-function isPkgWithWorkspaces(value: unknown): value is { workspaces: unknown } {
+function isPkgWithWorkspaces(value: unknown): value is {
+  workspaces: unknown;
+} {
   if (typeof value !== 'object' || value === null) {
     return false;
   }

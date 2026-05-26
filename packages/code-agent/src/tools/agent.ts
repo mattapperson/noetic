@@ -24,9 +24,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { createLocalFsAdapter } from '@noetic/platform-node';
 import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic-tools/core';
 import { historyWindow, NoeticConfigError, react, spawn, step, tool } from '@noetic-tools/core';
-import { createLocalFsAdapter } from '@noetic/platform-node';
 import { retargetCwdForSpawn } from '@noetic-tools/core/unstable';
 import { z } from 'zod';
 

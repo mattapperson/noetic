@@ -12,7 +12,8 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AgentIpcClient } from '../src/agent-ipc-client';
-import { encodeFrame, type ServerFrame } from '../src/agent-ipc-protocol';
+import type { ServerFrame } from '../src/agent-ipc-protocol';
+import { encodeFrame } from '../src/agent-ipc-protocol';
 
 let root: string;
 let server: Server;

@@ -24,8 +24,8 @@ import type {
   PackageManager,
 } from '../../setup/types.js';
 import { appendIgnoredBinary } from '../../setup/user-config-writer.js';
-import { Select } from '../components/custom-select/index.js';
 import type { Option } from '../components/custom-select/index.js';
+import { Select } from '../components/custom-select/index.js';
 import { SetupInstallRunner } from './setup-install-runner.js';
 import { SetupManualWaiter } from './setup-manual-waiter.js';
 
@@ -55,10 +55,20 @@ export interface SetupScreenProps {
 //#region Per-binary state
 
 type BinaryScreenState =
-  | { kind: 'menu' }
-  | { kind: 'auto'; option: InstallOption }
-  | { kind: 'manual' }
-  | { kind: 'done'; outcome: 'present' | 'ignored' };
+  | {
+      kind: 'menu';
+    }
+  | {
+      kind: 'auto';
+      option: InstallOption;
+    }
+  | {
+      kind: 'manual';
+    }
+  | {
+      kind: 'done';
+      outcome: 'present' | 'ignored';
+    };
 
 //#endregion
 
@@ -72,9 +82,7 @@ export function SetupScreen({
   onPersistIgnore,
 }: SetupScreenProps) {
   const [cursor, setCursor] = useState(0);
-  const [outcomes, setOutcomes] = useState<ReadonlyMap<BinaryId, 'present' | 'ignored'>>(
-    new Map(),
-  );
+  const [outcomes, setOutcomes] = useState<ReadonlyMap<BinaryId, 'present' | 'ignored'>>(new Map());
 
   const current = missing[cursor];
   const descriptor = useMemo(() => {
@@ -190,9 +198,11 @@ function BinaryPrompt({
   ]);
 
   const handleIgnore = useCallback(async () => {
-    const persist = onPersistIgnore ?? (async (id: BinaryId) => {
-      await appendIgnoredBinary(id);
-    });
+    const persist =
+      onPersistIgnore ??
+      (async (id: BinaryId) => {
+        await appendIgnoredBinary(id);
+      });
     try {
       await persist(descriptor.id);
     } catch (err) {
@@ -297,7 +307,9 @@ export function describeIgnoreImpact(descriptor: BinaryDescriptor): string {
   const degrades = descriptor.affects.filter((a) => a.mode === 'degrade').map((a) => a.toolId);
   const parts: string[] = [];
   if (omits.length > 0) {
-    parts.push(`the ${omits.join(', ')} tool${omits.length === 1 ? '' : 's'} will not be registered`);
+    parts.push(
+      `the ${omits.join(', ')} tool${omits.length === 1 ? '' : 's'} will not be registered`,
+    );
   }
   if (degrades.length > 0) {
     parts.push(

@@ -781,3 +781,102 @@
     display: none;
   }
 }
+
+/* Docs: smaller type on mobile so headings don't dominate the viewport
+   and copy fits without horizontal clipping. fumadocs renders prose with
+   `.prose` on the article body. */
+@media (max-width: 767px) {
+  .prose {
+    font-size: 14px;
+  }
+  .prose h1 {
+    font-size: 22px;
+  }
+  .prose h2 {
+    font-size: 18px;
+  }
+  .prose h3 {
+    font-size: 16px;
+  }
+  .prose h4 {
+    font-size: 13px;
+  }
+  .prose code {
+    font-size: 12px;
+  }
+}
+
+/* Docs header: 'NOETIC / <section>' breadcrumb in both the mobile sticky
+   header (#nd-subnav) and the desktop sidebar title row (#nd-sidebar).
+   Same treatment as the landing-page .nav-brand class. */
+#nd-subnav > a:first-of-type,
+#nd-sidebar a[href="/"] {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  color: var(--color-tui-green);
+  letter-spacing: 0.1em;
+}
+
+/* Grey, slightly muted, the / separator. */
+.docs-section-separator {
+  color: var(--color-tui-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Mobile header layout: equal 8px spacing between NOETIC, /, section name. */
+@media (max-width: 767px) {
+  #nd-subnav {
+    gap: 8px;
+    align-items: center;
+  }
+  #nd-subnav > div.flex-1 {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+/* Desktop sidebar header row: drop fumadocs's `me-auto` push so NOETIC,
+   the separator, and the section name sit adjacent with equal 8px spacing.
+   Collapse button stays on the far right via margin-left:auto. */
+@media (min-width: 768px) {
+  #nd-sidebar a[href="/"] {
+    margin-inline-end: 0;
+  }
+  #nd-sidebar > div:first-child > div.flex:first-child {
+    gap: 8px;
+    align-items: center;
+  }
+  #nd-sidebar button[aria-label="Collapse Sidebar"] {
+    margin-left: auto;
+  }
+}
+
+/* "Docs index" affordance in the sidebar/drawer banner slot. */
+.docs-index-link {
+  display: block;
+  padding: 6px 0;
+  color: var(--color-tui-secondary);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  text-decoration: none;
+}
+.docs-index-link:hover {
+  color: var(--color-tui-green);
+}
+
+/* fumadocs renders the banner BELOW the section dropdown; move the
+   dropdown to a later flex order so 'Docs index' lands above it. */
+#nd-sidebar > div:first-child > button[data-state] {
+  order: 1;
+}
+
+/* Desktop sidebar wide enough to fit 'Code Agent CLI' on one line in
+   the section selector dropdown (default 268px clips it). */
+@media (min-width: 768px) {
+  #nd-docs-layout {
+    --fd-sidebar-width: 320px;
+  }
+}
