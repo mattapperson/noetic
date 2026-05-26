@@ -806,15 +806,29 @@
   }
 }
 
-/* Mobile: 'Noetic' stays on the left (default brand title slot, links
-   to nav.url '/'). The dynamic section name lives in nav.children, which
-   fumadocs renders inside a `flex-1` div between the title and the
-   search button. Left-align that div so the section name sits next to
-   Noetic (breadcrumb pattern: `Noetic > Framework`). */
+/* Docs header: 'NOETIC / <section>' breadcrumb in both the mobile sticky
+   header (#nd-subnav) and the desktop sidebar title row (#nd-sidebar).
+   Same treatment as the landing-page .nav-brand class. */
+#nd-subnav > a:first-of-type,
+#nd-sidebar a[href='/'] {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: var(--color-tui-green);
+  letter-spacing: 0.1em;
+}
+
+/* Grey, slightly muted, the / separator. */
+.docs-section-separator {
+  color: var(--color-tui-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Mobile header layout: equal 8px spacing between NOETIC, /, section name. */
 @media (max-width: 767px) {
-  /* Equal spacing between NOETIC, >, and the section name. */
   #nd-subnav {
     gap: 8px;
+    align-items: center;
   }
   #nd-subnav > div.flex-1 {
     display: flex;
@@ -822,11 +836,20 @@
     align-items: center;
     gap: 8px;
   }
-  /* Match the landing-page .nav-brand treatment for the NOETIC wordmark. */
-  #nd-subnav > a:first-of-type {
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    color: var(--color-tui-green);
-    letter-spacing: 0.1em;
+}
+
+/* Desktop sidebar header row: drop fumadocs's `me-auto` push so NOETIC,
+   the separator, and the section name sit adjacent with equal 8px spacing.
+   Collapse button stays on the far right via margin-left:auto. */
+@media (min-width: 768px) {
+  #nd-sidebar a[href='/'] {
+    margin-inline-end: 0;
+  }
+  #nd-sidebar > div:first-child > div.flex:first-child {
+    gap: 8px;
+    align-items: center;
+  }
+  #nd-sidebar button[aria-label='Collapse Sidebar'] {
+    margin-left: auto;
   }
 }

@@ -24,7 +24,9 @@ export function MobileSectionTitle(): ReactNode {
   }
   return (
     <>
-      <span aria-hidden="true">&gt;</span>
+      <span aria-hidden="true" className="docs-section-separator">
+        /
+      </span>
       <span>{section.name}</span>
     </>
   );
