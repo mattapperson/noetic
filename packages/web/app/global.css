@@ -805,3 +805,11 @@
     font-size: 12px;
   }
 }
+
+/* Mobile: push the brand/section title next to the search icon
+   (fumadocs default puts it on the far left of #nd-subnav). */
+@media (max-width: 767px) {
+  #nd-subnav > a:first-of-type {
+    margin-left: auto;
+  }
+}
