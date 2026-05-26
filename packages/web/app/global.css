@@ -853,3 +853,16 @@
     margin-left: auto;
   }
 }
+
+/* "Docs index" affordance in the sidebar/drawer banner slot. */
+.docs-index-link {
+  display: block;
+  padding: 6px 0;
+  color: var(--color-tui-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  text-decoration: none;
+}
+.docs-index-link:hover {
+  color: var(--color-tui-green);
+}

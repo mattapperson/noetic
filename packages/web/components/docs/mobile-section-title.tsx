@@ -19,15 +19,12 @@ const SECTIONS: Array<{
 export function MobileSectionTitle(): ReactNode {
   const pathname = usePathname();
   const section = SECTIONS.find((s) => pathname.startsWith(s.urlPrefix));
-  if (!section) {
-    return null;
-  }
   return (
     <>
       <span aria-hidden="true" className="docs-section-separator">
         /
       </span>
-      <span>{section.name}</span>
+      <span>{section?.name ?? 'Docs'}</span>
     </>
   );
 }
