@@ -1,4 +1,9 @@
 node_modules/
+dist/
+dist-bin/
+dist-server/
+coverage/
+docs/superpowers/
 .next/
 packages/web/.next/
 packages/web/.source/
@@ -7,4 +12,6 @@ packages/web/next-env.d.ts
 .vercel
 .superpowers/
 packages/web/.typecheck-snippets/
+*.tsbuildinfo
 examples/skippy/.env
+.noetic/tasks/

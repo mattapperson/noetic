@@ -1,4 +1,4 @@
-import type { Tool, ToolExecutionContext } from '@noetic/core';
+import type { Tool, ToolExecutionContext } from '@noetic-tools/core';
 import type { ZodTypeAny, z } from 'zod';
 
 import type { ChatTool, ChatToolRenderable } from './types';

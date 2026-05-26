@@ -46,6 +46,7 @@ const agentPaths = [
   join(scriptsDir, '../node_modules/@openrouter/agent'),
   join(scriptsDir, '../node_modules/.bun/@openrouter+agent@0.3.0/node_modules/@openrouter/agent'),
   join(scriptsDir, '../node_modules/.bun/@openrouter+agent@0.3.1/node_modules/@openrouter/agent'),
+  join(scriptsDir, '../node_modules/.bun/@openrouter+agent@0.6.0/node_modules/@openrouter/agent'),
 ];
 
 for (const agentPath of agentPaths) {
@@ -91,4 +92,76 @@ for (const agentPath of agentPaths) {
     writeFileSync(modelResultPath, content);
     console.log(`Fixed openResponsesRequest -> responsesRequest in ${modelResultPath}`);
   }
+}
+
+// Shim 3: Remove duplicate keys from @openrouter/sdk tsconfig.json.
+// Upstream ships with "rootDir" declared twice, which makes Bun emit a
+// "Duplicate key" warning every time it resolves the package. The warning
+// is buffered while a TUI owns the terminal and flushes on exit (e.g. Ctrl+C).
+const tsconfigPaths = [
+  join(scriptsDir, '../node_modules/@openrouter/sdk/tsconfig.json'),
+  join(
+    scriptsDir,
+    '../node_modules/.bun/@openrouter+sdk@0.12.0/node_modules/@openrouter/sdk/tsconfig.json',
+  ),
+  join(
+    scriptsDir,
+    '../node_modules/.bun/@openrouter+sdk@0.10.2/node_modules/@openrouter/sdk/tsconfig.json',
+  ),
+  join(
+    scriptsDir,
+    '../node_modules/.bun/@openrouter+sdk@0.5.1/node_modules/@openrouter/sdk/tsconfig.json',
+  ),
+];
+
+for (const tsconfigPath of tsconfigPaths) {
+  if (!existsSync(tsconfigPath)) {
+    continue;
+  }
+  const original = readFileSync(tsconfigPath, 'utf-8');
+  const deduped = dedupeJsoncKeys(original);
+  if (deduped === original) {
+    continue;
+  }
+  writeFileSync(tsconfigPath, deduped);
+  console.log(`Removed duplicate keys from ${tsconfigPath}`);
+}
+
+// Removes lines that repeat a `"key":` already seen at the same brace depth.
+// Preserves comments and formatting so the file still reads naturally.
+function dedupeJsoncKeys(source) {
+  const lines = source.split('\n');
+  const seenByDepth = [
+    new Set(),
+  ];
+  let depth = 0;
+  const kept = [];
+
+  for (const line of lines) {
+    const keyMatch = line.match(/^\s*"([^"]+)"\s*:/);
+    if (keyMatch) {
+      const key = keyMatch[1];
+      const seen = seenByDepth[depth];
+      if (seen?.has(key)) {
+        continue;
+      }
+      seen?.add(key);
+    }
+
+    for (const char of line) {
+      if (char === '{' || char === '[') {
+        depth += 1;
+        seenByDepth[depth] = new Set();
+        continue;
+      }
+      if (char === '}' || char === ']') {
+        seenByDepth[depth] = undefined;
+        depth = Math.max(0, depth - 1);
+      }
+    }
+
+    kept.push(line);
+  }
+
+  return kept.join('\n');
 }

@@ -2,11 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { z } from 'zod';
 import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeTool } from '../../src/interpreter/execute-tool';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
+import { executeTool } from '../../src/interpreter/execute-action';
 import type { ContextMemory } from '../../src/types/memory';
 import type { StepTool } from '../../src/types/step';
 import type { ToolExecutionContext } from '../../src/types/tool-context';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx = makeMockContext();

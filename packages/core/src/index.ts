@@ -1,10 +1,11 @@
 //#region Adapters
 
 /** @public */
-export { createLocalFsAdapter } from './adapters/local-fs-adapter';
-
+export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
 /** @public */
-export { createLocalShellAdapter } from './adapters/local-shell-adapter';
+export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
+/** @public */
+export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
 
 /** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
@@ -17,6 +18,10 @@ export { createOpenRouterEmbed } from './adapters/openrouter';
 export { channel } from './builders/channel-builder';
 /** @public */
 export { branch, fork } from './builders/control-flow-builders';
+/** @public */
+export type { EveryOptions } from './builders/every';
+/** @public */
+export { every } from './builders/every';
 /** @public */
 export { layerData, layerFn } from './builders/layer-provides-builders';
 /** @public */
@@ -33,6 +38,10 @@ export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
+/** @public */
+export type { HydrationContext } from './builders/workflow-hydrator';
+/** @public */
+export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
 
 //#endregion
 
@@ -65,6 +74,27 @@ export { isNoeticError, NoeticErrorImpl } from './errors/noetic-error';
 
 //#endregion
 
+//#region Ask-User Schemas
+
+/** @public */
+export type {
+  AskUserAnnotation,
+  AskUserInput,
+  AskUserOption,
+  AskUserOutput,
+  AskUserQuestion,
+} from './types/ask-user-types';
+/** @public */
+export {
+  AskUserAnnotationSchema,
+  AskUserInputSchema,
+  AskUserOptionSchema,
+  AskUserOutputSchema,
+  AskUserQuestionSchema,
+} from './types/ask-user-types';
+
+//#endregion
+
 //#region Execution
 
 /** @public */
@@ -80,6 +110,10 @@ export type { DurableTaskState, DurableTaskStateConfig } from './memory/layers/d
 export { durableTaskState } from './memory/layers/durable-task-state';
 /** @public */
 export { fileReference } from './memory/layers/file-reference';
+/** @public */
+export type { HistoryWindowConfig } from './memory/layers/history-window';
+/** @public */
+export { historyWindow } from './memory/layers/history-window';
 /** @public */
 export type {
   ObservationalMemoryConfig,
@@ -107,6 +141,8 @@ export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 /** @public */
 export { workingMemory } from './memory/layers/working-memory';
+/** @public */
+export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 //#endregion
 
@@ -114,11 +150,17 @@ export { workingMemory } from './memory/layers/working-memory';
 
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
+/** @public */
+export { createInMemoryStorage } from './runtime/in-memory-storage';
 
 //#endregion
 
 //#region Patterns
 
+/** @public */
+export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './patterns/dynamic-workflow';
+/** @public */
+export { dynamicWorkflow, parseAndRunWorkflow } from './patterns/dynamic-workflow';
 /** @public */
 export type {
   FlowNode,
@@ -130,6 +172,10 @@ export type {
 } from './patterns/flow';
 /** @public */
 export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
+/** @public */
+export type { InterviewOpts, InterviewQuestionAnswer, InterviewResult } from './patterns/interview';
+/** @public */
+export { interview } from './patterns/interview';
 /** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
@@ -144,7 +190,66 @@ export { react } from './patterns/react';
 //#region Runtime
 
 /** @public */
-export { AgentHarness } from './runtime/agent-harness';
+export { AgentHarness } from './harness/agent-harness';
+/** @public */
+export type {
+  AfterFirstTurnContext,
+  CheckpointStore,
+  CreateCheckpointStoreOptions,
+  CreateNudgeMessageOpts,
+  DetachedSignal,
+  RunnableLoopHarness,
+  RunnableLoopOpts,
+  SessionSeedHarness,
+  StallNudgeOpts,
+} from './runtime/durable';
+/** @public */
+export {
+  CheckpointKeys,
+  createCheckpointStore,
+  createDetachedSignal,
+  createNudgeMessage,
+  createStallNudgeHook,
+  DEFAULT_NUDGE_MESSAGE_TEXT,
+  runnableLoop,
+  seedFromItems,
+} from './runtime/durable';
+/** @public */
+export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
+
+//#endregion
+
+//#region Schemas
+
+/** @public */
+export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from './schemas/item';
+/** @public */
+export type {
+  BranchRoute,
+  BranchWorkflowNode,
+  EveryWorkflowNode,
+  ForkWorkflowNode,
+  LlmWorkflowNode,
+  LoopWorkflowNode,
+  MergeStrategy,
+  ProvideWorkflowNode,
+  SequenceWorkflowNode,
+  SpawnWorkflowNode,
+  ToolWorkflowNode,
+  UntilPredicate,
+  WorkflowDocument,
+  WorkflowNode,
+} from './schemas/workflow';
+/** @public */
+export {
+  MergeStrategySchema,
+  UntilPredicateSchema,
+  validateWorkflow,
+  WorkflowDocumentSchema,
+  WorkflowNodeSchema,
+  walkWorkflow,
+  workflowDepth,
+} from './schemas/workflow';
 
 //#endregion
 
@@ -165,16 +270,26 @@ export type {
   RetryPolicy,
   StepMeta,
   TokenUsage,
-  Tool,
-  ToolMemoryDeclaration,
 } from './types/common';
+/** @public */
+export type { Tool, ToolMemoryDeclaration } from './types/tool';
 
 //#endregion
 
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
+export { getToolCwd, setToolCwd, snapshotCwdState } from './runtime/cwd-helpers';
+/** @public */
+export type {
+  Context,
+  ContextHarness,
+  CwdState,
+} from './types/context';
+/** @public */
+export type { ItemLog } from './types/context-parts/item-log';
+/** @public */
+export type { LastLayerUsage, LayerUsageEntry } from './types/context-parts/layer-usage';
 
 //#endregion
 
@@ -194,6 +309,28 @@ export type { EmbedFn } from './types/embed';
 
 //#endregion
 
+//#region Types — Checkpoint
+
+/** @public */
+export type {
+  CheckpointSnapshot,
+  CwdSnapshot,
+  FrontierFrame,
+  ItemLogSnapshot,
+  PendingAskUserSnapshot,
+} from './types/checkpoint';
+/** @public */
+export {
+  CheckpointSchemaVersion,
+  CheckpointSnapshotSchema,
+  CwdSnapshotSchema,
+  FrontierFrameSchema,
+  ItemLogSnapshotSchema,
+  PendingAskUserSnapshotSchema,
+} from './types/checkpoint';
+
+//#endregion
+
 //#region Types — Error
 
 /** @public */
@@ -206,14 +343,23 @@ export type { NoeticError } from './types/error';
 /** @public */
 export type {
   ContentPart,
+  DeveloperMessageExtensionItem,
   ExecuteInput,
+  ExtendedItem,
+  ExtensionItem,
   FileSearchItem,
   FunctionCallItem,
   FunctionCallOutputItem,
   ImageGenerationItem,
+  InferExtendedItem,
+  InputContentPart,
+  InputFilePart,
+  InputImagePart,
   InputMessageItem,
   InputTextPart,
   Item,
+  ItemBase,
+  ItemSchemaExtensions,
   MessageItem,
   OutputItem,
   OutputTextPart,
@@ -235,8 +381,6 @@ export type {
   CompleteParams,
   ContextMemory,
   DisposeParams,
-  ExecutionContext,
-  ExecutionOutcome,
   InferMemory,
   InferMemoryShape,
   InitParams,
@@ -248,7 +392,6 @@ export type {
   MemoryConfig,
   MemoryHooks,
   MemoryLayer,
-  MemoryScope,
   ProjectionPolicy,
   RecallParams,
   RecallResult,
@@ -263,6 +406,13 @@ export type {
 } from './types/memory';
 /** @public */
 export { Slot } from './types/memory';
+/** @public */
+export type {
+  ExecutionContext,
+  ExecutionOutcome,
+  MemoryCallModelRequest,
+  MemoryScope,
+} from './types/memory-context';
 
 //#endregion
 
@@ -356,8 +506,26 @@ export type { FsAdapter, FsStats } from './types/fs-adapter';
 
 //#region Types — Shell
 
+/** @public Reusable error-serialiser used by custom SubprocessAdapter implementations. */
+export { serializeError } from './adapters/in-memory-subprocess/metadata';
 /** @public */
 export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
+/** @public */
+export { TIMEOUT_ERROR_PREFIX } from './types/shell-adapter';
+/** @public */
+export type {
+  ProcessSubprocessRequest,
+  SerializedError,
+  StepSubprocessOverrides,
+  StepSubprocessRequest,
+  SubprocessAdapter,
+  SubprocessControlResult,
+  SubprocessHandle,
+  SubprocessHandleMetadata,
+  SubprocessRequest,
+  SubprocessStatus,
+  SubprocessStopResult,
+} from './types/subprocess-adapter';
 
 //#endregion
 

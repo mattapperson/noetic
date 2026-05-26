@@ -1,9 +1,9 @@
 'use client';
 
-import { AnimatePresence, motion, useScroll, useTransform } from 'motion/react';
+import { motion, useScroll, useTransform } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { CyclingCommand } from '@/components/landing/cycling-command';
 import { TuiWindow } from '@/components/tui/tui-window';
 import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
@@ -11,19 +11,19 @@ import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 const INSTALL_COMMANDS = [
   {
     prefix: '$ bun add ',
-    package: '@noetic/core',
+    package: '@noetic-tools/core',
   },
   {
     prefix: '$ npm install ',
-    package: '@noetic/core',
+    package: '@noetic-tools/core',
   },
   {
     prefix: '$ pnpm add ',
-    package: '@noetic/core',
+    package: '@noetic-tools/core',
   },
 ] as const;
 
-const HERO_CODE = `import { react, AgentHarness } from '@noetic/core';
+const HERO_CODE = `import { AgentHarness, react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -36,14 +36,13 @@ const harness = new AgentHarness({
   initialStep: agent,
   params: {},
 });
-const result = await harness.execute('Find recent AI news');`;
 
-const CYCLE_INTERVAL = 3e3;
+await harness.execute('Find recent AI news');
+const { text } = await harness.getAgentResponse();`;
+
+const HIGHLIGHTED_HERO_CODE = highlightCode(HERO_CODE);
 
 export function Hero(): ReactNode {
-  const [commandIndex, setCommandIndex] = useState(0);
-  const containerRef = useRef<HTMLElement>(null);
-
   const { scrollY } = useScroll();
   const opacity = useTransform(
     scrollY,
@@ -68,23 +67,11 @@ export function Hero(): ReactNode {
     ],
   );
 
-  const cycleCommand = useCallback((): void => {
-    setCommandIndex((prev) => (prev + 1) % INSTALL_COMMANDS.length);
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(cycleCommand, CYCLE_INTERVAL);
-    return (): void => clearInterval(interval);
-  }, [
-    cycleCommand,
-  ]);
-
   return (
     <section
-      ref={containerRef}
       style={{
         position: 'sticky',
-        inset: '64px 0px 0px',
+        inset: '102px 0px 0px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -194,65 +181,7 @@ export function Hero(): ReactNode {
           Reactive memory keeps context windows manageable automatically.
         </motion.p>
 
-        <motion.div
-          initial={{
-            opacity: 0,
-          }}
-          animate={{
-            opacity: 1,
-          }}
-          transition={{
-            delay: 0.6,
-          }}
-          style={{
-            marginBottom: '40px',
-            fontSize: '14px',
-          }}
-        >
-          <AnimatePresence mode="wait">
-            <motion.span
-              key={commandIndex}
-              initial={{
-                opacity: 0,
-                y: 8,
-              }}
-              animate={{
-                opacity: 1,
-                y: 0,
-              }}
-              exit={{
-                opacity: 0,
-                y: -8,
-              }}
-              transition={{
-                duration: 0.15,
-              }}
-              style={{
-                background: 'var(--color-tui-surface)',
-                padding: '8px 16px',
-                borderRadius: '4px',
-                fontFamily: 'var(--font-mono)',
-                border: '1px solid var(--color-tui-border)',
-                display: 'inline-block',
-              }}
-            >
-              <span
-                style={{
-                  color: 'var(--color-tui-muted)',
-                }}
-              >
-                {INSTALL_COMMANDS[commandIndex].prefix}
-              </span>
-              <span
-                style={{
-                  color: 'var(--color-tui-fg)',
-                }}
-              >
-                {INSTALL_COMMANDS[commandIndex].package}
-              </span>
-            </motion.span>
-          </AnimatePresence>
-        </motion.div>
+        <CyclingCommand commands={INSTALL_COMMANDS} />
 
         <motion.div
           initial={{
@@ -325,7 +254,7 @@ export function Hero(): ReactNode {
           }}
         >
           <TuiWindow title="react-agent.ts">
-            <pre style={CODE_PRE_STYLE}>{highlightCode(HERO_CODE)}</pre>
+            <pre style={CODE_PRE_STYLE}>{HIGHLIGHTED_HERO_CODE}</pre>
           </TuiWindow>
         </motion.div>
       </motion.div>

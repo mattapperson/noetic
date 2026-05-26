@@ -1,10 +1,10 @@
 /**
- * /mode command — toggles the CLI agent mode (normal ↔ planning).
+ * /mode command — toggles the CLI agent mode (act ↔ planning).
  *
  * Subcommands:
  *   /mode           - toggle current mode
  *   /mode plan      - enter planning mode
- *   /mode normal    - return to normal mode
+ *   /mode act       - return to act mode
  *   /mode status    - show current mode
  */
 
@@ -30,16 +30,16 @@ async function handleEnter(ctx: CommandContext): Promise<LocalCommandResult> {
 }
 
 async function handleExit(ctx: CommandContext): Promise<LocalCommandResult> {
-  if (ctx.agentMode === 'normal') {
+  if (ctx.agentMode === 'act') {
     return {
       type: 'text',
-      value: 'Already in normal mode.',
+      value: 'Already in act mode.',
     };
   }
-  await ctx.setAgentMode('normal');
+  await ctx.setAgentMode('act');
   return {
     type: 'text',
-    value: 'Returned to normal mode. Full toolset is available again.',
+    value: 'Returned to act mode. Full toolset is available again.',
   };
 }
 
@@ -58,7 +58,7 @@ const SUBCOMMANDS: Record<string, SubcommandHandler> = {
   '': handleToggle,
   plan: handleEnter,
   planning: handleEnter,
-  normal: handleExit,
+  act: handleExit,
   exit: handleExit,
   status: handleStatus,
 };
@@ -74,7 +74,7 @@ const call: LocalCommandCall = async (args, ctx) => {
   if (!handler) {
     return {
       type: 'text',
-      value: `Unknown mode: "${subcommand}". Available: /mode, /mode plan, /mode normal, /mode status`,
+      value: `Unknown mode: "${subcommand}". Available: /mode, /mode plan, /mode act, /mode status`,
     };
   }
 
@@ -88,7 +88,7 @@ const call: LocalCommandCall = async (args, ctx) => {
 export const mode: Command = {
   type: 'local',
   name: 'mode',
-  description: 'Toggle agent mode between normal and planning',
+  description: 'Toggle agent mode between act and planning',
   load: async () => ({
     call,
   }),

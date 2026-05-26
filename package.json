@@ -11,9 +11,9 @@
   },
   "scripts": {
     "postinstall": "node scripts/patch-sdk.js",
-    "test": "bun --cwd packages/core run test && bun --cwd packages/eval run test",
-    "test:coverage": "bun --cwd packages/core run test:coverage && bun --cwd packages/eval run test:coverage",
-    "test:ci": "bun --cwd packages/core run test:ci && bun --cwd packages/eval run test:ci",
+    "test": "bun --cwd packages/core run test && bun --cwd packages/code-agent run test && bun --cwd packages/eval run test",
+    "test:coverage": "bun --cwd packages/core run test:coverage && bun --cwd packages/code-agent run test && bun --cwd packages/eval run test:coverage",
+    "test:ci": "bun --cwd packages/core run test:ci && bun --cwd packages/code-agent run test && bun --cwd packages/eval run test:ci",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
@@ -21,9 +21,7 @@
     "check:exports": "bun scripts/check-export-tags.ts"
   },
   "dependencies": {
-    "@openrouter/agent": "0.3.1",
-    "@openrouter/sdk": "0.12.0"
-  },
-  "patchedDependencies": {
+    "@openrouter/agent": "^0.6.0",
+    "@openrouter/sdk": "^0.12.12"
   }
 }

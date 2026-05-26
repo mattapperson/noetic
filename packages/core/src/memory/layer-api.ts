@@ -1,10 +1,10 @@
-import { frameworkCast } from '../interpreter/framework-cast';
-import { contextToExecCtx } from '../runtime/exec-context-factory';
-import type { Tool } from '../types/common';
 import type { Context } from '../types/context';
 import type { ContextMemory, LayerFunctionDecl, MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
+import type { Tool } from '../types/tool';
 import type { ToolExecutionContext } from '../types/tool-context';
+import { frameworkCast } from '../util/framework-cast';
+import { contextToExecCtx } from './exec-context-factory';
 
 //#region Helpers
 

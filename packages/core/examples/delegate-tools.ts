@@ -9,10 +9,10 @@ import { step } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { react } from '../src/patterns/react';
 import type { Channel } from '../src/types/channel';
-import type { Tool } from '../src/types/common';
 import type { DetachedHandle, DetachedStatus } from '../src/types/detached';
 import type { ContextMemory, MemoryLayer } from '../src/types/memory';
 import type { AgentHarnessContract } from '../src/types/runtime';
+import type { Tool } from '../src/types/tool';
 import type { ToolExecutionContext } from '../src/types/tool-context';
 
 //#region Types

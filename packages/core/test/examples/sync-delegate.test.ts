@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { buildSyncDelegateAgent } from '../../examples/sync-delegate';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse, toolCallResponse } from '../_helpers';
 
 describe('sync delegate demo', () => {

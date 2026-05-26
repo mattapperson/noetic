@@ -6,7 +6,8 @@
   "types": "src/index.tsx",
   "dependencies": {
     "@noetic/cli": "workspace:*",
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
+    "string-width": "7.2.0",
     "zod": "^4.0.0"
   },
   "peerDependencies": {

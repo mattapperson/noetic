@@ -1,10 +1,8 @@
 import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
-import type { ItemLog } from './context';
-import type { FsAdapter } from './fs-adapter';
-import type { Item } from './items';
-import type { CallModelRequest } from './runtime';
-import type { ShellAdapter } from './shell-adapter';
+import type { ItemLog } from './context-parts/item-log';
+import type { Item, ItemSchemaExtensions } from './items';
+import type { ExecutionContext, ExecutionOutcome, MemoryScope } from './memory-context';
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
@@ -12,7 +10,36 @@ import type {
   BeforeToolCallResult,
 } from './steering';
 
-//#region Layer Provides
+export type {
+  ExecutionContext,
+  ExecutionOutcome,
+  MemoryCallModelRequest,
+  MemoryScope,
+} from './memory-context';
+
+/** @public Isolation scope controlling how a memory layer's state is keyed and shared. */
+export type BudgetConfig =
+  | number
+  | {
+      min: number;
+      max: number;
+    }
+  | 'auto';
+
+/** @public Per-hook timeout overrides in milliseconds for a memory layer. */
+export interface LayerTimeouts {
+  init?: number;
+  recall?: number;
+  store?: number;
+  onSpawn?: number;
+  onReturn?: number;
+  onComplete?: number;
+  dispose?: number;
+  beforeToolCall?: number;
+  afterModelCall?: number;
+  onItemAppend?: number;
+  projectHistory?: number;
+}
 
 /** @public A read-only data projection from layer state, accessible via `ctx.memory['layerId'].prop`. */
 export interface LayerDataDecl<T = unknown, TState = unknown> {
@@ -105,6 +132,7 @@ export type InferMemory<T extends MemoryConfig> = T['_shape'];
 
 /** @public Well-known ordering slots for positioning memory layers in the recall/store pipeline. */
 export const Slot = {
+  REMINDER: 80,
   STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
@@ -114,59 +142,6 @@ export const Slot = {
   RAG: 350,
   SEMANTIC_RECALL: 400,
 } as const satisfies Record<string, number>;
-
-/** @public Isolation scope controlling how a memory layer's state is keyed and shared. */
-export type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
-
-/** @public Token budget specification for a memory layer: fixed number, min/max range, or automatic. */
-export type BudgetConfig =
-  | number
-  | {
-      min: number;
-      max: number;
-    }
-  | 'auto';
-
-/** @public Per-hook timeout overrides in milliseconds for a memory layer. */
-export interface LayerTimeouts {
-  init?: number;
-  recall?: number;
-  store?: number;
-  onSpawn?: number;
-  onReturn?: number;
-  onComplete?: number;
-  dispose?: number;
-  beforeToolCall?: number;
-  afterModelCall?: number;
-  onItemAppend?: number;
-}
-
-/** @public Terminal outcome of an execution run, reported to memory layers on completion. */
-export type ExecutionOutcome = 'success' | 'failure' | 'aborted';
-
-/** @public Runtime metadata available to memory layer hooks during each lifecycle phase. */
-export interface ExecutionContext {
-  executionId: string;
-  threadId: string;
-  resourceId?: string;
-  depth: number;
-  stepNumber: number;
-  tokenUsage: {
-    input: number;
-    output: number;
-  };
-  cost: number;
-  /** Filesystem adapter for virtual or real filesystem access. */
-  fs: FsAdapter;
-  /** Shell adapter for virtual or real shell command execution. */
-  shell: ShellAdapter;
-  callModel?: (request: CallModelRequest) => Promise<LLMResponse>;
-  tokenize(text: string): number;
-  trace: {
-    setAttribute(key: string, value: string | number | boolean): void;
-    addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
-  };
-}
 
 /** @public Low-level key-value persistence backend used by scoped storage and memory layers. */
 export interface StorageAdapter {
@@ -265,6 +240,22 @@ export interface DisposeParams<TState> {
   state: TState;
 }
 
+/** @public Parameters passed to a memory layer's `projectHistory` hook to project the history portion of the LLM context window. */
+export interface ProjectHistoryParams<TState> {
+  /** Full historical items from the item log, uncapped. */
+  items: ReadonlyArray<Item>;
+  /** Current execution context. */
+  ctx: ExecutionContext;
+  /** Layer's current state snapshot. */
+  state: TState;
+}
+
+/** @public Value returned by a memory layer's `projectHistory` hook, carrying the projected items. */
+export interface ProjectHistoryResult {
+  /** Items to send to the LLM as history. Typically a subset of the input. */
+  items: ReadonlyArray<Item>;
+}
+
 //#region onItemAppend Hook
 
 /** @public Controls which layers re-run recall() when a re-render is triggered. */
@@ -333,6 +324,15 @@ export interface MemoryHooks<TState = unknown> {
    * NOT called for LLM response items — use `store()` for those.
    */
   onItemAppend?(params: OnItemAppendParams<TState>): Promise<OnItemAppendResult<TState>>;
+  /**
+   * Called once per LLM step to project (cap, transform) the history portion
+   * of the context window before assembleView. Layers compose in slot order:
+   * each receives the output of the previous layer. Storage (`itemLog`) is
+   * NOT mutated — this is a read-side projection only.
+   *
+   * Use for: capping history, summarising old turns, redacting items.
+   */
+  projectHistory?(params: ProjectHistoryParams<TState>): Promise<ProjectHistoryResult>;
 }
 
 /**
@@ -356,6 +356,8 @@ export interface MemoryLayer<TState = unknown> {
   timeouts?: Partial<LayerTimeouts>;
   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
   provides?: LayerProvides;
+  /** Optional item schemas contributed by this layer, primarily for developer-role memory items. */
+  itemSchemas?: Pick<ItemSchemaExtensions, 'developerMessages' | 'items'>;
   /** Default re-render timing when `onItemAppend` requests a re-render. */
   rerenderTiming?: 'immediate' | 'batched';
 }

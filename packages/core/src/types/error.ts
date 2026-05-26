@@ -59,4 +59,20 @@ export type NoeticError =
   | {
       kind: 'steering_denied';
       guidance?: string;
+    }
+  | {
+      /**
+       * Raised by `DetachedHandle.await()` when the adapter persistently
+       * returns `null` for a handle that was previously spawned — the
+       * handle has been evicted from the adapter's registry, either by
+       * a restart-after-stop-without-restore flow or by a storage
+       * inconsistency. This guards against an otherwise-infinite poll
+       * loop that would hold the promise open forever. A short grace
+       * period tolerates transient nulls (e.g. the in-memory adapter
+       * briefly returning null between spawn and first microtask yield).
+       */
+      kind: 'handle_evicted';
+      handleId: string;
+      stepId: string;
+      gracePeriodMs: number;
     };

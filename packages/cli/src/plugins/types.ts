@@ -1,19 +1,12 @@
-import type { LastLayerUsage, MemoryLayer, Tool } from '@noetic/core';
+import type { AgentPlugin, AgentPluginContext } from '@noetic/code-agent/plugins';
+import type { LastLayerUsage } from '@noetic-tools/core';
 import type { ReactNode } from 'react';
-
-import type { CallModel } from '../ai/plugin-call-model.js';
 import type { Command } from '../commands/types.js';
-import type { SubagentPreset } from '../plan/subagents.js';
-import type { SkillDefinition } from '../skills/types.js';
-import type { AgentConfig } from '../types/config.js';
-import type { DataDirScope } from './data-dir.js';
 
-//#region Footer extension point
+export type PluginRenderable = ReactNode;
 
 /**
- * Read-only snapshot of session state passed to plugin-contributed footer components.
- * Plugin footer components read this via the `useFooterContext()` hook so the public
- * plugin API stays stable as new fields are added.
+ * Read-only snapshot of TUI session state passed to plugin footer components.
  */
 export interface FooterContext {
   model: string;
@@ -24,74 +17,22 @@ export interface FooterContext {
   threadId: string;
   sessionStartedAt: number;
   entryCount: number;
-  /** Current agent mode: `'normal'` (full toolset) or `'planning'` (read-only, plan mode). */
-  agentMode: 'normal' | 'planning';
+  agentMode: 'act' | 'planning';
 }
 
-//#endregion
-
-//#region Plugin context
+export interface CliPluginContext extends AgentPluginContext {}
 
 /**
- * Capabilities the host CLI injects into every plugin hook. Introducing new
- * fields on `PluginContext` is additive; existing plugins keep compiling.
+ * CLI plugins are a strict superset of SDK agent plugins. Agent SDK hosts can
+ * load CLI plugins and ignore CLI-only hooks; the hooks below are no-ops
+ * outside the CLI/TUI host.
  */
-export interface PluginContext {
-  /** The parsed agent config (model, apiKey, cwd, ...). */
-  config: AgentConfig;
-  /**
-   * Call the configured LLM for one-shot generation (not tool loops). Uses
-   * the same API key as the harness. Plugins that need tool loops should
-   * register tools instead and let the harness drive the turn.
-   */
-  callModel: CallModel;
-  /**
-   * Returns a plugin-scoped data directory, creating it if needed.
-   *  - 'project' → `<cwd>/.noetic/<plugin-name>/`
-   *  - 'user'    → `~/.noetic/<plugin-name>/`
-   */
-  dataDir: (scope: DataDirScope) => string;
-}
-
-//#endregion
-
-export interface NoeticPlugin {
-  name: string;
-  version: string;
-  tools?: (ctx: PluginContext) => ReadonlyArray<Tool> | Promise<ReadonlyArray<Tool>>;
-  memoryLayers?: (
-    ctx: PluginContext,
-  ) => ReadonlyArray<MemoryLayer> | Promise<ReadonlyArray<MemoryLayer>>;
-  skills?: (
-    ctx: PluginContext,
-  ) => ReadonlyArray<SkillDefinition> | Promise<ReadonlyArray<SkillDefinition>>;
-  /**
-   * Called once after the plugin loads and before the TUI mounts. Receives
-   * the plugin context so it can cache `callModel`, `dataDir`, etc. for later
-   * use from hooks like `footer`, `commands`, `loadingMessages`.
-   */
-  initialize?: (ctx: PluginContext) => Promise<void>;
-  dispose?: () => Promise<void>;
-  /**
-   * Optional footer component rendered between the chat area and the prompt input.
-   * Components should read live session state via `useFooterContext()` rather than
-   * taking it as props. If multiple plugins provide a footer, the first one wins.
-   */
-  footer?: () => ReactNode;
-  /**
-   * Optional pool of loading-spinner messages. One is picked per turn to replace the
-   * default verb. Called once after plugin init; no per-turn calls.
-   */
+export interface CliPlugin extends AgentPlugin {
+  footer?: () => PluginRenderable;
   loadingMessages?: () => ReadonlyArray<string> | Promise<ReadonlyArray<string>>;
-  /**
-   * Optional slash commands contributed by this plugin. Merged into the CLI's
-   * built-in commands with plugin commands appearing after built-ins (so a
-   * plugin can't shadow `/help`, `/context`, etc.).
-   */
-  commands?: (ctx: PluginContext) => ReadonlyArray<Command> | Promise<ReadonlyArray<Command>>;
-  /**
-   * Optional registry of subagent presets the plugin contributes. These names
-   * become valid `preset` values inside plan-mode flow JSON `subagent` nodes.
-   */
-  subagentPresets?: () => Record<string, SubagentPreset> | Promise<Record<string, SubagentPreset>>;
+  commands?: (ctx: CliPluginContext) => ReadonlyArray<Command> | Promise<ReadonlyArray<Command>>;
 }
+
+export type PluginContext = CliPluginContext;
+export type NoeticPlugin = CliPlugin;
+export type AgentSdkPlugin = AgentPlugin;

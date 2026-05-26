@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { fork } from '../builders/control-flow-builders';
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type { ExecuteStepFn, Step } from '../types/step';
+import { frameworkCast } from '../util/framework-cast';
 
 export interface PlanNode {
   id: string;

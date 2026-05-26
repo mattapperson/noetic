@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@openrouter/agent':
+        specifier: 0.3.1
+        version: 0.3.1
+      '@openrouter/sdk':
+        specifier: 0.12.0
+        version: 0.12.0
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.11
@@ -71,6 +78,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@openrouter/agent@0.3.1':
+    resolution: {integrity: sha512-pKAi02SFsgs2W4RPCzZemqzguzjvneoj4+oQ4dnaZnwj9sBQBIoEy9mbpinCYnsF4Xwa/4P05g4ZPDlgpaVZ2w==}
+
+  '@openrouter/sdk@0.12.0':
+    resolution: {integrity: sha512-+X7Sl0uJ3BHBKc6VINCi3x1Y+TIVvBrAuxHCRX01ll8NoG8hvyoT9rk4WbbDaTI80aJJGe4EIlkmZ1OPk1t8jA==}
+
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
   '@biomejs/biome@2.4.9':
@@ -107,3 +123,14 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.4.9':
     optional: true
+
+  '@openrouter/agent@0.3.1':
+    dependencies:
+      '@openrouter/sdk': 0.12.0
+      zod: 4.4.3
+
+  '@openrouter/sdk@0.12.0':
+    dependencies:
+      zod: 4.4.3
+
+  zod@4.4.3: {}

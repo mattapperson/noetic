@@ -1,4 +1,4 @@
-import type { Step, Tool } from '@noetic/core';
+import type { Step, Tool } from '@noetic-tools/core';
 
 import type { Candidate } from '../types/optimizer';
 
@@ -32,8 +32,13 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
 
   switch (step.kind) {
     case 'llm': {
+      // Only rewrite eager (string / array) forms. Function-form Lazy<T> fields
+      // resolve at execution time against a live context, so optimizer candidate
+      // substitution cannot apply to them — pass them through unchanged.
       const instructions = candidate[`${path}.instructions`] ?? step.instructions;
-      const tools = step.tools ? replaceToolListFields(step.tools, candidate, path) : undefined;
+      const tools = Array.isArray(step.tools)
+        ? replaceToolListFields(step.tools, candidate, path)
+        : step.tools;
       return {
         ...step,
         instructions,
@@ -57,10 +62,20 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         child: cloneAndReplace(step.child, candidate, `${path}.`),
       };
+    case 'provide':
+      return {
+        ...step,
+        child: cloneAndReplace(step.child, candidate, `${path}.`),
+      };
     case 'loop':
       return {
         ...step,
         steps: step.steps.map((s) => cloneAndReplace(s, candidate, `${path}.`)),
+      };
+    case 'every':
+      return {
+        ...step,
+        step: cloneAndReplace(step.step, candidate, `${path}.`),
       };
     case 'branch':
       return {

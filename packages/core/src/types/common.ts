@@ -1,14 +1,4 @@
-import type { ZodTypeAny, z } from 'zod';
 import type { FunctionCallItem, Item } from './items';
-import type { ToolExecutionContext } from './tool-context';
-
-//#region Tool Execution Types
-
-type ToolExecutionResult<O extends ZodTypeAny> =
-  | Promise<z.infer<O>>
-  | AsyncGenerator<unknown, z.infer<O>>;
-
-//#endregion
 
 /**
  * Policy controlling automatic retry behavior on step failure.
@@ -38,42 +28,6 @@ export interface ModelParams {
   maxTokens?: number;
   /** Sequences that cause the model to stop generating. */
   stopSequences?: string[];
-}
-
-/**
- * Declares tool-owned memory that the runtime materializes into a MemoryLayer.
- * @public
- */
-export interface ToolMemoryDeclaration<TState = unknown> {
-  /** Shared id — tools with the same id share state. Defaults to `tool.name`. */
-  id?: string;
-  /** Factory for the initial state. */
-  init: () => TState;
-  /** Project state into the LLM context. Return null to omit. */
-  recall: (state: TState) => string | null;
-}
-
-/**
- * A tool definition that an LLM can invoke during execution.
- * @public
- */
-export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
-  /** Unique tool name used by the LLM for selection. */
-  name: string;
-  /** Human-readable description shown to the LLM. */
-  description: string;
-  /** Zod schema validating tool input arguments. */
-  input: I;
-  /** Zod schema validating tool return value. */
-  output: O;
-  /** Optional Zod schema validating streaming events yielded during execution. */
-  event?: ZodTypeAny;
-  /** Async function that performs the tool's work. */
-  execute(args: z.infer<I>, toolCtx: ToolExecutionContext): ToolExecutionResult<O>;
-  /** When true, execution pauses for human approval before running. */
-  needsApproval?: boolean;
-  /** Optional memory declaration — the runtime generates a MemoryLayer from this. */
-  memory?: ToolMemoryDeclaration;
 }
 
 /** @public Aggregate token counts for an execution (input, output, total, cached). */

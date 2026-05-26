@@ -2,26 +2,32 @@
 
 /**
  * @noetic/cli entry point.
+ *
+ * Dispatches to one of three bootstraps based on argv[2]:
+ * - `tasks`                  → bootstrap-tasks (headless task CLI)
+ * - `daemon` | `tasks-daemon`→ bootstrap-daemon (internal re-exec target)
+ * - anything else            → bootstrap-interactive (default TUI path)
  */
 
-import { createLocalFsAdapter } from '@noetic/core';
-import { discoverConfig, resolvePluginBaseDir } from '../config/discovery.js';
-import { createPluginContextBuilder } from '../plugins/context.js';
-import { loadPlugins } from '../plugins/loader.js';
-import { runAgent } from '../tui/app.js';
-import type { AgentRuntimeConfig } from '../types/config.js';
-import { parseArgs } from './args.js';
+import { installWorkspaceProxy } from './workspace-proxy.js';
 
-const argsConfig = parseArgs(process.argv);
-const discovered = await discoverConfig();
-const baseConfig = discovered?.config ?? argsConfig;
-const pluginBaseDir = discovered ? resolvePluginBaseDir(discovered.sourcePath) : baseConfig.cwd;
-const buildCtx = createPluginContextBuilder(baseConfig);
-const plugins = await loadPlugins(baseConfig, pluginBaseDir, buildCtx);
+const subcommand = process.argv[2];
 
-const runtimeConfig: AgentRuntimeConfig = {
-  ...baseConfig,
-  fs: createLocalFsAdapter(),
-};
+if (subcommand === 'tasks') {
+  const { runTasksEntry } = await import('./bootstrap-tasks.js');
+  const exitCode = await runTasksEntry(process.argv);
+  process.exit(exitCode);
+}
 
-await runAgent(plugins, runtimeConfig);
+if (subcommand === 'daemon' || subcommand === 'tasks-daemon') {
+  const { runDaemonEntry } = await import('./bootstrap-daemon.js');
+  await runDaemonEntry(process.argv);
+  process.exit(0);
+}
+
+// Only the interactive TUI path needs cross-checkout React deduping; the
+// `tasks` and `daemon` subcommands above don't render Ink. See workspace-proxy.ts.
+installWorkspaceProxy();
+
+const { runInteractiveEntry } = await import('./bootstrap-interactive.js');
+await runInteractiveEntry(process.argv);

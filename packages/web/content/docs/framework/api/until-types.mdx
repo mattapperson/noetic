@@ -1,0 +1,199 @@
+---
+title: Until Types
+description: Type definitions for termination predicates, verdicts, snapshots, and combinators in Noetic.
+---
+
+## Until
+
+A termination predicate function. Called after each loop iteration to decide whether to stop.
+
+```ts
+type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
+```
+
+## Snapshot
+
+The state visible to an `Until` predicate at the end of each iteration.
+
+```ts
+interface Snapshot {
+  stepCount: number;
+  tokens: {
+    input: number;
+    output: number;
+    total: number;
+  };
+  elapsed: number;
+  cost: number;
+  lastOutput: unknown;
+  lastText: string;
+  history: unknown[];
+  depth: number;
+  lastStepMeta?: StepMeta | null;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `stepCount` | `number` | Number of iterations completed |
+| `tokens.input` | `number` | Total input tokens consumed |
+| `tokens.output` | `number` | Total output tokens generated |
+| `tokens.total` | `number` | Total tokens (input + output) |
+| `elapsed` | `number` | Elapsed time in milliseconds |
+| `cost` | `number` | Accumulated cost in USD |
+| `lastOutput` | `unknown` | Raw output from the last iteration |
+| `lastText` | `string` | Text output from the last iteration |
+| `history` | `unknown[]` | All previous outputs |
+| `depth` | `number` | Execution nesting depth |
+| `lastStepMeta` | `StepMeta \| null` | Metadata from the last step (optional) |
+
+## Verdict
+
+The return value from an `Until` predicate.
+
+```ts
+interface Verdict {
+  stop: boolean;
+  reason?: string;
+  feedback?: string;
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `stop` | `boolean` | yes | Whether to stop the loop |
+| `reason` | `string` | no | Human-readable reason for stopping |
+| `feedback` | `string` | no | Feedback to pass to `prepareNext` for the next iteration |
+
+## Built-in Predicates
+
+The `until` object provides factory functions for common predicates:
+
+### until.maxSteps(n)
+
+Stops after `n` iterations.
+
+```ts
+const stop: Until = until.maxSteps(10);
+```
+
+### until.maxCost(usd)
+
+Stops when accumulated cost reaches the USD limit.
+
+```ts
+const stop: Until = until.maxCost(1.0);
+```
+
+### until.maxDuration(ms)
+
+Stops when elapsed time reaches the millisecond limit.
+
+```ts
+const stop: Until = until.maxDuration(60_000);
+```
+
+### until.noToolCalls()
+
+Stops when the LLM responds without making any tool calls. Skips the first iteration (step count < 1).
+
+```ts
+const stop: Until = until.noToolCalls();
+```
+
+### until.verified(fn)
+
+Stops when the verify function returns `{ pass: true }`. Feedback from failed verification is available in the verdict.
+
+```ts
+declare const verify: VerifyFn;
+const stop: Until = until.verified(verify);
+```
+
+### until.converged(opts)
+
+Stops when the output text is identical to the previous iteration's output.
+
+```ts
+const stop: Until = until.converged({ threshold: 1 });
+```
+
+### until.outputContains(marker)
+
+Stops when the output text contains the given marker string.
+
+```ts
+const stop: Until = until.outputContains('DONE');
+```
+
+### until.custom(fn)
+
+Wraps any `Until` function (identity passthrough for documentation purposes).
+
+```ts
+declare const fn: Until;
+const stop: Until = until.custom(fn);
+```
+
+## VerifyFn
+
+The verification function used by `until.verified()`:
+
+```ts
+type VerifyFn = (output: unknown) => Promise<{
+  pass: boolean;
+  feedback?: string;
+}>;
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `pass` | `boolean` | Whether verification succeeded |
+| `feedback` | `string` | Feedback for the next iteration (optional) |
+
+## ConvergeConfig
+
+```ts
+interface ConvergeConfig {
+  threshold?: number;
+  embed?: EmbedFn;
+  cache?: StorageAdapter;
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `threshold` | `number` | `1` | Similarity threshold. At `1` (default), uses exact string equality. When `embed` is provided and `threshold < 1`, uses cosine similarity. |
+| `embed` | `EmbedFn` | — | Embedding function. When provided with `threshold < 1`, enables semantic convergence detection. |
+| `cache` | `StorageAdapter` | — | Persist the previous output vector across ephemeral invocations (e.g., Cloudflare Workers). |
+
+## Combinators
+
+### any(...predicates)
+
+Returns an `Until` that stops when **any** predicate returns `{ stop: true }`.
+
+```ts
+declare function anySig(...predicates: Until[]): Until;
+```
+
+### all(...predicates)
+
+Returns an `Until` that stops when **all** predicates return `{ stop: true }`. Reasons from all predicates are joined with `'; '`.
+
+```ts
+declare function allSig(...predicates: Until[]): Until;
+```
+
+## Example: Combining Predicates
+
+```ts
+import { all, any, until } from '@noetic-tools/core';
+import type { VerifyFn } from '@noetic-tools/core';
+
+declare const myVerifyFn: VerifyFn;
+
+const stopEarly = any(until.maxSteps(10), until.maxCost(1.0), until.noToolCalls());
+
+const strictStop = all(until.verified(myVerifyFn), until.maxSteps(3));
+```

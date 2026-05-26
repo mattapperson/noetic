@@ -1,5 +1,4 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { Context } from '../types/context';
 import type { ContextMemory } from '../types/memory';
 import type {
@@ -11,6 +10,8 @@ import type {
   StepForkRace,
   StepForkSettle,
 } from '../types/step';
+import { getDefaultRegistrar } from '../types/step-registrar';
+import { frameworkCast } from '../util/framework-cast';
 
 /**
  * Creates a parallel execution step that races paths and returns the first result.
@@ -99,10 +100,12 @@ export function fork<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
       hint: 'Provide a merge function that combines path results into a single output.',
     });
   }
-  return frameworkCast<StepFork<TMemory, I, O>>({
+  const built = frameworkCast<StepFork<TMemory, I, O>>({
     kind: 'fork',
     ...opts,
   });
+  getDefaultRegistrar().register(built);
+  return built;
 }
 
 /**
@@ -138,8 +141,10 @@ export function branch<TMemory = ContextMemory, I = unknown, O = unknown>(opts: 
       hint: 'Provide a route function that selects the next step at runtime.',
     });
   }
-  return {
+  const built: StepBranch<TMemory, I, O> = {
     kind: 'branch',
     ...opts,
   };
+  getDefaultRegistrar().register(built);
+  return built;
 }

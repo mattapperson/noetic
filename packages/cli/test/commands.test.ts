@@ -3,9 +3,16 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
 
-import { BUILTIN_COMMANDS } from '../src/commands/builtins/index.js';
-import { isSlashCommand, parseSlashCommand } from '../src/commands/parse.js';
+import { AGENT_READINESS_PROMPT } from '../src/commands/builtins/agent-readiness.js';
+import {
+  isAutoDetectedShellCommand,
+  isBashCommand,
+  isSlashCommand,
+  parseBashCommand,
+  parseSlashCommand,
+} from '../src/commands/parse.js';
 import {
   findCommand,
   getEnabledCommands,
@@ -16,6 +23,7 @@ import {
   commandsToPromptSuggestions,
   generateCommandSuggestions,
 } from '../src/commands/suggestions.js';
+import { BUILTIN_COMMANDS } from '../src/tui/commands/index.js';
 
 describe('parseSlashCommand', () => {
   test('returns null for non-slash input', () => {
@@ -107,12 +115,49 @@ describe('BUILTIN_COMMANDS', () => {
     expect(names).toContain('clear');
     expect(names).toContain('context');
     expect(names).toContain('skills');
+    expect(names).toContain('agent-readiness');
+    expect(names).toContain('diff-review');
+    expect(names).toContain('tasks');
   });
 
   test('all commands have descriptions', () => {
     for (const cmd of BUILTIN_COMMANDS) {
       expect(cmd.description).toBeTruthy();
     }
+  });
+});
+
+describe('/diff-review command', () => {
+  test('is registered as a local-jsx command', () => {
+    const cmd = findCommand('diff-review', BUILTIN_COMMANDS);
+    assert(cmd !== undefined);
+    expect(cmd.type).toBe('local-jsx');
+    expect(cmd.description).toBeTruthy();
+  });
+});
+
+describe('/tasks command', () => {
+  test('is registered as a local command', () => {
+    const cmd = findCommand('tasks', BUILTIN_COMMANDS);
+    assert(cmd !== undefined);
+    expect(cmd.type).toBe('local');
+    expect(cmd.description).toBeTruthy();
+  });
+});
+
+describe('/agent-readiness command', () => {
+  test('is registered as a local command', () => {
+    const cmd = findCommand('agent-readiness', BUILTIN_COMMANDS);
+    assert(cmd !== undefined);
+    expect(cmd.type).toBe('local');
+    expect(cmd.description).toBeTruthy();
+  });
+
+  test('prompt starts with expected opener and is substantive', () => {
+    expect(AGENT_READINESS_PROMPT.startsWith('Set up a minimal CLAUDE.md')).toBe(true);
+    expect(AGENT_READINESS_PROMPT.length).toBeGreaterThan(1e3);
+    expect(AGENT_READINESS_PROMPT).toContain('## Phase 1: Ask what to set up');
+    expect(AGENT_READINESS_PROMPT).toContain('## Phase 8: Summary and next steps');
   });
 });
 
@@ -139,6 +184,81 @@ describe('commandsToPromptSuggestions', () => {
       expect(sug.cmd).toMatch(/^\//);
       expect(sug.desc).toBeTruthy();
     }
+  });
+});
+
+describe('isBashCommand', () => {
+  test('returns true for bang prefix with command', () => {
+    expect(isBashCommand('!ls')).toBe(true);
+    expect(isBashCommand('! ls')).toBe(true);
+    expect(isBashCommand('  !ls -la')).toBe(true);
+    expect(isBashCommand('!/foo')).toBe(true);
+  });
+
+  test('returns false for bare bang or bang + whitespace', () => {
+    expect(isBashCommand('!')).toBe(false);
+    expect(isBashCommand('! ')).toBe(false);
+    expect(isBashCommand('!   ')).toBe(false);
+  });
+
+  test('returns true for auto-detected commands', () => {
+    expect(isBashCommand('git status')).toBe(true);
+    expect(isBashCommand('ls')).toBe(true);
+    expect(isBashCommand('cd foo')).toBe(true);
+    expect(isBashCommand('pwd')).toBe(true);
+    expect(isBashCommand('grep -r "x" .')).toBe(true);
+    expect(isBashCommand('echo hi')).toBe(true);
+  });
+
+  test('returns false for natural language with similar prefixes', () => {
+    expect(isBashCommand('lsof')).toBe(false);
+    expect(isBashCommand('cats are great')).toBe(false);
+    expect(isBashCommand('github')).toBe(false);
+    expect(isBashCommand('let x = 1')).toBe(false);
+    expect(isBashCommand('hello world')).toBe(false);
+    expect(isBashCommand('')).toBe(false);
+  });
+});
+
+describe('isAutoDetectedShellCommand', () => {
+  test('matches only exact first-token hits', () => {
+    expect(isAutoDetectedShellCommand('git status')).toBe(true);
+    expect(isAutoDetectedShellCommand('git')).toBe(true);
+    expect(isAutoDetectedShellCommand('github')).toBe(false);
+    expect(isAutoDetectedShellCommand('gitstatus')).toBe(false);
+  });
+
+  test('false for empty/whitespace input', () => {
+    expect(isAutoDetectedShellCommand('')).toBe(false);
+    expect(isAutoDetectedShellCommand('   ')).toBe(false);
+  });
+});
+
+describe('parseBashCommand', () => {
+  test('strips bang prefix', () => {
+    expect(parseBashCommand('!ls')).toBe('ls');
+    expect(parseBashCommand('! ls -la')).toBe('ls -la');
+    expect(parseBashCommand('  !echo hi  ')).toBe('echo hi');
+  });
+
+  test('returns null for bare bang', () => {
+    expect(parseBashCommand('!')).toBeNull();
+    expect(parseBashCommand('!   ')).toBeNull();
+  });
+
+  test('returns the command for allowlist tokens', () => {
+    expect(parseBashCommand('git status')).toBe('git status');
+    expect(parseBashCommand('ls')).toBe('ls');
+  });
+
+  test('returns null for non-matching input', () => {
+    expect(parseBashCommand('hello world')).toBeNull();
+    expect(parseBashCommand('lsof -i')).toBeNull();
+    expect(parseBashCommand('')).toBeNull();
+  });
+
+  test('preserves inner whitespace but trims ends', () => {
+    expect(parseBashCommand('   ls   foo   bar   ')).toBe('ls   foo   bar');
   });
 });
 

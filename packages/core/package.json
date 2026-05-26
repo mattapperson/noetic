@@ -1,29 +1,60 @@
 {
-  "name": "@noetic/core",
-  "version": "0.1.0",
+  "name": "@noetic-tools/core",
+  "version": "0.0.1",
   "type": "module",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "description": "Step primitives, interpreter, runtime, and memory layer contract for Noetic agents.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "keywords": [
+    "noetic",
+    "agents",
+    "llm",
+    "ai",
+    "openrouter",
+    "agent-framework"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./portable": {
+      "types": "./dist/portable.d.ts",
+      "default": "./dist/portable.js"
     },
     "./unstable": {
-      "types": "./src/unstable.ts",
-      "default": "./src/unstable.ts"
+      "types": "./dist/unstable.d.ts",
+      "default": "./dist/unstable.js"
     },
     "./internal/test": {
-      "types": "./src/internal-test.ts",
-      "default": "./src/internal-test.ts"
+      "types": "./dist/internal-test.d.ts",
+      "default": "./dist/internal-test.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
-    "@openrouter/agent": "0.3.1",
+    "@openrouter/agent": "^0.6.0",
     "bun-types": "latest"
   },
   "peerDependencies": {
-    "@openrouter/agent": "0.3.1",
+    "@openrouter/agent": "^0.6.0",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
@@ -32,10 +63,12 @@
     }
   },
   "dependencies": {
-    "@openrouter/agent": "0.3.1",
+    "@openrouter/agent": "^0.6.0",
     "zod": "^4.0.0"
   },
   "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json",
+    "prepublishOnly": "rm -rf dist && bun run build",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
     "test:ci": "bun test --coverage --coverage-reporter=json",

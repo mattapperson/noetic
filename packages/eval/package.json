@@ -8,7 +8,7 @@
     "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
     "typescript": "5.9.3",
     "zod": "^4.0.0"
   },

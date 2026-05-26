@@ -1,8 +1,25 @@
-import { estimateTokens } from '../interpreter/message-helpers';
-import { isContextImpl } from '../interpreter/typeguards';
-import type { Tool } from '../types/common';
-import type { Context, LastLayerUsage, LayerUsageEntry } from '../types/context';
+import type { Context } from '../types/context';
+import type { LastLayerUsage, LayerUsageEntry } from '../types/context-parts/layer-usage';
 import type { RecallLayerOutput } from '../types/runtime';
+import type { Tool } from '../types/tool';
+import { estimateTokens } from '../util/message-helpers';
+
+/**
+ * Duck-type check for a Context whose `lastLayerUsage` property is writable.
+ * Avoids importing `ContextImpl` (which lives in runtime/) from the memory
+ * module — preserving the memory → (no interpreter/runtime) boundary.
+ */
+type MutableLayerUsageContext = Omit<Context, 'lastLayerUsage'> & {
+  lastLayerUsage: LastLayerUsage | undefined;
+};
+
+function canWriteLayerUsage(ctx: Context): ctx is MutableLayerUsageContext {
+  const desc = Object.getOwnPropertyDescriptor(ctx, 'lastLayerUsage');
+  if (desc === undefined) {
+    return false;
+  }
+  return desc.writable !== false;
+}
 
 //#region Types
 
@@ -69,7 +86,7 @@ export function computeLayerUsage({
 
 /** Commit computed usage to the Context, replacing any prior snapshot. */
 export function commitLayerUsage(ctx: Context, usage: LastLayerUsage): void {
-  if (!isContextImpl(ctx)) {
+  if (!canWriteLayerUsage(ctx)) {
     return;
   }
   ctx.lastLayerUsage = usage;

@@ -1,5 +1,5 @@
-import type { Step } from '@noetic/core';
-import { AgentHarness, InMemoryExporter } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
+import { AgentHarness, InMemoryExporter } from '@noetic-tools/core';
 
 import type { EvalSuiteOptions, ScoreResult } from '../types/eval';
 import type { EvalExecution, ScorerFn } from './eval-execution';

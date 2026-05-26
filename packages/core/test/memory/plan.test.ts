@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { PlanState } from '../../src/memory/layers/plan';
+import type { PlanExecutionEntry, PlanState } from '../../src/memory/layers/plan';
 import { PlanPhase, planMemory } from '../../src/memory/layers/plan';
 import type { FlowNode, LlmFlowNode, SequenceFlowNode } from '../../src/patterns/flow';
 import { SteeringAction } from '../../src/types/steering';
+import { frameworkCast } from '../../src/util/framework-cast';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 //#region Test Fixtures
@@ -65,6 +66,18 @@ function makeExecutingState(overrides?: Partial<PlanState>): PlanState {
     version: 1,
     ...overrides,
   };
+}
+
+function planState(value: unknown): PlanState {
+  assert(value);
+  return frameworkCast<PlanState>(value);
+}
+
+interface PlanStatusView {
+  phase: PlanPhase;
+  hasPrd: boolean;
+  hasPlanTree: boolean;
+  version: number;
 }
 
 //#endregion
@@ -370,10 +383,10 @@ describe('planMemory layer', () => {
         makeIdleState(),
         makeCtx(),
       );
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Planning);
-      expect(result.state.prd).toContain('Build feature X');
-      expect(result.state.version).toBe(1);
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Planning);
+      expect(state.prd).toContain('Build feature X');
+      expect(state.version).toBe(1);
     });
 
     it('rejects if not idle', async () => {
@@ -397,8 +410,8 @@ describe('planMemory layer', () => {
         makeIdleState(),
         makeCtx(),
       );
-      assert(result.state);
-      expect(result.state.prd).toBe('# Goal\n\nMigrate to v2\n');
+      const state = planState(result.state);
+      expect(state.prd).toBe('# Goal\n\nMigrate to v2\n');
     });
 
     it('leaves PRD null when no goal', async () => {
@@ -406,8 +419,8 @@ describe('planMemory layer', () => {
       const fn = layer.provides!.enterPlanMode;
       assert(fn.kind === 'function');
       const result = await fn.execute({}, makeIdleState(), makeCtx());
-      assert(result.state);
-      expect(result.state.prd).toBeNull();
+      const state = planState(result.state);
+      expect(state.prd).toBeNull();
     });
   });
 
@@ -423,8 +436,8 @@ describe('planMemory layer', () => {
         makePlanningState(),
         makeCtx(),
       );
-      assert(result.state);
-      expect(result.state.prd).toBe('# Updated PRD');
+      const state = planState(result.state);
+      expect(state.prd).toBe('# Updated PRD');
       expect(result.result).toBe('PRD updated successfully.');
     });
 
@@ -498,8 +511,8 @@ describe('planMemory layer', () => {
       assert(fn.kind === 'function');
       const node = makeFlowNode();
       const result = await fn.execute(node, makePlanningState(), makeCtx());
-      assert(result.state);
-      expect(result.state.planTree).toEqual(node);
+      const state = planState(result.state);
+      expect(state.planTree).toEqual(node);
     });
 
     it('rejects if not in planning phase', async () => {
@@ -581,8 +594,8 @@ describe('planMemory layer', () => {
         }),
         makeCtx(),
       );
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Executing);
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Executing);
     });
 
     it('rejects execute without PRD', async () => {
@@ -630,10 +643,10 @@ describe('planMemory layer', () => {
         }),
         makeCtx(),
       );
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Idle);
-      expect(result.state.prd).toBeNull();
-      expect(result.state.planTree).toBeNull();
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Idle);
+      expect(state.prd).toBeNull();
+      expect(state.planTree).toBeNull();
     });
 
     it('rejects if not in planning phase', async () => {
@@ -685,10 +698,10 @@ describe('planMemory layer', () => {
         ctx: makeCtx(),
       });
       assert(result);
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Completed);
-      expect(result.state.executionLog).toHaveLength(1);
-      expect(result.state.executionLog[0].outcome).toBe('success');
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Completed);
+      expect(state.executionLog).toHaveLength(1);
+      expect(state.executionLog[0].outcome).toBe('success');
     });
 
     it('records failure when executing', async () => {
@@ -701,10 +714,10 @@ describe('planMemory layer', () => {
         ctx: makeCtx(),
       });
       assert(result);
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Failed);
-      expect(result.state.executionLog).toHaveLength(1);
-      expect(result.state.executionLog[0].outcome).toBe('failure');
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Failed);
+      expect(state.executionLog).toHaveLength(1);
+      expect(state.executionLog[0].outcome).toBe('failure');
     });
 
     it('records aborted outcome when executing', async () => {
@@ -717,10 +730,10 @@ describe('planMemory layer', () => {
         ctx: makeCtx(),
       });
       assert(result);
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Failed);
-      expect(result.state.executionLog).toHaveLength(1);
-      expect(result.state.executionLog[0].outcome).toBe('aborted');
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Failed);
+      expect(state.executionLog).toHaveLength(1);
+      expect(state.executionLog[0].outcome).toBe('aborted');
     });
 
     it('does not modify state when not executing', async () => {
@@ -738,11 +751,11 @@ describe('planMemory layer', () => {
     it('caps executionLog at max entries', async () => {
       const layer = planMemory();
       assert(layer.hooks.onComplete);
-      const longLog = Array.from(
+      const longLog: PlanExecutionEntry[] = Array.from(
         {
           length: 15,
         },
-        (_, i) => ({
+        (_, i): PlanExecutionEntry => ({
           timestamp: i,
           version: 1,
           outcome: 'success',
@@ -757,9 +770,9 @@ describe('planMemory layer', () => {
         ctx: makeCtx(),
       });
       assert(result);
-      assert(result.state);
+      const state = planState(result.state);
       // 15 existing + 1 new = 16, capped to 10
-      expect(result.state.executionLog.length).toBeLessThanOrEqual(10);
+      expect(state.executionLog.length).toBeLessThanOrEqual(10);
     });
   });
 
@@ -781,9 +794,9 @@ describe('planMemory layer', () => {
       const fn = layer.provides!.enterPlanMode;
       assert(fn.kind === 'function');
       const result = await fn.execute({}, makeIdleState(), makeCtx());
-      assert(result.state);
+      const state = planState(result.state);
       expect(called).toBe(1);
-      expect(result.state.planSlug).toBe('amber-cobalt-falcon');
+      expect(state.planSlug).toBe('amber-cobalt-falcon');
     });
 
     it('leaves planSlug null when no callback configured', async () => {
@@ -791,8 +804,8 @@ describe('planMemory layer', () => {
       const fn = layer.provides!.enterPlanMode;
       assert(fn.kind === 'function');
       const result = await fn.execute({}, makeIdleState(), makeCtx());
-      assert(result.state);
-      expect(result.state.planSlug ?? null).toBeNull();
+      const state = planState(result.state);
+      expect(state.planSlug ?? null).toBeNull();
     });
 
     it('rejected onExit keeps phase in Planning and reports rejection', async () => {
@@ -836,8 +849,8 @@ describe('planMemory layer', () => {
         }),
         makeCtx(),
       );
-      assert(result.state);
-      expect(result.state.phase).toBe(PlanPhase.Executing);
+      const state = planState(result.state);
+      expect(state.phase).toBe(PlanPhase.Executing);
     });
 
     it('appends additionalPlanInstructions to recall payload', async () => {
@@ -870,11 +883,13 @@ describe('planMemory layer', () => {
       const layer = planMemory();
       const status = layer.provides!.status;
       assert(status.kind === 'data');
-      const value = status.read(
-        makePlanningState({
-          prd: '# PRD',
-          planTree: makeFlowNode(),
-        }),
+      const value = frameworkCast<PlanStatusView>(
+        status.read(
+          makePlanningState({
+            prd: '# PRD',
+            planTree: makeFlowNode(),
+          }),
+        ),
       );
       expect(value.phase).toBe(PlanPhase.Planning);
       expect(value.hasPrd).toBe(true);
@@ -886,7 +901,7 @@ describe('planMemory layer', () => {
       const layer = planMemory();
       const status = layer.provides!.status;
       assert(status.kind === 'data');
-      const value = status.read(makePlanningState());
+      const value = frameworkCast<PlanStatusView>(status.read(makePlanningState()));
       expect(value.hasPrd).toBe(false);
       expect(value.hasPlanTree).toBe(false);
     });

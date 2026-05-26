@@ -1,5 +1,5 @@
 import { RootProvider } from 'fumadocs-ui/provider/next';
-import { jetbrainsMono } from '@/lib/fonts';
+import { instrumentSerif, jetbrainsMono } from '@/lib/fonts';
 import './global.css';
 
 export const metadata = {
@@ -102,7 +102,11 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }): React.ReactNode {
   return (
-    <html lang="en" className={jetbrainsMono.variable} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${jetbrainsMono.variable} ${instrumentSerif.variable}`}
+      suppressHydrationWarning
+    >
       <body
         style={{
           fontFamily: 'var(--font-mono), monospace',

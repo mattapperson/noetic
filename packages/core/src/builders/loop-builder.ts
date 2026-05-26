@@ -1,6 +1,7 @@
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import type { ContextMemory } from '../types/memory';
 import type { StepLoop } from '../types/step';
+import { getDefaultRegistrar } from '../types/step-registrar';
 
 /** @public Configuration options accepted by the `loop()` builder, excluding the `kind` discriminant. */
 export type LoopConfig<TMemory = ContextMemory, I = unknown, O = unknown> = Omit<
@@ -50,8 +51,10 @@ export function loop<TMemory = ContextMemory, I = unknown, O = unknown>(
       hint: 'Provide an until predicate, e.g. until.maxSteps(10).',
     });
   }
-  return {
+  const built: StepLoop<TMemory, I, O> = {
     kind: 'loop',
     ...opts,
   };
+  getDefaultRegistrar().register(built);
+  return built;
 }

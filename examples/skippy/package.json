@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
     "@noetic/chat-sdk": "workspace:*",
     "@chat-adapter/discord": "4.23.0",
     "@chat-adapter/state-memory": "4.23.0",

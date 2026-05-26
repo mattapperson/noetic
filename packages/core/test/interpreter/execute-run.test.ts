@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeRun } from '../../src/interpreter/execute-run';
+import { executeRun } from '../../src/interpreter/execute-action';
 import type { Context } from '../../src/types/context';
 import type { ContextMemory } from '../../src/types/memory';
 import type { StepRun } from '../../src/types/step';

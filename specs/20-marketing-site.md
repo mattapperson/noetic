@@ -51,7 +51,7 @@ Sections 4 (Primitives) and 5 (Patterns) render **side-by-side** on desktop.
 | H1 | `NOETIC` |
 | Subhead | "Build complex AI agents without the framework tax." |
 | Body | "Proven patterns for ReAct, task trees, and dual-agent loops — or compose from seven primitives directly. Reactive memory decides what to keep, compress, and retrieve so your agents stay coherent across long conversations without bloating the context window." |
-| Install | `$ bun add @noetic/core` (cycling, prominent near CTAs) |
+| Install | `$ bun add @noetic-tools/core` (cycling, prominent near CTAs) |
 | CTA primary | "Start building (5 min quickstart)" → `/docs` |
 | CTA secondary | "View on GitHub ★" → GitHub URL |
 | Code block | TUI window with `react-agent.ts` snippet |

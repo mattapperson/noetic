@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.7/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -23,8 +23,14 @@
       "!packages/web/.source",
       "!packages/web/.next",
       "!packages/web/next-env.d.ts",
+      "!.agents",
       "!.worktrees",
-      "!packages/web/.typecheck-snippets"
+      "!.claude",
+      "!.vercel",
+      "!packages/cli/.tui-test",
+      "!packages/web/lib/*.generated.ts",
+      "!packages/web/.typecheck-snippets",
+      "!**/dist"
     ]
   },
   "formatter": {

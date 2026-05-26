@@ -48,6 +48,8 @@ function formatMessage(error: NoeticError): string {
       return `Budget exceeded: ${error.field} limit ${error.limit}, actual ${error.actual}`;
     case 'steering_denied':
       return `Steering denied${error.guidance ? `: ${error.guidance}` : ''}`;
+    case 'handle_evicted':
+      return `Subprocess handle '${error.handleId}' evicted (step '${error.stepId}'): adapter returned null for ${error.gracePeriodMs}ms`;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

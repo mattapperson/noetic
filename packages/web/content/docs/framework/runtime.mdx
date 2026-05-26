@@ -1,0 +1,335 @@
+---
+title: AgentHarness
+description: The AgentHarness executes agent steps, manages context, and coordinates memory and channels.
+---
+
+## Quick Example
+
+```ts
+import { react, AgentHarness } from '@noetic-tools/core';
+
+const agent = react({
+  model: 'gpt-4o',
+  tools: [searchTool, calcTool],
+  maxSteps: 10,
+});
+
+const harness = new AgentHarness({
+  name: 'researcher',
+  initialStep: agent,
+  params: {},
+});
+
+await harness.execute('Find recent AI news');
+const response = await harness.getAgentResponse();
+```
+
+The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, manages per-thread **sessions** with a message queue, dispatches steps, coordinates channels and memory layers, and provides tracing infrastructure.
+
+Calls to `execute()` enqueue the input on the session identified by `options.threadId` (a single default thread is used when omitted). Stream accessors are session-scoped — subscribe once and events flow across every turn in that session.
+
+## Constructor Options
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  initialStep: myStep,
+  params: { model: 'gpt-4o' },
+});
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `name` | `string` | required | Agent name (populates `config.name`). |
+| `initialStep` | `Step<TMemory, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TMemory` defaults to `ContextMemory`. |
+| `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
+| `memory` | `MemoryLayer[]` | `undefined` | Default memory layers applied to every context created via `createContext()` / `execute()`. |
+| `storage` | `StorageAdapter` | in-memory | Storage backend for memory persistence. |
+| `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
+| `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
+| `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Memory layers, tools, and skill discovery all route through this adapter. |
+| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
+| `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
+| `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. |
+| `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
+| `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
+| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
+| `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
+| `streamIdleTimeoutMs` | `number` | `120_000` | Abort the in-flight model call if the provider stream emits no events for this many milliseconds. Pass `0` or a negative number to disable. |
+| `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
+| `subprocess` | `SubprocessAdapter` | `createInMemorySubprocessAdapter()` | Adapter used to dispatch every `step.run`, `spawn`, and `detachedSpawn`. In-memory by default; set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
+| `checkpointStore` | `CheckpointStore` | `undefined` | Typed wrapper over the harness's `StorageAdapter` used by `checkpoint()` / `restore()`. When absent, checkpoint/restore are no-ops and the harness has no durable-execution guarantees. See [Durability](/docs/framework/durability). |
+
+## execute()
+
+Enqueues input on the session identified by `options.threadId` (or the default thread). Returns a `Promise<void>` that resolves once the message is accepted into the queue — **not** when the model finishes responding. Use the session-scoped accessors to observe the response.
+
+```ts
+await harness.execute('What is 2+2?');
+const response = await harness.getAgentResponse();
+console.log(response.text);
+
+// Stream text across all turns in the session
+for await (const delta of harness.getTextStream()) {
+  process.stdout.write(delta);
+}
+
+// With options
+await harness.execute('Hello', {
+  threadId: 'thread-1',
+  resourceId: 'user-1',
+});
+
+// Submit a second message while the first turn is still running — it queues
+// and runs as a new turn after the current turn completes.
+await harness.execute('follow-up', { threadId: 'thread-1' });
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `input` | `string \| Item \| Item[]` | The input to the agent. |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `memory`, `deliveryMode`. |
+
+Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
+
+## Session Accessors
+
+Stream accessors are keyed by `threadId` (via `SessionScope`), are safe to call before the first `execute()`, and stay alive across every turn in the session.
+
+| Method | Returns | Description |
+|---|---|---|
+| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
+| `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns. |
+| `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. |
+| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
+| `abort(scope?)` | `Promise<void>` | Cancel the in-flight turn. Queued messages are preserved and trigger a fresh turn once abort completes. |
+| `getStatus(scope?)` | `HarnessStatus` | Snapshot: `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
+| `getQueueSize(scope?)` | `number` | Count of messages queued on the session. |
+
+### Delivery Modes
+
+Each message carries a `DeliveryMode`. Override per-call via `options.deliveryMode`, or set `defaultDeliveryMode` on the harness.
+
+| Mode | Behaviour |
+|---|---|
+| `next-turn` (default) | Queue until the current turn completes, then run as a new turn. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. Matches Claude Code's inbox-attachment pattern. |
+| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
+
+### HarnessResponse
+
+```ts
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
+}
+```
+
+### StreamEvent
+
+Events have a `source` discriminant: `'sdk'` for OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix.
+
+```ts
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+```
+
+Framework events emitted during execution:
+
+| Event | Description |
+|---|---|
+| `{name}:turn_started` | A session turn began. Data: `{ turnId, messageIds }`. |
+| `{name}:turn_completed` | A session turn completed. Data: `{ turnId, durationMs }`. |
+| `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
+| `{name}:inbox_injected` | Between-rounds messages were injected. Data: `{ round, count, messageIds }`. |
+| `{name}:step_started` | Before each step executes. |
+| `{name}:step_completed` | After each step completes. |
+| `{name}:tool_round_started` | Before a tool execution round. |
+| `{name}:tool_call_started` | Before each tool call. |
+| `{name}:tool_call_completed` | After each tool call. |
+| `{name}:tool_round_completed` | After all tool calls in a round. |
+| `{name}:llm_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
+| `{name}:llm_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
+| `{name}:llm_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
+| `{name}:llm_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
+
+LLM steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
+
+### Stream Idle Timeout
+
+Each provider call is guarded by a watchdog that aborts the round if no SSE event arrives for `streamIdleTimeoutMs` (default `120000`; set `0` to disable). On timeout, `{name}:llm_call_stalled` is emitted and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`, so upstream providers that quietly drop a connection surface as errors rather than hangs.
+
+## run()
+
+Low-level step execution. Use this when you need full control over context creation and step dispatch.
+
+```ts
+const ctx = harness.createContext({ state: { count: 0 } });
+const result = await harness.run(myStep, input, ctx);
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `step` | `Step<TMemory, I, O>` | The step to execute. |
+| `input` | `I` | Input value for the step. |
+| `ctx` | `Context` | Execution context. |
+
+## createContext Options
+
+| Option | Type | Description |
+|---|---|---|
+| `parent` | `Context` | Parent context (for spawn). |
+| `items` | `Item[]` | Pre-seed the item log. |
+| `state` | `unknown` | Initial mutable state. |
+| `threadId` | `string` | Conversation thread identifier. |
+| `resourceId` | `string` | Optional resource/tenant identifier. |
+| `memory` | `MemoryLayer[]` | Memory layers for this context. Overrides harness-level `memory` if provided. |
+
+## Channel Methods
+
+| Method | Description |
+|---|---|
+| `send(channel, value, ctx)` | Push a value into a channel. |
+| `recv(channel, ctx, opts?)` | Wait for a value from a channel. Supports `timeout`. |
+| `tryRecv(channel, ctx)` | Non-blocking read. Returns `null` if nothing is available. |
+| `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/framework/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
+
+## Memory Methods
+
+The agent harness coordinates [memory layer](/docs/framework/memory) lifecycle hooks:
+
+| Method | Description |
+|---|---|
+| `initLayers` | Initialize layers at the start of an agent run. Loads persisted state from storage. |
+| `recallLayers` | Query layers for relevant items given an input string. Returns `RecallLayerOutput[]`. |
+| `previewRequestItems` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs assembled via `assembleView`. Read-mostly debug helper; safe to call between turns. |
+| `storeLayers` | Write new items from an LLM response into layers. |
+| `disposeLayers` | Clean up layers at the end of a run. |
+
+### RecallLayerOutput
+
+```ts
+interface RecallLayerOutput {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
+```
+
+## Durability Methods
+
+When the harness is constructed with a `checkpointStore` (and, typically, a durable `subprocess` adapter), `checkpoint` and `restore` become real crash-recovery hooks. When they are absent every call is a no-op — zero-config harnesses preserve in-memory semantics unchanged.
+
+| Method | Description |
+|---|---|
+| `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, ask-user queue, item log) through the configured `checkpointStore`. Fires automatically after every `execute()`, `detachedSpawn()` settle, ask-user enqueue, and `runAppendPipeline`. Keyed by `ctx.id`; idempotent. |
+| `restore(executionId)` | Rebuild a `Context` from a previously saved snapshot. Returns `null` when no snapshot exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. |
+| `cancel(ctx, reason?)` | Cancel a running execution. |
+
+The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
+
+## Tracing
+
+| Method | Description |
+|---|---|
+| `createSpan(name, parent)` | Create a new [tracing span](/docs/framework/observability). Links to a parent span when provided. |
+
+## AgentConfig
+
+`AgentConfig` defines the configuration for an agent harness. It is generic over `TParams`, an arbitrary key-value record that steps and tools access via `ctx.harness.config.params`.
+
+```ts
+interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  name: string;
+  storage?: StorageAdapter;
+  hooks?: AgentHooks;
+  params: TParams;
+}
+```
+
+| Field | Description |
+|---|---|
+| `name` | Human-readable agent name. |
+| `storage` | Storage adapter for memory persistence. |
+| `hooks` | Lifecycle hooks (see below). |
+| `params` | Arbitrary key-value parameters accessible via `ctx.harness.config.params`. |
+
+## AgentHooks
+
+```ts
+interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+```
+
+| Hook | When it fires | Typical use |
+|---|---|---|
+| `beforeStep` | Before each step executes. | Logging, injecting state, guard checks. |
+| `afterStep` | After each step completes. | Metrics collection, state updates, audit logging. |
+
+```ts
+const harness = new AgentHarness({
+  name: 'researcher',
+  initialStep: agent,
+  params: { model: 'gpt-4o' },
+  hooks: {
+    async beforeStep(step, ctx) {
+      console.log(`Starting step ${step.id} (depth ${ctx.depth})`);
+    },
+    async afterStep(step, result, ctx) {
+      console.log(`Step ${step.id} used ${ctx.tokens.total} tokens`);
+    },
+  },
+});
+```
+
+## Resuming a session from disk
+
+`harness.seedSessionHistory(threadId, items)` populates a fresh session's accumulated items before the next `execute()` call. Pair it with append-only persistence (one `Item` per line in a JSONL file) to make a chat survive subprocess restarts:
+
+```ts
+import { harness } from './my-harness';
+import { readPriorItems } from './my-store';
+
+const threadId = 'task-T-abc123';
+harness.seedSessionHistory(threadId, await readPriorItems(threadId));
+await harness.execute('continue from here', { threadId });
+```
+
+The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Task IPC for Live Chat" section of `specs/08-runtime.md` for the end-to-end design.
+
+## Subprocess Adapter
+
+The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
+
+```ts
+import { AgentHarness, createFileStorage } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic/platform-node';
+
+const subprocess = createLocalSubprocessAdapter({
+  storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
+});
+
+const harness = new AgentHarness({
+  name: 'durable-agent',
+  initialStep: agent,
+  params: {},
+  subprocess,                                 // real OS subprocess with durable manifests
+});
+```
+
+Per-step and per-call overrides let you mix execution backends. A step with `subprocess: createInMemorySubprocessAdapter()` stays in-process even when the harness default is the local adapter; a `detachedSpawn(step, input, ctx, { subprocess: otherAdapter })` overrides both. Resolution order is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+
+## Related Pages
+
+- [Context & Event Log](/docs/framework/context) -- the context object the agent harness creates.
+- [Channels](/docs/framework/operators/channels) -- channel send/recv methods on the agent harness.
+- [Memory](/docs/framework/memory) -- memory layers managed by the agent harness.
+- [Observability](/docs/framework/observability) -- tracing spans created by `createSpan`.
+- [Durability](/docs/framework/durability) -- checkpoint/restore, adapter durability, and the host-restart flow.

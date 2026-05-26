@@ -8,8 +8,7 @@
 
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
-
-const RESPONSE_PREFIX = '\u23BF'; // ⎿
+import { CORNER } from '../../glyphs.js';
 
 export interface MessageResponseProps {
   children: ReactNode;
@@ -20,7 +19,7 @@ export function MessageResponse({ children }: MessageResponseProps): ReactNode {
     <Box flexDirection="row">
       <Text dimColor>
         {'  '}
-        {RESPONSE_PREFIX}
+        {CORNER}
         {'  '}
       </Text>
       <Box flexDirection="column" flexGrow={1} flexShrink={1}>

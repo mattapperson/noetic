@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@noetic/core": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
     "chat": "4.23.0",
     "typescript": "5.9.3",
     "zod": "4.3.6"

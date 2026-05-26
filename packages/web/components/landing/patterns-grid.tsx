@@ -35,7 +35,7 @@ const PATTERNS: PatternCard[] = [
       'llm',
       'tool',
     ],
-    href: '/docs/patterns/react',
+    href: '/docs/framework/patterns/react',
   },
   {
     name: 'Ralph Wiggum',
@@ -46,7 +46,7 @@ const PATTERNS: PatternCard[] = [
       'llm',
       'tool',
     ],
-    href: '/docs/patterns/ralph-wiggum',
+    href: '/docs/framework/patterns/ralph-wiggum',
   },
   {
     name: 'Task Trees',
@@ -57,7 +57,7 @@ const PATTERNS: PatternCard[] = [
       'spawn',
       'llm',
     ],
-    href: '/docs/patterns/task-trees',
+    href: '/docs/framework/patterns/task-trees',
   },
   {
     name: 'Adaptive Plans',
@@ -68,7 +68,7 @@ const PATTERNS: PatternCard[] = [
       'branch',
       'llm',
     ],
-    href: '/docs/patterns/adaptive-plans',
+    href: '/docs/framework/patterns/adaptive-plans',
   },
   {
     name: 'Thread Weaving',
@@ -79,7 +79,7 @@ const PATTERNS: PatternCard[] = [
       'llm',
       'run',
     ],
-    href: '/docs/patterns/thread-weaving',
+    href: '/docs/framework/patterns/thread-weaving',
   },
   {
     name: 'Dual Agent',
@@ -90,7 +90,7 @@ const PATTERNS: PatternCard[] = [
       'llm',
       'branch',
     ],
-    href: '/docs/patterns/dual-agent',
+    href: '/docs/framework/patterns/dual-agent',
   },
 ];
 

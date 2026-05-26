@@ -1,3 +1,16 @@
+//#region Constants
+
+/**
+ * Prefix used by ShellAdapter implementations to signal a timeout-induced
+ * kill via the Error.message channel. Format: `${TIMEOUT_ERROR_PREFIX}${seconds}`.
+ * Callers parse the seconds back out of `error.message`.
+ *
+ * @public
+ */
+export const TIMEOUT_ERROR_PREFIX = 'timeout:';
+
+//#endregion
+
 //#region Types
 
 /** @public Options for a single shell command execution. */

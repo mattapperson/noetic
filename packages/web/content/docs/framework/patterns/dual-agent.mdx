@@ -1,0 +1,111 @@
+---
+title: Dual Agent
+description: Two agents communicating via channels -- spawn two agents and use channel-based message passing for coordination.
+---
+
+## Overview
+
+The Dual Agent pattern spawns two agents that communicate through typed channels. This enables patterns like writer/reviewer, teacher/student, or any architecture where two agents need to exchange messages during execution.
+
+## Pattern
+
+```ts
+import { channel, spawn, react, fork, step } from '@noetic-tools/core';
+import { z } from 'zod';
+
+// Define a typed channel
+const reviewChannel = channel({
+  name: 'review-feedback',
+  schema: z.object({
+    approved: z.boolean(),
+    comments: z.string(),
+  }),
+  mode: 'value',
+});
+
+// Writer agent -- sends output, waits for feedback
+const writerStep = step.run({
+  id: 'writer',
+  execute: async (input: string, ctx) => {
+    // Do work...
+    const draft = await generateDraft(input);
+
+    // Send to reviewer via channel
+    ctx.send(reviewChannel, { approved: false, comments: draft });
+
+    // Wait for feedback
+    const feedback = await ctx.recv(reviewChannel, { timeout: 30_000 });
+    if (feedback.approved) return draft;
+
+    // Revise based on feedback
+    return await revise(draft, feedback.comments);
+  },
+});
+
+// Reviewer agent -- receives output, sends feedback
+const reviewerStep = step.run({
+  id: 'reviewer',
+  execute: async (input: string, ctx) => {
+    // Wait for draft
+    const draft = await ctx.recv(reviewChannel, { timeout: 30_000 });
+
+    // Review it
+    const review = await reviewDraft(draft.comments);
+
+    // Send feedback back
+    ctx.send(reviewChannel, review);
+    return review;
+  },
+});
+
+// Run both agents in parallel
+const dualAgent = fork({
+  id: 'writer-reviewer',
+  mode: 'all',
+  paths: () => [writerStep, reviewerStep],
+  merge: (results) => results[0], // Return the writer's final output
+});
+```
+
+## Channel Modes
+
+| Mode | Behavior |
+|---|---|
+| `'value'` | Holds a single value -- new sends overwrite the previous value |
+| `'queue'` | FIFO queue -- sends enqueue, receives dequeue |
+| `'topic'` | Pub/sub -- all receivers get every message |
+
+## Channel API
+
+From within a step, use the context to interact with channels:
+
+```ts
+// Send a value
+ctx.send(channel, value);
+
+// Receive (blocks until a value is available or timeout)
+const value = await ctx.recv(channel, { timeout: 10_000 });
+
+// Try to receive without blocking
+const value = ctx.tryRecv(channel); // returns T | null
+```
+
+## When to Use
+
+- Writer/reviewer workflows
+- Teacher/student or mentor/mentee patterns
+- Any two-agent system that needs to exchange intermediate results
+- Debate or adversarial patterns where agents challenge each other
+
+## Tips
+
+- Always set a `timeout` on `recv` to prevent deadlocks.
+- Use `'queue'` mode for multi-turn exchanges where order matters.
+- Use `'value'` mode for simple request/response patterns.
+- Channels are typed via Zod schemas, so message format is validated at runtime.
+
+## Related
+
+- [Channels](/docs/framework/operators/channels) -- channel types and usage
+- [Spawn](/docs/framework/operators/spawn) -- isolated child execution
+- [A2A Remote](/docs/framework/patterns/a2a-remote) -- cross-process variant

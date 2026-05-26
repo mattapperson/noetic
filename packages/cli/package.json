@@ -8,34 +8,69 @@
     "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
-    "@noetic/core": "workspace:*",
-    "@openrouter/agent": "0.3.1",
+    "@noetic/code-agent": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
+    "@noetic/platform-node": "workspace:*",
+    "@openrouter/agent": "^0.6.0",
+    "agent-browser": "0.26.0",
+    "chalk": "5.6.2",
+    "cli-highlight": "2.1.11",
     "diff": "7.0.0",
+    "figures": "6.1.0",
     "glob": "11.0.3",
+    "html-to-text": "9.0.5",
     "ink": "^7.0.0",
     "ink-text-input": "^6.0.0",
     "just-bash": "2.14.1",
+    "marked": "14.1.3",
+    "pilotty": "0.0.7",
     "react": "^19.2.0",
+    "sharp": "0.33.5",
+    "strip-ansi": "7.1.0",
+    "vscode-jsonrpc": "8.2.1",
+    "vscode-languageserver-protocol": "3.17.5",
+    "wrap-ansi": "10.0.0",
     "yaml": "^2.8.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@microsoft/tui-test": "0.0.4",
     "@types/diff": "^8.0.0",
+    "@types/html-to-text": "9.0.4",
     "@types/react": "^19.2.14",
     "bun-types": "latest"
   },
+  "files": ["dist"],
   "scripts": {
+    "postinstall": "agent-browser install || true",
     "dev": "bun run src/cli/cli.ts",
-    "test": "bun test --preload ./test/setup.ts test/*.test.ts",
-    "test:coverage": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=text --coverage-reporter=json",
-    "test:ci": "bun test --preload ./test/setup.ts test/*.test.ts --coverage --coverage-reporter=json",
+    "test": "bun test --preload ./test/setup.ts",
+    "test:coverage": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=json",
     "test:e2e": "bunx tui-test 'e2e'",
     "test:e2e:live": "bunx tui-test 'live\\.test\\.ts$'",
     "typecheck": "bunx tsc --noEmit",
+    "build": "bun run scripts/build.ts && bun run build:types",
+    "build:types": "bunx tsc -p tsconfig.build.json",
+    "build:binary": "bun run scripts/build-binary.ts",
+    "clean": "rm -rf dist dist-bin",
+    "prepublishOnly": "bun run clean && bun run build",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format ."
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+      "noetic": "./dist/cli/cli.js"
+    },
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
   }
 }

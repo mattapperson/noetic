@@ -1,5 +1,5 @@
 import type { LLMResponse } from './common';
-import type { ExecutionContext, MemoryScope } from './memory';
+import type { ExecutionContext, MemoryScope } from './memory-context';
 
 //#region Enums
 

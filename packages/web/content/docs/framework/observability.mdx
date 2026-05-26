@@ -1,0 +1,208 @@
+---
+title: Observability
+description: Built-in distributed tracing with OpenTelemetry-compatible spans.
+---
+
+## Quick Example
+
+```ts
+import { AgentHarness, InMemoryExporter } from '@noetic-tools/core';
+
+const exporter = new InMemoryExporter();
+const harness = new AgentHarness({
+  name: 'traced-agent',
+  initialStep: myStep,
+  params: {},
+  traceExporter: exporter,
+});
+
+await harness.execute('Hello');
+
+// Inspect collected spans
+for (const span of exporter.spans) {
+  console.log(`${span.name} [${span.duration}ms]`);
+}
+```
+
+Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. Every step execution, LLM call, and tool invocation creates a span with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
+
+## Span Interface
+
+A span represents a single unit of work in a trace tree.
+
+```ts
+interface Span {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly parentSpanId: string | null;
+  setAttribute(key: string, value: string | number | boolean): void;
+  addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+  end(): void;
+}
+```
+
+| Property / Method | Description |
+|---|---|
+| `traceId` | Shared across all spans in the same execution trace. |
+| `spanId` | Unique identifier for this span. |
+| `parentSpanId` | Links this span to its parent. `null` for root spans. |
+| `setAttribute(key, value)` | Attach metadata (model name, token counts, cost). |
+| `addEvent(name, attributes?)` | Record a point-in-time event within the span. |
+| `end()` | Mark the span as complete and record its end time. |
+
+Every [Context](/docs/framework/context) has a `span` property. You can add custom attributes from within any step:
+
+```ts
+const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) => {
+  ctx.span.setAttribute('input.length', input.length);
+  ctx.span.addEvent('processing_started');
+
+  const result = doWork(input);
+
+  ctx.span.addEvent('processing_finished', { resultSize: result.length });
+  return result;
+}});
+```
+
+## SpanImpl
+
+`SpanImpl` is the concrete implementation used by `AgentHarness`. It adds fields useful for export and inspection:
+
+| Property | Type | Description |
+|---|---|---|
+| `name` | `string` | The span name (typically the step ID). |
+| `startTime` | `number` | `Date.now()` when the span was created. |
+| `endTime` | `number \| undefined` | Set when `end()` is called. |
+| `attributes` | `Map<string, string \| number \| boolean>` | All attributes set via `setAttribute`. |
+| `events` | `Array<{ name, timestamp, attributes? }>` | All events recorded via `addEvent`. |
+| `duration` | `number` (getter) | `endTime - startTime`, or time since creation if still open. |
+
+## MemoryTraceSpan
+
+Memory layer operations produce their own trace records:
+
+```ts
+interface MemoryTraceSpan {
+  layerId: string;
+  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  durationMs: number;
+  status: 'ok' | 'error' | 'timeout' | 'skipped';
+  budget?: { allocated: number; used: number; yielded: number };
+  itemCount?: number;
+  error?: { message: string; stack?: string };
+}
+```
+
+| Field | Description |
+|---|---|
+| `layerId` | Which memory layer produced this trace. |
+| `hook` | The lifecycle hook that executed. |
+| `durationMs` | How long the hook took. |
+| `status` | Outcome: `ok`, `error`, `timeout`, or `skipped`. |
+| `budget` | Token budget allocation and usage (when applicable). |
+| `itemCount` | Number of items produced by recall. |
+| `error` | Error details if `status` is `error`. |
+
+## TraceExporter Interface
+
+Exporters receive completed spans and send them to a backend:
+
+```ts
+interface TraceExporter {
+  export(spans: Span[]): Promise<void>;
+}
+```
+
+### Built-in Exporters
+
+#### NoopExporter
+
+Discards all spans. This is the default when no exporter is configured.
+
+```ts
+import { NoopExporter } from '@noetic-tools/core';
+
+const harness = new AgentHarness({
+  traceExporter: new NoopExporter(),
+});
+```
+
+#### InMemoryExporter
+
+Collects spans in an array for testing and debugging.
+
+```ts
+import { InMemoryExporter } from '@noetic-tools/core';
+
+const exporter = new InMemoryExporter();
+// ... run agent ...
+
+// Query spans
+const llmSpans = exporter.getSpansByName('llm-call');
+const children = exporter.getChildSpans(rootSpan.spanId);
+const fullTrace = exporter.getTraceTree(rootSpan.traceId);
+
+// Reset
+exporter.clear();
+```
+
+| Method | Description |
+|---|---|
+| `spans` | Array of all collected `SpanImpl` instances. |
+| `getSpansByName(name)` | Filter spans by name. |
+| `getChildSpans(parentSpanId)` | Get direct children of a span. |
+| `getTraceTree(traceId)` | Get all spans in a trace. |
+| `clear()` | Empty the spans array. |
+
+### Custom Exporters
+
+Implement `TraceExporter` to send spans to any backend:
+
+```ts
+import type { TraceExporter, Span } from '@noetic-tools/core';
+
+class OtlpExporter implements TraceExporter {
+  async export(spans: Span[]): Promise<void> {
+    await fetch('https://otel-collector.example.com/v1/traces', {
+      method: 'POST',
+      body: JSON.stringify(spans),
+    });
+  }
+}
+```
+
+## GenAI Semantic Attributes
+
+Noetic defines constants following the OpenTelemetry GenAI semantic conventions. These are automatically set on LLM and tool spans:
+
+### GenAI Constants
+
+| Constant | Value | Description |
+|---|---|---|
+| `GenAI.SYSTEM` | `'gen_ai.system'` | LLM provider name. |
+| `GenAI.REQUEST_MODEL` | `'gen_ai.request.model'` | Model identifier. |
+| `GenAI.USAGE_INPUT_TOKENS` | `'gen_ai.usage.input_tokens'` | Input token count. |
+| `GenAI.USAGE_OUTPUT_TOKENS` | `'gen_ai.usage.output_tokens'` | Output token count. |
+| `GenAI.COST` | `'gen_ai.cost'` | Estimated cost. |
+
+### ToolAttr Constants
+
+| Constant | Value | Description |
+|---|---|---|
+| `ToolAttr.NAME` | `'tool.name'` | Tool name. |
+| `ToolAttr.NEEDS_APPROVAL` | `'tool.needs_approval'` | Whether the tool requires human approval. |
+
+```ts
+import { GenAI, ToolAttr } from '@noetic-tools/core';
+
+// These are set automatically by the agent harness, but you can use them
+// in custom exporters or assertions:
+const model = span.attributes.get(GenAI.REQUEST_MODEL);
+const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
+```
+
+## Related Pages
+
+- [Context & Event Log](/docs/framework/context) -- every context carries a `span`.
+- [AgentHarness](/docs/framework/runtime) -- `createSpan` and trace exporter configuration.
+- [Memory](/docs/framework/memory) -- memory layer operations produce `MemoryTraceSpan` records.

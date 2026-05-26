@@ -185,7 +185,7 @@ export const ChainOfThoughtStep = memo(
 
     return (
       <Box flexDirection="column" marginLeft={1}>
-        <Text>
+        <Text wrap="truncate-end">
           <Text color={color}>{dot}</Text>
           <Text color={theme.foreground}> </Text>
           <Text color={isPending ? theme.muted : color} dimColor={isPending} bold={isActive}>
@@ -198,7 +198,7 @@ export const ChainOfThoughtStep = memo(
           )}
         </Text>
         {children && (
-          <Text>
+          <Text wrap="truncate-end">
             <Text color={color} dimColor>
               {pipe + ' '}
             </Text>
@@ -206,7 +206,7 @@ export const ChainOfThoughtStep = memo(
           </Text>
         )}
         {!isLast && (
-          <Text>
+          <Text wrap="truncate-end">
             <Text color={color} dimColor>
               {pipe}
             </Text>

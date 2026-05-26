@@ -7,27 +7,13 @@
  * Limitations:
  * - stat/lstat return hardcoded mode (0o644) and current timestamp for mtime
  *   since FsStats does not expose these fields
- * - rm, cp, mv, symlink, link, readlink are not supported (FsAdapter lacks these ops)
+ * - cp, symlink, link, readlink are not supported (FsAdapter lacks these ops)
  * - getAllPaths returns [] (glob expansion in just-bash falls back to readdir)
  */
 
 import path from 'node:path';
-import type { FsAdapter } from '@noetic/core';
+import type { FsAdapter } from '@noetic-tools/core';
 import type { IFileSystem } from 'just-bash';
-
-//#region Helpers
-
-function hasCode(err: unknown): err is Error & {
-  code: string;
-} {
-  return err instanceof Error && 'code' in err && typeof err.code === 'string';
-}
-
-function isEnoent(err: unknown): boolean {
-  return hasCode(err) && err.code === 'ENOENT';
-}
-
-//#endregion
 
 //#region Public API
 
@@ -49,17 +35,8 @@ export function createBridgedFs(fs: FsAdapter): IFileSystem {
     },
 
     async appendFile(p, content) {
-      let existing = '';
-      try {
-        existing = await fs.readFileText(p);
-      } catch (err: unknown) {
-        if (!isEnoent(err)) {
-          throw err;
-        }
-        // file doesn't exist yet — will be created
-      }
-      const addition = typeof content === 'string' ? content : new TextDecoder().decode(content);
-      await fs.writeFile(p, existing + addition);
+      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      await fs.appendFile(p, text);
     },
 
     async exists(p) {
@@ -103,16 +80,16 @@ export function createBridgedFs(fs: FsAdapter): IFileSystem {
       return fs.readdir(p);
     },
 
-    async rm() {
-      throw new Error('rm not supported via FsAdapter bridge');
+    async rm(p, options) {
+      await fs.rm(p, options);
     },
 
     async cp() {
       throw new Error('cp not supported via FsAdapter bridge');
     },
 
-    async mv() {
-      throw new Error('mv not supported via FsAdapter bridge');
+    async mv(from, to) {
+      await fs.rename(from, to);
     },
 
     resolvePath(base, rel) {

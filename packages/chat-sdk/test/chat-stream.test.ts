@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { StreamEvent } from '@noetic/core';
+import type { StreamEvent } from '@noetic-tools/core';
 
 import { chatStream } from '../src/chat-stream';
 

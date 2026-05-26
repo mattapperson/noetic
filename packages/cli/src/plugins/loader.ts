@@ -12,6 +12,20 @@ import type { NoeticPlugin } from './types.js';
  * Uses z.unknown() for function fields since Zod's z.function() doesn't
  * preserve the specific function signatures from NoeticPlugin.
  */
+const FN_FIELDS = [
+  'tools',
+  'memoryLayers',
+  'skills',
+  'initialize',
+  'dispose',
+  'footer',
+  'loadingMessages',
+  'commands',
+  'subagentPresets',
+  'reminderTriggers',
+  'lspServers',
+] as const;
+
 const NoeticPluginSchema = z
   .object({
     name: z.string(),
@@ -24,20 +38,13 @@ const NoeticPluginSchema = z
     footer: z.unknown().optional(),
     loadingMessages: z.unknown().optional(),
     commands: z.unknown().optional(),
+    subagentPresets: z.unknown().optional(),
+    reminderTriggers: z.unknown().optional(),
+    lspServers: z.unknown().optional(),
   })
   .refine(
     (obj) => {
-      const fnFields = [
-        'tools',
-        'memoryLayers',
-        'skills',
-        'initialize',
-        'dispose',
-        'footer',
-        'loadingMessages',
-        'commands',
-      ] as const;
-      for (const field of fnFields) {
+      for (const field of FN_FIELDS) {
         const value = obj[field];
         if (value !== undefined && typeof value !== 'function') {
           return false;
@@ -46,8 +53,7 @@ const NoeticPluginSchema = z
       return true;
     },
     {
-      message:
-        'Optional hook fields (tools, memoryLayers, skills, initialize, dispose, footer, loadingMessages, commands) must be functions if provided',
+      message: `Optional hook fields (${FN_FIELDS.join(', ')}) must be functions if provided`,
     },
   );
 

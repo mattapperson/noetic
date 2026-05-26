@@ -1,0 +1,83 @@
+---
+title: Plan Memory
+description: PRD authoring and plan execution lifecycle with tool restrictions during planning.
+---
+
+## Overview
+
+Plan Memory manages a structured planning workflow: the agent enters a restricted "plan mode" where only read-only tools are allowed, writes a PRD document, structures a `PlanNode` execution tree, then exits to execute the plan with full tool access.
+
+- **Slot**: `240` (`Slot.PROCEDURAL - 10`)
+- **Scope**: `thread` (default)
+- **Default budget**: `{ min: 100, max: 3000 }`
+
+## Usage
+
+```ts
+import { planMemory } from '@noetic-tools/core';
+
+const layer = planMemory();
+```
+
+The layer is included by default in the Noetic CLI. Users type `/plan` to enter plan mode.
+
+## Configuration
+
+```ts
+interface PlanMemoryConfig {
+  scope?: MemoryScope;
+  additionalAllowedTools?: string[];
+  maxPrdLength?: number;
+  maxTreeDepth?: number;
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `scope` | `MemoryScope` | `'thread'` | Persistence scope |
+| `additionalAllowedTools` | `string[]` | -- | Extra tools allowed during plan mode |
+| `maxPrdLength` | `number` | `50000` | Maximum PRD content length |
+| `maxTreeDepth` | `number` | `5` | Maximum plan tree nesting depth |
+
+## Phase Lifecycle
+
+The layer manages a state machine with five phases:
+
+1. **idle** — No active plan. `recall` returns nothing.
+2. **planning** — Read-only tools only. LLM writes PRD and plan tree.
+3. **executing** — Full tool access. Plan context injected into each LLM call.
+4. **completed** — Execution succeeded. Outcome recorded.
+5. **failed** — Execution failed or was aborted. Outcome recorded.
+
+## LLM Tools
+
+The layer exposes four LLM tools and one data projection via its `provides` map:
+
+| Tool | Description |
+|---|---|
+| `plan/enterPlanMode` | Enter plan mode. Accepts optional `goal` string. |
+| `plan/updatePrd` | Replace PRD content with new markdown. |
+| `plan/setPlanTree` | Set the `PlanNode` execution tree. |
+| `plan/exitPlanMode` | Exit plan mode (`execute` or `cancel`). |
+| `status` (data) | Read-only: `{ phase, hasPrd, hasPlanTree, version }` |
+
+## Tool Restrictions
+
+During the `planning` phase, `beforeToolCall` restricts tool usage:
+
+- **Allowed**: `Read`, `Grep`, `Find`, `Ls`, `activateSkill`, and all `plan/*` tools
+- **Denied**: All other tools (`Write`, `Edit`, `Bash`, etc.)
+
+Additional tools can be allowed via `additionalAllowedTools` in the config.
+
+## Integration with compilePlan
+
+The plan layer stores the `PlanNode` tree produced by the LLM. For programmatic execution, extract the tree and pass it to `compilePlan()`:
+
+```ts
+import { compilePlan } from '@noetic-tools/core';
+
+const compiled = compilePlan(planTree, agents, constraints);
+```
+
+The default CLI flow uses context injection instead — the plan is recalled into the LLM's view and the model executes by making tool calls directly.

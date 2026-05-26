@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import type { ContextMemory } from '../../src/types/memory';
 import type { Step } from '../../src/types/step';
 import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';

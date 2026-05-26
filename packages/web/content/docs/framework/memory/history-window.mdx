@@ -1,0 +1,63 @@
+---
+title: History Window
+description: A read-side memory layer that caps the trailing items projected to the LLM without mutating storage.
+---
+
+## Overview
+
+`historyWindow` caps the number of trailing items projected to the LLM each turn. Storage (`itemLog`, `session.accumulatedItems`, session JSON) is untouched — the cap is a pure projection over the value handed to `assembleView`. Long-running sessions stay within the model's context window without losing transcript history.
+
+- **Slot**: `275` (after recall-contributing layers)
+- **Default scope**: `'execution'`
+- **Default `maxItems`**: `40`
+- **Hook**: `projectHistory` only (no `recall`, no state)
+
+## Usage
+
+```ts
+import { historyWindow, observationalMemory, workingMemory } from '@noetic-tools/core';
+
+const memory = [
+  workingMemory(),
+  observationalMemory(),
+  historyWindow({ maxItems: 40 }),
+];
+```
+
+## Algorithm
+
+On every LLM step, the layer:
+
+1. Slices the trailing `maxItems` from the input.
+2. Walks backward to ensure the projected window contains at least one user `message` AND one assistant `message`. If the slice lacks either role, the cap is temporarily exceeded — the **minimum-exchange guarantee**.
+3. Drops any orphan `function_call` / `function_call_output` whose pair fell outside the slice. (OpenRouter rejects unpaired tool items, so this is required.)
+
+## Storage isolation
+
+The projection runs against `ctx.itemLog.items` but never mutates it. As a result:
+
+- **Session save/restore** — saved JSON contains the entire transcript.
+- **`getAgentResponse()`** — returns all items the agent emitted this session.
+- **TUI transcript views** — display the full conversation.
+- **`itemLog.items.length`** — grows unbounded; the cap only narrows the projection used by `assembleView`.
+
+## Mid-round in-flight items are not capped
+
+Within a single `callModel` invocation's tool loop, that round's own `function_call` and `function_call_output` items accumulate in the wire payload until the call returns. The cap fires at **turn boundaries**, not mid-call — capping mid-flight would corrupt the active tool flow.
+
+## CLI configuration
+
+The CLI installs `historyWindow` only when `AgentConfig.history.maxItems` is set. When unset, history is uncapped (the pre-existing default behaviour). Configure it via:
+
+- `noetic.config.ts`:
+
+  ```ts
+  export default {
+    // ...
+    history: { maxItems: 40 },
+  } satisfies AgentConfig;
+  ```
+
+- `/config` slash command → **Memory** tab → **History Window (items)**. Leave blank to disable.
+
+Spawned sub-agents (teammates) inherit the same cap by default.

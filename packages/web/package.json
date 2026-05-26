@@ -9,7 +9,10 @@
     "start": "next start",
     "test:build": "bun run build",
     "test:links": "bunx lychee --offline 'content/**/*.mdx'",
-    "typecheck:docs": "bun ../../scripts/extract-doc-snippets.ts && bunx tsc --noEmit --project tsconfig.snippets.json"
+    "typecheck:docs": "bun ../../scripts/extract-doc-snippets.ts && bunx tsc --noEmit --project tsconfig.snippets.json",
+    "sync-tui": "bun scripts/sync-tui.ts",
+    "sync-tui:chrome": "bun scripts/sync-tui.ts --chrome-only",
+    "sync-tui:check": "bun scripts/sync-tui.ts --check"
   },
   "dependencies": {
     "fumadocs-core": "16.6.17",

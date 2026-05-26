@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Step, Tool } from '@noetic/core';
-import { branch, spawn, step } from '@noetic/core';
+import type { Step, Tool } from '@noetic-tools/core';
+import { branch, spawn, step } from '@noetic-tools/core';
 import { z } from 'zod';
 import { discoverFields, enrichWithSourceLocations } from '../../src/optimization/field-discovery';
 import { OptimizeScope } from '../../src/types/eval';

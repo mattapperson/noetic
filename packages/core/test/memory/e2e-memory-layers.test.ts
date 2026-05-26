@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { OpenResponsesResult } from '@openrouter/agent';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
+import { frameworkCast } from '../../src/util/framework-cast';
 
 type OpenResponsesOutputItem = OpenResponsesResult['output'][number];
 
@@ -78,9 +78,10 @@ function createTestCallModel(): ((request: CallModelRequest) => Promise<LLMRespo
         });
       });
 
+    type OpenRouterInput = Parameters<typeof client.callModel>[0]['input'];
     const sdkResult = client.callModel({
       model: request.model,
-      input: inputMessages,
+      input: frameworkCast<OpenRouterInput>(inputMessages),
     });
     const response = await sdkResult.getResponse();
 

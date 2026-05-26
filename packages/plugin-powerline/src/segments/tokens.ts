@@ -1,4 +1,4 @@
-import type { LastLayerUsage } from '@noetic/core';
+import type { LastLayerUsage } from '@noetic-tools/core';
 
 import type { Segment } from './types.js';
 

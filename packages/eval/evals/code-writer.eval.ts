@@ -1,4 +1,4 @@
-import { ralphWiggum, tool } from '@noetic/core';
+import { ralphWiggum, tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { describe, it, scorer } from '../src';

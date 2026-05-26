@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
+import { frameworkCast } from '../../src/util/framework-cast';
 
 describe('frameworkCast', () => {
   it('returns the value unchanged for primitives', () => {

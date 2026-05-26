@@ -1,6 +1,9 @@
-import { frameworkCast } from '../interpreter/framework-cast';
-import { isFunctionCall } from '../interpreter/typeguards';
-import type { Item } from '../types/items';
+import type { FunctionCallItem, Item } from '../types/items';
+import { frameworkCast } from '../util/framework-cast';
+
+function isFunctionCall(item: Item): item is FunctionCallItem {
+  return item.type === 'function_call' && 'callId' in item && 'name' in item;
+}
 
 /**
  * Finds the first function_call item matching `name`, parses its JSON arguments,

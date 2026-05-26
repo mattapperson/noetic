@@ -8,7 +8,7 @@ import {
   runAppendPipeline,
 } from '../../src/memory/layer-lifecycle';
 import { fileReference } from '../../src/memory/layers/file-reference';
-import type { InputMessageItem, Item } from '../../src/types/items';
+import type { InputMessageItem, InputTextPart, Item } from '../../src/types/items';
 import type { MemoryLayer, RecallParams } from '../../src/types/memory';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
@@ -48,21 +48,33 @@ describe('fileReference', () => {
     };
   }
 
-  function isInputMessage(item: Item): item is InputMessageItem {
+  type TextOnlyInputMessage = Omit<InputMessageItem, 'content'> & {
+    readonly content: InputTextPart[];
+  };
+
+  function isInputTextPart(value: unknown): value is InputTextPart {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      'type' in value &&
+      value.type === 'input_text' &&
+      'text' in value &&
+      typeof value.text === 'string'
+    );
+  }
+
+  function isInputMessage(item: Item): item is TextOnlyInputMessage {
     return (
       item.type === 'message' &&
       'role' in item &&
       item.role === 'user' &&
       'content' in item &&
       Array.isArray(item.content) &&
-      item.content.every(
-        (c: unknown) =>
-          typeof c === 'object' && c !== null && 'type' in c && c.type === 'input_text',
-      )
+      item.content.every(isInputTextPart)
     );
   }
 
-  function assertInputMessage(item: Item): InputMessageItem {
+  function assertInputMessage(item: Item): TextOnlyInputMessage {
     if (!isInputMessage(item)) {
       throw new Error(`Expected InputMessageItem but got ${item.type}`);
     }

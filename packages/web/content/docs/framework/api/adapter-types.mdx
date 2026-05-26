@@ -1,0 +1,67 @@
+---
+title: Adapter Types
+description: OpenRouter adapter and EmbedFn type for semantic routing and convergence.
+---
+
+## EmbedFn
+
+Batch embedding function that maps N texts to N vectors. Used by `semanticSwitch`, `embeddingMatch`, and `until.converged`.
+
+```ts
+type EmbedFn = (texts: readonly string[]) => Promise<readonly number[][]>;
+```
+
+## LlmProviderConfig
+
+Configuration for the LLM provider, passed to `AgentHarness` via the `llm` option.
+
+```ts
+interface LlmProviderConfig {
+  provider: 'openrouter';
+  apiKey?: string; // defaults to process.env.OPENROUTER_API_KEY
+}
+```
+
+| Property | Type | Required | Description |
+|---|---|---|---|
+| `provider` | `'openrouter'` | Yes | LLM provider identifier |
+| `apiKey` | `string` | No | API key. Defaults to `process.env.OPENROUTER_API_KEY`. |
+
+## OpenRouter Adapter
+
+Factory function that creates an `EmbedFn` implementation backed by the `@openrouter/sdk`.
+
+### createOpenRouterEmbed(apiKey, embeddingModel?)
+
+Creates an `EmbedFn` that calls the OpenRouter embeddings endpoint.
+
+```ts
+import { createOpenRouterEmbed } from '@noetic-tools/core';
+
+const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `apiKey` | `string` | Yes | OpenRouter API key |
+| `embeddingModel` | `string` | No | Embedding model ID. Defaults to `openai/text-embedding-3-small`. |
+
+### Usage with Semantic Routing
+
+```ts
+import { branch, createOpenRouterEmbed, semanticSwitch, step } from '@noetic-tools/core';
+
+const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
+
+const router = branch({
+  id: 'semantic-router',
+  route: semanticSwitch({
+    embed,
+    cases: {
+      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+    },
+    threshold: 0.7,
+  }),
+});
+```

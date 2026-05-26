@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { workingMemory } from '../../src/memory/layers/working-memory';
 import type { FunctionCallItem } from '../../src/types/items';
-import { makeCtx, makeItemLog, makeScopedStorage as makeStorage } from '../_helpers';
+import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('workingMemory layer', () => {
   it('has correct id and slot', () => {
@@ -13,7 +13,7 @@ describe('workingMemory layer', () => {
   });
 
   it('init loads from storage', async () => {
-    const storage = makeStorage();
+    const storage = makeScopedStorage();
     await storage.set('state', {
       notes: 'hello',
     });
@@ -31,7 +31,7 @@ describe('workingMemory layer', () => {
   it('init defaults to empty string for non-schema mode', async () => {
     const layer = workingMemory();
     const result = await layer.hooks.init!({
-      storage: makeStorage(),
+      storage: makeScopedStorage(),
       scopeKey: 'thread-1',
       ctx: makeCtx(),
     });

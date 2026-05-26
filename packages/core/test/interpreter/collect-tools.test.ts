@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { collectAllTools, deduplicateTools } from '../../src/interpreter/collect-tools';
-import type { Tool } from '../../src/types/common';
 import type { Step } from '../../src/types/step';
+import type { Tool } from '../../src/types/tool';
 import { makeTestTool } from '../_helpers';
 
 //#region Test Helpers

@@ -7,7 +7,7 @@
 
 ## Overview
 
-This spec defines the testing strategy, coverage policy, and CI requirements for the Noetic monorepo. It covers `@noetic/core`, `@noetic/eval`, and `@noetic/web`.
+This spec defines the testing strategy, coverage policy, and CI requirements for the Noetic monorepo. It covers `@noetic-tools/core`, `@noetic/eval`, and `@noetic/web`.
 
 ---
 
@@ -22,7 +22,7 @@ Four tiers with explicit scope constraints:
 | Functional | Full public API in-process | No network; scripted model via `createScriptedCallModel` | core, eval |
 | E2E | Running application | HTTP/build only | web |
 
-`@noetic/core` and `@noetic/eval` have no E2E tier.
+`@noetic-tools/core` and `@noetic/eval` have no E2E tier.
 `@noetic/web` has no unit/integration tier.
 
 ### Functional Tier Requirements
@@ -59,7 +59,7 @@ The initial baseline is established by running `bun test --coverage --coverage-r
 For the initial CI gate (before a baseline exists), minimum floor thresholds are enforced:
 
 ```typescript
-// @noetic/core — floors, not targets
+// @noetic-tools/core — floors, not targets
 branches: 85   // HIGHEST: runtime has complex control flow, error model has 10 kinds
 lines: 80
 functions: 80

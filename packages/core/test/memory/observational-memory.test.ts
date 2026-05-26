@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import type { ObservationalState } from '../../src/memory/layers/observational-memory';
 import { observationalMemory } from '../../src/memory/layers/observational-memory';
 import type { MessageItem } from '../../src/types/items';
-import { makeCtx, makeItemLog, makeScopedStorage as makeStorage } from '../_helpers';
+import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('observationalMemory', () => {
   it('has correct id and slot', () => {
@@ -15,7 +15,7 @@ describe('observationalMemory', () => {
   it('init loads state from storage', async () => {
     const layer = observationalMemory();
     const result = await layer.hooks.init!({
-      storage: makeStorage(),
+      storage: makeScopedStorage(),
       scopeKey: 'user-1',
       ctx: makeCtx(),
     });

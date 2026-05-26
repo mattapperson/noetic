@@ -1,7 +1,14 @@
 import type { ZodTypeAny, z } from 'zod';
 
 import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { Tool } from '../types/common';
+import type {
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  Item,
+  ItemSchemaExtensions,
+  ToolResultExtensionItem,
+} from '../types/items';
+import type { Tool } from '../types/tool';
 import type { ToolExecutionContext } from '../types/tool-context';
 
 //#region Types
@@ -11,6 +18,15 @@ interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
   description: string;
   input: I;
   output: O;
+  itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
+  decorateResultItem?: (params: {
+    baseItem: FunctionCallOutputItem;
+    callItem: FunctionCallItem;
+    args: z.infer<I>;
+    result: z.infer<O> | undefined;
+    output: string;
+    error?: boolean;
+  }) => Item | ToolResultExtensionItem;
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
 }
@@ -21,6 +37,15 @@ interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O exte
   input: I;
   event: E;
   output: O;
+  itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
+  decorateResultItem?: (params: {
+    baseItem: FunctionCallOutputItem;
+    callItem: FunctionCallItem;
+    args: z.infer<I>;
+    result: z.infer<O> | undefined;
+    output: string;
+    error?: boolean;
+  }) => Item | ToolResultExtensionItem;
   execute: (
     args: z.infer<I>,
     toolCtx: ToolExecutionContext,
@@ -69,6 +94,8 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
     description: config.description,
     input: config.input,
     output: config.output,
+    itemSchemas: config.itemSchemas,
+    decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
   } satisfies Tool<I, O>;
@@ -90,6 +117,8 @@ export function toolWithGenerator<I extends ZodTypeAny, E extends ZodTypeAny, O 
     input: config.input,
     event: config.event,
     output: config.output,
+    itemSchemas: config.itemSchemas,
+    decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
   } satisfies Tool<I, O>;

@@ -1,0 +1,101 @@
+---
+title: Thread Weaving
+description: Run parallel analysis threads using fork with mode 'all', then merge the results into a unified output.
+---
+
+## Overview
+
+Thread Weaving uses `fork({ mode: 'all' })` to run multiple analysis paths in parallel and then merges the results. This is useful when a problem benefits from multiple perspectives or when independent sub-tasks can run concurrently.
+
+## Pattern
+
+```ts
+import { fork, react } from '@noetic-tools/core';
+
+const weavedAnalysis = fork({
+  id: 'thread-weave',
+  mode: 'all',
+  paths: (input) => [
+    react({
+      model: 'gpt-4o',
+      instructions: 'Analyze from a technical perspective.',
+      tools: [codeTool],
+    }),
+    react({
+      model: 'gpt-4o',
+      instructions: 'Analyze from a business perspective.',
+      tools: [marketTool],
+    }),
+    react({
+      model: 'gpt-4o',
+      instructions: 'Analyze from a user experience perspective.',
+      tools: [uxTool],
+    }),
+  ],
+  merge: (results) => {
+    return `## Technical\n${results[0]}\n\n## Business\n${results[1]}\n\n## UX\n${results[2]}`;
+  },
+  concurrency: 3,
+});
+```
+
+## Fork Modes
+
+Thread Weaving typically uses `mode: 'all'`, but other modes are available:
+
+| Mode | Behavior | Merge Required |
+|---|---|---|
+| `'all'` | Wait for all paths to complete, then merge | Yes -- `merge(results[])` |
+| `'race'` | Return the first path to complete, cancel others | No |
+| `'settle'` | Wait for all paths, include failures | Yes -- `merge(settleResults[])` |
+
+## Example: Research with Multiple Sources
+
+```ts
+import { fork, react } from '@noetic-tools/core';
+
+const multiSourceResearch = fork({
+  id: 'multi-source',
+  mode: 'all',
+  paths: () => [
+    react({ model: 'gpt-4o', instructions: 'Search academic papers.', tools: [scholarTool] }),
+    react({ model: 'gpt-4o', instructions: 'Search news articles.', tools: [newsTool] }),
+    react({ model: 'gpt-4o', instructions: 'Search code repositories.', tools: [githubTool] }),
+  ],
+  merge: (results, ctx) => {
+    return results.map((r, i) => `Source ${i + 1}:\n${r}`).join('\n\n');
+  },
+  concurrency: 3,
+});
+```
+
+## Example: Settle Mode for Fault Tolerance
+
+```ts
+import { fork } from '@noetic-tools/core';
+
+const resilientFork = fork({
+  id: 'resilient-analysis',
+  mode: 'settle',
+  paths: () => [agentA, agentB, agentC],
+  merge: (results) => {
+    const succeeded = results
+      .filter((r) => r.status === 'fulfilled')
+      .map((r) => r.value);
+    return succeeded.join('\n');
+  },
+});
+```
+
+## When to Use
+
+- Multi-perspective analysis of a single problem
+- Parallel data gathering from independent sources
+- Ensemble approaches where you want to combine multiple agent outputs
+- Tasks that benefit from redundancy (use `settle` mode)
+
+## Tips
+
+- Set `concurrency` to control how many paths run simultaneously. This helps manage API rate limits.
+- The `merge` function receives the full `Context`, so you can use it to log or update state.
+- Each path receives the same input. If paths need different inputs, transform them inside the `paths` factory function.

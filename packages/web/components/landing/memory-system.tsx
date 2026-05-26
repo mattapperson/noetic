@@ -1,7 +1,8 @@
 'use client';
 
-import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
+import { LayerTile } from '@/components/landing/layer-tile';
+import { LegendRow } from '@/components/landing/legend-row';
 import { MemoryIsometricSvg } from '@/components/landing/svgs/memory-isometric';
 
 const LAYERS = [
@@ -29,6 +30,21 @@ const LAYERS = [
     name: 'Durable Task State',
     description: 'Persistent agent checkpoints',
     color: 'var(--color-tui-amber)',
+  },
+] as const;
+
+const LEGEND = [
+  {
+    color: 'var(--color-tui-cyan)',
+    label: 'working layers',
+  },
+  {
+    color: 'var(--color-tui-green)',
+    label: 'retrieval layers',
+  },
+  {
+    color: 'var(--color-tui-amber)',
+    label: 'persistence',
   },
 ] as const;
 
@@ -98,70 +114,8 @@ export function MemorySystem(): ReactNode {
         </div>
       </div>
 
-      {/* Legend */}
-      <div
-        style={{
-          display: 'flex',
-          gap: '24px',
-          alignItems: 'center',
-          marginBottom: '12px',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '11px',
-            color: 'var(--color-tui-muted)',
-            letterSpacing: '0.08em',
-          }}
-        >
-          LEGEND
-        </span>
-        {(
-          [
-            {
-              color: 'var(--color-tui-cyan)',
-              label: 'working layers',
-            },
-            {
-              color: 'var(--color-tui-green)',
-              label: 'retrieval layers',
-            },
-            {
-              color: 'var(--color-tui-amber)',
-              label: 'persistence',
-            },
-          ] as const
-        ).map((item) => (
-          <div
-            key={item.label}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <span
-              style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: item.color,
-                flexShrink: 0,
-              }}
-            />
-            <span
-              style={{
-                fontSize: '11px',
-                color: 'var(--color-tui-muted)',
-              }}
-            >
-              {item.label}
-            </span>
-          </div>
-        ))}
-      </div>
+      <LegendRow items={LEGEND} />
 
-      {/* Layer list: full width below */}
       <div
         className="memory-layers-grid"
         style={{
@@ -170,50 +124,13 @@ export function MemorySystem(): ReactNode {
         }}
       >
         {LAYERS.map((layer, i) => (
-          <motion.div
+          <LayerTile
             key={layer.name}
-            initial={{
-              opacity: 0,
-              y: 10,
-            }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            transition={{
-              delay: i * 0.08,
-              duration: 0.3,
-            }}
-            viewport={{
-              once: true,
-            }}
-            style={{
-              background: 'var(--color-tui-surface)',
-              border: '1px solid var(--color-tui-border)',
-              padding: '12px 16px',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                color: layer.color,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                marginBottom: '4px',
-              }}
-            >
-              {layer.name}
-            </div>
-            <div
-              style={{
-                fontSize: '12px',
-                color: 'var(--color-tui-muted)',
-              }}
-            >
-              {layer.description}
-            </div>
-          </motion.div>
+            name={layer.name}
+            description={layer.description}
+            color={layer.color}
+            delay={i * 0.08}
+          />
         ))}
       </div>
     </section>

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import type { Step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
 
 import type { SuiteDefinition } from '../runner/describe';
 import type { SuiteResult } from '../types/eval';

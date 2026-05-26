@@ -1,4 +1,4 @@
-import type { StreamEvent } from '@noetic/core';
+import type { StreamEvent } from '@noetic-tools/core';
 
 //#region Helper
 

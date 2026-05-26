@@ -1,6 +1,6 @@
 import { NoeticErrorImpl } from '../errors/noetic-error';
-import { frameworkCast } from '../interpreter/framework-cast';
 import type { Channel, ChannelHandle, ExternalChannel } from '../types/channel';
+import { frameworkCast } from '../util/framework-cast';
 
 function isExternalChannel<T>(ch: Channel<T>): ch is ExternalChannel<T> {
   return 'external' in ch && ch.external === true;
@@ -26,6 +26,12 @@ interface ChannelState<T> {
   }>;
   // topic mode
   topicSubscribers: Set<(value: T) => void>;
+  /**
+   * Non-consuming wake subscribers — fired by every `send()` regardless of mode,
+   * after the primary delivery path runs. Used by `every({ wakeOn })` so the body
+   * still sees pending queue / value entries on the next iteration.
+   */
+  wakeSubscribers: Set<() => void>;
 }
 
 export class ChannelStore {
@@ -43,10 +49,28 @@ export class ChannelStore {
         capacity: channel.capacity ?? 1_000,
         queueWaiters: [],
         topicSubscribers: new Set(),
+        wakeSubscribers: new Set(),
       };
       this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
     }
     return state;
+  }
+
+  /**
+   * Subscribe to wake notifications on a channel without consuming any value.
+   * Fired once on the next `send()` for any mode, then auto-removed. Returns
+   * an `unsubscribe` so the caller can detach if it cancels first.
+   */
+  subscribeWake<T>(channel: Channel<T>, callback: () => void): () => void {
+    const state = this.getOrCreate(channel);
+    // Capture the set the callback is added to. `send()` swaps in a fresh set
+    // before firing, so once a wake fires the captured `subscribers` is the
+    // *old* set — this unsubscribe is then a no-op, which is correct.
+    const subscribers = state.wakeSubscribers;
+    subscribers.add(callback);
+    return () => {
+      subscribers.delete(callback);
+    };
   }
 
   send<T>(channel: Channel<T>, value: T): void {
@@ -82,6 +106,17 @@ export class ChannelStore {
           sub(value);
         }
         break;
+    }
+
+    if (state.wakeSubscribers.size > 0) {
+      // Swap in a fresh set before firing so a callback that re-subscribes
+      // (typical for `every` re-arming on its next iteration) lands on the
+      // new set and survives until the next send.
+      const wakers = state.wakeSubscribers;
+      state.wakeSubscribers = new Set();
+      for (const wake of wakers) {
+        wake();
+      }
     }
   }
 

@@ -1,0 +1,276 @@
+{
+  "name": "@noetic/code-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./tools": {
+      "types": "./src/tools/index.ts",
+      "default": "./src/tools/index.ts"
+    },
+    "./tools/node": {
+      "types": "./src/tools/node.ts",
+      "default": "./src/tools/node.ts"
+    },
+    "./skills": {
+      "types": "./src/skills/index.ts",
+      "default": "./src/skills/index.ts"
+    },
+    "./agents": {
+      "types": "./src/agents/index.ts",
+      "default": "./src/agents/index.ts"
+    },
+    "./plan": {
+      "types": "./src/plan/index.ts",
+      "default": "./src/plan/index.ts"
+    },
+    "./ask-user-service": {
+      "types": "./src/ask-user-service.ts",
+      "default": "./src/ask-user-service.ts"
+    },
+    "./memory": {
+      "types": "./src/memory/index.ts",
+      "default": "./src/memory/index.ts"
+    },
+    "./tasks": {
+      "types": "./src/tasks/index.ts",
+      "default": "./src/tasks/index.ts"
+    },
+    "./tasks/schema": {
+      "types": "./src/tasks/schema.ts",
+      "default": "./src/tasks/schema.ts"
+    },
+    "./tasks/plugin": {
+      "types": "./src/tasks/plugin.ts",
+      "default": "./src/tasks/plugin.ts"
+    },
+    "./tasks/store/memory": {
+      "types": "./src/tasks/store-memory.ts",
+      "default": "./src/tasks/store-memory.ts"
+    },
+    "./tasks/store/fs-node": {
+      "types": "./src/tasks/fs-node.ts",
+      "default": "./src/tasks/fs-node.ts"
+    },
+    "./tasks/execution": {
+      "types": "./src/tasks/execution.ts",
+      "default": "./src/tasks/execution.ts"
+    },
+    "./tasks/path-utils": {
+      "types": "./src/tasks/path-utils.ts",
+      "default": "./src/tasks/path-utils.ts"
+    },
+    "./tasks/transport/memory": {
+      "types": "./src/tasks/subprocess-transport-memory.ts",
+      "default": "./src/tasks/subprocess-transport-memory.ts"
+    },
+    "./tasks/transport/unix-node": {
+      "types": "./src/tasks/subprocess-transport-unix-node.ts",
+      "default": "./src/tasks/subprocess-transport-unix-node.ts"
+    },
+    "./tasks/worktree-node": {
+      "types": "./src/tasks/worktree-node.ts",
+      "default": "./src/tasks/worktree-node.ts"
+    },
+    "./tasks/worktree": {
+      "types": "./src/tasks/worktree.ts",
+      "default": "./src/tasks/worktree.ts"
+    },
+    "./tasks/command": {
+      "types": "./src/tasks/command.ts",
+      "default": "./src/tasks/command.ts"
+    },
+    "./tasks/command-node": {
+      "types": "./src/tasks/command-node.ts",
+      "default": "./src/tasks/command-node.ts"
+    },
+    "./tasks/ipc-node": {
+      "types": "./src/tasks/ipc-node.ts",
+      "default": "./src/tasks/ipc-node.ts"
+    },
+    "./tasks/memory": {
+      "types": "./src/tasks/memory.ts",
+      "default": "./src/tasks/memory.ts"
+    },
+    "./channels": {
+      "types": "./src/channels.ts",
+      "default": "./src/channels.ts"
+    },
+    "./channels/node": {
+      "types": "./src/channels-node.ts",
+      "default": "./src/channels-node.ts"
+    },
+    "./lsp": {
+      "types": "./src/lsp/index.ts",
+      "default": "./src/lsp/index.ts"
+    },
+    "./plugins": {
+      "types": "./src/plugins/index.ts",
+      "default": "./src/plugins/index.ts"
+    },
+    "./utils": {
+      "types": "./src/utils.ts",
+      "default": "./src/utils.ts"
+    },
+    "./config": {
+      "types": "./src/types/config.ts",
+      "default": "./src/types/config.ts"
+    },
+    "./worktree": {
+      "types": "./src/worktree.ts",
+      "default": "./src/worktree.ts"
+    }
+  },
+  "dependencies": {
+    "@noetic-tools/core": "workspace:*",
+    "@noetic/platform-node": "workspace:*",
+    "diff": "7.0.0",
+    "glob": "11.0.3",
+    "pilotty": "0.0.7",
+    "vscode-jsonrpc": "8.2.1",
+    "vscode-languageserver-protocol": "3.17.5",
+    "yaml": "^2.8.3",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^8.0.0",
+    "bun-types": "latest"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "build:browser": "bun build ./test/fixtures/browser-entry.ts --target browser --outfile /tmp/noetic-code-agent-browser.js",
+    "build": "bun run scripts/build.ts && bun run build:types",
+    "build:types": "bunx tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run clean && bun run build",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./tools": {
+        "types": "./dist/tools/index.d.ts",
+        "default": "./dist/tools/index.js"
+      },
+      "./tools/node": {
+        "types": "./dist/tools/node.d.ts",
+        "default": "./dist/tools/node.js"
+      },
+      "./skills": {
+        "types": "./dist/skills/index.d.ts",
+        "default": "./dist/skills/index.js"
+      },
+      "./agents": {
+        "types": "./dist/agents/index.d.ts",
+        "default": "./dist/agents/index.js"
+      },
+      "./plan": {
+        "types": "./dist/plan/index.d.ts",
+        "default": "./dist/plan/index.js"
+      },
+      "./memory": {
+        "types": "./dist/memory/index.d.ts",
+        "default": "./dist/memory/index.js"
+      },
+      "./tasks": {
+        "types": "./dist/tasks/index.d.ts",
+        "default": "./dist/tasks/index.js"
+      },
+      "./tasks/schema": {
+        "types": "./dist/tasks/schema.d.ts",
+        "default": "./dist/tasks/schema.js"
+      },
+      "./tasks/plugin": {
+        "types": "./dist/tasks/plugin.d.ts",
+        "default": "./dist/tasks/plugin.js"
+      },
+      "./tasks/store/memory": {
+        "types": "./dist/tasks/store-memory.d.ts",
+        "default": "./dist/tasks/store-memory.js"
+      },
+      "./tasks/store/fs-node": {
+        "types": "./dist/tasks/fs-node.d.ts",
+        "default": "./dist/tasks/fs-node.js"
+      },
+      "./tasks/execution": {
+        "types": "./dist/tasks/execution.d.ts",
+        "default": "./dist/tasks/execution.js"
+      },
+      "./tasks/transport/memory": {
+        "types": "./dist/tasks/subprocess-transport-memory.d.ts",
+        "default": "./dist/tasks/subprocess-transport-memory.js"
+      },
+      "./tasks/transport/unix-node": {
+        "types": "./dist/tasks/subprocess-transport-unix-node.d.ts",
+        "default": "./dist/tasks/subprocess-transport-unix-node.js"
+      },
+      "./tasks/worktree-node": {
+        "types": "./dist/tasks/worktree-node.d.ts",
+        "default": "./dist/tasks/worktree-node.js"
+      },
+      "./tasks/worktree": {
+        "types": "./dist/tasks/worktree.d.ts",
+        "default": "./dist/tasks/worktree.js"
+      },
+      "./tasks/command": {
+        "types": "./dist/tasks/command.d.ts",
+        "default": "./dist/tasks/command.js"
+      },
+      "./tasks/command-node": {
+        "types": "./dist/tasks/command-node.d.ts",
+        "default": "./dist/tasks/command-node.js"
+      },
+      "./tasks/ipc-node": {
+        "types": "./dist/tasks/ipc-node.d.ts",
+        "default": "./dist/tasks/ipc-node.js"
+      },
+      "./tasks/memory": {
+        "types": "./dist/tasks/memory.d.ts",
+        "default": "./dist/tasks/memory.js"
+      },
+      "./channels": {
+        "types": "./dist/channels.d.ts",
+        "default": "./dist/channels.js"
+      },
+      "./channels/node": {
+        "types": "./dist/channels-node.d.ts",
+        "default": "./dist/channels-node.js"
+      },
+      "./lsp": {
+        "types": "./dist/lsp/index.d.ts",
+        "default": "./dist/lsp/index.js"
+      },
+      "./plugins": {
+        "types": "./dist/plugins/index.d.ts",
+        "default": "./dist/plugins/index.js"
+      },
+      "./utils": {
+        "types": "./dist/utils.d.ts",
+        "default": "./dist/utils.js"
+      },
+      "./config": {
+        "types": "./dist/types/config.d.ts",
+        "default": "./dist/types/config.js"
+      },
+      "./worktree": {
+        "types": "./dist/worktree.d.ts",
+        "default": "./dist/worktree.js"
+      }
+    }
+  }
+}

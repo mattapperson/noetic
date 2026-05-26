@@ -1,16 +1,24 @@
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
-
-import { frameworkCast } from '../interpreter/framework-cast';
-import { isAssistantMessage } from '../interpreter/typeguards';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
-import type { LLMResponse, Tool } from '../types/common';
+import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
 import type { EmbedFn } from '../types/embed';
-import type { InputMessageItem, Item, MessageItem } from '../types/items';
+import type {
+  InputContentPart,
+  InputFilePart,
+  InputImagePart,
+  InputMessageItem,
+  InputTextPart,
+  Item,
+  MessageItem,
+} from '../types/items';
 import type { MemoryLayer } from '../types/memory';
 import type { AgentHarnessContract } from '../types/runtime';
 import { SteeringAction } from '../types/steering';
+import type { Tool } from '../types/tool';
+import { frameworkCast } from '../util/framework-cast';
+import { isAssistantMessage } from '../util/message-helpers';
 
 //#region Provider Types
 
@@ -20,6 +28,7 @@ type OpenRouterInputItem =
   | OpenRouterAgent.FunctionCallItem
   | OpenRouterAgent.FunctionCallOutputItem
   | ProviderOutputItem;
+type ProviderInputContentPart = OpenRouterAgent.EasyInputMessageContentUnion1;
 
 /** @internal */
 export type SdkTool = OpenRouterAgent.Tool;
@@ -65,6 +74,58 @@ function contentPartsToText(
     .join('');
 }
 
+function inputTextPartToProvider(part: InputTextPart): OpenRouterAgent.InputText {
+  return {
+    type: 'input_text',
+    text: part.text,
+  };
+}
+
+function inputImagePartToProvider(
+  part: InputImagePart,
+): OpenRouterAgent.EasyInputMessageContentInputImage {
+  return {
+    type: 'input_image',
+    imageUrl: part.imageUrl,
+    detail: part.detail ?? 'auto',
+  };
+}
+
+function inputFilePartToProvider(part: InputFilePart): OpenRouterAgent.InputFile {
+  return {
+    type: 'input_file',
+    filename: part.filename,
+    fileData: part.fileData,
+    fileUrl: part.fileUrl,
+    fileId: part.fileId,
+  };
+}
+
+function inputContentPartToProvider(part: InputContentPart): ProviderInputContentPart {
+  if (part.type === 'input_text') {
+    return inputTextPartToProvider(part);
+  }
+  if (part.type === 'input_image') {
+    return inputImagePartToProvider(part);
+  }
+  return inputFilePartToProvider(part);
+}
+
+function contentPartsToProviderContent(
+  parts: ReadonlyArray<{
+    type: string;
+    text?: string;
+  }>,
+): string | ProviderInputContentPart[] {
+  const hasStructuredInput = parts.some(
+    (part) => part.type === 'input_image' || part.type === 'input_file',
+  );
+  if (!hasStructuredInput) {
+    return contentPartsToText(parts);
+  }
+  return frameworkCast<ReadonlyArray<InputContentPart>>(parts).map(inputContentPartToProvider);
+}
+
 //#endregion
 
 //#region Item → OpenRouter Input Conversion
@@ -105,7 +166,7 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     // because the SDK's input union does not accept ResponsesOutputMessage directly.
     return {
       role: item.role,
-      content: contentPartsToText(item.content),
+      content: contentPartsToProviderContent(item.content),
     } satisfies OpenRouterAgent.EasyInputMessage;
   }
 
@@ -210,13 +271,24 @@ export function extractUsage(
 // This prevents the SDK from handling tool calls internally, which would
 // make tool interactions invisible to Noetic's itemLog, token tracking,
 // and observability. Instead, the AgentHarness manages the tool loop.
+/**
+ * Provider APIs (Anthropic via OpenRouter) enforce tool names match
+ * `^[a-zA-Z0-9_-]{1,64}$`. Noetic's internal layer-tool names use `layerId/fn`
+ * which contains a forbidden `/`. We translate to a wire-safe form only at
+ * the SDK boundary; internal tool-name identity (and every codebase reference
+ * to names like `plan/updatePrd`) is preserved.
+ */
+export function sanitizeToolNameForWire(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 /** @internal */
 export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
     frameworkCast<SdkTool>({
       type: 'function',
       function: {
-        name: t.name,
+        name: sanitizeToolNameForWire(t.name),
         description: t.description,
         inputSchema: t.input,
       },
@@ -254,10 +326,24 @@ async function consumeGenerator(generator: AsyncGenerator<unknown, unknown>): Pr
 }
 
 /** @internal Execute a single tool call with steering checks. */
-export async function executeToolCall(params: ExecuteToolCallParams): Promise<string> {
-  const matchedTool = params.tools.find((t) => t.name === params.toolName);
+export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
+  output: string;
+  result?: unknown;
+  error?: boolean;
+}> {
+  // Model sees sanitised tool names (see `sanitizeToolNameForWire`). Match
+  // against both the original and sanitised name so internal identity (e.g.
+  // `plan/updatePrd` used by steering whitelists, skill docs, and the
+  // `planMemory.beforeToolCall` hook) stays intact while the wire name is
+  // provider-compliant.
+  const matchedTool = params.tools.find(
+    (t) => t.name === params.toolName || sanitizeToolNameForWire(t.name) === params.toolName,
+  );
   if (!matchedTool) {
-    return `Error: unknown tool '${params.toolName}'`;
+    return {
+      output: `Error: unknown tool '${params.toolName}'`,
+      error: true,
+    };
   }
 
   if (params.layers && params.layers.length > 0) {
@@ -268,10 +354,16 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<st
       params.context,
     );
     if (decision.action === SteeringAction.Deny) {
-      return `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`;
+      return {
+        output: `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`,
+        error: true,
+      };
     }
     if (decision.action === SteeringAction.Guide) {
-      return `Tool call redirected: ${decision.guidance}`;
+      return {
+        output: `Tool call redirected: ${decision.guidance}`,
+        error: true,
+      };
     }
   }
 
@@ -282,9 +374,15 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<st
     const result = isAsyncGenerator(executionResult)
       ? await consumeGenerator(executionResult)
       : await executionResult;
-    return typeof result === 'string' ? result : JSON.stringify(result);
+    return {
+      output: typeof result === 'string' ? result : JSON.stringify(result),
+      result,
+    };
   } catch (e) {
-    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+    return {
+      output: `Error: ${e instanceof Error ? e.message : String(e)}`,
+      error: true,
+    };
   }
 }
 

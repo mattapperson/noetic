@@ -1,0 +1,146 @@
+---
+title: Error Model
+description: Noetic uses structured NoeticError objects with error codes and recovery hints.
+---
+
+## Quick Example
+
+```ts
+import { isNoeticError } from '@noetic-tools/core';
+
+try {
+  const result = await harness.execute('Do something');
+} catch (e) {
+  if (isNoeticError(e)) {
+    console.log(e.noeticError.kind); // e.g. 'step_failed'
+    console.log(e.message);         // Human-readable description
+  }
+}
+```
+
+Noetic wraps every framework-level failure in a structured `NoeticError` discriminated union. Instead of catching generic exceptions and guessing what went wrong, you can match on the `kind` field and access typed metadata for each error variant.
+
+## NoeticError Type
+
+`NoeticError` is a discriminated union with a `kind` field. Each variant carries context-specific data:
+
+| `kind` | Key Fields | When it occurs |
+|---|---|---|
+| `step_failed` | `stepId`, `cause: Error`, `retriesExhausted` | A step throws after exhausting retries. |
+| `llm_refused` | `stepId`, `refusal: string` | The model returns a refusal instead of content. |
+| `llm_parse_error` | `stepId`, `raw: string`, `schema: ZodType`, `zodError: ZodError` | Structured output fails Zod validation. |
+| `llm_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
+| `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Some fork paths succeeded and others failed (settle mode). |
+| `spawn_summary_failed` | `stepId`, `childOutput`, `summaryCause: Error` | A spawn's summary step failed after the child completed. |
+| `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call exceeded its timeout. |
+| `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
+| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()`. |
+| `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
+
+### Full Type Definition
+
+```ts
+type NoeticError =
+  | { kind: 'step_failed'; stepId: string; cause: Error; retriesExhausted: boolean }
+  | { kind: 'llm_refused'; stepId: string; refusal: string }
+  | { kind: 'llm_parse_error'; stepId: string; raw: string; schema: ZodType; zodError: ZodError }
+  | { kind: 'llm_rate_limit'; stepId: string; retryAfter?: number }
+  | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
+  | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
+  | { kind: 'channel_timeout'; channelName: string; timeout: number }
+  | { kind: 'channel_closed'; channelName: string }
+  | { kind: 'cancelled'; reason?: string }
+  | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number };
+```
+
+## NoeticErrorImpl Class
+
+`NoeticErrorImpl` extends the standard `Error` class, so it works with `try/catch` and stack traces. The structured error data lives on the `.noeticError` property:
+
+```ts
+class NoeticErrorImpl extends Error {
+  readonly noeticError: NoeticError;
+  constructor(error: NoeticError);
+}
+```
+
+The `message` string is auto-generated from the error kind and its fields. For example, a `step_failed` error produces:
+
+```
+Step 'fetch-data' failed: Connection refused
+```
+
+## isNoeticError Type Guard
+
+Use `isNoeticError()` to narrow an `unknown` catch value:
+
+```ts
+import { isNoeticError } from '@noetic-tools/core';
+
+function isNoeticError(e: unknown): e is NoeticErrorImpl;
+```
+
+This is an `instanceof` check against `NoeticErrorImpl`.
+
+## Handling Errors in Loops
+
+Loops accept an `onError` callback that receives the structured error and returns a recovery action:
+
+```ts
+import { step, loop, until } from '@noetic-tools/core';
+
+const resilientLoop = loop({
+  id: 'retry-loop',
+  steps: [step.llm({ id: 'generate', model: 'gpt-4o' })],
+  until: until.noToolCalls(),
+  onError(error, ctx) {
+    if (error.kind === 'llm_rate_limit') {
+      return 'retry';  // Try the same iteration again
+    }
+    if (error.kind === 'step_failed' && !error.retriesExhausted) {
+      return 'skip';   // Move to the next iteration
+    }
+    return 'abort';    // Re-throw the error
+  },
+});
+```
+
+| Return value | Behavior |
+|---|---|
+| `'retry'` | Re-execute the same iteration immediately. |
+| `'skip'` | Skip this iteration and continue with the previous output. |
+| `'abort'` | Re-throw the error, ending the loop. |
+
+## Matching on Error Kind
+
+Because `NoeticError` is a discriminated union, TypeScript narrows the type after checking `kind`:
+
+```ts
+if (isNoeticError(e)) {
+  const err = e.noeticError;
+
+  switch (err.kind) {
+    case 'llm_parse_error':
+      // TypeScript knows: err.raw, err.schema, err.zodError
+      console.log('Validation errors:', err.zodError.errors);
+      break;
+
+    case 'fork_partial':
+      // TypeScript knows: err.succeeded, err.failed
+      console.log(`${err.succeeded.length} paths ok, ${err.failed.length} failed`);
+      break;
+
+    case 'budget_exceeded':
+      // TypeScript knows: err.field, err.limit, err.actual
+      console.log(`${err.field} limit: ${err.limit}, used: ${err.actual}`);
+      break;
+  }
+}
+```
+
+## Related Pages
+
+- [Context & Event Log](/docs/framework/context) -- `ctx.abort()` produces a `cancelled` error.
+- [Channels](/docs/framework/operators/channels) -- `channel_timeout` and `channel_closed` errors.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- the `onError` recovery callback.
+- [AgentHarness](/docs/framework/runtime) -- `harness.cancel()` triggers cancellation errors.

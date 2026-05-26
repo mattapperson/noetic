@@ -181,7 +181,7 @@ async function withTempPlansRoot<T>(fn: (root: string) => Promise<T>): Promise<T
 describe('plan file store', () => {
   test('createPlanSession + writePrd + readPlanSession round-trip', async () => {
     await withTempPlansRoot(async () => {
-      const store = await import('../src/plan/file-store.ts');
+      const store = await import('../src/plan/file-store.js');
       const session = await store.createPlanSession();
       expect(session.slug.length).toBeGreaterThan(0);
       expect(session.dir).toContain(session.slug);
@@ -196,7 +196,7 @@ describe('plan file store', () => {
 
   test('writeFlow validates and persists JSON', async () => {
     await withTempPlansRoot(async () => {
-      const store = await import('../src/plan/file-store.ts');
+      const store = await import('../src/plan/file-store.js');
       const session = await store.createPlanSession();
       const flow: FlowNode = {
         kind: 'llm',
@@ -211,7 +211,7 @@ describe('plan file store', () => {
 
   test('writeFlow rejects invalid JSON', async () => {
     await withTempPlansRoot(async () => {
-      const store = await import('../src/plan/file-store.ts');
+      const store = await import('../src/plan/file-store.js');
       const session = await store.createPlanSession();
       await expect(
         store.writeFlow(session.slug, {
@@ -223,7 +223,7 @@ describe('plan file store', () => {
 
   test('writeSubPlan rejects path-traversal nodeIds', async () => {
     await withTempPlansRoot(async () => {
-      const store = await import('../src/plan/file-store.ts');
+      const store = await import('../src/plan/file-store.js');
       const session = await store.createPlanSession();
       await expect(store.writeSubPlan(session.slug, '../escape', 'hi')).rejects.toThrow();
     });
@@ -231,7 +231,7 @@ describe('plan file store', () => {
 
   test('listPlanSessions returns created session slugs', async () => {
     await withTempPlansRoot(async () => {
-      const store = await import('../src/plan/file-store.ts');
+      const store = await import('../src/plan/file-store.js');
       const a = await store.createPlanSession();
       const b = await store.createPlanSession();
       const list = await store.listPlanSessions();
@@ -242,7 +242,7 @@ describe('plan file store', () => {
 
   test('listPlanSessions returns [] when no sessions exist', async () => {
     await withTempPlansRoot(async () => {
-      const store = await import('../src/plan/file-store.ts');
+      const store = await import('../src/plan/file-store.js');
       const list = await store.listPlanSessions();
       expect(list).toEqual([]);
     });

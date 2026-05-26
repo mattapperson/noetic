@@ -74,7 +74,7 @@ pilotty kill -s noetic
 
 ### Tool System (`src/tools/`)
 
-Tools are created with a `cwd` context and return `Tool` type from `@noetic/core`:
+Tools are created with a `cwd` context and return `Tool` type from `@noetic-tools/core`:
 
 | Tool | Description |
 |------|-------------|
@@ -85,8 +85,15 @@ Tools are created with a `cwd` context and return `Tool` type from `@noetic/core
 | `grep` | Search file contents |
 | `find` | Find files by pattern |
 | `ls` | List directory contents |
+| `InteractiveTerminal` | Drive a TUI program through pilotty (spawn / snapshot / key / type / wait-for / kill / list-sessions / click / scroll). In read-only mode (`createReadOnlyTools`), `spawn` rejects mutators (editors, shells, agent CLIs, file managers, mutating git TUIs); other actions are unaffected. |
+| `agent` | Spawn a sub-agent (teammate) sync, background, or named+addressable; optional `isolation: 'worktree'`. Picks skill by `subagent_type`. |
+| `sendMessage` | Write a message to a named teammate's inbound queue; the teammate sees it as `<inbound-message>` on its next turn. |
+| `checkAgent` | Poll status/result/error of a previously-launched teammate by agentId. |
+| `AskUserQuestion` | Pause mid-turn to pose 1–4 multiple-choice questions (with optional markdown/HTML `preview` per option, multi-select, and free-text "Other"). Returns a `question → answer` map. Registered whenever an `AskUserService` is supplied — the in-process TUI service for the main chat, and an IPC-backed service (`tasks/ipc-ask-user-service.ts`) for autonomous task runners. |
 
-Use `createCodingTools(cwd, fs?)` for full toolset or `createReadOnlyTools(cwd, fs?)` for safe exploration. Both accept an optional `FsAdapter` from `@noetic/core` (defaults to local filesystem).
+Use `createCodingTools(opts)` for full toolset or `createReadOnlyTools(opts)` for safe exploration. Both accept `{ cwd, fs?, shell?, lspService?, askUserService? }`; the TUI passes `askUserService` so the ask-user tool can render a modal.
+
+Teammate tools compose `@noetic-tools/core` primitives (`spawn`, `react`, `detachedSpawn`, memory layers) via the per-harness `TeammateRegistry` in `src/agents/registry-runtime.ts`. Background/named teammates run on a fresh `threadId` (passed via `detachedSpawn` overrides) so they do not pollute the parent's session item log.
 
 ### Plugin System
 

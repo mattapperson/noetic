@@ -1,5 +1,5 @@
-import type { LlmProviderConfig } from '@noetic/core';
-import { AgentHarness, step } from '@noetic/core';
+import type { LlmProviderConfig } from '@noetic-tools/core';
+import { AgentHarness, step } from '@noetic-tools/core';
 import type { ZodType } from 'zod';
 
 import type { EvalExecution, ScoreResult, ScorerFn } from './types';
@@ -81,7 +81,7 @@ function buildAnalyzeScorerFn<T, R>(
     const prompt = analyzeConfig.createPrompt(preprocessed, objective);
 
     const model = judge?.model ?? 'openai/gpt-4o-mini';
-    const judgeStep = step.llm<string, unknown>({
+    const judgeStep = step.llm({
       id: `${pipelineId}-judge`,
       model,
       instructions: prompt,

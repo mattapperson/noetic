@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
 import { durableTaskState } from '../../src/memory/layers/durable-task-state';
-import { makeCtx, makeItemLog, makeScopedStorage as makeStorage } from '../_helpers';
+import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('durableTaskState', () => {
   it('has correct id and slot', () => {
@@ -15,7 +15,7 @@ describe('durableTaskState', () => {
   it('init/recall lifecycle', async () => {
     const layer = durableTaskState();
     const result = await layer.hooks.init!({
-      storage: makeStorage(),
+      storage: makeScopedStorage(),
       scopeKey: 'exec-1',
       ctx: makeCtx(),
     });

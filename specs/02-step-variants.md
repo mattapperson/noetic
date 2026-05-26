@@ -14,6 +14,16 @@ interface StepRunOpts<I, O> {
   id: string;
   execute: (input: I, ctx: Context) => Promise<O>;
   retry?: RetryPolicy;
+  /**
+   * Per-step subprocess adapter override. When set, the interpreter
+   * dispatches this step through the given adapter instead of the harness
+   * default. Resolution order at dispatch time is
+   * `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+   * Use an out-of-process adapter here to run this specific step in its own
+   * OS child; use an in-memory test adapter to intercept the request and
+   * assert on it from a unit test.
+   */
+  subprocess?: SubprocessAdapter;
 }
 
 interface RetryPolicy {
@@ -22,6 +32,8 @@ interface RetryPolicy {
   initialDelay: number;  // ms
 }
 ```
+
+The `subprocess` field is preserved verbatim across step registration and interpreter dispatch. The same adapter is consulted by `harness.run()`, `spawn()`, and `harness.detachedSpawn()` when the dispatched step has it set. See `04-spawn` for routing semantics and `23-durable-execution` for how adapters carry durable handle manifests.
 
 ```typescript
 const fetchData = step.run({
@@ -41,13 +53,17 @@ const fetchData = step.run({
 Costs tokens, needs model routing (OpenRouter, gateway, etc.), generates trace metadata with GenAI semantic conventions. Output may contain tool calls that drive the next iteration.
 
 ```typescript
-interface StepLLMOpts<O> {
+type Lazy<T, TMemory = ContextMemory> =
+  | T
+  | ((ctx: Context<TMemory>) => T | Promise<T>);
+
+interface StepLLMOpts<TMemory, O> {
   id: string;
-  model: string;              // e.g. 'anthropic/claude-sonnet-4-20250514'
-  instructions?: string;
-  tools?: Tool[];             // allowed tool subset (undefined = all, [] = none)
-  output?: ZodType<O>;        // structured output schema
-  params?: ModelParams;       // temperature, topP, etc.
+  model: Lazy<string, TMemory>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
+  instructions?: Lazy<string | undefined, TMemory>;
+  tools?: Lazy<Tool[] | undefined, TMemory>;       // allowed tool subset (undefined = all, [] = none)
+  output?: ZodType<O>;                             // structured output schema
+  params?: ModelParams;                            // temperature, topP, etc.
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
@@ -57,6 +73,26 @@ interface ModelParams {
   maxTokens?: number;
   stopSequences?: string[];
 }
+```
+
+### Lazy Params
+
+`model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params`, `ctx.unifiedTools`, or memory layer state to produce per-run values without baking them in at build time.
+
+- **Eager vs lazy — semantics are identical** after resolution. An eager `model: 'gpt-4'` behaves the same as `model: () => 'gpt-4'`.
+- **Model validation moves to runtime for getters.** `step.llm()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
+- **Function-form `tools` do NOT contribute to `ctx.unifiedTools`.** `collectAllTools` skips them since they can't be inspected without a live context. Tools needed in the harness-wide pool should be registered via `AgentHarness.tools` (see spec 08).
+
+```typescript
+const planChat = step.llm({
+  id: 'plan-chat',
+  model: (ctx) => ctx.harness.config.params.model as string,
+  instructions: (ctx) => {
+    const user = ctx.harness.config.params.instructions;
+    return [user, PLAN_SYSTEM_PROMPT].filter(Boolean).join('\n\n');
+  },
+  tools: (ctx) => (ctx.unifiedTools ?? []).filter((t) => PLAN_MODE_TOOL_NAMES.has(t.name)),
+});
 ```
 
 ```typescript
@@ -86,7 +122,7 @@ interface LlmProviderConfig {
 The agent harness constructs and manages the OpenRouter client internally. There is no user-facing `CallModelFn` — the adapter seam is the `LlmProviderConfig` on the harness.
 
 ```typescript
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildParallelResearchAgent } from '../../examples/parallel-research';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('parallel research agent', () => {

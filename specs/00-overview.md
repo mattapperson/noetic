@@ -19,26 +19,32 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Packages
 
 ```
-@noetic/memory  ←  @noetic/core  ←  @noetic/eval
+@noetic-tools/core  ←  @noetic/eval
+      ↑
+      ├── @noetic/platform-node
+      ├── @noetic/platform-browser
+      └── @noetic/mirage
 ```
 
-- **`@noetic/memory`** — The memory API contract and built-in implementations. Contains: the `MemoryLayer` interface, all hook param/result types, `MemoryScope`, `StorageAdapter`, `ScopedStorage`, budget types, and all built-in layer factories. Custom layer authors depend only on this package — not `@noetic/core`.
+- **`@noetic-tools/core`** — Step primitives, execution infrastructure, and the memory system. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic-tools/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
 
-- **`@noetic/core`** — Step primitives and execution infrastructure only. Depends on `@noetic/memory` for the layer contract. Does not contain layer implementations.
+- **`@noetic/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic/cli`, `@noetic/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
-- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic/core`.
+- **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
+
+- **`@noetic/mirage`** — Runtime-neutral bridge that wraps a user-constructed Mirage `Workspace` (from `@struktoai/mirage-node` or `@struktoai/mirage-browser`) in `FsAdapter` + `ShellAdapter` implementations. Declares all three Mirage packages as optional peers. See `24-mirage-resources`.
+
+- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
 
 ## Architecture
 
-`@noetic/core` is structured around two layers (the memory contract lives in `@noetic/memory`):
+`@noetic-tools/core` is structured around three layers:
 
 1. **Step primitives** (`01-step-type`, `02-step-variants`, `03-control-flow`, `04-spawn`, `05-loop-and-until`, `06-channels`) — One discriminated union type with seven variants. Everything is a `Step<I, O>`.
 
 2. **Execution infrastructure** (`07-context-and-event-log`, `08-agent-harness`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable agent harness backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with the LLM provider.
 
-`@noetic/memory` provides:
-
-3. **Memory contract and implementations** (`11-memory-layer-system`, `12-builtin-memory-layers`) — The `MemoryLayer` interface, lifecycle hook types, scope system, storage adapter contract, and built-in layer factories. The View (what the LLM actually sees) is assembled by the Projector in `@noetic/core` from the layer outputs + conversation history, but the layer contract itself is owned by `@noetic/memory`.
+3. **Memory system** (`11-memory-layer-system`, `12-builtin-memory-layers`) — The `MemoryLayer` contract, lifecycle hook types, scope system, storage adapter contract, and built-in layer factories. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** memory source files MUST NOT import from `interpreter/` or `runtime/`; shared pure helpers live under `util/`. This keeps memory tree-shakable from the rest of the package.
 
 **Patterns** (`13-patterns`) are 15-30 line compositions of primitives. They prove the primitives are sufficient; they are not framework magic.
 
@@ -61,16 +67,13 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
+| `22-cli-architecture` | `@noetic/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
+| `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
 
 ## Dependency Graph
 
 ```
-── @noetic/memory ──────────────────────────────────────────────
-                11-memory-system
-                       |
-                12-builtin-layers
-
-── @noetic/core ────────────────────────────────────────────────
+── @noetic-tools/core ────────────────────────────────────────────────
                     01-step-type
                    /    |    \
           02-variants 03-flow  05-loop
@@ -81,10 +84,14 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
                     \      /                 |
                    08-agent-harness           |
                        |                     |
-                  [memory contract] ─────────+   (imported from @noetic/memory)
+                   memory (11, 12) ──────────+
+                       |
+                   util/ (pure helpers shared by memory + interpreter + runtime)
                        |
                   13-patterns (uses all primitives)
 
 ── @noetic/eval ────────────────────────────────────────────────
                 17-eval-and-optimization
 ```
+
+The `memory` node has no edges into `interpreter/` or `runtime/` — see the boundary rule in the Architecture section above. Pure helpers used by both sides live under `util/`.

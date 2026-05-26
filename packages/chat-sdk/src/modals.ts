@@ -1,4 +1,4 @@
-import type { ExecuteInput, Item } from '@noetic/core';
+import type { ExecuteInput, Item } from '@noetic-tools/core';
 
 import type { ModalInputOptions } from './types';
 import { ModalInputMode } from './types';

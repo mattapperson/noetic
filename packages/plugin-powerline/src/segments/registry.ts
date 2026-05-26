@@ -6,7 +6,7 @@ import { clockSegment, sessionTimeSegment } from './time.js';
 import { contextPctSegment, tokensSegment } from './tokens.js';
 import type { Segment } from './types.js';
 
-export const SEGMENTS: Record<string, Segment> = {
+export const SEGMENTS = {
   noetic: noeticSegment,
   model: modelSegment,
   path: pathSegment,
@@ -15,15 +15,29 @@ export const SEGMENTS: Record<string, Segment> = {
   context_pct: contextPctSegment,
   session_time: sessionTimeSegment,
   clock: clockSegment,
-};
+} as const satisfies Record<string, Segment>;
 
-export function resolveSegments(names: ReadonlyArray<string>): ReadonlyArray<Segment> {
-  const out: Segment[] = [];
+export type SegmentName = keyof typeof SEGMENTS;
+
+export interface ResolvedSegment {
+  readonly name: SegmentName;
+  readonly render: Segment;
+}
+
+function isSegmentName(name: string): name is SegmentName {
+  return name in SEGMENTS;
+}
+
+export function resolveSegments(names: ReadonlyArray<string>): ReadonlyArray<ResolvedSegment> {
+  const out: ResolvedSegment[] = [];
   for (const name of names) {
-    const seg = SEGMENTS[name];
-    if (seg) {
-      out.push(seg);
+    if (!isSegmentName(name)) {
+      continue;
     }
+    out.push({
+      name,
+      render: SEGMENTS[name],
+    });
   }
   return out;
 }

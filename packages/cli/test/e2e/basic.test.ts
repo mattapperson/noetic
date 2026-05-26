@@ -25,7 +25,7 @@ test.use({
 
 test('shows the input prompt on startup', async ({ terminal }) => {
   await waitForView(terminal, 'Type a message...');
-  await waitForView(terminal, 'model: anthropic/claude-sonnet-4');
+  await waitForView(terminal, 'anthropic/claude-sonnet-4');
 });
 
 test('accepts typed input without crashing immediately', async ({ terminal }) => {

@@ -1,8 +1,12 @@
+import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
 import type { Context } from '../types/context';
-import type { FunctionCallItem, Item, MessageItem } from '../types/items';
+import type { FunctionCallItem, Item } from '../types/items';
 import type { ContextMemory } from '../types/memory';
 import type { MutableContext } from '../types/mutable-context';
+
+// Re-exports for backward compatibility; the pure variants live in util/.
+export { isAssistantMessage, isOutputText, isUserMessage } from '../util/message-helpers';
 
 export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableContext {
   // Check if the context has writable mutable fields (ContextImpl or compatible mock)
@@ -18,26 +22,20 @@ export function isContextImpl(ctx: Context<ContextMemory>): ctx is ContextImpl {
   return ctx instanceof ContextImpl;
 }
 
-export function isAssistantMessage(item: unknown): item is MessageItem {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'type' in item &&
-    item.type === 'message' &&
-    'role' in item &&
-    item.role === 'assistant'
-  );
+/**
+ * Co-located with `isContextImpl` so the import of `ContextImpl` flows through
+ * the same module other interpreters pull it from, sidestepping a circular
+ * TDZ when this helper is used by `executeEvery` in `execute-control.ts`.
+ */
+export function getContextChannelStore<TMemory>(ctx: Context<TMemory>): ChannelStore | undefined {
+  if (ctx instanceof ContextImpl) {
+    return ctx.channelStore;
+  }
+  return undefined;
 }
 
 export function isFunctionCall(item: Item): item is FunctionCallItem {
   return item.type === 'function_call' && 'callId' in item && 'name' in item;
-}
-
-export function isOutputText(part: { type: string }): part is {
-  type: 'output_text';
-  text: string;
-} {
-  return part.type === 'output_text';
 }
 
 function assertNever(_value: never): never {
