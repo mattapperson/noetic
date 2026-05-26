@@ -86,8 +86,8 @@ export function SetupManualWaiter({
         {descriptor
           .manualInstructionsFor(os)
           .split('\n')
-          .map((line, idx) => (
-            <Text key={`${idx}-${line.slice(0, 12)}`}>{line}</Text>
+          .map((line) => (
+            <Text key={line}>{line}</Text>
           ))}
       </Box>
       <Box marginTop={1}>

@@ -26,18 +26,23 @@ export interface SetupInstallRunnerProps {
 
 //#region State
 
+interface LogLine {
+  readonly id: number;
+  readonly text: string;
+}
+
 type Phase =
   | {
       kind: 'running';
-      lines: ReadonlyArray<string>;
+      lines: ReadonlyArray<LogLine>;
     }
   | {
       kind: 'verifying';
-      lines: ReadonlyArray<string>;
+      lines: ReadonlyArray<LogLine>;
     }
   | {
       kind: 'failed';
-      lines: ReadonlyArray<string>;
+      lines: ReadonlyArray<LogLine>;
       reason: string;
     };
 
@@ -64,15 +69,19 @@ export function SetupInstallRunner({
     cancelRef.current = handle.cancel;
     let cancelled = false;
 
-    (async () => {
-      const tail: string[] = [];
+    async function run(): Promise<void> {
+      const tail: LogLine[] = [];
+      let nextLineId = 0;
       let exitCode: number | null = null;
       for await (const event of handle.events) {
         if (cancelled) {
           return;
         }
         if (event.kind === 'line') {
-          tail.push(event.text);
+          tail.push({
+            id: nextLineId++,
+            text: event.text,
+          });
           while (tail.length > TAIL_SIZE) {
             tail.shift();
           }
@@ -122,7 +131,9 @@ export function SetupInstallRunner({
       }
 
       onInstalled();
-    })();
+    }
+
+    void run();
 
     return () => {
       cancelled = true;
@@ -162,9 +173,9 @@ export function SetupInstallRunner({
         $ {option.command} {option.args.join(' ')}
       </Text>
       <Box flexDirection="column" marginTop={1}>
-        {phase.lines.map((line, idx) => (
-          <Text key={`${idx}-${line.slice(0, 16)}`} dimColor>
-            {line}
+        {phase.lines.map((line) => (
+          <Text key={line.id} dimColor>
+            {line.text}
           </Text>
         ))}
       </Box>

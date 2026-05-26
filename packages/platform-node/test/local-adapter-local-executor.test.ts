@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import type { StepSubprocessRequest } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '../src/local-subprocess-adapter';
 
@@ -60,14 +61,9 @@ describe('local adapter in-process step dispatch', () => {
     }
     expect(settled?.status).toBe('failed');
     const error = settled?.metadata?.error;
-    expect(typeof error).toBe('object');
-    expect(
-      (
-        error as {
-          message: string;
-        }
-      ).message,
-    ).toBe('boom');
+    expect(error).toBeInstanceOf(Object);
+    assert(error && typeof error === 'object' && 'message' in error);
+    expect(error.message).toBe('boom');
   });
 
   it('still rejects step requests when neither registryEntry nor _localExecutor is provided', async () => {
