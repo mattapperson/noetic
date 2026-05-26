@@ -23,9 +23,9 @@ export function MobileSectionTitle(): ReactNode {
     return null;
   }
   return (
-    <span>
-      <span aria-hidden="true"> &gt; </span>
-      {section.name}
-    </span>
+    <>
+      <span aria-hidden="true">&gt;</span>
+      <span>{section.name}</span>
+    </>
   );
 }

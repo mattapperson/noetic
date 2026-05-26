@@ -812,10 +812,15 @@
    search button. Left-align that div so the section name sits next to
    Noetic (breadcrumb pattern: `Noetic > Framework`). */
 @media (max-width: 767px) {
+  /* Equal spacing between NOETIC, >, and the section name. */
+  #nd-subnav {
+    gap: 8px;
+  }
   #nd-subnav > div.flex-1 {
     display: flex;
     justify-content: flex-start;
     align-items: center;
+    gap: 8px;
   }
   /* Match the landing-page .nav-brand treatment for the NOETIC wordmark. */
   #nd-subnav > a:first-of-type {
