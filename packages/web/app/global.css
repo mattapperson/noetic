@@ -781,3 +781,27 @@
     display: none;
   }
 }
+
+/* Docs: smaller type on mobile so headings don't dominate the viewport
+   and copy fits without horizontal clipping. fumadocs renders prose with
+   `.prose` on the article body. */
+@media (max-width: 767px) {
+  .prose {
+    font-size: 14px;
+  }
+  .prose h1 {
+    font-size: 22px;
+  }
+  .prose h2 {
+    font-size: 18px;
+  }
+  .prose h3 {
+    font-size: 16px;
+  }
+  .prose h4 {
+    font-size: 13px;
+  }
+  .prose code {
+    font-size: 12px;
+  }
+}
