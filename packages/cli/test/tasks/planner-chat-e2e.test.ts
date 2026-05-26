@@ -16,9 +16,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-
-import { createFileStorage, createLocalFsAdapter } from '@noetic/platform-node';
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
+import {
+  createFileStorage,
+  createLocalFsAdapter,
+  createLocalSubprocessAdapter,
+} from '@noetic/platform-node';
 
 import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
 import { ensureChatTarget } from '../../src/tasks/runtime/resolve-chat-target.js';

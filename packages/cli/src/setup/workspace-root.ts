@@ -37,7 +37,9 @@ function hasWorkspaceMarker(dir: string): boolean {
   return false;
 }
 
-function isPkgWithWorkspaces(value: unknown): value is { workspaces: unknown } {
+function isPkgWithWorkspaces(value: unknown): value is {
+  workspaces: unknown;
+} {
   if (typeof value !== 'object' || value === null) {
     return false;
   }

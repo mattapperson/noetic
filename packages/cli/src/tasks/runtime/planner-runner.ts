@@ -27,6 +27,12 @@ import {
   saveTask,
   taskDirPaths,
 } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  AgentIpcServer,
+  createLocalFsAdapter,
+  createLocalShellAdapter,
+  unlinkSocketSync,
+} from '@noetic/platform-node';
 import type { Item } from '@noetic-tools/core';
 import {
   createDetachedSignal,
@@ -34,12 +40,6 @@ import {
   createStallNudgeHook,
   runnableLoop,
 } from '@noetic-tools/core';
-import {
-  AgentIpcServer,
-  createLocalFsAdapter,
-  createLocalShellAdapter,
-  unlinkSocketSync,
-} from '@noetic/platform-node';
 import { createSteeringFileLayer } from '../../memory/steering-file-layer.js';
 import { createCodingTools } from '../../tools/index.js';
 import { DEFAULT_MODEL } from './defaults.js';

@@ -27,9 +27,19 @@ export interface SetupInstallRunnerProps {
 //#region State
 
 type Phase =
-  | { kind: 'running'; lines: ReadonlyArray<string> }
-  | { kind: 'verifying'; lines: ReadonlyArray<string> }
-  | { kind: 'failed'; lines: ReadonlyArray<string>; reason: string };
+  | {
+      kind: 'running';
+      lines: ReadonlyArray<string>;
+    }
+  | {
+      kind: 'verifying';
+      lines: ReadonlyArray<string>;
+    }
+  | {
+      kind: 'failed';
+      lines: ReadonlyArray<string>;
+      reason: string;
+    };
 
 const TAIL_SIZE = 20;
 

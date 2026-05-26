@@ -15,8 +15,8 @@ import { resolve } from '@noetic/code-agent/tasks/path-utils';
 import { TaskSource } from '@noetic/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
 import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ShellAdapter } from '@noetic-tools/core';
 import { createLocalFsAdapter } from '@noetic/platform-node';
+import type { ShellAdapter } from '@noetic-tools/core';
 import type {
   MutationPolicy,
   MutationPolicyDecision,

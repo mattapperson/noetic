@@ -12,22 +12,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
-import {
-  createInMemoryStorage,
-  type HarnessStatus,
-  type Item,
-  type StreamEvent,
-  type StreamingItem,
-} from '@noetic-tools/core';
+import type { HarnessStatus, Item, StreamEvent, StreamingItem } from '@noetic-tools/core';
+import { createInMemoryStorage } from '@noetic-tools/core';
 import { AgentIpcClient } from '../src/agent-ipc-client';
-import {
-  AgentIpcServer,
-  type ChatHistoryStore,
-  type IpcAskUserService,
-  type IpcHarness,
-  type TaskLogger,
+import type {
+  ChatHistoryStore,
+  IpcAskUserService,
+  IpcHarness,
+  TaskLogger,
 } from '../src/agent-ipc-server';
+import { AgentIpcServer } from '../src/agent-ipc-server';
 import { createLocalFsAdapter } from '../src/local-fs-adapter';
 
 //#region Test helpers

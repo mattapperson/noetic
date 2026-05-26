@@ -10,9 +10,9 @@ describe('detectOs', () => {
     // We cannot actually flip process.platform — instead verify the current
     // platform is one of the four supported values and the resolver returns it.
     const result = detectOs();
-    expect(result === 'macos' || result === 'linux' || result === 'windows' || result === 'other').toBe(
-      true,
-    );
+    expect(
+      result === 'macos' || result === 'linux' || result === 'windows' || result === 'other',
+    ).toBe(true);
   });
 });
 

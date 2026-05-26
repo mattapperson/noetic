@@ -61,7 +61,13 @@ describe('local adapter in-process step dispatch', () => {
     expect(settled?.status).toBe('failed');
     const error = settled?.metadata?.error;
     expect(typeof error).toBe('object');
-    expect((error as { message: string }).message).toBe('boom');
+    expect(
+      (
+        error as {
+          message: string;
+        }
+      ).message,
+    ).toBe('boom');
   });
 
   it('still rejects step requests when neither registryEntry nor _localExecutor is provided', async () => {

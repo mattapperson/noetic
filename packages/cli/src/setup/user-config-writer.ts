@@ -110,8 +110,14 @@ function serialize(state: UserSetupFile): string {
 //#region Public API
 
 export type AppendResult =
-  | { status: 'written'; path: string }
-  | { status: 'already-present'; path: string };
+  | {
+      status: 'written';
+      path: string;
+    }
+  | {
+      status: 'already-present';
+      path: string;
+    };
 
 /**
  * Merge `id` into the user-global ignore list. Idempotent: a second call

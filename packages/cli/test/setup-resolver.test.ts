@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import { resolveBinaryStatuses } from '../src/setup/resolver.js';
-import type { AgentConfig } from '../src/types/config.js';
 import type { BinaryDescriptor } from '../src/setup/types.js';
+import type { AgentConfig } from '../src/types/config.js';
 
 function makeConfig(ignored: ReadonlyArray<string> = []): AgentConfig {
   return {
@@ -50,9 +50,14 @@ describe('resolveBinaryStatuses', () => {
       manualInstructionsFor: () => '',
       affects: [],
     };
-    const result = await resolveBinaryStatuses(makeConfig(['rtk']), [
-      descriptor,
-    ]);
+    const result = await resolveBinaryStatuses(
+      makeConfig([
+        'rtk',
+      ]),
+      [
+        descriptor,
+      ],
+    );
     expect(result).toEqual([
       {
         id: 'rtk',
@@ -87,11 +92,16 @@ describe('resolveBinaryStatuses', () => {
   });
 
   it('handles mixed ignored / present / missing in one call', async () => {
-    const result = await resolveBinaryStatuses(makeConfig(['rtk']), [
-      makeDescriptor('rtk', true),
-      makeDescriptor('pilotty', true),
-      makeDescriptor('agent-browser', false),
-    ]);
+    const result = await resolveBinaryStatuses(
+      makeConfig([
+        'rtk',
+      ]),
+      [
+        makeDescriptor('rtk', true),
+        makeDescriptor('pilotty', true),
+        makeDescriptor('agent-browser', false),
+      ],
+    );
     expect(result).toEqual([
       {
         id: 'rtk',
@@ -109,9 +119,14 @@ describe('resolveBinaryStatuses', () => {
   });
 
   it('ignores unknown ids in the config silently', async () => {
-    const result = await resolveBinaryStatuses(makeConfig(['definitely-not-a-binary']), [
-      makeDescriptor('rtk', true),
-    ]);
+    const result = await resolveBinaryStatuses(
+      makeConfig([
+        'definitely-not-a-binary',
+      ]),
+      [
+        makeDescriptor('rtk', true),
+      ],
+    );
     expect(result).toEqual([
       {
         id: 'rtk',
