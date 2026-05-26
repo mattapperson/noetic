@@ -810,8 +810,8 @@
    header (#nd-subnav) and the desktop sidebar title row (#nd-sidebar).
    Same treatment as the landing-page .nav-brand class. */
 #nd-subnav > a:first-of-type,
-#nd-sidebar a[href='/'] {
-  font-family: 'JetBrains Mono', monospace;
+#nd-sidebar a[href="/"] {
+  font-family: "JetBrains Mono", monospace;
   font-weight: 700;
   color: var(--color-tui-green);
   letter-spacing: 0.1em;
@@ -842,14 +842,14 @@
    the separator, and the section name sit adjacent with equal 8px spacing.
    Collapse button stays on the far right via margin-left:auto. */
 @media (min-width: 768px) {
-  #nd-sidebar a[href='/'] {
+  #nd-sidebar a[href="/"] {
     margin-inline-end: 0;
   }
   #nd-sidebar > div:first-child > div.flex:first-child {
     gap: 8px;
     align-items: center;
   }
-  #nd-sidebar button[aria-label='Collapse Sidebar'] {
+  #nd-sidebar button[aria-label="Collapse Sidebar"] {
     margin-left: auto;
   }
 }
@@ -859,7 +859,7 @@
   display: block;
   padding: 6px 0;
   color: var(--color-tui-secondary);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 13px;
   text-decoration: none;
 }
