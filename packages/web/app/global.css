@@ -866,3 +866,17 @@
 .docs-index-link:hover {
   color: var(--color-tui-green);
 }
+
+/* fumadocs renders the banner BELOW the section dropdown; move the
+   dropdown to a later flex order so 'Docs index' lands above it. */
+#nd-sidebar > div:first-child > button[data-state] {
+  order: 1;
+}
+
+/* Desktop sidebar wide enough to fit 'Code Agent CLI' on one line in
+   the section selector dropdown (default 268px clips it). */
+@media (min-width: 768px) {
+  #nd-docs-layout {
+    --fd-sidebar-width: 320px;
+  }
+}
