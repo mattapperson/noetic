@@ -806,10 +806,16 @@
   }
 }
 
-/* Mobile: push the brand/section title next to the search icon
-   (fumadocs default puts it on the far left of #nd-subnav). */
+/* Mobile: 'Noetic' stays on the left (default brand title slot, links
+   to nav.url '/'). The dynamic section name lives in nav.children, which
+   fumadocs renders inside a `flex-1` div between the title and the
+   search button. Right-align that div so the section name sits next to
+   the search icon. */
 @media (max-width: 767px) {
-  #nd-subnav > a:first-of-type {
-    margin-left: auto;
+  #nd-subnav > div.flex-1 {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding-right: 8px;
   }
 }

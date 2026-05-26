@@ -7,7 +7,9 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
     <DocsLayout
       tree={source.pageTree}
       nav={{
-        title: <MobileSectionTitle />,
+        title: 'Noetic',
+        url: '/',
+        children: <MobileSectionTitle />,
       }}
     >
       {children}

@@ -19,5 +19,8 @@ const SECTIONS: Array<{
 export function MobileSectionTitle(): ReactNode {
   const pathname = usePathname();
   const section = SECTIONS.find((s) => pathname.startsWith(s.urlPrefix));
-  return <span>{section?.name ?? 'Noetic'}</span>;
+  if (!section) {
+    return null;
+  }
+  return <span>{section.name}</span>;
 }
