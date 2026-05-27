@@ -112,11 +112,10 @@ import {
   resolvePromptAttachments,
   runUserShellCommand,
   StreamMetricsProvider,
-  TaskBoard,
-  TaskChatSpawningView,
-  TaskChatView,
   useExitOnInterrupt,
 } from './app-parts/ui.js';
+import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
+import { TaskBoard } from './tasks/runtime-ui/task-board.js';
 
 //#region Types
 

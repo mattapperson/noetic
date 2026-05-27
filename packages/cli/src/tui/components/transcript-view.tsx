@@ -23,17 +23,19 @@ import {
   isSystemEntry,
   isUserEntry,
 } from '../item-utils.js';
-import { AssistantText } from './items/assistant-text.js';
-import { BashResult } from './items/bash-result.js';
-import { EditResult } from './items/edit-result.js';
-import { LspResult } from './items/lsp-result.js';
-import { MessageResponse } from './items/message-response.js';
-import { Reasoning } from './items/reasoning.js';
-import { SystemMessage } from './items/system-message.js';
-import type { ToolCallStatus } from './items/tool-call.js';
-import { ToolCall } from './items/tool-call.js';
-import { ToolResult } from './items/tool-result.js';
-import { UserPrompt } from './items/user-prompt.js';
+import type { ToolCallStatus } from './items/index.js';
+import {
+  AssistantText,
+  BashResult,
+  EditResult,
+  LspResult,
+  MessageResponse,
+  Reasoning,
+  SystemMessage,
+  ToolCall,
+  ToolResult,
+  UserPrompt,
+} from './items/index.js';
 import { useTheme } from './theme.js';
 
 //#region Types
