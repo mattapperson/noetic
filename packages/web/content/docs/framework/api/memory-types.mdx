@@ -316,7 +316,7 @@ interface MemoryConfig<TLayers extends MemoryLayer[] = MemoryLayer[]> {
 Extracts the memory shape type from a `MemoryConfig`.
 
 ```ts
-type InferMemory<T extends MemoryConfig> = T['_shape'];
+type InferMemory<T extends { readonly _shape: unknown }> = T['_shape'];
 ```
 
 ## InferMemoryShape

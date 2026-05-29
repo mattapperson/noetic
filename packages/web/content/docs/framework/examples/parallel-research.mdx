@@ -19,6 +19,7 @@ A research agent that investigates a topic from three perspectives simultaneousl
 ## Code
 
 ```ts
+import type { ContextMemory } from '@noetic-tools/core';
 import { fork } from '@noetic-tools/core';
 import { spawn } from '@noetic-tools/core';
 import { step } from '@noetic-tools/core';
@@ -42,14 +43,14 @@ const PERSPECTIVES = [
 ] as const;
 
 export function buildParallelResearchAgent() {
-  return fork<string, string>({
+  return fork<ContextMemory, string, string>({
     id: 'parallel-research',
     mode: 'all',
     paths: () =>
       PERSPECTIVES.map((perspective) =>
-        spawn<string, string>({
+        spawn<ContextMemory, string, string>({
           id: `research-${perspective.id}`,
-          child: step.llm<string, string>({
+          child: step.llm<ContextMemory, string, string>({
             id: `llm-${perspective.id}`,
             model: 'gpt-4o',
             instructions: perspective.instructions,

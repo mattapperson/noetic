@@ -30,12 +30,12 @@ interface PlanNode {
 ## compilePlan()
 
 ```ts
-function compilePlan<TMemory = ContextMemory, O = unknown>(
+function compilePlan<O, A = unknown>(
   plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step<TMemory, string, unknown>>,
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>,
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
-): Step<TMemory, string, O>
+): Step<ContextMemory, string, O>
 ```
 
 | Parameter | Type | Purpose |

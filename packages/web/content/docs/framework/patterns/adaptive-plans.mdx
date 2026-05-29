@@ -10,13 +10,13 @@ Adaptive Plans combine LLM-powered plan generation with automatic error-driven r
 ## Signature
 
 ```ts
-function adaptivePlan<TMemory = ContextMemory, O = unknown>(opts: {
-  planner: Step<TMemory, string, PlanNode>;
-  agents: Record<string, (prompt: string) => Step<TMemory, string, unknown>>;
+function adaptivePlan<O, A = unknown>(opts: {
+  planner: Step<ContextMemory, string, PlanNode>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>;
   constraints?: PlanConstraints;
   maxRevisions: number;
   executeStep?: ExecuteStepFn;
-}): Step<TMemory, string, O>
+}): Step<ContextMemory, string, O>
 ```
 
 | Parameter | Type | Purpose |

@@ -246,10 +246,12 @@ export default function myPlugin(): NoeticPlugin {
       description: 'Have the model tell a joke about the current cwd.',
       execute: async () => {
         const joke = await ctx.callModel({
-          system: 'You tell terse, dry developer jokes.',
-          user: `Tell a joke about working in ${ctx.config.cwd}.`,
+          messages: [
+            { role: 'system', content: 'You tell terse, dry developer jokes.' },
+            { role: 'user', content: `Tell a joke about working in ${ctx.config.cwd}.` },
+          ],
         });
-        return { kind: 'message', content: joke };
+        return { kind: 'message', content: joke.text };
       },
     }],
   };

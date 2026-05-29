@@ -8,12 +8,8 @@ Durable execution is opt-in. A zero-config `AgentHarness` has no persistent stor
 ## Quick Example
 
 ```ts
-import {
-  AgentHarness,
-  createCheckpointStore,
-  createFileStorage,
-} from '@noetic-tools/core';
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
+import { AgentHarness, createCheckpointStore } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 // Two distinct on-disk roots: subprocess manifests vs checkpoint snapshots.
 const subprocessStorage = createFileStorage({
@@ -187,8 +183,7 @@ Subprocess manifests and IPC queues can share a root because both are owned by t
 Switch a specific spawn to run in its own OS child by passing a local adapter as a per-call override:
 
 ```ts
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
-import { createFileStorage } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 const localAdapter = createLocalSubprocessAdapter({
   storage: createFileStorage({

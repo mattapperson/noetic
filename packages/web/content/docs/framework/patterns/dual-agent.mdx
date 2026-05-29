@@ -14,8 +14,7 @@ import { channel, spawn, react, fork, step } from '@noetic-tools/core';
 import { z } from 'zod';
 
 // Define a typed channel
-const reviewChannel = channel({
-  name: 'review-feedback',
+const reviewChannel = channel('review-feedback', {
   schema: z.object({
     approved: z.boolean(),
     comments: z.string(),

@@ -309,8 +309,8 @@ The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Tas
 The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
 
 ```ts
-import { AgentHarness, createFileStorage } from '@noetic-tools/core';
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
+import { AgentHarness } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 const subprocess = createLocalSubprocessAdapter({
   storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),

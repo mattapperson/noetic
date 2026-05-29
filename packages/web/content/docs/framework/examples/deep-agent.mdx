@@ -137,7 +137,7 @@ The `buildDeepAgent` function composes everything using `react()` with `memory`:
 
 ```ts
 import { observationalMemory, react, staticContent, toolMemoryLayer } from '@noetic-tools/core';
-import type { MemoryLayer, StepLoop, StepSpawn, Tool } from '@noetic-tools/core';
+import type { ContextMemory, MemoryLayer, StepLoop, StepSpawn, Tool } from '@noetic-tools/core';
 
 interface DeepAgentConfig {
   model: string;
@@ -151,7 +151,9 @@ declare function skillsLayer(opts: unknown): MemoryLayer;
 declare function loadInstructions(): Promise<string>;
 declare const observer: (buffer: ReadonlyArray<unknown>) => Promise<string[]>;
 
-export function buildDeepAgent(config: DeepAgentConfig): StepLoop | StepSpawn {
+export function buildDeepAgent(
+  config: DeepAgentConfig,
+): StepLoop<ContextMemory, string, string> | StepSpawn<ContextMemory, string, string> {
   const allTools = [...fsTools, ...todoTools, delegateTool];
   const layers: MemoryLayer[] = [
     staticContent({ load: loadInstructions, tag: 'instructions' }),

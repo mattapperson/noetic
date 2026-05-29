@@ -29,8 +29,7 @@ interface ChannelHandle<T> {
 import { channel } from '@noetic-tools/core';
 import { z } from 'zod';
 
-const taskChannel = channel({
-  name: 'remote-task',
+const taskChannel = channel('remote-task', {
   schema: z.object({
     taskId: z.string(),
     payload: z.string(),
@@ -69,8 +68,7 @@ if (!handle.closed) {
 import { channel, step } from '@noetic-tools/core';
 import { z } from 'zod';
 
-const resultChannel = channel({
-  name: 'worker-results',
+const resultChannel = channel('worker-results', {
   schema: z.object({ result: z.string() }),
   mode: 'queue',
   external: true,

@@ -74,6 +74,7 @@ const autoBudget: BudgetConfig = 'auto';
 Implement only the hooks you need. All hooks are optional.
 
 ```ts
+import { createMessage } from '@noetic-tools/core';
 import type { MemoryLayer, MemoryHooks } from '@noetic-tools/core';
 
 function myCustomLayer(): MemoryLayer<MyLayerState> {
@@ -98,24 +99,21 @@ function myCustomLayer(): MemoryLayer<MyLayerState> {
         const content = `<my_context>\n${text}\n</my_context>`;
 
         return {
-          items: [{
-            id: 'my-layer-recall',
-            type: 'message' as const,
-            role: 'developer' as const,
-            status: 'completed' as const,
-            content: [{ type: 'input_text' as const, text: content }],
-          }],
+          items: [createMessage(content, 'developer')],
           tokenCount: Math.ceil(content.length / 4),
         };
       },
 
       async store({ newItems, state }) {
-        // Extract relevant data from the LLM response
-        const texts = newItems
-          .filter((i) => i.type === 'message')
-          .flatMap((i) => i.content)
-          .filter((c) => c.type === 'output_text')
-          .map((c) => c.text);
+        // Extract assistant text from the model's latest output
+        const texts: string[] = [];
+        for (const item of newItems) {
+          if (item.type !== 'message' || item.role !== 'assistant') continue;
+          const parts = Array.isArray(item.content) ? item.content : [item.content];
+          for (const part of parts) {
+            if (part.type === 'output_text') texts.push(part.text);
+          }
+        }
 
         if (!texts.length) return;
 
@@ -252,7 +250,7 @@ Use the `layerData()` and `layerFn()` builders:
 
 ```ts
 import { z } from 'zod';
-import { layerData, layerFn } from '@noetic-tools/core';
+import { createMessage, layerData, layerFn } from '@noetic-tools/core';
 import type { MemoryLayer } from '@noetic-tools/core';
 
 interface MyLayerState {
@@ -296,13 +294,7 @@ function myCustomLayer() {
         const text = state.entries.join('\n');
         const content = `<my_context>\n${text}\n</my_context>`;
         return {
-          items: [{
-            id: 'my-layer-recall',
-            type: 'message' as const,
-            role: 'developer' as const,
-            status: 'completed' as const,
-            content: [{ type: 'input_text' as const, text: content }],
-          }],
+          items: [createMessage(content, 'developer')],
           tokenCount: Math.ceil(content.length / 4),
         };
       },

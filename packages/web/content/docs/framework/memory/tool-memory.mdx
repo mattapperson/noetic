@@ -250,7 +250,7 @@ function entityMemory(): MemoryLayer<EntityState> {
         };
       },
 
-      async store({ newItems, state, storage }) {
+      async store({ newItems, state }) {
         const args = findFunctionCall(newItems, 'updateEntities');
         if (!args) {
           return;
@@ -261,7 +261,8 @@ function entityMemory(): MemoryLayer<EntityState> {
           entities: [...state.entities, ...incoming],
         };
 
-        await storage.set('state', updated);
+        // Returning state is enough: the runtime persists it to durable scoped
+        // storage (key 'state') for non-execution scopes, so init() rehydrates it next run.
         return { state: updated };
       },
     },

@@ -46,7 +46,29 @@ Spawn-local memory layers control what the child sees and how results are transf
 - **`onReturn` hooks** transform the child's results before they flow back to the parent. Layers can summarize, filter, or restructure the output.
 
 ```ts
-import { spawn, step } from '@noetic-tools/core';
+import { createMessage, spawn, step } from '@noetic-tools/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+
+interface ResearchState {
+  lastResearch?: string;
+}
+
+const contextLayer: MemoryLayer<ResearchState> = {
+  id: 'context-layer',
+  name: 'Context Provider',
+  slot: 100,
+  scope: 'execution',
+  hooks: {
+    onSpawn: async ({ parentState }) => ({
+      childState: parentState,
+      items: [createMessage('Here is background context for your research.', 'user')],
+    }),
+    onReturn: async ({ parentState, result }) => ({
+      parentState: { ...parentState, lastResearch: String(result) },
+      result,
+    }),
+  },
+};
 
 const withMemory = spawn({
   id: 'research-agent',
@@ -55,35 +77,7 @@ const withMemory = spawn({
     model: 'gpt-4o',
     instructions: 'Research the topic thoroughly.',
   }),
-  memory: [
-    {
-      id: 'context-layer',
-      name: 'Context Provider',
-      slot: 100,
-      scope: 'execution',
-      hooks: {
-        onSpawn: async ({ parentState, childCtx }) => ({
-          childState: parentState,
-          items: [
-            {
-              type: 'message',
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: 'Here is background context for your research.',
-                },
-              ],
-            },
-          ],
-        }),
-        onReturn: async ({ childState, childLog, parentState, result }) => ({
-          parentState: { ...parentState, lastResearch: result },
-          result: result,
-        }),
-      },
-    },
-  ],
+  memory: [contextLayer],
 });
 ```
 
@@ -102,12 +96,34 @@ const spawned = spawn({
 ## Real-World Example: Research Delegation with Memory
 
 ```ts
-import { spawn, step, until } from '@noetic-tools/core';
+import { createMessage, loop, spawn, step, until } from '@noetic-tools/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+
+interface BriefingState {
+  topic: string;
+  findings?: unknown;
+}
+
+const briefingLayer: MemoryLayer<BriefingState> = {
+  id: 'research-briefing',
+  name: 'Research Briefing',
+  slot: 100,
+  scope: 'execution',
+  hooks: {
+    onSpawn: async ({ parentState }) => ({
+      childState: null,
+      items: [createMessage(`Research the following topic: ${parentState.topic}`, 'user')],
+    }),
+    onReturn: async ({ parentState, result }) => ({
+      parentState: { ...parentState, findings: result },
+      result,
+    }),
+  },
+};
 
 const researchAgent = spawn({
   id: 'delegated-research',
-  child: {
-    kind: 'loop',
+  child: loop({
     id: 'research-loop',
     steps: [step.llm({
       id: 'researcher-llm',
@@ -117,36 +133,8 @@ const researchAgent = spawn({
     })],
     until: until.noToolCalls(),
     maxIterations: 10,
-  },
-  memory: [
-    {
-      id: 'research-briefing',
-      name: 'Research Briefing',
-      slot: 100,
-      scope: 'execution',
-      hooks: {
-        onSpawn: async ({ parentState }) => ({
-          childState: null,
-          items: [
-            {
-              type: 'message',
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: `Research the following topic: ${parentState.topic}`,
-                },
-              ],
-            },
-          ],
-        }),
-        onReturn: async ({ childLog, parentState, result }) => ({
-          parentState: { ...parentState, findings: result },
-          result: result,
-        }),
-      },
-    },
-  ],
+  }),
+  memory: [briefingLayer],
   timeout: 6e4, // 60 seconds
 });
 ```
@@ -232,21 +220,24 @@ Give the LLM both a sync and async delegation tool. The LLM decides at runtime w
 
 ```ts
 import { channel, spawn, step, tool, until } from '@noetic-tools/core';
-import type { Context } from '@noetic-tools/core';
+import type { ContextMemory } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
 // Tool 1: Sync — blocks until sub-agent finishes, returns result directly
-// The execute function receives the parent context as its second argument.
+// A tool's execute receives a ToolExecutionContext as its second argument;
+// reach the harness and the current Context through it (toolCtx.harness / toolCtx.ctx).
 const delegateTool = tool({
   name: 'delegate',
   description: 'Run a sub-agent and wait for its result. Use when you need the answer now.',
   input: z.object({ task: z.string() }),
   output: z.string(),
-  execute: async (args: { task: string }, parentCtx: Context) => {
-    const child = step.llm({ id: 'sync-sub', model: 'gpt-4o', instructions: 'Answer concisely.' });
-    return harness.run(spawn({ id: 'sync-spawn', child }), args.task, parentCtx);
+  execute: async (args: { task: string }, toolCtx) => {
+    const child = step.llm<ContextMemory, string, string>({
+      id: 'sync-sub', model: 'gpt-4o', instructions: 'Answer concisely.',
+    });
+    return toolCtx.harness.run(spawn({ id: 'sync-spawn', child }), args.task, toolCtx.ctx);
   },
 });
 
@@ -256,15 +247,15 @@ const launchTool = tool({
   description: 'Launch a sub-agent in the background. Use when you can continue other work.',
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
-  execute: async (args: { task: string }, parentCtx: Context) => {
-    const child = step.llm<string, string>({
+  execute: async (args: { task: string }, toolCtx) => {
+    const child = step.llm<ContextMemory, string, string>({
       id: 'async-sub', model: 'gpt-4o', instructions: 'Answer concisely.',
     });
-    const handle = harness.detachedSpawn(child, args.task, parentCtx);
+    const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
     // Notify the parent loop when the sub-agent finishes
     handle.await().then(
-      (result) => harness.send(inbox, `[Agent ${handle.id} done] ${result}`, parentCtx),
-      (err) => harness.send(inbox, `[Agent ${handle.id} failed] ${err}`, parentCtx),
+      (result) => toolCtx.harness.send(inbox, `[Agent ${handle.id} done] ${result}`, toolCtx.ctx),
+      (err) => toolCtx.harness.send(inbox, `[Agent ${handle.id} failed] ${err}`, toolCtx.ctx),
     );
     return { agentId: handle.id };
   },
@@ -300,8 +291,7 @@ Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through a `Sub
 
 ```ts
 import { spawn, step } from '@noetic-tools/core';
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
-import { createFileStorage } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
 
 // Run this spawn out-of-process with durable handle manifests.
 const subprocess = createLocalSubprocessAdapter({

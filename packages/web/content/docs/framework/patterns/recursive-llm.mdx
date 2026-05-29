@@ -69,7 +69,14 @@ const recursiveStep = spawn({
 ## Example: Divide and Conquer
 
 ```ts
-import { spawn, react, step, fork } from '@noetic-tools/core';
+import { channel, spawn, react, step, fork } from '@noetic-tools/core';
+import { z } from 'zod';
+
+// Channel each spawned subtask writes its result back on
+const subtaskResult = channel('subtask-result', {
+  schema: z.string(),
+  mode: 'queue',
+});
 
 // The main agent decides how to decompose the problem
 const mainAgent = step.run({
@@ -80,8 +87,8 @@ const mainAgent = step.run({
 
     // Fork to handle each subtask in parallel
     const results = await Promise.all(
-      subtasks.map((task) =>
-        ctx.recv(/* channel with subtask result */)
+      subtasks.map(() =>
+        ctx.recv(subtaskResult)
       ),
     );
 

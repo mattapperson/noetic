@@ -143,13 +143,24 @@ interface MemoryHooks<TState = unknown> {
 
 ## assembleView()
 
-The standalone `assembleView()` function (from `memory/projector.ts`) merges all layer `recall` outputs into a single list of `Item` objects, ordered by slot number. This list is prepended to the conversation history before the LLM call.
+The standalone `assembleView()` function (from `memory/projector.ts`) merges system-prompt, layer `recall` output, and conversation-history `Item` objects into a single ordered list that is sent to the LLM. The runtime calls it for you on every turn — you rarely need it directly.
+
+**Unstable API.** `assembleView` is intended for authors of custom memory backends and framework extensions. Import it from `@noetic-tools/core/unstable`; its signature may change in any minor release.
 
 ```ts
-import { assembleView } from '@noetic-tools/core';
+import type { Item } from '@noetic-tools/core';
+import { assembleView } from '@noetic-tools/core/unstable';
 
-const items = await assembleView(layers, userInput, ctx);
-// items contains memory items from all layers, sorted by slot
+declare const systemPromptItems: Item[];
+declare const layerOutputItems: Item[]; // from layer recall, already sorted by slot
+declare const historyItems: Item[];
+
+const items: Item[] = assembleView({
+  systemPromptItems,
+  layerOutputItems,
+  historyItems,
+});
+// items = systemPrompt + layer outputs (slot order) + history
 ```
 
 ## LayerTimeouts
