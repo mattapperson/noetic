@@ -67,4 +67,8 @@ export type { FooterContext, NoeticPlugin, PluginContext } from './plugins/types
 export { ResponsesChat, type ResponsesChatProps } from './tui/components/index.js';
 export { FooterContextProvider, useFooterContext } from './tui/footer-context.js';
 export type { AssistantEntry, ConversationEntry, UserEntry } from './tui/item-utils.js';
+export {
+  type ReattachLiveResult,
+  reattachLiveChildren,
+} from './tui/reattach-live-children.js';
 export type { AgentConfig, PluginSpec } from './types/config.js';
