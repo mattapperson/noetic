@@ -1,5 +1,6 @@
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
+import { NoeticConfigError } from '../errors/noetic-config-error';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { LLMResponse } from '../types/common';
 import type { Context } from '../types/context';
@@ -398,7 +399,14 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
  * @param embeddingModel - Model identifier (default: `'openai/text-embedding-3-small'`).
  * @returns An `EmbedFn` that produces embedding vectors for the given texts.
  */
-export function createOpenRouterEmbed(apiKey: string, embeddingModel?: string): EmbedFn {
+export function createOpenRouterEmbed(apiKey?: string, embeddingModel?: string): EmbedFn {
+  if (!apiKey) {
+    throw new NoeticConfigError({
+      code: 'MISSING_API_KEY',
+      message: 'createOpenRouterEmbed() requires an OpenRouter API key.',
+      hint: 'Pass the key explicitly, e.g. createOpenRouterEmbed(process.env.OPENROUTER_API_KEY).',
+    });
+  }
   const model = embeddingModel ?? 'openai/text-embedding-3-small';
 
   return async (texts: readonly string[]): Promise<readonly number[][]> => {

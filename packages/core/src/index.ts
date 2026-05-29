@@ -104,6 +104,8 @@ export { execute } from './interpreter/execute';
 //#region Memory Layers
 
 /** @public */
+export { findFunctionCall } from './memory/function-call-utils';
+/** @public */
 export type { DurableTaskState, DurableTaskStateConfig } from './memory/layers/durable-task-state';
 /** @public */
 export { durableTaskState } from './memory/layers/durable-task-state';
@@ -145,8 +147,17 @@ export { stripUnresolvedToolCalls } from './memory/strip-unresolved';
 
 //#endregion
 
+//#region Message Utilities
+
+/** @public */
+export { createMessage, estimateTokens } from './util/message-helpers';
+
+//#endregion
+
 //#region Observability
 
+/** @public */
+export { GenAI, ToolAttr } from './observability/genai-attributes';
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 /** @public */

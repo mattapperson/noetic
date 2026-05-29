@@ -8,7 +8,7 @@ import type {
   ItemSchemaExtensions,
   ToolResultExtensionItem,
 } from '../types/items';
-import type { Tool } from '../types/tool';
+import type { Tool, ToolMemoryDeclaration } from '../types/tool';
 import type { ToolExecutionContext } from '../types/tool-context';
 
 //#region Types
@@ -29,6 +29,8 @@ interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
   }) => Item | ToolResultExtensionItem;
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
+  /** Optional memory declaration — the runtime generates a MemoryLayer from this via toolMemoryLayer(). */
+  memory?: ToolMemoryDeclaration;
 }
 
 interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O extends ZodTypeAny> {
@@ -51,6 +53,8 @@ interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O exte
     toolCtx: ToolExecutionContext,
   ) => AsyncGenerator<z.infer<E>, z.infer<O>>;
   needsApproval?: boolean;
+  /** Optional memory declaration — the runtime generates a MemoryLayer from this via toolMemoryLayer(). */
+  memory?: ToolMemoryDeclaration;
 }
 
 //#endregion
@@ -98,6 +102,7 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
+    memory: config.memory,
   } satisfies Tool<I, O>;
 }
 
@@ -121,6 +126,7 @@ export function toolWithGenerator<I extends ZodTypeAny, E extends ZodTypeAny, O 
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
+    memory: config.memory,
   } satisfies Tool<I, O>;
 }
 

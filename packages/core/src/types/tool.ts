@@ -19,9 +19,14 @@ export interface ToolMemoryDeclaration<TState = unknown> {
   /** Shared id — tools with the same id share state. Defaults to `tool.name`. */
   id?: string;
   /** Factory for the initial state. */
-  init: () => TState;
-  /** Project state into the LLM context. Return null to omit. */
-  recall: (state: TState) => string | null;
+  init(): TState;
+  /**
+   * Project state into the LLM context. Return null to omit.
+   * Declared as a method (bivariant params) so a concrete
+   * `ToolMemoryDeclaration<MyState>` assigns to the erased
+   * `ToolMemoryDeclaration` the `tool()` builder and runtime consume.
+   */
+  recall(state: TState): string | null;
 }
 
 /**

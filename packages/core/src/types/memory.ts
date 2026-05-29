@@ -125,8 +125,21 @@ export interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly 
   readonly _shape: InferMemoryShape<TLayers>;
 }
 
-/** @public Extract the typed memory shape from a MemoryConfig. Usage: `type Mem = InferMemory<typeof config>` */
-export type InferMemory<T extends MemoryConfig> = T['_shape'];
+/**
+ * Extract the typed memory shape from a MemoryConfig.
+ * Constrains structurally on the phantom `_shape` field rather than on
+ * `MemoryConfig` itself: `MemoryConfig` is invariant in `TLayers` (the `_shape`
+ * field carries it in an invariant position), so a concrete
+ * `MemoryConfig<readonly [SomeLayer]>` does not satisfy the defaulted
+ * `MemoryConfig<readonly MemoryLayer[]>`. Since `InferMemory` only reads
+ * `_shape`, this constraint accepts any config the `memory()` builder produces.
+ * @public Usage: `type Mem = InferMemory<typeof config>`
+ */
+export type InferMemory<
+  T extends {
+    readonly _shape: unknown;
+  },
+> = T['_shape'];
 
 //#endregion
 
