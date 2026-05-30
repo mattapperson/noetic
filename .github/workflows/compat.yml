@@ -1,0 +1,56 @@
+name: cross-platform-compat
+
+# Proves @noetic-tools/core and @noetic-tools/code-agent build, deploy, and run
+# on every supported runtime: Node, Bun, Deno, the browser, and Cloudflare
+# Workers. Each target makes a live OpenRouter call against the built, packed
+# tarballs (i.e. the published artifacts), not the workspace source.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Serialize: the Cloudflare deploy uses a single fixed worker name.
+concurrency:
+  group: compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NOETIC_COMPAT_MODEL: openai/gpt-4o-mini
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install workspace deps (builds need them)
+        run: bun install
+
+      - name: Build + pack core and code-agent into tarballs
+        working-directory: compat
+        run: bun run pack:packages
+
+      - name: Install the packed tarballs as an external consumer
+        working-directory: compat
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium for the browser target
+        working-directory: compat
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the cross-platform deployment smoke (live, deploys to Cloudflare)
+        working-directory: compat
+        run: bun --no-install run.ts
