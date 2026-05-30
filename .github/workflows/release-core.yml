@@ -46,6 +46,13 @@ jobs:
       - name: Build
         run: bun --cwd packages/core run build
 
+      # semantic-release runs `npm version`, which builds the full workspace tree
+      # and chokes on sibling packages' `workspace:*` deps (EUNSUPPORTEDPROTOCOL).
+      # Drop the root `workspaces` field so npm treats core as a standalone package.
+      # The runner is ephemeral and this file is never committed back.
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
       - name: Release
         working-directory: packages/core
         env:
