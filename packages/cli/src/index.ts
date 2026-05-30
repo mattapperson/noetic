@@ -64,7 +64,7 @@ export { discoverConfig, resolvePluginBaseDir } from './config/discovery.js';
 export { createAgentHarness, type HarnessWithSkills } from './harness/factory.js';
 export { disposePlugins, loadPlugins } from './plugins/loader.js';
 export type { FooterContext, NoeticPlugin, PluginContext } from './plugins/types.js';
-export { ResponsesChat, type ResponsesChatProps } from './tui/components/index.js';
+export { ResponsesChat, type ResponsesChatProps } from './tui/components/responses-chat.js';
 export { FooterContextProvider, useFooterContext } from './tui/footer-context.js';
 export type { AssistantEntry, ConversationEntry, UserEntry } from './tui/item-utils.js';
 export {
