@@ -32,6 +32,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # @noetic-tools/core resolves to its dist/ even in dev, so it must be built
+      # before the bundler can inline it into code-agent/cli.
+      - name: Build @noetic-tools/core
+        working-directory: packages/core
+        run: bun run build
+
       - name: Build @noetic/code-agent
         working-directory: packages/code-agent
         run: bun run build
@@ -76,6 +82,11 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # The compiled binary bundles @noetic-tools/core, which resolves to dist/.
+      - name: Build @noetic-tools/core
+        working-directory: packages/core
+        run: bun run build
 
       - name: Compile binaries
         working-directory: packages/cli
