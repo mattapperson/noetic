@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { z } from 'zod';
 
 // npm (>=10) no longer applies `publishConfig` field-overrides on pack/publish,
 // and it keeps `devDependencies` — which carry the bun `workspace:` protocol — in
@@ -10,6 +9,7 @@ import { z } from 'zod';
 // are bundled into `dist` at build time, so they are not needed as runtime deps.
 //
 // Runs against the ephemeral CI checkout right before `npm publish`; never committed.
+// Kept dependency-free (no zod) so it runs from the workspace root.
 
 const NpmConfigKeys = new Set([
   'access',
@@ -18,7 +18,13 @@ const NpmConfigKeys = new Set([
   'provenance',
 ]);
 
-const ManifestSchema = z.record(z.string(), z.unknown());
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseJson(text: string): unknown {
+  return JSON.parse(text);
+}
 
 const dir = process.argv[2];
 if (!dir) {
@@ -27,10 +33,17 @@ if (!dir) {
 }
 
 const file = resolve(dir, 'package.json');
-const pkg = ManifestSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
+const parsed = parseJson(readFileSync(file, 'utf8'));
+if (!isRecord(parsed)) {
+  console.error(`${file} is not a JSON object`);
+  process.exit(1);
+}
+const pkg = parsed;
 
-const publishConfig = pkg.publishConfig;
-if (publishConfig && typeof publishConfig === 'object') {
+// Merge publishConfig entry-point overrides (main/types/bin/exports/…) into the
+// top-level manifest; skip the npm-only config keys.
+const { publishConfig } = pkg;
+if (isRecord(publishConfig)) {
   for (const [key, value] of Object.entries(publishConfig)) {
     if (NpmConfigKeys.has(key)) {
       continue;
