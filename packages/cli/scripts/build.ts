@@ -14,17 +14,14 @@ const pkg = PackageJsonSchema.parse(
   JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
 );
 
-const workspaceDeps = new Set([
-  '@noetic/code-agent',
-  '@noetic-tools/core',
-]);
-
+// Runtime `dependencies` stay external; workspace `@noetic/*` packages live in
+// devDependencies so the bundler inlines them and they never ship as deps.
 const external = [
   ...Object.keys(pkg.dependencies ?? {}),
   ...Object.keys(pkg.peerDependencies ?? {}),
   ...Object.keys(pkg.optionalDependencies ?? {}),
   'node:*',
-].filter((name) => !workspaceDeps.has(name));
+];
 
 const entrypoints = [
   resolve(root, 'src/index.ts'),

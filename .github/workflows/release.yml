@@ -40,15 +40,27 @@ jobs:
         working-directory: packages/cli
         run: bun run build
 
+      # Rewrite each manifest for publish: apply publishConfig (entry points -> dist)
+      # and drop devDependencies (which carry the bun `workspace:` protocol). The
+      # `@noetic/*` workspace packages are bundled into dist by the build above, so
+      # they are not runtime deps. `--ignore-scripts` skips prepublishOnly (it would
+      # rebuild from the rewritten manifest); `--no-workspaces` stops npm from
+      # traversing sibling packages that still use `workspace:*`.
+      - name: Prepare @noetic/code-agent manifest
+        run: bun scripts/prepare-publish.ts packages/code-agent
+
       - name: Publish @noetic/code-agent
         working-directory: packages/code-agent
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --no-workspaces --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Prepare @noetic/cli manifest
+        run: bun scripts/prepare-publish.ts packages/cli
+
       - name: Publish @noetic/cli
         working-directory: packages/cli
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --no-workspaces --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

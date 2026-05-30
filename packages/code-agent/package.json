@@ -127,8 +127,6 @@
     }
   },
   "dependencies": {
-    "@noetic-tools/core": "workspace:*",
-    "@noetic/platform-node": "workspace:*",
     "diff": "7.0.0",
     "glob": "11.0.3",
     "pilotty": "0.0.7",
@@ -138,6 +136,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@noetic-tools/core": "workspace:*",
+    "@noetic/platform-node": "workspace:*",
     "@types/diff": "^8.0.0",
     "bun-types": "latest"
   },
