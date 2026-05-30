@@ -30,7 +30,9 @@
       "!packages/cli/.tui-test",
       "!packages/web/lib/*.generated.ts",
       "!packages/web/.typecheck-snippets",
-      "!**/dist"
+      "!**/dist",
+      "!**/.wrangler",
+      "!compat/vendor"
     ]
   },
   "formatter": {

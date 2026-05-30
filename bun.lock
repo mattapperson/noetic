@@ -103,7 +103,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",

@@ -1,0 +1,8 @@
+name = "noetic-compat-smoke"
+main = "worker.ts"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "da64980e164b57ba0d63963b51927a89"
+
+# OPENROUTER_API_KEY is provided as a secret (deploy) or a dev var (local).
+# NOETIC_COMPAT_MODEL is optional; the smoke defaults to openai/gpt-4o-mini.
