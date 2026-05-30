@@ -5,7 +5,11 @@
 
 import { basename, format, join, parse } from '@noetic-tools/code-agent/tasks/path-utils';
 import type { LogEntry, Task } from '@noetic-tools/code-agent/tasks/schema';
-import { EventKind, LogEntryKind, TaskLifecycleStatus } from '@noetic-tools/code-agent/tasks/schema';
+import {
+  EventKind,
+  LogEntryKind,
+  TaskLifecycleStatus,
+} from '@noetic-tools/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
@@ -14,9 +18,12 @@ import {
   saveTask,
   taskDirPaths,
 } from '@noetic-tools/code-agent/tasks/store/fs-node';
-import { execTolerantOfMissing, isShellMissing } from '@noetic-tools/code-agent/tasks/worktree-node';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
+import {
+  execTolerantOfMissing,
+  isShellMissing,
+} from '@noetic-tools/code-agent/tasks/worktree-node';
 import type { FsAdapter, ShellAdapter, ShellExecResult } from '@noetic-tools/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { AgentCiActionResult, Signaller } from '../agent-ci-control.js';
 import { togglePauseAgentCiRun } from '../agent-ci-control.js';
 import { deriveColumn, KanbanColumn, moveTask } from '../kanban.js';

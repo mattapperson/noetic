@@ -19,7 +19,10 @@ import type {
   FeatureLoopStateChangedMessage,
   ValidatorRequest,
 } from '@noetic-tools/code-agent/tasks/ipc-node';
-import { featureLoopStateChan, validatorRequestChan } from '@noetic-tools/code-agent/tasks/ipc-node';
+import {
+  featureLoopStateChan,
+  validatorRequestChan,
+} from '@noetic-tools/code-agent/tasks/ipc-node';
 import type { Feature } from '@noetic-tools/code-agent/tasks/schema';
 import { FeatureLoopState } from '@noetic-tools/code-agent/tasks/schema';
 import { tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';

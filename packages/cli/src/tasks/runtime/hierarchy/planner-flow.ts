@@ -15,7 +15,12 @@ import {
   LogEntryKind,
 } from '@noetic-tools/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
-import { appendEvent, appendLog, loadTask, saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  appendLog,
+  loadTask,
+  saveTask,
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { persistTaskHierarchy } from './persist.js';
 
 //#region Helpers

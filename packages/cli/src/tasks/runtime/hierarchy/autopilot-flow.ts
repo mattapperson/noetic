@@ -18,13 +18,20 @@
  */
 
 import type { ValidatorRequest } from '@noetic-tools/code-agent/tasks/ipc-node';
-import { featureLoopStateChan, validatorRequestChan } from '@noetic-tools/code-agent/tasks/ipc-node';
+import {
+  featureLoopStateChan,
+  validatorRequestChan,
+} from '@noetic-tools/code-agent/tasks/ipc-node';
 import type {
   Feature,
   MilestoneWithChildren,
   SliceWithFeatures,
 } from '@noetic-tools/code-agent/tasks/schema';
-import { FeatureLoopState, HierarchyStatus, SliceStatus } from '@noetic-tools/code-agent/tasks/schema';
+import {
+  FeatureLoopState,
+  HierarchyStatus,
+  SliceStatus,
+} from '@noetic-tools/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { listTasks } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step, StepBranch } from '@noetic-tools/core';

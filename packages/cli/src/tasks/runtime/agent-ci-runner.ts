@@ -24,7 +24,12 @@ import { basename, dirname } from '@noetic-tools/code-agent/tasks/path-utils';
 import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import { EventKind, LogEntryKind, TaskReviewStatus } from '@noetic-tools/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
-import { appendEvent, appendLog, loadTask, saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import {
+  appendEvent,
+  appendLog,
+  loadTask,
+  saveTask,
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { clearRunner, loadRunner } from './runner-state.js';
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { ProvisionTool, provisionWorktree, WorktreeProvisionError } from '@noetic-tools/code-agent/tasks';
+import {
+  ProvisionTool,
+  provisionWorktree,
+  WorktreeProvisionError,
+} from '@noetic-tools/code-agent/tasks';
 import type { ShellAdapter, ShellExecResult } from '@noetic-tools/core';
 
 //#region Fake shell helpers

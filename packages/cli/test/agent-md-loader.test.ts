@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import type { FsAdapter, FsStats, ShellAdapter, ShellExecResult } from '@noetic-tools/core';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 
 import { loadAgentInstructions } from '../src/config/agent-md-loader.js';
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { featureLoopStateChan, validatorRequestChan } from '@noetic-tools/code-agent/tasks/ipc-node';
+import {
+  featureLoopStateChan,
+  validatorRequestChan,
+} from '@noetic-tools/code-agent/tasks/ipc-node';
 import type { Event } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,

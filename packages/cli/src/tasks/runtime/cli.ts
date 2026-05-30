@@ -11,12 +11,12 @@ import { fileURLToPath } from 'node:url';
 import { TaskSource } from '@noetic-tools/code-agent/tasks/schema';
 import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { resolveSubprocessRoot } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import type { FsAdapter } from '@noetic-tools/core';
 import {
   createFileStorage,
   createLocalFsAdapter,
   createLocalSubprocessAdapter,
 } from '@noetic-tools/platform-node';
-import type { FsAdapter } from '@noetic-tools/core';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
 import { autopilotHandler, steerTaskHandler } from './handlers/autopilot.js';
 import {

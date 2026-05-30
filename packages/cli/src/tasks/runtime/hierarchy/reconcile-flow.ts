@@ -14,9 +14,9 @@ import { reconcileTasksFs } from '@noetic-tools/code-agent/tasks';
 import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ProjectWorktree } from '@noetic-tools/code-agent/tasks/worktree-node';
 import { loadProjectWorktrees } from '@noetic-tools/code-agent/tasks/worktree-node';
-import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { ContextMemory, ShellAdapter, Step } from '@noetic-tools/core';
 import { every, step } from '@noetic-tools/core';
+import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 
 //#region Types
 

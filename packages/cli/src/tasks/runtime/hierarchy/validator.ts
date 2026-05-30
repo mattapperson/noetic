@@ -1,6 +1,10 @@
 import { featureDirPaths, validatorRunPath } from '@noetic-tools/code-agent/tasks';
 import * as path from '@noetic-tools/code-agent/tasks/path-utils';
-import type { AssertionOutcome, Feature, ValidatorRun } from '@noetic-tools/code-agent/tasks/schema';
+import type {
+  AssertionOutcome,
+  Feature,
+  ValidatorRun,
+} from '@noetic-tools/code-agent/tasks/schema';
 import {
   generateValidatorRunId,
   ValidatorRunIdSchema,

@@ -16,8 +16,8 @@
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { FsAdapter, ShellAdapter } from '@noetic-tools/core';
+import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 import { processSkillContent } from '../util/skill-processor.js';
 
 //#region Types

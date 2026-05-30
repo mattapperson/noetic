@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type {
   ExecutionContext,
   FunctionCallItem,
@@ -12,6 +11,7 @@ import type {
   ScopedStorage,
 } from '@noetic-tools/core';
 import { Slot } from '@noetic-tools/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 
 import { reminderLayer } from '../src/memory/reminder-layer.js';
 import type { ReminderLayerState } from '../src/memory/reminder-triggers.js';
