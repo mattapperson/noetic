@@ -12,7 +12,7 @@ const isolated = spawn({
   id: 'sub-agent',
   child: step.llm({
     id: 'researcher',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
   }),
 });
@@ -74,7 +74,7 @@ const withMemory = spawn({
   id: 'research-agent',
   child: step.llm({
     id: 'researcher',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
   }),
   memory: [contextLayer],
@@ -127,7 +127,7 @@ const researchAgent = spawn({
     id: 'research-loop',
     steps: [step.llm({
       id: 'researcher-llm',
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
       instructions: 'You are a research assistant. Use tools to find information.',
       tools: [searchTool, fetchTool],
     })],
@@ -235,7 +235,7 @@ const delegateTool = tool({
   output: z.string(),
   execute: async (args: { task: string }, toolCtx) => {
     const child = step.llm<ContextMemory, string, string>({
-      id: 'sync-sub', model: 'gpt-4o', instructions: 'Answer concisely.',
+      id: 'sync-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     return toolCtx.harness.run(spawn({ id: 'sync-spawn', child }), args.task, toolCtx.ctx);
   },
@@ -249,7 +249,7 @@ const launchTool = tool({
   output: z.object({ agentId: z.string() }),
   execute: async (args: { task: string }, toolCtx) => {
     const child = step.llm<ContextMemory, string, string>({
-      id: 'async-sub', model: 'gpt-4o', instructions: 'Answer concisely.',
+      id: 'async-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
     // Notify the parent loop when the sub-agent finishes
@@ -267,7 +267,7 @@ const agent = {
   id: 'smart-delegator',
   steps: [step.llm({
     id: 'orchestrator',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: `You are an orchestrator. You have two delegation tools:
 - delegate: blocks and returns the result. Use for tasks you need answered before continuing.
 - launch_agent: runs in background. Use when you can keep working while it runs.`,
@@ -300,7 +300,7 @@ const subprocess = createLocalSubprocessAdapter({
 
 const isolated = spawn({
   id: 'sub-agent',
-  child: step.llm({ id: 'researcher', model: 'gpt-4o' }),
+  child: step.llm({ id: 'researcher', model: 'openai/gpt-4o' }),
   subprocess,                   // per-step override
 });
 ```

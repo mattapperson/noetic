@@ -14,7 +14,7 @@ const triageAgent = branch({
     if (input.includes('urgent')) {
       return step.llm({
         id: 'urgent-handler',
-        model: 'gpt-4o',
+        model: 'openai/gpt-4o',
         instructions: 'Handle this urgent request immediately.',
       });
     }
@@ -23,7 +23,7 @@ const triageAgent = branch({
     }
     return step.llm({
       id: 'default-handler',
-      model: 'gpt-4o-mini',
+      model: 'openai/gpt-4o-mini',
       instructions: 'Handle this routine request.',
     });
   },
@@ -61,7 +61,7 @@ const maybeTranslate = branch({
     }
     return step.llm({
       id: 'translate',
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
       instructions: `Translate the following text to English.`,
     });
   },
@@ -78,7 +78,7 @@ import { branch, step } from '@noetic-tools/core';
 const modelPicker = branch({
   id: 'model-picker',
   route: (input: { task: string; budget: 'low' | 'high' }) => {
-    const model = input.budget === 'high' ? 'gpt-4o' : 'gpt-4o-mini';
+    const model = input.budget === 'high' ? 'openai/gpt-4o' : 'openai/gpt-4o-mini';
     return step.llm({
       id: `${input.task}-llm`,
       model,
@@ -105,11 +105,11 @@ const nested = branch({
         paths: () => [
           step.llm({
             id: 'model-a',
-            model: 'gpt-4o',
+            model: 'openai/gpt-4o',
           }),
           step.llm({
             id: 'model-b',
-            model: 'gpt-4o-mini',
+            model: 'openai/gpt-4o-mini',
           }),
         ],
         merge: (results) => results.join('\n---\n'),
@@ -117,7 +117,7 @@ const nested = branch({
     }
     return step.llm({
       id: 'single',
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
     });
   },
 });
@@ -135,8 +135,8 @@ const router = branch({
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),

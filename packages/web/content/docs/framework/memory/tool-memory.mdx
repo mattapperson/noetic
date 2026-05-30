@@ -46,7 +46,7 @@ import { react, toolMemoryLayer } from '@noetic-tools/core';
 const tools = [writeTodos, updateTodo, listTodos];
 
 const agent = react({
-  model: 'openrouter/anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-4',
   instructions: 'You are a task planner.',
   tools,
   memory: [
@@ -274,7 +274,7 @@ Register the layer and instruct the LLM in the system prompt:
 
 ```ts
 const agent = react({
-  model: 'openrouter/anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-4',
   instructions: `You are a research assistant.
 
 When you discover important entities (people, organizations, concepts),
@@ -294,7 +294,7 @@ A single agent can use both patterns together. Tool-owned memory tracks state th
 const tools = [writeTodos, updateTodo];
 
 const agent = react({
-  model: 'openrouter/anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-4',
   instructions: 'You are a planner. Use todos to track tasks. Call updateNotes to save observations.',
   tools,
   memory: [

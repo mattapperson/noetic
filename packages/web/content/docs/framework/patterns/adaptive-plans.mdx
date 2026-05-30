@@ -34,19 +34,19 @@ import { adaptivePlan, react, step, PlanNodeSchema } from '@noetic-tools/core';
 
 const planner = step.llm({
   id: 'plan-generator',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Generate a task plan as a PlanNode tree. Available agents: researcher, coder.',
   output: PlanNodeSchema,
 });
 
 const agents = {
   researcher: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [searchTool],
   }),
   coder: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [codeTool, testTool],
   }),

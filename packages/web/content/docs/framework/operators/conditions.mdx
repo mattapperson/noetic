@@ -34,9 +34,9 @@ const router = branch({
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
-      'complaint or feedback': step.llm({ id: 'feedback', model: 'gpt-4o' }),
+      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
+      'complaint or feedback': step.llm({ id: 'feedback', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),
@@ -53,14 +53,14 @@ const router = branch({
     cases: [
       {
         labels: ['greeting', 'hello', 'hi there'],
-        step: step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+        step: step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
       },
       {
         labels: 'technical question',
-        step: step.llm({ id: 'tech', model: 'gpt-4o' }),
+        step: step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
       },
     ],
-    default: step.llm({ id: 'fallback', model: 'gpt-4o-mini' }),
+    default: step.llm({ id: 'fallback', model: 'openai/gpt-4o-mini' }),
     threshold: 0.7,
   }),
 });
@@ -87,7 +87,7 @@ const router = branch({
   id: 'smart-router',
   route: semanticRoute(
     when(embeddingMatch(embed, 'greeting', 0.8), greetingStep),
-    when(aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
+    when(aiCondition({ model: 'openai/gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
     otherwise(defaultStep),
   ),
 });
@@ -164,7 +164,7 @@ Uses an LLM as a boolean classifier. The model receives the input and answers a 
 import { aiCondition } from '@noetic-tools/core';
 
 const isUrgent = aiCondition({
-  model: 'gpt-4o-mini',
+  model: 'openai/gpt-4o-mini',
   prompt: 'Is this message urgent and requiring immediate attention?',
 });
 ```
@@ -187,7 +187,7 @@ import { anyCondition, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
 const isGreetingOrUrgent = anyCondition(
   embeddingMatch(embed, 'greeting', 0.8),
-  aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+  aiCondition({ model: 'openai/gpt-4o-mini', prompt: 'Is this urgent?' }),
 );
 ```
 
@@ -200,7 +200,7 @@ import { allCondition, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
 const isUrgentGreeting = allCondition(
   embeddingMatch(embed, 'greeting', 0.8),
-  aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+  aiCondition({ model: 'openai/gpt-4o-mini', prompt: 'Is this urgent?' }),
 );
 ```
 

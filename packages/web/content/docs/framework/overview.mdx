@@ -37,12 +37,12 @@ const router = branch({
     if (input.includes('code')) {
       return step.llm({
         id: 'code-llm',
-        model: 'gpt-4o',
+        model: 'openai/gpt-4o',
       });
     }
     return step.llm({
       id: 'chat-llm',
-      model: 'gpt-4o-mini',
+      model: 'openai/gpt-4o-mini',
     });
   },
 });

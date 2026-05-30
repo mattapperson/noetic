@@ -63,7 +63,7 @@ export function buildParallelResearchAgent(): StepForkAll<ContextMemory, string,
           id: `research-${perspective.id}`,
           child: step.llm<ContextMemory, string, string>({
             id: `llm-${perspective.id}`,
-            model: 'gpt-4o',
+            model: 'openai/gpt-4o',
             instructions: perspective.instructions,
           }),
         }),

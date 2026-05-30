@@ -38,7 +38,7 @@ const normalizeStage = step.run<ContextMemory, string, string>({
 
 const analyzeStage = step.llm<ContextMemory, string, string>({
   id: 'analyze-text',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Analyze the text for sentiment, key themes, and patterns. Return labeled sections.',
 });
 

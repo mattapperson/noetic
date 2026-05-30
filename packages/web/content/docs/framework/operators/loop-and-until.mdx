@@ -12,7 +12,7 @@ const agent = loop({
   id: 'chat-loop',
   steps: [step.llm({
     id: 'chat',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'You are a helpful assistant.',
     tools: [searchTool],
   })],
@@ -194,7 +194,7 @@ const refiner = loop({
   id: 'refine-loop',
   steps: [step.llm({
     id: 'refiner',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'Improve the draft based on feedback.',
   })],
   until: until.verified(async (output) => {
@@ -239,7 +239,7 @@ const agent = loop({
   id: 'async-agent',
   steps: [step.llm({
     id: 'agent-llm',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     tools: [launchTool, checkTool],
   })],
   until: until.noToolCalls(),
@@ -288,7 +288,7 @@ The built-in `react()` helper is just a loop with `until.noToolCalls()`.
 import { react } from '@noetic-tools/core';
 
 const agent = react({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'You are a helpful assistant.',
   tools: [searchTool, calculatorTool],
   maxSteps: 10,
@@ -305,7 +305,7 @@ const agent = loop({
   id: 'react-loop',
   steps: [step.llm({
     id: 'react-step',
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'You are a helpful assistant.',
     tools: [searchTool, calculatorTool],
   })],

@@ -6,11 +6,21 @@ description: The AgentHarness executes agent steps, manages context, and coordin
 ## Quick Example
 
 ```ts
-import { react, AgentHarness } from '@noetic-tools/core';
+import { AgentHarness, react } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const searchTool = {
+  name: 'search',
+  description: 'Search the web for information',
+  input: z.object({ query: z.string() }),
+  output: z.object({ result: z.string() }),
+  execute: async (args) => ({ result: `Results for: ${args.query}` }),
+};
 
 const agent = react({
-  model: 'gpt-4o',
-  tools: [searchTool, calcTool],
+  model: 'openai/gpt-4o',
+  instructions: 'You are a research assistant.',
+  tools: [searchTool],
   maxSteps: 10,
 });
 
@@ -18,10 +28,12 @@ const harness = new AgentHarness({
   name: 'researcher',
   initialStep: agent,
   params: {},
+  llm: { provider: 'openrouter' }, // reads OPENROUTER_API_KEY from the env
 });
 
 await harness.execute('Find recent AI news');
 const response = await harness.getAgentResponse();
+console.log(response.text);
 ```
 
 The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, manages per-thread **sessions** with a message queue, dispatches steps, coordinates channels and memory layers, and provides tracing infrastructure.
@@ -36,7 +48,7 @@ import { AgentHarness } from '@noetic-tools/core';
 const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
-  params: { model: 'gpt-4o' },
+  params: { model: 'openai/gpt-4o' },
 });
 ```
 
@@ -277,7 +289,7 @@ interface AgentHooks {
 const harness = new AgentHarness({
   name: 'researcher',
   initialStep: agent,
-  params: { model: 'gpt-4o' },
+  params: { model: 'openai/gpt-4o' },
   hooks: {
     async beforeStep(step, ctx) {
       console.log(`Starting step ${step.id} (depth ${ctx.depth})`);

@@ -48,7 +48,7 @@ export function buildAsyncDelegateAgent(opts: {
     steps: [
       step.llm({
         id: 'async-delegate-llm',
-        model: 'gpt-4o',
+        model: 'openai/gpt-4o',
         instructions: 'You are an assistant that can launch background sub-agents.',
         tools: [
           launchTool,

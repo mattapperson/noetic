@@ -58,8 +58,8 @@ const router = branch({
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),

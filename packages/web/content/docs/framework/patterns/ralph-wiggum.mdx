@@ -51,7 +51,7 @@ import type { Tool } from '@noetic-tools/core';
 declare const codeExecutionTool: Tool;
 
 const agent = ralphWiggum({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Write a Python function that sorts a list using merge sort.',
   tools: [codeExecutionTool],
   verify: async (output) => {

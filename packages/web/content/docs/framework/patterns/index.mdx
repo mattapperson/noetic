@@ -34,15 +34,15 @@ const parallel = fork({
   id: 'parallel-research',
   mode: 'all',
   paths: () => [
-    react({ model: 'gpt-4o', tools: [searchTool] }),
-    react({ model: 'gpt-4o', tools: [analyzeTool] }),
+    react({ model: 'openai/gpt-4o', tools: [searchTool] }),
+    react({ model: 'openai/gpt-4o', tools: [analyzeTool] }),
   ],
   merge: (results) => results.join('\n\n'),
 });
 
 // Wrap a pattern in verification
 const verified = ralphWiggum({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Write unit tests.',
   tools: [codeTool],
   verify: async (output) => ({

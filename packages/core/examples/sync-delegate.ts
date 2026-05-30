@@ -20,7 +20,7 @@ export function buildSyncDelegateAgent():
   const delegateTool = createSyncDelegateTool();
 
   return react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'You are an assistant that can delegate research tasks to a sub-agent.',
     tools: [
       delegateTool,

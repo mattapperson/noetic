@@ -63,17 +63,17 @@ import { compilePlan, react } from '@noetic-tools/core';
 
 const agents = {
   researcher: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [searchTool],
   }),
   writer: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [writeTool],
   }),
   reviewer: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [],
   }),

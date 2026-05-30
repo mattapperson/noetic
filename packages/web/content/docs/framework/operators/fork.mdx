@@ -14,11 +14,11 @@ const fastest = fork({
   paths: (input: string) => [
     step.llm({
       id: 'model-a',
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
     }),
     step.llm({
       id: 'model-b',
-      model: 'gpt-4o-mini',
+      model: 'openai/gpt-4o-mini',
     }),
   ],
 });

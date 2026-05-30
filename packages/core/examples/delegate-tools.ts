@@ -43,7 +43,7 @@ type CheckToolResult = {
 function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextMemory, string, string>> {
   return step.llm<ContextMemory, string, string>({
     id,
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'You are a research assistant. Answer concisely.',
   });
 }

@@ -13,7 +13,7 @@ The Recursive LLM pattern uses `spawn()` to create child agents that start with 
 import { spawn, react } from '@noetic-tools/core';
 
 const subTaskAgent = react({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Solve the given sub-task.',
   tools: [searchTool, codeTool],
   maxSteps: 10,
@@ -100,7 +100,7 @@ const mainAgent = step.run({
 const subtaskStep = spawn({
   id: 'solve-subtask',
   child: react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     tools: [searchTool],
   }),
   timeout: 6e4,

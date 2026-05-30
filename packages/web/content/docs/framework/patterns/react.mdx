@@ -22,7 +22,7 @@ declare function react(opts: {
 
 | Parameter | Type | Default | Purpose |
 |---|---|---|---|
-| `model` | `string` | -- | Model identifier (e.g., `'gpt-4o'`) |
+| `model` | `string` | -- | Model identifier (e.g., `'openai/gpt-4o'`) |
 | `instructions` | `string` | -- | System prompt |
 | `tools` | `Tool[]` | -- | Available tools for the agent |
 | `maxSteps` | `number` | `10` | Maximum loop iterations |
@@ -46,7 +46,7 @@ const searchTool = tool({
 });
 
 const agent = react({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'You are a research assistant.',
   tools: [searchTool],
   maxSteps: 5,
@@ -113,7 +113,7 @@ import type { ContextMemory, StepLoop, Tool } from '@noetic-tools/core';
 
 declare const tools: Tool[];
 
-const myReact = react({ model: 'gpt-4o', tools }) as StepLoop<ContextMemory, string, string>;
+const myReact = react({ model: 'openai/gpt-4o', tools }) as StepLoop<ContextMemory, string, string>;
 
 myReact.onError = (error) => {
   if (error.kind === 'llm_rate_limit') return 'retry';

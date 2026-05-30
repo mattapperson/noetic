@@ -62,7 +62,7 @@ const billingHandler = step.run<ContextMemory, string, string>({
 
 const technicalHandler = step.llm<ContextMemory, string, string>({
   id: 'technical-handler',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: [
     'You are a technical support specialist.',
     'Analyze the issue described and provide a concise troubleshooting response.',
