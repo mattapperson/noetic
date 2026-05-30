@@ -6,8 +6,8 @@
  * Esc returns to the kanban. Pure helpers are exported for unit tests.
  */
 
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';

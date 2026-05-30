@@ -5,7 +5,7 @@
  * distinct from skills which are instruction prompts for the model.
  */
 
-import type { AskUserService } from '@noetic/code-agent/ask-user-service';
+import type { AskUserService } from '@noetic-tools/code-agent/ask-user-service';
 import type { AgentHarness, LastLayerUsage, MemoryLayer } from '@noetic-tools/core';
 import type { ReactNode } from 'react';
 import type { SkillDefinition } from '../skills/types.js';

@@ -14,8 +14,8 @@
  * just renders the current phase and forwards `Esc` to cancel.
  */
 
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendEvent } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';

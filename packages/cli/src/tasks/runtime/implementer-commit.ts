@@ -1,6 +1,6 @@
-import { EventKind, LogEntryKind } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent, appendLog } from '@noetic/code-agent/tasks/store/fs-node';
+import { EventKind, LogEntryKind } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendEvent, appendLog } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FeatureLifecycleContext } from './hierarchy/feature-lifecycle.js';
 import { applyFeatureLoopStateUpdate } from './hierarchy/feature-lifecycle.js';
 import type { ImplementerOutcome } from './hierarchy/implementer-flow.js';

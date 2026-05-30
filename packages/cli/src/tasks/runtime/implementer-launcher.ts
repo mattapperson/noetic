@@ -6,16 +6,16 @@
  * `shell` to a local adapter when the caller hasn't supplied one.
  */
 
-import type { StartImplementerRunResult } from '@noetic/code-agent/tasks';
-import * as sdk from '@noetic/code-agent/tasks';
-import { fileUrlToPath } from '@noetic/code-agent/tasks';
-import { createLocalShellAdapter } from '@noetic/platform-node';
+import type { StartImplementerRunResult } from '@noetic-tools/code-agent/tasks';
+import * as sdk from '@noetic-tools/code-agent/tasks';
+import { fileUrlToPath } from '@noetic-tools/code-agent/tasks';
+import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 
 export type {
   LauncherProvisionRequest,
   StartImplementerRunResult,
-} from '@noetic/code-agent/tasks';
-export { ImplementerSpawnError } from '@noetic/code-agent/tasks';
+} from '@noetic-tools/code-agent/tasks';
+export { ImplementerSpawnError } from '@noetic-tools/code-agent/tasks';
 
 /**
  * CLI argument shape: `shell` is optional (defaults to

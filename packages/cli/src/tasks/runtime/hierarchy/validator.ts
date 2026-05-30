@@ -1,14 +1,14 @@
-import { featureDirPaths, validatorRunPath } from '@noetic/code-agent/tasks';
-import * as path from '@noetic/code-agent/tasks/path-utils';
-import type { AssertionOutcome, Feature, ValidatorRun } from '@noetic/code-agent/tasks/schema';
+import { featureDirPaths, validatorRunPath } from '@noetic-tools/code-agent/tasks';
+import * as path from '@noetic-tools/code-agent/tasks/path-utils';
+import type { AssertionOutcome, Feature, ValidatorRun } from '@noetic-tools/code-agent/tasks/schema';
 import {
   generateValidatorRunId,
   ValidatorRunIdSchema,
   ValidatorRunSchema,
   ValidatorRunStatus,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { isEnoent, tempPath } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { isEnoent, tempPath } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { loadFeature, saveFeature } from './store.js';
 
 //#region Types

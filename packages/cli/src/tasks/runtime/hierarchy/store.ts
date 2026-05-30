@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/tasks';
+export * from '@noetic-tools/code-agent/tasks';

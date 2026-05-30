@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { HierarchyStatus } from '@noetic/code-agent/tasks/schema';
-import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { HierarchyStatus } from '@noetic-tools/code-agent/tasks/schema';
+import { loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { planTaskHandler } from '../../../src/tasks/runtime/handlers/autopilot.js';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import {

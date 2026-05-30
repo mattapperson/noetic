@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { execTolerantOfMissing, isShellMissing } from '@noetic/code-agent/tasks/worktree-node';
+import { execTolerantOfMissing, isShellMissing } from '@noetic-tools/code-agent/tasks/worktree-node';
 import type { ShellAdapter } from '@noetic-tools/core';
 
 describe('isShellMissing', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   archiveTaskHandler,
   createTaskHandler,

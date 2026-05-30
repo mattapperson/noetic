@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/worktree';
+export * from '@noetic-tools/code-agent/worktree';

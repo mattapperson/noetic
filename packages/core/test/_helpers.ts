@@ -12,7 +12,7 @@ import type { ShellAdapter } from '../src/types/shell-adapter';
 //#region Test-only Node adapters
 //
 // Core is runtime-agnostic and ships no `node:*` adapters; those live in
-// `@noetic/platform-node`. Core tests that exercise filesystem-dependent
+// `@noetic-tools/platform-node`. Core tests that exercise filesystem-dependent
 // memory layers need real disk access, so we inline a minimal
 // Node-backed `FsAdapter` and a no-op `ShellAdapter` here. Keeping these
 // helpers local to `test/` prevents the production bundle from pulling

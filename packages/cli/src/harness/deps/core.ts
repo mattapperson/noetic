@@ -1,4 +1,4 @@
-export { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
+export { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 export type {
   AgentHarness,
   FsAdapter,

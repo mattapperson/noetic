@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import type { LogEntry } from '@noetic/code-agent/tasks/schema';
+import type { LogEntry } from '@noetic-tools/code-agent/tasks/schema';
 import {
   formatLogLine,
   logEntryKey,

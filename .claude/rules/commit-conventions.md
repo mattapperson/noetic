@@ -26,8 +26,8 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with
 Use the package name as scope when the change is package-specific:
 
 - `feat(core):` — triggers `@noetic-tools/core` npm release
-- `feat(cli):` — for `@noetic/cli` changes
-- `feat(code-agent):` — for `@noetic/code-agent` changes
+- `feat(cli):` — for `@noetic-tools/cli` changes
+- `feat(code-agent):` — for `@noetic-tools/code-agent` changes
 - `feat(eval):` — for `@noetic/eval` changes
 - `chore(web):` — for website changes
 

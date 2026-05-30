@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { DetachedHandle, ExecutionContext, Item, ItemLog } from '@noetic-tools/core';
 import { TeammateRegistry } from '../src/agents/registry-runtime.js';
 import { teammateInboundLayer } from '../src/memory/teammate-inbound-layer.js';

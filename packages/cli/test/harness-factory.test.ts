@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createLocalFsAdapter } from '@noetic/platform-node';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import type { Tool } from '@noetic-tools/core';
 import { Slot } from '@noetic-tools/core';
 import { z } from 'zod';

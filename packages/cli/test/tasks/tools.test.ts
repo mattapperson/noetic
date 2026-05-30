@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { listTasks, loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ToolExecutionContext } from '@noetic-tools/core';
 import { z } from 'zod';
 import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';

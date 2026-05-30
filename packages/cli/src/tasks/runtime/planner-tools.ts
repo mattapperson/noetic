@@ -16,7 +16,7 @@
  * consumers don't need to learn a new envelope.
  */
 
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { DetachedSignal, Tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { CommitFailureArgs, CommitSuccessArgs } from './hierarchy/planner-flow.js';

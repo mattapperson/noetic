@@ -4,8 +4,8 @@
  * indicator.
  */
 
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import { TaskSource } from '@noetic-tools/code-agent/tasks/schema';
 import { Box, Text } from 'ink';
 import type React from 'react';
 import { useTheme } from '../../components/theme.js';

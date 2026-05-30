@@ -14,7 +14,7 @@
     "paths": {
       "@noetic-tools/core": ["../core/src/index.ts"],
       "@noetic-tools/core/*": ["../core/src/*"],
-      "@noetic/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
+      "@noetic-tools/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
       "@noetic/eval": ["../eval/src/index.ts"]
     }
   },

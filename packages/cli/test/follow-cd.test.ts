@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createLocalFsAdapter } from '@noetic/platform-node';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import type {
   CwdState,
   ShellAdapter,

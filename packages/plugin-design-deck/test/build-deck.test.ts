@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { CallModel, CallModelInput, CallModelResponse } from '@noetic/cli';
+import type { CallModel, CallModelInput, CallModelResponse } from '@noetic-tools/cli';
 
 import { buildDeck } from '../src/generate/build-deck.js';
 

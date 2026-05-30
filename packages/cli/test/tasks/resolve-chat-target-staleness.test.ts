@@ -60,7 +60,7 @@ describe('resolveChatTarget — socket reachability', () => {
     // fixture. resolve-chat-target.ts reconstructs this from
     // runnerSocketPath; we just need it to be in the "live" set.
     const implementerSocketPath = (
-      await import('@noetic/code-agent/tasks/store/fs-node')
+      await import('@noetic-tools/code-agent/tasks/store/fs-node')
     ).runnerSocketPath(ctx, {
       taskId: TASK_ID,
       role: 'implementer',

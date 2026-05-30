@@ -335,12 +335,12 @@ Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
 
-### createSteeringFileLayer (`@noetic/cli`)
+### createSteeringFileLayer (`@noetic-tools/cli`)
 
 Surfaces a per-task `steering.md` file to the agent run servicing that task. The harness factory mounts it unconditionally; activation is gated by the `NOETIC_TASK_DIR` env var that the task launcher sets when spawning agent-ci for a specific task. Non-task agent runs see no steering content.
 
 ```typescript
-import { createSteeringFileLayer } from '@noetic/cli/src/memory/steering-file-layer.js';
+import { createSteeringFileLayer } from '@noetic-tools/cli/src/memory/steering-file-layer.js';
 
 const layer = createSteeringFileLayer();
 // slot:  Slot.STEERING (90) — ahead of working memory and observations
@@ -356,12 +356,12 @@ Behaviour:
 
 The layer carries no state (`state: null`); everything is resolved at recall time, so a steering file edited mid-session takes effect on the next recall. See `specs/21-tasks.md` for the full task-system contract.
 
-### createFixFeedbackLayer (`@noetic/cli`)
+### createFixFeedbackLayer (`@noetic-tools/cli`)
 
 Thread-scoped layer that carries the implementer's retry-feedback bundle (parent-task plan, description, accumulated assertion failures, attempt count) across iterations of the implementer↔validator retry loop.
 
 ```typescript
-import { createFixFeedbackLayer } from '@noetic/cli/src/commands/builtins/tasks/memory/fix-feedback-layer.js';
+import { createFixFeedbackLayer } from '@noetic-tools/cli/src/commands/builtins/tasks/memory/fix-feedback-layer.js';
 
 const layer = createFixFeedbackLayer({
   initial: { plan, description, accumulatedIssues, attempt: 1 },
@@ -375,12 +375,12 @@ const layer = createFixFeedbackLayer({
 
 The implementer-runner seeds this layer's `initial` from disk (parent task description + accumulated `assertionOutcomes` from prior validator runs in the feature's fix lineage), so each retry's react loop sees prior failures via `recall()` without depending on chat-history continuation.
 
-### createPlannerAttemptLayer (`@noetic/cli`)
+### createPlannerAttemptLayer (`@noetic-tools/cli`)
 
 Resource-scoped layer that tracks per-task planner-attempt counts and persists them to `<projectRoot>/.noetic/tasks/_planner-attempts.json`. The autopilot's plan-pass reads the file directly to gate retry budget; the planner subprocess increments via `recordAttempt`.
 
 ```typescript
-import { createPlannerAttemptLayer, MAX_PLANNER_ATTEMPTS } from '@noetic/cli/src/commands/builtins/tasks/memory/planner-attempt-layer.js';
+import { createPlannerAttemptLayer, MAX_PLANNER_ATTEMPTS } from '@noetic-tools/cli/src/commands/builtins/tasks/memory/planner-attempt-layer.js';
 
 const layer = createPlannerAttemptLayer({ projectRoot, maxAttempts? });
 // slot:  Slot.REMINDER (80) — code-only, no recall surface
@@ -659,7 +659,7 @@ step.run({
 
 ## ShellAdapter
 
-Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
 
 ```typescript
 interface ShellExecOptions {
@@ -693,7 +693,7 @@ interface LocalShellAdapter extends ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic-tools/core` so non-CLI embedders keep raw shell semantics; `@noetic/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
+`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic-tools/core` so non-CLI embedders keep raw shell semantics; `@noetic-tools/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
 
 Pass a custom adapter to the harness:
 
@@ -941,7 +941,7 @@ File-backed `StorageAdapter`. Each key becomes a JSON file under `root`; writes 
 
 ```typescript
 // packages/cli/src/cli/reattach-live-children.ts
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 
 const { handles, contexts } = await reattachLiveChildren(harness);
 // handles: ReadonlyArray<SubprocessHandle>
@@ -1024,12 +1024,12 @@ Treat returned values as read-only.
 
 ## CLI-specific memory layers
 
-These are shipped by `@noetic/cli` on top of the core framework:
+These are shipped by `@noetic-tools/cli` on top of the core framework:
 
 ### `reminderLayer(opts)`
 
 ```typescript
-import { reminderLayer, createReminderRegistry, BUILTIN_TRIGGERS } from '@noetic/cli';
+import { reminderLayer, createReminderRegistry, BUILTIN_TRIGGERS } from '@noetic-tools/cli';
 
 const registry = createReminderRegistry();
 for (const t of BUILTIN_TRIGGERS) registry.register(t);
@@ -1048,7 +1048,7 @@ Emits `<system-reminder>`-wrapped developer messages based on registered trigger
 ### `agentMdLayer(opts)`
 
 ```typescript
-import { agentMdLayer, loadAgentInstructions } from '@noetic/cli';
+import { agentMdLayer, loadAgentInstructions } from '@noetic-tools/cli';
 
 const instructions = await loadAgentInstructions({ cwd, fs });
 const layer = agentMdLayer({ loader: () => Promise.resolve(instructions) });
@@ -1058,15 +1058,15 @@ Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction f
 
 ## CLI-specific tools
 
-These are shipped by `@noetic/cli` on top of the core framework.
+These are shipped by `@noetic-tools/cli` on top of the core framework.
 
 ### `taskTools(opts)` — Task management
 
 The `task_*` tool prefix gives agents 1:1 parity with the `noetic tasks <verb>` CLI. Tools are registered by the harness factory and are **default-on**; opt out via `tools.tasks: false` in `noetic.config.ts`. A read-only variant exposes only `task_show`, `task_list`, and `task_logs` — used in planning mode and other contexts where the agent must observe but not mutate.
 
 ```typescript
-import { taskTools } from '@noetic/cli/src/commands/builtins/tasks/tools.js';
-import type { TaskStoreContext } from '@noetic/cli/src/commands/builtins/tasks/fs-store.js';
+import { taskTools } from '@noetic-tools/cli/src/commands/builtins/tasks/tools.js';
+import type { TaskStoreContext } from '@noetic-tools/cli/src/commands/builtins/tasks/fs-store.js';
 
 const ctx: TaskStoreContext = { fs, projectRoot };
 
@@ -1335,7 +1335,7 @@ interface ToolExecutionContext {
 
 ## CLI Plugin Hooks
 
-Plugins loaded by `@noetic/cli` implement the `NoeticPlugin` interface
+Plugins loaded by `@noetic-tools/cli` implement the `NoeticPlugin` interface
 (`packages/cli/src/plugins/types.ts`). The hooks below aggregate contributions
 from every loaded plugin alongside the CLI's built-ins.
 
@@ -1347,7 +1347,7 @@ builtins — a plugin can **override** a builtin by reusing its `id`, or **add**
 a new language by claiming a novel extension.
 
 ```typescript
-import type { LspServerContribution } from '@noetic/cli';
+import type { LspServerContribution } from '@noetic-tools/cli';
 
 export default {
   name: 'my-rust-lsp',

@@ -3,10 +3,10 @@ import type {
   AssertionOutcome,
   Feature,
   ValidatorRun,
-} from '@noetic/code-agent/tasks/schema';
-import { EventKind, FeatureLoopState, ValidatorRunStatus } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent, listTasks, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { EventKind, FeatureLoopState, ValidatorRunStatus } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendEvent, listTasks, tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import * as log from '../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
 import { getTaskHierarchy } from './aggregate.js';

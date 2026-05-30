@@ -27,17 +27,17 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 
-import { fileUrlToPath, randomHex } from '@noetic/code-agent/tasks';
-import { basename, resolve } from '@noetic/code-agent/tasks/path-utils';
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import { EventKind, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import { fileUrlToPath, randomHex } from '@noetic-tools/code-agent/tasks';
+import { basename, resolve } from '@noetic-tools/code-agent/tasks/path-utils';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import { EventKind, TaskReviewStatus } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   loadTask,
   saveTask,
   taskDirPaths,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { Signaller } from './agent-ci-control.js';
 import { defaultSignaller } from './agent-ci-control.js';
 import { clearRunner, loadRunner, saveRunner } from './runner-state.js';

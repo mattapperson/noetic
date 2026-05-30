@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
-import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { TaskReviewStatus } from '@noetic-tools/code-agent/tasks/schema';
+import { listTasks, loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { CliStreams } from '../../src/tasks/runtime/cli.js';
 import { runTasksCli } from '../../src/tasks/runtime/cli.js';
 import { makeStoreContext } from './_helpers.js';

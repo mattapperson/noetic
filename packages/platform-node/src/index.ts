@@ -1,5 +1,5 @@
 /**
- * `@noetic/platform-node` — Node-only adapter implementations.
+ * `@noetic-tools/platform-node` — Node-only adapter implementations.
  *
  * Consumers on Node.js ≥ 20 (or any runtime that provides
  * `node:fs/promises`, `node:child_process`, `node:net`, and

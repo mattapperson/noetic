@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { EventKind } from '@noetic/code-agent/tasks/schema';
-import { loadTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { EventKind } from '@noetic-tools/code-agent/tasks/schema';
+import { loadTask, tailEvents } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   archiveTaskHandler,
   createTaskHandler,

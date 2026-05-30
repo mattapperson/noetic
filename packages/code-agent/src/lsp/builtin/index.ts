@@ -5,7 +5,7 @@ import { swiftContribution } from './swift.js';
 import { typescriptContribution } from './typescript.js';
 
 /**
- * The language-server contributions shipped built-in with `@noetic/cli`.
+ * The language-server contributions shipped built-in with `@noetic-tools/cli`.
  * Third-party plugins can contribute additional servers via
  * `NoeticPlugin.lspServers`. Plugin contributions are applied after builtins,
  * so they can override a builtin by reusing its `id`.

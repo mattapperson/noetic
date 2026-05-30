@@ -1,7 +1,7 @@
-import type { Feature, ValidatorRun } from '@noetic/code-agent/tasks/schema';
-import { FeatureLoopState, ValidatorRunStatus } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { listTasks, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Feature, ValidatorRun } from '@noetic-tools/code-agent/tasks/schema';
+import { FeatureLoopState, ValidatorRunStatus } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { listTasks, tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import * as log from '../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';
 import { getTaskHierarchy } from './aggregate.js';

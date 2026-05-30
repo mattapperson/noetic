@@ -429,7 +429,7 @@ Every surface that spawns a task runner (daemon autopilot, `noetic tasks` CLI, T
 ```typescript
 import { createFileStorage } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
-import { resolveSubprocessRoot } from '@noetic/code-agent/tasks';
+import { resolveSubprocessRoot } from '@noetic-tools/code-agent/tasks';
 
 const storage = createFileStorage({ root: resolveSubprocessRoot() });
 const subprocess = createLocalSubprocessAdapter({ storage });

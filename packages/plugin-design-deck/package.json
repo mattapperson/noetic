@@ -5,7 +5,7 @@
   "main": "src/index.tsx",
   "types": "src/index.tsx",
   "dependencies": {
-    "@noetic/cli": "workspace:*",
+    "@noetic-tools/cli": "workspace:*",
     "cli-highlight": "^2.1.11",
     "marked": "^15.0.7",
     "marked-terminal": "^7.3.0",

@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/tasks/memory';
+export * from '@noetic-tools/code-agent/tasks/memory';

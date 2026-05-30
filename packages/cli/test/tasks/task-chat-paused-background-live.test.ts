@@ -40,9 +40,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { TaskPauseReason } from '@noetic/code-agent/tasks/schema';
-import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
-import { createLocalFsAdapter } from '@noetic/platform-node';
+import { TaskPauseReason } from '@noetic-tools/code-agent/tasks/schema';
+import { loadTask, saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { z } from 'zod';
 import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
 

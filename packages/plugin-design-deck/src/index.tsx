@@ -17,7 +17,7 @@
  * ```
  */
 
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
 import { deckCommand } from './commands/deck.js';
 import { deckDiscoverCommand } from './commands/deck-discover.js';

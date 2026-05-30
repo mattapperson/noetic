@@ -11,15 +11,15 @@ import { GITHUB_URL } from '@/lib/tui-theme';
 const INSTALL_COMMANDS = [
   {
     prefix: '$ npm i -g ',
-    package: '@noetic/cli',
+    package: '@noetic-tools/cli',
   },
   {
     prefix: '$ bun add -g ',
-    package: '@noetic/cli',
+    package: '@noetic-tools/cli',
   },
   {
     prefix: '$ pnpm add -g ',
-    package: '@noetic/cli',
+    package: '@noetic-tools/cli',
   },
 ] as const;
 

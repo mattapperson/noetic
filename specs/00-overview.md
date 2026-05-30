@@ -21,14 +21,14 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ```
 @noetic-tools/core  ←  @noetic/eval
       ↑
-      ├── @noetic/platform-node
+      ├── @noetic-tools/platform-node
       ├── @noetic/platform-browser
       └── @noetic/mirage
 ```
 
 - **`@noetic-tools/core`** — Step primitives, execution infrastructure, and the memory system. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic-tools/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
 
-- **`@noetic/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic/cli`, `@noetic/code-agent`, and any Node-target user code. See `25-platform-packages`.
+- **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
 
@@ -67,7 +67,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
-| `22-cli-architecture` | `@noetic/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
+| `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
 | `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
 
 ## Dependency Graph

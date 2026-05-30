@@ -1,5 +1,5 @@
 {
-  "name": "@noetic/cli",
+  "name": "@noetic-tools/cli",
   "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",
@@ -31,9 +31,9 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@noetic/code-agent": "workspace:*",
+    "@noetic-tools/code-agent": "workspace:*",
     "@noetic-tools/core": "workspace:*",
-    "@noetic/platform-node": "workspace:*",
+    "@noetic-tools/platform-node": "workspace:*",
     "@microsoft/tui-test": "0.0.4",
     "@types/diff": "^8.0.0",
     "@types/html-to-text": "9.0.4",

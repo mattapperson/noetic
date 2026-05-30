@@ -1,6 +1,6 @@
-import { featureDirPaths } from '@noetic/code-agent/tasks';
-import * as path from '@noetic/code-agent/tasks/path-utils';
-import type { Feature, FixLineage, ValidatorRun } from '@noetic/code-agent/tasks/schema';
+import { featureDirPaths } from '@noetic-tools/code-agent/tasks';
+import * as path from '@noetic-tools/code-agent/tasks/path-utils';
+import type { Feature, FixLineage, ValidatorRun } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AssertionStatus,
   DEFAULT_IMPLEMENTATION_RETRY_BUDGET,
@@ -9,9 +9,9 @@ import {
   FixLineageSchema,
   generateFeatureId,
   generateFixLineageId,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { isEnoent } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { isEnoent } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { AgentHarness, ContextMemory, Step } from '@noetic-tools/core';
 import { branch, step } from '@noetic-tools/core';
 import { listFeatures, loadFeature, saveFeature } from './store.js';

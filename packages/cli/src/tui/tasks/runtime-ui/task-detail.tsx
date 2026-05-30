@@ -8,9 +8,9 @@
  * rendering Ink.
  */
 
-import type { LogEntry, Task } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { isEnoent, tailLog, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import type { LogEntry, Task } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { isEnoent, tailLog, taskDirPaths } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';

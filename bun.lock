@@ -43,7 +43,7 @@
       },
     },
     "packages/cli": {
-      "name": "@noetic/cli",
+      "name": "@noetic-tools/cli",
       "version": "0.1.0",
       "bin": {
         "noetic": "src/cli/cli.ts",
@@ -73,9 +73,9 @@
       },
       "devDependencies": {
         "@microsoft/tui-test": "0.0.4",
+        "@noetic-tools/code-agent": "workspace:*",
         "@noetic-tools/core": "workspace:*",
-        "@noetic/code-agent": "workspace:*",
-        "@noetic/platform-node": "workspace:*",
+        "@noetic-tools/platform-node": "workspace:*",
         "@types/diff": "^8.0.0",
         "@types/html-to-text": "9.0.4",
         "@types/react": "^19.2.14",
@@ -83,7 +83,7 @@
       },
     },
     "packages/code-agent": {
-      "name": "@noetic/code-agent",
+      "name": "@noetic-tools/code-agent",
       "version": "0.1.0",
       "dependencies": {
         "diff": "7.0.0",
@@ -96,7 +96,7 @@
       },
       "devDependencies": {
         "@noetic-tools/core": "workspace:*",
-        "@noetic/platform-node": "workspace:*",
+        "@noetic-tools/platform-node": "workspace:*",
         "@types/diff": "^8.0.0",
         "bun-types": "latest",
       },
@@ -182,7 +182,7 @@
       ],
     },
     "packages/platform-node": {
-      "name": "@noetic/platform-node",
+      "name": "@noetic-tools/platform-node",
       "version": "0.1.0",
       "dependencies": {
         "@noetic-tools/core": "workspace:*",
@@ -202,7 +202,7 @@
       "name": "@noetic/plugin-design-deck",
       "version": "0.1.0",
       "dependencies": {
-        "@noetic/cli": "workspace:*",
+        "@noetic-tools/cli": "workspace:*",
         "cli-highlight": "^2.1.11",
         "marked": "^15.0.7",
         "marked-terminal": "^7.3.0",
@@ -224,8 +224,8 @@
       "name": "@noetic/plugin-powerline",
       "version": "0.1.0",
       "dependencies": {
+        "@noetic-tools/cli": "workspace:*",
         "@noetic-tools/core": "workspace:*",
-        "@noetic/cli": "workspace:*",
         "string-width": "7.2.0",
         "zod": "^4.0.0",
       },
@@ -510,21 +510,21 @@
 
     "@nodable/entities": ["@nodable/entities@2.1.0", "", {}, "sha512-nyT7T3nbMyBI/lvr6L5TyWbFJAI9FTgVRakNoBqCD+PmID8DzFrrNdLLtHMwMszOtqZa8PAOV24ZqDnQrhQINA=="],
 
+    "@noetic-tools/cli": ["@noetic-tools/cli@workspace:packages/cli"],
+
+    "@noetic-tools/code-agent": ["@noetic-tools/code-agent@workspace:packages/code-agent"],
+
     "@noetic-tools/core": ["@noetic-tools/core@workspace:packages/core"],
 
+    "@noetic-tools/platform-node": ["@noetic-tools/platform-node@workspace:packages/platform-node"],
+
     "@noetic/chat-sdk": ["@noetic/chat-sdk@workspace:packages/chat-sdk"],
-
-    "@noetic/cli": ["@noetic/cli@workspace:packages/cli"],
-
-    "@noetic/code-agent": ["@noetic/code-agent@workspace:packages/code-agent"],
 
     "@noetic/eval": ["@noetic/eval@workspace:packages/eval"],
 
     "@noetic/mirage": ["@noetic/mirage@workspace:packages/mirage"],
 
     "@noetic/platform-browser": ["@noetic/platform-browser@workspace:packages/platform-browser"],
-
-    "@noetic/platform-node": ["@noetic/platform-node@workspace:packages/platform-node"],
 
     "@noetic/plugin-design-deck": ["@noetic/plugin-design-deck@workspace:packages/plugin-design-deck"],
 

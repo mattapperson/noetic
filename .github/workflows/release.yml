@@ -39,11 +39,11 @@ jobs:
         working-directory: packages/core
         run: bun run build
 
-      - name: Build @noetic/code-agent
+      - name: Build @noetic-tools/code-agent
         working-directory: packages/code-agent
         run: bun run build
 
-      - name: Build @noetic/cli
+      - name: Build @noetic-tools/cli
         working-directory: packages/cli
         run: bun run build
 
@@ -53,19 +53,19 @@ jobs:
       # they are not runtime deps. `--ignore-scripts` skips prepublishOnly (it would
       # rebuild from the rewritten manifest); `--no-workspaces` stops npm from
       # traversing sibling packages that still use `workspace:*`.
-      - name: Prepare @noetic/code-agent manifest
+      - name: Prepare @noetic-tools/code-agent manifest
         run: bun scripts/prepare-publish.ts packages/code-agent
 
-      - name: Publish @noetic/code-agent
+      - name: Publish @noetic-tools/code-agent
         working-directory: packages/code-agent
         run: npm publish --access public --provenance --no-workspaces --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Prepare @noetic/cli manifest
+      - name: Prepare @noetic-tools/cli manifest
         run: bun scripts/prepare-publish.ts packages/cli
 
-      - name: Publish @noetic/cli
+      - name: Publish @noetic-tools/cli
         working-directory: packages/cli
         run: npm publish --access public --provenance --no-workspaces --ignore-scripts
         env:

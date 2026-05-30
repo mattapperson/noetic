@@ -9,12 +9,12 @@
  * driven by `harness.detachedSpawn(...)` from the daemon entry.
  */
 
-import type { ReconcileTasksFsResult } from '@noetic/code-agent/tasks';
-import { reconcileTasksFs } from '@noetic/code-agent/tasks';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import type { ProjectWorktree } from '@noetic/code-agent/tasks/worktree-node';
-import { loadProjectWorktrees } from '@noetic/code-agent/tasks/worktree-node';
-import { createLocalShellAdapter } from '@noetic/platform-node';
+import type { ReconcileTasksFsResult } from '@noetic-tools/code-agent/tasks';
+import { reconcileTasksFs } from '@noetic-tools/code-agent/tasks';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import type { ProjectWorktree } from '@noetic-tools/code-agent/tasks/worktree-node';
+import { loadProjectWorktrees } from '@noetic-tools/code-agent/tasks/worktree-node';
+import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { ContextMemory, ShellAdapter, Step } from '@noetic-tools/core';
 import { every, step } from '@noetic-tools/core';
 

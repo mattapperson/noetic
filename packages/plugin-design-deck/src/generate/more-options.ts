@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { CallModel } from '@noetic/cli';
+import type { CallModel } from '@noetic-tools/cli';
 import { z } from 'zod';
 import type { DeckOption, Slide } from '../types.js';
 import { OptionSchema } from '../types.js';

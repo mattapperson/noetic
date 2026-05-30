@@ -291,7 +291,7 @@ Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through a `Sub
 
 ```ts
 import { spawn, step } from '@noetic-tools/core';
-import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Run this spawn out-of-process with durable handle manifests.
 const subprocess = createLocalSubprocessAdapter({

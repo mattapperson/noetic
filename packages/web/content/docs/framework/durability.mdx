@@ -9,7 +9,7 @@ Durable execution is opt-in. A zero-config `AgentHarness` has no persistent stor
 
 ```ts
 import { AgentHarness, createCheckpointStore } from '@noetic-tools/core';
-import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Two distinct on-disk roots: subprocess manifests vs checkpoint snapshots.
 const subprocessStorage = createFileStorage({
@@ -114,7 +114,7 @@ Without storage, `listLive()` returns an empty set and `reattach()` returns null
 The CLI helper `reattachLiveChildren` wires up the recovery step:
 
 ```ts
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 
 const { handles, contexts } = await reattachLiveChildren(harness);
 for (const [handleId, ctx] of contexts) {
@@ -131,7 +131,7 @@ The helper calls `harness.subprocess.listLive()`, then `harness.restore(executio
 A server that composes `DurableOutboundQueue` wraps every outbound frame in a `durable` envelope keyed by a monotonic sequence number. The client tracks the highest seq it has durably consumed and sends `durableResume { ackedThrough }` on every reconnect. The server replays any frames the client has not acked, resumes live emission, and compacts the queue when `durableAck { throughSeq }` arrives.
 
 ```ts
-import { createDurableOutboundQueue } from '@noetic/platform-node';
+import { createDurableOutboundQueue } from '@noetic-tools/platform-node';
 
 const queue = await createDurableOutboundQueue({ storage, socketPath });
 
@@ -183,7 +183,7 @@ Subprocess manifests and IPC queues can share a root because both are owned by t
 Switch a specific spawn to run in its own OS child by passing a local adapter as a per-call override:
 
 ```ts
-import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const localAdapter = createLocalSubprocessAdapter({
   storage: createFileStorage({
@@ -231,13 +231,13 @@ harness.detachedSpawn(backgroundWorkerStep, jobSpec, parentCtx);
 // ... process crashes ...
 
 // Second boot: same harness construction, then:
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 const { handles, contexts } = await reattachLiveChildren(harness);
 // `handles` contains the still-running background worker.
 // `contexts` has its rebuilt parent context.
 ```
 
-The pattern generalises to any host — not just `@noetic/cli`. Any embedder that configures durable storage and calls `listLive()` + `restore()` on boot gets the same recovery.
+The pattern generalises to any host — not just `@noetic-tools/cli`. Any embedder that configures durable storage and calls `listLive()` + `restore()` on boot gets the same recovery.
 
 ## Guarantees
 

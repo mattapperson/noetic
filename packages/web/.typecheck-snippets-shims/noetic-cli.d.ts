@@ -1,5 +1,5 @@
 /**
- * Minimal `@noetic/cli` shim for doc-snippet type-checking. The real cli source
+ * Minimal `@noetic-tools/cli` shim for doc-snippet type-checking. The real cli source
  * pulls in Bun globals and other runtime-only deps that aren't available in the
  * snippet harness, so we expose just the public types referenced by documentation.
  */

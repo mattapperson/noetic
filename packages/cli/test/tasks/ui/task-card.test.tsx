@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import { TaskSource } from '@noetic-tools/code-agent/tasks/schema';
 import {
   hierarchyIcon,
   sourceBadge,

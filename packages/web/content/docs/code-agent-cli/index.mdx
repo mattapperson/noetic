@@ -10,8 +10,8 @@ It is built on top of `@noetic-tools/core` — every long-lived behavior (the au
 ## Install
 
 ```bash
-npm i -g @noetic/cli
-# or: bun add -g @noetic/cli
+npm i -g @noetic-tools/cli
+# or: bun add -g @noetic-tools/cli
 ```
 
 You also need an OpenRouter API key in `OPENROUTER_API_KEY` (or `NOETIC_API_KEY`).
@@ -28,7 +28,7 @@ If no config file is found, the CLI uses CLI-arg defaults: model `anthropic/clau
 For anything beyond a one-shot trial, write a `noetic.config.ts`:
 
 ```ts
-import type { AgentConfig } from '@noetic/cli';
+import type { AgentConfig } from '@noetic-tools/cli';
 
 export default {
   model: 'anthropic/claude-sonnet-4',

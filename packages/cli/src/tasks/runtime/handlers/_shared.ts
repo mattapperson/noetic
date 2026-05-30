@@ -5,9 +5,9 @@
  * timestamps) so every handler stays small and focused.
  */
 
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 
 //#region Helpers
 

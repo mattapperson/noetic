@@ -20,7 +20,7 @@ import {
   createFileStorage,
   createLocalFsAdapter,
   createLocalSubprocessAdapter,
-} from '@noetic/platform-node';
+} from '@noetic-tools/platform-node';
 
 import { createTaskHandler } from '../../src/tasks/runtime/handlers/lifecycle.js';
 import { ensureChatTarget } from '../../src/tasks/runtime/resolve-chat-target.js';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { TaskLifecycleStatus, TaskSource } from '@noetic/code-agent/tasks/schema';
-import { listTasks, loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { TaskLifecycleStatus, TaskSource } from '@noetic-tools/code-agent/tasks/schema';
+import { listTasks, loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { Feature, Milestone, Slice } from '../../../src/tasks/runtime/hierarchy/schemas.js';
 import {
   FeatureLoopState,

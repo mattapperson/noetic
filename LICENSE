@@ -99,6 +99,6 @@ Elastic License 2.0:
 
 - `packages/core` (`@noetic-tools/core`) — See `packages/core/LICENSE`
 
-All other packages in this repository (`@noetic/cli`, `@noetic/code-agent`,
+All other packages in this repository (`@noetic-tools/cli`, `@noetic-tools/code-agent`,
 `@noetic/eval`, `@noetic/chat-sdk`, `@noetic/plugin-*`, `@noetic/web`) are
 licensed under this Elastic License 2.0.

@@ -1,4 +1,4 @@
-import type { Command, PluginContext } from '@noetic/cli';
+import type { Command, PluginContext } from '@noetic-tools/cli';
 import type { ReactNode } from 'react';
 
 import type { DesignDeckOptions } from '../options.js';

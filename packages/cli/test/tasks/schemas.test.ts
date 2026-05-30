@@ -18,7 +18,7 @@ import {
   TaskReviewStatus,
   TaskSchema,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
+} from '@noetic-tools/code-agent/tasks/schema';
 
 //#region ID helpers
 

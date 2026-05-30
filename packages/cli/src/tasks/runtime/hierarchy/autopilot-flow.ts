@@ -17,16 +17,16 @@
  * so it also wakes early on any feature loop-state transition.
  */
 
-import type { ValidatorRequest } from '@noetic/code-agent/tasks/ipc-node';
-import { featureLoopStateChan, validatorRequestChan } from '@noetic/code-agent/tasks/ipc-node';
+import type { ValidatorRequest } from '@noetic-tools/code-agent/tasks/ipc-node';
+import { featureLoopStateChan, validatorRequestChan } from '@noetic-tools/code-agent/tasks/ipc-node';
 import type {
   Feature,
   MilestoneWithChildren,
   SliceWithFeatures,
-} from '@noetic/code-agent/tasks/schema';
-import { FeatureLoopState, HierarchyStatus, SliceStatus } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { FeatureLoopState, HierarchyStatus, SliceStatus } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { listTasks } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step, StepBranch } from '@noetic-tools/core';
 import { branch, every, step } from '@noetic-tools/core';
 import { getTaskHierarchy } from './aggregate.js';

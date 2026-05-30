@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { CallModel, CallModelMessage } from '@noetic/cli';
+import type { CallModel, CallModelMessage } from '@noetic-tools/cli';
 import type { Deck } from '../types.js';
 import { DeckSchema } from '../types.js';
 import { extractJson } from './shared.js';

@@ -16,7 +16,7 @@
  * depend on it as a re-fetch trigger (e.g. inside a `useEffect`).
  */
 
-import { taskRootPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import { taskRootPaths } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic-tools/core';
 import { useEffect, useState } from 'react';
 

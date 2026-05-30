@@ -2,20 +2,20 @@
  * Agent-loop orchestration handlers: autopilot, steer, plan.
  */
 
-import type { LogEntry, Task } from '@noetic/code-agent/tasks/schema';
+import type { LogEntry, Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
   HierarchyStatus,
   LogEntryKind,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   appendLog,
   saveTask,
   taskDirPaths,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type {
   InterviewQuestionEnvelope,
   InterviewResultLike,

@@ -8,7 +8,7 @@ A **plugin** is an npm-publishable extension that contributes to the CLI's runti
 ## The `NoeticPlugin` interface
 
 ```ts
-import type { NoeticPlugin, PluginContext } from '@noetic/cli';
+import type { NoeticPlugin, PluginContext } from '@noetic-tools/cli';
 
 interface NoeticPlugin {
   name: string;
@@ -83,7 +83,7 @@ Contribute [skills](/docs/code-agent-cli/skills) programmatically — useful whe
 Contribute slash commands. Plugin commands merge into the CLI's built-in registry **after** built-ins, so a plugin can't shadow `/help`, `/context`, or `/clear`.
 
 ```ts
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
 const commands: NoeticPlugin['commands'] = (ctx) => [
   {
@@ -114,7 +114,7 @@ Contribute language servers for the `lsp` tool. Built-in servers (TypeScript, Py
 Render a React/Ink component between the chat area and the prompt. The component reads live session state via `useFooterContext()`:
 
 ```ts
-import { useFooterContext } from '@noetic/cli';
+import { useFooterContext } from '@noetic-tools/cli';
 
 const StatusFooter = () => {
   const { model, status, lastLayerUsage, contextLimit } = useFooterContext();
@@ -170,7 +170,7 @@ Adds a powerline-style footer + themed working-vibes loading messages.
 
 ```tsx
 import type { ReactNode } from 'react';
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
 declare const Footer: (props: { segments: unknown; theme: unknown }) => ReactNode;
 declare function parseOptions(input: unknown): {
@@ -204,7 +204,7 @@ Demonstrates `initialize`, `loadingMessages`, and `footer`.
 Adds an interactive visual-decision modal as a slash command.
 
 ```ts
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
 export default function designDeck(userInput = {}): NoeticPlugin {
   const options = parseOptions(userInput);
@@ -227,7 +227,7 @@ A minimal plugin that contributes one tool and one slash command:
 
 ```ts
 // my-plugin/src/index.ts
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 import { z } from 'zod';
 
 export default function myPlugin(): NoeticPlugin {

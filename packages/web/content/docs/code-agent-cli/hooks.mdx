@@ -10,7 +10,7 @@ The `worktree` namespace mirrors a subset of [worktrunk's](https://worktrunk.dev
 ## Schema
 
 ```ts
-import type { AgentConfig } from '@noetic/cli';
+import type { AgentConfig } from '@noetic-tools/cli';
 
 export default {
   // ...
@@ -49,7 +49,7 @@ export default {
 A hook can be either a single command string or a named table of commands.
 
 ```ts
-import type { AgentConfig } from '@noetic/cli';
+import type { AgentConfig } from '@noetic-tools/cli';
 
 const hooks = {
   'pre-start': 'git fetch origin',
@@ -92,7 +92,7 @@ These match worktrunk's filter semantics.
 A list of glob patterns. Matching files are copied from the parent worktree into the new worktree right after `post-start`. Use this for files that aren't in git but the sub-agent needs to run:
 
 ```ts
-import type { AgentConfig } from '@noetic/cli';
+import type { AgentConfig } from '@noetic-tools/cli';
 
 const cloneFiles: NonNullable<AgentConfig['worktree']>['clone-files'] = [
   '.env*',

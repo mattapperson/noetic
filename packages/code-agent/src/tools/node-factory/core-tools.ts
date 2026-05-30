@@ -1,4 +1,4 @@
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { FsAdapter, ShellAdapter, Tool } from '@noetic-tools/core';
 import type { LspService } from '../../lsp/service.js';
 import type { AskUserService } from '../ask-user.js';

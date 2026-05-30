@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import { TaskSource } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import { TaskSource } from '@noetic-tools/code-agent/tasks/schema';
 import { KanbanColumn } from '../../../src/tasks/runtime/kanban.js';
 import type { DecoratedTask } from '../../../src/tui/tasks/runtime-ui/task-board.js';
 import {

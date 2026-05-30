@@ -50,7 +50,7 @@ const harness = new AgentHarness({
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
 | `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Memory layers, tools, and skill discovery all route through this adapter. |
-| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
+| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
 | `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
 | `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. |
 | `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
@@ -310,7 +310,7 @@ The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`,
 
 ```ts
 import { AgentHarness } from '@noetic-tools/core';
-import { createFileStorage, createLocalSubprocessAdapter } from '@noetic/platform-node';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const subprocess = createLocalSubprocessAdapter({
   storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),

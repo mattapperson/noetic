@@ -1,5 +1,5 @@
 {
-  "name": "@noetic/code-agent",
+  "name": "@noetic-tools/code-agent",
   "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",
@@ -137,7 +137,7 @@
   },
   "devDependencies": {
     "@noetic-tools/core": "workspace:*",
-    "@noetic/platform-node": "workspace:*",
+    "@noetic-tools/platform-node": "workspace:*",
     "@types/diff": "^8.0.0",
     "bun-types": "latest"
   },

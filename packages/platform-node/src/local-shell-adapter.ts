@@ -17,7 +17,7 @@ export interface CreateLocalShellAdapterOptions {
    * for unknown programs (exit 1, no output → original used).
    *
    * Defaults to `false` so non-CLI embedders keep raw shell semantics.
-   * `@noetic/cli` opts in via `createDefaultShellAdapter`.
+   * `@noetic-tools/cli` opts in via `createDefaultShellAdapter`.
    *
    * Resolved against `PATH` once at adapter creation; the result is exposed
    * as `rtkAvailable` so callers can fail fast when this is required.

@@ -3,7 +3,7 @@ export {
   createLocalFsAdapter,
   createLocalShellAdapter,
   unlinkSocketSync,
-} from '@noetic/platform-node';
+} from '@noetic-tools/platform-node';
 export type { Item } from '@noetic-tools/core';
 export {
   createDetachedSignal,

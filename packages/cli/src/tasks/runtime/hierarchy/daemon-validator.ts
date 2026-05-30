@@ -18,7 +18,7 @@
 import type { SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 
-import { tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { RunValidatorArgs, ValidatorRunOutcome } from './validator-job.js';
 
 //#region Types

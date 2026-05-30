@@ -11,13 +11,13 @@
  * run can be resumed.
  */
 
-import type { AskUserService } from '@noetic/code-agent/ask-user-service';
-import type { InterviewSession, TaskHierarchyInput } from '@noetic/code-agent/tasks/schema';
+import type { AskUserService } from '@noetic-tools/code-agent/ask-user-service';
+import type { InterviewSession, TaskHierarchyInput } from '@noetic-tools/code-agent/tasks/schema';
 import {
   generateInterviewSessionId,
   InterviewSessionStatus,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type {
   AgentHarness,
   AskUserInput,

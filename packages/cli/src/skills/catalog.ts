@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/skills';
+export * from '@noetic-tools/code-agent/skills';

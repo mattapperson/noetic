@@ -1,5 +1,5 @@
 /**
- * @noetic/cli — Coding agent CLI/TUI package.
+ * @noetic-tools/cli — Coding agent CLI/TUI package.
  */
 
 export type {
@@ -23,7 +23,7 @@ export type {
   TaskController,
   TaskStoreAdapter,
   ToolController,
-} from '@noetic/code-agent';
+} from '@noetic-tools/code-agent';
 export {
   createCodeAgent,
   createCodingToolsPlugin,
@@ -32,12 +32,12 @@ export {
   createInMemoryShellAdapter,
   createInMemoryTaskStoreAdapter,
   createTaskToolsPlugin,
-} from '@noetic/code-agent';
+} from '@noetic-tools/code-agent';
 export {
   createAgentTool,
   createCodingTools,
   createReadOnlyTools,
-} from '@noetic/code-agent/tools/node';
+} from '@noetic-tools/code-agent/tools/node';
 export type {
   CallModel,
   CallModelInput,

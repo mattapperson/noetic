@@ -131,7 +131,7 @@ describe('createCodeAgent', () => {
   it('does not import the CLI package or UI concepts', async () => {
     const files = await sourceFiles(join(import.meta.dir, '..', 'src'));
     const forbidden = [
-      '@noetic/cli',
+      '@noetic-tools/cli',
       'react',
       'ink',
     ];

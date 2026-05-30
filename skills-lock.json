@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "agent-experience": {
+      "source": "browserbase/skills",
+      "sourceType": "github",
+      "skillPath": "skills/agent-experience/SKILL.md",
+      "computedHash": "8f0a9546f8d3ed606bb51effcdeff73c6d20293895371f5bf65934d808e62ce1"
+    },
     "improve-codebase-architecture": {
       "source": "mattpocock/skills",
       "sourceType": "github",

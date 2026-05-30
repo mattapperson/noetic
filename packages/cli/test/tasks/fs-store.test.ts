@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Event, LogEntry, Task } from '@noetic/code-agent/tasks/schema';
+import type { Event, LogEntry, Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -11,8 +11,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   appendLog,
@@ -28,8 +28,8 @@ import {
   taskDirPaths,
   taskRootPaths,
   tryLoadTask,
-} from '@noetic/code-agent/tasks/store/fs-node';
-import { createLocalFsAdapter } from '@noetic/platform-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { MemFs, makeStoreContext } from './_helpers.js';
 
 //#region Helpers

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { LogEntryKind } from '@noetic/code-agent/tasks/schema';
-import { readLog } from '@noetic/code-agent/tasks/store/fs-node';
+import { LogEntryKind } from '@noetic-tools/code-agent/tasks/schema';
+import { readLog } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { attachTaskHandler } from '../../../src/tasks/runtime/handlers/state.js';
 import { MemFs, makeStoreContext } from '../_helpers.js';

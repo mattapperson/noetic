@@ -6,8 +6,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ValidatorShellSpawn } from '../../../src/tasks/runtime/hierarchy/daemon-validator.js';
 import { createShellValidator } from '../../../src/tasks/runtime/hierarchy/daemon-validator.js';
 import type { Feature, ValidatorRun } from '../../../src/tasks/runtime/hierarchy/schemas.js';

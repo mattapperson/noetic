@@ -7,15 +7,15 @@
  * audit→state→event commit sequence to the helpers exported here.
  */
 
-import type { Task, TaskHierarchyInput } from '@noetic/code-agent/tasks/schema';
+import type { Task, TaskHierarchyInput } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
   HierarchyStatus,
   LogEntryKind,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent, appendLog, loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendEvent, appendLog, loadTask, saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { persistTaskHierarchy } from './persist.js';
 
 //#region Helpers

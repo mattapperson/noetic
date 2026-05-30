@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SpawnOptions } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -10,15 +10,15 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   loadTask,
   readLog,
   saveTask,
   tailEvents,
   taskDirPaths,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { RunnerSpawn } from '../../src/tasks/runtime/agent-ci-runner.js';
 import { runAgentCi } from '../../src/tasks/runtime/agent-ci-runner.js';
 import { saveRunner } from '../../src/tasks/runtime/runner-state.js';

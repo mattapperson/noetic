@@ -15,10 +15,10 @@ import {
   createIpcAskUserService,
   createRunnerHarness,
   readChatHistory,
-} from '@noetic/code-agent/tasks';
-import { basename, dirname } from '@noetic/code-agent/tasks/path-utils';
-import { EventKind, LogEntryKind, TaskPauseReason } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks';
+import { basename, dirname } from '@noetic-tools/code-agent/tasks/path-utils';
+import { EventKind, LogEntryKind, TaskPauseReason } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   appendLog,
@@ -26,13 +26,13 @@ import {
   runnerSocketPath,
   saveTask,
   taskDirPaths,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   AgentIpcServer,
   createLocalFsAdapter,
   createLocalShellAdapter,
   unlinkSocketSync,
-} from '@noetic/platform-node';
+} from '@noetic-tools/platform-node';
 import type { Item } from '@noetic-tools/core';
 import {
   createDetachedSignal,

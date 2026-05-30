@@ -3,7 +3,7 @@
 /**
  * One-off rewrite: split `@noetic-tools/core` imports that co-reference Node-only
  * adapter symbols into (a) the remaining `@noetic-tools/core` import and (b) a new
- * `@noetic/platform-node` import. Also fixes bare `from '@noetic-tools/core'`
+ * `@noetic-tools/platform-node` import. Also fixes bare `from '@noetic-tools/core'`
  * imports that only referenced Node-only symbols.
  *
  * Removed here: createLocalFsAdapter, createLocalShellAdapter,
@@ -101,7 +101,7 @@ function rewriteFile(path: string): boolean {
     if (stay.length > 0) {
       parts.push(`import { ${stay.join(', ')} } from '@noetic-tools/core';`);
     }
-    parts.push(`import { ${move.join(', ')} } from '@noetic/platform-node';`);
+    parts.push(`import { ${move.join(', ')} } from '@noetic-tools/platform-node';`);
     return parts.join('\n');
   });
   if (changed) {

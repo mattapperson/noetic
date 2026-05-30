@@ -1,7 +1,7 @@
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import { TaskLifecycleStatus, TaskReviewStatus } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { loadTask, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import { TaskLifecycleStatus, TaskReviewStatus } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { loadTask, saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 
 //#region Kanban column enum
 

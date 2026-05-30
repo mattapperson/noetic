@@ -3,9 +3,9 @@
  * add-assertion, activate-slice.
  */
 
-import { EventKind } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent } from '@noetic/code-agent/tasks/store/fs-node';
+import { EventKind } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendEvent } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ActivateSliceResult } from '../hierarchy/activation.js';
 import { activateSlice } from '../hierarchy/activation.js';
 import { hierarchyPaths } from '../hierarchy/paths.js';

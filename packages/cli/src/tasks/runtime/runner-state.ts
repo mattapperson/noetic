@@ -7,10 +7,10 @@
  * task record.
  */
 
-import * as path from '@noetic/code-agent/tasks/path-utils';
-import { TaskIdSchema } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { isEnoent, taskDirPaths, tempPath } from '@noetic/code-agent/tasks/store/fs-node';
+import * as path from '@noetic-tools/code-agent/tasks/path-utils';
+import { TaskIdSchema } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { isEnoent, taskDirPaths, tempPath } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { z } from 'zod';
 
 //#region Schema
