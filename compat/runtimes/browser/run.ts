@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     // apps proxy LLM calls through their own backend. Playwright stands in for
     // that proxy: it forwards the request server-side (no CORS) and returns the
     // response with permissive CORS headers, so the in-page noetic code runs
-    // unmodified. This proves core loads and executes in the browser.
+    // unmodified. This proves core + code-agent load and execute in the browser.
     await page.route('https://openrouter.ai/**', async (route) => {
       if (route.request().method() === 'OPTIONS') {
         await route.fulfill({

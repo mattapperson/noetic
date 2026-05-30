@@ -8,29 +8,32 @@
  *   - Deno:    `dist/deno/run.mjs` — a self-contained bundle (the noetic
  *              packages inlined from their installed `dist`, only `node:`
  *              builtins left external, which Deno supports via node-compat).
- *              Deno's npm interop refuses `file:` tarball specifiers, so the
- *              self-contained bundle is the portable way to run the built code.
- *   - Browser: `dist/browser/bundle.js` — the browser entry fully bundled for a
- *              DOM context (proves the packages bundle and run in a browser).
+ *   - Browser: `dist/browser/bundle.js` — the full smoke bundled with esbuild
+ *              and `esbuild-plugin-polyfill-node`, the same kind of pipeline a
+ *              real Next.js/webpack/esbuild browser app uses. code-agent pulls
+ *              in `node:` builtins (path/crypto/os/fs/net/url/module); the
+ *              polyfill plugin shims them, plus a tiny custom shim gives
+ *              `node:module`/`node:url` working load-time functions.
  *
  * Bun runs the TypeScript entry directly, so it needs no bundle.
  *
- * The `file:` tarball dependencies make Bun's bundler resolve `@noetic-tools/*`
- * to the `.tgz` archive instead of the extracted package. The resolver plugin
- * below redirects those bare specifiers to the installed `node_modules` `dist`
- * so the self-contained bundles pull in the real built artifacts.
+ * The Bun-based bundles use a resolver plugin because Bun's bundler resolves the
+ * `file:` tarball dependency to the `.tgz` archive; esbuild resolves the
+ * extracted `node_modules` package normally, so the browser build needs none.
  */
 
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BunPlugin } from 'bun';
 import { $ } from 'bun';
+import * as esbuild from 'esbuild';
+import { polyfillNode } from 'esbuild-plugin-polyfill-node';
 
 const COMPAT_DIR = fileURLToPath(new URL('..', import.meta.url));
 
 const NOETIC_PACKAGE = /^@noetic-tools\/(core|code-agent)$/;
 
-/** Redirect `@noetic-tools/*` bare imports to their installed dist entry. */
+/** Redirect `@noetic-tools/*` bare imports to their installed dist entry (Bun). */
 const noeticResolver: BunPlugin = {
   name: 'noetic-node-modules',
   setup(build) {
@@ -45,6 +48,47 @@ const noeticResolver: BunPlugin = {
           path: join(COMPAT_DIR, 'node_modules', '@noetic-tools', subpackage, 'dist', 'index.js'),
         };
       },
+    );
+  },
+};
+
+/**
+ * esbuild shim for `node:module`/`node:url`. `esbuild-plugin-polyfill-node`
+ * stubs these out, but code-agent calls `createRequire(...)` and
+ * `fileURLToPath(...)` at module load, so they must be real functions (the
+ * require they return is only invoked on Node-only paths the smoke never hits).
+ */
+const MODULE_SHIM =
+  'export function createRequire(){return (id)=>{throw new Error("require("+id+") is unavailable in the browser");};}\n' +
+  'export default {createRequire};';
+const URL_SHIM = [
+  'export function fileURLToPath(u){const s=String(u);return s.startsWith("file://")?decodeURIComponent(s.slice(7)):s;}',
+  'export function pathToFileURL(p){return new URL("file://"+p);}',
+  'export const URL=globalThis.URL;export const URLSearchParams=globalThis.URLSearchParams;',
+  'export default {fileURLToPath,pathToFileURL,URL,URLSearchParams};',
+].join('\n');
+
+const loadShims: esbuild.Plugin = {
+  name: 'node-load-shims',
+  setup(build) {
+    build.onResolve(
+      {
+        filter: /^(node:)?(module|url)$/,
+      },
+      (args) => ({
+        path: args.path.replace(/^node:/, ''),
+        namespace: 'node-load-shim',
+      }),
+    );
+    build.onLoad(
+      {
+        filter: /.*/,
+        namespace: 'node-load-shim',
+      },
+      (args) => ({
+        contents: args.path === 'module' ? MODULE_SHIM : URL_SHIM,
+        loader: 'js',
+      }),
     );
   },
 };
@@ -69,38 +113,30 @@ async function buildDenoBundle(): Promise<void> {
     outdir: join(COMPAT_DIR, 'dist', 'deno'),
     naming: 'run.mjs',
   });
-  assertBuilt(result, 'Deno');
-}
-
-async function buildBrowserBundle(): Promise<void> {
-  console.log('• bundling browser entry → dist/browser/bundle.js');
-  const result = await Bun.build({
-    entrypoints: [
-      join(COMPAT_DIR, 'runtimes', 'browser', 'entry.ts'),
-    ],
-    target: 'browser',
-    plugins: [
-      noeticResolver,
-    ],
-    outdir: join(COMPAT_DIR, 'dist', 'browser'),
-    naming: 'bundle.js',
-  });
-  assertBuilt(result, 'browser');
-}
-
-function assertBuilt(
-  result: {
-    success: boolean;
-    logs: ReadonlyArray<unknown>;
-  },
-  label: string,
-): void {
   if (!result.success) {
     for (const log of result.logs) {
       console.error(log);
     }
-    throw new Error(`${label} bundle failed`);
+    throw new Error('Deno bundle failed');
   }
+}
+
+async function buildBrowserBundle(): Promise<void> {
+  console.log('• bundling browser entry (esbuild + node polyfills) → dist/browser/bundle.js');
+  await esbuild.build({
+    entryPoints: [
+      join(COMPAT_DIR, 'runtimes', 'browser', 'entry.ts'),
+    ],
+    outfile: join(COMPAT_DIR, 'dist', 'browser', 'bundle.js'),
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    plugins: [
+      loadShims,
+      polyfillNode({}),
+    ],
+  });
 }
 
 async function main(): Promise<void> {

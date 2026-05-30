@@ -1,13 +1,13 @@
 /**
- * Core-only smoke surface. Imports **only** `@noetic-tools/core`, which is fully
+ * Core smoke surface. Imports **only** `@noetic-tools/core`, which is fully
  * platform-portable (it reaches OpenRouter via `fetch`, with no `node:` builtins
- * referenced at module load). This module is what the browser target bundles, so
- * it must never import `@noetic-tools/code-agent`.
+ * referenced at module load). Kept separate from the code-agent smoke so core's
+ * portable surface is exercised independently.
  */
 
 import { AgentHarness, step } from '@noetic-tools/core';
 
-import type { CoreSmokeResult, SmokeOptions, SmokeResult } from './types.js';
+import type { CoreSmokeResult } from './types.js';
 
 export const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 export const PING_INSTRUCTIONS =
@@ -46,35 +46,5 @@ export async function runCoreSmoke(apiKey: string, model: string): Promise<CoreS
     reply: asNonEmptyString(result, 'core step.llm'),
     inputTokens: ctx.tokens.input,
     outputTokens: ctx.tokens.output,
-  };
-}
-
-/**
- * Run a core-only smoke and assemble a full {@link SmokeResult} with code-agent
- * recorded as skipped. Used by the browser target, which cannot bundle
- * code-agent's Node-coupled `dist`.
- */
-export async function runCoreOnlySmoke(
-  options: SmokeOptions,
-  skipReason: string,
-): Promise<SmokeResult> {
-  const model = options.model ?? DEFAULT_MODEL;
-  const clock = options.now ?? (() => Date.now());
-  const startedAt = clock();
-
-  if (!options.apiKey) {
-    throw new Error('runCoreOnlySmoke requires an OpenRouter apiKey');
-  }
-
-  const core = await runCoreSmoke(options.apiKey, model);
-
-  return {
-    ok: true,
-    runtime: options.runtime,
-    model,
-    core,
-    codeAgent: null,
-    codeAgentSkipReason: skipReason,
-    durationMs: clock() - startedAt,
   };
 }

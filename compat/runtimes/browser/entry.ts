@@ -1,20 +1,15 @@
 /**
  * Browser bundle entry. Bundled by `scripts/build-bundles.ts` into
- * `dist/browser/bundle.js` and loaded by a headless Chromium page driven by
- * `runtimes/browser/run.ts`.
+ * `dist/browser/bundle.js` (via esbuild + a node-polyfill plugin, the same kind
+ * of pipeline a real Next.js/webpack/esbuild app uses) and loaded by a headless
+ * Chromium page driven by `runtimes/browser/run.ts`.
  *
- * It imports ONLY `core-smoke.ts` (which imports only `@noetic-tools/core`).
- * Importing the code-agent smoke here would pull code-agent's Node-coupled
- * `dist` into the browser bundle and break it at load time.
- *
- * The Playwright harness injects the OpenRouter key and model onto `window`
- * before the bundle runs, then polls `window.__noeticSmoke` for the outcome.
+ * It runs the full smoke (core + code-agent). The Playwright harness injects the
+ * OpenRouter key and model onto `window` before the bundle runs, then polls
+ * `window.__noeticSmoke` for the outcome.
  */
 
-import { runCoreOnlySmoke } from '../../shared/core-smoke.js';
-
-const SKIP_REASON =
-  'code-agent dist statically imports node:url/LSP modules; not browser-bundleable';
+import { runSmoke } from '../../shared/smoke.js';
 
 async function run(): Promise<void> {
   window.__noeticSmoke = {
@@ -25,14 +20,11 @@ async function run(): Promise<void> {
     if (!apiKey) {
       throw new Error('window.__OPENROUTER_API_KEY__ is not set');
     }
-    const result = await runCoreOnlySmoke(
-      {
-        runtime: 'browser',
-        apiKey,
-        model: window.__NOETIC_COMPAT_MODEL__,
-      },
-      SKIP_REASON,
-    );
+    const result = await runSmoke({
+      runtime: 'browser',
+      apiKey,
+      model: window.__NOETIC_COMPAT_MODEL__,
+    });
     window.__noeticSmoke = {
       status: 'ok',
       result,

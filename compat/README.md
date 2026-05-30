@@ -9,12 +9,13 @@ OpenRouter call** on each one:
 | **Node 22** | built bundle, packages resolved from `node_modules` at runtime | core + code-agent |
 | **Bun** | runs the TypeScript entry directly | core + code-agent |
 | **Deno** | self-contained bundle (`node:` builtins via node-compat) | core + code-agent |
-| **Browser** | bundle run in headless Chromium (Playwright) | core only — see note |
-| **Cloudflare Workers** | real `workerd` locally + a real deploy + teardown | core only — see note |
+| **Browser** | esbuild + node polyfills, run in headless Chromium (Playwright) | core + code-agent |
+| **Cloudflare Workers** | real deploy + invoke + teardown (also `--local` workerd) | core + code-agent |
 
-`@noetic-tools/core` runs on **all five** runtimes. `@noetic-tools/code-agent`
-runs on the three Node-module environments (Node, Bun, Deno); its published
-`dist` cannot load in a browser or a Worker (see findings below).
+Both packages run on **all five** runtimes. core is fully portable (it reaches
+OpenRouter via `fetch`); code-agent's `dist` touches `node:` builtins, so the
+browser and Worker targets bundle it with the standard tooling those platforms
+use (see "How the edge runtimes are handled").
 
 The suite installs the two packages as **packed tarballs** (`npm pack` with the
 release `publishConfig` applied), so every runtime consumes the *built,
@@ -67,20 +68,26 @@ bun run smoke:cloudflare -- --local   # local workerd
 > auto-installs, which breaks Node/Deno/bundling that expect the extracted
 > directories.
 
-## Notes / findings
+## How the edge runtimes are handled
 
-- **code-agent's published `dist` only loads in Node-module environments**
-  (Node, Bun, Deno). Two distinct issues block the edge runtimes, and both are
-  worth fixing upstream if browser/Worker support is desired:
-  - **Browser:** the `dist` statically imports `node:url` (`fileURLToPath`) and
-    `vscode-languageserver-protocol` through its LSP chunk, so it cannot be
-    bundled for a browser even via the `./tools` subpath (lazy-loading the LSP
-    tool would fix this).
-  - **Cloudflare Workers:** a chunk runs `createRequire(import.meta.url)` at
-    module load. `import.meta.url` is `undefined` in a bundled Worker, so the
-    worker throws before handling any request — even with `nodejs_compat`.
-  The browser and Worker targets therefore exercise core only and record
-  code-agent as skipped with the specific reason.
+code-agent's published `dist` pulls in `node:` builtins (path/crypto/os/fs/net/
+url/module) and runs `createRequire(import.meta.url)` / `fileURLToPath(...)` at
+module load. Node, Bun, and Deno supply those natively. The browser and Worker
+targets handle them the same way a real app on those platforms would:
+
+- **Browser:** bundled with **esbuild + `esbuild-plugin-polyfill-node`** (the
+  same node-polyfill approach a Next.js/webpack/esbuild app uses), plus a tiny
+  shim giving `node:module`/`node:url` working load-time functions. The portable
+  code-agent surface (in-memory fs, the Write/Read tools) then runs in the
+  browser; the Node-only tool paths (real fs, LSP, subprocess) simply aren't
+  exercised.
+- **Cloudflare Workers:** `wrangler.toml` sets `compatibility_flags =
+  ["nodejs_compat"]` (supplying `node:*`) and `[define] "import.meta.url"` to a
+  valid file URL, so the load-time `createRequire(import.meta.url)` resolves.
+  wrangler bundles with esbuild, which substitutes the define.
+
+## Notes
+
 - **Browser → OpenRouter goes through a proxy.** OpenRouter's CORS policy
   rejects the SDK's custom `x-openrouter-callmodel` header on preflight, so a
   browser cannot call OpenRouter directly — real browser apps proxy LLM calls

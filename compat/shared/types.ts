@@ -42,14 +42,7 @@ export interface SmokeResult {
   runtime: Runtime;
   model: string;
   core: CoreSmokeResult;
-  /**
-   * `null` when code-agent was intentionally skipped on this runtime (browser),
-   * with the reason in {@link codeAgentSkipReason}. The published code-agent
-   * `dist` statically imports `node:url`/LSP modules, so it only loads on
-   * runtimes with Node compatibility (Node, Bun, Deno, Workers).
-   */
-  codeAgent: CodeAgentSmokeResult | null;
-  codeAgentSkipReason?: string;
+  codeAgent: CodeAgentSmokeResult;
   /** Wall-clock duration of the whole smoke in milliseconds. */
   durationMs: number;
 }
@@ -60,12 +53,6 @@ export interface SmokeOptions {
   apiKey: string;
   /** OpenRouter model id. Defaults to `openai/gpt-4o-mini`. */
   model?: string;
-  /**
-   * Whether to exercise `@noetic-tools/code-agent`. Defaults to `true`. The
-   * browser target sets this to `false` because code-agent's built `dist` is
-   * not browser-bundleable (static `node:url`/LSP imports).
-   */
-  includeCodeAgent?: boolean;
   /** Millisecond clock; injected so the module stays runtime-agnostic. */
   now?: () => number;
 }

@@ -4,5 +4,11 @@ compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "da64980e164b57ba0d63963b51927a89"
 
+# code-agent's dist runs createRequire(import.meta.url) at module load.
+# import.meta.url is undefined in a bundled Worker, so define it to a valid file
+# URL (wrangler bundles with esbuild, which substitutes the literal).
+[define]
+"import.meta.url" = "'file:///worker.js'"
+
 # OPENROUTER_API_KEY is provided as a secret (deploy) or a dev var (local).
 # NOETIC_COMPAT_MODEL is optional; the smoke defaults to openai/gpt-4o-mini.

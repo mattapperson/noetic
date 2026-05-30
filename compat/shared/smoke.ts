@@ -1,13 +1,12 @@
 /**
  * Full cross-platform deployment smoke for `@noetic-tools/core` and
- * `@noetic-tools/code-agent`, used by the Node, Bun, Deno, and Cloudflare Worker
- * targets (every runtime with Node compatibility).
+ * `@noetic-tools/code-agent`, used by every runtime target.
  *
- * The browser target does NOT import this module — code-agent's built `dist`
- * statically pulls in `node:url`/LSP modules and cannot be bundled for a
- * browser. The browser entry uses `runCoreOnlySmoke` from `core-smoke.ts`
- * instead. Keeping the code-agent import out of `core-smoke.ts` is what makes
- * the browser bundle viable.
+ * The split between `core-smoke.ts` and `code-agent-smoke.ts` keeps core's
+ * (fully portable) surface independent of code-agent's Node-coupled `dist`. The
+ * browser and Cloudflare Worker targets still run both: the browser bundles
+ * code-agent through esbuild + node polyfills, and the Worker defines
+ * `import.meta.url` so code-agent's load-time `createRequire` works.
  */
 
 import { runCodeAgentSmoke } from './code-agent-smoke.js';
@@ -27,9 +26,8 @@ export async function runSmoke(options: SmokeOptions): Promise<SmokeResult> {
     throw new Error('runSmoke requires an OpenRouter apiKey');
   }
 
-  const includeCodeAgent = options.includeCodeAgent ?? true;
   const core = await runCoreSmoke(options.apiKey, model);
-  const codeAgent = includeCodeAgent ? await runCodeAgentSmoke(options.apiKey, model) : null;
+  const codeAgent = await runCodeAgentSmoke(options.apiKey, model);
 
   return {
     ok: true,
@@ -37,9 +35,6 @@ export async function runSmoke(options: SmokeOptions): Promise<SmokeResult> {
     model,
     core,
     codeAgent,
-    codeAgentSkipReason: includeCodeAgent
-      ? undefined
-      : 'code-agent dist statically imports node:url/LSP modules; not browser-bundleable',
     durationMs: clock() - startedAt,
   };
 }
