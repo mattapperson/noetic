@@ -6,6 +6,9 @@ on:
     paths:
       - 'packages/core/**'
       - '.github/workflows/release-core.yml'
+      # Root build config that can affect core's published output.
+      - 'biome.json'
+      - 'bun.lock'
   workflow_dispatch:
 
 concurrency:

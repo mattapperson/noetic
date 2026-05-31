@@ -10,16 +10,25 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with
 
 ## Types and Version Impact
 
-| Type | Version Bump | When to use |
-|------|-------------|-------------|
-| `feat` | **minor** | New feature or public API addition |
-| `fix` | patch | Bug fix |
-| `perf` | patch | Performance improvement |
-| `refactor` | patch | Code restructuring without behavior change |
-| `build` | patch | Build system, deps, or tooling changes |
-| `chore` | none | Maintenance tasks (no release) |
-| `docs` | none | Documentation only |
-| `test` | none | Test additions/fixes only |
+**Default policy: every core change publishes at least a patch.** A breaking
+change is a major, a `feat` is a minor, and *everything else* — `fix`, `perf`,
+`refactor`, `build`, `chore`, `docs`, `test`, **and untyped/unrecognized
+commits** (e.g. a squash-merge that dropped the prefix) — is a **patch**. A core
+change never silently skips a release.
+
+| Type | Version Bump |
+|------|-------------|
+| breaking (`!` / `BREAKING CHANGE:` footer) | **major** |
+| `feat` | **minor** |
+| everything else (incl. untyped) | **patch** |
+
+> This is why a sloppy or squash-stripped commit message still cuts a patch
+> rather than nothing. There is no per-commit "no release" type anymore; to skip
+> a release entirely, either don't touch the release-triggering paths or add
+> `[skip ci]` to the commit (which skips the workflow).
+
+> Use a `BREAKING CHANGE:` footer for breaking changes — the `!` shorthand alone
+> is not reliably detected by the analyzer and would only cut a patch.
 
 ## Scopes
 
@@ -41,20 +50,32 @@ Append `!` after the scope for breaking changes (triggers major bump):
 feat(core)!: rename Step.execute to Step.run
 ```
 
-Or include `BREAKING CHANGE:` in the commit body.
+Use a `BREAKING CHANGE:` footer (the reliable signal); see the note above.
 
 ## Suppressing Releases
 
-Use `scope: no-release` or type `chore`/`docs`/`test` for commits that should NOT trigger a release even when touching `packages/core/`.
+There is no per-commit type that suppresses a release — every core change is at
+least a patch. To skip a release: don't touch the release-triggering paths
+(`packages/core/**`, `biome.json`, `bun.lock`), or add `[skip ci]` to the commit
+to skip the workflow entirely.
 
 ## What Triggers a Core npm Release
 
-The `release-core.yml` workflow runs on push to `main` when `packages/core/**` changes. It:
+The `release-core.yml` workflow runs on push to `main` when `packages/core/**`,
+`biome.json`, or `bun.lock` changes. It:
 1. Runs lint, typecheck, build
-2. Scans commits since last `core-v*` tag
-3. Determines the version bump from commit types
+2. Scans commits since last `core-v*` tag (scoped to `packages/core` by
+   `semantic-release-monorepo`)
+3. Determines the version bump from commit types — **major** for breaking,
+   **minor** for `feat`, **patch** for everything else (including untyped /
+   squash-stripped commits)
 4. Publishes to npm with provenance
 5. Creates a GitHub release and git tag (`core-v<version>`)
+
+> Note: because of `semantic-release-monorepo` scoping, a release is cut only
+> when the analyzed commits touched `packages/core/**`. A change to *only*
+> `biome.json`/`bun.lock` starts the workflow but won't publish unless a
+> `packages/core` commit is in range (avoids publishing an identical tarball).
 
 ## Examples
 
@@ -62,7 +83,8 @@ The `release-core.yml` workflow runs on push to `main` when `packages/core/**` c
 feat(core): add JSON workflow runtime                  → minor (0.1.0 → 0.2.0)
 fix(core): handle null in branch route matching        → patch (0.2.0 → 0.2.1)
 refactor(core): simplify hydrator switch               → patch (0.2.1 → 0.2.2)
-chore(core): update dev dependencies                   → no release
-feat(core)!: remove deprecated FlowSchema export       → major (0.2.2 → 1.0.0)
-feat(cli): add --resume flag                           → no core release
+chore(core): update dev dependencies                   → patch (now releases)
+"Combining the three commits into one message"         → patch (untyped → patch)
+feat(core): drop FlowSchema\n\nBREAKING CHANGE: ...     → major (0.2.2 → 1.0.0)
+feat(cli): add --resume flag                           → no core release (not packages/core)
 ```
