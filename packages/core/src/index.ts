@@ -138,6 +138,16 @@ export { staticContent } from './memory/layers/static-content';
 /** @public */
 export { steering } from './memory/layers/steering';
 /** @public */
+export type {
+  FactExtractor,
+  FactSearcher,
+  TemporalFact,
+  TemporalMemoryConfig,
+  TemporalSearchResult,
+} from './memory/layers/temporal';
+/** @public */
+export { temporalMemory } from './memory/layers/temporal';
+/** @public */
 export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 /** @public */
 export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';

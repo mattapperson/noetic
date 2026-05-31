@@ -11,6 +11,9 @@ export { observationalMemory } from '../memory/layers/observational-memory';
 export { planMemory } from '../memory/layers/plan';
 
 /** @public */
+export { temporalMemory } from '../memory/layers/temporal';
+
+/** @public */
 export { toolMemoryLayer } from '../memory/layers/tool-memory-layer';
 
 /** @public */

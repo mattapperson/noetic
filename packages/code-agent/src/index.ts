@@ -45,6 +45,7 @@ import {
   observationalMemory,
   planMemory,
   step,
+  temporalMemory,
   tool,
   toolMemoryLayer,
   until,
@@ -52,6 +53,7 @@ import {
 } from '@noetic-tools/core/portable';
 import { frameworkCast } from '@noetic-tools/core/unstable';
 import { z } from 'zod';
+import { createTemporalExtractor, createTemporalSearcher } from './ai/temporal-llm.js';
 import { actAgent } from './agents/act.js';
 import { fixAgent } from './agents/fix.js';
 import type { CodeAgentMode } from './agents/flow-state.js';
@@ -162,6 +164,8 @@ export interface CreateCodeAgentOptions {
   llm?: {
     provider: 'openrouter';
     apiKey?: string;
+    /** Send `X-OpenRouter-Cache: true` so identical model calls aren't re-billed. */
+    cache?: boolean;
   };
   itemSchemas?: ItemSchemaExtensions;
   strictItemSchemas?: boolean;
@@ -1046,6 +1050,10 @@ export async function createCodeAgent(
         ]
       : [
           flowMemory,
+          temporalMemory({
+            extract: createTemporalExtractor({ model: options.model, llm: options.llm }),
+            search: createTemporalSearcher({ model: options.model, llm: options.llm }),
+          }),
           planMemory(),
           workingMemory(),
           observationalMemory(),

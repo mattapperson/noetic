@@ -65,4 +65,10 @@ export interface LLMResponse {
 export interface LlmProviderConfig {
   provider: 'openrouter';
   apiKey?: string;
+  /**
+   * When true, sends the `X-OpenRouter-Cache: true` request header on every
+   * model call. OpenRouter then serves identical requests from cache without
+   * re-billing — useful for deterministic re-runs (evals, regression suites).
+   */
+  cache?: boolean;
 }

@@ -303,6 +303,24 @@ Accumulates text, distills to observations when buffer exceeds threshold.
 observationalMemory({ bufferThreshold?, maxObservations?, scope?, observer? })
 ```
 
+### temporalMemory
+
+LLM-backed long-term memory for time-anchored recall. Distills the conversation into a key-value ledger of timestamped facts (`Record<isoTs, string[]>`) and answers temporal queries on demand. `recall` injects a `<current_datetime>` block (default on) so the model can resolve relative dates and compute differences. The `temporal/searchMemory` tool (auto-injected from `provides`) takes `{ query }` and returns `{ facts, date?, fuzzy? }`.
+
+```typescript
+temporalMemory({
+  now?, scope?,            // clock injection; 'thread' | 'resource' (default 'resource')
+  extract?, search?,       // FactExtractor / FactSearcher — host-injected LLM callbacks
+  bufferThreshold?,        // tokens before extract runs, default 2000
+  maxFacts?,               // ledger cap, default 200 (oldest dropped)
+  groundDateTime?,         // <current_datetime> on recall, default true
+  injectLedger?,           // <remembered_facts> on recall, default false
+})
+// id 'temporal', slot Slot.REMINDER (80). LLM-agnostic: omit extract/search and the
+// layer only buffers / the tool returns the raw ledger (never fabricates facts).
+// The code agent wires step.llm-backed callbacks and installs it by default.
+```
+
 ### durableTaskState
 
 Persists file lists and checkpoints across executions.

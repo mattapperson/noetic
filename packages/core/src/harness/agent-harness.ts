@@ -203,6 +203,19 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   if (!apiKey) {
     return undefined;
   }
+  if (config?.cache) {
+    // Inject `X-OpenRouter-Cache: true` on every request so OpenRouter serves
+    // identical model calls from cache without re-billing (deterministic re-runs).
+    return new OpenRouter({
+      apiKey,
+      hooks: {
+        beforeRequest: (_ctx, request) => {
+          request.headers.set('X-OpenRouter-Cache', 'true');
+          return request;
+        },
+      },
+    });
+  }
   return new OpenRouter({
     apiKey,
   });

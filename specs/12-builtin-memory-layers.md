@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/core` (sub-module at `core/src/memory/layers/**`)
 > **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `temporalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `TemporalMemoryConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
 
 ---
 
@@ -148,6 +148,64 @@ function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<Ob
 - `recall`: Renders observations as `<observations>` bullet list in a `MessageItem` with `role: developer`.
 - `store`: Accumulates tokens. When threshold reached, runs observer LLM on unprocessed items. Compacts if over `maxObservations`.
 - `onSpawn`: Clones observations to child.
+
+---
+
+## `temporalMemory()`
+
+Non-atomic, LLM-backed long-term memory for time-anchored recall. Distills the conversation into a key-value ledger of timestamped facts and answers temporal queries on demand. Addresses the failure class that pure recall cannot fix: relative-date arithmetic and event ordering ("what did I do three weeks ago?").
+
+```typescript
+interface TemporalFact { ts: string; fact: string }        // ts = ISO-8601
+
+interface TemporalSearchResult {
+  facts: string[];
+  date?: string;        // resolved date when the query implies one
+  fuzzy?: boolean;      // true when the date is approximate
+}
+
+// Host-injected LLM capabilities (keep the layer tree-shakable / LLM-agnostic)
+type FactExtractor = (input: { transcript: string; now: string }) => Promise<TemporalFact[]>;
+type FactSearcher = (input: { query: string; facts: TemporalFact[]; now: string }) => Promise<TemporalSearchResult>;
+
+interface TemporalMemoryConfig {
+  now?: () => Date;            // injectable clock (tests/replay); default () => new Date()
+  scope?: 'thread' | 'resource';
+  extract?: FactExtractor;     // store-side distillation; omitted → buffer only, never fabricate
+  search?: FactSearcher;       // searchMemory backing; omitted → tool returns the raw ledger
+  bufferThreshold?: number;    // tokens before extract runs, default 2000
+  maxFacts?: number;           // ledger cap, default 200 (oldest timestamps dropped)
+  groundDateTime?: boolean;    // inject <current_datetime> on recall, default true
+  injectLedger?: boolean;      // also inject <remembered_facts> on recall, default false
+}
+
+function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<TemporalState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'temporal'` |
+| **slot** | `Slot.REMINDER` (80) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 0, max: config.injectLedger ? 800 : 200 }` |
+| **timeouts** | `{ store: 60_000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+**State:** `{ facts: Record<isoTs, string[]>, buffer: string[], bufferTokens: number, version: number }`.
+
+**Behavior:**
+- `init`: Loads versioned state from `ScopedStorage`. Defaults to an empty ledger.
+- `recall`: When `groundDateTime`, emits a `<current_datetime>` block so the model can resolve relative time and compute date differences (deterministic — no LLM call). When `injectLedger`, also emits a `<remembered_facts>` block. Returns `null` when both are off/empty.
+- `store`: Collects text from new message items and accumulates it into `buffer`. Once `bufferTokens >= bufferThreshold` and an `extract` callback is configured, calls `extract({ transcript, now })`, merges the returned facts into the ledger keyed by ISO timestamp, caps to `maxFacts` (dropping oldest), clears the buffer, and bumps `version`. With no `extract`, it keeps buffering — it never invents facts.
+- `onSpawn`: Deep-clones state to the child execution.
+
+**Provides:**
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `searchMemory` | `layerFn` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
+
+**Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observationalMemory`'s `observer`), so `memory/` stays tree-shakable. The code agent wires structured `step.llm` calls as the callbacks and installs `temporalMemory()` in its default stack.
 
 ---
 

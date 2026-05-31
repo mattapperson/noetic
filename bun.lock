@@ -12,6 +12,19 @@
         "@biomejs/biome": "^2.3.11",
       },
     },
+    "evals": {
+      "name": "@noetic/evals",
+      "version": "0.0.0",
+      "dependencies": {
+        "@noetic-tools/code-agent": "workspace:*",
+        "@noetic-tools/core": "workspace:*",
+        "@noetic/eval": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+    },
     "examples/skippy": {
       "name": "skippy",
       "version": "0.1.0",
@@ -270,7 +283,7 @@
 
     "@ampproject/remapping": ["@ampproject/remapping@2.3.0", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.5", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw=="],
 
-    "@ax-llm/ax": ["@ax-llm/ax@21.0.4", "", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "ax": "cli/index.mjs" } }, "sha512-sKMbvofzSrbZQOS4IVv/Bh+hNKADQe8fnmu9j6byq8tdeZAC1/2HxCSMCZcTN1Ib126nBUkESlMFClgBhxWJUg=="],
+    "@ax-llm/ax": ["@ax-llm/ax@21.0.14", "", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "ax": "cli/index.mjs" } }, "sha512-HgyaXLwJ9ub2x+q1o/VyMCiEzaD/21GmpOMEi5pMtmSsppApjSdle9Kab0kf5CgB/24UAdISHbCSfQ96ovK4wQ=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 
@@ -521,6 +534,8 @@
     "@noetic/chat-sdk": ["@noetic/chat-sdk@workspace:packages/chat-sdk"],
 
     "@noetic/eval": ["@noetic/eval@workspace:packages/eval"],
+
+    "@noetic/evals": ["@noetic/evals@workspace:evals"],
 
     "@noetic/mirage": ["@noetic/mirage@workspace:packages/mirage"],
 

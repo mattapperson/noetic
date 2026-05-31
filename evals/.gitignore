@@ -1,0 +1,3 @@
+# LongMemEval datasets are large (oracle ~15 MB, s ~278 MB, m ~2.75 GB).
+# They are downloaded on demand via `bun evals/longmem/download.ts`.
+longmem/data/*.json
