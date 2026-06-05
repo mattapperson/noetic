@@ -11,11 +11,12 @@
  * Uses loop({ until: until.maxSteps(3) }) with branch routing by phase,
  * and prepareNext feeding each stage's output as the next stage's input.
  */
+
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { StepLoop } from '@noetic-tools/types';
 import { branch } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
-import type { ContextMemory } from '../src/types/memory';
-import type { StepLoop } from '../src/types/step';
 import { until } from '../src/until/predicates';
 
 //#region Stage Handlers

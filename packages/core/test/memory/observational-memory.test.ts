@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ObservationalState } from '../../src/memory/layers/observational-memory';
-import { observationalMemory } from '../../src/memory/layers/observational-memory';
-import type { MessageItem } from '../../src/types/items';
+import type { ObservationalState } from '@noetic-tools/memory';
+import { observationalMemory } from '@noetic-tools/memory';
+import type { MessageItem } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('observationalMemory', () => {

@@ -1,0 +1,63 @@
+{
+  "name": "@noetic-tools/memory",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Memory layer system for Noetic agents: the MemoryLayer contract, lifecycle, budget/projection machinery, and built-in layer implementations.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/memory"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "keywords": [
+    "noetic",
+    "agents",
+    "memory",
+    "llm",
+    "context"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "dependencies": {
+    "@noetic-tools/types": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
+    "verify:esm": "bun scripts/verify-node-esm.ts",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
+    "test:ci": "bun test --coverage --coverage-reporter=json",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  }
+}

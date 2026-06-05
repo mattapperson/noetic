@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type {
+  Context,
+  SettleResult,
+  StepForkAll,
+  StepForkRace,
+  StepForkSettle,
+} from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { isNoeticError } from '../../src/errors/noetic-error';
 import { executeFork } from '../../src/interpreter/execute-control';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { Context } from '../../src/types/context';
-import type { ContextMemory } from '../../src/types/memory';
-import type { SettleResult, StepForkAll, StepForkRace, StepForkSettle } from '../../src/types/step';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
 const _StateSchema = z.record(z.string(), z.unknown());

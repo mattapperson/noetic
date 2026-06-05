@@ -6,14 +6,14 @@ type OpenResponsesNonStreamingResponse = OpenResponsesResult;
 
 type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
 
+import type { Item, ReasoningItem } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import {
   extractOutputItems,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
 } from '../../src/adapters/openrouter';
-import type { Item, ReasoningItem } from '../../src/types/items';
-import { frameworkCast } from '../../src/util/framework-cast';
 import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
 describe('extractSystemInstruction', () => {

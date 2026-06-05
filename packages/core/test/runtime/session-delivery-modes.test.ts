@@ -1,13 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { CallModelRequest, LLMResponse, Step, StreamEvent, Tool } from '@noetic-tools/types';
 import { z } from 'zod';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import type { LLMResponse } from '../../src/types/common';
-import type { StreamEvent } from '../../src/types/harness-result';
-import type { ContextMemory } from '../../src/types/memory';
-import type { CallModelRequest } from '../../src/types/runtime';
-import type { Step } from '../../src/types/step';
-import type { Tool } from '../../src/types/tool';
 
 //#region Test scaffolding
 

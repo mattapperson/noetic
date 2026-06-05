@@ -1,7 +1,10 @@
+import type {
+  AgentHarnessContract,
+  Context,
+  ToolExecutionContext,
+  ToolMemory,
+} from '@noetic-tools/types';
 import type { TurnContext } from '@openrouter/agent';
-import type { Context } from '../types/context';
-import type { AgentHarnessContract } from '../types/runtime';
-import type { ToolExecutionContext, ToolMemory } from '../types/tool-context';
 
 export function buildToolMemory(harness: AgentHarnessContract, ctx: Context): ToolMemory {
   return {

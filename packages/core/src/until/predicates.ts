@@ -1,7 +1,7 @@
+import type { StorageAdapter } from '@noetic-tools/memory';
+import type { Snapshot, Until, Verdict } from '@noetic-tools/types';
 import { cosineSimilarity } from '../conditions/cosine-similarity';
 import type { EmbedFn } from '../types/embed';
-import type { StorageAdapter } from '../types/memory';
-import type { Snapshot, Until, Verdict } from '../types/step';
 import { never } from './never';
 
 /** @public Async verification function that checks loop output and optionally returns feedback. */

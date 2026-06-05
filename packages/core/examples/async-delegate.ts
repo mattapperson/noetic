@@ -7,14 +7,13 @@
  * Flow: User input → LLM loop → launch_agent tool → sub-agent runs in background
  *       → inbox receives result → LLM synthesizes final answer
  */
+
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Channel, DetachedHandle, StepLoop } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
 import { loop } from '../src/builders/loop-builder';
 import { step } from '../src/builders/step-builders';
-import type { Channel } from '../src/types/channel';
-import type { DetachedHandle } from '../src/types/detached';
-import type { ContextMemory } from '../src/types/memory';
-import type { StepLoop } from '../src/types/step';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
 import { createAsyncLaunchTool, createCheckTool } from './delegate-tools';

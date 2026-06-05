@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
+import { isNoeticConfigError } from '@noetic-tools/types';
 import { CheckpointKeys, createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 

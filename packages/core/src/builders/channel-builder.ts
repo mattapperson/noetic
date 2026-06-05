@@ -1,5 +1,5 @@
+import type { Channel, ExternalChannel } from '@noetic-tools/types';
 import type { ZodType } from 'zod';
-import type { Channel, ExternalChannel } from '../types/channel';
 
 /**
  * Creates a typed communication channel writable from outside the execution tree.

@@ -197,9 +197,9 @@ For complete builder signatures, memory layer APIs, agent harness methods, and s
 | Builders | `packages/core/src/builders/` |
 | Step types | `packages/core/src/types/step.ts` |
 | Tool types | `packages/core/src/types/common.ts` |
-| Memory types | `packages/core/src/types/memory.ts` |
+| Memory types | `packages/types/src/types/memory.ts` |
 | Patterns | `packages/core/src/patterns/` |
-| Memory layers | `packages/core/src/memory/layers/` |
+| Memory layers | `packages/memory/src/memory/layers/` |
 | AgentHarness | `packages/core/src/runtime/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
 | Specs | `specs/` (numbered 00-16) |

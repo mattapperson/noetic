@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Snapshot } from '../../src/types/step';
+import type { Snapshot } from '@noetic-tools/types';
 import { all, any } from '../../src/until/combinators';
 import { until } from '../../src/until/predicates';
 import { makeStorage, mockEmbed } from '../_helpers';

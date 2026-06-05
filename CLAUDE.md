@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All scripts run from the repo root unless noted.
 
 - `bun install` — install workspace deps (postinstall patches `@openrouter/agent`)
-- `bun test` — runs `@noetic-tools/core`, `@noetic-tools/code-agent`, `@noetic/eval` suites **sequentially** (does NOT include `@noetic-tools/cli`)
+- `bun test` — runs `@noetic-tools/types`, `@noetic-tools/memory`, `@noetic-tools/core`, `@noetic-tools/code-agent`, `@noetic/eval` suites **sequentially** (does NOT include `@noetic-tools/cli`)
 - `bun test:ci` — same plus coverage enforcement (diff gate from baseline)
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun scripts/check-export-tags.ts` — validates `@public` JSDoc tags on core's entry points
@@ -25,16 +25,19 @@ Architecture gates:
 
 ## Architecture big picture
 
-Eight workspace packages under `packages/*`. Dependency direction (arrows = "depends on"):
+Ten workspace packages under `packages/*`. Dependency direction (arrows = "depends on"):
 
 ```
 plugins ──→ cli ──→ code-agent ──→ core ←── eval
-                                    ↑
-                                    └── chat-sdk
+                                    ↑  │
+                            chat-sdk ┘  └──→ memory ──→ types
+                                                 └───────────↗
 web (standalone — no workspace deps)
 ```
 
-- **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, memory layer contract, error model, observability. Internal order (foundational → consumer): `types/schemas/errors` → `memory/observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `patterns`. Memory layers live at `packages/core/src/memory/` and must stay tree-shakable (no imports from `interpreter/`, `runtime/`, `adapters/`, `patterns/`).
+- **`@noetic-tools/types`** — the dependency-free foundation: the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`), execution context + steering contracts, the `MemoryLayer` contract (also exported at the `./contract` subpath), platform adapter interfaces, the error model, and the `Item` schema. Imported by `memory` and `core`; depends on nothing in the workspace.
+- **`@noetic-tools/memory`** — the memory layer system: lifecycle, budget/projection machinery (`assembleView`, `allocateBudgets`, layer state stores, scoping), and the built-in layers (working/history/observational/plan/temporal/steering/file-reference/static-content/durable-task-state/tool). Depends only on `@noetic-tools/types`; re-exports the `MemoryLayer` contract so it is the one-stop import for memory-layer authoring. Must stay free of imports from `core` (acyclic + tree-shakable).
+- **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, error model, observability. Re-exports the public surface of `@noetic-tools/memory` and `@noetic-tools/types`, so its `.`, `/portable`, `/unstable`, and `/internal/test` entry points are unchanged for consumers. Internal order (foundational → consumer): `types/schemas/errors` → `observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `patterns`.
 - **`@noetic-tools/code-agent`** — tool implementations, plugin registry, skills, tasks, LSP, git worktree integration.
 - **`@noetic-tools/cli`** — Ink-based TUI harness. Six internal layers per `specs/22-cli-architecture.md`: `foundations → infra → domain → orchestration → presentation → entry`.
 - **`@noetic/eval`** — eval framework, scorers, GEPA optimization, regression.

@@ -13,9 +13,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { isNoeticError } from '../../src/errors/noetic-error';
+import type { SubprocessAdapter, SubprocessHandle } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
-import type { SubprocessAdapter, SubprocessHandle } from '../../src/types/subprocess-adapter';
 
 /**
  * Minimal adapter stub for the eviction test. `pollUntilSettled` only

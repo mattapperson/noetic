@@ -1,1 +1,1 @@
-export { layerData, layerFn } from '../memory/layer-provides';
+export { layerData, layerFn } from '@noetic-tools/memory';

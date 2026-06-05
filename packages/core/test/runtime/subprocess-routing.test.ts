@@ -17,17 +17,17 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
-import { isNoeticError } from '../../src/errors/noetic-error';
-import { AgentHarness } from '../../src/harness/agent-harness';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
+import type { ContextMemory } from '@noetic-tools/memory';
 import type {
+  Step,
   StepSubprocessRequest,
   SubprocessAdapter,
   SubprocessHandle,
   SubprocessRequest,
-} from '../../src/types/subprocess-adapter';
+} from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
+import { AgentHarness } from '../../src/harness/agent-harness';
 
 //#region Recording adapter
 

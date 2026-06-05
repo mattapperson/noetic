@@ -1,8 +1,6 @@
-import type { ItemSchemaRegistry } from '../schemas/item';
-import { mergeExtensions } from '../schemas/item';
-import type { Item, ItemSchemaExtensions } from '../types/items';
-import type { MemoryLayer } from '../types/memory';
-import type { Tool } from '../types/tool';
+import type { MemoryLayer } from '@noetic-tools/memory';
+import type { Item, ItemSchemaExtensions, ItemSchemaRegistry, Tool } from '@noetic-tools/types';
+import { mergeExtensions } from '@noetic-tools/types';
 
 function mergeItemSchemaExtensions(
   extensions: ReadonlyArray<ItemSchemaExtensions | undefined>,

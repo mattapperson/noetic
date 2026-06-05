@@ -64,13 +64,15 @@
     }
   },
   "dependencies": {
+    "@noetic-tools/memory": "workspace:*",
+    "@noetic-tools/types": "workspace:*",
     "@openrouter/agent": "^0.6.0",
     "zod": "^4.0.0"
   },
   "scripts": {
     "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
     "verify:esm": "bun scripts/verify-node-esm.ts",
-    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
     "test:ci": "bun test --coverage --coverage-reporter=json",

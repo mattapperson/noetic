@@ -1,6 +1,6 @@
-export { buildContextMemory } from '../memory/layer-api';
-export type { ItemSchemaRegistry } from '../schemas/item';
-export { defaultItemSchemaRegistry } from '../schemas/item';
+export { buildContextMemory } from '@noetic-tools/memory';
+export type { ItemSchemaRegistry } from '@noetic-tools/types';
+export { defaultItemSchemaRegistry } from '@noetic-tools/types';
 export type {
   AgentHarnessContract,
   Channel,

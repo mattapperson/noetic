@@ -1,1 +1,1 @@
-export { trackUsage } from '../util/message-helpers';
+export { trackUsage } from '@noetic-tools/types';

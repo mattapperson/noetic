@@ -21,13 +21,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-
+import type { ExecuteInput, HarnessResponse, Item } from '@noetic-tools/types';
 import { createDetachedSignal } from '../../src/runtime/durable/detached-signal';
 import type { RunnableLoopHarness } from '../../src/runtime/durable/runnable-loop';
 import { runnableLoop } from '../../src/runtime/durable/runnable-loop';
 import { createNudgeMessage, createStallNudgeHook } from '../../src/runtime/durable/stall-nudge';
-import type { HarnessResponse } from '../../src/types/harness-result';
-import type { ExecuteInput, Item } from '../../src/types/items';
 
 interface HarnessStub {
   readonly harness: RunnableLoopHarness;

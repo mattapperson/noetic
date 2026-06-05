@@ -1,7 +1,7 @@
-import { NoeticConfigError } from '../../errors/noetic-config-error';
+import type { StorageAdapter } from '@noetic-tools/memory';
+import { NoeticConfigError } from '@noetic-tools/types';
 import type { CheckpointSnapshot } from '../../types/checkpoint';
 import { CheckpointSnapshotSchema } from '../../types/checkpoint';
-import type { StorageAdapter } from '../../types/memory';
 
 //#region Keys
 

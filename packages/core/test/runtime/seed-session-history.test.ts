@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { CallModelRequest, Item, LLMResponse, Step } from '@noetic-tools/types';
+import { ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
 import { z } from 'zod';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { ItemSchema, ItemSchemaRegistry } from '../../src/schemas/item';
-import type { LLMResponse } from '../../src/types/common';
-import type { Item } from '../../src/types/items';
-import type { ContextMemory } from '../../src/types/memory';
-import type { CallModelRequest } from '../../src/types/runtime';
-import type { Step } from '../../src/types/step';
 import { makeMessage, textOnlyResponse } from '../_helpers';
 
 const echoStep: Step<ContextMemory, string, string> = {

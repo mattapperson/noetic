@@ -4,10 +4,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
 import { z } from 'zod';
-
 import { AgentHarness, loop, step, tool, until } from '../src/index';
-import type { ContextMemory } from '../src/types/memory';
 import { assertOpenResponsesCompliance } from './_helpers';
 
 // Live tests require both an API key and explicit opt-in via NOETIC_LIVE_TESTS=1

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { FunctionCallItem } from '../../src/types/items';
+import { workingMemory } from '@noetic-tools/memory';
+import type { FunctionCallItem } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('workingMemory layer', () => {

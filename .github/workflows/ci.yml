@@ -22,37 +22,49 @@ jobs:
       - name: Lint
         run: bunx biome check .
 
+      - name: Typecheck types
+        run: bun --cwd=packages/types run typecheck
+
+      - name: Typecheck memory
+        run: bun --cwd=packages/memory run typecheck
+
       - name: Typecheck core
-        run: bun --cwd packages/core run typecheck
+        run: bun --cwd=packages/core run typecheck
 
       - name: Typecheck eval
-        run: bun --cwd packages/eval run typecheck
+        run: bun --cwd=packages/eval run typecheck
 
       - name: Check export tags
         run: bun run check:exports
 
       - name: Typecheck docs
-        run: bun --cwd packages/web run typecheck:docs
+        run: bun --cwd=packages/web run typecheck:docs
+
+      - name: Test types
+        run: bun --cwd=packages/types run test:ci
+
+      - name: Test memory
+        run: bun --cwd=packages/memory run test:ci
 
       - name: Test core
-        run: bun --cwd packages/core run test:ci
+        run: bun --cwd=packages/core run test:ci
 
       - name: Test eval
-        run: bun --cwd packages/eval run test:ci
+        run: bun --cwd=packages/eval run test:ci
 
       - name: Build web
-        run: bun --cwd packages/web run test:build
+        run: bun --cwd=packages/web run test:build
 
       - name: Link check
-        run: bun --cwd packages/web run test:links
+        run: bun --cwd=packages/web run test:links
 
       - name: Eval regression (if baselines exist)
         if: hashFiles('.noetic/baselines/**') != ''
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            bun --cwd packages/eval run noetic test --regression --fail-on-regression
+            bun --cwd=packages/eval run noetic test --regression --fail-on-regression
           else
-            bun --cwd packages/eval run noetic test --regression || echo "::warning::Eval regression detected — scores degraded on this PR"
+            bun --cwd=packages/eval run noetic test --regression || echo "::warning::Eval regression detected — scores degraded on this PR"
           fi
 
   structural-gate:

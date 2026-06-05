@@ -1,10 +1,7 @@
-import type { LayerStateStore } from '../../memory/layer-lifecycle';
-import type { ItemSchemaRegistry } from '../../schemas/item';
+import type { LayerStateStore, MemoryLayer } from '@noetic-tools/memory';
+import type { Context, Item, ItemSchemaRegistry } from '@noetic-tools/types';
 import type { CheckpointSnapshot, FrontierFrame } from '../../types/checkpoint';
 import { CheckpointSchemaVersion } from '../../types/checkpoint';
-import type { Context } from '../../types/context';
-import type { Item } from '../../types/items';
-import type { MemoryLayer } from '../../types/memory';
 import { ContextImpl } from '../context-impl';
 import type { CheckpointStore } from './checkpoint-store';
 

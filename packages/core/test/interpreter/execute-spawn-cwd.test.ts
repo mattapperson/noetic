@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, StepSpawn } from '@noetic-tools/types';
 import { executeSpawn } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { setToolCwd } from '../../src/runtime/cwd-helpers';
-import type { Context } from '../../src/types/context';
-import type { ContextMemory } from '../../src/types/memory';
-import type { StepSpawn } from '../../src/types/step';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
 function makeSpawnStep<I, O>(

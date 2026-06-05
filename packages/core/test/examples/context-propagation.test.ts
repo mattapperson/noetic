@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import type {
+  AgentHarnessContract,
+  DetachedHandle,
+  ToolExecutionContext,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/delegate-tools';
 import { channel } from '../../src/builders/channel-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import type { DetachedHandle } from '../../src/types/detached';
-import type { AgentHarnessContract } from '../../src/types/runtime';
-import type { ToolExecutionContext } from '../../src/types/tool-context';
 
 function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionContext {
   const ctx = harness.createContext({

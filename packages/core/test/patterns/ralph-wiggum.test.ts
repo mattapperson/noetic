@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import type {
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  LLMResponse,
+  MessageItem,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { ralphWiggum } from '../../src/patterns/ralph-wiggum';
-import type { LLMResponse } from '../../src/types/common';
-import type { FunctionCallItem, FunctionCallOutputItem, MessageItem } from '../../src/types/items';
 import { createDynamicCallModel } from '../_helpers';
 
 describe('Ralph Wiggum pattern', () => {

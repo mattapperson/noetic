@@ -1,4 +1,4 @@
-import type { ShellAdapter, ShellExecResult } from '../types/shell-adapter';
+import type { ShellAdapter, ShellExecResult } from '@noetic-tools/types';
 
 //#region Public API
 

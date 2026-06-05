@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { SettleResult, Step } from '@noetic-tools/types';
+import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { loop } from '../../src/builders/loop-builder';
-import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { ContextMemory } from '../../src/types/memory';
-import type { SettleResult, Step } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
 import { makeMockHarness } from '../_helpers';
 

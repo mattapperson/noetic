@@ -1,5 +1,4 @@
-import type { ExecuteInput } from '../types/items';
-import type { DeliveryMode, ExecuteOptions } from '../types/runtime';
+import type { DeliveryMode, ExecuteInput, ExecuteOptions } from '@noetic-tools/types';
 
 //#region Types
 

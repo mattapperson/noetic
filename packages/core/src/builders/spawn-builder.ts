@@ -1,8 +1,7 @@
-import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
-import type { Step, StepSpawn } from '../types/step';
+import type { ContextMemory, MemoryConfig, MemoryLayer } from '@noetic-tools/memory';
+import type { Step, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
+import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
-import type { SubprocessAdapter } from '../types/subprocess-adapter';
 
 //#region Types
 

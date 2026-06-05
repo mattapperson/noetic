@@ -1,8 +1,7 @@
-import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { ContextMemory } from '../types/memory';
-import type { Step } from '../types/step';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Step } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { setDefaultRegistrar } from '../types/step-registrar';
-import { frameworkCast } from '../util/framework-cast';
 
 //#region Types
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { frameworkCast } from '../../src/util/framework-cast';
+import { frameworkCast } from '@noetic-tools/types';
 
 describe('frameworkCast', () => {
   it('returns the value unchanged for primitives', () => {

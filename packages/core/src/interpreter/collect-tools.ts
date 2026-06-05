@@ -1,6 +1,5 @@
-import type { Step } from '../types/step';
-import type { Tool } from '../types/tool';
-import { frameworkCast } from '../util/framework-cast';
+import type { Step, Tool } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 
 /**
  * Recursively walks a step tree and collects all Tool instances

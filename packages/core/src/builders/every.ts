@@ -1,7 +1,6 @@
-import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { Channel } from '../types/channel';
-import type { ContextMemory } from '../types/memory';
-import type { EveryErrorPolicy, Step, StepEvery } from '../types/step';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Channel, EveryErrorPolicy, Step, StepEvery } from '@noetic-tools/types';
+import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 /**

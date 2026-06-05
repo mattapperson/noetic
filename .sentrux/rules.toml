@@ -182,11 +182,6 @@ paths = [
 order = 84
 
 [[layers]]
-name = "core-memory"
-paths = ["packages/core/src/memory/**"]
-order = 85
-
-[[layers]]
 name = "core-observability"
 paths = ["packages/core/src/observability/**"]
 order = 85
@@ -202,33 +197,47 @@ paths = [
 order = 86
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Memory tree-shakability — each of the files in
-# packages/core/src/memory/layers/ is an independently exported API.
-# Keeping memory/** free of imports from interpreter/runtime/adapters/patterns
-# is what lets bundlers drop unused layers. The layer-direction rule above
-# already forbids these edges via the ordering, but these boundaries give
-# specific tree-shakability error messages when triggered.
+# Tier E — foundational shared packages. The memory layer system and the
+# type/contract vocabulary it builds on were extracted from core so they can
+# ship as standalone npm packages (@noetic-tools/memory, @noetic-tools/types).
+# They sit BELOW every core layer: core imports them, never the reverse.
+# @noetic-tools/types is the dependency-free bottom; @noetic-tools/memory
+# builds on types and is consumed by core.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "noetic-memory"
+paths = ["packages/memory/src/**"]
+order = 88
+
+[[layers]]
+name = "noetic-types"
+paths = ["packages/types/src/**"]
+order = 90
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Foundation acyclicity + memory tree-shakability. @noetic-tools/memory and
+# @noetic-tools/types are extracted foundational packages: core depends on
+# them, never the reverse. A memory layer importing back into core would
+# both create a package cycle and defeat tree-shakability (importing one
+# layer must not pull in the interpreter/runtime). @noetic-tools/types is
+# the dependency-free bottom of the stack.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
-to = "packages/core/src/interpreter/**"
-reason = "memory layers must be tree-shakable; importing a layer must not pull in the interpreter"
+from = "packages/memory/src/**"
+to = "packages/core/src/**"
+reason = "core depends on @noetic-tools/memory; memory must never import back into core (acyclic) and must stay tree-shakable from the interpreter/runtime"
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
-to = "packages/core/src/runtime/**"
-reason = "memory layers must be tree-shakable; importing a layer must not pull in the runtime"
+from = "packages/types/src/**"
+to = "packages/memory/src/**"
+reason = "@noetic-tools/types is the dependency-free foundation; @noetic-tools/memory builds on it, not the reverse"
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
-to = "packages/core/src/adapters/**"
-reason = "memory layers are platform-independent; adapters are platform-specific"
-
-[[boundaries]]
-from = "packages/core/src/memory/**"
-to = "packages/core/src/patterns/**"
-reason = "patterns compose memory, not the other way"
+from = "packages/types/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/types is the dependency-free foundation; core builds on it, not the reverse"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Peer-package isolation at tier 50 — chat-sdk, code-agent, and eval are
@@ -306,12 +315,12 @@ to = "packages/platform-browser/src/**"
 reason = "core is runtime-agnostic; it cannot depend on a specific platform"
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
+from = "packages/memory/src/**"
 to = "packages/platform-node/src/**"
 reason = "memory layers are platform-independent; platform packages are platform-specific"
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
+from = "packages/memory/src/**"
 to = "packages/platform-browser/src/**"
 reason = "memory layers are platform-independent; platform packages are platform-specific"
 
@@ -395,7 +404,7 @@ to = "packages/mirage/src/**"
 reason = "core is runtime-agnostic and has no dependency on the Mirage bridge"
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
+from = "packages/memory/src/**"
 to = "packages/mirage/src/**"
 reason = "memory layers are platform-independent; Mirage is a backend-specific bridge"
 
