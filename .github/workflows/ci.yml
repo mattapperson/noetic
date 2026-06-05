@@ -19,6 +19,17 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # Build the foundational dists in dependency order. Consumers (eval,
+      # docs, the test suites) resolve `@noetic-tools/core` via its built
+      # `dist/*.d.ts`/`*.js`, and core's own build resolves @noetic-tools/types
+      # and @noetic-tools/memory via their dists. Without this, tsc/bun can't
+      # find the packages and the typecheck/test steps fail.
+      - name: Build packages
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/memory run build
+          bun --cwd=packages/core run build
+
       - name: Lint
         run: bunx biome check .
 

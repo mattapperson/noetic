@@ -17,6 +17,8 @@
   "dependencies": {
     "@noetic-tools/code-agent": "file:./vendor/noetic-code-agent.tgz",
     "@noetic-tools/core": "file:./vendor/noetic-core.tgz",
+    "@noetic-tools/memory": "file:./vendor/noetic-memory.tgz",
+    "@noetic-tools/types": "file:./vendor/noetic-types.tgz",
     "@openrouter/agent": "0.6.0",
     "zod": "^4.0.0"
   },

@@ -55,6 +55,25 @@ if (isRecord(publishConfig)) {
 delete pkg.publishConfig;
 delete pkg.devDependencies;
 
+// Pin any remaining `workspace:` runtime dependency to a concrete `^<version>`
+// range read from the sibling package, so the packed/published tarball is
+// installable by an external consumer (npm rejects the `workspace:` protocol).
+// `@noetic-tools/<name>` resolves to the sibling package dir at `../<name>`.
+const deps = pkg.dependencies;
+if (isRecord(deps)) {
+  for (const [name, spec] of Object.entries(deps)) {
+    if (typeof spec !== 'string' || !spec.startsWith('workspace:')) {
+      continue;
+    }
+    const shortName = name.split('/')[1];
+    const siblingFile = resolve(dir, '..', shortName, 'package.json');
+    const sibling = parseJson(readFileSync(siblingFile, 'utf8'));
+    if (isRecord(sibling) && typeof sibling.version === 'string') {
+      deps[name] = `^${sibling.version}`;
+    }
+  }
+}
+
 writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
 
 const name = typeof pkg.name === 'string' ? pkg.name : dir;
