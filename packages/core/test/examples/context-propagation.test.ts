@@ -46,8 +46,17 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured
-      if (!(err instanceof Error && err.message.includes('callModel'))) {
+      // Expected: the spawned agent's model call fails because this bare test
+      // harness configures no LLM provider / callModel override. The harness
+      // surfaces this as either "No callModel override configured." or "No LLM
+      // provider configured on this harness." — tolerate both; anything else
+      // is a real failure. The assertion below is what this test verifies.
+      if (
+        !(
+          err instanceof Error &&
+          (err.message.includes('callModel') || err.message.includes('LLM provider'))
+        )
+      ) {
         throw err;
       }
     }
@@ -81,8 +90,17 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured
-      if (!(err instanceof Error && err.message.includes('callModel'))) {
+      // Expected: the spawned agent's model call fails because this bare test
+      // harness configures no LLM provider / callModel override. The harness
+      // surfaces this as either "No callModel override configured." or "No LLM
+      // provider configured on this harness." — tolerate both; anything else
+      // is a real failure. The assertion below is what this test verifies.
+      if (
+        !(
+          err instanceof Error &&
+          (err.message.includes('callModel') || err.message.includes('LLM provider'))
+        )
+      ) {
         throw err;
       }
     }
