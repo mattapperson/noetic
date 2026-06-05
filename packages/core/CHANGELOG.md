@@ -1,3 +1,7 @@
+## @noetic-tools/core-v0.2.0 (2026-06-05)
+
+* feat(evals): add LongMemEval harness and temporal memory layer ([3df68cf](https://github.com/mattapperson/noetic/commit/3df68cf))
+
 ## @noetic-tools/core-v0.1.2 (2026-05-31)
 
 * ci: default unsignalled core commits to a patch release ([afc473d](https://github.com/mattapperson/noetic/commit/afc473d))
