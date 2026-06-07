@@ -1,3 +1,7 @@
+## @noetic-tools/core-v0.2.1 (2026-06-07)
+
+* Combine these commits into a single commit message. ([e41abb2](https://github.com/mattapperson/noetic/commit/e41abb2))
+
 ## @noetic-tools/core-v0.2.0 (2026-06-05)
 
 * feat(evals): add LongMemEval harness and temporal memory layer ([3df68cf](https://github.com/mattapperson/noetic/commit/3df68cf))
