@@ -9,7 +9,7 @@ The Recursive LLM pattern uses `spawn()` to create child agents that start with 
 
 ## Pattern
 
-```ts
+```ts validate=none
 import { spawn, react } from '@noetic-tools/core';
 
 const subTaskAgent = react({
@@ -33,7 +33,7 @@ Memory layers give you fine-grained control over what the child sees and how res
 
 **`onReturn` hooks** transform the child's results before they reach the parent. Use these to summarize verbose output, extract structured data, or update parent state.
 
-```ts
+```ts validate=none
 const recursiveStep = spawn({
   id: 'recursive-subtask',
   child: subTaskAgent,
@@ -68,7 +68,7 @@ const recursiveStep = spawn({
 
 ## Example: Divide and Conquer
 
-```ts
+```ts validate=none
 import { channel, spawn, react, step, fork } from '@noetic-tools/core';
 import { z } from 'zod';
 

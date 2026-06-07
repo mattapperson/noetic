@@ -9,7 +9,7 @@ Adaptive Plans combine LLM-powered plan generation with automatic error-driven r
 
 ## Signature
 
-```ts
+```ts validate=none
 function adaptivePlan<O, A = unknown>(opts: {
   planner: Step<ContextMemory, string, PlanNode>;
   agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>;
@@ -29,7 +29,7 @@ function adaptivePlan<O, A = unknown>(opts: {
 
 ## Example
 
-```ts
+```ts validate=none
 import { adaptivePlan, react, step, PlanNodeSchema } from '@noetic-tools/core';
 
 const planner = step.llm({

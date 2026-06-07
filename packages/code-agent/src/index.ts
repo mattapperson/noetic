@@ -53,7 +53,6 @@ import {
 } from '@noetic-tools/core/portable';
 import { frameworkCast } from '@noetic-tools/core/unstable';
 import { z } from 'zod';
-import { createTemporalExtractor, createTemporalSearcher } from './ai/temporal-llm.js';
 import { actAgent } from './agents/act.js';
 import { fixAgent } from './agents/fix.js';
 import type { CodeAgentMode } from './agents/flow-state.js';
@@ -67,6 +66,7 @@ import {
 import { planAgent } from './agents/plan.js';
 import { CODE_AGENT_DONE_SENTINEL } from './agents/shared.js';
 import { verifyAgent, verifyAndCheck } from './agents/verify.js';
+import { createTemporalExtractor, createTemporalSearcher } from './ai/temporal-llm.js';
 import type {
   ChannelTransportAdapter,
   ChannelTransportController,
@@ -1051,8 +1051,14 @@ export async function createCodeAgent(
       : [
           flowMemory,
           temporalMemory({
-            extract: createTemporalExtractor({ model: options.model, llm: options.llm }),
-            search: createTemporalSearcher({ model: options.model, llm: options.llm }),
+            extract: createTemporalExtractor({
+              model: options.model,
+              llm: options.llm,
+            }),
+            search: createTemporalSearcher({
+              model: options.model,
+              llm: options.llm,
+            }),
           }),
           planMemory(),
           workingMemory(),

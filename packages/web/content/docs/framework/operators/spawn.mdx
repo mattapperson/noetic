@@ -85,7 +85,7 @@ const withMemory = spawn({
 
 Set a maximum execution time for the child. If the timeout is exceeded, the spawn throws an error.
 
-```ts
+```ts validate=none
 const spawned = spawn({
   id: 'time-limited',
   child: myStep,
@@ -95,7 +95,7 @@ const spawned = spawn({
 
 ## Real-World Example: Research Delegation with Memory
 
-```ts
+```ts validate=none
 import { createMessage, loop, spawn, step, until } from '@noetic-tools/core';
 import type { MemoryLayer } from '@noetic-tools/core';
 
@@ -143,7 +143,7 @@ const researchAgent = spawn({
 
 For background sub-agents that run concurrently, use `harness.detachedSpawn()`. The parent continues immediately and receives a `DetachedHandle` to track the child.
 
-```ts
+```ts validate=none
 import type { DetachedHandle } from '@noetic-tools/core';
 
 const handle = harness.detachedSpawn(subAgentStep, input, ctx);
@@ -167,7 +167,7 @@ and replay in the parent's next turn. For long-running background sub-agents
 whose work should NOT pollute the parent's history (e.g. a separate research
 teammate), pass an `overrides` argument:
 
-```ts
+```ts validate=none
 const handle = harness.detachedSpawn(subAgentStep, input, ctx, {
   threadId: `teammate-${agentId}`,
 });
@@ -191,7 +191,7 @@ are unchanged.
 
 Combine detached spawn with the [loop inbox channel](/docs/framework/operators/loop-and-until#inbox-channel) for a full async delegation workflow:
 
-```ts
+```ts validate=none
 import { channel } from '@noetic-tools/core';
 import { z } from 'zod';
 

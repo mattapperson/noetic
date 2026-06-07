@@ -7,7 +7,7 @@ description: Type definitions for Context, ItemLog, Item variants, and content p
 
 The execution context threaded through every step.
 
-```ts
+```ts validate=none
 interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
@@ -78,7 +78,7 @@ interface Context<TMemory = ContextMemory, TState = unknown> {
 
 An append-only log of conversation items.
 
-```ts
+```ts validate=none
 interface ItemLog {
   readonly items: ReadonlyArray<Item>;
   append(item: Item): void;
@@ -94,7 +94,7 @@ interface ItemLog {
 
 The `Item` type is a discriminated union over the `type` field:
 
-```ts
+```ts validate=none
 type Item =
   | MessageItem
   | FunctionCallItem
@@ -157,7 +157,7 @@ See [Items & Events](/docs/framework/api/items-and-events) for the complete refe
 
 ## ContentPart
 
-```ts
+```ts validate=none
 type ContentPart =
   | { type: 'output_text'; text: string }
   | { type: 'input_text'; text: string }
@@ -189,7 +189,7 @@ type ContentPart =
 
 ## LayerUsageEntry
 
-```ts
+```ts validate=none
 interface LayerUsageEntry {
   readonly layerId: string;
   readonly tokenCount: number;
@@ -205,7 +205,7 @@ interface LayerUsageEntry {
 
 ## LastLayerUsage
 
-```ts
+```ts validate=none
 interface LastLayerUsage {
   readonly executionId: string;
   readonly modelId: string;

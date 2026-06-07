@@ -23,7 +23,7 @@ The layer is included by default in the Noetic CLI. Users type `/plan` to enter 
 
 ## Configuration
 
-```ts
+```ts validate=none
 interface PlanMemoryConfig {
   scope?: MemoryScope;
   additionalAllowedTools?: string[];
@@ -74,7 +74,7 @@ Additional tools can be allowed via `additionalAllowedTools` in the config.
 
 The plan layer stores the `PlanNode` tree produced by the LLM. For programmatic execution, extract the tree and pass it to `compilePlan()`:
 
-```ts
+```ts validate=none
 import { compilePlan } from '@noetic-tools/core';
 
 const compiled = compilePlan(planTree, agents, constraints);

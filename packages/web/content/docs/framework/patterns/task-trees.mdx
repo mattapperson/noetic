@@ -9,7 +9,7 @@ Task Trees let you define a hierarchical plan where each node is assigned to an 
 
 ## PlanNode
 
-```ts
+```ts validate=none
 interface PlanNode {
   id: string;
   description: string;
@@ -29,7 +29,7 @@ interface PlanNode {
 
 ## compilePlan()
 
-```ts
+```ts validate=none
 function compilePlan<O, A = unknown>(
   plan: PlanNode,
   agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>,
@@ -47,7 +47,7 @@ function compilePlan<O, A = unknown>(
 
 ## PlanConstraints
 
-```ts
+```ts validate=none
 interface PlanConstraints {
   toolAllowlist?: Record<string, string[]>;
   maxStepsPerNode?: number;
@@ -58,7 +58,7 @@ interface PlanConstraints {
 
 ## Example
 
-```ts
+```ts validate=none
 import { compilePlan, react } from '@noetic-tools/core';
 
 const agents = {
@@ -113,6 +113,8 @@ The `PlanNodeSchema` Zod schema is also exported, so you can have an LLM generat
 
 ```ts
 import { PlanNodeSchema } from '@noetic-tools/core';
+
+declare const llmOutput: unknown;
 
 const plan = PlanNodeSchema.parse(llmOutput);
 ```

@@ -116,7 +116,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -270,9 +270,12 @@
         "@types/node": "25.5.0",
         "@types/react": "19.1.6",
         "@types/react-dom": "19.1.6",
+        "kiira": "0.3.0",
+        "kiira-core": "0.3.0",
         "postcss": "8.5.4",
         "tailwindcss": "4.1.8",
         "typescript": "5.8.3",
+        "zod": "4.3.6",
       },
     },
   },
@@ -1114,6 +1117,10 @@
     "js-yaml": ["js-yaml@4.1.1", "", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.js" } }, "sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA=="],
 
     "just-bash": ["just-bash@2.14.1", "", { "dependencies": { "diff": "^8.0.2", "fast-xml-parser": "^5.3.3", "file-type": "^21.2.0", "ini": "^6.0.0", "minimatch": "^10.1.1", "modern-tar": "^0.7.3", "papaparse": "^5.5.3", "quickjs-emscripten": "^0.32.0", "re2js": "^1.2.1", "seek-bzip": "^2.0.0", "smol-toml": "^1.6.0", "sprintf-js": "^1.1.3", "sql.js": "^1.13.0", "turndown": "^7.2.2", "yaml": "^2.8.2" }, "optionalDependencies": { "@mongodb-js/zstd": "^7.0.0", "node-liblzma": "^2.0.3" }, "bin": { "just-bash": "dist/bin/just-bash.js", "just-bash-shell": "dist/bin/shell/shell.js" } }, "sha512-GnErSk35IqEbV1qqxhxAWz/Ve6epm6QTYhDQgp/etYeJmZuyIfwfT4KcoozcO7VS2OkBk9HmIHh/FtrTtfDqAA=="],
+
+    "kiira": ["kiira@0.3.0", "", { "dependencies": { "chalk": "^5.4.1", "kiira-core": "0.3.0" }, "bin": { "kiira": "./dist/index.mjs" } }, "sha512-XUmayqdcbYeVJdNtAX1Zreg/Nf0Tohpx2SkrCzEU3WZ6IWWxpRxwM2g1WnNqCBjfIm0RjfDCc+VFwHrEQmL7lg=="],
+
+    "kiira-core": ["kiira-core@0.3.0", "", { "dependencies": { "jiti": "^2.4.2", "typescript": "^5.4.0" } }, "sha512-sEquMKsQn+PJTmnD9BdGlEjgMcRpKXMoLmAnR9f0/4iejQbr4644MOYwLS9s6CaHCcuvy0DCxW53+i9+XkZP6g=="],
 
     "leac": ["leac@0.6.0", "", {}, "sha512-y+SqErxb8h7nE/fiEX07jsbuhrpO9lL8eca7/Y1nuWV2moNlXhyd59iDGcRf6moVyDMbmTNzL40SUyrFU/yDpg=="],
 

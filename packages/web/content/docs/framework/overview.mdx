@@ -33,7 +33,7 @@ import { branch, fork, spawn, step, until } from '@noetic-tools/core';
 // A branch that picks between two LLM steps
 const router = branch({
   id: 'pick-model',
-  route: (input, ctx) => {
+  route: (input: string, ctx) => {
     if (input.includes('code')) {
       return step.llm({
         id: 'code-llm',

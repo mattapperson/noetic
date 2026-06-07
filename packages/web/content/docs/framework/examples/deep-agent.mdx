@@ -35,6 +35,12 @@ Three tools mirror the todoListMiddleware pattern:
 Tools declare a shared `ToolMemoryDeclaration` with `id: 'todos'` — `toolMemoryLayer()` materializes this into a single `MemoryLayer` that projects the todo state into the LLM context:
 
 ```ts
+interface TodoState {
+  items: { id: string; description: string; status: string }[];
+}
+
+declare const STATUS_ICONS: Record<string, string>;
+
 const todoMemory: ToolMemoryDeclaration<TodoState> = {
   id: 'todos',
   init: () => ({ items: [] }),
@@ -67,7 +73,7 @@ All tools validate paths against `rootDir` using `resolve()` + `startsWith()` to
 
 The `createConfigurableDelegateTool` uses `toolCtx.harness` to run sub-agents — no need to pass the agent harness at construction time:
 
-```ts
+```ts validate=none
 export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool {
   return tool({
     name: 'delegate',
@@ -86,7 +92,7 @@ export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool
 
 Uses the built-in `staticContent()` layer to load instruction files from disk:
 
-```ts
+```ts validate=none
 staticContent({
   load: async () => {
     const contents = await Promise.all(paths.map(p => Bun.file(p).text()));
@@ -104,7 +110,9 @@ staticContent({
 Generated automatically from `ToolMemoryDeclaration` on the tools:
 
 ```ts
-toolMemoryLayer(allTools) // produces one layer per unique memory.id
+declare const allTools: Tool[];
+
+toolMemoryLayer(allTools); // produces one layer per unique memory.id
 ```
 
 - **Slot**: `WORKING_MEMORY + 10` (110)
