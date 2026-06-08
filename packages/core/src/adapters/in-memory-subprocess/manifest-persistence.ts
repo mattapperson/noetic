@@ -1,5 +1,5 @@
-import type { StorageAdapter } from '../../types/memory';
-import type { StepSubprocessRequest, SubprocessHandle } from '../../types/subprocess-adapter';
+import type { StorageAdapter } from '@noetic-tools/memory';
+import type { StepSubprocessRequest, SubprocessHandle } from '@noetic-tools/types';
 import { isRecord } from './metadata';
 import type { InMemoryStepManifest } from './types';
 

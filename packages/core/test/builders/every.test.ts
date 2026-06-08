@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { Step } from '@noetic-tools/types';
+import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { every } from '../../src/builders/every';
-import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
-import type { Step } from '../../src/types/step';
 
 const body: Step<unknown, void, void> = {
   kind: 'run',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { MemoryLayer } from '@noetic-tools/memory';
 import { spawn } from '../../src/builders/spawn-builder';
-import type { MemoryLayer } from '../../src/types/memory';
 
 describe('spawn builder', () => {
   it('creates correct step shape', () => {

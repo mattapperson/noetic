@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { NoeticError } from '@noetic-tools/types';
+import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { ZodError, z } from 'zod';
-import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
-import type { NoeticError } from '../../src/types/error';
 
 describe('NoeticError', () => {
   describe('constructors for each kind', () => {

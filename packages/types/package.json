@@ -1,0 +1,73 @@
+{
+  "name": "@noetic-tools/types",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Foundational type contracts and primitives shared across the Noetic framework (items, LLM config, adapters, steering, errors).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/types"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "keywords": [
+    "noetic",
+    "agents",
+    "types",
+    "contracts"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/types/memory.d.ts",
+      "default": "./dist/types/memory.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@openrouter/agent": "^0.6.0",
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "@openrouter/agent": "^0.6.0",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@openrouter/agent": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@openrouter/agent": "^0.6.0",
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
+    "verify:esm": "bun scripts/verify-node-esm.ts",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --coverage --coverage-reporter=lcov",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  }
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { SettleResult } from '@noetic-tools/types';
 import { branch, fork } from '../../src/builders/control-flow-builders';
-import type { ContextMemory } from '../../src/types/memory';
-import type { SettleResult } from '../../src/types/step';
 import { makeMockContext } from '../_helpers';
 
 describe('fork builder', () => {

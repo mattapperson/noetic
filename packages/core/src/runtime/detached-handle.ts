@@ -1,14 +1,12 @@
-import { NoeticErrorImpl } from '../errors/noetic-error';
-import type { DetachedHandle } from '../types/detached';
-import { DetachedStatus } from '../types/detached';
-import type { NoeticError } from '../types/error';
 import type {
+  DetachedHandle,
+  NoeticError,
   SerializedError,
   SubprocessAdapter,
   SubprocessHandle,
   SubprocessStatus,
-} from '../types/subprocess-adapter';
-import { frameworkCast } from '../util/framework-cast';
+} from '@noetic-tools/types';
+import { DetachedStatus, frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 
 //#region Types
 

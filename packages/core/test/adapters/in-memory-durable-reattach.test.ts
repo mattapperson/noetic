@@ -9,9 +9,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import type { StepSubprocessRequest } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
-import type { StepSubprocessRequest } from '../../src/types/subprocess-adapter';
 
 describe('in-memory adapter durability', () => {
   it('without storage: reattach returns null and listLive is ephemeral only', async () => {

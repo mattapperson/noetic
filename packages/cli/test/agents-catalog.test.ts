@@ -97,17 +97,22 @@ describe('built-in agent skills', () => {
     expect(explore.agentOmitClaudeMd).toBe(true);
   });
 
-  test('plan agent restricts tools to read-only set', () => {
+  test('plan agent restricts file tools to read-only set, plus spawn/coordination', () => {
     const plan = getAgent(BUILT_IN_SKILLS, 'plan');
     expect(plan).toBeDefined();
     if (!plan) {
       return;
     }
+    // Read-only file access; the planner may also spawn and coordinate
+    // teammates (agent-can-spawn) but never writes files.
     expect(plan.allowedTools).toEqual([
       'read',
       'grep',
       'find',
       'ls',
+      'agent',
+      'sendMessage',
+      'checkAgent',
     ]);
   });
 

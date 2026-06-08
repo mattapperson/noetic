@@ -5,7 +5,7 @@ import type {
   SubprocessHandle,
   SubprocessHandleMetadata,
   SubprocessRequest,
-} from '../types/subprocess-adapter';
+} from '@noetic-tools/types';
 import {
   clearManifest,
   listManifests,

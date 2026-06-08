@@ -8,8 +8,9 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, SettleResult, Step, Verdict } from '@noetic-tools/types';
 import { z } from 'zod';
-
 import {
   AgentHarness,
   branch,
@@ -21,9 +22,6 @@ import {
   tool,
   until,
 } from '../src/index';
-import type { Context } from '../src/types/context';
-import type { ContextMemory } from '../src/types/memory';
-import type { SettleResult, Step, Verdict } from '../src/types/step';
 import {
   assertOpenResponsesCompliance,
   createDynamicCallModel,

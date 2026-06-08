@@ -1,25 +1,26 @@
 # Memory Layer System
 
-> **Module:** `@noetic-tools/core` (sub-module at `core/src/memory/**`)
+> **Module:** `@noetic-tools/memory` (source at `packages/memory/src/**`); the `MemoryLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/memory.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
 > **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
 
 ## Module Boundary
 
-Memory is a sub-module of `@noetic-tools/core` at `core/src/memory/**`. It has a strict import boundary so that consumers who only use the memory contract (custom layer authors) can tree-shake the interpreter and runtime code out of their bundle.
+The memory layer system lives in `@noetic-tools/memory` (`packages/memory/src/**`), built on the dependency-free `@noetic-tools/types` foundation. It has a strict import boundary so that consumers who only use the memory contract (custom layer authors) can tree-shake the interpreter and runtime code out of their bundle.
 
-| Lives in `core/src/memory/**` | Lives elsewhere in `@noetic-tools/core` |
+| Owned by `@noetic-tools/types` | Lives in `@noetic-tools/memory` |
 |---|---|
-| `MemoryLayer` interface and all hook types | Layer lifecycle orchestration is in `memory/` too (`initLayers`, `recallLayers`, etc.) |
-| `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) lives in `memory/projector.ts` |
-| `BudgetConfig`, `Slot`, budget algorithm | `allocateBudgets` lives in `memory/budget.ts` |
-| `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) lives in `runtime/` |
-| `ProjectionPolicy` | Projector implementation lives in `memory/projector.ts` |
-| `contextToExecCtx` (Context → ExecutionContext mapping) | — |
+| `MemoryLayer` interface and all hook types | Layer lifecycle orchestration (`initLayers`, `recallLayers`, etc.) |
+| `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) in `projector.ts` |
+| `BudgetConfig`, `Slot` | budget algorithm; `allocateBudgets` in `budget.ts` |
+| `ExecutionContext` (memory-facing read-only view) | built-in layer factories under `memory/layers/` |
+| `ProjectionPolicy` | Projector implementation in `projector.ts` |
 
-**Boundary rule:** files under `core/src/memory/**` MUST NOT import from `core/src/interpreter/**` or `core/src/runtime/**`. Pure helpers needed by both sides (`frameworkCast`, `createMessage`, `estimateTokens`, `isAssistantMessage`, `isUserMessage`, `isOutputText`) live under `core/src/util/**`. This keeps the memory sub-module tree-shakable from the interpreter/runtime graph; importing a memory layer factory does not pull in `ContextImpl`.
+`Context` (the full execution object) lives in `@noetic-tools/core`'s `runtime/`; the `contextToExecCtx` mapping (Context → ExecutionContext) bridges core to the memory contract.
 
-**Custom layer authors** import from `@noetic-tools/core`. Their bundle contains only the memory contract, the layer factories they use, and the `util/` helpers — not the interpreter or runtime.
+**Boundary rule:** `@noetic-tools/memory` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. Pure helpers needed by both sides (`frameworkCast`, `createMessage`, `estimateTokens`, `isAssistantMessage`, `isUserMessage`, `isOutputText`) live in `@noetic-tools/types`. This keeps the memory package tree-shakable from the interpreter/runtime graph; importing a memory layer factory does not pull in `ContextImpl`.
+
+**Custom layer authors** import from `@noetic-tools/memory` (or, equivalently, from `@noetic-tools/core`, which re-exports it). Their bundle contains only the memory contract, the layer factories they use, and the shared `@noetic-tools/types` helpers — not the interpreter or runtime.
 
 ---
 

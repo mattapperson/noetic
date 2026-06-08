@@ -6,9 +6,10 @@
  *
  * Flow: User input → LLM loop → delegate tool call → sub-agent executes → result returned
  */
+
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { StepLoop, StepSpawn } from '@noetic-tools/types';
 import { react } from '../src/patterns/react';
-import type { ContextMemory } from '../src/types/memory';
-import type { StepLoop, StepSpawn } from '../src/types/step';
 import { createSyncDelegateTool } from './delegate-tools';
 
 //#region Agent Builder

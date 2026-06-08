@@ -1,4 +1,4 @@
-import type { Context } from '../types/context';
+import type { Context } from '@noetic-tools/types';
 import type { EventBroadcaster } from './event-broadcaster';
 
 //#region Types

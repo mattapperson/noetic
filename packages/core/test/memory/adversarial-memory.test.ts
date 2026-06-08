@@ -8,28 +8,28 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { allocateBudgets } from '../../src/memory/budget';
-import { findFunctionCall } from '../../src/memory/function-call-utils';
+import type {
+  DurableTaskState,
+  ExecutionContext,
+  MemoryLayer,
+  ObservationalState,
+  WorkingMemoryState,
+} from '@noetic-tools/memory';
 import {
+  allocateBudgets,
   createLayerStateStore,
   disposeLayers,
+  durableTaskState,
+  findFunctionCall,
   initLayers,
+  observationalMemory,
   recallLayers,
+  steering,
   storeLayers,
-} from '../../src/memory/layer-lifecycle';
-import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
-import { durableTaskState } from '../../src/memory/layers/durable-task-state';
-import type { ObservationalState } from '../../src/memory/layers/observational-memory';
-import { observationalMemory } from '../../src/memory/layers/observational-memory';
-import { steering } from '../../src/memory/layers/steering';
-import type { WorkingMemoryState } from '../../src/memory/layers/working-memory';
-import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { LLMResponse } from '../../src/types/common';
-import type { Item } from '../../src/types/items';
-import type { ExecutionContext, MemoryLayer } from '../../src/types/memory';
-import type { SteeringState } from '../../src/types/steering';
-import { SteeringAction } from '../../src/types/steering';
-import { frameworkCast } from '../../src/util/framework-cast';
+  workingMemory,
+} from '@noetic-tools/memory';
+import type { Item, LLMResponse, SteeringState } from '@noetic-tools/types';
+import { frameworkCast, SteeringAction } from '@noetic-tools/types';
 import {
   assistantMessage,
   isRecord,

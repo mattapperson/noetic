@@ -25,7 +25,19 @@ interface PackTarget {
   out: string;
 }
 
+// Order matters: @noetic-tools/core is built with tsc (its workspace deps are
+// NOT bundled), so it imports @noetic-tools/types and @noetic-tools/memory at
+// runtime. Build/pack those first so core's build resolves them and the
+// external consumer can install them as real tarballs.
 const TARGETS: ReadonlyArray<PackTarget> = [
+  {
+    dir: 'packages/types',
+    out: 'noetic-types.tgz',
+  },
+  {
+    dir: 'packages/memory',
+    out: 'noetic-memory.tgz',
+  },
   {
     dir: 'packages/core',
     out: 'noetic-core.tgz',
@@ -45,9 +57,14 @@ async function packTarget(target: PackTarget): Promise<void> {
   await $`bun run build`.cwd(pkgDir);
 
   // Apply the same manifest rewrite the release pipeline uses (publishConfig
-  // entry points → dist, strip workspace devDeps), then restore afterwards so
-  // the working tree stays clean. This makes the tarball resolve like npm's.
+  // entry points → dist, strip workspace devDeps, pin workspace runtime deps),
+  // then restore afterwards so the working tree stays clean. This makes the
+  // tarball resolve like npm's.
   const originalManifest = await readFile(manifestPath, 'utf8');
+  // Snapshot existing tarballs so we can identify exactly the one npm pack
+  // creates for THIS target — multiple targets share VENDOR_DIR, so filtering
+  // by "non-stable name" is ambiguous once earlier tarballs are renamed.
+  const before = new Set((await readdir(VENDOR_DIR)).filter((name) => name.endsWith('.tgz')));
   try {
     console.log(`• preparing ${target.dir} manifest for publish`);
     await $`bun ${prepareScript} ${pkgDir}`.cwd(REPO_ROOT);
@@ -58,14 +75,16 @@ async function packTarget(target: PackTarget): Promise<void> {
     await writeFile(manifestPath, originalManifest);
   }
 
-  // npm pack writes `<name>-<version>.tgz`; normalize to the stable name.
+  // npm pack writes `<name>-<version>.tgz`; the new entry is the one absent
+  // from the pre-pack snapshot. Normalize it to the stable name.
   const produced = (await readdir(VENDOR_DIR)).filter(
-    (name) => name.endsWith('.tgz') && name !== target.out,
+    (name) => name.endsWith('.tgz') && !before.has(name),
   );
-  if (produced.length === 0) {
-    throw new Error(`npm pack produced no tarball for ${target.dir}`);
+  if (produced.length !== 1) {
+    throw new Error(
+      `expected exactly one new tarball for ${target.dir}, got ${JSON.stringify(produced)}`,
+    );
   }
-  // The only non-stable tarball present is the one we just produced.
   await rename(join(VENDOR_DIR, produced[0]), join(VENDOR_DIR, target.out));
 }
 

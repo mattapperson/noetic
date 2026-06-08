@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import type { Channel, InputMessageItem } from '@noetic-tools/types';
 import { z } from 'zod';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { Channel } from '../../src/types/channel';
-import type { InputMessageItem } from '../../src/types/items';
 import { makeMockHarness } from '../_helpers';
 
 function makeTestItem(): InputMessageItem {

@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, StepBranch } from '@noetic-tools/types';
 import { executeBranch } from '../../src/interpreter/execute-control';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { Context } from '../../src/types/context';
-import type { ContextMemory } from '../../src/types/memory';
-import type { StepBranch } from '../../src/types/step';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
 describe('executeBranch', () => {

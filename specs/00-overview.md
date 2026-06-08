@@ -19,6 +19,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Packages
 
 ```
+@noetic-tools/memory  →  @noetic-tools/types
+        ↑                        ↑
 @noetic-tools/core  ←  @noetic/eval
       ↑
       ├── @noetic-tools/platform-node
@@ -26,7 +28,11 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
       └── @noetic/mirage
 ```
 
-- **`@noetic-tools/core`** — Step primitives, execution infrastructure, and the memory system. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Memory lives as a sub-module at `core/src/memory/**` containing the `MemoryLayer` contract, built-in layer factories, and scope/storage helpers. Custom layer authors import from `@noetic-tools/core`; the memory sub-module is tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
+- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `MemoryLayer` contract (`types/memory.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
+
+- **`@noetic-tools/memory`** — The memory layer system: lifecycle, budget allocation, projector/view assembly (`assembleView`, `allocateBudgets`), scope/storage helpers, and the built-in layer factories. Depends only on `@noetic-tools/types`; re-exports the `MemoryLayer` contract so it is the one-stop import for memory-layer authoring.
+
+- **`@noetic-tools/core`** — Step primitives and execution infrastructure. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Depends on `@noetic-tools/types` and `@noetic-tools/memory` and re-exports their public surface, so every symbol importable from `@noetic-tools/core` (including the `MemoryLayer` contract and built-in layers) stays importable from it. The memory subsystem remains tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
 
 - **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
@@ -44,7 +50,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 2. **Execution infrastructure** (`07-context-and-event-log`, `08-agent-harness`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable agent harness backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with the LLM provider.
 
-3. **Memory system** (`11-memory-layer-system`, `12-builtin-memory-layers`) — The `MemoryLayer` contract, lifecycle hook types, scope system, storage adapter contract, and built-in layer factories. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** memory source files MUST NOT import from `interpreter/` or `runtime/`; shared pure helpers live under `util/`. This keeps memory tree-shakable from the rest of the package.
+3. **Memory system** (`11-memory-layer-system`, `12-builtin-memory-layers`) — The `MemoryLayer` contract (owned by `@noetic-tools/types`), lifecycle hook types, scope system, storage adapter contract, and built-in layer factories, all living in `@noetic-tools/memory`. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** `@noetic-tools/memory` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. This keeps memory tree-shakable and free of any transitive dependency on the interpreter or runtime.
 
 **Patterns** (`13-patterns`) are 15-30 line compositions of primitives. They prove the primitives are sufficient; they are not framework magic.
 
@@ -84,14 +90,20 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
                     \      /                 |
                    08-agent-harness           |
                        |                     |
-                   memory (11, 12) ──────────+
-                       |
-                   util/ (pure helpers shared by memory + interpreter + runtime)
-                       |
                   13-patterns (uses all primitives)
+                       |
+                       ↓ re-exports
+── @noetic-tools/memory ──────────────────────────────────────────────
+                   memory (11, 12)
+                       |
+                       ↓ depends on
+── @noetic-tools/types ───────────────────────────────────────────────
+            Item, LlmProviderConfig, ExecutionContext,
+            FsAdapter/ShellAdapter/SubprocessAdapter,
+            NoeticErrorImpl, MemoryLayer contract
 
 ── @noetic/eval ────────────────────────────────────────────────
                 17-eval-and-optimization
 ```
 
-The `memory` node has no edges into `interpreter/` or `runtime/` — see the boundary rule in the Architecture section above. Pure helpers used by both sides live under `util/`.
+`@noetic-tools/memory` depends only on `@noetic-tools/types` and has no edge into `@noetic-tools/core` — see the boundary rule in the Architecture section above. `@noetic-tools/core` re-exports the public surface of both so its entry points are unchanged for consumers.

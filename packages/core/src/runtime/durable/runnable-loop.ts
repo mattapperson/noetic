@@ -31,9 +31,13 @@
  * hook.
  */
 
-import type { HarnessResponse } from '../../types/harness-result';
-import type { ExecuteInput, Item } from '../../types/items';
-import type { ExecuteOptions, SessionScope } from '../../types/runtime';
+import type {
+  ExecuteInput,
+  ExecuteOptions,
+  HarnessResponse,
+  Item,
+  SessionScope,
+} from '@noetic-tools/types';
 import type { DetachedSignal } from './detached-signal';
 
 //#region Types

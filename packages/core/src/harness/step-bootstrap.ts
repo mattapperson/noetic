@@ -23,8 +23,8 @@
  * never sees a silent crash.
  */
 
+import type { StepSubprocessOverrides } from '@noetic-tools/types';
 import { lookupStep } from '../runtime/step-registry';
-import type { StepSubprocessOverrides } from '../types/subprocess-adapter';
 import { AgentHarness } from './agent-harness';
 
 //#region Types

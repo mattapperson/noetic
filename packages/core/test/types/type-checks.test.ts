@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import type { ExtendedItem } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { SettleResult } from '../../src/index';
 import { Slot } from '../../src/index';
-import type { ExtendedItem } from '../../src/types/items';
 
 describe('Type definitions', () => {
   describe('Memory types', () => {

@@ -11,7 +11,7 @@
  * than reaching for the harness method inline.
  */
 
-import type { Item } from '../../types/items';
+import type { Item } from '@noetic-tools/types';
 
 //#region Types
 

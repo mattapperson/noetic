@@ -1,6 +1,5 @@
-import type { StepMeta, TokenUsage } from './common';
-import type { Context } from './context';
-import type { ContextMemory } from './memory';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, StepMeta, TokenUsage } from '@noetic-tools/types';
 
 /**
  * Internal-only interface for interpreter code that needs to mutate Context fields.

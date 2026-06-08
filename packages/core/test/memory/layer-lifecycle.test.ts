@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { z } from 'zod';
+import type { MemoryLayer } from '@noetic-tools/memory';
 import {
   completeLayers,
   createLayerStateStore,
@@ -11,10 +11,9 @@ import {
   resolveLayerBudgets,
   runAppendPipeline,
   storeLayers,
-} from '../../src/memory/layer-lifecycle';
-import type { LLMResponse } from '../../src/types/common';
-import type { Item } from '../../src/types/items';
-import type { MemoryLayer } from '../../src/types/memory';
+} from '@noetic-tools/memory';
+import type { Item, LLMResponse } from '@noetic-tools/types';
+import { z } from 'zod';
 import { getItemId, makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 describe('layer-lifecycle', () => {

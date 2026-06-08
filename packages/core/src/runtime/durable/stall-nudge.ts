@@ -18,7 +18,7 @@
  * the config.
  */
 
-import type { InputMessageItem } from '../../types/items';
+import type { InputMessageItem } from '@noetic-tools/types';
 import type { DetachedSignal } from './detached-signal';
 import type { AfterFirstTurnContext, RunnableLoopHarness } from './runnable-loop';
 

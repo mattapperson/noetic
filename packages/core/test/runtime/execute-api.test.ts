@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Step } from '@noetic-tools/types';
+import { isNoeticConfigError } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
 import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
 
 const echoStep: Step<ContextMemory, string, string> = {

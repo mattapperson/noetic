@@ -1,6 +1,6 @@
-import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
-import type { Step, StepProvide } from '../types/step';
+import type { ContextMemory, MemoryConfig, MemoryLayer } from '@noetic-tools/memory';
+import type { Step, StepProvide } from '@noetic-tools/types';
+import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 /**

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import type { Item } from '@noetic-tools/types';
 import type { SessionSeedHarness } from '../../src/runtime/durable/session-seed';
 import { seedFromItems } from '../../src/runtime/durable/session-seed';
-import type { Item } from '../../src/types/items';
 
 interface SeedCall {
   readonly threadId: string;

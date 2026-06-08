@@ -2,16 +2,12 @@
  * Control-flow step handlers: branch, fork, loop, every.
  */
 
-import { isNoeticError, NoeticErrorImpl } from '../errors/noetic-error';
-import type { ChannelStore } from '../runtime/channel-store';
-import { ContextImpl } from '../runtime/context-impl';
-import { snapshotCwdState } from '../runtime/cwd-helpers';
-import type { Channel } from '../types/channel';
-import type { Context } from '../types/context';
-import type { NoeticError } from '../types/error';
-import type { ContextMemory } from '../types/memory';
+import type { ContextMemory } from '@noetic-tools/memory';
 import type {
+  Channel,
+  Context,
   ExecuteStepFn,
+  NoeticError,
   SettleResult,
   Snapshot,
   Step,
@@ -23,9 +19,11 @@ import type {
   StepForkSettle,
   StepLoop,
   Verdict,
-} from '../types/step';
-import { frameworkCast } from '../util/framework-cast';
-import { createMessage } from '../util/message-helpers';
+} from '@noetic-tools/types';
+import { createMessage, frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import type { ChannelStore } from '../runtime/channel-store';
+import { ContextImpl } from '../runtime/context-impl';
+import { snapshotCwdState } from '../runtime/cwd-helpers';
 import { cloneWithGuard } from './clone-guard';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 

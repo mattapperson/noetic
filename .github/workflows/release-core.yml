@@ -44,15 +44,25 @@ jobs:
         run: bunx biome check packages/core
 
       - name: Typecheck
-        run: bun --cwd packages/core run typecheck
+        run: bun --cwd=packages/core run typecheck
+
+      # @noetic-tools/core depends on @noetic-tools/types and @noetic-tools/memory.
+      # Build those dists first so core's own build (run by `prepublishOnly`) and
+      # the Node ESM smoke test can resolve them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/memory run build
 
       - name: Build
-        run: bun --cwd packages/core run build
+        run: bun --cwd=packages/core run build
 
       # semantic-release runs `npm version`, which builds the full workspace tree
       # and chokes on sibling packages' `workspace:*` deps (EUNSUPPORTEDPROTOCOL).
       # Drop the root `workspaces` field so npm treats core as a standalone package.
-      # The runner is ephemeral and this file is never committed back.
+      # core's own `workspace:*` deps (@noetic-tools/types, @noetic-tools/memory) are
+      # pinned to concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts). The runner is ephemeral; not committed back.
       - name: Detach package from workspace for npm
         run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
 

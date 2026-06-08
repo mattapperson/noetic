@@ -4,7 +4,7 @@ import type {
   StepSubprocessRequest,
   SubprocessHandleMetadata,
   SubprocessRequest,
-} from '../../types/subprocess-adapter';
+} from '@noetic-tools/types';
 
 //#region Time
 

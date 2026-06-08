@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import {
-  createLayerStateStore,
-  initLayers,
-  returnLayers,
-  spawnLayers,
-} from '../../src/memory/layer-lifecycle';
-import type { MemoryLayer } from '../../src/types/memory';
+import type { MemoryLayer } from '@noetic-tools/memory';
+import { createLayerStateStore, initLayers, returnLayers, spawnLayers } from '@noetic-tools/memory';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 type DataState = {

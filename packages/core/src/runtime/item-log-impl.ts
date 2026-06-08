@@ -1,7 +1,5 @@
-import type { ItemSchemaRegistry } from '../schemas/item';
-import { defaultItemSchemaRegistry } from '../schemas/item';
-import type { ItemLog } from '../types/context-parts/item-log';
-import type { Item } from '../types/items';
+import type { Item, ItemLog, ItemSchemaRegistry } from '@noetic-tools/types';
+import { defaultItemSchemaRegistry } from '@noetic-tools/types';
 
 export class ItemLogImpl implements ItemLog {
   private readonly _items: Item[] = [];

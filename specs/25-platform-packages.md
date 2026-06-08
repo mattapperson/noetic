@@ -172,12 +172,12 @@ Memory layer boundaries extend to forbid importing platform packages directly:
 
 ```toml
 [[boundaries]]
-from = "packages/core/src/memory/**"
+from = "packages/memory/src/**"
 to = "packages/platform-node/**"
 reason = "memory layers are platform-independent; platform packages are platform-specific"
 
 [[boundaries]]
-from = "packages/core/src/memory/**"
+from = "packages/memory/src/**"
 to = "packages/platform-browser/**"
 reason = "memory layers are platform-independent; platform packages are platform-specific"
 ```

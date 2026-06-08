@@ -1,4 +1,4 @@
-import type { Until, Verdict } from '../types/step';
+import type { Until, Verdict } from '@noetic-tools/types';
 
 /**
  * Termination predicate that never stops the loop. Use with `every`-like

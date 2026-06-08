@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { LLMResponse, Step, StreamEvent } from '@noetic-tools/types';
+import { frameworkCast, ItemSchemaRegistry, isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { tool } from '../../src/builders/tool-builder';
-import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import {
@@ -10,12 +12,6 @@ import {
   filterReasoningStream,
   filterTextStream,
 } from '../../src/runtime/session-streams';
-import { ItemSchemaRegistry } from '../../src/schemas/item';
-import type { LLMResponse } from '../../src/types/common';
-import type { StreamEvent } from '../../src/types/harness-result';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
-import { frameworkCast } from '../../src/util/framework-cast';
 import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
 
 //#region Helpers
