@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { PlanState } from '../../../src/memory/layers/plan';
-import { PlanPhase, planMemory } from '../../../src/memory/layers/plan';
-import type { FlowNode, LlmFlowNode } from '../../../src/patterns/flow';
-import { frameworkCast } from '../../../src/util/framework-cast';
+import type { FlowNode, LlmFlowNode, PlanState } from '@noetic-tools/memory';
+import { PlanPhase, planMemory } from '@noetic-tools/memory';
+import { frameworkCast } from '@noetic-tools/types';
 import { makeCtx, makeItemLog } from '../../_helpers';
 
 //#region Fixtures (mirror plan.test.ts)

@@ -1,19 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { DurableTaskState } from '@noetic-tools/memory';
 import {
   beforeToolCallLayers,
   createLayerStateStore,
+  durableTaskState,
   initLayers,
   mostRestrictive,
+  steering,
   storeLayers,
-} from '../../../src/memory/layer-lifecycle';
-import type { DurableTaskState } from '../../../src/memory/layers/durable-task-state';
-import { durableTaskState } from '../../../src/memory/layers/durable-task-state';
-import { steering } from '../../../src/memory/layers/steering';
-import type { MemoryLayer } from '../../../src/types/memory';
-import type { SteeringConfig, SteeringRule } from '../../../src/types/steering';
-import { SteeringAction } from '../../../src/types/steering';
-import { frameworkCast } from '../../../src/util/framework-cast';
+} from '@noetic-tools/memory';
+import type { MemoryLayer, SteeringConfig, SteeringRule } from '@noetic-tools/types';
+import { frameworkCast, SteeringAction } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeLLMResponse, makeStorage } from '../../_helpers';
 
 function asLayer(layer: unknown): MemoryLayer {

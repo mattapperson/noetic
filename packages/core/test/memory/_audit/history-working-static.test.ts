@@ -7,18 +7,17 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { z } from 'zod';
 import {
   createLayerStateStore,
+  historyWindow,
   initLayers,
   recallLayers,
-} from '../../../src/memory/layer-lifecycle';
-import { historyWindow } from '../../../src/memory/layers/history-window';
-import { staticContent } from '../../../src/memory/layers/static-content';
-import { workingMemory } from '../../../src/memory/layers/working-memory';
-import type { Item } from '../../../src/types/items';
-import type { MemoryLayer } from '../../../src/types/memory';
-import { frameworkCast } from '../../../src/util/framework-cast';
+  staticContent,
+  workingMemory,
+} from '@noetic-tools/memory';
+import type { Item, MemoryLayer } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
+import { z } from 'zod';
 import {
   getItemId,
   makeCtx,

@@ -4,13 +4,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   createLayerStateStore,
+  fileReference,
   initLayers,
   runAppendPipeline,
-} from '../../../src/memory/layer-lifecycle';
-import { fileReference } from '../../../src/memory/layers/file-reference';
-import type { Item } from '../../../src/types/items';
-import type { MemoryLayer, RecallParams } from '../../../src/types/memory';
-import { estimateTokens } from '../../../src/util/message-helpers';
+} from '@noetic-tools/memory';
+import type { Item, MemoryLayer, RecallParams } from '@noetic-tools/types';
+import { estimateTokens } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeMessage, makeStorage } from '../../_helpers';
 
 //#region Local helpers (mirrors file-reference.test.ts)

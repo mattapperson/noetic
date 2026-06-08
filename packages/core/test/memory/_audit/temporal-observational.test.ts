@@ -13,11 +13,9 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { observationalMemory } from '../../../src/memory/layers/observational-memory';
-import { temporalMemory } from '../../../src/memory/layers/temporal';
-import type { Item } from '../../../src/types/items';
-import { frameworkCast } from '../../../src/util/framework-cast';
-import { estimateTokens } from '../../../src/util/message-helpers';
+import { observationalMemory, temporalMemory } from '@noetic-tools/memory';
+import type { Item } from '@noetic-tools/types';
+import { estimateTokens, frameworkCast } from '@noetic-tools/types';
 import { assistantMessage, makeCtx, makeItemLog, makeScopedStorage } from '../../_helpers';
 
 // A ~25-token chunk of text used to build oversized recall payloads.

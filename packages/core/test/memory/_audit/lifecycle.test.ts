@@ -10,8 +10,9 @@
 
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { allocateBudgets } from '../../../src/memory/budget';
 import {
+  allocateBudgets,
+  assembleView,
   completeLayers,
   createLayerStateStore,
   disposeLayers,
@@ -21,10 +22,8 @@ import {
   runAppendPipeline,
   spawnLayers,
   storeLayers,
-} from '../../../src/memory/layer-lifecycle';
-import { assembleView } from '../../../src/memory/projector';
-import type { Item } from '../../../src/types/items';
-import type { MemoryLayer } from '../../../src/types/memory';
+} from '@noetic-tools/memory';
+import type { Item, MemoryLayer } from '@noetic-tools/types';
 import {
   makeCtx,
   makeItemLog,
