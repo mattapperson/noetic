@@ -52,6 +52,8 @@ The CLI installs `historyWindow` only when `AgentConfig.history.maxItems` is set
 - `noetic.config.ts`:
 
   ```ts
+  import type { AgentConfig } from '@noetic-tools/cli';
+
   export default {
     // ...
     history: { maxItems: 40 },

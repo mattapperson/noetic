@@ -1,3 +1,15 @@
+## @noetic-tools/core-v0.2.1 (2026-06-07)
+
+* Combine these commits into a single commit message. ([e41abb2](https://github.com/mattapperson/noetic/commit/e41abb2))
+
+## @noetic-tools/core-v0.2.0 (2026-06-05)
+
+* feat(evals): add LongMemEval harness and temporal memory layer ([3df68cf](https://github.com/mattapperson/noetic/commit/3df68cf))
+
+## @noetic-tools/core-v0.1.2 (2026-05-31)
+
+* ci: default unsignalled core commits to a patch release ([afc473d](https://github.com/mattapperson/noetic/commit/afc473d))
+
 ## @noetic-tools/core-v0.1.1 (2026-05-30)
 
 * fix(docs): correct model ids and Node ESM resolution ([3804935](https://github.com/mattapperson/noetic/commit/3804935))

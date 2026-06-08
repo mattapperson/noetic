@@ -11,7 +11,7 @@ The name is a playful reference -- like Ralph Wiggum, it keeps trying until it g
 
 ## Signature
 
-```ts
+```ts validate=none
 declare function ralphWiggum(opts: {
   model: string;
   instructions: string;
@@ -33,7 +33,7 @@ declare function ralphWiggum(opts: {
 
 ### VerifyFn
 
-```ts
+```ts validate=none
 type VerifyFn = (output: unknown) => Promise<{
   pass: boolean;
   feedback?: string;

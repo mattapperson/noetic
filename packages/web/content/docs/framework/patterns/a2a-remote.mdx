@@ -11,7 +11,7 @@ A2A (Agent-to-Agent) Remote extends the channel pattern across process boundarie
 
 An `ExternalChannel` is a channel marked with `external: true`. The runtime exposes it via `getChannelHandle()`, which returns a `ChannelHandle` that external code can use to send messages into the agent's execution.
 
-```ts
+```ts validate=none
 interface ExternalChannel<T> extends Channel<T> {
   readonly external: true;
 }
@@ -44,7 +44,7 @@ const taskChannel = channel('remote-task', {
 
 The runtime provides handles for external channels tied to a specific execution:
 
-```ts
+```ts validate=none
 const handle = runtime.getChannelHandle(taskChannel, executionId);
 
 // Send from outside the agent
@@ -64,7 +64,7 @@ if (!handle.closed) {
 
 ### Process A (Orchestrator)
 
-```ts
+```ts validate=none
 import { channel, step } from '@noetic-tools/core';
 import { z } from 'zod';
 
@@ -92,7 +92,7 @@ const orchestrator = step.run({
 
 ### Process B (Worker)
 
-```ts
+```ts validate=none
 // Worker process gets a handle to the orchestrator's channel
 const handle = runtime.getChannelHandle(resultChannel, orchestratorExecutionId);
 

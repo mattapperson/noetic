@@ -40,7 +40,7 @@ const searchTool = {
   description: 'Search the web for information',
   input: z.object({ query: z.string() }),
   output: z.object({ result: z.string() }),
-  execute: async (args) => {
+  execute: async (args: { query: string }) => {
     return { result: `Results for: ${args.query}` };
   },
 };

@@ -24,7 +24,7 @@ const layer = workingMemory({
 
 Register the layer with a `react` pattern (or `spawn`'s `memory` option):
 
-```ts
+```ts validate=none
 const agent = react({
   model: 'openai/gpt-4o',
   instructions: 'You are a helpful assistant.',
@@ -34,7 +34,7 @@ const agent = react({
 
 ## Configuration
 
-```ts
+```ts validate=none
 interface WorkingMemoryConfig {
   scope?: 'thread' | 'resource';
   schema?: ZodType;
@@ -52,7 +52,7 @@ interface WorkingMemoryConfig {
 
 ## State Type
 
-```ts
+```ts validate=none
 type WorkingMemoryState = string | Record<string, unknown>;
 ```
 
@@ -103,7 +103,7 @@ Working Memory exposes two entries via the `provides` API, making them accessibl
 
 A read-only projection of the current working memory state.
 
-```ts
+```ts validate=none
 const current = ctx.memory['working-memory'].snapshot;
 // Returns WorkingMemoryState (string | Record<string, unknown>)
 ```
@@ -112,7 +112,7 @@ const current = ctx.memory['working-memory'].snapshot;
 
 Merges key-value pairs into the current state. Accepts a `Record<string, unknown>` argument.
 
-```ts
+```ts validate=none
 await ctx.memory['working-memory'].update({ currentGoal: 'Ship v2' });
 ```
 

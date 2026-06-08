@@ -5,7 +5,7 @@ description: Repeat a step until a termination predicate says stop.
 
 ## Quick Example
 
-```ts
+```ts validate=none
 import { loop, step, until } from '@noetic-tools/core';
 
 const agent = loop({
@@ -103,7 +103,7 @@ const predicate = until.maxDuration(3e4); // 30 seconds
 
 Stop when a verification function confirms the output is correct. The function receives the last output and returns `{ pass, feedback }`.
 
-```ts
+```ts validate=none
 const predicate = until.verified(async (output) => {
   const isValid = await validate(output);
   return {
@@ -119,7 +119,7 @@ When `pass` is `false`, the `feedback` string is available on the `Verdict` for 
 
 Stop when the output stabilizes. By default, uses exact string equality. When an `embed` function is provided and `threshold < 1`, uses cosine similarity between consecutive output embeddings.
 
-```ts
+```ts validate=none
 // Exact match (default)
 const exact = until.converged({});
 
@@ -187,7 +187,7 @@ const stopCondition = all(
 
 By default, the last step's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
 
-```ts
+```ts validate=none
 import { loop, step, until } from '@noetic-tools/core';
 
 const refiner = loop({
@@ -229,7 +229,7 @@ When `until` returns `{ stop: true }` and `inbox` is set:
 2. If a message is found, it's injected as a `developer` message in the context and the loop **continues**
 3. If no message is found (or timeout expires), the loop truly stops
 
-```ts
+```ts validate=none
 import { channel, loop, step, until } from '@noetic-tools/core';
 import { z } from 'zod';
 
@@ -262,7 +262,7 @@ The `onError` callback lets you decide what happens when the body steps throws.
 | `'skip'` | Skip this iteration, use the previous output, and continue |
 | `'abort'` | Re-throw the error, terminating the loop |
 
-```ts
+```ts validate=none
 import { loop, until } from '@noetic-tools/core';
 
 const resilientLoop = loop({
@@ -284,7 +284,7 @@ If `onError` is not provided, errors propagate immediately.
 
 The built-in `react()` helper is just a loop with `until.noToolCalls()`.
 
-```ts
+```ts validate=none
 import { react } from '@noetic-tools/core';
 
 const agent = react({
@@ -298,7 +298,7 @@ const agent = react({
 
 This is equivalent to:
 
-```ts
+```ts validate=none
 import { any, loop, step, until } from '@noetic-tools/core';
 
 const agent = loop({

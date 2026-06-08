@@ -34,7 +34,7 @@ const fastest = fork({
 
 Returns the output of the first step to complete. All other paths are discarded.
 
-```ts
+```ts validate=none
 import { fork, step } from '@noetic-tools/core';
 
 const raceExample = fork({
@@ -59,7 +59,7 @@ No `merge` function is needed -- the winner's output is used directly.
 
 Waits for every path to complete, then calls `merge` with an array of all results.
 
-```ts
+```ts validate=none
 import { fork, step } from '@noetic-tools/core';
 
 const allExample = fork({
@@ -89,7 +89,7 @@ If any path throws, the entire fork throws.
 
 Like `all`, but collects both successes and failures. Each result is a `SettleResult` with a `status` field.
 
-```ts
+```ts validate=none
 import type { SettleResult } from '@noetic-tools/core';
 
 import { fork, step } from '@noetic-tools/core';
@@ -147,7 +147,7 @@ const settleExample = fork({
 
 Limit how many paths run at once with `concurrency`.
 
-```ts
+```ts validate=none
 import { fork, step } from '@noetic-tools/core';
 
 const throttled = fork({

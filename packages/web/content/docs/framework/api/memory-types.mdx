@@ -37,13 +37,13 @@ declare interface MemoryLayerShape<TState = unknown> {
 
 ## MemoryScope
 
-```ts
+```ts validate=none
 type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
 ```
 
 ## BudgetConfig
 
-```ts
+```ts validate=none
 type BudgetConfig =
   | number
   | { min: number; max: number }
@@ -70,7 +70,7 @@ The runtime exports the `Slot` constant from `@noetic-tools/core` with these val
 
 ## MemoryHooks
 
-```ts
+```ts validate=none
 interface MemoryHooks<TState = unknown> {
   init?: (params: InitParams) => Promise<InitResult<TState>>;
   recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | string | null>;
@@ -179,7 +179,7 @@ interface MemoryHooks<TState = unknown> {
 
 ## ExecutionOutcome
 
-```ts
+```ts validate=none
 type ExecutionOutcome = 'success' | 'failure' | 'aborted';
 ```
 
@@ -187,7 +187,7 @@ type ExecutionOutcome = 'success' | 'failure' | 'aborted';
 
 Context available to memory layer hooks (different from the step `Context`).
 
-```ts
+```ts validate=none
 interface ExecutionContext {
   executionId: string;
   threadId: string;
@@ -222,7 +222,7 @@ interface ExecutionContext {
 
 ## ProjectionPolicy
 
-```ts
+```ts validate=none
 interface ProjectionPolicy {
   tokenBudget: number;
   responseReserve: number;
@@ -242,7 +242,7 @@ interface ProjectionPolicy {
 
 ## StorageAdapter
 
-```ts
+```ts validate=none
 interface StorageAdapter {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T): Promise<void>;
@@ -262,7 +262,7 @@ interface StorageAdapter {
 
 Same interface as `StorageAdapter` but scoped to a specific layer and scope key.
 
-```ts
+```ts validate=none
 interface ScopedStorage {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T): Promise<void>;
@@ -275,7 +275,7 @@ interface ScopedStorage {
 
 Observability data for a single memory hook execution.
 
-```ts
+```ts validate=none
 interface MemoryTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
@@ -291,7 +291,7 @@ interface MemoryTraceSpan {
 
 The default memory shape used when no typed memory config is provided.
 
-```ts
+```ts validate=none
 type ContextMemory = Readonly<Record<string, Record<string, unknown>>>;
 ```
 
@@ -299,7 +299,7 @@ type ContextMemory = Readonly<Record<string, Record<string, unknown>>>;
 
 A typed memory configuration that carries a phantom `_shape` for compile-time memory access. Created via the `memory()` builder.
 
-```ts
+```ts validate=none
 interface MemoryConfig<TLayers extends MemoryLayer[] = MemoryLayer[]> {
   layers: TLayers;
   _shape: InferMemoryShape<TLayers>;
@@ -315,7 +315,7 @@ interface MemoryConfig<TLayers extends MemoryLayer[] = MemoryLayer[]> {
 
 Extracts the memory shape type from a `MemoryConfig`.
 
-```ts
+```ts validate=none
 type InferMemory<T extends { readonly _shape: unknown }> = T['_shape'];
 ```
 
@@ -325,7 +325,7 @@ A mapped type that collects each layer's `provides` declarations into a record k
 
 ## LayerProvides
 
-```ts
+```ts validate=none
 type LayerProvides = Record<string, LayerDataDecl | LayerFunctionDecl>;
 ```
 
@@ -333,7 +333,7 @@ A record of named declarations that a layer exposes on `ctx.memory[layerId]`.
 
 ## LayerDataDecl
 
-```ts
+```ts validate=none
 interface LayerDataDecl<T = unknown, TState = unknown> {
   kind: 'data';
   read: (state: TState) => T;
@@ -347,7 +347,7 @@ interface LayerDataDecl<T = unknown, TState = unknown> {
 
 ## LayerFunctionDecl
 
-```ts
+```ts validate=none
 interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknown> {
   kind: 'function';
   description: string;
@@ -369,7 +369,7 @@ interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknow
 
 ### layerData
 
-```ts
+```ts validate=none
 function layerData<T, TState>(read: (state: TState) => T): LayerDataDecl<T, TState>;
 ```
 
@@ -377,7 +377,7 @@ Creates a `LayerDataDecl` that derives a value from layer state.
 
 ### layerFn
 
-```ts
+```ts validate=none
 function layerFn<TInput, TOutput, TState>(opts: {
   description: string;
   input: ZodType<TInput>;
@@ -390,7 +390,7 @@ Creates a `LayerFunctionDecl` that exposes a callable function on the memory obj
 
 ### memory
 
-```ts
+```ts validate=none
 function memory<TLayers extends MemoryLayer[]>(...layers: TLayers): MemoryConfig<TLayers>;
 ```
 

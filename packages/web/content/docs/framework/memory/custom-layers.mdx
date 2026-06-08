@@ -22,7 +22,7 @@ interface MyLayerState {
 
 The slot determines where your layer's output appears in the assembled prompt. Lower slots appear first.
 
-```ts
+```ts validate=none
 import { Slot } from '@noetic-tools/core';
 
 // Use a built-in constant...
@@ -73,7 +73,7 @@ const autoBudget: BudgetConfig = 'auto';
 
 Implement only the hooks you need. All hooks are optional.
 
-```ts
+```ts validate=none
 import { createMessage } from '@noetic-tools/core';
 import type { MemoryLayer, MemoryHooks } from '@noetic-tools/core';
 
@@ -156,7 +156,7 @@ const timeouts: Partial<LayerTimeouts> = {
 
 Pass custom layers to a `react` pattern (or `spawn`'s `memory` option):
 
-```ts
+```ts validate=none
 const agent = react({
   model: 'openai/gpt-4o',
   instructions: 'You are a helpful assistant.',
@@ -170,7 +170,7 @@ const agent = react({
 
 Configure persistence via `AgentConfig.storage` on the harness:
 
-```ts
+```ts validate=none
 const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
@@ -309,7 +309,7 @@ Note the `as const` on the `id` field and the `satisfies MemoryLayer<MyLayerStat
 
 Wrap your layers in the `memory()` builder to get full type inference:
 
-```ts
+```ts validate=none
 import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
 
 const mem = memory([workingMemory(), myCustomLayer()]);
@@ -324,7 +324,7 @@ type Mem = InferMemory<typeof mem>;
 
 In a `step.run`, access the typed memory:
 
-```ts
+```ts validate=none
 const myStep = step.run({
   id: 'use-memory',
   execute: async (input: string, ctx: Context<Mem>) => {

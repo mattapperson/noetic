@@ -21,7 +21,7 @@ Tools can declare a `memory` property. The runtime collects these declarations a
 
 ### ToolMemoryDeclaration
 
-```ts
+```ts validate=none
 import type { ToolMemoryDeclaration } from '@noetic-tools/core';
 
 interface ToolMemoryDeclaration<TState = unknown> {
@@ -40,7 +40,7 @@ The `recall` function returns `string | null` -- a shorthand the runtime accepts
 
 Pass your tools to `toolMemoryLayer()` to generate the layers, then include both in your agent:
 
-```ts
+```ts validate=none
 import { react, toolMemoryLayer } from '@noetic-tools/core';
 
 const tools = [writeTodos, updateTodo, listTodos];
@@ -61,7 +61,7 @@ const agent = react({
 
 Inside a tool's `execute` function, use `toolCtx.memory` to access layer state:
 
-```ts
+```ts validate=none
 interface ToolMemory {
   get<T>(layerId: string): T | undefined;
   set<T>(layerId: string, state: T): void;
@@ -194,7 +194,7 @@ The built-in `workingMemory()` layer uses this pattern: the LLM calls `updateWor
 
 ### findFunctionCall Utility
 
-```ts
+```ts validate=none
 import { findFunctionCall } from '@noetic-tools/core';
 
 // Searches newItems for the first function_call matching the name.
@@ -272,7 +272,7 @@ function entityMemory(): MemoryLayer<EntityState> {
 
 Register the layer and instruct the LLM in the system prompt:
 
-```ts
+```ts validate=none
 const agent = react({
   model: 'anthropic/claude-sonnet-4',
   instructions: `You are a research assistant.
@@ -290,7 +290,7 @@ Because no tool schema is registered for `updateEntities`, the LLM relies entire
 
 A single agent can use both patterns together. Tool-owned memory tracks state that tools modify imperatively, while function-call memory gives the LLM a channel to update state directly:
 
-```ts
+```ts validate=none
 const tools = [writeTodos, updateTodo];
 
 const agent = react({

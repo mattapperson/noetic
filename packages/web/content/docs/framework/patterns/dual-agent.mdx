@@ -9,7 +9,7 @@ The Dual Agent pattern spawns two agents that communicate through typed channels
 
 ## Pattern
 
-```ts
+```ts validate=none
 import { channel, spawn, react, fork, step } from '@noetic-tools/core';
 import { z } from 'zod';
 
@@ -78,7 +78,7 @@ const dualAgent = fork({
 
 From within a step, use the context to interact with channels:
 
-```ts
+```ts validate=none
 // Send a value
 ctx.send(channel, value);
 

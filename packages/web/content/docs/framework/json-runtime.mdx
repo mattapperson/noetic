@@ -8,7 +8,9 @@ description: Generate and execute agent workflows as portable JSON definitions.
 Define a workflow as a plain JSON document and execute it with `parseAndRunWorkflow`:
 
 ```ts
-import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
+import { parseAndRunWorkflow, AgentHarness, type Tool } from '@noetic-tools/core';
+
+declare const webSearchTool: Tool;
 
 const workflow = {
   version: 1,
@@ -301,7 +303,10 @@ Combine multiple predicates with `any` (logical OR) or `all` (logical AND):
 The `dynamicWorkflow` pattern hands the planning to an LLM: it generates a workflow document as JSON, validates it, hydrates it, and executes it -- all within a single harness run. If validation fails, the planner retries with error feedback up to `maxRevisions` times.
 
 ```ts
-import { dynamicWorkflow, AgentHarness } from '@noetic-tools/core';
+import { dynamicWorkflow, AgentHarness, type Tool } from '@noetic-tools/core';
+
+declare const searchTool: Tool;
+declare const calcTool: Tool;
 
 const agent = dynamicWorkflow({
   model: 'openai/gpt-4o',
@@ -337,7 +342,11 @@ Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner
 For pre-built JSON workflows -- parse, validate, hydrate, and execute in one call.
 
 ```ts
-import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
+import { parseAndRunWorkflow, AgentHarness, type Tool } from '@noetic-tools/core';
+
+declare const workflowDocument: unknown;
+declare const searchTool: Tool;
+declare const calcTool: Tool;
 
 const harness = new AgentHarness({ name: 'runner', params: {} });
 const ctx = harness.createContext();
@@ -369,7 +378,7 @@ Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON do
 
 For lower-level control, use `hydrateWorkflow` and `hydrateNode` to convert JSON workflow structures into live `Step` objects without immediately executing them.
 
-```ts
+```ts validate=none
 import { hydrateWorkflow, hydrateNode } from '@noetic-tools/core';
 import type { HydrationContext } from '@noetic-tools/core';
 

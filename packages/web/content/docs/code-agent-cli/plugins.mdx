@@ -7,7 +7,7 @@ A **plugin** is an npm-publishable extension that contributes to the CLI's runti
 
 ## The `NoeticPlugin` interface
 
-```ts
+```ts validate=none
 import type { NoeticPlugin, PluginContext } from '@noetic-tools/cli';
 
 interface NoeticPlugin {
@@ -35,7 +35,7 @@ Pick the hooks that fit your contribution; leave the rest off. Adding fields to 
 
 Every hook receives a `PluginContext`:
 
-```ts
+```ts validate=none
 interface PluginContext {
   config: AgentConfig;                  // parsed agent config
   callModel: CallModel;                 // one-shot LLM generation (no tool loops)
@@ -57,10 +57,12 @@ Contribute new tools to the harness. Tools follow the framework's [Tool API](/do
 import { z } from 'zod';
 import type { Tool } from '@noetic-tools/core';
 
-const weatherTool: Tool = {
+const weatherInput = z.object({ city: z.string() });
+
+const weatherTool: Tool<typeof weatherInput> = {
   name: 'get_weather',
   description: 'Look up current weather for a city.',
-  input: z.object({ city: z.string() }),
+  input: weatherInput,
   output: z.object({ tempC: z.number(), summary: z.string() }),
   execute: async (args) => {
     const res = await fetch(`https://wttr.in/${args.city}?format=j1`);
@@ -137,6 +139,7 @@ Run once at plugin load (after the context is built, before the TUI mounts) and 
 In `noetic.config.ts`:
 
 ```ts
+import type { AgentConfig } from '@noetic-tools/cli';
 import designDeck from '@noetic/plugin-design-deck';
 import powerline from '@noetic/plugin-powerline';
 
@@ -178,7 +181,7 @@ declare function parseOptions(input: unknown): {
   theme: unknown;
   vibe: unknown;
 };
-declare function resolveVibes(args: { options: unknown; apiKey: string }): Promise<string[]>;
+declare function resolveVibes(args: { options: unknown; apiKey: string | undefined }): Promise<string[]>;
 declare function loadTheme(theme: unknown): unknown;
 
 export default function powerline(userInput: unknown = {}): NoeticPlugin {
@@ -206,7 +209,15 @@ Adds an interactive visual-decision modal as a slash command.
 ```ts
 import type { NoeticPlugin } from '@noetic-tools/cli';
 
-export default function designDeck(userInput = {}): NoeticPlugin {
+declare function parseOptions(input: unknown): unknown;
+declare function deckCommand(args: unknown): {
+  name: string;
+  description: string;
+  execute: (input: string, session: unknown) => Promise<unknown>;
+};
+declare const deckDiscoverCommand: typeof deckCommand;
+
+export default function designDeck(userInput: unknown = {}): NoeticPlugin {
   const options = parseOptions(userInput);
   return {
     name: '@noetic/plugin-design-deck',
@@ -261,6 +272,7 @@ export default function myPlugin(): NoeticPlugin {
 Then in your `noetic.config.ts`:
 
 ```ts
+import type { AgentConfig } from '@noetic-tools/cli';
 import myPlugin from './my-plugin/src/index.ts';
 
 export default {

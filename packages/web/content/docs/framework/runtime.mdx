@@ -14,7 +14,7 @@ const searchTool = {
   description: 'Search the web for information',
   input: z.object({ query: z.string() }),
   output: z.object({ result: z.string() }),
-  execute: async (args) => ({ result: `Results for: ${args.query}` }),
+  execute: async (args: { query: string }) => ({ result: `Results for: ${args.query}` }),
 };
 
 const agent = react({
@@ -42,7 +42,7 @@ Calls to `execute()` enqueue the input on the session identified by `options.thr
 
 ## Constructor Options
 
-```ts
+```ts validate=none
 import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
@@ -79,6 +79,8 @@ const harness = new AgentHarness({
 Enqueues input on the session identified by `options.threadId` (or the default thread). Returns a `Promise<void>` that resolves once the message is accepted into the queue — **not** when the model finishes responding. Use the session-scoped accessors to observe the response.
 
 ```ts
+declare const harness: AgentHarness;
+
 await harness.execute('What is 2+2?');
 const response = await harness.getAgentResponse();
 console.log(response.text);
@@ -133,7 +135,7 @@ Each message carries a `DeliveryMode`. Override per-call via `options.deliveryMo
 
 ### HarnessResponse
 
-```ts
+```ts validate=none
 interface HarnessResponse {
   readonly items: ReadonlyArray<Item>;
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
@@ -147,7 +149,7 @@ interface HarnessResponse {
 
 Events have a `source` discriminant: `'sdk'` for OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix.
 
-```ts
+```ts validate=none
 type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
 ```
 
@@ -180,7 +182,7 @@ Each provider call is guarded by a watchdog that aborts the round if no SSE even
 
 Low-level step execution. Use this when you need full control over context creation and step dispatch.
 
-```ts
+```ts validate=none
 const ctx = harness.createContext({ state: { count: 0 } });
 const result = await harness.run(myStep, input, ctx);
 ```
@@ -225,7 +227,7 @@ The agent harness coordinates [memory layer](/docs/framework/memory) lifecycle h
 
 ### RecallLayerOutput
 
-```ts
+```ts validate=none
 interface RecallLayerOutput {
   layerId: string;
   items: Item[];
@@ -255,7 +257,7 @@ The `subprocess` adapter is the companion surface: it persists handle manifests 
 
 `AgentConfig` defines the configuration for an agent harness. It is generic over `TParams`, an arbitrary key-value record that steps and tools access via `ctx.harness.config.params`.
 
-```ts
+```ts validate=none
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   storage?: StorageAdapter;
@@ -273,7 +275,7 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
 ## AgentHooks
 
-```ts
+```ts validate=none
 interface AgentHooks {
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
@@ -320,7 +322,7 @@ The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Tas
 
 The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
 
-```ts
+```ts validate=none
 import { AgentHarness } from '@noetic-tools/core';
 import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 

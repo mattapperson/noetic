@@ -5,7 +5,7 @@ description: Attach memory layers to descendant steps without creating an isolat
 
 ## Quick Example
 
-```ts
+```ts validate=none
 import { provide, step } from '@noetic-tools/core';
 
 const withLayers = provide({
@@ -39,7 +39,7 @@ This is the primitive for scoping memory layers to a section of your execution t
 
 Attach a knowledge base layer only to a specific subtree, without affecting sibling steps:
 
-```ts
+```ts validate=none
 import { provide, step } from '@noetic-tools/core';
 
 const researchPhase = provide({

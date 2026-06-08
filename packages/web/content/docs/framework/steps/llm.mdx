@@ -71,9 +71,9 @@ If the model response does not match the schema, a validation error is thrown.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic-tools/core';
+import { step, tool } from '@noetic-tools/core';
 
-const searchTool = {
+const searchTool = tool({
   name: 'search',
   description: 'Search the knowledge base',
   input: z.object({
@@ -87,7 +87,7 @@ const searchTool = {
       results: ['Result 1', 'Result 2'],
     };
   },
-};
+});
 
 const researcher = step.llm({
   id: 'research',

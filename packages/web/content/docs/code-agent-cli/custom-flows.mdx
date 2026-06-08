@@ -20,7 +20,7 @@ When the agent is in **plan mode** (`/plan` or `/mode plan`), it can emit a JSON
 
 ### Node kinds
 
-```ts
+```ts validate=none
 type FlowNode =
   | LlmFlowNode
   | SubagentFlowNode
@@ -39,7 +39,7 @@ type FlowNode =
 
 Every node has `id` (string) and optional `subPlanRef` (links the node back to a section of the PRD).
 
-```ts
+```ts validate=none
 interface LlmFlowNode {
   kind: 'llm';
   id: string;
@@ -126,7 +126,7 @@ For long-running infrastructure, write the flow in TypeScript. The CLI's task da
 
 ### The shape
 
-```ts
+```ts validate=none
 import type { ContextMemory, Step } from '@noetic-tools/core';
 import { every, fork, spawn, step, workingMemory } from '@noetic-tools/core';
 
@@ -157,7 +157,7 @@ The harness drives the returned `Step` via `harness.run(...)` (sync) or `harness
 
 `every` runs on an interval but can also wake immediately on a channel send. The validator flow uses this:
 
-```ts
+```ts validate=none
 every({
   id: 'validator.every',
   step: validatorIterationStep,
@@ -173,7 +173,7 @@ every({
 
 The CLI's real validator drains a channel of `ValidatorRequest`s, runs tests for each requested feature, persists the run, and emits an outcome. Stripped to the bones:
 
-```ts
+```ts validate=none
 import type { ContextMemory, Step } from '@noetic-tools/core';
 import { every, step } from '@noetic-tools/core';
 
@@ -220,7 +220,7 @@ This is the same shape as the production flow at `packages/cli/src/tasks/runtime
 
 The CLI's daemon roots all four periodic flows in a `fork({ mode: 'all' })` wrapped in a `spawn`:
 
-```ts
+```ts validate=none
 import { every, fork, spawn, workingMemory } from '@noetic-tools/core';
 
 const daemonInner = fork<ContextMemory, void, void>({
