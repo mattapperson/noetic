@@ -361,6 +361,15 @@ export interface MemoryLayer<TState = unknown> {
   /** Per-hook timeout overrides in ms. */
   timeouts?: Partial<LayerTimeouts>;
   /**
+   * What to do when this layer's `init` hook throws.
+   * - `'throw'` (default): surface the error and abort the execution — memory is
+   *   load-bearing, and silent disabling hides failures (and, for the steering
+   *   layer, would fail *open*).
+   * - `'disable'`: log a diagnostic and run the execution without this layer
+   *   (its `recall`/`store`/etc. are skipped). Opt in only for non-critical layers.
+   */
+  onInitError?: 'throw' | 'disable';
+  /**
    * Recall mode controlling whether this layer's `recall()` blocks the model call.
    * - `'atomic'` (default): recall runs synchronously in the hot path; the
    *   harness waits for it before assembling the view.

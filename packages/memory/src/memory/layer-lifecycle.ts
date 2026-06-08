@@ -281,6 +281,12 @@ export async function initLayers({ layers, ctx, storage, store }: InitLayersPara
       store.set(ctx.executionId, layer.id, result.state);
     } catch (e) {
       store.diagnostic(layer.id, 'init', e);
+      // Fail loud by default: a failed init silently disabling a load-bearing
+      // layer (e.g. steering → fail-open) hides real errors. Opt into graceful
+      // degradation per layer with `onInitError: 'disable'`.
+      if (layer.onInitError !== 'disable') {
+        throw e;
+      }
     }
   }
 }
@@ -484,7 +490,9 @@ export async function storeLayers({
           }),
           timeout,
         );
-        if (result?.state !== undefined) {
+        // `'state' in result` (not `!== undefined`) so a layer can explicitly
+        // clear its state by returning `{ state: undefined }`.
+        if (result && 'state' in result) {
           store.set(ctx.executionId, layer.id, result.state);
           // Invalidate this layer's eventual-recall cache so the next turn
           // re-runs recall() against the freshly stored state.
@@ -493,7 +501,8 @@ export async function storeLayers({
           }
           // Mirror to durable storage so the next execution's init() can
           // rehydrate. Skip 'execution' scope — its key rotates each run.
-          if (layer.scope !== 'execution') {
+          // Skip when clearing (undefined) — nothing to persist.
+          if (result.state !== undefined && layer.scope !== 'execution') {
             const scopedStorage = createScopedStorage(
               storage,
               layer.id,
@@ -523,6 +532,11 @@ export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams)
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
+    // Skip disabled layers (init hook present but no state) — consistent with
+    // recall/store; nothing was initialized, so there is nothing to dispose.
+    if (state === undefined && layer.hooks.init) {
+      continue;
+    }
     try {
       const timeout = layer.timeouts?.dispose ?? 5e3;
       await withTimeout(
@@ -564,7 +578,10 @@ export async function spawnLayers({
       continue;
     }
     const parentState = store.get(parentCtx.executionId, layer.id);
-    if (parentState === undefined) {
+    // Skip only disabled layers (init present but no state). An init-less layer
+    // has legitimately undefined state and should still spawn — consistent with
+    // how recall treats init-less layers.
+    if (parentState === undefined && layer.hooks.init) {
       continue;
     }
     try {
@@ -610,7 +627,10 @@ export async function returnLayers<T>({
     }
     const childState = store.get(childCtx.executionId, layer.id);
     const parentState = store.get(parentCtx.executionId, layer.id);
-    if (childState === undefined || parentState === undefined) {
+    // Only the child's contribution is required to merge; a parent that never
+    // initialized state can still be seeded from the child. Skip only when the
+    // child produced nothing.
+    if (childState === undefined) {
       continue;
     }
     try {
@@ -650,6 +670,11 @@ export async function completeLayers({
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
+    // Skip disabled layers (init present but no state) — consistent with the
+    // rest of the lifecycle; avoids invoking onComplete with undefined state.
+    if (state === undefined && layer.hooks.init) {
+      continue;
+    }
     try {
       const timeout = layer.timeouts?.onComplete ?? 3e4;
       const result = await withTimeout(

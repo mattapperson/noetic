@@ -1020,6 +1020,7 @@ describe('Layer lifecycle: disabled layer detection', () => {
       id: 'failing',
       slot: 100,
       scope: 'execution',
+      onInitError: 'disable',
       hooks: {
         init: async () => {
           throw new Error('init failed');

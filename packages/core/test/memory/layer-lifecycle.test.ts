@@ -300,6 +300,7 @@ describe('layer-lifecycle', () => {
         name: 'Broken',
         slot: 100,
         scope: 'thread',
+        onInitError: 'disable',
         hooks: {
           init: async () => {
             throw new Error('init failed');
@@ -412,12 +413,15 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-diag',
     });
-    await initLayers({
-      layers,
-      ctx,
-      storage: makeStorage(),
-      store,
-    });
+    // Fail-loud: the error is both recorded as a diagnostic and surfaced.
+    await expect(
+      initLayers({
+        layers,
+        ctx,
+        storage: makeStorage(),
+        store,
+      }),
+    ).rejects.toThrow('init failed');
     expect(errors).toHaveLength(1);
     expect(errors[0].layerId).toBe('broken');
     expect(errors[0].hook).toBe('init');
@@ -1313,6 +1317,7 @@ describe('runAppendPipeline', () => {
         name: 'Disabled',
         slot: 100,
         scope: 'execution',
+        onInitError: 'disable',
         hooks: {
           init: async () => {
             throw new Error('init failed');
