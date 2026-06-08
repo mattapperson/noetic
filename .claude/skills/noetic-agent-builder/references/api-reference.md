@@ -287,9 +287,60 @@ const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness))
 
 ## Memory Layers
 
+### MemoryLayer config fields
+
+Beyond `id`, `slot`, `scope`, `budget`, `hooks`, `provides`, `timeouts`, and `rerenderTiming`, a layer accepts:
+
+```typescript
+interface MemoryLayer<TState> {
+  // ...
+  /** What to do when init() throws. Default 'throw' (fail-loud: surface + abort). */
+  onInitError?: 'throw' | 'disable';
+  /** Whether recall() blocks the model call. Default 'atomic'. */
+  recallMode?: 'atomic' | 'eventual';
+}
+```
+
+- **`onInitError`** — `'throw'` (default) surfaces the init error and aborts the execution; memory is load-bearing and silently disabling it hides failures (and for steering would fail *open*). `'disable'` logs a diagnostic and runs without the layer (its other hooks are skipped). Opt in only for non-critical layers.
+- **`recallMode`** — `'atomic'` (default) runs `recall()` synchronously before the model call. `'eventual'` serves `recall()` from a per-harness cache that never blocks; the cache refreshes after the layer's `store()` produces new state, so the next turn sees it. Use `'eventual'` for slow recall paths that can tolerate one-turn staleness.
+
+### Projection & recall budget
+
+The recall token budget and the assembled context window are governed by a `ProjectionPolicy`, resolved per LLM step as `step.projection` → `harness.projection` (`AgentConfig.projection`) → `DEFAULT_PROJECTION`.
+
+```typescript
+interface ProjectionPolicy {
+  tokenBudget: number;
+  responseReserve: number;
+  overflow: 'truncate' | 'summarize' | 'sliding_window';
+  overflowModel?: string;
+  windowSize?: number;
+}
+
+// Fallback when neither step nor harness configures one:
+const DEFAULT_PROJECTION = { tokenBudget: 128_000, responseReserve: 4_000, overflow: 'sliding_window' };
+```
+
+```typescript
+interface AgentConfig {
+  // ...
+  projection?: ProjectionPolicy;   // default for all LLM steps
+  forceAtomicRecall?: boolean;     // recall every layer atomically, bypass the eventual cache
+}
+
+interface StepLLM {
+  // ...
+  projection?: ProjectionPolicy;   // overrides the harness default for this step
+}
+```
+
+- A single allocator (`allocateBudgets`) splits the recall budget: each layer's `budget.min` is satisfied first, then ~60% of the remainder funds a proportional pool across layers (by headroom `max − min`) and ~40% is reserved for conversation history. A layer never exceeds its `max`.
+- `assembleView` then holds the final view to a hard cap (`tokenBudget − responseReserve`): system items are always kept, layer output is kept low-slot-first (highest-slot dropped when tight), history keeps the most recent turns, and orphan tool calls are stripped at the boundary.
+- `forceAtomicRecall: true` makes every layer atomic regardless of `recallMode`.
+
 ### workingMemory
 
-Thread/resource-scoped structured state, updated via `updateWorkingMemory` tool call.
+Thread/resource-scoped structured state, updated via the `working-memory/update` tool (or the legacy `updateWorkingMemory` function call). Updates **deep-merge** into state: nested object keys merge recursively while arrays and primitives replace; `__proto__`/`constructor` are stripped at every depth. An object update applied over prior freeform-string state preserves the old string under a `_previous` key.
 
 ```typescript
 workingMemory({ scope?, schema?, template?, readOnly? })
@@ -297,7 +348,7 @@ workingMemory({ scope?, schema?, template?, readOnly? })
 
 ### observationalMemory
 
-Accumulates text, distills to observations when buffer exceeds threshold.
+Accumulates text, distills to observations when buffer exceeds threshold. Buffers the full conversation: assistant output via `store`, plus user input and tool output via `onItemAppend`. `recall` trims output to the allocated budget.
 
 ```typescript
 observationalMemory({ bufferThreshold?, maxObservations?, scope?, observer? })
@@ -312,18 +363,19 @@ temporalMemory({
   now?, scope?,            // clock injection; 'thread' | 'resource' (default 'resource')
   extract?, search?,       // FactExtractor / FactSearcher — host-injected LLM callbacks
   bufferThreshold?,        // tokens before extract runs, default 2000
-  maxFacts?,               // ledger cap, default 200 (oldest dropped)
+  maxFacts?,               // ledger cap, default 200 (per-fact: keeps newest maxFacts)
   groundDateTime?,         // <current_datetime> on recall, default true
   injectLedger?,           // <remembered_facts> on recall, default false
 })
 // id 'temporal', slot Slot.REMINDER (80). LLM-agnostic: omit extract/search and the
 // layer only buffers / the tool returns the raw ledger (never fabricates facts).
+// Buffers assistant output (store) + user/tool input (onItemAppend) for extraction.
 // The code agent wires step.llm-backed callbacks and installs it by default.
 ```
 
 ### durableTaskState
 
-Persists file lists and checkpoints across executions.
+Persists file lists and checkpoints across executions/iterations within a thread (scope `'thread'`, not `'execution'` — an execution-scoped key would rotate each run and defeat durable rehydration).
 
 ```typescript
 durableTaskState({ baseDir?, gitCommit?, schema?, serializer? })
@@ -339,7 +391,7 @@ staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 
 ### historyWindow
 
-Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message) and strips orphan `function_call` / `function_call_output` at the slice boundary.
+Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message), but that expansion is bounded to `maxItems × 4` so a tool-only burst can't grow the window unbounded. Re-attaches a head `system`/anchor message that fell outside the window, and strips orphan `function_call` / `function_call_output` at the slice boundary.
 
 ```typescript
 historyWindow({ maxItems?: number })  // default 40
@@ -452,12 +504,15 @@ Intercepts tool calls and model responses via programmatic or LLM-evaluated rule
 steering({
   rules: SteeringRule[];
   maxLedgerEntries?: number;  // default 100
-  maxRetries?: number;        // default 3
+  maxRetries?: number;        // default 1 (retries on unparseable verdict)
   scope?: MemoryScope;        // default 'execution'
 }): MemoryLayer<SteeringState>
 // LLM-evaluated rules use callModel from the execution context (configured
 // via AgentHarness's `llm` option or OPENROUTER_API_KEY). If no LLM provider
 // is configured, LLM-evaluated rules throw NoeticConfigError (MISSING_CALL_MODEL).
+// The model is asked to reply ALLOW / DENY / "GUIDE: <text>"; the verdict keyword
+// is matched at the start on a word boundary, case-insensitively, with guidance
+// text preserved verbatim. Unparseable replies retry up to maxRetries, then pass.
 ```
 
 **SteeringRule:**
