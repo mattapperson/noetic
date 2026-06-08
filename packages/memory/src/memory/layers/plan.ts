@@ -172,12 +172,11 @@ function recallExecuting(state: PlanState): string {
     '## PRD',
     '',
     state.prd ?? '',
-    '',
-    '## Execution Plan',
-    '',
-    JSON.stringify(state.planTree, null, 2),
-    '</active_plan>',
   ];
+  if (state.planTree) {
+    sections.push('', '## Execution Plan', '', JSON.stringify(state.planTree, null, 2));
+  }
+  sections.push('</active_plan>');
   return sections.join('\n');
 }
 
@@ -237,7 +236,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
       >({
         read: (state) => ({
           phase: state.phase,
-          hasPrd: state.prd !== null,
+          hasPrd: Boolean(state.prd),
           hasPlanTree: state.planTree !== null,
           version: state.version,
         }),
@@ -257,9 +256,9 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         }),
         output: z.string(),
         execute: async (args, state) => {
-          if (state.phase !== PlanPhase.Idle) {
+          if (state.phase === PlanPhase.Planning || state.phase === PlanPhase.Executing) {
             return {
-              result: `Cannot enter plan mode: current phase is "${state.phase}".`,
+              result: `Cannot enter plan mode: a plan is already active (phase "${state.phase}").`,
               state,
             };
           }
@@ -271,6 +270,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
               phase: PlanPhase.Planning,
               prd: args.goal ? `# Goal\n\n${args.goal}\n` : null,
               planTree: null,
+              executionLog: [],
               version: state.version + 1,
               planSlug: session?.slug ?? null,
             },
@@ -414,7 +414,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         };
       },
 
-      async recall({ state }) {
+      async recall({ state, budget }) {
         if (state.phase === PlanPhase.Idle) {
           return null;
         }
@@ -425,11 +425,15 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         }
 
         const content = renderer(state, additionalPlanInstructions);
+        // Respect the budget: estimateTokens uses ~4 chars/token, so cap the
+        // rendered text at budget*4 chars to keep tokenCount <= budget.
+        const maxChars = budget * 4;
+        const trimmed = content.length > maxChars ? content.slice(0, maxChars) : content;
         return {
           items: [
-            createMessage(content, 'developer'),
+            createMessage(trimmed, 'developer'),
           ],
-          tokenCount: estimateTokens(content),
+          tokenCount: estimateTokens(trimmed),
         };
       },
 
