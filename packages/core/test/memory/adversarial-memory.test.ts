@@ -144,7 +144,7 @@ describe('Steering: DENY response parsing', () => {
     expect(result.decision.guidance).toBeUndefined();
   });
 
-  it('parses "DENY:reason" correctly — colon at index 4 skipped by slice(5)', async () => {
+  it('parses "DENY:reason" — strips the colon and preserves guidance casing', async () => {
     const layer = steering({
       rules: [
         {
@@ -181,11 +181,11 @@ describe('Steering: DENY response parsing', () => {
     });
 
     expect(result.decision.action).toBe(SteeringAction.Deny);
-    // "DENY:UNSAFE OPERATION" → slice(5) → "UNSAFE OPERATION" (colon at index 4 is skipped)
-    expect(result.decision.guidance).toBe('UNSAFE OPERATION');
+    // "DENY:unsafe operation" → strip "DENY" + colon → "unsafe operation" (casing preserved)
+    expect(result.decision.guidance).toBe('unsafe operation');
   });
 
-  it('[BUG] "DENYALL" parsed as DENY with guidance "LL" — no word boundary check', async () => {
+  it('"DENYALL" is NOT parsed as DENY (word boundary) → treated as no verdict', async () => {
     const layer = steering({
       rules: [
         {
@@ -221,10 +221,9 @@ describe('Steering: DENY response parsing', () => {
       state: store.get<SteeringState>(ctx.executionId, layer.id)!,
     });
 
-    // BUG: "DENYALL" starts with "DENY" so it's parsed as Deny
-    // slice(5) → "LL" becomes the guidance — clearly wrong
-    expect(result.decision.action).toBe(SteeringAction.Deny);
-    expect(result.decision.guidance).toBe('LL');
+    // "DENYALL" has no word boundary after "DENY", so it is not a valid verdict.
+    // Unparseable output is retried then treated as a pass (Allow).
+    expect(result.decision.action).toBe(SteeringAction.Allow);
   });
 
   it('parses "DENY reason text" with space separator correctly', async () => {
@@ -264,8 +263,8 @@ describe('Steering: DENY response parsing', () => {
     });
 
     expect(result.decision.action).toBe(SteeringAction.Deny);
-    // Space-separated works: slice(5) on "DENY UNSAFE OPERATION" → "UNSAFE OPERATION"
-    expect(result.decision.guidance).toBe('UNSAFE OPERATION');
+    // Space-separated: strip "DENY" + space → "unsafe operation" (casing preserved)
+    expect(result.decision.guidance).toBe('unsafe operation');
   });
 
   it('parses "GUIDE:" with no space after colon', async () => {
@@ -305,8 +304,8 @@ describe('Steering: DENY response parsing', () => {
     });
 
     expect(result.decision.action).toBe(SteeringAction.Guide);
-    // "GUIDE:BE CAREFUL" → slice(6) → "BE CAREFUL" — correct
-    expect(result.decision.guidance).toBe('BE CAREFUL');
+    // "GUIDE:be careful" → strip "GUIDE" + colon → "be careful" (casing preserved)
+    expect(result.decision.guidance).toBe('be careful');
   });
 });
 

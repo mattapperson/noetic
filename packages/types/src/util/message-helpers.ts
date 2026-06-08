@@ -41,6 +41,55 @@ export function isOutputText(part: { type: string }): part is {
   return part.type === 'output_text';
 }
 
+/** True for any content part carrying a string `text` field (input_text, output_text, …). */
+export function isTextPart(part: { type: string }): part is {
+  type: string;
+  text: string;
+} {
+  return 'text' in part && typeof part.text === 'string';
+}
+
+/** Extracts assistant/output text from items for memory buffering (one string per message). */
+export function collectOutputText(items: ReadonlyArray<Item>): string[] {
+  return items
+    .filter((i): i is MessageItem => i.type === 'message')
+    .map((i) =>
+      i.content
+        .filter(isOutputText)
+        .map((c: { text: string }) => c.text)
+        .join(''),
+    )
+    .filter((t) => t.length > 0);
+}
+
+/**
+ * Extracts text from INPUT items for memory buffering: concatenates the text
+ * content parts of message items (user `input_text` and any text parts) and
+ * appends the `output` of `function_call_output` (tool result) items. Empty
+ * strings are dropped.
+ */
+export function collectInputText(items: ReadonlyArray<Item>): string[] {
+  const texts: string[] = [];
+  for (const item of items) {
+    if (item.type === 'message') {
+      let text = '';
+      for (const part of item.content) {
+        if (isTextPart(part)) {
+          text += part.text;
+        }
+      }
+      if (text.length > 0) {
+        texts.push(text);
+      }
+      continue;
+    }
+    if (item.type === 'function_call_output' && item.output.length > 0) {
+      texts.push(item.output);
+    }
+  }
+  return texts;
+}
+
 export function createMessage(text: string, role: 'user' | 'developer'): InputMessageItem {
   return {
     id: crypto.randomUUID(),

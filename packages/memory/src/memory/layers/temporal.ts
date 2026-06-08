@@ -1,5 +1,11 @@
-import type { MemoryLayer, MemoryScope, MessageItem } from '@noetic-tools/types';
-import { createMessage, estimateTokens, isOutputText, Slot } from '@noetic-tools/types';
+import type { MemoryLayer, MemoryScope } from '@noetic-tools/types';
+import {
+  collectInputText,
+  collectOutputText,
+  createMessage,
+  estimateTokens,
+  Slot,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { layerFn } from '../layer-provides';
 
@@ -171,7 +177,16 @@ function mergeFacts(
     }
     facts[ts] = list;
   }
-  // Cap: drop oldest timestamps until under maxFacts.
+  return capLedger(facts, maxFacts);
+}
+
+/**
+ * Caps the ledger at FACT granularity: when over `maxFacts`, drops the OLDEST
+ * facts and always retains the most recent `maxFacts`. Operating per-fact (not
+ * per-timestamp) prevents a single oversized extraction at one instant from
+ * evicting the just-added newest facts.
+ */
+function capLedger(facts: Record<string, string[]>, maxFacts: number): Record<string, string[]> {
   let total = 0;
   for (const list of Object.values(facts)) {
     total += list.length;
@@ -179,32 +194,109 @@ function mergeFacts(
   if (total <= maxFacts) {
     return facts;
   }
-  const sortedTs = Object.keys(facts).sort();
-  for (const ts of sortedTs) {
-    if (total <= maxFacts) {
-      break;
+  // Flatten chronologically (oldest first; stable within a timestamp), then keep
+  // only the most recent `maxFacts`.
+  const flat: TemporalFact[] = [];
+  for (const [ts, list] of Object.entries(facts)) {
+    for (const fact of list) {
+      flat.push({
+        ts,
+        fact,
+      });
     }
-    total -= facts[ts].length;
-    delete facts[ts];
   }
-  return facts;
+  flat.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const kept = flat.slice(flat.length - maxFacts);
+  const capped: Record<string, string[]> = {};
+  for (const { ts, fact } of kept) {
+    const list = capped[ts] ?? [];
+    list.push(fact);
+    capped[ts] = list;
+  }
+  return capped;
 }
 
-/** Extracts assistant/output text from newly appended items for buffering. */
-function collectText(
-  newItems: ReadonlyArray<{
-    type: string;
-  }>,
-): string[] {
-  return newItems
-    .filter((i): i is MessageItem => i.type === 'message')
-    .map((i) =>
-      i.content
-        .filter(isOutputText)
-        .map((c: { text: string }) => c.text)
-        .join(''),
-    )
-    .filter((t) => t.length > 0);
+/**
+ * Renders the `<remembered_facts>` block, greedily including the most recent
+ * facts first and stopping before the block would exceed `budget` tokens.
+ * Returns `null` when there are no facts or not even one fits.
+ */
+function renderLedgerBlock(facts: ReadonlyArray<TemporalFact>, budget: number): string | null {
+  if (facts.length === 0) {
+    return null;
+  }
+  const open = '<remembered_facts>';
+  const close = '</remembered_facts>';
+  // Most recent first so the budget retains the freshest facts.
+  const ordered = [
+    ...facts,
+  ].reverse();
+  const selected: string[] = [];
+  for (const f of ordered) {
+    const line = `- [${f.ts}] ${f.fact}`;
+    const candidate = [
+      open,
+      ...selected,
+      line,
+      close,
+    ].join('\n');
+    if (estimateTokens(candidate) > budget) {
+      break;
+    }
+    selected.push(line);
+  }
+  if (selected.length === 0) {
+    return null;
+  }
+  return [
+    open,
+    ...selected,
+    close,
+  ].join('\n');
+}
+
+interface AccumulateConfig {
+  threshold: number;
+  maxFacts: number;
+  now: () => Date;
+  extract?: FactExtractor;
+}
+
+/**
+ * Appends `texts` into the buffer and, once the token threshold is crossed (and
+ * an extractor is configured), distills the buffer into ledger facts. Shared by
+ * `store` (assistant output) and `onItemAppend` (user/tool input).
+ */
+async function accumulate(
+  s: TemporalState,
+  texts: string[],
+  cfg: AccumulateConfig,
+): Promise<TemporalState> {
+  const newBuffer = [
+    ...s.buffer,
+    ...texts,
+  ];
+  const newTokens = texts.reduce((sum, t) => sum + estimateTokens(t), 0);
+  const totalBufferTokens = s.bufferTokens + newTokens;
+
+  if (cfg.extract && totalBufferTokens >= cfg.threshold && newBuffer.length > 0) {
+    const extracted = await cfg.extract({
+      transcript: newBuffer.join('\n'),
+      now: formatNow(cfg.now()),
+    });
+    return {
+      facts: mergeFacts(s, extracted, cfg.maxFacts),
+      buffer: [],
+      bufferTokens: 0,
+      version: s.version + 1,
+    };
+  }
+
+  return {
+    ...s,
+    buffer: newBuffer,
+    bufferTokens: totalBufferTokens,
+  };
 }
 
 //#endregion
@@ -295,16 +387,21 @@ export function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<Tempo
         };
       },
 
-      async recall({ state }) {
+      async recall({ state, budget }) {
         const blocks: string[] = [];
         if (groundDateTime) {
           blocks.push(renderDateTimeBlock(now()));
         }
         if (injectLedger) {
-          const facts = ledgerToFacts(state ?? emptyState());
-          if (facts.length > 0) {
-            const lines = facts.map((f) => `- [${f.ts}] ${f.fact}`).join('\n');
-            blocks.push(`<remembered_facts>\n${lines}\n</remembered_facts>`);
+          // Reserve whatever the grounding block (plus its `\n\n` separator)
+          // already consumed so the rendered output stays within budget.
+          const used = blocks.length > 0 ? estimateTokens(`${blocks.join('\n\n')}\n\n`) : 0;
+          const ledgerBlock = renderLedgerBlock(
+            ledgerToFacts(state ?? emptyState()),
+            budget - used,
+          );
+          if (ledgerBlock !== null) {
+            blocks.push(ledgerBlock);
           }
         }
         if (blocks.length === 0) {
@@ -319,37 +416,37 @@ export function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<Tempo
         };
       },
 
+      // Captures assistant output text.
       async store({ newItems, state }) {
-        const s: TemporalState = state ?? emptyState();
-        const texts = collectText(newItems);
-        const newBuffer = [
-          ...s.buffer,
-          ...texts,
-        ];
-        const newTokens = texts.reduce((sum, t) => sum + estimateTokens(t), 0);
-        const totalBufferTokens = s.bufferTokens + newTokens;
+        const s = state ?? emptyState();
+        const texts = collectOutputText(newItems);
+        return {
+          state: await accumulate(s, texts, {
+            threshold,
+            maxFacts,
+            now,
+            extract,
+          }),
+        };
+      },
 
-        if (extract && totalBufferTokens >= threshold && newBuffer.length > 0) {
-          const extracted = await extract({
-            transcript: newBuffer.join('\n'),
-            now: formatNow(now()),
-          });
+      // Captures user input and tool output text (pass-through; no transform).
+      async onItemAppend({ items, state }) {
+        const s = state ?? emptyState();
+        const texts = collectInputText(items);
+        if (texts.length === 0) {
           return {
-            state: {
-              facts: mergeFacts(s, extracted, maxFacts),
-              buffer: [],
-              bufferTokens: 0,
-              version: s.version + 1,
-            },
+            items,
           };
         }
-
         return {
-          state: {
-            ...s,
-            buffer: newBuffer,
-            bufferTokens: totalBufferTokens,
-          },
+          items,
+          state: await accumulate(s, texts, {
+            threshold,
+            maxFacts,
+            now,
+            extract,
+          }),
         };
       },
 

@@ -14,15 +14,49 @@ export interface WorkingMemoryConfig {
   readOnly?: boolean;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Recursively merges `source` into `target`: object-valued keys are deep-merged,
+ * while arrays and primitives replace. Prototype-pollution keys (`__proto__`,
+ * `constructor`) are stripped at every depth.
+ */
+function deepMerge(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    ...target,
+  };
+  for (const [key, value] of Object.entries(source)) {
+    if (key === '__proto__' || key === 'constructor') {
+      continue;
+    }
+    const existing = out[key];
+    if (isPlainObject(value)) {
+      out[key] = isPlainObject(existing) ? deepMerge(existing, value) : deepMerge({}, value);
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 function safeMerge(state: WorkingMemoryState, args: Record<string, unknown>): WorkingMemoryState {
-  const { __proto__: _p, constructor: _c, ...safeArgs } = args;
   if (typeof state === 'object' && state !== null) {
+    return deepMerge(state, args);
+  }
+  // Freeform string state: an object update must not silently discard prior content.
+  const merged = deepMerge({}, args);
+  if (typeof state === 'string' && state.length > 0) {
     return {
-      ...state,
-      ...safeArgs,
+      _previous: state,
+      ...merged,
     };
   }
-  return safeArgs;
+  return merged;
 }
 
 /**

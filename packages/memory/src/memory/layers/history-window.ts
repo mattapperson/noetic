@@ -6,10 +6,12 @@
  * Algorithm per turn:
  *   1. Slice the last `maxItems`.
  *   2. If the slice lacks a user `message` or an assistant `message`, expand
- *      backward until both are present. The cap may be exceeded — for
- *      tool-burst histories the projected length can grow well beyond
- *      `maxItems` because the most recent role-pair may be far back.
- *   3. Drop any orphan `function_call` / `function_call_output` left at the
+ *      backward until both are present. The cap may be exceeded, but only up to
+ *      a hard bound (`maxItems * MAX_EXPANSION_MULTIPLE`) — a tool-only burst
+ *      cannot grow the window back to the start of history.
+ *   3. Re-attach a system/anchor message from the head if it fell outside the
+ *      window, so core instructions survive windowing.
+ *   4. Drop any orphan `function_call` / `function_call_output` left at the
  *      slice boundary via `stripUnresolvedToolCalls`.
  */
 
@@ -23,6 +25,12 @@ const DEFAULT_MAX_ITEMS = 40;
 const MIN_MAX_ITEMS = 2;
 const MAX_MAX_ITEMS = 1e4;
 const HISTORY_WINDOW_SLOT = Slot.PROCEDURAL + 25; // 275 — runs after recall-contributing layers
+// Hard upper bound on how far minimum-exchange expansion may grow the window,
+// expressed as a multiple of maxItems. Without this, a tool-only burst lets the
+// window expand back to the first role-pair, defeating the cap entirely.
+const MAX_EXPANSION_MULTIPLE = 4;
+// How many leading items to scan for a system/anchor message to preserve.
+const ANCHOR_SCAN_LIMIT = 4;
 
 //#endregion
 
@@ -87,6 +95,22 @@ function expandToMinimumExchange(items: ReadonlyArray<Item>, sliceStart: number)
   return start;
 }
 
+/**
+ * Find a system/anchor message in the leading items that falls outside the
+ * projected window (`windowStart`). Returns it so it can be re-attached to the
+ * head of the projection; returns null when there is none.
+ */
+function findHeadAnchor(items: ReadonlyArray<Item>, windowStart: number): Item | null {
+  const limit = Math.min(windowStart, ANCHOR_SCAN_LIMIT);
+  for (let i = 0; i < limit; i++) {
+    const item = items[i];
+    if (item.type === 'message' && item.role === 'system') {
+      return item;
+    }
+  }
+  return null;
+}
+
 //#endregion
 
 //#region Public API
@@ -121,9 +145,26 @@ export function historyWindow(config?: HistoryWindowConfig): MemoryLayer<null> {
           };
         }
         const sliceStart = items.length - maxItems;
-        const expandedStart = expandToMinimumExchange(items, sliceStart);
+        let expandedStart = expandToMinimumExchange(items, sliceStart);
+        // Hard upper bound: minimum-exchange expansion (e.g. for a tool-only
+        // burst) must never grow the window without limit. Drop the oldest
+        // excess so the projected count stays a bounded multiple of maxItems.
+        const maxWindow = maxItems * MAX_EXPANSION_MULTIPLE;
+        if (items.length - expandedStart > maxWindow) {
+          expandedStart = items.length - maxWindow;
+        }
         const window = items.slice(expandedStart);
-        const cleaned = stripUnresolvedToolCalls(window);
+        // Preserve a system/anchor message at the head even when it falls
+        // outside the trailing window.
+        const anchor = findHeadAnchor(items, expandedStart);
+        const cleaned = stripUnresolvedToolCalls(
+          anchor
+            ? [
+                anchor,
+                ...window,
+              ]
+            : window,
+        );
         return {
           items: cleaned,
         };

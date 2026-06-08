@@ -155,6 +155,11 @@ function resolvePath(base: string, ref = ''): string {
   return normalizePath(ref.startsWith('/') ? ref : `${base}/${ref}`);
 }
 
+/** Resolves a raw reference to the absolute path used for dedup/reads. */
+function resolveRefPath(baseDir: string, ref: string): string {
+  return isAbsolutePath(ref) ? ref : resolvePath(baseDir, ref);
+}
+
 function pathBasename(input: string): string {
   const normalized = normalizePath(input);
   if (normalized === '/') {
@@ -484,8 +489,18 @@ async function addNewReferences(args: {
   scoringModel: string;
 }): Promise<boolean> {
   let hasChanges = false;
+  // Dedupe by RESOLVED absolute path so `#config.json` and `#./config.json`
+  // (which point at the same file) only get tracked once.
+  const seenPaths = new Set<string>();
+  for (const tracked of args.files.values()) {
+    seenPaths.add(tracked.absolutePath);
+  }
   for (const ref of args.refs) {
     if (args.files.has(ref)) {
+      continue;
+    }
+    const absolutePath = resolveRefPath(args.state.baseDir, ref);
+    if (seenPaths.has(absolutePath)) {
       continue;
     }
     args.files.set(
@@ -495,6 +510,7 @@ async function addNewReferences(args: {
         ref,
       }),
     );
+    seenPaths.add(absolutePath);
     hasChanges = true;
   }
   return hasChanges;
@@ -566,9 +582,8 @@ async function refreshTrackedFile(args: {
   userQuery: string;
   scoringModel: string;
 }): Promise<TrackedFile | null> {
-  if (args.tracked.error) {
-    return null;
-  }
+  // NB: a previously-errored file is retried (no early bail) so it can recover
+  // once the underlying condition (too large / permission) is resolved.
   const result = await readFileContent(args.tracked.absolutePath, args.readOpts, args.ctx.fs);
   if (result.deleted && !args.tracked.deleted) {
     return {
@@ -684,16 +699,67 @@ function buildDeletedOrErrorBlock(file: TrackedFile): string | null {
   return null;
 }
 
+function truncationMarker(omittedLines: number): string {
+  return `\n\n... [truncated ${omittedLines} lines] ...\n\n`;
+}
+
+/** Number of leading lines whose joined length fits within `charBudget`. */
+function fitLeadingLines(lines: string[], start: number, charBudget: number): number {
+  let count = 0;
+  let used = 0;
+  for (let i = start; i < lines.length; i++) {
+    const next = used === 0 ? lines[i].length : lines[i].length + 1;
+    if (used + next > charBudget) {
+      break;
+    }
+    used += next;
+    count++;
+  }
+  return count;
+}
+
+/** Number of trailing lines (not before `floor`) whose joined length fits. */
+function fitTrailingLines(lines: string[], floor: number, charBudget: number): number {
+  let count = 0;
+  let used = 0;
+  for (let i = lines.length - 1; i >= floor; i--) {
+    const next = used === 0 ? lines[i].length : lines[i].length + 1;
+    if (used + next > charBudget) {
+      break;
+    }
+    used += next;
+    count++;
+  }
+  return count;
+}
+
+// Truncates content so the rendered text honors `remainingBudget` tokens
+// (estimateTokens ≈ chars / 4). The previous head(60%)+tail(30%) line split
+// ignored the budget and kept ~90% of any file, blowing the budget wide open.
 function truncateFileContent(file: TrackedFile, remainingBudget: number): string {
   if (!file.content || file.tokenCount <= remainingBudget) {
     return file.content ?? '';
   }
   const lines = file.content.split('\n');
-  const headLines = Math.floor(lines.length * 0.6);
-  const tailLines = Math.floor(lines.length * 0.3);
-  const head = lines.slice(0, headLines).join('\n');
-  const tail = lines.slice(-tailLines).join('\n');
-  return `${head}\n\n... [truncated ${lines.length - headLines - tailLines} lines] ...\n\n${tail}`;
+  const totalChars = Math.max(0, remainingBudget * 4);
+  // Reserve room for the marker (sized for the worst case of all lines omitted).
+  const contentChars = Math.max(0, totalChars - truncationMarker(lines.length).length);
+  const headBudget = Math.floor(contentChars * 0.6);
+  const headCount = fitLeadingLines(lines, 0, headBudget);
+  const tailBudget = contentChars - lines.slice(0, headCount).join('\n').length;
+  const tailCount = fitTrailingLines(lines, headCount, tailBudget);
+  const omitted = lines.length - headCount - tailCount;
+  const head = lines.slice(0, headCount).join('\n');
+  const tail = tailCount > 0 ? lines.slice(lines.length - tailCount).join('\n') : '';
+  if (omitted <= 0) {
+    return [
+      head,
+      tail,
+    ]
+      .filter((s) => s.length > 0)
+      .join('\n');
+  }
+  return `${head}${truncationMarker(omitted)}${tail}`;
 }
 
 function buildContentBlock(file: TrackedFile, totalTokens: number, budget: number): string | null {

@@ -63,13 +63,14 @@ function evaluateProgrammaticRule(
  */
 function parseLlmVerdict(raw: string): SteeringDecision | null {
   const text = raw.trim();
-  const upper = text.toUpperCase();
-  if (upper.startsWith('ALLOW')) {
+  // Match the verdict keyword on a word boundary (so "DENYALL" is NOT a DENY),
+  // case-insensitively, but keep the guidance text's original casing.
+  if (/^ALLOW\b/i.test(text)) {
     return {
       action: SteeringAction.Allow,
     };
   }
-  if (upper.startsWith('DENY')) {
+  if (/^DENY\b/i.test(text)) {
     return {
       action: SteeringAction.Deny,
       guidance:
@@ -79,10 +80,14 @@ function parseLlmVerdict(raw: string): SteeringDecision | null {
           .trim() || undefined,
     };
   }
-  if (upper.startsWith('GUIDE:')) {
+  if (/^GUIDE\b/i.test(text)) {
     return {
       action: SteeringAction.Guide,
-      guidance: text.slice(6).trim() || undefined,
+      guidance:
+        text
+          .slice(5)
+          .replace(/^[:\s]+/, '')
+          .trim() || undefined,
     };
   }
   return null;

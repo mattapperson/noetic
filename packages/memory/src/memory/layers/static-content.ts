@@ -1,5 +1,5 @@
 import type { MemoryLayer, MemoryScope } from '@noetic-tools/types';
-import { Slot } from '@noetic-tools/types';
+import { estimateTokens, Slot } from '@noetic-tools/types';
 
 interface StaticContentOpts {
   id?: string;
@@ -36,9 +36,13 @@ export function staticContent(opts: StaticContentOpts) {
         };
       },
 
-      async recall({ state }) {
+      async recall({ state, budget }) {
         if (!state) {
           return null;
+        }
+        if (budget > 0 && estimateTokens(state) > budget) {
+          // Trim so the recalled text fits the token budget (~4 chars/token).
+          return state.slice(0, budget * 4);
         }
         return state;
       },
