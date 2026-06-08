@@ -299,10 +299,17 @@ export async function executeLLM<TMemory, I, O>(
   // and split the context budget across layers via allocateBudgets.
   const policy: ProjectionPolicy =
     step.projection ?? baseCtx.harness.config.projection ?? DEFAULT_PROJECTION;
+  // `instructions` are sent to the model as a separate field, outside the
+  // assembled view. Reserve their tokens from the projection budget so the
+  // view + instructions together stay within the policy's token budget.
+  const systemPromptTokens = resolvedInstructions ? estimateTokens(resolvedInstructions) : 0;
+  const viewPolicy: ProjectionPolicy = {
+    ...policy,
+    tokenBudget: Math.max(0, policy.tokenBudget - systemPromptTokens),
+  };
 
   let budgetMap = new Map<string, number>();
   if (hasLayers) {
-    const systemPromptTokens = resolvedInstructions ? estimateTokens(resolvedInstructions) : 0;
     const { allocations } = allocateBudgets({
       layers,
       totalBudget: policy.tokenBudget,
@@ -391,7 +398,7 @@ export async function executeLLM<TMemory, I, O>(
         systemPromptItems: systemItems,
         layerOutputItems,
         historyItems: nonSystemHistory,
-        policy,
+        policy: viewPolicy,
       });
     } else {
       assembledItems =

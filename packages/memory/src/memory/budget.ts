@@ -119,6 +119,21 @@ export function allocateBudgets({
     remaining -= min;
   }
 
+  // Declared minimums overcommit the available budget: scale them down
+  // proportionally so the total fits `available` (never negative, never over).
+  // Nothing is left for the proportional pool or history.
+  if (remaining < 0) {
+    const totalMin = available - remaining;
+    const scale = totalMin > 0 ? available / totalMin : 0;
+    for (const alloc of allocations) {
+      alloc.allocated = Math.floor(alloc.allocated * scale);
+    }
+    return {
+      allocations,
+      historyBudget: 0,
+    };
+  }
+
   // Phase 2: distribute 60% of remaining to layers proportionally, 40% to history
   const layerPool = remaining * 0.6;
   const historyBudget = remaining * 0.4;

@@ -1,9 +1,9 @@
 /**
- * ADVERSARIAL AUDIT — memory layer lifecycle orchestrator.
+ * REGRESSION SUITE — memory layer lifecycle orchestrator.
  *
- * Each test below encodes the EXPECTED-CORRECT behavior so it FAILS against the
- * current implementation (or, for dead-code findings, demonstrates the feature
- * is a no-op). Failing assertions are the deliverable — see the report.
+ * Each test encodes the EXPECTED-CORRECT behavior. These began as an adversarial
+ * audit (originally failing-by-design to prove the bugs); the bugs are now fixed,
+ * so the suite passes and guards against regressions.
  *
  * Run: bun test test/memory/_audit/lifecycle.test.ts
  */

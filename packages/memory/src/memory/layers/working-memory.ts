@@ -18,14 +18,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Cap recursion depth so a cyclic or pathologically-nested update can't overflow the stack. */
+const MAX_MERGE_DEPTH = 32;
+
 /**
  * Recursively merges `source` into `target`: object-valued keys are deep-merged,
  * while arrays and primitives replace. Prototype-pollution keys (`__proto__`,
- * `constructor`) are stripped at every depth.
+ * `constructor`) are stripped at every depth. Beyond `MAX_MERGE_DEPTH` the source
+ * value replaces rather than recurses (cycle/over-nesting guard).
  */
 function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
+  depth = 0,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {
     ...target,
@@ -35,8 +40,10 @@ function deepMerge(
       continue;
     }
     const existing = out[key];
-    if (isPlainObject(value)) {
-      out[key] = isPlainObject(existing) ? deepMerge(existing, value) : deepMerge({}, value);
+    if (isPlainObject(value) && depth < MAX_MERGE_DEPTH) {
+      out[key] = isPlainObject(existing)
+        ? deepMerge(existing, value, depth + 1)
+        : deepMerge({}, value, depth + 1);
       continue;
     }
     out[key] = value;
@@ -51,9 +58,11 @@ function safeMerge(state: WorkingMemoryState, args: Record<string, unknown>): Wo
   // Freeform string state: an object update must not silently discard prior content.
   const merged = deepMerge({}, args);
   if (typeof state === 'string' && state.length > 0) {
+    // `_previous` last so the preserved prior content always wins over a
+    // (pathological) update key literally named `_previous`.
     return {
-      _previous: state,
       ...merged,
+      _previous: state,
     };
   }
   return merged;

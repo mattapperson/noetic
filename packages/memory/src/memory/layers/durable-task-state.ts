@@ -103,21 +103,28 @@ export function durableTaskState(_config?: DurableTaskStateConfig) {
       },
 
       async onReturn({ childState, parentState }) {
-        // Merge child artifacts back to parent
+        // Merge child artifacts back to parent. The parent may have no state
+        // (init-less / never-initialized) — seed an empty base so the child's
+        // contribution is still merged rather than crashing.
+        const parent = parentState ?? {
+          checkpoints: [],
+          files: [],
+          data: {},
+        };
         return {
           parentState: {
             checkpoints: [
-              ...parentState.checkpoints,
+              ...parent.checkpoints,
               ...childState.checkpoints,
             ],
             files: [
               ...new Set([
-                ...parentState.files,
+                ...parent.files,
                 ...childState.files,
               ]),
             ],
             data: {
-              ...parentState.data,
+              ...parent.data,
               ...childState.data,
             },
           },

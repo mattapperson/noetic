@@ -4,10 +4,12 @@ import type { MemoryLayer } from '@noetic-tools/memory';
 import {
   completeLayers,
   createLayerStateStore,
+  createRecallCache,
   disposeLayers,
   executeRerender,
   initLayers,
   recallLayers,
+  recallLayersEventual,
   runAppendPipeline,
   storeLayers,
 } from '@noetic-tools/memory';
@@ -1776,5 +1778,61 @@ describe('executeRerender', () => {
       role: 'developer',
       memoryLayerId: 'typed-memory',
     });
+  });
+});
+
+describe('recallLayersEventual cross-turn cache', () => {
+  it('serves an eventual layer from cache across turns (same thread, new executionId each turn)', async () => {
+    let recallCount = 0;
+    const layer: MemoryLayer = {
+      id: 'slow',
+      slot: 200,
+      scope: 'thread',
+      recallMode: 'eventual',
+      hooks: {
+        recall: async () => {
+          recallCount += 1;
+          return {
+            items: [],
+            tokenCount: 0,
+          };
+        },
+      },
+    };
+    const store = createLayerStateStore();
+    const cache = createRecallCache();
+    const budgets = new Map([
+      [
+        'slow',
+        1000,
+      ],
+    ]);
+    const common = {
+      layers: [
+        layer,
+      ],
+      query: 'q',
+      log: makeItemLog(),
+      budgets,
+      store,
+      cache,
+    };
+    // Turn 1 and turn 2 use DIFFERENT executionIds but the SAME thread — the
+    // cache is keyed by scope, so the slow recall must run only once.
+    await recallLayersEventual({
+      ...common,
+      ctx: makeCtx({
+        executionId: 'e1',
+        threadId: 'T',
+      }),
+    });
+    await recallLayersEventual({
+      ...common,
+      ctx: makeCtx({
+        executionId: 'e2',
+        threadId: 'T',
+      }),
+    });
+    expect(recallCount).toBe(1);
   });
 });

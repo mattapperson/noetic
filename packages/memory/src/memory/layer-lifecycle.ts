@@ -202,8 +202,15 @@ export function createRecallCache(): RecallCache {
   };
 }
 
-function recallCacheKey(executionId: string, layerId: string): string {
-  return `${executionId}:${layerId}`;
+/**
+ * Cache key for eventual recall. Keyed by the layer's SCOPE key (not the
+ * per-turn executionId) so the cache survives across turns within a session —
+ * matching where the layer's state lives. An 'execution'-scoped layer's key
+ * rotates each turn (so its eventual recall behaves like atomic), which is
+ * correct since its state does not persist either.
+ */
+function recallCacheKey(layer: MemoryLayer, ctx: ExecutionContext): string {
+  return `${resolveScopeKey(layer.scope, ctx)}:${layer.id}`;
 }
 
 //#endregion
@@ -422,7 +429,7 @@ export async function recallLayersEventual({
 
   const results: RecallEntry[] = [];
   for (const layer of eventualLayers) {
-    const key = recallCacheKey(params.ctx.executionId, layer.id);
+    const key = recallCacheKey(layer, params.ctx);
     const cached = cache.entries.get(key);
     const isStale = cache.stale.has(key);
 
@@ -498,7 +505,7 @@ export async function storeLayers({
           // Invalidate this layer's eventual-recall cache so the next turn
           // re-runs recall() against the freshly stored state.
           if (recallCache && layer.recallMode === 'eventual') {
-            recallCache.stale.add(recallCacheKey(ctx.executionId, layer.id));
+            recallCache.stale.add(recallCacheKey(layer, ctx));
           }
           // Mirror to durable storage so the next execution's init() can
           // rehydrate. Skip 'execution' scope — its key rotates each run.
