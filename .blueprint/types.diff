@@ -1,0 +1,76 @@
+diff --git a/packages/core/src/types/memory.ts b/packages/core/src/types/memory.ts
+index 49ae628d..17e88b62 100644
+--- a/packages/core/src/types/memory.ts
++++ b/packages/core/src/types/memory.ts
+@@ -295,6 +295,8 @@ export interface MemoryLayer<TState = unknown> {
+   hooks: MemoryHooks<TState>;
+   /** Per-hook timeout overrides in ms. */
+   timeouts?: Partial<LayerTimeouts>;
++  /** Recall mode: `'atomic'` blocks callModel until recall completes (default); `'eventual'` uses cached results and never blocks. */
++  recallMode?: 'atomic' | 'eventual';
+   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
+   provides?: LayerProvides;
+ }
+diff --git a/packages/core/src/types/runtime.ts b/packages/core/src/types/runtime.ts
+index 83f664d3..1002ecac 100644
+--- a/packages/core/src/types/runtime.ts
++++ b/packages/core/src/types/runtime.ts
+@@ -5,7 +5,7 @@ import type { Context } from './context';
+ import type { DetachedHandle } from './detached';
+ import type { HarnessResult } from './harness-result';
+ import type { ExecuteInput, Item } from './items';
+-import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
++import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
+ import type { Span } from './observability';
+ import type { SteeringDecision } from './steering';
+ import type { Step } from './step';
+@@ -22,6 +22,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
+   storage?: StorageAdapter;
+   hooks?: AgentHooks;
+   params: TParams;
++  /** Default projection policy for all LLM steps. Individual steps can override via `step.projection`. */
++  projection?: ProjectionPolicy;
+ }
+ 
+ /** @public Base fields shared by all callModel requests. */
+@@ -95,6 +97,18 @@ export interface AgentHarnessContract<
+   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
++  recallLayersAtomic(
++    layers: MemoryLayer[],
++    input: string,
++    ctx: Context,
++    budgets: Map<string, number>,
++  ): Promise<RecallLayerOutput[]>;
++  recallLayersEventual(
++    layers: MemoryLayer[],
++    input: string,
++    ctx: Context,
++    budgets: Map<string, number>,
++  ): Promise<RecallLayerOutput[]>;
+   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+   checkpoint(ctx: Context): Promise<void>;
+diff --git a/packages/core/src/types/step.ts b/packages/core/src/types/step.ts
+index e780d6c6..64afa936 100644
+--- a/packages/core/src/types/step.ts
++++ b/packages/core/src/types/step.ts
+@@ -3,7 +3,7 @@ import type { Channel } from './channel';
+ import type { ModelParams, RetryPolicy, StepMeta, Tool } from './common';
+ import type { Context } from './context';
+ import type { NoeticError } from './error';
+-import type { ContextMemory, MemoryConfig, MemoryLayer } from './memory';
++import type { ContextMemory, MemoryConfig, MemoryLayer, ProjectionPolicy } from './memory';
+ 
+ /**
+  * Cumulative execution snapshot passed to loop `until` predicates.
+@@ -95,6 +95,8 @@ export interface StepLLM<_TMemory = ContextMemory, _I = unknown, O = unknown> {
+   params?: ModelParams;
+   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
+   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
++  /** Projection policy for this step. Overrides the harness-level default. */
++  projection?: ProjectionPolicy;
+ }
+ 
+ /** @public A step that invokes a single tool directly, bypassing the LLM. */

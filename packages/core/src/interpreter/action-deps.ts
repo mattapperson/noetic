@@ -1,9 +1,11 @@
 export type { LayerStateStore } from '@noetic-tools/memory';
 export {
+  allocateBudgets,
   assembleView,
   commitLayerUsage,
   computeLayerUsage,
   contextToExecCtx,
+  DEFAULT_PROJECTION,
   resolveLayerTools,
   returnLayers,
   spawnLayers,

@@ -486,6 +486,10 @@ export function makeMockHarness(): AgentHarnessContract {
     },
     initLayers: async () => {},
     recallLayers: async () => [],
+    // Default to delegating atomic recall to recallLayers so tests that mock
+    // recallLayers keep working; eventual recall contributes nothing by default.
+    recallLayersAtomic: async (layers, input, ctx) => harness.recallLayers(layers, input, ctx),
+    recallLayersEventual: async () => [],
     previewRequestItems: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},

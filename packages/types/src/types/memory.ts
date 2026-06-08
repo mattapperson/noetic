@@ -360,6 +360,17 @@ export interface MemoryLayer<TState = unknown> {
   hooks: MemoryHooks<TState>;
   /** Per-hook timeout overrides in ms. */
   timeouts?: Partial<LayerTimeouts>;
+  /**
+   * Recall mode controlling whether this layer's `recall()` blocks the model call.
+   * - `'atomic'` (default): recall runs synchronously in the hot path; the
+   *   harness waits for it before assembling the view.
+   * - `'eventual'`: recall is served from cache and never blocks; the cache
+   *   refreshes after `store()` produces new state, so the next turn sees it.
+   *
+   * A harness configured with `forceAtomicRecall` treats every layer as atomic,
+   * ignoring this field.
+   */
+  recallMode?: 'atomic' | 'eventual';
   /** Typed functions and data exposed to code steps via `ctx.memory['layerId']` and automatically as LLM tools. */
   provides?: LayerProvides;
   /** Optional item schemas contributed by this layer, primarily for developer-role memory items. */

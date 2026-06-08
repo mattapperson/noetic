@@ -4,6 +4,7 @@
 
 import {
   createMessage,
+  estimateTokens,
   extractAssistantText,
   frameworkCast,
   NoeticConfigError,
@@ -12,12 +13,14 @@ import {
 import { ZodError } from 'zod';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import {
+  allocateBudgets,
   assembleView,
   buildToolExecutionContext,
   ContextImpl,
   commitLayerUsage,
   computeLayerUsage,
   contextToExecCtx,
+  DEFAULT_PROJECTION,
   defaultItemSchemaRegistry,
   emitFrameworkEvent,
   getBroadcaster,
@@ -30,12 +33,14 @@ import type {
   AgentHarnessContract,
   Context,
   ContextMemory,
+  ContextRerenderRequest,
   ExecuteStepFn,
   ExecutionContext,
   FunctionCallItem,
   Item,
   MemoryConfig,
   MemoryLayer,
+  ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
   StepLLM,
@@ -107,6 +112,34 @@ function computeDelay(retry: RetryPolicy, attempt: number): number {
 
 const MAX_STEERING_RETRIES = 3;
 const emptyRecall: ReadonlyArray<RecallLayerOutput> = [];
+
+/**
+ * Merge re-render recall outputs over the base recall results, replacing entries
+ * for the same layer and keeping slot order. New layer entries are appended.
+ */
+function mergeRecallResults(
+  base: RecallLayerOutput[],
+  overrides: RecallLayerOutput[],
+  slotOf: Map<string, number>,
+): RecallLayerOutput[] {
+  if (overrides.length === 0) {
+    return base;
+  }
+  const byId = new Map(
+    overrides.map((r) => [
+      r.layerId,
+      r,
+    ]),
+  );
+  const merged = base.map((r) => byId.get(r.layerId) ?? r);
+  const seen = new Set(base.map((r) => r.layerId));
+  for (const o of overrides) {
+    if (!seen.has(o.layerId)) {
+      merged.push(o);
+    }
+  }
+  return merged.sort((a, b) => (slotOf.get(a.layerId) ?? 0) - (slotOf.get(b.layerId) ?? 0));
+}
 
 interface ResolvedTools {
   tools: Tool[] | undefined;
@@ -198,9 +231,13 @@ interface RunInputPipelineParams {
   input: string;
 }
 
-async function runInputPipeline({ ctx, layers, input }: RunInputPipelineParams): Promise<void> {
+async function runInputPipeline({
+  ctx,
+  layers,
+  input,
+}: RunInputPipelineParams): Promise<ContextRerenderRequest[]> {
   const userItem = createMessage(input, 'user');
-  const { items: finalItems } = await ctx.harness.runAppendPipeline(
+  const { items: finalItems, rerenderRequests } = await ctx.harness.runAppendPipeline(
     layers,
     [
       userItem,
@@ -210,6 +247,7 @@ async function runInputPipeline({ ctx, layers, input }: RunInputPipelineParams):
   for (const item of finalItems) {
     ctx.itemLog.append(item);
   }
+  return rerenderRequests;
 }
 
 export async function executeLLM<TMemory, I, O>(
@@ -236,9 +274,12 @@ export async function executeLLM<TMemory, I, O>(
   const resolvedStepTools = await resolveLazy(step.tools, ctx);
 
   // Append user input — through layer pipeline if layers exist, otherwise direct.
+  // The append pipeline may request a context re-render (e.g. a layer that
+  // expanded an input reference into new content); applied after recall below.
+  let rerenderRequests: ContextRerenderRequest[] = [];
   if (typeof input === 'string' && input.length > 0) {
     if (hasLayers) {
-      await runInputPipeline({
+      rerenderRequests = await runInputPipeline({
         ctx: baseCtx,
         layers,
         input,
@@ -254,14 +295,76 @@ export async function executeLLM<TMemory, I, O>(
     baseCtx,
   );
 
-  // Recall once per LLM step: every layer with a recall hook contributes its
-  // current view. Results drive both the assembled context window and the
-  // per-layer usage breakdown (ctx.lastLayerUsage). Recall fires before the
+  // Resolve the projection policy (step override > harness default > fallback)
+  // and split the context budget across layers via allocateBudgets.
+  const policy: ProjectionPolicy =
+    step.projection ?? baseCtx.harness.config.projection ?? DEFAULT_PROJECTION;
+
+  let budgetMap = new Map<string, number>();
+  if (hasLayers) {
+    const systemPromptTokens = resolvedInstructions ? estimateTokens(resolvedInstructions) : 0;
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: policy.tokenBudget,
+      systemPromptTokens,
+      responseReserve: policy.responseReserve,
+    });
+    budgetMap = new Map(
+      allocations.map((a) => [
+        a.layerId,
+        a.allocated,
+      ]),
+    );
+  }
+
+  // Recall once per LLM step: atomic layers run in the hot path; eventual layers
+  // are served from cache. Results drive both the assembled context window and
+  // the per-layer usage breakdown (ctx.lastLayerUsage). Recall fires before the
   // steering retry loop because retries replay the same context.
   const recallQuery = typeof input === 'string' ? input : '';
-  const recallResults = hasLayers
-    ? await baseCtx.harness.recallLayers(layers, recallQuery, baseCtx)
-    : emptyRecall;
+  const slotOf = new Map(
+    (layers ?? []).map((l) => [
+      l.id,
+      l.slot,
+    ]),
+  );
+  let recallResults: ReadonlyArray<RecallLayerOutput> = emptyRecall;
+  if (hasLayers) {
+    const atomic = await baseCtx.harness.recallLayersAtomic(
+      layers,
+      recallQuery,
+      baseCtx,
+      budgetMap,
+    );
+    const eventual = await baseCtx.harness.recallLayersEventual(
+      layers,
+      recallQuery,
+      baseCtx,
+      budgetMap,
+    );
+    recallResults = [
+      ...atomic,
+      ...eventual,
+    ].sort((a, b) => (slotOf.get(a.layerId) ?? 0) - (slotOf.get(b.layerId) ?? 0));
+
+    // Apply re-render requests collected from the input-append pipeline.
+    if (rerenderRequests.length > 0) {
+      const rerendered = await baseCtx.harness.executeRerender(
+        rerenderRequests,
+        layers,
+        baseCtx,
+        budgetMap,
+        recallQuery,
+      );
+      recallResults = mergeRecallResults(
+        [
+          ...recallResults,
+        ],
+        rerendered,
+        slotOf,
+      );
+    }
+  }
   const layerOutputItems: Item[] = recallResults.flatMap((r) => r.items);
 
   let retries = 0;
@@ -271,20 +374,33 @@ export async function executeLLM<TMemory, I, O>(
     const projectedHistoryItems = hasLayers
       ? await baseCtx.harness.projectHistory(layers, rawHistoryItems, baseCtx)
       : rawHistoryItems;
-    const assembledItems =
-      layerOutputItems.length > 0
-        ? assembleView({
-            systemPromptItems: [],
-            layerOutputItems,
-            historyItems: [
-              ...projectedHistoryItems,
-            ],
-          })
-        : projectedHistoryItems === rawHistoryItems
+    let assembledItems: ReadonlyArray<Item>;
+    if (hasLayers) {
+      // Keep system messages at the front; the projector enforces the token
+      // budget (drops highest-slot layer output, then oldest history).
+      const systemItems: Item[] = [];
+      const nonSystemHistory: Item[] = [];
+      for (const item of projectedHistoryItems) {
+        if (item.type === 'message' && item.role === 'system') {
+          systemItems.push(item);
+          continue;
+        }
+        nonSystemHistory.push(item);
+      }
+      assembledItems = assembleView({
+        systemPromptItems: systemItems,
+        layerOutputItems,
+        historyItems: nonSystemHistory,
+        policy,
+      });
+    } else {
+      assembledItems =
+        projectedHistoryItems === rawHistoryItems
           ? rawHistoryItems
           : [
               ...projectedHistoryItems,
             ];
+    }
 
     const request = resolvedTools
       ? {

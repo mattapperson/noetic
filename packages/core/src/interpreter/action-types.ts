@@ -7,9 +7,11 @@ export type {
 export type {
   AgentHarnessContract,
   Context,
+  ContextRerenderRequest,
   ExecuteStepFn,
   FunctionCallItem,
   Item,
+  ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
   StepLLM,

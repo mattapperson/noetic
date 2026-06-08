@@ -1,10 +1,21 @@
-import type { BudgetConfig, Context, MemoryLayer } from '@noetic-tools/types';
+import type { BudgetConfig, Context, MemoryLayer, ProjectionPolicy } from '@noetic-tools/types';
 import { NoeticErrorImpl } from '@noetic-tools/types';
 
 export interface BudgetAllocation {
   layerId: string;
   allocated: number;
 }
+
+/**
+ * Fallback projection policy when neither a step nor the harness configures one.
+ * The token budget is a conservative default; configure `harness.projection` or
+ * `step.projection` to match the target model's real context length.
+ */
+export const DEFAULT_PROJECTION: ProjectionPolicy = {
+  tokenBudget: 128e3,
+  responseReserve: 4e3,
+  overflow: 'sliding_window',
+};
 
 function extractMin(config: BudgetConfig | undefined): number {
   if (config && typeof config === 'object' && 'min' in config) {

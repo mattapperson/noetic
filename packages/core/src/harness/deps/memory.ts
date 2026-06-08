@@ -1,16 +1,20 @@
-export type { LayerStateStore } from '@noetic-tools/memory';
+export type { LayerStateStore, RecallCache } from '@noetic-tools/memory';
 export {
   afterModelCallLayers,
+  allocateBudgets,
   assembleView,
   beforeToolCallLayers,
   contextToExecCtx,
   createLayerStateStore,
+  createRecallCache,
+  DEFAULT_PROJECTION,
   disposeLayers,
   executeRerender,
   initLayers,
   projectHistoryLayers,
   recallLayers,
-  resolveLayerBudgets,
+  recallLayersAtomic,
+  recallLayersEventual,
   resolveLayerTools,
   runAppendPipeline,
   storeLayers,

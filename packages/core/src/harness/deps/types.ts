@@ -2,6 +2,7 @@ export type {
   ContextMemory,
   ExecutionContext,
   MemoryLayer,
+  ProjectionPolicy,
   StorageAdapter,
 } from '@noetic-tools/memory';
 export type {

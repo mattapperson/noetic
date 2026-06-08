@@ -8,7 +8,7 @@ import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput } from './items';
-import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
+import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
@@ -119,6 +119,8 @@ export interface ContextHarness {
   readonly config: {
     readonly name: string;
     readonly params: Record<string, unknown>;
+    /** Harness-wide default projection policy; a step's `projection` overrides it. */
+    readonly projection?: ProjectionPolicy;
   };
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
@@ -170,6 +172,18 @@ export interface ContextHarness {
     layers: MemoryLayer[],
     input: string,
     ctx: Context,
+  ): Promise<ContextRecallLayerOutput[]>;
+  recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<ContextRecallLayerOutput[]>;
+  recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
   ): Promise<ContextRecallLayerOutput[]>;
   projectHistory(
     layers: MemoryLayer[],

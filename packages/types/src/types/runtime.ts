@@ -6,7 +6,7 @@ import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
-import type { ContextMemory, MemoryLayer, StorageAdapter } from './memory';
+import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
@@ -30,6 +30,10 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   itemSchemas?: ItemSchemaExtensions;
   /** Whether unknown extension item types must match a registered schema. Defaults to true. */
   strictItemSchemas?: boolean;
+  /** Default projection policy for all LLM steps. Individual steps override via `step.projection`. */
+  projection?: ProjectionPolicy;
+  /** When true, every layer is recalled atomically regardless of its `recallMode` (no eventual/cached recall). */
+  forceAtomicRecall?: boolean;
 }
 
 //#region Delivery Mode
@@ -255,6 +259,20 @@ export interface AgentHarnessContract<
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  /** Recall only atomic layers (or all layers when the harness forces atomic recall). Blocks until complete. */
+  recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]>;
+  /** Recall eventual layers from cache (non-blocking); returns nothing when the harness forces atomic recall. */
+  recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]>;
   /**
    * Compute the items that would be sent to the model on the next turn for a
    * session — its accumulated history plus the harness's memory-layer recall

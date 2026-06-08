@@ -51,6 +51,8 @@ interface StoreLayersParams {
   log: ItemLog;
   store: LayerStateStore;
   storage: StorageAdapter;
+  /** When provided, an eventual layer whose store produces new state is marked stale for the next recall. */
+  recallCache?: RecallCache;
 }
 
 interface SpawnLayersParams {
@@ -147,32 +149,6 @@ interface ExecuteRerenderParams {
 /** Maximum allowed re-render depth to prevent infinite loops */
 const MAX_RERENDER_DEPTH = 3;
 
-/**
- * Default per-layer token budget when a layer has no `budget` config or uses
- * `'auto'`. Big enough that budget-respecting layers (e.g. file-reference)
- * render their content; real auto-allocation across layers is future work.
- */
-const DEFAULT_LAYER_BUDGET = 1.6e4;
-
-/** Resolve each layer's `BudgetConfig` to a concrete token budget for recall. */
-export function resolveLayerBudgets(layers: ReadonlyArray<MemoryLayer>): Map<string, number> {
-  const budgets = new Map<string, number>();
-  for (const layer of layers) {
-    const cfg = layer.budget;
-    if (typeof cfg === 'number') {
-      budgets.set(layer.id, cfg);
-      continue;
-    }
-    if (typeof cfg === 'object') {
-      budgets.set(layer.id, cfg.max);
-      continue;
-    }
-    // 'auto' or undefined → use the default ceiling.
-    budgets.set(layer.id, DEFAULT_LAYER_BUDGET);
-  }
-  return budgets;
-}
-
 //#endregion
 
 //#region Helper Functions
@@ -199,6 +175,38 @@ export function createLayerStateStore(
     diagnostic: diagnostic ?? (() => {}),
   };
 }
+
+//#region Recall Cache (eventual recall)
+
+interface RecallCacheEntry {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
+
+/**
+ * Per-harness memoization for `recallMode: 'eventual'` layers. Eventual recall
+ * serves the cached entry when warm and re-runs only when `store()` produces new
+ * state (which marks the entry stale), so a slow layer's `recall()` does not run
+ * on every turn.
+ */
+export interface RecallCache {
+  entries: Map<string, RecallCacheEntry>;
+  stale: Set<string>;
+}
+
+export function createRecallCache(): RecallCache {
+  return {
+    entries: new Map(),
+    stale: new Set(),
+  };
+}
+
+function recallCacheKey(executionId: string, layerId: string): string {
+  return `${executionId}:${layerId}`;
+}
+
+//#endregion
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   if (ms <= 0) {
@@ -353,6 +361,85 @@ export async function recallLayers({
   return results;
 }
 
+type RecallEntry = {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+};
+
+interface RecallLayersModeParams extends RecallLayersParams {
+  /** When true, treat every layer as atomic regardless of its `recallMode`. */
+  forceAtomic?: boolean;
+}
+
+/**
+ * Recall the layers that must complete before the model call: those with
+ * `recallMode !== 'eventual'`, or every layer when `forceAtomic` is set.
+ */
+export async function recallLayersAtomic({
+  forceAtomic,
+  ...params
+}: RecallLayersModeParams): Promise<RecallEntry[]> {
+  const atomicLayers = forceAtomic
+    ? params.layers
+    : params.layers.filter((l) => l.recallMode !== 'eventual');
+  return recallLayers({
+    ...params,
+    layers: atomicLayers,
+  });
+}
+
+interface RecallLayersEventualParams extends RecallLayersModeParams {
+  cache: RecallCache;
+}
+
+/**
+ * Recall `recallMode: 'eventual'` layers, served from {@link RecallCache}.
+ * A cold or store-invalidated (stale) entry is recalled and cached; a warm
+ * entry is returned as-is, so an eventual layer's `recall()` runs only after
+ * its `store()` produces new state. Returns nothing when `forceAtomic` is set —
+ * those layers are then handled by {@link recallLayersAtomic} instead.
+ */
+export async function recallLayersEventual({
+  cache,
+  forceAtomic,
+  ...params
+}: RecallLayersEventualParams): Promise<RecallEntry[]> {
+  if (forceAtomic) {
+    return [];
+  }
+  const eventualLayers = params.layers.filter((l) => l.recallMode === 'eventual');
+  if (eventualLayers.length === 0) {
+    return [];
+  }
+
+  const results: RecallEntry[] = [];
+  for (const layer of eventualLayers) {
+    const key = recallCacheKey(params.ctx.executionId, layer.id);
+    const cached = cache.entries.get(key);
+    const isStale = cache.stale.has(key);
+
+    if (!cached || isStale) {
+      const recalled = await recallLayers({
+        ...params,
+        layers: [
+          layer,
+        ],
+      });
+      for (const entry of recalled) {
+        cache.entries.set(key, entry);
+        results.push(entry);
+      }
+      cache.stale.delete(key);
+      continue;
+    }
+
+    results.push(cached);
+  }
+
+  return results;
+}
+
 export async function storeLayers({
   layers,
   response,
@@ -360,6 +447,7 @@ export async function storeLayers({
   log,
   store,
   storage,
+  recallCache,
 }: StoreLayersParams): Promise<void> {
   // Concurrent via Promise.allSettled — each layer gets its own state snapshot
   const snapshots: {
@@ -398,6 +486,11 @@ export async function storeLayers({
         );
         if (result?.state !== undefined) {
           store.set(ctx.executionId, layer.id, result.state);
+          // Invalidate this layer's eventual-recall cache so the next turn
+          // re-runs recall() against the freshly stored state.
+          if (recallCache && layer.recallMode === 'eventual') {
+            recallCache.stale.add(recallCacheKey(ctx.executionId, layer.id));
+          }
           // Mirror to durable storage so the next execution's init() can
           // rehydrate. Skip 'execution' scope — its key rotates each run.
           if (layer.scope !== 'execution') {

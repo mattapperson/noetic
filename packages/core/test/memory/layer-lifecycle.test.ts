@@ -8,7 +8,6 @@ import {
   executeRerender,
   initLayers,
   recallLayers,
-  resolveLayerBudgets,
   runAppendPipeline,
   storeLayers,
 } from '@noetic-tools/memory';
@@ -1700,61 +1699,6 @@ describe('executeRerender', () => {
       'first',
       'second',
     ]);
-  });
-
-  describe('resolveLayerBudgets', () => {
-    it('uses the numeric value when budget is a number', () => {
-      const layers: MemoryLayer[] = [
-        {
-          id: 'fixed',
-          slot: 0,
-          scope: 'execution',
-          budget: 1234,
-          hooks: {},
-        },
-      ];
-      const budgets = resolveLayerBudgets(layers);
-      expect(budgets.get('fixed')).toBe(1234);
-    });
-
-    it('uses max from a {min, max} range', () => {
-      const layers: MemoryLayer[] = [
-        {
-          id: 'range',
-          slot: 0,
-          scope: 'execution',
-          budget: {
-            min: 100,
-            max: 5e3,
-          },
-          hooks: {},
-        },
-      ];
-      const budgets = resolveLayerBudgets(layers);
-      expect(budgets.get('range')).toBe(5e3);
-    });
-
-    it('falls back to the default ceiling for "auto" or undefined', () => {
-      const layers: MemoryLayer[] = [
-        {
-          id: 'auto',
-          slot: 0,
-          scope: 'execution',
-          budget: 'auto',
-          hooks: {},
-        },
-        {
-          id: 'unset',
-          slot: 0,
-          scope: 'execution',
-          hooks: {},
-        },
-      ];
-      const budgets = resolveLayerBudgets(layers);
-      expect(budgets.get('auto')).toBeGreaterThan(0);
-      expect(budgets.get('unset')).toBeGreaterThan(0);
-      expect(budgets.get('auto')).toBe(budgets.get('unset'));
-    });
   });
 
   it('validates memory-layer developer message extensions during recall', async () => {
