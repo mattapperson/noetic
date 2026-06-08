@@ -222,31 +222,32 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export function mostRestrictive(decisions: SteeringDecision[]): SteeringDecision {
-  let result: SteeringDecision = {
-    action: SteeringAction.Allow,
-  };
   const guidances: string[] = [];
 
+  let hasGuide = false;
   for (const d of decisions) {
     if (d.action === SteeringAction.Deny) {
       return d;
     }
     if (d.action === SteeringAction.Guide) {
-      result = d;
+      hasGuide = true;
+      // Collect every non-empty guidance — a guidance-less Guide must never
+      // overwrite/drop guidance carried by another Guide.
       if (d.guidance) {
         guidances.push(d.guidance);
       }
     }
   }
 
-  if (result.action === SteeringAction.Guide && guidances.length > 1) {
+  if (!hasGuide) {
     return {
-      action: SteeringAction.Guide,
-      guidance: guidances.join('\n'),
+      action: SteeringAction.Allow,
     };
   }
-
-  return result;
+  return {
+    action: SteeringAction.Guide,
+    guidance: guidances.length > 0 ? guidances.join('\n') : undefined,
+  };
 }
 
 function layerItemSchemas(

@@ -56,9 +56,42 @@ function evaluateProgrammaticRule(
   return rule.predicate(params);
 }
 
+/**
+ * Parse an LLM steering verdict. Returns `null` when the output is unparseable
+ * (neither ALLOW/DENY/GUIDE) so the caller can retry. The verdict keyword is
+ * matched case-insensitively, but the guidance text is preserved verbatim.
+ */
+function parseLlmVerdict(raw: string): SteeringDecision | null {
+  const text = raw.trim();
+  const upper = text.toUpperCase();
+  if (upper.startsWith('ALLOW')) {
+    return {
+      action: SteeringAction.Allow,
+    };
+  }
+  if (upper.startsWith('DENY')) {
+    return {
+      action: SteeringAction.Deny,
+      guidance:
+        text
+          .slice(4)
+          .replace(/^[:\s]+/, '')
+          .trim() || undefined,
+    };
+  }
+  if (upper.startsWith('GUIDE:')) {
+    return {
+      action: SteeringAction.Guide,
+      guidance: text.slice(6).trim() || undefined,
+    };
+  }
+  return null;
+}
+
 async function evaluateLlmRuleSync(
   rule: SteeringRule,
   params: BeforeToolCallParams | AfterModelCallParams,
+  maxRetries: number,
 ): Promise<SteeringDecision> {
   if (!rule.llmEval) {
     return {
@@ -83,25 +116,18 @@ async function evaluateLlmRuleSync(
   const userMessage = createMessage(prompt, 'user');
   const model = rule.llmEval.model ?? 'openai/gpt-4o-mini';
 
-  const response = await callModel({
-    model,
-    items: [
-      userMessage,
-    ],
-  });
-  const text = extractAssistantText(response.items).trim().toUpperCase();
-
-  if (text.startsWith('DENY')) {
-    return {
-      action: SteeringAction.Deny,
-      guidance: text.slice(5).trim() || undefined,
-    };
-  }
-  if (text.startsWith('GUIDE:')) {
-    return {
-      action: SteeringAction.Guide,
-      guidance: text.slice(6).trim(),
-    };
+  // Retry on unparseable output up to maxRetries; treat as pass on exhaustion.
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await callModel({
+      model,
+      items: [
+        userMessage,
+      ],
+    });
+    const verdict = parseLlmVerdict(extractAssistantText(response.items));
+    if (verdict) {
+      return verdict;
+    }
   }
   return {
     action: SteeringAction.Allow,
@@ -112,10 +138,16 @@ interface FireLlmRuleAsyncParams {
   rule: SteeringRule;
   params: BeforeToolCallParams | AfterModelCallParams;
   pendingAsync: SteeringState['pendingAsync'];
+  maxRetries: number;
 }
 
-function fireLlmRuleAsync({ rule, params, pendingAsync }: FireLlmRuleAsyncParams): void {
-  evaluateLlmRuleSync(rule, params)
+function fireLlmRuleAsync({
+  rule,
+  params,
+  pendingAsync,
+  maxRetries,
+}: FireLlmRuleAsyncParams): void {
+  evaluateLlmRuleSync(rule, params, maxRetries)
     .then((decision) => {
       if (decision.action !== SteeringAction.Allow) {
         pendingAsync.push({
@@ -141,6 +173,7 @@ interface EvaluateRulesParams {
   hookName: 'beforeToolCall' | 'afterModelCall';
   params: BeforeToolCallParams | AfterModelCallParams;
   state: SteeringState;
+  maxRetries: number;
 }
 
 async function evaluateRules({
@@ -148,6 +181,7 @@ async function evaluateRules({
   hookName,
   params,
   state,
+  maxRetries,
 }: EvaluateRulesParams): Promise<SteeringDecision> {
   const applicable = rules.filter((r) => r.appliesTo.includes(hookName));
   const decisions: SteeringDecision[] = [];
@@ -171,7 +205,7 @@ async function evaluateRules({
     requireCallModel(params, rule.id);
 
     if (rule.llmEval.mode === 'sync') {
-      const decision = await evaluateLlmRuleSync(rule, params);
+      const decision = await evaluateLlmRuleSync(rule, params, maxRetries);
       decisions.push(decision);
       if (decision.action === SteeringAction.Deny) {
         return mostRestrictive(decisions);
@@ -184,6 +218,7 @@ async function evaluateRules({
       rule,
       params,
       pendingAsync: state.pendingAsync,
+      maxRetries,
     });
   }
 
@@ -203,6 +238,7 @@ async function evaluateRules({
  */
 export function steering(config: SteeringConfig) {
   const maxLedger = config.maxLedgerEntries ?? DEFAULT_MAX_LEDGER_ENTRIES;
+  const maxRetries = config.maxRetries ?? 1;
   const scope: MemoryScope = config.scope ?? 'execution';
 
   return {
@@ -262,6 +298,7 @@ export function steering(config: SteeringConfig) {
             state,
           },
           state,
+          maxRetries,
         });
 
         const entry: LedgerEntry = {
@@ -292,6 +329,7 @@ export function steering(config: SteeringConfig) {
             state,
           },
           state,
+          maxRetries,
         });
 
         const entry: LedgerEntry = {

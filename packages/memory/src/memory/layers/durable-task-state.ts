@@ -35,7 +35,11 @@ export function durableTaskState(_config?: DurableTaskStateConfig) {
     id: 'durable-task-state' as const,
     name: 'Durable Task State',
     slot: Slot.WORKING_MEMORY + 10, // 110
-    scope: 'execution',
+    // 'thread' (not 'execution'): the layer's purpose is to persist task state
+    // ACROSS executions/iterations within a thread. 'execution' scope rotates
+    // its storage key every run, so checkpoints never survived (storeLayers also
+    // skips durable persistence for 'execution' scope).
+    scope: 'thread',
     budget: {
       min: 100,
       max: 800,

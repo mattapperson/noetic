@@ -9,7 +9,8 @@ describe('durableTaskState', () => {
     const layer = durableTaskState();
     expect(layer.id).toBe('durable-task-state');
     expect(layer.slot).toBe(110);
-    expect(layer.scope).toBe('execution');
+    // 'thread' so checkpoints persist across executions within a thread.
+    expect(layer.scope).toBe('thread');
   });
 
   it('init/recall lifecycle', async () => {
