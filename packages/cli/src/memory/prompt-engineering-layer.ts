@@ -6,7 +6,7 @@
  * recent errors, and conversation context.
  */
 
-import type { FunctionCallItem, Item, MemoryLayer } from '@noetic/core';
+import type { FunctionCallItem, FunctionCallOutputItem, Item, MemoryLayer } from '@noetic/core';
 import { Slot } from '@noetic/core';
 
 //#region Types
@@ -18,8 +18,7 @@ interface PromptEngineeringState {
     error: string;
     timestamp: number;
   }>;
-  toolUsagePatterns: Map<string, number>;
-  communicationStyle: 'concise' | 'normal' | 'verbose';
+  toolUsagePatterns: Record<string, number>;
   lastContextUpdate: number;
 }
 
@@ -37,12 +36,12 @@ function isFunctionCall(item: Item): item is FunctionCallItem {
   );
 }
 
-function isToolResult(item: Item): boolean {
+function isFailedToolResult(item: Item): item is FunctionCallOutputItem {
   return (
     typeof item === 'object' &&
     item !== null &&
-    'type' in item &&
-    item.type === 'function_call_output'
+    item.type === 'function_call_output' &&
+    item.status === 'failed'
   );
 }
 
@@ -54,8 +53,7 @@ function createInitialState(): PromptEngineeringState {
   return {
     currentMode: 'normal',
     recentErrors: [],
-    toolUsagePatterns: new Map(),
-    communicationStyle: 'normal',
+    toolUsagePatterns: {},
     lastContextUpdate: Date.now(),
   };
 }
@@ -69,22 +67,16 @@ function getCoreBehavioralGuidelines(): string {
 - Focus on user-facing decisions, not internal steps
 - Skip filler words, preamble, and unnecessary transitions
 
-## Output Style Guidelines
-- Don't use colons before tool calls
-- Use file_path:line_number format for code references
-- Use owner/repo#123 format for GitHub issues/PRs
-- Provide context in explanations, but keep them concise
-
 ## Focus Areas
 Prioritize communication about:
 - Decisions requiring user input
-- High-level status updates at natural milestones  
+- High-level status updates at natural milestones
 - Errors or blockers that change the plan
 Avoid: step-by-step narration, routine operations`;
 }
 
-function getToolUsageGuidelines(patterns: Map<string, number>): string {
-  const mostUsedTools = Array.from(patterns.entries())
+function getToolUsageGuidelines(patterns: Record<string, number>): string {
+  const mostUsedTools = Object.entries(patterns)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
     .map(([name]) => name);
@@ -133,23 +125,6 @@ Tools with issues: ${Object.keys(errorsByTool).join(', ')}
 - Escalate to user when genuinely stuck after investigation`;
 }
 
-function adaptCommunicationStyle(
-  currentStyle: 'concise' | 'normal' | 'verbose',
-  toolUsage: Map<string, number>,
-): 'concise' | 'normal' | 'verbose' {
-  // Simple heuristic: if using many tools frequently, tend toward concise
-  const totalUsage = Array.from(toolUsage.values()).reduce((sum, count) => sum + count, 0);
-
-  if (totalUsage > 20) {
-    return 'concise';
-  }
-  if (totalUsage > 10) {
-    return 'normal';
-  }
-
-  return currentStyle;
-}
-
 function detectErrors(items: ReadonlyArray<Item>): Array<{
   tool: string;
   error: string;
@@ -165,22 +140,12 @@ function detectErrors(items: ReadonlyArray<Item>): Array<{
     const item = items[i];
     const nextItem = items[i + 1];
 
-    if (isFunctionCall(item) && isToolResult(nextItem)) {
-      // Check if the tool result indicates an error
-      if (typeof nextItem === 'object' && 'content' in nextItem) {
-        const content = String(nextItem.content || '');
-        if (
-          content.toLowerCase().includes('error') ||
-          content.toLowerCase().includes('failed') ||
-          content.toLowerCase().includes('permission denied')
-        ) {
-          errors.push({
-            tool: item.name,
-            error: content.substring(0, 200), // First 200 chars
-            timestamp: Date.now(),
-          });
-        }
-      }
+    if (isFunctionCall(item) && isFailedToolResult(nextItem)) {
+      errors.push({
+        tool: item.name,
+        error: nextItem.output.substring(0, 200), // First 200 chars
+        timestamp: Date.now(),
+      });
     }
   }
 
@@ -227,26 +192,19 @@ export function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState> {
           guidelines.push(errorGuidance);
         }
 
-        // Add communication style context
-        if (state.communicationStyle === 'concise') {
-          guidelines.push(`## Current Style: Concise Mode
-- Minimize explanatory text
-- Lead with actions and results
-- Skip reasoning unless specifically requested`);
-        }
-
         return guidelines.join('\n\n');
       },
 
       async store({ newItems, state }) {
         // Track tool usage patterns
-        const newPatterns = new Map(state.toolUsagePatterns);
+        const newPatterns: Record<string, number> = {
+          ...state.toolUsagePatterns,
+        };
 
         // Update tool usage counts
         for (const item of newItems) {
           if (isFunctionCall(item)) {
-            const current = newPatterns.get(item.name) || 0;
-            newPatterns.set(item.name, current + 1);
+            newPatterns[item.name] = (newPatterns[item.name] || 0) + 1;
           }
         }
 
@@ -256,27 +214,25 @@ export function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState> {
           ...detectErrors(newItems),
         ].slice(-10); // Keep last 10 errors
 
-        // Adapt communication style based on usage patterns
-        const adaptedStyle = adaptCommunicationStyle(state.communicationStyle, newPatterns);
-
         return {
           state: {
             ...state,
             toolUsagePatterns: newPatterns,
             recentErrors: newErrors,
-            communicationStyle: adaptedStyle,
             lastContextUpdate: Date.now(),
           },
         };
       },
 
       async onSpawn({ parentState }) {
-        // Children inherit tool patterns and communication style but start with fresh errors
+        // Children inherit tool patterns but start with fresh errors
         return {
           childState: {
             ...parentState,
             recentErrors: [], // Fresh error context for spawned agents
-            toolUsagePatterns: new Map(parentState.toolUsagePatterns),
+            toolUsagePatterns: {
+              ...parentState.toolUsagePatterns,
+            },
           },
         };
       },

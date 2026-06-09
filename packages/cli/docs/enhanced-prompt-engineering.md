@@ -1,273 +1,235 @@
-# Enhanced Prompt Engineering Implementation
+# Enhanced Prompt Engineering
 
-This document describes the implementation of enhanced prompt engineering patterns inspired by Claude Code's sophisticated system, adapted for the Noetic CLI's memory layer architecture.
+The CLI provides memory layers that implement prompt engineering patterns adapted from Claude Code's system. These layers inject behavioral guidelines, tool usage instructions, communication style rules, environment context, and planning-mode guidance into the agent's context. They are layered on top of the core memory layers from `@noetic/memory` and live in `packages/cli/src/memory/`.
 
-## Overview
+All layers use `Slot.PROCEDURAL` (250) execution scope with configured min/max token budgets. They are assembled in the harness factory at `src/harness/factory.ts` and activate automatically when the harness is created in `normal` or `planning` mode.
 
-We've implemented a comprehensive prompt engineering system using memory layers that provides:
+## Prompt Engineering Layer
 
-- **Dynamic behavioral guidelines** based on Claude Code's best practices
-- **Context-aware tool usage instructions** 
-- **Adaptive communication styles** based on user interactions
-- **Environment-aware context** with automatic capability detection
-- **Mode-specific guidance** for planning vs. normal operation
-- **Progressive skill activation** with enhanced behavioral guidelines
+Core behavioral guidelines with usage-pattern tracking and error-based adaptation.
 
-## Architecture
+**Source:** `src/memory/prompt-engineering-layer.ts`
 
-### Memory Layer Approach
-
-Instead of Claude Code's static prompt concatenation, we use a dynamic memory layer system that provides several advantages:
-
-1. **Dynamic Adaptation**: Layers adapt based on conversation history and usage patterns
-2. **Budget-Aware Content**: Each layer has token budgets for optimal context usage
-3. **State Management**: Layers maintain state across turns with learning capabilities
-4. **Modular Enhancement**: New layers can be added without breaking existing ones
-5. **Context Sensitivity**: Different layers activate based on mode, tools, and context
-
-### Layer Organization
-
-```
-Memory Layer Stack:
-├── Core Layers (planMemory, workingMemory, observationalMemory)
-├── Prompt Engineering Layers
-│   ├── promptEngineeringLayer()      - Core behavioral guidelines
-│   ├── communicationStyleLayer()     - Adaptive communication patterns
-│   ├── environmentContextLayer()     - Environment detection & context
-│   └── toolGuidanceLayer()          - Tool-specific usage instructions
-├── Mode-Specific Layers
-│   └── planningModeLayer()          - Plan mode guidance (when active)
-├── Existing Layers (fileReference, durableTaskState, etc.)
-└── Enhanced Skills Layer             - Skills with behavioral guidelines
-```
-
-## Implemented Layers
-
-### 1. Prompt Engineering Layer (`src/memory/prompt-engineering-layer.ts`)
-
-**Purpose**: Core behavioral guidelines inspired by Claude Code patterns.
-
-**Features**:
-- **Tool Usage Tracking**: Monitors which tools are used frequently
-- **Error Pattern Detection**: Learns from recent tool failures
-- **Adaptive Guidance**: Provides context-specific behavioral instructions
-- **Communication Efficiency**: Emphasizes leading with answers, not process
-
-**Key Guidelines**:
-```
-- Lead with answers, not process description
-- Use 1 sentence instead of 3 when possible
-- Focus on user-facing decisions, not internal steps
-- Skip filler words, preamble, and unnecessary transitions
-```
-
-### 2. Communication Style Layer (`src/memory/communication-style-layer.ts`)
-
-**Purpose**: Adaptive communication patterns based on user preferences.
-
-**Features**:
-- **User Preference Detection**: Analyzes user messages for communication preferences
-- **Style Adaptation**: Switches between concise, normal, and verbose modes
-- **Pattern Recognition**: Detects technical questions, explanation requests, direct answer preferences
-- **Dynamic Adjustment**: Continuously adapts based on user interaction patterns
-
-**Styles**:
-- **Concise**: Direct answers, minimal explanations
-- **Normal**: Balanced approach with context
-- **Verbose**: Detailed explanations with comprehensive background
-
-### 3. Tool Guidance Layer (`src/memory/tool-guidance-layer.ts`)
-
-**Purpose**: Context-aware tool usage instructions based on available tools and mode.
-
-**Features**:
-- **Tool Hierarchy**: Clear preference order (Read tool vs cat, Edit tool vs sed)
-- **Mode Awareness**: Different guidance for planning vs. normal mode
-- **File Operation Guidelines**: Specific instructions for read-before-edit patterns
-- **Agent Delegation**: Guidelines for when and how to use subagents
-
-**Key Patterns**:
-```
-- File reading: Use Read tool (NOT cat/head/tail)
-- File editing: Use Edit tool (NOT sed/awk)
-- File creation: Use Write tool (NOT echo >/cat <<EOF)
-- ALWAYS read files before editing them
-- Use parallel tool calls for independent operations
-```
-
-### 4. Environment Context Layer (`src/memory/environment-context-layer.ts`)
-
-**Purpose**: Dynamic environment detection and context awareness.
-
-**Features**:
-- **Platform Detection**: OS, shell type, Node.js version
-- **Git Repository**: Branch status, repository detection
-- **Package Manager**: npm/yarn/pnpm/bun detection
-- **Available Commands**: Capability scanning for common tools
-- **Platform-Specific Notes**: OS-appropriate command guidance
-
-**Auto-Detection**:
-- Git repository status and current branch
-- Node.js version and package manager
-- Available command-line tools (git, docker, curl, etc.)
-- Shell type (bash, zsh, fish)
-- Platform-specific path and command requirements
-
-### 5. Planning Mode Layer (`src/memory/planning-mode-layer.ts`)
-
-**Purpose**: Specialized guidance for plan mode operations.
-
-**Features**:
-- **FlowSchema Integration**: Detailed node type explanations (llm, subagent, fork, spawn, sequence)
-- **PRD Authoring Guidelines**: Structured approach to writing plan.md files
-- **Phase Management**: Tracks exploration → authoring → review progression
-- **Tool Restrictions**: Clear guidance on read-only mode limitations
-
-**FlowSchema Node Types**:
-```
-- llm: Direct LLM processing tasks
-- subagent: Delegate to specialized agents
-- fork: Parallel execution branches
-- spawn: Independent task creation
-- sequence: Sequential task chains
-```
-
-### 6. Enhanced Skills Layer (Modified `src/memory/skills-layer.ts`)
-
-**Purpose**: Skills with integrated behavioral guidelines.
-
-**Enhancements**:
-- **Behavioral Guidelines**: Added when skills are activated
-- **Tool Usage Hierarchy**: Integrated with skill activation
-- **Progress Update Guidelines**: Focus on user-relevant information
-- **Communication Style**: Consistent with other layers
-
-## Integration
-
-### Harness Factory Integration
-
-The layers are integrated into the harness creation process in `src/harness/factory.ts`:
+| Property | Value |
+|----------|-------|
+| **id** | `prompt-engineering` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 200, max: 1000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
 
 ```typescript
-const memory: MemoryLayer[] = [
-  // Core memory layers
-  planMemory({ /* ... */ }),
-  workingMemory(),
-  observationalMemory(),
-  
-  // Enhanced prompt engineering layers
-  promptEngineeringLayer(),
-  communicationStyleLayer(),
-  environmentContextLayer({ config, shell }),
-  toolGuidanceLayer({ tools, mode }),
-  
-  // Mode-specific layers
-  ...(mode === 'planning' ? [planningModeLayer({ availableTools: tools, currentMode: mode })] : []),
-  
-  // Existing layers continue
-  fileReference(),
-  durableTaskState(),
-  ...toolMemoryLayer(tools),
-  ...pluginMemory,
-  
-  // Enhanced skills layer
-  ...(allSkills.length > 0 ? [skillsLayer(allSkills, { cwd: config.cwd })] : []),
-];
+function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState>
 ```
 
-### Mode Awareness
+**State:** Tracks current mode (`normal`/`planning`), tool usage frequencies (`Map<string, number>`), recent errors (up to 10), and an adapted communication style. No external dependencies.
 
-The system is fully aware of the current agent mode:
-- **Planning Mode**: Activates planning-specific layers and tool restrictions
-- **Normal Mode**: Full tool access with implementation-focused guidance
+**Behavior:**
 
-## Claude Code Patterns Implemented
+- `init`: Initialises with empty usage patterns and no errors. Mode defaults to `normal`.
+- `recall`: Injects core behavioral guidelines (communication efficiency rules, output style, focus areas). If tools have been used frequently, appends tool-usage reminders. If recent errors exist (within 5 minutes), appends error-recovery guidance.
+- `store`: Increments per-tool call counters. Detects error signatures (`'error'`, `'failed'`, `'permission denied'`) in tool-result content following function-call items. Trims error history to the last 10 entries. Adapts communication style toward concise mode when total tool usage exceeds 20 calls.
+- `onSpawn`: Clones tool patterns and communication style to child. Resets error history (spawned agents start with a clean slate).
 
-### 1. Structured Instruction Hierarchy
-✅ **Implemented**: Clear sectioned guidelines with bullet points and structured formatting
+## Communication Style Layer
 
-### 2. Tool Preference Hierarchy  
-✅ **Implemented**: Explicit preference order for tools with "NOT" instructions
+Adaptive communication patterns based on user message analysis.
 
-### 3. Behavioral Guidelines
-✅ **Implemented**: Communication efficiency, output style, progress update guidelines
+**Source:** `src/memory/communication-style-layer.ts`
 
-### 4. Context-Aware Instructions
-✅ **Implemented**: Mode-specific, environment-specific, and tool-specific guidance
+| Property | Value |
+|----------|-------|
+| **id** | `communication-style` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 150, max: 500 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
 
-### 5. Dynamic Content Management
-✅ **Implemented**: Memory layers with state management and adaptive behavior
-
-### 6. Error-Based Learning
-✅ **Implemented**: Error detection and adaptive guidance based on recent failures
-
-## Benefits Over Static Prompts
-
-### 1. **Adaptability**
-- Instructions evolve based on user behavior and tool usage patterns
-- Communication style adapts to user preferences automatically
-- Error patterns trigger specific guidance adjustments
-
-### 2. **Efficiency**
-- Budget-aware content ensures optimal token usage
-- Layers activate only when relevant (e.g., planning layer only in plan mode)
-- Caching reduces redundant computation
-
-### 3. **Modularity**
-- New layers can be added without affecting existing ones
-- Plugin layers can extend the prompt engineering system
-- Easy A/B testing of different instruction patterns
-
-### 4. **State Persistence**
-- Learning persists across conversation turns
-- Spawned agents inherit relevant context
-- Progressive skill activation with cumulative guidance
-
-## Testing
-
-Comprehensive tests in `test/memory-layers.test.ts` verify:
-- Layer initialization and state management
-- Content generation and guidelines
-- Mode-aware behavior
-- Environment detection
-- Communication style adaptation
-
-## Usage Examples
-
-### Activating Enhanced Prompts
-Enhanced prompts activate automatically when the harness is created. No additional configuration is required.
-
-### Mode Switching
-```bash
-/plan          # Activates planning mode with specialized layers
-/plan cancel   # Returns to normal mode
+```typescript
+function communicationStyleLayer(): MemoryLayer<CommunicationStyleState>
 ```
 
-### Skill Activation
-When skills are activated, behavioral guidelines are automatically included:
+**State:** Tracks the current style (`concise`/`normal`/`verbose`), user preference flags (prefers explanations, prefers direct answers, asks technical questions), conversation metrics (message count, average length, question count), and last-update timestamp. No external dependencies.
+
+**Behavior:**
+
+- `init`: Sets style to `normal` with neutral preferences and zero metrics.
+- `recall`: Renders style-specific communication guidelines and user preference notes. Concise mode skips reasoning; verbose mode provides detailed explanations.
+- `store`: Extracts user message text from new items. Analyzes for question markers (`?`, leading wh-words/can-you phrases), technical keywords, explanation requests, and direct-answer indicators. Updates preference flags when 30%/40% thresholds are met. Adapts style: concise when direct-answer requests dominate and messages are short; verbose when explanation requests dominate or technical questions exceed 50% of recent messages.
+- `onSpawn`: Clones style and preferences to child. Resets conversation metrics (spawned agents build their own history).
+
+## Environment Context Layer
+
+Dynamic environment detection providing platform, git, and capability context.
+
+**Source:** `src/memory/environment-context-layer.ts`
+
+| Property | Value |
+|----------|-------|
+| **id** | `environment-context` |
+| **slot** | `Slot.OBSERVATIONS` (200) |
+| **scope** | `execution` |
+| **budget** | `{ min: 200, max: 800 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+```typescript
+interface EnvironmentContextConfig {
+  config: AgentConfig;
+  shell: ShellAdapter;
+}
+
+function environmentContextLayer(config: EnvironmentContextConfig): MemoryLayer<EnvironmentContextState>
 ```
-# Active Skills Behavioral Guidelines
 
-## Communication Style
-- Lead with the answer or action, not the reasoning process
-- Keep responses concise and focused on user needs
-- Use file_path:line_number format for code references
+**Dependencies:** `AgentConfig` (for `cwd`), `ShellAdapter` (for environment detection).
 
-## Tool Usage Hierarchy
-- File reading: Use Read tool (NOT cat/head/tail)
-- File editing: Use Edit tool (NOT sed/awk)
-...
+**Environment detection** runs during `init` using the shell adapter:
+
+- Platform: `process.platform`
+- Git: `git rev-parse --is-inside-work-tree` and `git branch --show-current`
+- Node.js: `node --version`
+- Shell type: `echo $SHELL`
+- Package manager: lock file detection (`bun.lockb`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`)
+- Available commands: `command -v` checks for git, npm, yarn, pnpm, bun, curl, wget, jq, docker
+
+All probes are run in parallel with individual 2-5s timeouts.
+
+**Behavior:**
+
+- `init`: Discovers environment info (parallel shell probes). Determines capabilities (git, package management, docker, HTTP, JSON processing). Stores as environment state.
+- `recall`: Formats environment info into a structured context block including working directory, platform, git status, package manager, available commands, and platform-specific notes (macOS/Windows/Linux).
+- `store`: Pass-through (environment is treated as static after init). Space reserved for periodic refresh.
+- `onSpawn`: Clones environment context to child with updated timestamp.
+
+## Tool Guidance Layer
+
+Context-aware tool usage instructions with preference hierarchy and mode awareness.
+
+**Source:** `src/memory/tool-guidance-layer.ts`
+
+| Property | Value |
+|----------|-------|
+| **id** | `tool-guidance` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 300, max: 1200 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+```typescript
+interface ToolGuidanceConfig {
+  tools: ReadonlyArray<Tool>;
+  mode?: 'normal' | 'planning';
+}
+
+function toolGuidanceLayer(config: ToolGuidanceConfig): MemoryLayer<ToolGuidanceState>
 ```
 
-## Future Enhancements
+**State:** Tracks available tool names, current mode, and recent tool failures. Initialized from the config's tool list and mode.
 
-Potential areas for extension:
-1. **Learning Persistence**: Save learned patterns across sessions
-2. **Plugin Layer Support**: Allow plugins to contribute prompt engineering layers
-3. **A/B Testing Framework**: Easy testing of different instruction variants
-4. **User Customization**: Allow users to customize communication preferences
-5. **Advanced Error Recovery**: More sophisticated error pattern recognition
+**Behavior:**
 
-## Conclusion
+- `init`: Seeds state with all tool names from the provided tool array. Sets mode from config (defaults to `normal`).
+- `recall`: Assembles a tool-usage guidance block. When tools exist that match CLI conventions (Read, Edit, Write, Find, Grep, Bash), it emits a preference hierarchy ("Use Read tool, NOT cat/head/tail"). Adds file operation guidelines (read-before-edit, indentation preservation, absolute paths). In `planning` mode, adds plan-specific tool guidance. If agent delegation tools are available (`spawn`, `subagent`, `Agent`), adds delegation guidelines. If recent failures exist, appends troubleshooting reminders.
+- `store`: Pass-through (failure tracking is a future enhancement; state passes through unchanged).
+- `onSpawn`: Clones tool set and mode to child. Resets failure history.
 
-This implementation successfully adapts Claude Code's sophisticated prompt engineering patterns to the Noetic CLI's memory layer architecture, providing dynamic, context-aware, and adaptive agent instructions that improve with use while maintaining the modularity and efficiency benefits of the memory layer system.
+## Planning Mode Layer
+
+Specialized guidance for plan-mode operations with FlowSchema integration.
+
+**Source:** `src/memory/planning-mode-layer.ts`
+
+| Property | Value |
+|----------|-------|
+| **id** | `planning-mode` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 400, max: 1500 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+```typescript
+interface PlanningModeConfig {
+  availableTools: ReadonlyArray<Tool>;
+  currentMode: 'normal' | 'planning';
+}
+
+function planningModeLayer(config: PlanningModeConfig): MemoryLayer<PlanningModeState>
+```
+
+**State:** Tracks whether planning mode is active, the current planning phase (`exploration`/`authoring`/`review`), active PRD references, FlowSchema node descriptions, and exploration progress (files examined, components identified, requirements gathered).
+
+**Behavior:**
+
+- `init`: Sets `isActive` from `currentMode`. Defaults to `exploration` phase with empty progress.
+- `recall`: Returns `null` when not active. When active, returns a structured plan-mode context block containing: mode header and transition instructions, FlowSchema node type guidelines (llm, subagent, fork, spawn, sequence), PRD authoring best practices with `plan.md` template, tool usage guidance filtered by plan-mode appropriate tools, phase-specific objectives and recommendations, exploration progress summary with next-step recommendations.
+- `store`: Updates exploration progress by counting Read function calls. Transitions phase automatically: exploration to authoring after 10 files examined; authoring to review when PRDs exist. Returns state unchanged if not active.
+- `onSpawn`: Clones planning state to child. Resets exploration progress.
+
+## Enhanced Skills Layer
+
+Skills layer with integrated behavioral guidelines and progressive disclosure.
+
+**Source:** `src/memory/skills-layer.ts`
+
+| Property | Value |
+|----------|-------|
+| **id** | `skills-memory` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 300, max: 2000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+```typescript
+interface SkillsLayerConfig {
+  cwd: string;
+}
+
+function skillsLayer(
+  skills: SkillDefinition[],
+  config: SkillsLayerConfig,
+): MemoryLayer<SkillsLayerState>
+```
+
+**State:** Maintains skill definitions, list of activated skill names, and a processed-instruction cache (LRU, max 50 entries). Processed instructions are expanded inline shell commands (`!`) evaluated at activation time.
+
+**Behavior:**
+
+- `init`: Loads skill definitions into state. No skills are activated at start.
+- `recall`: When skills are defined but none activated, renders an `<available_skills>` block listing each skill's name, description, when-to-use guidance, and the `activateSkill` prompt. When skills are activated, additionally injects behavioral guidelines (communication style, tool usage hierarchy, file operation rules, progress update rules) and each activated skill's full processed instructions.
+- `store`: Detects `activateSkill` function calls via `findFunctionCall`. Validates the target skill exists and is model-invocable. Processes instructions (expanding inline shell commands using `processSkillContent`) and caches the result. Maintains LRU eviction when cache exceeds `MAX_CACHE_SIZE` (50).
+- `onSpawn`: Clones definitions, activated skills, and processed instruction cache to child.
+
+## Harness Factory Integration
+
+The layers are assembled in `src/harness/factory.ts` in this order:
+
+```
+Core layers:           planMemory, workingMemory, observationalMemory
+Enhanced layers:       promptEngineeringLayer, communicationStyleLayer,
+                       environmentContextLayer(config, shell),
+                       toolGuidanceLayer(tools, mode)
+Mode-specific:         planningModeLayer(tools, mode) [only when mode=planning]
+Existing layers:       fileReference, durableTaskState, toolMemoryLayer, plugin layers
+Skills:                skillsLayer(skills, cwd) [only when skills exist]
+```
+
+Mode switching between `normal` and `planning` is controlled by the `/plan` CLI command. The `planningModeLayer` activates only in planning mode; the `toolGuidanceLayer` includes mode-appropriate guidance for either mode.
+
+## Export
+
+All layers are exported from `src/memory/index.ts`:
+
+```typescript
+export { communicationStyleLayer } from './communication-style-layer.js';
+export { environmentContextLayer } from './environment-context-layer.js';
+export { planningModeLayer } from './planning-mode-layer.js';
+export { promptEngineeringLayer } from './prompt-engineering-layer.js';
+export { skillsLayer } from './skills-layer.js';
+export { toolGuidanceLayer } from './tool-guidance-layer.js';
+```
+
+## Future Considerations
+
+- **Plugin contributions**: Allow plugins to register their own prompt engineering layers through the plugin system.
+- **Session persistence**: Persist learned patterns (communication style preferences, tool usage frequencies) across CLI sessions.
+- **Periodic environment refresh**: Re-run environment detection periodically (or on workspace change) rather than once at init.

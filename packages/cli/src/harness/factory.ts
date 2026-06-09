@@ -184,6 +184,20 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     observationalMemory(),
 
     // Enhanced prompt engineering layers
+    //
+    // NOTE on budget min-reservation (see core budget.ts Phase 1):
+    //   The framework's allocateBudgets reserves each layer's `min` budget
+    //   UNCONDITIONALLY in Phase 1, even for layers whose recall() returns
+    //   null in the current mode. This means every enhanced layer added here
+    //   consumes at least its `min` tokens from the prompt budget every turn.
+    //
+    //   planningModeLayer is intentionally gated behind `mode === 'planning'`
+    //   (below) so its 400-token min is NOT reserved in normal mode.
+    //   toolGuidanceLayer (min: 300) always returns a string in both modes,
+    //   so its min is always justified. environmentContextLayer (min: 200)
+    //   always returns context once initialized. If a layer can return null
+    //   (e.g. a layer with no data for the current mode), consider gating it
+    //   conditionally like planningModeLayer to avoid dead min reservations.
     promptEngineeringLayer(),
     communicationStyleLayer(),
     environmentContextLayer({

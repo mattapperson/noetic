@@ -38,6 +38,39 @@ const agent = react({
 
 When `memory` is provided, `react()` auto-wraps the loop in a `spawn` boundary.
 
+### Agent with CLI Enhanced Prompts
+
+The `@noetic/cli` package provides enhanced prompt engineering layers. Import them from `@noetic/cli` when building agents that need behavioral guidelines, adaptive communication, environment context, and tool guidance:
+
+```typescript
+import {
+  promptEngineeringLayer,
+  communicationStyleLayer,
+  environmentContextLayer,
+  toolGuidanceLayer,
+  planningModeLayer,
+} from '@noetic/cli';
+
+const agent = react({
+  model: 'anthropic/claude-sonnet-4-20250514',
+  instructions: 'You are a coding assistant.',
+  tools: codingTools,
+  maxSteps: 25,
+  memory: [
+    workingMemory({ scope: 'resource' }),
+    observationalMemory({ bufferThreshold: 4_000 }),
+    promptEngineeringLayer(),
+    communicationStyleLayer(),
+    environmentContextLayer({ config: agentConfig, shell: shellAdapter }),
+    toolGuidanceLayer({ tools: codingTools, mode: 'normal' }),
+    // Only include in planning mode:
+    // planningModeLayer({ availableTools: codingTools, currentMode: 'planning' }),
+  ],
+});
+```
+
+All CLI enhanced layers use `execution` scope and `Slot.PROCEDURAL` (250). The harness factory in `@noetic/cli` assembles them automatically; manual composition is only needed when building custom agents outside the CLI harness.
+
 ## Pattern: Agent with Steering
 
 Use the steering layer to enforce policies on tool usage and model output.

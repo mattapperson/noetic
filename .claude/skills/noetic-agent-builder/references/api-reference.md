@@ -242,6 +242,136 @@ Loads content at init, injects as tagged XML block in every recall.
 staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 ```
 
+### promptEngineeringLayer
+
+Core behavioral guidelines with tool usage tracking and error-based adaptation. Part of the CLI's enhanced prompt engineering system (`@noetic/cli`).
+
+```typescript
+function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `prompt-engineering` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 200, max: 1000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+Recall injects communication efficiency rules, tool-usage reminders based on frequency, and error-recovery guidance when recent errors exist. Store tracks tool call frequencies and detects error signatures in tool results. Spanw clones patterns and clears error history.
+
+### communicationStyleLayer
+
+Adaptive communication patterns (concise/normal/verbose) based on user message analysis. Part of the CLI's enhanced prompt engineering system (`@noetic/cli`).
+
+```typescript
+function communicationStyleLayer(): MemoryLayer<CommunicationStyleState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `communication-style` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 150, max: 500 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+Recall renders style-specific communication guidelines. Store analyzes user messages for question markers, technical keywords, and preference indicators, then adapts the style accordingly. Spanw clones style and preferences, resets metrics.
+
+### environmentContextLayer
+
+Dynamic environment detection providing platform, git, Node.js, shell, and package-manager context. Part of the CLI's enhanced prompt engineering system (`@noetic/cli`).
+
+```typescript
+interface EnvironmentContextConfig {
+  config: AgentConfig;
+  shell: ShellAdapter;
+}
+
+function environmentContextLayer(config: EnvironmentContextConfig): MemoryLayer<EnvironmentContextState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `environment-context` |
+| **slot** | `Slot.OBSERVATIONS` (200) |
+| **scope** | `execution` |
+| **budget** | `{ min: 200, max: 800 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+Init probes the environment via the shell adapter (git, node, shell type, package manager, available commands) in parallel with individual timeouts. Recall formats into a structured context block. Store is pass-through (environment treated as static). Spanw clones context with updated timestamp.
+
+### toolGuidanceLayer
+
+Context-aware tool usage instructions with preference hierarchy and mode awareness. Part of the CLI's enhanced prompt engineering system (`@noetic/cli`).
+
+```typescript
+interface ToolGuidanceConfig {
+  tools: ReadonlyArray<Tool>;
+  mode?: 'normal' | 'planning';
+}
+
+function toolGuidanceLayer(config: ToolGuidanceConfig): MemoryLayer<ToolGuidanceState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `tool-guidance` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 300, max: 1200 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+Recall emits a tool preference hierarchy (e.g. "Use Read tool, NOT cat/head/tail"), file operation guidelines, and mode-specific guidance. In planning mode, includes plan tool restrictions. If agent delegation tools are available, adds delegation guidelines. Spanw clones tool set and mode, resets failure history.
+
+### planningModeLayer
+
+Specialized guidance for plan-mode operations with FlowSchema integration and phase tracking. Part of the CLI's enhanced prompt engineering system (`@noetic/cli`).
+
+```typescript
+interface PlanningModeConfig {
+  availableTools: ReadonlyArray<Tool>;
+  currentMode: 'normal' | 'planning';
+}
+
+function planningModeLayer(config: PlanningModeConfig): MemoryLayer<PlanningModeState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `planning-mode` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 400, max: 1500 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+Recall returns null when not active. When active, injects FlowSchema node type guidelines (llm, subagent, fork, spawn, sequence), PRD authoring best practices with a plan.md template, plan-mode tool restrictions, phase-specific objectives (exploration/authoring/review), and exploration progress. Store counts Read calls to auto-transition phases. Spanw clones state, resets progress.
+
+### skillsLayer (CLI Enhanced)
+
+Progressive skill disclosure with integrated behavioral guidelines and inline command processing. Part of `@noetic/cli`.
+
+```typescript
+interface SkillsLayerConfig {
+  cwd: string;
+}
+
+function skillsLayer(
+  skills: SkillDefinition[],
+  config: SkillsLayerConfig,
+): MemoryLayer<SkillsLayerState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `skills-memory` |
+| **slot** | `Slot.PROCEDURAL` (250) |
+| **scope** | `execution` |
+| **budget** | `{ min: 300, max: 2000 }` |
+| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+
+Recall lists model-invocable skills as `<available_skills>` when none are activated. Upon activation, injects behavioral guidelines and full skill instructions. Store detects `activateSkill` calls, processes inline shell commands (`!`), and caches results (LRU, max 50). Spanw clones cache to child.
+
 ### toolMemoryLayer
 
 Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state. Defaults to `'execution'` scope.

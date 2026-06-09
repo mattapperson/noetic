@@ -20,8 +20,6 @@ interface PlanningModeState {
   }>;
   explorationProgress: {
     filesExamined: number;
-    componentsIdentified: string[];
-    requirementsGathered: string[];
   };
 }
 
@@ -42,8 +40,6 @@ function createInitialState(isActive: boolean): PlanningModeState {
     flowSchemaNodes: [],
     explorationProgress: {
       filesExamined: 0,
-      componentsIdentified: [],
-      requirementsGathered: [],
     },
   };
 }
@@ -186,28 +182,19 @@ function getToolDescription(toolName: string): string {
 }
 
 function getExplorationGuidance(progress: PlanningModeState['explorationProgress']): string {
+  if (progress.filesExamined === 0) {
+    return '';
+  }
+
   const guidance = [
     '## Exploration Progress',
+    `- **Files examined**: ${progress.filesExamined}`,
   ];
-
-  if (progress.filesExamined > 0) {
-    guidance.push(`- **Files examined**: ${progress.filesExamined}`);
-  }
-
-  if (progress.componentsIdentified.length > 0) {
-    guidance.push(`- **Components identified**: ${progress.componentsIdentified.join(', ')}`);
-  }
-
-  if (progress.requirementsGathered.length > 0) {
-    guidance.push(`- **Requirements gathered**: ${progress.requirementsGathered.length} items`);
-  }
 
   guidance.push(`
 ### Next Steps Recommendations:
 ${progress.filesExamined < 5 ? '- Continue exploring key project files (package.json, README, main source files)' : ''}
-${progress.componentsIdentified.length < 3 ? '- Identify main components and their relationships' : ''}
-${progress.requirementsGathered.length < 5 ? '- Gather functional and non-functional requirements' : ''}
-${progress.filesExamined >= 5 && progress.componentsIdentified.length >= 3 ? '- Ready to begin PRD authoring with plan/updatePrd' : ''}`);
+${progress.filesExamined >= 5 ? '- Ready to begin PRD authoring with plan/updatePrd' : ''}`);
 
   return guidance.join('\n');
 }
@@ -334,14 +321,13 @@ Focus on analysis, documentation, and planning rather than implementation.
 
         // Track exploration progress based on tool usage
         let newFilesExamined = state.explorationProgress.filesExamined;
-        const newComponents = [
-          ...state.explorationProgress.componentsIdentified,
+        const newActivePRDs = [
+          ...state.activePRDs,
         ];
-        const newRequirements = [
-          ...state.explorationProgress.requirementsGathered,
+        const newFlowSchemaNodes = [
+          ...state.flowSchemaNodes,
         ];
 
-        // Simple tracking - could be enhanced with actual tool result analysis
         for (const item of newItems) {
           if (
             typeof item === 'object' &&
@@ -351,8 +337,25 @@ Focus on analysis, documentation, and planning rather than implementation.
           ) {
             if (item.name === 'Read') {
               newFilesExamined += 1;
+            } else if (item.name === 'plan/updatePrd') {
+              // Extract PRD name from arguments if available
+              try {
+                const args = JSON.parse(item.arguments);
+                if (args.name && !newActivePRDs.includes(args.name)) {
+                  newActivePRDs.push(args.name);
+                }
+              } catch {
+                // If we can't parse arguments, add a default placeholder
+                if (newActivePRDs.length === 0) {
+                  newActivePRDs.push('plan.md');
+                }
+              }
+            } else if (item.name === 'plan/setPlanTree') {
+              newFlowSchemaNodes.push({
+                type: 'execution-tree',
+                description: 'FlowSchema execution tree defined via plan/setPlanTree',
+              });
             }
-            // Could add more sophisticated progress tracking here
           }
         }
 
@@ -360,7 +363,7 @@ Focus on analysis, documentation, and planning rather than implementation.
         let newPhase = state.planningPhase;
         if (state.planningPhase === 'exploration' && newFilesExamined > 10) {
           newPhase = 'authoring';
-        } else if (state.planningPhase === 'authoring' && state.activePRDs.length > 0) {
+        } else if (state.planningPhase === 'authoring' && newActivePRDs.length > 0) {
           newPhase = 'review';
         }
 
@@ -368,10 +371,10 @@ Focus on analysis, documentation, and planning rather than implementation.
           state: {
             ...state,
             planningPhase: newPhase,
+            activePRDs: newActivePRDs,
+            flowSchemaNodes: newFlowSchemaNodes,
             explorationProgress: {
               filesExamined: newFilesExamined,
-              componentsIdentified: newComponents,
-              requirementsGathered: newRequirements,
             },
           },
         };
@@ -382,6 +385,8 @@ Focus on analysis, documentation, and planning rather than implementation.
         return {
           childState: {
             ...parentState,
+            activePRDs: [],
+            flowSchemaNodes: [],
             explorationProgress: createInitialState(parentState.isActive).explorationProgress,
           },
         };
