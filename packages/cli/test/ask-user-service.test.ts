@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { AskUserBusyError, createAskUserService } from '@noetic/code-agent/ask-user-service';
+import { AskUserBusyError, createAskUserService } from '@noetic-tools/code-agent/ask-user-service';
 import type { AskUserInput, AskUserOutput } from '@noetic-tools/core';
 import { isNoeticError } from '@noetic-tools/core';
 

@@ -5,13 +5,14 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": ".",
+    "noEmit": true,
     "skipLibCheck": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "paths": {
+      "@noetic-tools/types": ["../types/src/index.ts"],
+      "@noetic-tools/types/contract": ["../types/src/types/memory.ts"],
+      "@noetic-tools/memory": ["../memory/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

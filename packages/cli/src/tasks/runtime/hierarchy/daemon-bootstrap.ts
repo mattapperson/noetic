@@ -21,21 +21,21 @@
  *     that drives `harness.run(adversarialValidatorStep, args, ctx)`.
  */
 
-import { createCodeAgent } from '@noetic/code-agent';
+import { createCodeAgent } from '@noetic-tools/code-agent';
 import {
   externalTaskEventsChan,
   featureLoopStateChan,
   validatorRequestChan,
-} from '@noetic/code-agent/tasks/ipc-node';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/ipc-node';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { resolveSubprocessRoot } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import type { AgentHarness, StorageAdapter, SubprocessAdapter } from '@noetic-tools/core';
 import {
   createFileStorage,
   createLocalFsAdapter,
   createLocalShellAdapter,
   createLocalSubprocessAdapter,
-} from '@noetic/platform-node';
-import type { AgentHarness, StorageAdapter, SubprocessAdapter } from '@noetic-tools/core';
+} from '@noetic-tools/platform-node';
 import { defaultSignaller } from '../agent-ci-control.js';
 import { DEFAULT_MODEL } from '../defaults.js';
 import { startImplementerRun } from '../implementer-launcher.js';

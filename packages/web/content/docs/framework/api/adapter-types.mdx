@@ -7,7 +7,7 @@ description: OpenRouter adapter and EmbedFn type for semantic routing and conver
 
 Batch embedding function that maps N texts to N vectors. Used by `semanticSwitch`, `embeddingMatch`, and `until.converged`.
 
-```ts
+```ts validate=none
 type EmbedFn = (texts: readonly string[]) => Promise<readonly number[][]>;
 ```
 
@@ -15,7 +15,7 @@ type EmbedFn = (texts: readonly string[]) => Promise<readonly number[][]>;
 
 Configuration for the LLM provider, passed to `AgentHarness` via the `llm` option.
 
-```ts
+```ts validate=none
 interface LlmProviderConfig {
   provider: 'openrouter';
   apiKey?: string; // defaults to process.env.OPENROUTER_API_KEY
@@ -58,8 +58,8 @@ const router = branch({
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
+      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),

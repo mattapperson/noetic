@@ -1,4 +1,4 @@
-import type { Feature, Task } from '@noetic/code-agent/tasks/schema';
+import type { Feature, Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   FeatureLoopState,
@@ -7,9 +7,9 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FeatureLoopStateChanged } from './feature-lifecycle.js';
 import { listFeatures, loadFeature, loadSlice, saveFeature } from './store.js';
 

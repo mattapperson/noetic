@@ -5,12 +5,12 @@
  * SDK's own (different directory).
  */
 
-import type { StartPlannerRunArgs, StartPlannerRunResult } from '@noetic/code-agent/tasks';
-import * as sdk from '@noetic/code-agent/tasks';
-import { fileUrlToPath } from '@noetic/code-agent/tasks';
+import type { StartPlannerRunArgs, StartPlannerRunResult } from '@noetic-tools/code-agent/tasks';
+import * as sdk from '@noetic-tools/code-agent/tasks';
+import { fileUrlToPath } from '@noetic-tools/code-agent/tasks';
 
-export type { StartPlannerRunArgs, StartPlannerRunResult } from '@noetic/code-agent/tasks';
-export { PlannerSpawnError, PlannerSpawnErrorCode } from '@noetic/code-agent/tasks';
+export type { StartPlannerRunArgs, StartPlannerRunResult } from '@noetic-tools/code-agent/tasks';
+export { PlannerSpawnError, PlannerSpawnErrorCode } from '@noetic-tools/code-agent/tasks';
 
 /**
  * Resolve the CLI's local `planner-runner.ts` path. The SDK's launcher

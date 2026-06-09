@@ -1,8 +1,6 @@
-import { NoeticConfigError } from '../errors/noetic-config-error';
+import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
-import { ItemSchemaRegistry } from '../schemas/item';
-import { frameworkCast } from '../util/framework-cast';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
@@ -16,19 +14,23 @@ import {
   dispatchStepThroughAdapter,
   execute,
 } from './deps/interpreter';
-import type { LayerStateStore } from './deps/memory';
+import type { LayerStateStore, RecallCache } from './deps/memory';
 import {
   afterModelCallLayers,
+  allocateBudgets,
   assembleView,
   beforeToolCallLayers,
   contextToExecCtx,
   createLayerStateStore,
+  createRecallCache,
+  DEFAULT_PROJECTION,
   disposeLayers,
   executeRerender,
   initLayers,
   projectHistoryLayers,
   recallLayers,
-  resolveLayerBudgets,
+  recallLayersAtomic,
+  recallLayersEventual,
   resolveLayerTools,
   runAppendPipeline,
   storeLayers,
@@ -70,6 +72,7 @@ import type {
   LLMResponse,
   LlmProviderConfig,
   MemoryLayer,
+  ProjectionPolicy,
   RecallLayerOutput,
   SessionScope,
   ShellAdapter,
@@ -128,6 +131,10 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   itemSchemas?: ItemSchemaExtensions;
   /** Whether unknown extension item types must match a registered schema. Defaults to true. */
   strictItemSchemas?: boolean;
+  /** Default projection policy for all LLM steps. Individual steps override via `step.projection`. */
+  projection?: ProjectionPolicy;
+  /** When true, every layer is recalled atomically regardless of its `recallMode`. */
+  forceAtomicRecall?: boolean;
   traceExporter?: TraceExporter;
   layerStateStore?: LayerStateStore;
   /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
@@ -203,6 +210,19 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
   if (!apiKey) {
     return undefined;
   }
+  if (config?.cache) {
+    // Inject `X-OpenRouter-Cache: true` on every request so OpenRouter serves
+    // identical model calls from cache without re-billing (deterministic re-runs).
+    return new OpenRouter({
+      apiKey,
+      hooks: {
+        beforeRequest: (_ctx, request) => {
+          request.headers.set('X-OpenRouter-Cache', 'true');
+          return request;
+        },
+      },
+    });
+  }
   return new OpenRouter({
     apiKey,
   });
@@ -247,6 +267,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly streamIdleTimeoutMs: number;
   private readonly sessions = new Map<string, Session>();
   readonly layerStateStore: LayerStateStore;
+  /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
+  readonly recallCache: RecallCache;
   readonly traceExporter: TraceExporter;
   /**
    * Long-lived shared cwd state. The same reference is seeded into every
@@ -269,6 +291,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       params: validatedParams,
       itemSchemas: opts.itemSchemas,
       strictItemSchemas: opts.strictItemSchemas ?? true,
+      projection: opts.projection,
+      forceAtomicRecall: opts.forceAtomicRecall,
     };
     this.fs = opts.fs ?? createInMemoryFsAdapter();
     this.shell = opts.shell ?? createInMemoryShellAdapter();
@@ -282,6 +306,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
+    this.recallCache = createRecallCache();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
     this.streamIdleTimeoutMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
     this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas, {
@@ -628,9 +653,63 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       query: input,
       ctx: this.toExecCtx(ctx),
       log: ctx.itemLog,
-      budgets: resolveLayerBudgets(layers),
+      budgets: this.layerBudgets(layers),
       store: this.layerStateStore,
       itemSchemas: this.itemSchemas,
+    });
+  }
+
+  /** Allocate per-layer recall budgets from the harness projection policy. */
+  private layerBudgets(layers: MemoryLayer[]): Map<string, number> {
+    const policy = this.config.projection ?? DEFAULT_PROJECTION;
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: policy.tokenBudget,
+      systemPromptTokens: 0,
+      responseReserve: policy.responseReserve,
+    });
+    return new Map(
+      allocations.map((a) => [
+        a.layerId,
+        a.allocated,
+      ]),
+    );
+  }
+
+  async recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]> {
+    return recallLayersAtomic({
+      layers,
+      query: input,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets,
+      store: this.layerStateStore,
+      itemSchemas: this.itemSchemas,
+      forceAtomic: this.config.forceAtomicRecall,
+    });
+  }
+
+  async recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]> {
+    return recallLayersEventual({
+      layers,
+      query: input,
+      ctx: this.toExecCtx(ctx),
+      log: ctx.itemLog,
+      budgets,
+      store: this.layerStateStore,
+      itemSchemas: this.itemSchemas,
+      forceAtomic: this.config.forceAtomicRecall,
+      cache: this.recallCache,
     });
   }
 
@@ -686,6 +765,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       log: ctx.itemLog,
       store: this.layerStateStore,
       storage,
+      recallCache: this.recallCache,
     });
   }
 

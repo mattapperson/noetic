@@ -45,6 +45,7 @@ import {
   observationalMemory,
   planMemory,
   step,
+  temporalMemory,
   tool,
   toolMemoryLayer,
   until,
@@ -65,6 +66,7 @@ import {
 import { planAgent } from './agents/plan.js';
 import { CODE_AGENT_DONE_SENTINEL } from './agents/shared.js';
 import { verifyAgent, verifyAndCheck } from './agents/verify.js';
+import { createTemporalExtractor, createTemporalSearcher } from './ai/temporal-llm.js';
 import type {
   ChannelTransportAdapter,
   ChannelTransportController,
@@ -162,6 +164,8 @@ export interface CreateCodeAgentOptions {
   llm?: {
     provider: 'openrouter';
     apiKey?: string;
+    /** Send `X-OpenRouter-Cache: true` so identical model calls aren't re-billed. */
+    cache?: boolean;
   };
   itemSchemas?: ItemSchemaExtensions;
   strictItemSchemas?: boolean;
@@ -1046,6 +1050,16 @@ export async function createCodeAgent(
         ]
       : [
           flowMemory,
+          temporalMemory({
+            extract: createTemporalExtractor({
+              model: options.model,
+              llm: options.llm,
+            }),
+            search: createTemporalSearcher({
+              model: options.model,
+              llm: options.llm,
+            }),
+          }),
           planMemory(),
           workingMemory(),
           observationalMemory(),

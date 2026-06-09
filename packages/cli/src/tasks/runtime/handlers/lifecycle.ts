@@ -2,9 +2,9 @@
  * Task lifecycle handlers: create, delete, duplicate, archive, unarchive.
  */
 
-import { listLiveTaskHandles, TaskRole } from '@noetic/code-agent/tasks';
-import { join } from '@noetic/code-agent/tasks/path-utils';
-import type { Task } from '@noetic/code-agent/tasks/schema';
+import { listLiveTaskHandles, TaskRole } from '@noetic-tools/code-agent/tasks';
+import { join } from '@noetic-tools/code-agent/tasks/path-utils';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -12,14 +12,14 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   deleteTaskDir,
   saveTask,
   taskDirPaths,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { SubprocessAdapter, SubprocessHandle } from '@noetic-tools/core';
 import type { Signaller } from '../agent-ci-control.js';
 import { defaultSignaller, verifyPidIdentity } from '../agent-ci-control.js';

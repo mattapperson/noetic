@@ -1,4 +1,4 @@
-import type { Span, TraceExporter } from '../types/observability';
+import type { Span, TraceExporter } from '@noetic-tools/types';
 import { SpanImpl } from './span-impl';
 
 /** @public No-op trace exporter that silently discards all spans. */

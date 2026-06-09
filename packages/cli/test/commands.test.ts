@@ -7,18 +7,22 @@ import assert from 'node:assert/strict';
 
 import { AGENT_READINESS_PROMPT } from '../src/commands/builtins/agent-readiness.js';
 import {
-  commandsToPromptSuggestions,
-  findCommand,
-  generateCommandSuggestions,
-  getEnabledCommands,
-  getVisibleCommands,
-  hasCommand,
   isAutoDetectedShellCommand,
   isBashCommand,
   isSlashCommand,
   parseBashCommand,
   parseSlashCommand,
-} from '../src/commands/index.js';
+} from '../src/commands/parse.js';
+import {
+  findCommand,
+  getEnabledCommands,
+  getVisibleCommands,
+  hasCommand,
+} from '../src/commands/registry.js';
+import {
+  commandsToPromptSuggestions,
+  generateCommandSuggestions,
+} from '../src/commands/suggestions.js';
 import { BUILTIN_COMMANDS } from '../src/tui/commands/index.js';
 
 describe('parseSlashCommand', () => {

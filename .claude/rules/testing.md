@@ -46,5 +46,8 @@ All scripting should be done in TypeScript.
 
 All Node packages must expose:
 - `test` — fast, no coverage (existing)
-- `test:coverage` — text + json output, no enforcement
-- `test:ci` — json output, diff enforcement, NO bail flag
+- `test:coverage` — text + lcov output, no enforcement
+- `test:ci` — lcov output, NO bail flag
+
+> Bun's coverage reporter accepts only `text` and `lcov` (the `json` reporter was
+> removed in Bun 1.3). Use `lcov` for machine-readable CI output.

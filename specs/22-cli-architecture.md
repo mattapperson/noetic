@@ -9,7 +9,7 @@
 
 ## Purpose
 
-The `@noetic/cli` package is a TUI harness that composes a `@noetic-tools/core`
+The `@noetic-tools/cli` package is a TUI harness that composes a `@noetic-tools/core`
 `AgentHarness` with an Ink-rendered user interface, session persistence,
 tool routing, plugin loading, and skill discovery. It is the reference
 consumer of `@noetic-tools/core` and the host for the built-in tasks system
@@ -65,7 +65,7 @@ Every directory under `packages/cli/src/` belongs to exactly one layer.
    import from `cli-orchestration`).
 3. Same-layer imports are allowed.
 4. The only permitted cross-package workspace dependencies for the CLI are
-   `@noetic-tools/core` and `@noetic/code-agent`, per `specs/00-overview.md` and
+   `@noetic-tools/core` and `@noetic-tools/code-agent`, per `specs/00-overview.md` and
    the CLI's `package.json`.
 
 Sentrux enforces rules 1–3 via the `[[layers]]` ordering in

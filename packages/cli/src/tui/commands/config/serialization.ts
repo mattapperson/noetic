@@ -8,7 +8,7 @@ export function serializeConfig(
   editedFields: ReadonlySet<ConfigFieldPath> = new Set(),
 ): string {
   const body = serializeValue(pruneUndefined(cleanConfig(config, editedFields)), 0);
-  return `import type { AgentConfig } from '@noetic/cli';\n\nexport default ${body} satisfies AgentConfig;\n`;
+  return `import type { AgentConfig } from '@noetic-tools/cli';\n\nexport default ${body} satisfies AgentConfig;\n`;
 }
 
 //#endregion

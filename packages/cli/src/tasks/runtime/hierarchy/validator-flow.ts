@@ -18,11 +18,14 @@
 import type {
   FeatureLoopStateChangedMessage,
   ValidatorRequest,
-} from '@noetic/code-agent/tasks/ipc-node';
-import { featureLoopStateChan, validatorRequestChan } from '@noetic/code-agent/tasks/ipc-node';
-import type { Feature } from '@noetic/code-agent/tasks/schema';
-import { FeatureLoopState } from '@noetic/code-agent/tasks/schema';
-import { tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/ipc-node';
+import {
+  featureLoopStateChan,
+  validatorRequestChan,
+} from '@noetic-tools/code-agent/tasks/ipc-node';
+import type { Feature } from '@noetic-tools/code-agent/tasks/schema';
+import { FeatureLoopState } from '@noetic-tools/code-agent/tasks/schema';
+import { tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step } from '@noetic-tools/core';
 import { every, step } from '@noetic-tools/core';
 import * as log from '../../../util/log.js';

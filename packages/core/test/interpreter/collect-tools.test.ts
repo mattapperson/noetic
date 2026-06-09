@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import type { Step, Tool } from '@noetic-tools/types';
 import { z } from 'zod';
 import { collectAllTools, deduplicateTools } from '../../src/interpreter/collect-tools';
-import type { Step } from '../../src/types/step';
-import type { Tool } from '../../src/types/tool';
 import { makeTestTool } from '../_helpers';
 
 //#region Test Helpers

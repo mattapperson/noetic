@@ -21,9 +21,9 @@
  */
 
 import { access } from 'node:fs/promises';
-import { findLiveTaskHandle, TaskRole } from '@noetic/code-agent/tasks';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { runnerSocketPath } from '@noetic/code-agent/tasks/store/fs-node';
+import { findLiveTaskHandle, TaskRole } from '@noetic-tools/code-agent/tasks';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { runnerSocketPath } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { SubprocessHandle } from '@noetic-tools/core';
 import { PlannerSpawnError, PlannerSpawnErrorCode, startPlannerRun } from './planner-launcher.js';
 

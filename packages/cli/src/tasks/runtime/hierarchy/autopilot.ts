@@ -5,7 +5,7 @@ import type {
   Slice,
   SliceWithFeatures,
   Task,
-} from '@noetic/code-agent/tasks/schema';
+} from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -15,15 +15,15 @@ import {
   SliceStatus,
   TaskLifecycleStatus,
   TaskReviewStatus,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   appendEvent,
   hasHierarchy,
   listTasks,
   saveTask,
   tryLoadTask,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { SubprocessAdapter } from '@noetic-tools/core';
 import * as log from '../../../util/log.js';
 import type { Signaller } from '../agent-ci-control.js';

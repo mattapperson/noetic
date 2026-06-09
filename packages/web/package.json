@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
+    "dev": "fumadocs-mdx && next dev --turbopack",
+    "build": "fumadocs-mdx && next build",
     "start": "next start",
     "test:build": "bun run build",
-    "test:links": "bunx lychee --offline 'content/**/*.mdx'",
-    "typecheck:docs": "bun ../../scripts/extract-doc-snippets.ts && bunx tsc --noEmit --project tsconfig.snippets.json",
+    "test:links": "lychee --offline --root-dir content --fallback-extensions mdx 'content/**/*.mdx'",
+    "check:docs": "bun scripts/check-docs.ts",
+    "gen:doc-preamble": "bun scripts/gen-doc-preamble.ts",
     "sync-tui": "bun scripts/sync-tui.ts",
     "sync-tui:chrome": "bun scripts/sync-tui.ts --chrome-only",
     "sync-tui:check": "bun scripts/sync-tui.ts --check"
@@ -28,8 +29,11 @@
     "@types/node": "25.5.0",
     "@types/react": "19.1.6",
     "@types/react-dom": "19.1.6",
+    "kiira": "0.3.0",
+    "kiira-core": "0.3.0",
     "postcss": "8.5.4",
     "tailwindcss": "4.1.8",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "zod": "4.3.6"
   }
 }

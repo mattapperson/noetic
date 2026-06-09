@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { EventKind, TaskLifecycleStatus } from '@noetic/code-agent/tasks/schema';
+import { EventKind, TaskLifecycleStatus } from '@noetic-tools/code-agent/tasks/schema';
 
-import { loadTask, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { loadTask, saveTask, tailEvents } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ShellAdapter, ShellExecResult } from '@noetic-tools/core';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { mergeTaskHandler } from '../../../src/tasks/runtime/handlers/state.js';

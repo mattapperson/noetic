@@ -1,9 +1,9 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 
-import { resolve } from '@noetic/code-agent/tasks/path-utils';
-import type { ValidatorRun } from '@noetic/code-agent/tasks/schema';
-import { ValidatorRunStatus } from '@noetic/code-agent/tasks/schema';
+import { resolve } from '@noetic-tools/code-agent/tasks/path-utils';
+import type { ValidatorRun } from '@noetic-tools/code-agent/tasks/schema';
+import { ValidatorRunStatus } from '@noetic-tools/code-agent/tasks/schema';
 import type { Signaller } from '../agent-ci-control.js';
 import { defaultSignaller } from '../agent-ci-control.js';
 import type { ValidatorContext } from './validator.js';

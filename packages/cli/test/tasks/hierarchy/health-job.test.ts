@@ -5,8 +5,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import { activateSlice } from '../../../src/tasks/runtime/hierarchy/activation.js';
 import { applyFeatureLoopStateUpdate } from '../../../src/tasks/runtime/hierarchy/feature-lifecycle.js';

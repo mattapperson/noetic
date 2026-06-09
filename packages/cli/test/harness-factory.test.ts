@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { createLocalFsAdapter } from '@noetic/platform-node';
 import type { Tool } from '@noetic-tools/core';
 import { Slot } from '@noetic-tools/core';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { z } from 'zod';
 
 import { createAgentHarness } from '../src/harness/factory.js';

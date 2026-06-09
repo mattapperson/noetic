@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { z } from 'zod';
+import type { MemoryLayer } from '@noetic-tools/memory';
 import {
   completeLayers,
   createLayerStateStore,
+  createRecallCache,
   disposeLayers,
   executeRerender,
   initLayers,
   recallLayers,
-  resolveLayerBudgets,
+  recallLayersEventual,
   runAppendPipeline,
   storeLayers,
-} from '../../src/memory/layer-lifecycle';
-import type { LLMResponse } from '../../src/types/common';
-import type { Item } from '../../src/types/items';
-import type { MemoryLayer } from '../../src/types/memory';
+} from '@noetic-tools/memory';
+import type { Item, LLMResponse } from '@noetic-tools/types';
+import { z } from 'zod';
 import { getItemId, makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 describe('layer-lifecycle', () => {
@@ -302,6 +302,7 @@ describe('layer-lifecycle', () => {
         name: 'Broken',
         slot: 100,
         scope: 'thread',
+        onInitError: 'disable',
         hooks: {
           init: async () => {
             throw new Error('init failed');
@@ -414,12 +415,15 @@ describe('layer-lifecycle', () => {
     const ctx = makeCtx({
       executionId: 'exec-diag',
     });
-    await initLayers({
-      layers,
-      ctx,
-      storage: makeStorage(),
-      store,
-    });
+    // Fail-loud: the error is both recorded as a diagnostic and surfaced.
+    await expect(
+      initLayers({
+        layers,
+        ctx,
+        storage: makeStorage(),
+        store,
+      }),
+    ).rejects.toThrow('init failed');
     expect(errors).toHaveLength(1);
     expect(errors[0].layerId).toBe('broken');
     expect(errors[0].hook).toBe('init');
@@ -1315,6 +1319,7 @@ describe('runAppendPipeline', () => {
         name: 'Disabled',
         slot: 100,
         scope: 'execution',
+        onInitError: 'disable',
         hooks: {
           init: async () => {
             throw new Error('init failed');
@@ -1703,61 +1708,6 @@ describe('executeRerender', () => {
     ]);
   });
 
-  describe('resolveLayerBudgets', () => {
-    it('uses the numeric value when budget is a number', () => {
-      const layers: MemoryLayer[] = [
-        {
-          id: 'fixed',
-          slot: 0,
-          scope: 'execution',
-          budget: 1234,
-          hooks: {},
-        },
-      ];
-      const budgets = resolveLayerBudgets(layers);
-      expect(budgets.get('fixed')).toBe(1234);
-    });
-
-    it('uses max from a {min, max} range', () => {
-      const layers: MemoryLayer[] = [
-        {
-          id: 'range',
-          slot: 0,
-          scope: 'execution',
-          budget: {
-            min: 100,
-            max: 5e3,
-          },
-          hooks: {},
-        },
-      ];
-      const budgets = resolveLayerBudgets(layers);
-      expect(budgets.get('range')).toBe(5e3);
-    });
-
-    it('falls back to the default ceiling for "auto" or undefined', () => {
-      const layers: MemoryLayer[] = [
-        {
-          id: 'auto',
-          slot: 0,
-          scope: 'execution',
-          budget: 'auto',
-          hooks: {},
-        },
-        {
-          id: 'unset',
-          slot: 0,
-          scope: 'execution',
-          hooks: {},
-        },
-      ];
-      const budgets = resolveLayerBudgets(layers);
-      expect(budgets.get('auto')).toBeGreaterThan(0);
-      expect(budgets.get('unset')).toBeGreaterThan(0);
-      expect(budgets.get('auto')).toBe(budgets.get('unset'));
-    });
-  });
-
   it('validates memory-layer developer message extensions during recall', async () => {
     const store = createLayerStateStore();
     const layer: MemoryLayer = {
@@ -1828,5 +1778,61 @@ describe('executeRerender', () => {
       role: 'developer',
       memoryLayerId: 'typed-memory',
     });
+  });
+});
+
+describe('recallLayersEventual cross-turn cache', () => {
+  it('serves an eventual layer from cache across turns (same thread, new executionId each turn)', async () => {
+    let recallCount = 0;
+    const layer: MemoryLayer = {
+      id: 'slow',
+      slot: 200,
+      scope: 'thread',
+      recallMode: 'eventual',
+      hooks: {
+        recall: async () => {
+          recallCount += 1;
+          return {
+            items: [],
+            tokenCount: 0,
+          };
+        },
+      },
+    };
+    const store = createLayerStateStore();
+    const cache = createRecallCache();
+    const budgets = new Map([
+      [
+        'slow',
+        1000,
+      ],
+    ]);
+    const common = {
+      layers: [
+        layer,
+      ],
+      query: 'q',
+      log: makeItemLog(),
+      budgets,
+      store,
+      cache,
+    };
+    // Turn 1 and turn 2 use DIFFERENT executionIds but the SAME thread — the
+    // cache is keyed by scope, so the slow recall must run only once.
+    await recallLayersEventual({
+      ...common,
+      ctx: makeCtx({
+        executionId: 'e1',
+        threadId: 'T',
+      }),
+    });
+    await recallLayersEventual({
+      ...common,
+      ctx: makeCtx({
+        executionId: 'e2',
+        threadId: 'T',
+      }),
+    });
+    expect(recallCount).toBe(1);
   });
 });

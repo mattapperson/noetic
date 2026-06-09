@@ -1,5 +1,5 @@
-import type { LocalShellAdapter } from '@noetic/platform-node';
-import { createLocalShellAdapter } from '@noetic/platform-node';
+import type { LocalShellAdapter } from '@noetic-tools/platform-node';
+import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 import type { AgentConfig } from '../types/config.js';
 
 //#region Types

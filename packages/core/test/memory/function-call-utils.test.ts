@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { findFunctionCall } from '../../src/memory/function-call-utils';
+import { findFunctionCall } from '@noetic-tools/memory';
 import { makeFunctionCall, makeMessage } from '../_helpers';
 
 describe('findFunctionCall', () => {

@@ -9,7 +9,7 @@ Thread Weaving uses `fork({ mode: 'all' })` to run multiple analysis paths in pa
 
 ## Pattern
 
-```ts
+```ts validate=none
 import { fork, react } from '@noetic-tools/core';
 
 const weavedAnalysis = fork({
@@ -17,17 +17,17 @@ const weavedAnalysis = fork({
   mode: 'all',
   paths: (input) => [
     react({
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
       instructions: 'Analyze from a technical perspective.',
       tools: [codeTool],
     }),
     react({
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
       instructions: 'Analyze from a business perspective.',
       tools: [marketTool],
     }),
     react({
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
       instructions: 'Analyze from a user experience perspective.',
       tools: [uxTool],
     }),
@@ -51,16 +51,16 @@ Thread Weaving typically uses `mode: 'all'`, but other modes are available:
 
 ## Example: Research with Multiple Sources
 
-```ts
+```ts validate=none
 import { fork, react } from '@noetic-tools/core';
 
 const multiSourceResearch = fork({
   id: 'multi-source',
   mode: 'all',
   paths: () => [
-    react({ model: 'gpt-4o', instructions: 'Search academic papers.', tools: [scholarTool] }),
-    react({ model: 'gpt-4o', instructions: 'Search news articles.', tools: [newsTool] }),
-    react({ model: 'gpt-4o', instructions: 'Search code repositories.', tools: [githubTool] }),
+    react({ model: 'openai/gpt-4o', instructions: 'Search academic papers.', tools: [scholarTool] }),
+    react({ model: 'openai/gpt-4o', instructions: 'Search news articles.', tools: [newsTool] }),
+    react({ model: 'openai/gpt-4o', instructions: 'Search code repositories.', tools: [githubTool] }),
   ],
   merge: (results, ctx) => {
     return results.map((r, i) => `Source ${i + 1}:\n${r}`).join('\n\n');
@@ -71,7 +71,7 @@ const multiSourceResearch = fork({
 
 ## Example: Settle Mode for Fault Tolerance
 
-```ts
+```ts validate=none
 import { fork } from '@noetic-tools/core';
 
 const resilientFork = fork({

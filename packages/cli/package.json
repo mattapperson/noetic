@@ -1,16 +1,18 @@
 {
-  "name": "@noetic/cli",
+  "name": "@noetic-tools/cli",
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/cli"
+  },
   "main": "src/index.ts",
   "types": "src/index.ts",
   "bin": {
     "noetic": "src/cli/cli.ts"
   },
   "dependencies": {
-    "@noetic/code-agent": "workspace:*",
-    "@noetic-tools/core": "workspace:*",
-    "@noetic/platform-node": "workspace:*",
     "@openrouter/agent": "^0.6.0",
     "agent-browser": "0.26.0",
     "chalk": "5.6.2",
@@ -34,6 +36,9 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@noetic-tools/code-agent": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
+    "@noetic-tools/platform-node": "workspace:*",
     "@microsoft/tui-test": "0.0.4",
     "@types/diff": "^8.0.0",
     "@types/html-to-text": "9.0.4",
@@ -45,8 +50,8 @@
     "postinstall": "agent-browser install || true",
     "dev": "bun run src/cli/cli.ts",
     "test": "bun test --preload ./test/setup.ts",
-    "test:coverage": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=text --coverage-reporter=json",
-    "test:ci": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=json",
+    "test:coverage": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --preload ./test/setup.ts --coverage --coverage-reporter=lcov",
     "test:e2e": "bunx tui-test 'e2e'",
     "test:e2e:live": "bunx tui-test 'live\\.test\\.ts$'",
     "typecheck": "bunx tsc --noEmit",

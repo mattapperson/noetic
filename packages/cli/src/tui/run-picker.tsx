@@ -7,7 +7,7 @@
 import { render } from 'ink';
 
 import type { SessionFile } from '../types/session.js';
-import { InkProvider } from './components/index.js';
+import { InkProvider } from './components/provider.js';
 import { ResumeScreen } from './components/resume/resume-screen.js';
 
 export async function runPicker(cwd: string): Promise<SessionFile | null> {

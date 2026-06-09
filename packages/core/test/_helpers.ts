@@ -4,15 +4,14 @@
 
 import { expect } from 'bun:test';
 import * as fsp from 'node:fs/promises';
+import type { FsAdapter, FsStats, ShellAdapter } from '@noetic-tools/types';
 import { z } from 'zod';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
-import type { FsAdapter, FsStats } from '../src/types/fs-adapter';
-import type { ShellAdapter } from '../src/types/shell-adapter';
 
 //#region Test-only Node adapters
 //
 // Core is runtime-agnostic and ships no `node:*` adapters; those live in
-// `@noetic/platform-node`. Core tests that exercise filesystem-dependent
+// `@noetic-tools/platform-node`. Core tests that exercise filesystem-dependent
 // memory layers need real disk access, so we inline a minimal
 // Node-backed `FsAdapter` and a no-op `ShellAdapter` here. Keeping these
 // helpers local to `test/` prevents the production bundle from pulling
@@ -65,25 +64,26 @@ function createNoopShellAdapter(): ShellAdapter {
   };
 }
 
+import type { ExecutionContext, ScopedStorage, StorageAdapter } from '@noetic-tools/memory';
 //#endregion
-import type { LLMResponse } from '../src/types/common';
-import type { Context } from '../src/types/context';
-import type { ItemLog } from '../src/types/context-parts/item-log';
-import type { EmbedFn } from '../src/types/embed';
 import type {
+  AgentHarnessContract,
+  CallModelRequest,
+  Context,
+  ExecuteStepFn,
   FunctionCallItem,
   FunctionCallOutputItem,
   InputMessageItem,
   Item,
+  ItemLog,
+  LLMResponse,
   MessageItem,
-} from '../src/types/items';
-import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
-import type { AgentHarnessContract, CallModelRequest } from '../src/types/runtime';
-import { SteeringAction } from '../src/types/steering';
-import type { ExecuteStepFn, Step } from '../src/types/step';
-import type { Tool } from '../src/types/tool';
-import type { ToolExecutionContext } from '../src/types/tool-context';
-import { frameworkCast } from '../src/util/framework-cast';
+  Step,
+  Tool,
+  ToolExecutionContext,
+} from '@noetic-tools/types';
+import { frameworkCast, SteeringAction } from '@noetic-tools/types';
+import type { EmbedFn } from '../src/types/embed';
 
 // ── Storage ──────────────────────────────────────────────────────────
 
@@ -486,6 +486,10 @@ export function makeMockHarness(): AgentHarnessContract {
     },
     initLayers: async () => {},
     recallLayers: async () => [],
+    // Default to delegating atomic recall to recallLayers so tests that mock
+    // recallLayers keep working; eventual recall contributes nothing by default.
+    recallLayersAtomic: async (layers, input, ctx) => harness.recallLayers(layers, input, ctx),
+    recallLayersEventual: async () => [],
     previewRequestItems: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},

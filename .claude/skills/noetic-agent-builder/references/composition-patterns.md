@@ -432,8 +432,8 @@ The CLI's `reminderLayer()` emits `<system-reminder>`-wrapped developer messages
 ### Registering a trigger from a plugin
 
 ```typescript
-import type { NoeticPlugin } from '@noetic/cli';
-import type { ReminderTrigger } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
+import type { ReminderTrigger } from '@noetic-tools/cli';
 
 const myPlugin: NoeticPlugin = {
   name: 'my-plugin',
@@ -559,7 +559,7 @@ import {
   createCheckpointStore,
 } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 
 // Three roots: subprocess manifests, checkpoint snapshots, per-project task state.
 const subprocessStorage = createFileStorage({
@@ -593,7 +593,7 @@ for (const [handleId, restoredCtx] of contexts) {
 
 **Key points**:
 
-- `reattachLiveChildren` is a thin helper — under the hood it calls `harness.subprocess.listLive()` and then `harness.restore(executionId)` per live handle. Third-party hosts can call those directly without importing `@noetic/cli`.
+- `reattachLiveChildren` is a thin helper — under the hood it calls `harness.subprocess.listLive()` and then `harness.restore(executionId)` per live handle. Third-party hosts can call those directly without importing `@noetic-tools/cli`.
 - Subprocess manifests and checkpoint snapshots live at distinct roots (`~/.noetic/subprocess` vs `~/.noetic/checkpoints`). Override both via `NOETIC_HOME=/some/dir` if needed.
 - `checkpoint()` is a no-op when `checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
 - The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
@@ -658,10 +658,10 @@ for (const entry of await queue.frameRange(resume.ackedThrough + 1)) {
 
 ## Subprocess-spawned task agent (planner / implementer)
 
-The tasks system (`@noetic/code-agent/tasks`) uses a thin wrapper over the generic "run an agent out-of-process" + "survive a host crash" patterns above. Each runner is a `harness.detachedSpawn` call against the shared tasks `SubprocessAdapter`:
+The tasks system (`@noetic-tools/code-agent/tasks`) uses a thin wrapper over the generic "run an agent out-of-process" + "survive a host crash" patterns above. Each runner is a `harness.detachedSpawn` call against the shared tasks `SubprocessAdapter`:
 
 ```typescript
-import { findLiveTaskHandle } from '@noetic/code-agent/tasks';
+import { findLiveTaskHandle } from '@noetic-tools/code-agent/tasks';
 
 // Launcher: refuse to start if a live runner is already attached.
 const existing = await findLiveTaskHandle({

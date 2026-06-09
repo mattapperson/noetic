@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { safePluginNameSegment } from '@noetic/code-agent/utils';
+import { safePluginNameSegment } from '@noetic-tools/code-agent/utils';
 import { createDataDir } from '../src/plugins/data-dir.js';
 
 describe('safePluginNameSegment', () => {

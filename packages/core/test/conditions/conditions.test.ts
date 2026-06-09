@@ -1,4 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Step } from '@noetic-tools/types';
 import {
   aiCondition,
   allCondition,
@@ -8,10 +10,8 @@ import {
   semanticRoute,
   semanticSwitch,
   when,
-} from '../../src/conditions';
+} from '../../src/conditions/conditions';
 import type { EmbedFn } from '../../src/types/embed';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
 import {
   makeLLMResponse,
   makeMockContext,

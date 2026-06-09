@@ -8,28 +8,28 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { allocateBudgets } from '../../src/memory/budget';
-import { findFunctionCall } from '../../src/memory/function-call-utils';
+import type {
+  DurableTaskState,
+  ExecutionContext,
+  MemoryLayer,
+  ObservationalState,
+  WorkingMemoryState,
+} from '@noetic-tools/memory';
 import {
+  allocateBudgets,
   createLayerStateStore,
   disposeLayers,
+  durableTaskState,
+  findFunctionCall,
   initLayers,
+  observationalMemory,
   recallLayers,
+  steering,
   storeLayers,
-} from '../../src/memory/layer-lifecycle';
-import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
-import { durableTaskState } from '../../src/memory/layers/durable-task-state';
-import type { ObservationalState } from '../../src/memory/layers/observational-memory';
-import { observationalMemory } from '../../src/memory/layers/observational-memory';
-import { steering } from '../../src/memory/layers/steering';
-import type { WorkingMemoryState } from '../../src/memory/layers/working-memory';
-import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { LLMResponse } from '../../src/types/common';
-import type { Item } from '../../src/types/items';
-import type { ExecutionContext, MemoryLayer } from '../../src/types/memory';
-import type { SteeringState } from '../../src/types/steering';
-import { SteeringAction } from '../../src/types/steering';
-import { frameworkCast } from '../../src/util/framework-cast';
+  workingMemory,
+} from '@noetic-tools/memory';
+import type { Item, LLMResponse, SteeringState } from '@noetic-tools/types';
+import { frameworkCast, SteeringAction } from '@noetic-tools/types';
 import {
   assistantMessage,
   isRecord,
@@ -144,7 +144,7 @@ describe('Steering: DENY response parsing', () => {
     expect(result.decision.guidance).toBeUndefined();
   });
 
-  it('parses "DENY:reason" correctly — colon at index 4 skipped by slice(5)', async () => {
+  it('parses "DENY:reason" — strips the colon and preserves guidance casing', async () => {
     const layer = steering({
       rules: [
         {
@@ -181,11 +181,11 @@ describe('Steering: DENY response parsing', () => {
     });
 
     expect(result.decision.action).toBe(SteeringAction.Deny);
-    // "DENY:UNSAFE OPERATION" → slice(5) → "UNSAFE OPERATION" (colon at index 4 is skipped)
-    expect(result.decision.guidance).toBe('UNSAFE OPERATION');
+    // "DENY:unsafe operation" → strip "DENY" + colon → "unsafe operation" (casing preserved)
+    expect(result.decision.guidance).toBe('unsafe operation');
   });
 
-  it('[BUG] "DENYALL" parsed as DENY with guidance "LL" — no word boundary check', async () => {
+  it('"DENYALL" is NOT parsed as DENY (word boundary) → treated as no verdict', async () => {
     const layer = steering({
       rules: [
         {
@@ -221,10 +221,9 @@ describe('Steering: DENY response parsing', () => {
       state: store.get<SteeringState>(ctx.executionId, layer.id)!,
     });
 
-    // BUG: "DENYALL" starts with "DENY" so it's parsed as Deny
-    // slice(5) → "LL" becomes the guidance — clearly wrong
-    expect(result.decision.action).toBe(SteeringAction.Deny);
-    expect(result.decision.guidance).toBe('LL');
+    // "DENYALL" has no word boundary after "DENY", so it is not a valid verdict.
+    // Unparseable output is retried then treated as a pass (Allow).
+    expect(result.decision.action).toBe(SteeringAction.Allow);
   });
 
   it('parses "DENY reason text" with space separator correctly', async () => {
@@ -264,8 +263,8 @@ describe('Steering: DENY response parsing', () => {
     });
 
     expect(result.decision.action).toBe(SteeringAction.Deny);
-    // Space-separated works: slice(5) on "DENY UNSAFE OPERATION" → "UNSAFE OPERATION"
-    expect(result.decision.guidance).toBe('UNSAFE OPERATION');
+    // Space-separated: strip "DENY" + space → "unsafe operation" (casing preserved)
+    expect(result.decision.guidance).toBe('unsafe operation');
   });
 
   it('parses "GUIDE:" with no space after colon', async () => {
@@ -305,8 +304,8 @@ describe('Steering: DENY response parsing', () => {
     });
 
     expect(result.decision.action).toBe(SteeringAction.Guide);
-    // "GUIDE:BE CAREFUL" → slice(6) → "BE CAREFUL" — correct
-    expect(result.decision.guidance).toBe('BE CAREFUL');
+    // "GUIDE:be careful" → strip "GUIDE" + colon → "be careful" (casing preserved)
+    expect(result.decision.guidance).toBe('be careful');
   });
 });
 
@@ -1020,6 +1019,7 @@ describe('Layer lifecycle: disabled layer detection', () => {
       id: 'failing',
       slot: 100,
       scope: 'execution',
+      onInitError: 'disable',
       hooks: {
         init: async () => {
           throw new Error('init failed');

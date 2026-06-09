@@ -7,9 +7,9 @@ description: Invoke a single tool directly as a typed step.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic-tools/core';
+import { step, tool } from '@noetic-tools/core';
 
-const calculator = {
+const calculator = tool({
   name: 'add',
   description: 'Add two numbers',
   input: z.object({
@@ -22,7 +22,7 @@ const calculator = {
   execute: async (args) => ({
     sum: args.a + args.b,
   }),
-};
+});
 
 const addStep = step.tool({
   id: 'add-numbers',
@@ -103,8 +103,11 @@ Set `needsApproval: true` on a tool to signal that the runtime should pause and 
 
 ```ts
 import { z } from 'zod';
+import { tool } from '@noetic-tools/core';
 
-const deleteTool = {
+declare const db: { delete(recordId: string): Promise<void> };
+
+const deleteTool = tool({
   name: 'delete-record',
   description: 'Permanently delete a database record',
   input: z.object({
@@ -121,7 +124,7 @@ const deleteTool = {
     };
   },
   needsApproval: true,
-};
+});
 ```
 
 ## Related

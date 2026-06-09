@@ -22,8 +22,11 @@
  * the provisioner contract.
  */
 
-import type { LauncherProvisionRequest, ProvisionWorktreeResult } from '@noetic/code-agent/tasks';
-import { ProvisionTool } from '@noetic/code-agent/tasks';
+import type {
+  LauncherProvisionRequest,
+  ProvisionWorktreeResult,
+} from '@noetic-tools/code-agent/tasks';
+import { ProvisionTool } from '@noetic-tools/code-agent/tasks';
 import type {
   SubprocessAdapter,
   SubprocessHandle,

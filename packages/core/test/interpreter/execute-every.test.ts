@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { every } from '../../src/builders/every';
-import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
 import { execute } from '../../src/interpreter/execute';
 import { executeEvery } from '../../src/interpreter/execute-control';
 import { SpanImpl } from '../../src/observability/span-impl';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { ContextMemory } from '../../src/types/memory';
 import { makeMockHarness, simpleExecute, sleep } from '../_helpers';
 
 interface CapturedEvent {

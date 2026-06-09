@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { DurableTaskState } from '../../src/memory/layers/durable-task-state';
-import { durableTaskState } from '../../src/memory/layers/durable-task-state';
+import type { DurableTaskState } from '@noetic-tools/memory';
+import { durableTaskState } from '@noetic-tools/memory';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('durableTaskState', () => {
@@ -9,7 +9,8 @@ describe('durableTaskState', () => {
     const layer = durableTaskState();
     expect(layer.id).toBe('durable-task-state');
     expect(layer.slot).toBe(110);
-    expect(layer.scope).toBe('execution');
+    // 'thread' so checkpoints persist across executions within a thread.
+    expect(layer.scope).toBe('thread');
   });
 
   it('init/recall lifecycle', async () => {

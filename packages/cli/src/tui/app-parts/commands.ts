@@ -1,12 +1,8 @@
-export {
-  BUILTIN_COMMANDS,
-  commandsToPromptSuggestions,
-  executeCommand,
-  findCommand,
-  isSlashCommand,
-  parseBashCommand,
-  parseSlashCommand,
-} from '../../commands/index.js';
+export { BUILTIN_COMMANDS } from '../../commands/builtins/index.js';
+export { executeCommand } from '../../commands/execute.js';
+export { isSlashCommand, parseBashCommand, parseSlashCommand } from '../../commands/parse.js';
+export { findCommand } from '../../commands/registry.js';
+export { commandsToPromptSuggestions } from '../../commands/suggestions.js';
 export type {
   Command,
   CommandContext,

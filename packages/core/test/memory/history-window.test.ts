@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
-import { historyWindow } from '../../src/memory/layers/history-window';
-import type { Item } from '../../src/types/items';
+import { historyWindow } from '@noetic-tools/memory';
+import type { Item } from '@noetic-tools/types';
+import { isNoeticConfigError } from '@noetic-tools/types';
 import {
   getItemId,
   makeCtx,

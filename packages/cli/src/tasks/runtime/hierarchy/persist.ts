@@ -4,7 +4,7 @@ import type {
   Milestone,
   Slice,
   TaskHierarchyInput,
-} from '@noetic/code-agent/tasks/schema';
+} from '@noetic-tools/code-agent/tasks/schema';
 import {
   AssertionStatus,
   FeatureLoopState,
@@ -15,8 +15,8 @@ import {
   generateSliceId,
   MilestoneStatus,
   SliceStatus,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { loadFeature, saveAssertion, saveFeature, saveMilestone, saveSlice } from './store.js';
 
 //#region Types

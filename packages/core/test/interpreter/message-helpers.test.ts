@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { LLMResponse } from '../../src/types/common';
-import { trackUsage } from '../../src/util/message-helpers';
+import type { LLMResponse } from '@noetic-tools/types';
+import { trackUsage } from '@noetic-tools/types';
 import { makeMockContext } from '../_helpers';
 
 describe('trackUsage', () => {

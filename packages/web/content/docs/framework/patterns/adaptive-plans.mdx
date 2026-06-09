@@ -9,14 +9,14 @@ Adaptive Plans combine LLM-powered plan generation with automatic error-driven r
 
 ## Signature
 
-```ts
-function adaptivePlan<TMemory = ContextMemory, O = unknown>(opts: {
-  planner: Step<TMemory, string, PlanNode>;
-  agents: Record<string, (prompt: string) => Step<TMemory, string, unknown>>;
+```ts validate=none
+function adaptivePlan<O, A = unknown>(opts: {
+  planner: Step<ContextMemory, string, PlanNode>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>;
   constraints?: PlanConstraints;
   maxRevisions: number;
   executeStep?: ExecuteStepFn;
-}): Step<TMemory, string, O>
+}): Step<ContextMemory, string, O>
 ```
 
 | Parameter | Type | Purpose |
@@ -29,24 +29,24 @@ function adaptivePlan<TMemory = ContextMemory, O = unknown>(opts: {
 
 ## Example
 
-```ts
+```ts validate=none
 import { adaptivePlan, react, step, PlanNodeSchema } from '@noetic-tools/core';
 
 const planner = step.llm({
   id: 'plan-generator',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Generate a task plan as a PlanNode tree. Available agents: researcher, coder.',
   output: PlanNodeSchema,
 });
 
 const agents = {
   researcher: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [searchTool],
   }),
   coder: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [codeTool, testTool],
   }),

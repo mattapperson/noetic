@@ -5,8 +5,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask, tailEvents, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask, tailEvents, tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import { persistTaskHierarchy } from '../../src/tasks/runtime/hierarchy/persist.js';
 import {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { deriveColumn, KanbanColumn, moveTask } from '../../src/tasks/runtime/kanban.js';
 import { makeStoreContext } from './_helpers.js';
 
@@ -342,7 +342,7 @@ describe('moveTask', () => {
     });
 
     // Re-read from the store: the canonical record reflects the move.
-    const { loadTask } = await import('@noetic/code-agent/tasks/store/fs-node');
+    const { loadTask } = await import('@noetic-tools/code-agent/tasks/store/fs-node');
     const reloaded = await loadTask(ctx, t.id);
     expect(reloaded.reviewStatus).toBe(TaskReviewStatus.Approved);
     expect(deriveColumn(reloaded)).toBe(KanbanColumn.ReadyToMerge);

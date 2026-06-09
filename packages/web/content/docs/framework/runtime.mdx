@@ -6,11 +6,21 @@ description: The AgentHarness executes agent steps, manages context, and coordin
 ## Quick Example
 
 ```ts
-import { react, AgentHarness } from '@noetic-tools/core';
+import { AgentHarness, react } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const searchTool = {
+  name: 'search',
+  description: 'Search the web for information',
+  input: z.object({ query: z.string() }),
+  output: z.object({ result: z.string() }),
+  execute: async (args: { query: string }) => ({ result: `Results for: ${args.query}` }),
+};
 
 const agent = react({
-  model: 'gpt-4o',
-  tools: [searchTool, calcTool],
+  model: 'openai/gpt-4o',
+  instructions: 'You are a research assistant.',
+  tools: [searchTool],
   maxSteps: 10,
 });
 
@@ -18,10 +28,12 @@ const harness = new AgentHarness({
   name: 'researcher',
   initialStep: agent,
   params: {},
+  llm: { provider: 'openrouter' }, // reads OPENROUTER_API_KEY from the env
 });
 
 await harness.execute('Find recent AI news');
 const response = await harness.getAgentResponse();
+console.log(response.text);
 ```
 
 The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, manages per-thread **sessions** with a message queue, dispatches steps, coordinates channels and memory layers, and provides tracing infrastructure.
@@ -30,13 +42,13 @@ Calls to `execute()` enqueue the input on the session identified by `options.thr
 
 ## Constructor Options
 
-```ts
+```ts validate=none
 import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'my-agent',
   initialStep: myStep,
-  params: { model: 'gpt-4o' },
+  params: { model: 'openai/gpt-4o' },
 });
 ```
 
@@ -50,7 +62,7 @@ const harness = new AgentHarness({
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
 | `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Memory layers, tools, and skill discovery all route through this adapter. |
-| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
+| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
 | `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
 | `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. |
 | `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
@@ -67,6 +79,8 @@ const harness = new AgentHarness({
 Enqueues input on the session identified by `options.threadId` (or the default thread). Returns a `Promise<void>` that resolves once the message is accepted into the queue — **not** when the model finishes responding. Use the session-scoped accessors to observe the response.
 
 ```ts
+declare const harness: AgentHarness;
+
 await harness.execute('What is 2+2?');
 const response = await harness.getAgentResponse();
 console.log(response.text);
@@ -121,7 +135,7 @@ Each message carries a `DeliveryMode`. Override per-call via `options.deliveryMo
 
 ### HarnessResponse
 
-```ts
+```ts validate=none
 interface HarnessResponse {
   readonly items: ReadonlyArray<Item>;
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
@@ -135,7 +149,7 @@ interface HarnessResponse {
 
 Events have a `source` discriminant: `'sdk'` for OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix.
 
-```ts
+```ts validate=none
 type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
 ```
 
@@ -168,7 +182,7 @@ Each provider call is guarded by a watchdog that aborts the round if no SSE even
 
 Low-level step execution. Use this when you need full control over context creation and step dispatch.
 
-```ts
+```ts validate=none
 const ctx = harness.createContext({ state: { count: 0 } });
 const result = await harness.run(myStep, input, ctx);
 ```
@@ -213,7 +227,7 @@ The agent harness coordinates [memory layer](/docs/framework/memory) lifecycle h
 
 ### RecallLayerOutput
 
-```ts
+```ts validate=none
 interface RecallLayerOutput {
   layerId: string;
   items: Item[];
@@ -243,7 +257,7 @@ The `subprocess` adapter is the companion surface: it persists handle manifests 
 
 `AgentConfig` defines the configuration for an agent harness. It is generic over `TParams`, an arbitrary key-value record that steps and tools access via `ctx.harness.config.params`.
 
-```ts
+```ts validate=none
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   storage?: StorageAdapter;
@@ -261,7 +275,7 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
 ## AgentHooks
 
-```ts
+```ts validate=none
 interface AgentHooks {
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
@@ -277,7 +291,7 @@ interface AgentHooks {
 const harness = new AgentHarness({
   name: 'researcher',
   initialStep: agent,
-  params: { model: 'gpt-4o' },
+  params: { model: 'openai/gpt-4o' },
   hooks: {
     async beforeStep(step, ctx) {
       console.log(`Starting step ${step.id} (depth ${ctx.depth})`);
@@ -308,9 +322,9 @@ The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Tas
 
 The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
 
-```ts
-import { AgentHarness, createFileStorage } from '@noetic-tools/core';
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
+```ts validate=none
+import { AgentHarness } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const subprocess = createLocalSubprocessAdapter({
   storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),

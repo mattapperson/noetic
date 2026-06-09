@@ -12,7 +12,7 @@
  * the runner signal so the runner loop exits.
  */
 
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { DetachedSignal, Tool } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { ImplementerOutcome } from './hierarchy/implementer-flow.js';

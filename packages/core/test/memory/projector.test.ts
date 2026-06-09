@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { assembleView } from '../../src/memory/projector';
+import { assembleView } from '@noetic-tools/memory';
 import { makeMessage } from '../_helpers';
 
 describe('assembleView', () => {

@@ -10,10 +10,11 @@ export {
   parseCdArg,
   runUserShellCommand,
 } from '../bash-command.js';
-export { AskUserModal } from '../components/ask-user/index.js';
-export type { ChatStatus, PromptInputMessage } from '../components/index.js';
-export { InkProvider, ResponsesChat } from '../components/index.js';
+export { AskUserModal } from '../components/ask-user/ask-user-modal.js';
 export { PlanApprovalModal } from '../components/plan-approval-modal.js';
+export type { ChatStatus, PromptInputMessage } from '../components/prompt-input.js';
+export { InkProvider } from '../components/provider.js';
+export { ResponsesChat } from '../components/responses-chat.js';
 export { FooterContextProvider } from '../footer-context.js';
 export type { ExitActionStatus } from '../input/exit-action.js';
 export { useExitOnInterrupt } from '../input/use-exit-on-interrupt.js';
@@ -35,7 +36,5 @@ export { reattachLiveChildren } from '../reattach-live-children.js';
 export type { LiveTokens, StreamMetricsRefs } from '../stream-metrics-context.js';
 export { StreamMetricsProvider } from '../stream-metrics-context.js';
 export { installSuspendResumeHandlers } from '../suspend-resume.js';
-export { TaskChatSpawningView, TaskChatView } from '../task-chat/task-chat-view.js';
-export { TaskBoard } from '../tasks/runtime-ui/task-board.js';
 export { getDefaultImageStore } from '../utils/image-store.js';
 export { resolvePromptAttachments } from '../utils/prompt-attachments.js';

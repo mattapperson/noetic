@@ -9,7 +9,7 @@ Task Trees let you define a hierarchical plan where each node is assigned to an 
 
 ## PlanNode
 
-```ts
+```ts validate=none
 interface PlanNode {
   id: string;
   description: string;
@@ -29,13 +29,13 @@ interface PlanNode {
 
 ## compilePlan()
 
-```ts
-function compilePlan<TMemory = ContextMemory, O = unknown>(
+```ts validate=none
+function compilePlan<O, A = unknown>(
   plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step<TMemory, string, unknown>>,
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>,
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
-): Step<TMemory, string, O>
+): Step<ContextMemory, string, O>
 ```
 
 | Parameter | Type | Purpose |
@@ -47,7 +47,7 @@ function compilePlan<TMemory = ContextMemory, O = unknown>(
 
 ## PlanConstraints
 
-```ts
+```ts validate=none
 interface PlanConstraints {
   toolAllowlist?: Record<string, string[]>;
   maxStepsPerNode?: number;
@@ -58,22 +58,22 @@ interface PlanConstraints {
 
 ## Example
 
-```ts
+```ts validate=none
 import { compilePlan, react } from '@noetic-tools/core';
 
 const agents = {
   researcher: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [searchTool],
   }),
   writer: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [writeTool],
   }),
   reviewer: (prompt: string) => react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: prompt,
     tools: [],
   }),
@@ -113,6 +113,8 @@ The `PlanNodeSchema` Zod schema is also exported, so you can have an LLM generat
 
 ```ts
 import { PlanNodeSchema } from '@noetic-tools/core';
+
+declare const llmOutput: unknown;
 
 const plan = PlanNodeSchema.parse(llmOutput);
 ```

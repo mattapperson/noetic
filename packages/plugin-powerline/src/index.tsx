@@ -17,7 +17,7 @@
  * ```
  */
 
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 import type { ReactNode } from 'react';
 
 import { Footer } from './footer.js';

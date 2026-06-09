@@ -17,7 +17,7 @@
  * for history persistence, a `TaskLogger` callback for operational
  * logs, and an `IpcAskUserService` for the ask-user modal bridge. The
  * concrete implementations of those collaborators live in
- * `@noetic/code-agent` and are wired at construction time — this
+ * `@noetic-tools/code-agent` and are wired at construction time — this
  * module never imports the task-domain package.
  */
 
@@ -73,7 +73,7 @@ export type { AgentHarnessContract };
  * Structural chat-history persistence the server uses. Callers provide
  * an object bound to a specific `taskId`-agnostic backing store — the
  * server passes `taskId` on every call. Concrete implementations in
- * `@noetic/code-agent` adapt the on-disk `<taskDir>/chat.jsonl` store.
+ * `@noetic-tools/code-agent` adapt the on-disk `<taskDir>/chat.jsonl` store.
  */
 export interface ChatHistoryStore {
   /**

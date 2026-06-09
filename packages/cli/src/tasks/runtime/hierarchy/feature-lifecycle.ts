@@ -1,6 +1,6 @@
-import type { Feature } from '@noetic/code-agent/tasks/schema';
-import { FeatureLoopState, FeatureStatus } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Feature } from '@noetic-tools/code-agent/tasks/schema';
+import { FeatureLoopState, FeatureStatus } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { loadFeature, saveFeature } from './store.js';
 
 //#region Types

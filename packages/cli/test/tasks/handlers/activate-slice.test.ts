@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { listTasks, saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { listTasks, saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   activateSliceHandler,
   addFeatureHandler,

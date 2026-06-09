@@ -8,15 +8,15 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { TaskSource } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { resolveSubprocessRoot } from '@noetic/code-agent/tasks/store/fs-node';
+import { TaskSource } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { resolveSubprocessRoot } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import type { FsAdapter } from '@noetic-tools/core';
 import {
   createFileStorage,
   createLocalFsAdapter,
   createLocalSubprocessAdapter,
-} from '@noetic/platform-node';
-import type { FsAdapter } from '@noetic-tools/core';
+} from '@noetic-tools/platform-node';
 import { formatError, requireProjectRoot } from './handlers/_shared.js';
 import { autopilotHandler, steerTaskHandler } from './handlers/autopilot.js';
 import {

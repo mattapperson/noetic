@@ -58,7 +58,7 @@ const progress = channel('progress', {
 
 Holds the latest value. Readers always get the most recent write. If no value has been sent yet, `recv` blocks until one arrives.
 
-```ts
+```ts validate=none
 const config = channel('config', {
   schema: z.object({ temperature: z.number() }),
   mode: 'value',
@@ -78,7 +78,7 @@ Best for: shared configuration, latest-status indicators, feature flags.
 
 FIFO buffer. Each value is consumed by exactly one reader. Values accumulate up to `capacity`; when full, new messages are dropped (with a warning). If the queue is empty, `recv` blocks until a value arrives.
 
-```ts
+```ts validate=none
 const tasks = channel('tasks', {
   schema: z.object({ url: z.string().url() }),
   mode: 'queue',
@@ -100,7 +100,7 @@ Best for: work queues, task distribution, ordered pipelines.
 
 Pub/sub broadcast. Every `recv` call that is waiting at the time of `send` receives the value. Values are not buffered -- if nobody is listening, the message is lost. `tryRecv` always returns `null` in topic mode.
 
-```ts
+```ts validate=none
 const events = channel('events', {
   schema: z.object({ type: z.string(), payload: z.unknown() }),
   mode: 'topic',
@@ -118,7 +118,7 @@ Best for: event broadcasting, fan-out notifications, real-time updates.
 
 ## Channel Interface
 
-```ts
+```ts validate=none
 interface Channel<T> {
   readonly name: string;
   readonly schema: ZodType<T>;
@@ -143,7 +143,7 @@ Channels are accessed through the [Context](/docs/framework/context) or [AgentHa
 
 The agent harness provides the same three methods, taking an additional `ctx` parameter:
 
-```ts
+```ts validate=none
 harness.send(channel, value, ctx);
 const val = await harness.recv(channel, ctx, { timeout: 5_000 });
 const maybe = harness.tryRecv(channel, ctx);
@@ -154,6 +154,8 @@ const maybe = harness.tryRecv(channel, ctx);
 External channels let code outside the agent (your application, an API handler, a UI) push values into a running execution.
 
 ```ts
+import { z } from 'zod';
+
 const userInput = channel('user-input', {
   schema: z.string(),
   mode: 'queue',
@@ -165,7 +167,7 @@ The `external: true` option changes the return type to `ExternalChannel<T>`, whi
 
 ### ChannelHandle
 
-```ts
+```ts validate=none
 interface ChannelHandle<T> {
   send(value: T): void;
   readonly closed: boolean;
@@ -175,7 +177,7 @@ interface ChannelHandle<T> {
 
 Get a handle from the agent harness using the execution ID:
 
-```ts
+```ts validate=none
 const handle = harness.getChannelHandle(userInput, ctx.id);
 
 // From your API handler, UI callback, etc:
@@ -197,7 +199,7 @@ if (handle.closed) {
 
 A typical human-in-the-loop pattern:
 
-```ts
+```ts validate=none
 import { z } from 'zod';
 import { channel, step, loop, until } from '@noetic-tools/core';
 
@@ -222,7 +224,7 @@ handle.send('approve'); // Unblocks the step
 
 Every value sent through a channel is validated against its Zod schema at runtime. This catches type mismatches, malformed data, and contract violations early:
 
-```ts
+```ts validate=none
 const scores = channel('scores', {
   schema: z.number().int().min(0).max(100),
   mode: 'queue',

@@ -21,7 +21,7 @@ Content part types used within message and reasoning items.
 
 Model-generated text content with optional annotations and logprobs. Type alias for `ResponseOutputText` from `@openrouter/sdk`.
 
-```ts
+```ts validate=none
 type OutputTextPart = ResponseOutputText;
 // { type: 'output_text'; text: string; annotations?: ...; logprobs?: ... }
 ```
@@ -30,7 +30,7 @@ type OutputTextPart = ResponseOutputText;
 
 Model refusal content. Type alias for `OpenAIResponsesRefusalContent` from `@openrouter/sdk`.
 
-```ts
+```ts validate=none
 type RefusalPart = OpenAIResponsesRefusalContent;
 // { type: 'refusal'; refusal: string }
 ```
@@ -39,7 +39,7 @@ type RefusalPart = OpenAIResponsesRefusalContent;
 
 User/developer input text, created by the framework (not from the SDK).
 
-```ts
+```ts validate=none
 interface InputTextPart {
   readonly type: 'input_text';
   readonly text: string;
@@ -50,7 +50,7 @@ interface InputTextPart {
 
 Reasoning trace content within `ReasoningItem`. Type alias for `ReasoningTextContent` from `@openrouter/sdk`.
 
-```ts
+```ts validate=none
 type ReasoningTextPart = ReasoningTextContent;
 // { type: 'reasoning_text'; text: string }
 ```
@@ -59,7 +59,7 @@ type ReasoningTextPart = ReasoningTextContent;
 
 Reasoning summary content within `ReasoningItem`. Type alias for `ReasoningSummaryText` from `@openrouter/sdk`.
 
-```ts
+```ts validate=none
 type SummaryTextPart = ReasoningSummaryText;
 // { type: 'summary_text'; text: string }
 ```
@@ -68,7 +68,7 @@ type SummaryTextPart = ReasoningSummaryText;
 
 Union of content parts used in message items:
 
-```ts
+```ts validate=none
 type ContentPart = OutputTextPart | RefusalPart | InputTextPart;
 ```
 
@@ -86,7 +86,7 @@ These are type aliases of the `@openrouter/sdk` types. The SDK provides `id`, `t
 
 Assistant message output item. Type alias for `ResponsesOutputMessage`.
 
-```ts
+```ts validate=none
 type MessageItem = ResponsesOutputMessage;
 ```
 
@@ -100,7 +100,7 @@ type MessageItem = ResponsesOutputMessage;
 
 A tool/function invocation requested by the model. Type alias for `ResponsesOutputItemFunctionCall`.
 
-```ts
+```ts validate=none
 type FunctionCallItem = ResponsesOutputItemFunctionCall;
 ```
 
@@ -115,7 +115,7 @@ type FunctionCallItem = ResponsesOutputItemFunctionCall;
 
 Internal reasoning trace emitted by reasoning-capable models. Type alias for `ResponsesOutputItemReasoning`. Uses `ReasoningTextPart` and `SummaryTextPart` content types (not `OutputTextPart`).
 
-```ts
+```ts validate=none
 type ReasoningItem = ResponsesOutputItemReasoning;
 ```
 
@@ -130,7 +130,7 @@ type ReasoningItem = ResponsesOutputItemReasoning;
 
 Web search call result. Type alias for `ResponsesWebSearchCallOutput`.
 
-```ts
+```ts validate=none
 type WebSearchItem = ResponsesWebSearchCallOutput;
 ```
 
@@ -145,7 +145,7 @@ type WebSearchItem = ResponsesWebSearchCallOutput;
 
 File search call result. Type alias for `ResponsesOutputItemFileSearchCall`.
 
-```ts
+```ts validate=none
 type FileSearchItem = ResponsesOutputItemFileSearchCall;
 ```
 
@@ -160,7 +160,7 @@ type FileSearchItem = ResponsesOutputItemFileSearchCall;
 
 Image generation call result. Type alias for `ResponsesImageGenerationCall`.
 
-```ts
+```ts validate=none
 type ImageGenerationItem = ResponsesImageGenerationCall;
 ```
 
@@ -175,7 +175,7 @@ type ImageGenerationItem = ResponsesImageGenerationCall;
 
 Server tool output with a vendor-prefixed type (e.g., `openrouter:datetime`). Based on `ResponsesServerToolOutput` with the `type` field constrained to `${string}:${string}` for discriminant narrowing.
 
-```ts
+```ts validate=none
 type ServerToolItem = Omit<ResponsesServerToolOutput, 'type'> & {
   readonly type: `${string}:${string}`;
 };
@@ -191,7 +191,7 @@ The prefix identifies the vendor or domain (e.g., `openrouter`, `noetic`, `myapp
 
 All output item types from the model:
 
-```ts
+```ts validate=none
 type OutputItem =
   | MessageItem
   | FunctionCallItem
@@ -210,7 +210,7 @@ These item types are Noetic-owned interfaces for items created by the framework,
 
 Input message created by the framework for user, system, or developer roles.
 
-```ts
+```ts validate=none
 interface InputMessageItem {
   readonly id: string;
   readonly type: 'message';
@@ -231,7 +231,7 @@ interface InputMessageItem {
 
 Tool execution output created by the harness during the tool loop. This is an input-only item type in Open Responses (sent by the developer, not the model).
 
-```ts
+```ts validate=none
 interface FunctionCallOutputItem {
   readonly id: string;
   readonly type: 'function_call_output';
@@ -252,7 +252,7 @@ interface FunctionCallOutputItem {
 
 All item types that can appear in an `ItemLog`:
 
-```ts
+```ts validate=none
 type Item = OutputItem | InputMessageItem | FunctionCallOutputItem;
 ```
 
@@ -409,7 +409,7 @@ In addition to OpenResponses streaming events, Noetic emits framework-level even
 
 Framework events are available through `harness.execute(input).getFullStream()` alongside SDK events. They can be distinguished by the `source` field:
 
-```ts
+```ts validate=none
 for await (const event of harness.execute('Hello').getFullStream()) {
   if (event.source === 'sdk') {
     // OpenResponses SSE event

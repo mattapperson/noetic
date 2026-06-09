@@ -5,5 +5,5 @@ export type {
   SequenceFlowNode,
   SpawnFlowNode,
   SubagentFlowNode,
-} from '../memory/flow-schema';
-export { FlowSchema, flowDepth, validateFlow, walkFlow } from '../memory/flow-schema';
+} from '@noetic-tools/memory';
+export { FlowSchema, flowDepth, validateFlow, walkFlow } from '@noetic-tools/memory';

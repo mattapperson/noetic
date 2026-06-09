@@ -1,5 +1,5 @@
-import type { FsAdapter, FsStats } from '../types/fs-adapter';
-import { frameworkCast } from '../util/framework-cast';
+import type { FsAdapter, FsStats } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 
 //#region Helpers
 

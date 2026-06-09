@@ -79,7 +79,7 @@ type Mem = InferMemory<typeof mem>;
 
 ### TokenUsage
 
-```ts
+```ts validate=none
 interface TokenUsage {
   input: number;
   output: number;
@@ -91,7 +91,7 @@ interface TokenUsage {
 
 The `ItemLog` is an append-only log of every message, tool call, and reasoning trace produced during an execution.
 
-```ts
+```ts validate=none
 interface ItemLog {
   readonly items: ReadonlyArray<Item>;
   append(item: Item): void;
@@ -173,7 +173,7 @@ Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` 
 
 Every entry in the item log is one of these discriminated union variants. All items share a base shape:
 
-```ts
+```ts validate=none
 interface ItemBase {
   readonly id: string;
   readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
@@ -182,7 +182,7 @@ interface ItemBase {
 
 ### MessageItem
 
-```ts
+```ts validate=none
 interface MessageItem extends ItemBase {
   readonly type: 'message';
   readonly role: 'user' | 'assistant' | 'system' | 'developer';
@@ -192,7 +192,7 @@ interface MessageItem extends ItemBase {
 
 ### FunctionCallItem
 
-```ts
+```ts validate=none
 interface FunctionCallItem extends ItemBase {
   readonly type: 'function_call';
   readonly callId: string;
@@ -203,7 +203,7 @@ interface FunctionCallItem extends ItemBase {
 
 ### FunctionCallOutputItem
 
-```ts
+```ts validate=none
 interface FunctionCallOutputItem extends ItemBase {
   readonly type: 'function_call_output';
   readonly callId: string;
@@ -213,7 +213,7 @@ interface FunctionCallOutputItem extends ItemBase {
 
 ### ReasoningItem
 
-```ts
+```ts validate=none
 interface ReasoningItem extends ItemBase {
   readonly type: 'reasoning';
   readonly content: ContentPart[];
@@ -226,7 +226,7 @@ interface ReasoningItem extends ItemBase {
 
 Custom item types using the `prefix:name` convention (e.g., `noetic:analytics`, `openrouter:web_search`):
 
-```ts
+```ts validate=none
 interface ExtensionItem extends ItemBase {
   readonly type: `${string}:${string}`;
   readonly data: Record<string, unknown>;

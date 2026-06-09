@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Event, Task } from '@noetic/code-agent/tasks/schema';
+import type { Event, Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -7,13 +7,13 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
+} from '@noetic-tools/code-agent/tasks/schema';
 import {
   loadState,
   saveTask,
   tailEvents,
   tryLoadTask,
-} from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import type { AutopilotDeps } from '../../../src/tasks/runtime/hierarchy/autopilot.js';

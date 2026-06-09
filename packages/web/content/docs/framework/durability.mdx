@@ -7,13 +7,9 @@ Durable execution is opt-in. A zero-config `AgentHarness` has no persistent stor
 
 ## Quick Example
 
-```ts
-import {
-  AgentHarness,
-  createCheckpointStore,
-  createFileStorage,
-} from '@noetic-tools/core';
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
+```ts validate=none
+import { AgentHarness, createCheckpointStore } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Two distinct on-disk roots: subprocess manifests vs checkpoint snapshots.
 const subprocessStorage = createFileStorage({
@@ -59,7 +55,7 @@ Any caller can also invoke `harness.checkpoint(ctx)` explicitly — it's an ordi
 
 ### What's in a Snapshot
 
-```ts
+```ts validate=none
 import type { CheckpointSnapshot } from '@noetic-tools/core';
 
 interface CheckpointSnapshot {
@@ -81,6 +77,9 @@ The snapshot is keyed by `executionId` and validated by `CheckpointSnapshotSchem
 ### Restore
 
 ```ts
+declare const harness: AgentHarness;
+declare const executionId: string;
+
 const restored = await harness.restore(executionId);
 if (restored !== null) {
   // `restored.id === executionId`. The item log, layer state, and cwd
@@ -101,7 +100,7 @@ LLM mid-stream is not resumed. If the host dies while the model is generating, o
 
 Every `SubprocessAdapter` exposes two durability hooks:
 
-```ts
+```ts validate=none
 interface SubprocessAdapter {
   reattach(handleId: string): Promise<SubprocessHandle | null>;
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
@@ -117,8 +116,8 @@ Without storage, `listLive()` returns an empty set and `reattach()` returns null
 
 The CLI helper `reattachLiveChildren` wires up the recovery step:
 
-```ts
-import { reattachLiveChildren } from '@noetic/cli';
+```ts validate=none
+import { reattachLiveChildren } from '@noetic-tools/cli';
 
 const { handles, contexts } = await reattachLiveChildren(harness);
 for (const [handleId, ctx] of contexts) {
@@ -134,8 +133,8 @@ The helper calls `harness.subprocess.listLive()`, then `harness.restore(executio
 
 A server that composes `DurableOutboundQueue` wraps every outbound frame in a `durable` envelope keyed by a monotonic sequence number. The client tracks the highest seq it has durably consumed and sends `durableResume { ackedThrough }` on every reconnect. The server replays any frames the client has not acked, resumes live emission, and compacts the queue when `durableAck { throughSeq }` arrives.
 
-```ts
-import { createDurableOutboundQueue } from '@noetic/platform-node';
+```ts validate=none
+import { createDurableOutboundQueue } from '@noetic-tools/platform-node';
 
 const queue = await createDurableOutboundQueue({ storage, socketPath });
 
@@ -186,9 +185,8 @@ Subprocess manifests and IPC queues can share a root because both are owned by t
 
 Switch a specific spawn to run in its own OS child by passing a local adapter as a per-call override:
 
-```ts
-import { createLocalSubprocessAdapter } from '@noetic/platform-node';
-import { createFileStorage } from '@noetic-tools/core';
+```ts validate=none
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const localAdapter = createLocalSubprocessAdapter({
   storage: createFileStorage({
@@ -216,7 +214,7 @@ Per-step overrides work the same way: set `subprocess: localAdapter` on a `step.
 
 ## Survive a Host Crash
 
-```ts
+```ts validate=none
 // First boot: configure durable storage.
 const harness = new AgentHarness({
   name: 'crash-proof',
@@ -236,13 +234,13 @@ harness.detachedSpawn(backgroundWorkerStep, jobSpec, parentCtx);
 // ... process crashes ...
 
 // Second boot: same harness construction, then:
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 const { handles, contexts } = await reattachLiveChildren(harness);
 // `handles` contains the still-running background worker.
 // `contexts` has its rebuilt parent context.
 ```
 
-The pattern generalises to any host — not just `@noetic/cli`. Any embedder that configures durable storage and calls `listLive()` + `restore()` on boot gets the same recovery.
+The pattern generalises to any host — not just `@noetic-tools/cli`. Any embedder that configures durable storage and calls `listLive()` + `restore()` on boot gets the same recovery.
 
 ## Guarantees
 

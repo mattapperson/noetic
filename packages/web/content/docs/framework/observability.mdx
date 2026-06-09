@@ -5,7 +5,7 @@ description: Built-in distributed tracing with OpenTelemetry-compatible spans.
 
 ## Quick Example
 
-```ts
+```ts validate=none
 import { AgentHarness, InMemoryExporter } from '@noetic-tools/core';
 
 const exporter = new InMemoryExporter();
@@ -30,7 +30,7 @@ Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. 
 
 A span represents a single unit of work in a trace tree.
 
-```ts
+```ts validate=none
 interface Span {
   readonly traceId: string;
   readonly spanId: string;
@@ -53,6 +53,8 @@ interface Span {
 Every [Context](/docs/framework/context) has a `span` property. You can add custom attributes from within any step:
 
 ```ts
+declare function doWork(input: string): string;
+
 const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) => {
   ctx.span.setAttribute('input.length', input.length);
   ctx.span.addEvent('processing_started');
@@ -81,7 +83,7 @@ const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) =
 
 Memory layer operations produce their own trace records:
 
-```ts
+```ts validate=none
 interface MemoryTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
@@ -107,7 +109,7 @@ interface MemoryTraceSpan {
 
 Exporters receive completed spans and send them to a backend:
 
-```ts
+```ts validate=none
 interface TraceExporter {
   export(spans: Span[]): Promise<void>;
 }
@@ -119,7 +121,7 @@ interface TraceExporter {
 
 Discards all spans. This is the default when no exporter is configured.
 
-```ts
+```ts validate=none
 import { NoopExporter } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
@@ -131,7 +133,7 @@ const harness = new AgentHarness({
 
 Collects spans in an array for testing and debugging.
 
-```ts
+```ts validate=none
 import { InMemoryExporter } from '@noetic-tools/core';
 
 const exporter = new InMemoryExporter();
@@ -192,7 +194,7 @@ Noetic defines constants following the OpenTelemetry GenAI semantic conventions.
 | `ToolAttr.NAME` | `'tool.name'` | Tool name. |
 | `ToolAttr.NEEDS_APPROVAL` | `'tool.needs_approval'` | Whether the tool requires human approval. |
 
-```ts
+```ts validate=none
 import { GenAI, ToolAttr } from '@noetic-tools/core';
 
 // These are set automatically by the agent harness, but you can use them

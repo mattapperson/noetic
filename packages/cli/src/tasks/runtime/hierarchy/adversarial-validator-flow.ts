@@ -31,10 +31,10 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 
-import { join } from '@noetic/code-agent/tasks/path-utils';
-import type { Assertion, AssertionOutcome } from '@noetic/code-agent/tasks/schema';
-import { AssertionStatus } from '@noetic/code-agent/tasks/schema';
-import { tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { join } from '@noetic-tools/code-agent/tasks/path-utils';
+import type { Assertion, AssertionOutcome } from '@noetic-tools/code-agent/tasks/schema';
+import { AssertionStatus } from '@noetic-tools/code-agent/tasks/schema';
+import { tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { Context, ContextMemory, Step } from '@noetic-tools/core';
 import { fork, step } from '@noetic-tools/core';
 import { z } from 'zod';

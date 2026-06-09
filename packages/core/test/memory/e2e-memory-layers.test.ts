@@ -8,26 +8,24 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
+import { frameworkCast } from '@noetic-tools/types';
 import type { OpenResponsesResult } from '@openrouter/agent';
-import { frameworkCast } from '../../src/util/framework-cast';
 
 type OpenResponsesOutputItem = OpenResponsesResult['output'][number];
 
+import type { ExecutionContext } from '@noetic-tools/memory';
 import {
   createLayerStateStore,
   disposeLayers,
   initLayers,
+  observationalMemory,
   recallLayers,
+  steering,
   storeLayers,
-} from '../../src/memory/layer-lifecycle';
-import { observationalMemory } from '../../src/memory/layers/observational-memory';
-import { steering } from '../../src/memory/layers/steering';
-import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { LLMResponse } from '../../src/types/common';
-import type { ExecutionContext } from '../../src/types/memory';
-import type { CallModelRequest } from '../../src/types/runtime';
-import type { SteeringState } from '../../src/types/steering';
-import { SteeringAction } from '../../src/types/steering';
+  workingMemory,
+} from '@noetic-tools/memory';
+import type { CallModelRequest, LLMResponse, SteeringState } from '@noetic-tools/types';
+import { SteeringAction } from '@noetic-tools/types';
 import {
   isRecord,
   makeCtx,

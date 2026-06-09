@@ -1,6 +1,6 @@
-import { NoeticConfigError } from '../errors/noetic-config-error';
-import type { ContextMemory } from '../types/memory';
-import type { StepLoop } from '../types/step';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { StepLoop } from '@noetic-tools/types';
+import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 /** @public Configuration options accepted by the `loop()` builder, excluding the `kind` discriminant. */

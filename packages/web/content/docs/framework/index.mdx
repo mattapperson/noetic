@@ -16,48 +16,76 @@ bun add @noetic-tools/core
 pnpm add @noetic-tools/core
 ```
 
+`@noetic-tools/core` pulls in `@openrouter/agent` and `zod` automatically. It runs on **Node.js 18+** and **Bun**.
+
+## Set Your API Key
+
+Noetic calls LLMs through [OpenRouter](https://openrouter.ai). Create a key at [openrouter.ai/keys](https://openrouter.ai/keys) and export it — the runtime reads `OPENROUTER_API_KEY` by default:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
 ## Your First Agent
 
-Build a ReAct agent in under 10 lines. This agent loops over an LLM step, calling tools until the model decides it has the answer.
+Build a ReAct agent that loops over an LLM step, calling tools until the model has its answer. Here is the **whole program** — save it as `agent.mjs` and run `node agent.mjs`:
 
 ```ts
+import { AgentHarness, react } from '@noetic-tools/core';
 import { z } from 'zod';
-import { react, step, until } from '@noetic-tools/core';
 
+// A tool the agent can call. Inputs and outputs are validated with zod.
 const searchTool = {
   name: 'search',
   description: 'Search the web for information',
-  input: z.object({
-    query: z.string(),
-  }),
-  output: z.object({
-    result: z.string(),
-  }),
-  execute: async (args) => {
+  input: z.object({ query: z.string() }),
+  output: z.object({ result: z.string() }),
+  execute: async (args: { query: string }) => {
     return { result: `Results for: ${args.query}` };
   },
 };
 
+// react() composes step.llm + until.noToolCalls + a loop for you.
 const agent = react({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o', // OpenRouter model id (provider/model)
   instructions: 'You are a helpful research assistant.',
   tools: [searchTool],
   maxSteps: 5,
 });
+
+// The harness runs the agent. `name` and `params` are required;
+// `llm` selects the provider and reads OPENROUTER_API_KEY from the env.
+const harness = new AgentHarness({
+  name: 'researcher',
+  initialStep: agent,
+  params: {},
+  llm: { provider: 'openrouter' },
+});
+
+await harness.execute('What are the latest developments in AI?');
+const response = await harness.getAgentResponse();
+console.log(response.text);
 ```
 
-The `react` pattern composes three primitives under the hood: `step.llm`, `until.noToolCalls`, and a `loop`. You can build the same thing yourself for full control -- see [Loop & Until](/docs/framework/operators/loop-and-until).
+Run it and the model's final answer prints to your terminal.
+
+> **Using TypeScript?** Save the file as `agent.ts` and run it with `bunx tsx agent.ts` (or `bun run agent.ts`) — both execute TypeScript directly, no build step. Plain `node` runs the `.mjs` version above.
 
 ## What Happens When You Run It
 
-1. The LLM receives the system prompt and user input.
+1. The LLM receives the system prompt and your input.
 2. If the model calls a tool, Noetic executes it and feeds the result back.
-3. The loop repeats until the model responds without tool calls, or the step limit is reached.
-4. The final text output is returned.
+3. The loop repeats until the model responds without tool calls, or `maxSteps` is reached.
+4. `getAgentResponse()` resolves with the final `response.text`.
+
+> **Model ids** use OpenRouter's `provider/model` format (e.g. `openai/gpt-4o`, `anthropic/claude-sonnet-4`). Browse them at [openrouter.ai/models](https://openrouter.ai/models).
+
+The `react` pattern composes three primitives under the hood: `step.llm`, `until.noToolCalls`, and a `loop`. You can build the same thing yourself for full control -- see [Loop & Until](/docs/framework/operators/loop-and-until).
 
 ## Next Steps
 
 - [Overview](/docs/framework/overview) -- understand Noetic's philosophy and the 7 primitives.
 - [Steps](/docs/framework/steps) -- learn about `step.run`, `step.llm`, and `step.tool`.
+- [AgentHarness](/docs/framework/runtime) -- the runtime that executes agents.
 - [Control Flow](/docs/framework/operators) -- branch and fork for conditional and parallel logic.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- iteration with termination predicates.

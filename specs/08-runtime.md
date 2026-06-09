@@ -65,7 +65,7 @@ interface ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter(opts?)` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
+`createLocalShellAdapter(opts?)` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
 
 The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
 
@@ -82,7 +82,7 @@ createLocalShellAdapter({ useRtk: true });   // opt in: wrap via rtk rewrite
 
 The returned adapter exposes `rtkAvailable`, `rtkPath`, and `useRtk` for introspection so callers can fail fast on missing rtk instead of silently degrading.
 
-`@noetic/cli` opts in by default via the `shell` namespace in `noetic.config.ts` and fails fast at startup with install instructions when `rtk` is missing:
+`@noetic-tools/cli` opts in by default via the `shell` namespace in `noetic.config.ts` and fails fast at startup with install instructions when `rtk` is missing:
 
 ```typescript
 export default {
@@ -231,7 +231,7 @@ Callers may attach arbitrary additional keys via `request.metadata`; the adapter
 
 ### Durability Contract (`reattach`, `listLive`)
 
-`reattach(handleId)` and `listLive()` are adapter-level durability hooks. An adapter configured with a durable `StorageAdapter` persists handle manifests on `spawn()` and consults them on reattach/list; a zero-config adapter returns empty results. The host boot flow (`reattachLiveChildren(harness)` in `@noetic/cli`) calls `harness.subprocess.listLive()` first and then `harness.restore(executionId)` per live handle. See `23-durable-execution` for the full model.
+`reattach(handleId)` and `listLive()` are adapter-level durability hooks. An adapter configured with a durable `StorageAdapter` persists handle manifests on `spawn()` and consults them on reattach/list; a zero-config adapter returns empty results. The host boot flow (`reattachLiveChildren(harness)` in `@noetic-tools/cli`) calls `harness.subprocess.listLive()` first and then `harness.restore(executionId)` per live handle. See `23-durable-execution` for the full model.
 
 ---
 

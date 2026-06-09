@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@noetic-tools/core": ["../core/src/index.ts"],
+      "@noetic-tools/core/*": ["../core/src/*"],
+      "@noetic-tools/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
+      "@noetic-tools/platform-node": ["../platform-node/src/index.ts"],
+      "@noetic/eval": ["../eval/src/index.ts"],
+      "@noetic/plugin-powerline": ["../plugin-powerline/src/index.tsx"],
+      "@noetic/plugin-design-deck": ["../plugin-design-deck/src/index.tsx"]
+    }
+  }
+}

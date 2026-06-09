@@ -1,4 +1,4 @@
-import type { CallModel } from '@noetic/cli';
+import type { CallModel } from '@noetic-tools/cli';
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useReducer } from 'react';

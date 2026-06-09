@@ -287,9 +287,60 @@ const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness))
 
 ## Memory Layers
 
+### MemoryLayer config fields
+
+Beyond `id`, `slot`, `scope`, `budget`, `hooks`, `provides`, `timeouts`, and `rerenderTiming`, a layer accepts:
+
+```typescript
+interface MemoryLayer<TState> {
+  // ...
+  /** What to do when init() throws. Default 'throw' (fail-loud: surface + abort). */
+  onInitError?: 'throw' | 'disable';
+  /** Whether recall() blocks the model call. Default 'atomic'. */
+  recallMode?: 'atomic' | 'eventual';
+}
+```
+
+- **`onInitError`** — `'throw'` (default) surfaces the init error and aborts the execution; memory is load-bearing and silently disabling it hides failures (and for steering would fail *open*). `'disable'` logs a diagnostic and runs without the layer (its other hooks are skipped). Opt in only for non-critical layers.
+- **`recallMode`** — `'atomic'` (default) runs `recall()` synchronously before the model call. `'eventual'` serves `recall()` from a per-harness cache that never blocks; the cache refreshes after the layer's `store()` produces new state, so the next turn sees it. Use `'eventual'` for slow recall paths that can tolerate one-turn staleness.
+
+### Projection & recall budget
+
+The recall token budget and the assembled context window are governed by a `ProjectionPolicy`, resolved per LLM step as `step.projection` → `harness.projection` (`AgentConfig.projection`) → `DEFAULT_PROJECTION`.
+
+```typescript
+interface ProjectionPolicy {
+  tokenBudget: number;
+  responseReserve: number;
+  overflow: 'truncate' | 'summarize' | 'sliding_window';
+  overflowModel?: string;
+  windowSize?: number;
+}
+
+// Fallback when neither step nor harness configures one:
+const DEFAULT_PROJECTION = { tokenBudget: 128_000, responseReserve: 4_000, overflow: 'sliding_window' };
+```
+
+```typescript
+interface AgentConfig {
+  // ...
+  projection?: ProjectionPolicy;   // default for all LLM steps
+  forceAtomicRecall?: boolean;     // recall every layer atomically, bypass the eventual cache
+}
+
+interface StepLLM {
+  // ...
+  projection?: ProjectionPolicy;   // overrides the harness default for this step
+}
+```
+
+- A single allocator (`allocateBudgets`) splits the recall budget: each layer's `budget.min` is satisfied first, then ~60% of the remainder funds a proportional pool across layers (by headroom `max − min`) and ~40% is reserved for conversation history. A layer never exceeds its `max`.
+- `assembleView` then holds the final view to a hard cap (`tokenBudget − responseReserve`): system items are always kept, layer output is kept low-slot-first (highest-slot dropped when tight), history keeps the most recent turns, and orphan tool calls are stripped at the boundary.
+- `forceAtomicRecall: true` makes every layer atomic regardless of `recallMode`.
+
 ### workingMemory
 
-Thread/resource-scoped structured state, updated via `updateWorkingMemory` tool call.
+Thread/resource-scoped structured state, updated via the `working-memory/update` tool (or the legacy `updateWorkingMemory` function call). Updates **deep-merge** into state: nested object keys merge recursively while arrays and primitives replace; `__proto__`/`constructor` are stripped at every depth. An object update applied over prior freeform-string state preserves the old string under a `_previous` key.
 
 ```typescript
 workingMemory({ scope?, schema?, template?, readOnly? })
@@ -297,15 +348,34 @@ workingMemory({ scope?, schema?, template?, readOnly? })
 
 ### observationalMemory
 
-Accumulates text, distills to observations when buffer exceeds threshold.
+Accumulates text, distills to observations when buffer exceeds threshold. Buffers the full conversation: assistant output via `store`, plus user input and tool output via `onItemAppend`. `recall` trims output to the allocated budget.
 
 ```typescript
 observationalMemory({ bufferThreshold?, maxObservations?, scope?, observer? })
 ```
 
+### temporalMemory
+
+LLM-backed long-term memory for time-anchored recall. Distills the conversation into a key-value ledger of timestamped facts (`Record<isoTs, string[]>`) and answers temporal queries on demand. `recall` injects a `<current_datetime>` block (default on) so the model can resolve relative dates and compute differences. The `temporal/searchMemory` tool (auto-injected from `provides`) takes `{ query }` and returns `{ facts, date?, fuzzy? }`.
+
+```typescript
+temporalMemory({
+  now?, scope?,            // clock injection; 'thread' | 'resource' (default 'resource')
+  extract?, search?,       // FactExtractor / FactSearcher — host-injected LLM callbacks
+  bufferThreshold?,        // tokens before extract runs, default 2000
+  maxFacts?,               // ledger cap, default 200 (per-fact: keeps newest maxFacts)
+  groundDateTime?,         // <current_datetime> on recall, default true
+  injectLedger?,           // <remembered_facts> on recall, default false
+})
+// id 'temporal', slot Slot.REMINDER (80). LLM-agnostic: omit extract/search and the
+// layer only buffers / the tool returns the raw ledger (never fabricates facts).
+// Buffers assistant output (store) + user/tool input (onItemAppend) for extraction.
+// The code agent wires step.llm-backed callbacks and installs it by default.
+```
+
 ### durableTaskState
 
-Persists file lists and checkpoints across executions.
+Persists file lists and checkpoints across executions/iterations within a thread (scope `'thread'`, not `'execution'` — an execution-scoped key would rotate each run and defeat durable rehydration).
 
 ```typescript
 durableTaskState({ baseDir?, gitCommit?, schema?, serializer? })
@@ -321,7 +391,7 @@ staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 
 ### historyWindow
 
-Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message) and strips orphan `function_call` / `function_call_output` at the slice boundary.
+Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message), but that expansion is bounded to `maxItems × 4` so a tool-only burst can't grow the window unbounded. Re-attaches a head `system`/anchor message that fell outside the window, and strips orphan `function_call` / `function_call_output` at the slice boundary.
 
 ```typescript
 historyWindow({ maxItems?: number })  // default 40
@@ -335,12 +405,12 @@ Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `
 toolMemoryLayer(tools: Tool[], opts?: { slot? })
 ```
 
-### createSteeringFileLayer (`@noetic/cli`)
+### createSteeringFileLayer (`@noetic-tools/cli`)
 
 Surfaces a per-task `steering.md` file to the agent run servicing that task. The harness factory mounts it unconditionally; activation is gated by the `NOETIC_TASK_DIR` env var that the task launcher sets when spawning agent-ci for a specific task. Non-task agent runs see no steering content.
 
 ```typescript
-import { createSteeringFileLayer } from '@noetic/cli/src/memory/steering-file-layer.js';
+import { createSteeringFileLayer } from '@noetic-tools/cli/src/memory/steering-file-layer.js';
 
 const layer = createSteeringFileLayer();
 // slot:  Slot.STEERING (90) — ahead of working memory and observations
@@ -356,12 +426,12 @@ Behaviour:
 
 The layer carries no state (`state: null`); everything is resolved at recall time, so a steering file edited mid-session takes effect on the next recall. See `specs/21-tasks.md` for the full task-system contract.
 
-### createFixFeedbackLayer (`@noetic/cli`)
+### createFixFeedbackLayer (`@noetic-tools/cli`)
 
 Thread-scoped layer that carries the implementer's retry-feedback bundle (parent-task plan, description, accumulated assertion failures, attempt count) across iterations of the implementer↔validator retry loop.
 
 ```typescript
-import { createFixFeedbackLayer } from '@noetic/cli/src/commands/builtins/tasks/memory/fix-feedback-layer.js';
+import { createFixFeedbackLayer } from '@noetic-tools/cli/src/commands/builtins/tasks/memory/fix-feedback-layer.js';
 
 const layer = createFixFeedbackLayer({
   initial: { plan, description, accumulatedIssues, attempt: 1 },
@@ -375,12 +445,12 @@ const layer = createFixFeedbackLayer({
 
 The implementer-runner seeds this layer's `initial` from disk (parent task description + accumulated `assertionOutcomes` from prior validator runs in the feature's fix lineage), so each retry's react loop sees prior failures via `recall()` without depending on chat-history continuation.
 
-### createPlannerAttemptLayer (`@noetic/cli`)
+### createPlannerAttemptLayer (`@noetic-tools/cli`)
 
 Resource-scoped layer that tracks per-task planner-attempt counts and persists them to `<projectRoot>/.noetic/tasks/_planner-attempts.json`. The autopilot's plan-pass reads the file directly to gate retry budget; the planner subprocess increments via `recordAttempt`.
 
 ```typescript
-import { createPlannerAttemptLayer, MAX_PLANNER_ATTEMPTS } from '@noetic/cli/src/commands/builtins/tasks/memory/planner-attempt-layer.js';
+import { createPlannerAttemptLayer, MAX_PLANNER_ATTEMPTS } from '@noetic-tools/cli/src/commands/builtins/tasks/memory/planner-attempt-layer.js';
 
 const layer = createPlannerAttemptLayer({ projectRoot, maxAttempts? });
 // slot:  Slot.REMINDER (80) — code-only, no recall surface
@@ -434,12 +504,15 @@ Intercepts tool calls and model responses via programmatic or LLM-evaluated rule
 steering({
   rules: SteeringRule[];
   maxLedgerEntries?: number;  // default 100
-  maxRetries?: number;        // default 3
+  maxRetries?: number;        // default 1 (retries on unparseable verdict)
   scope?: MemoryScope;        // default 'execution'
 }): MemoryLayer<SteeringState>
 // LLM-evaluated rules use callModel from the execution context (configured
 // via AgentHarness's `llm` option or OPENROUTER_API_KEY). If no LLM provider
 // is configured, LLM-evaluated rules throw NoeticConfigError (MISSING_CALL_MODEL).
+// The model is asked to reply ALLOW / DENY / "GUIDE: <text>"; the verdict keyword
+// is matched at the start on a word boundary, case-insensitively, with guidance
+// text preserved verbatim. Unparseable replies retry up to maxRetries, then pass.
 ```
 
 **SteeringRule:**
@@ -659,7 +732,7 @@ step.run({
 
 ## ShellAdapter
 
-Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
 
 ```typescript
 interface ShellExecOptions {
@@ -693,7 +766,7 @@ interface LocalShellAdapter extends ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic-tools/core` so non-CLI embedders keep raw shell semantics; `@noetic/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
+`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic-tools/core` so non-CLI embedders keep raw shell semantics; `@noetic-tools/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
 
 Pass a custom adapter to the harness:
 
@@ -941,7 +1014,7 @@ File-backed `StorageAdapter`. Each key becomes a JSON file under `root`; writes 
 
 ```typescript
 // packages/cli/src/cli/reattach-live-children.ts
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 
 const { handles, contexts } = await reattachLiveChildren(harness);
 // handles: ReadonlyArray<SubprocessHandle>
@@ -1024,12 +1097,12 @@ Treat returned values as read-only.
 
 ## CLI-specific memory layers
 
-These are shipped by `@noetic/cli` on top of the core framework:
+These are shipped by `@noetic-tools/cli` on top of the core framework:
 
 ### `reminderLayer(opts)`
 
 ```typescript
-import { reminderLayer, createReminderRegistry, BUILTIN_TRIGGERS } from '@noetic/cli';
+import { reminderLayer, createReminderRegistry, BUILTIN_TRIGGERS } from '@noetic-tools/cli';
 
 const registry = createReminderRegistry();
 for (const t of BUILTIN_TRIGGERS) registry.register(t);
@@ -1048,7 +1121,7 @@ Emits `<system-reminder>`-wrapped developer messages based on registered trigger
 ### `agentMdLayer(opts)`
 
 ```typescript
-import { agentMdLayer, loadAgentInstructions } from '@noetic/cli';
+import { agentMdLayer, loadAgentInstructions } from '@noetic-tools/cli';
 
 const instructions = await loadAgentInstructions({ cwd, fs });
 const layer = agentMdLayer({ loader: () => Promise.resolve(instructions) });
@@ -1058,15 +1131,15 @@ Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction f
 
 ## CLI-specific tools
 
-These are shipped by `@noetic/cli` on top of the core framework.
+These are shipped by `@noetic-tools/cli` on top of the core framework.
 
 ### `taskTools(opts)` — Task management
 
 The `task_*` tool prefix gives agents 1:1 parity with the `noetic tasks <verb>` CLI. Tools are registered by the harness factory and are **default-on**; opt out via `tools.tasks: false` in `noetic.config.ts`. A read-only variant exposes only `task_show`, `task_list`, and `task_logs` — used in planning mode and other contexts where the agent must observe but not mutate.
 
 ```typescript
-import { taskTools } from '@noetic/cli/src/commands/builtins/tasks/tools.js';
-import type { TaskStoreContext } from '@noetic/cli/src/commands/builtins/tasks/fs-store.js';
+import { taskTools } from '@noetic-tools/cli/src/commands/builtins/tasks/tools.js';
+import type { TaskStoreContext } from '@noetic-tools/cli/src/commands/builtins/tasks/fs-store.js';
 
 const ctx: TaskStoreContext = { fs, projectRoot };
 
@@ -1335,7 +1408,7 @@ interface ToolExecutionContext {
 
 ## CLI Plugin Hooks
 
-Plugins loaded by `@noetic/cli` implement the `NoeticPlugin` interface
+Plugins loaded by `@noetic-tools/cli` implement the `NoeticPlugin` interface
 (`packages/cli/src/plugins/types.ts`). The hooks below aggregate contributions
 from every loaded plugin alongside the CLI's built-ins.
 
@@ -1347,7 +1420,7 @@ builtins — a plugin can **override** a builtin by reusing its `id`, or **add**
 a new language by claiming a novel extension.
 
 ```typescript
-import type { LspServerContribution } from '@noetic/cli';
+import type { LspServerContribution } from '@noetic-tools/cli';
 
 export default {
   name: 'my-rust-lsp',

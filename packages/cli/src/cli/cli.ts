@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * @noetic/cli entry point.
+ * @noetic-tools/cli entry point.
  *
  * Dispatches to one of three bootstraps based on argv[2]:
  * - `tasks`                  → bootstrap-tasks (headless task CLI)

@@ -2,10 +2,10 @@
  * Read and append-only handlers: show, list, log, logs, comment.
  */
 
-import type { LogEntry, Task, TaskSource } from '@noetic/code-agent/tasks/schema';
-import { LogEntryKind } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendLog, listTasks, tailLog } from '@noetic/code-agent/tasks/store/fs-node';
+import type { LogEntry, Task, TaskSource } from '@noetic-tools/code-agent/tasks/schema';
+import { LogEntryKind } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendLog, listTasks, tailLog } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { getTaskHierarchy } from '../hierarchy/aggregate.js';
 import type { TaskHierarchy } from '../hierarchy/schemas.js';
 import { deriveColumn, KanbanColumn } from '../kanban.js';

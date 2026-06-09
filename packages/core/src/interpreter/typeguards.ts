@@ -1,12 +1,11 @@
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, FunctionCallItem, Item } from '@noetic-tools/types';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
-import type { Context } from '../types/context';
-import type { FunctionCallItem, Item } from '../types/items';
-import type { ContextMemory } from '../types/memory';
 import type { MutableContext } from '../types/mutable-context';
 
 // Re-exports for backward compatibility; the pure variants live in util/.
-export { isAssistantMessage, isOutputText, isUserMessage } from '../util/message-helpers';
+export { isAssistantMessage, isOutputText, isUserMessage } from '@noetic-tools/types';
 
 export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableContext {
   // Check if the context has writable mutable fields (ContextImpl or compatible mock)

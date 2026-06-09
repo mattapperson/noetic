@@ -44,7 +44,7 @@ function readPackageJson(url: URL): Record<string, unknown> | null {
 
 /**
  * The CLI package root (`packages/cli`). We walk up from THIS module's URL
- * until we find a `package.json` with `"name": "@noetic/cli"`. Child-process
+ * until we find a `package.json` with `"name": "@noetic-tools/cli"`. Child-process
  * probes spawn from here so they resolve against the CLI's node_modules
  * (pilotty, agent-browser live there as workspace deps).
  */
@@ -53,7 +53,7 @@ function findCliPackageRoot(): string {
   while (true) {
     const pkgUrl = new URL('package.json', current);
     const pkg = readPackageJson(pkgUrl);
-    if (pkg !== null && pkg.name === '@noetic/cli') {
+    if (pkg !== null && pkg.name === '@noetic-tools/cli') {
       return fileURLToPath(current);
     }
     const parentUrl = new URL('..', current);

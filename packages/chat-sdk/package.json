@@ -15,8 +15,8 @@
   },
   "scripts": {
     "test": "bun test",
-    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=json",
-    "test:ci": "bun test --coverage --coverage-reporter=json",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --coverage --coverage-reporter=lcov",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",

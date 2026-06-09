@@ -22,6 +22,7 @@ A support ticket router that classifies incoming tickets by keyword and routes t
 
 ```ts
 import { branch } from '@noetic-tools/core';
+import type { ContextMemory } from '@noetic-tools/core';
 import { loop } from '@noetic-tools/core';
 import { step } from '@noetic-tools/core';
 import { until } from '@noetic-tools/core';
@@ -34,7 +35,7 @@ function containsKeyword(input: string, keywords: readonly string[]): boolean {
   return keywords.some((kw) => lower.includes(kw));
 }
 
-const billingHandler = step.run<string, string>({
+const billingHandler = step.run<ContextMemory, string, string>({
   id: 'billing-handler',
   execute: async (input) => {
     return [
@@ -48,13 +49,13 @@ const billingHandler = step.run<string, string>({
   },
 });
 
-const technicalHandler = step.llm<string, string>({
+const technicalHandler = step.llm<ContextMemory, string, string>({
   id: 'technical-handler',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'You are a technical support specialist. Analyze the issue and provide troubleshooting steps.',
 });
 
-const fallbackHandler = step.run<string, string>({
+const fallbackHandler = step.run<ContextMemory, string, string>({
   id: 'fallback-handler',
   execute: async (input) => {
     return `General Support: We received your ticket: "${input}". Expected response: 48 hours.`;
@@ -62,7 +63,7 @@ const fallbackHandler = step.run<string, string>({
 });
 
 export function buildBranchingAgent() {
-  const router = branch<string, string>({
+  const router = branch<ContextMemory, string, string>({
     id: 'ticket-router',
     route: (input) => {
       if (containsKeyword(input, BILLING_KEYWORDS)) return billingHandler;

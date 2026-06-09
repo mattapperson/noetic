@@ -115,7 +115,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
 
 ## DeliveryMode
 
-```ts
+```ts validate=none
 type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 ```
 
@@ -127,7 +127,7 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 
 ## ExecuteOptions
 
-```ts
+```ts validate=none
 interface ExecuteOptions {
   threadId?: string;
   resourceId?: string;
@@ -143,7 +143,7 @@ interface SessionScope {
 
 ## HarnessStatus
 
-```ts
+```ts validate=none
 type HarnessStatus =
   | { readonly kind: 'idle' }
   | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
@@ -152,7 +152,7 @@ type HarnessStatus =
 
 ## HarnessResponse
 
-```ts
+```ts validate=none
 interface HarnessResponse {
   readonly items: ReadonlyArray<Item>;
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
@@ -164,7 +164,7 @@ interface HarnessResponse {
 
 ## StreamEvent
 
-```ts
+```ts validate=none
 type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
 
 interface SdkStreamEvent {
@@ -184,7 +184,7 @@ interface FrameworkStreamEvent {
 
 ## StreamingItem
 
-```ts
+```ts validate=none
 type StreamingItem = Item & { readonly isComplete: boolean };
 ```
 
@@ -216,7 +216,7 @@ declare interface AgentConfigShape<
 
 ## AgentHooks
 
-```ts
+```ts validate=none
 interface AgentHooks {
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
@@ -232,7 +232,7 @@ interface AgentHooks {
 
 A handle returned by `harness.detachedSpawn()` to track a concurrently running child step.
 
-```ts
+```ts validate=none
 interface DetachedHandle<O> {
   readonly id: string;
   readonly status: DetachedStatus;
@@ -252,7 +252,7 @@ interface DetachedHandle<O> {
 
 ## DetachedStatus
 
-```ts
+```ts validate=none
 const DetachedStatus = {
   Running: 'running',
   Completed: 'completed',
@@ -271,7 +271,7 @@ type DetachedStatus = (typeof DetachedStatus)[keyof typeof DetachedStatus];
 
 The output from a single memory layer's recall hook.
 
-```ts
+```ts validate=none
 interface RecallLayerOutput {
   layerId: string;
   items: Item[];
@@ -289,7 +289,7 @@ interface RecallLayerOutput {
 
 The response from an LLM call.
 
-```ts
+```ts validate=none
 interface LLMResponse {
   items: Item[];
   usage: {

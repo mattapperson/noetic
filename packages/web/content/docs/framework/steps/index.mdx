@@ -35,7 +35,7 @@ import { step } from '@noetic-tools/core';
 
 const classify = step.llm({
   id: 'classify-intent',
-  model: 'gpt-4o-mini',
+  model: 'openai/gpt-4o-mini',
   instructions: 'Classify the user message as one of: question, command, chitchat.',
   output: z.object({
     intent: z.enum([
@@ -57,9 +57,9 @@ Invoke a single tool without going through an LLM. Useful when you know exactly 
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic-tools/core';
+import { step, tool } from '@noetic-tools/core';
 
-const weatherTool = {
+const weatherTool = tool({
   name: 'get-weather',
   description: 'Get current weather for a city',
   input: z.object({
@@ -75,7 +75,7 @@ const weatherTool = {
       condition: 'sunny',
     };
   },
-};
+});
 
 const getWeather = step.tool({
   id: 'weather-lookup',

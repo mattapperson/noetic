@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { MemoryLayer } from '@noetic-tools/memory';
+import { Slot } from '@noetic-tools/memory';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import type { MemoryLayer } from '../../src/types/memory';
-import { Slot } from '../../src/types/memory';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 //#region Helper Functions

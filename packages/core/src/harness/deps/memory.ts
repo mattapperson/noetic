@@ -1,17 +1,21 @@
-export { contextToExecCtx } from '../../memory/exec-context-factory';
-export { resolveLayerTools } from '../../memory/layer-api';
-export type { LayerStateStore } from '../../memory/layer-lifecycle';
+export type { LayerStateStore, RecallCache } from '@noetic-tools/memory';
 export {
   afterModelCallLayers,
+  allocateBudgets,
+  assembleView,
   beforeToolCallLayers,
+  contextToExecCtx,
   createLayerStateStore,
+  createRecallCache,
+  DEFAULT_PROJECTION,
   disposeLayers,
   executeRerender,
   initLayers,
   projectHistoryLayers,
   recallLayers,
-  resolveLayerBudgets,
+  recallLayersAtomic,
+  recallLayersEventual,
+  resolveLayerTools,
   runAppendPipeline,
   storeLayers,
-} from '../../memory/layer-lifecycle';
-export { assembleView } from '../../memory/projector';
+} from '@noetic-tools/memory';

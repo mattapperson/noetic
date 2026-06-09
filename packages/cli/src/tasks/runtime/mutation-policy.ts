@@ -11,12 +11,12 @@
  * we fall open (allow mutation) rather than risk locking the user out.
  */
 
-import { resolve } from '@noetic/code-agent/tasks/path-utils';
-import { TaskSource } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { listTasks } from '@noetic/code-agent/tasks/store/fs-node';
-import { createLocalFsAdapter } from '@noetic/platform-node';
+import { resolve } from '@noetic-tools/code-agent/tasks/path-utils';
+import { TaskSource } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { listTasks } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ShellAdapter } from '@noetic-tools/core';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import type {
   MutationPolicy,
   MutationPolicyDecision,

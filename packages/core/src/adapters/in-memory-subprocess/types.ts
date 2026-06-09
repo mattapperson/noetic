@@ -1,11 +1,11 @@
-import type { StorageAdapter } from '../../types/memory';
+import type { StorageAdapter } from '@noetic-tools/memory';
 import type {
   ProcessSubprocessRequest,
   StepSubprocessRequest,
   SubprocessHandle,
   SubprocessHandleMetadata,
   SubprocessRequest,
-} from '../../types/subprocess-adapter';
+} from '@noetic-tools/types';
 
 //#region Factory options
 

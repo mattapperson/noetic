@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FooterContext } from '@noetic/cli';
+import type { FooterContext } from '@noetic-tools/cli';
 
 import { DEFAULT_THEME } from '../src/colors.js';
 import { resolveIcons } from '../src/icons.js';

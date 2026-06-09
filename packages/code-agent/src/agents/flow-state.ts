@@ -140,7 +140,7 @@ export async function persistFlowState(ctx: Context<ContextMemory>): Promise<voi
 
 /**
  * Mutable module-level default applied by `flowMemory.init` when no prior
- * state is persisted. Hosts (e.g. `@noetic/cli`) call `setFlowMemoryDefaultMode`
+ * state is persisted. Hosts (e.g. `@noetic-tools/cli`) call `setFlowMemoryDefaultMode`
  * before the first turn runs so fresh sessions boot in the right mode. The
  * legacy default stays `'plan'` so existing embedders retain plan-first
  * routing unless they opt in.

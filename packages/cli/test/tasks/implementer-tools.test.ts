@@ -13,8 +13,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask, tailEvents } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ToolExecutionContext } from '@noetic-tools/core';
 import { createDetachedSignal } from '@noetic-tools/core';
 import type { ImplementerOutcome } from '../../src/tasks/runtime/hierarchy/implementer-flow.js';

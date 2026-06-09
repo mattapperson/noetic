@@ -430,7 +430,10 @@
   justify-content: center;
   gap: 8px;
   padding: 10px 24px;
-  background: rgba(245, 158, 11, 0.1);
+  background:
+    linear-gradient(rgba(245, 158, 11, 0.09), rgba(245, 158, 11, 0.09)), rgba(5, 5, 5, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(245, 158, 11, 0.25);
   font-size: 12px;
   letter-spacing: 0.05em;

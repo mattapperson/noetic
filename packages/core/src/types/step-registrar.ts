@@ -14,7 +14,7 @@
  * execution walks the step tree directly and never touches either side.
  */
 
-import type { Step } from './step';
+import type { Step } from '@noetic-tools/types';
 
 //#region Types
 

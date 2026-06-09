@@ -173,7 +173,7 @@ The in-memory adapter is the default zero-config backend and the framework's tes
 On CLI startup, the host calls:
 
 ```typescript
-import { reattachLiveChildren } from '@noetic/cli';
+import { reattachLiveChildren } from '@noetic-tools/cli';
 
 const { handles, contexts } = await reattachLiveChildren(harness);
 ```

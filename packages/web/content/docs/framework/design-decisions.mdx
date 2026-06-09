@@ -9,7 +9,7 @@ Every step has a `kind` property (`'run'`, `'llm'`, `'tool'`, `'branch'`, `'fork
 
 Discriminated unions also make steps serializable as plain data. You can log, inspect, and reconstruct any step from its JSON representation.
 
-```ts
+```ts validate=none
 type Step<TMemory, I, O> =
   | StepRun<TMemory, I, O>
   | StepLLM<TMemory, I, O>
@@ -70,7 +70,7 @@ Items in the `ItemLog` are readonly and append-only. Every item has a `readonly`
 - Enables **safe cloning** for spawn operations
 - Simplifies **debugging** -- the log is a complete, unmodified record
 
-```ts
+```ts validate=none
 interface MessageItem extends ItemBase {
   readonly type: 'message';
   readonly role: 'user' | 'assistant' | 'system' | 'developer';

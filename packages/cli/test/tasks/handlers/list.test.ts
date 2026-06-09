@@ -5,8 +5,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { listTasksHandler } from '../../../src/tasks/runtime/handlers/inspection.js';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { KanbanColumn } from '../../../src/tasks/runtime/kanban.js';

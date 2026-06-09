@@ -1,7 +1,7 @@
 /**
  * Pilotty-driven e2e test for opening chat on a task.
  *
- * Drives the real `@noetic/cli` TUI via the `pilotty` terminal automation
+ * Drives the real `@noetic-tools/cli` TUI via the `pilotty` terminal automation
  * binary. Creates a task in a temp project, launches the TUI, opens the
  * task board (`/tasks`), selects the task, and asserts the chat view
  * transitions from "starting planner agent…" to "chatting with planner"

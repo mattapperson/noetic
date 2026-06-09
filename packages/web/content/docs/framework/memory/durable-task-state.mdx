@@ -25,7 +25,7 @@ const layer = durableTaskState({
 
 ## Configuration
 
-```ts
+```ts validate=none
 interface DurableTaskStateConfig {
   baseDir?: string;
   gitCommit?: boolean;
@@ -43,7 +43,7 @@ interface DurableTaskStateConfig {
 
 ## State Type
 
-```ts
+```ts validate=none
 interface DurableTaskState {
   checkpoints: Array<{
     timestamp: number;
@@ -93,7 +93,7 @@ Records the execution outcome (`'success'`, `'failure'`, or `'aborted'`) in `dat
 
 Durable Task State relies on the `StorageAdapter` provided in your `AgentConfig` (via `storage` on the harness constructor). The adapter must implement:
 
-```ts
+```ts validate=none
 interface StorageAdapter {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T): Promise<void>;

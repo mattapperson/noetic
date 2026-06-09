@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Step } from '@noetic-tools/types';
 import { execute } from '../../src/interpreter/execute';
 import type { PlanNode } from '../../src/patterns/plans';
 import { adaptivePlan, compilePlan } from '../../src/patterns/plans';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
 import { makeMockHarness } from '../_helpers';
 
 describe('compilePlan', () => {

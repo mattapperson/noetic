@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Step, StepSubprocessRequest } from '@noetic-tools/types';
+import { DetachedStatus, isNoeticError } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
-import { isNoeticError } from '../../src/errors/noetic-error';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
-import { DetachedStatus } from '../../src/types/detached';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
-import type { StepSubprocessRequest } from '../../src/types/subprocess-adapter';
 
 //#region Helpers
 

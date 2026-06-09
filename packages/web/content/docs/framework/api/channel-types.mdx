@@ -7,7 +7,7 @@ description: Type definitions for channels, external channels, and channel handl
 
 A typed communication channel for inter-step message passing.
 
-```ts
+```ts validate=none
 interface Channel<T> {
   readonly name: string;
   readonly schema: ZodType<T>;
@@ -35,7 +35,7 @@ interface Channel<T> {
 
 An external channel extends `Channel` with an `external` flag, enabling cross-process communication.
 
-```ts
+```ts validate=none
 interface ExternalChannel<T> extends Channel<T> {
   readonly external: true;
 }
@@ -53,7 +53,7 @@ interface ExternalChannel<T> extends Channel<T> {
 
 A handle for sending messages into a channel from outside the agent execution context.
 
-```ts
+```ts validate=none
 interface ChannelHandle<T> {
   send(value: T): void;
   readonly closed: boolean;
@@ -71,7 +71,7 @@ interface ChannelHandle<T> {
 
 The `Context` object provides three methods for channel interaction:
 
-```ts
+```ts validate=none
 interface Context {
   send<T>(channel: Channel<T>, value: T): void;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;

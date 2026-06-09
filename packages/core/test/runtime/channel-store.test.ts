@@ -1,8 +1,8 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import assert from 'node:assert';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { isNoeticError } from '../../src/errors/noetic-error';
 import { ChannelStore } from '../../src/runtime/channel-store';
 
 describe('ChannelStore', () => {

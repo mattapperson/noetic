@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { workingMemory } from '../../src/memory/layers/working-memory';
-import type { FunctionCallItem } from '../../src/types/items';
+import { workingMemory } from '@noetic-tools/memory';
+import type { FunctionCallItem } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 describe('workingMemory layer', () => {
@@ -182,7 +182,7 @@ describe('workingMemory layer', () => {
     expect(result).toBeNull();
   });
 
-  it('store performs shallow merge (nested objects overwritten)', async () => {
+  it('store deep-merges nested objects (sibling keys preserved)', async () => {
     const layer = workingMemory();
     const funcCall: FunctionCallItem = {
       id: 'fc1',
@@ -216,9 +216,10 @@ describe('workingMemory layer', () => {
     });
     assert(result !== undefined);
     assert(typeof result.state !== 'string');
-    // Shallow merge: nested object is replaced entirely, b is lost
+    // Deep merge: nested object is merged, sibling key b is preserved
     expect(result.state.nested).toEqual({
       a: 99,
+      b: 2,
     });
   });
 

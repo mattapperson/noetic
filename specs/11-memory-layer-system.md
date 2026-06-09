@@ -1,25 +1,26 @@
 # Memory Layer System
 
-> **Module:** `@noetic-tools/core` (sub-module at `core/src/memory/**`)
+> **Module:** `@noetic-tools/memory` (source at `packages/memory/src/**`); the `MemoryLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/memory.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (MemoryTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
 > **Exports:** `MemoryLayer`, `MemoryHooks`, `MemoryScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `MemoryConfig`, `InferMemory`, `InferMemoryShape`, `layerData`, `layerFn`, `memory`
 
 ## Module Boundary
 
-Memory is a sub-module of `@noetic-tools/core` at `core/src/memory/**`. It has a strict import boundary so that consumers who only use the memory contract (custom layer authors) can tree-shake the interpreter and runtime code out of their bundle.
+The memory layer system lives in `@noetic-tools/memory` (`packages/memory/src/**`), built on the dependency-free `@noetic-tools/types` foundation. It has a strict import boundary so that consumers who only use the memory contract (custom layer authors) can tree-shake the interpreter and runtime code out of their bundle.
 
-| Lives in `core/src/memory/**` | Lives elsewhere in `@noetic-tools/core` |
+| Owned by `@noetic-tools/types` | Lives in `@noetic-tools/memory` |
 |---|---|
-| `MemoryLayer` interface and all hook types | Layer lifecycle orchestration is in `memory/` too (`initLayers`, `recallLayers`, etc.) |
-| `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) lives in `memory/projector.ts` |
-| `BudgetConfig`, `Slot`, budget algorithm | `allocateBudgets` lives in `memory/budget.ts` |
-| `ExecutionContext` (memory-facing read-only view) | `Context` (full execution object) lives in `runtime/` |
-| `ProjectionPolicy` | Projector implementation lives in `memory/projector.ts` |
-| `contextToExecCtx` (Context → ExecutionContext mapping) | — |
+| `MemoryLayer` interface and all hook types | Layer lifecycle orchestration (`initLayers`, `recallLayers`, etc.) |
+| `MemoryScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) in `projector.ts` |
+| `BudgetConfig`, `Slot` | budget algorithm; `allocateBudgets` in `budget.ts` |
+| `ExecutionContext` (memory-facing read-only view) | built-in layer factories under `memory/layers/` |
+| `ProjectionPolicy` | Projector implementation in `projector.ts` |
 
-**Boundary rule:** files under `core/src/memory/**` MUST NOT import from `core/src/interpreter/**` or `core/src/runtime/**`. Pure helpers needed by both sides (`frameworkCast`, `createMessage`, `estimateTokens`, `isAssistantMessage`, `isUserMessage`, `isOutputText`) live under `core/src/util/**`. This keeps the memory sub-module tree-shakable from the interpreter/runtime graph; importing a memory layer factory does not pull in `ContextImpl`.
+`Context` (the full execution object) lives in `@noetic-tools/core`'s `runtime/`; the `contextToExecCtx` mapping (Context → ExecutionContext) bridges core to the memory contract.
 
-**Custom layer authors** import from `@noetic-tools/core`. Their bundle contains only the memory contract, the layer factories they use, and the `util/` helpers — not the interpreter or runtime.
+**Boundary rule:** `@noetic-tools/memory` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. Pure helpers needed by both sides (`frameworkCast`, `createMessage`, `estimateTokens`, `isAssistantMessage`, `isUserMessage`, `isOutputText`) live in `@noetic-tools/types`. This keeps the memory package tree-shakable from the interpreter/runtime graph; importing a memory layer factory does not pull in `ContextImpl`.
+
+**Custom layer authors** import from `@noetic-tools/memory` (or, equivalently, from `@noetic-tools/core`, which re-exports it). Their bundle contains only the memory contract, the layer factories they use, and the shared `@noetic-tools/types` helpers — not the interpreter or runtime.
 
 ---
 
@@ -66,6 +67,19 @@ interface MemoryLayer<TState = unknown> {
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
   timeouts?: Partial<LayerTimeouts>;
+  /**
+   * What to do when this layer's `init` hook throws.
+   * - `'throw'` (default): surface the error and abort the execution.
+   * - `'disable'`: log a diagnostic and run without this layer.
+   */
+  onInitError?: 'throw' | 'disable';
+  /**
+   * Whether `recall()` blocks the model call.
+   * - `'atomic'` (default): recall runs in the hot path before view assembly.
+   * - `'eventual'`: recall is served from a per-harness cache and never blocks;
+   *   the cache refreshes after `store()` produces new state.
+   */
+  recallMode?: 'atomic' | 'eventual';
   provides?: LayerProvides;
   rerenderTiming?: 'immediate' | 'batched';
 }
@@ -133,7 +147,9 @@ The agent harness MUST execute hooks in this order:
 EXECUTION START
 │
 ├─ init()              Sequential, array order. MUST complete before any recall().
-│                      Throws → layer DISABLED for this execution.
+│                      Throws → execution ABORTS (fail-loud default). A layer that
+│                      sets `onInitError: 'disable'` is instead skipped for the
+│                      rest of the execution (its other hooks do not run).
 │
 ▼
 LOOP ITERATION ─────────────────────────────────────────────────
@@ -141,10 +157,17 @@ LOOP ITERATION ─────────────────────�
 ├─ (on user input / tool output)
 │   └─ onItemAppend()  Sequential, SLOT ORDER. Pipeline: each layer receives
 │                      the output of the previous layer. Can filter, transform,
-│                      or inject items. MAY request re-render.
+│                      or inject items. MAY request re-render — those requests are
+│                      collected and run after recall (see Re-render below); the
+│                      re-recalled output is merged over the base recall by layer id.
 │                      NOT called for LLM response items (use store()).
 │
 ├─ recall()            Sequential, SLOT ORDER (ascending). Ties by array index.
+│                      Atomic layers (`recallMode !== 'eventual'`, the default)
+│                      run here in the hot path. Eventual layers are served from
+│                      the per-harness recall cache and re-run only after their
+│                      own `store()` has produced new state. A disabled layer
+│                      (init present, no state) is skipped.
 │
 ├─ projectHistory()    Sequential, SLOT ORDER. Each layer receives the previous
 │                      layer's output. Caps/transforms history items only.
@@ -182,6 +205,15 @@ EXECUTION END
 ### State Guarantee
 
 If a layer provides `init`, the returned `state` is guaranteed non-null for all subsequent hooks. If no `init`, `TState` SHOULD be `void`.
+
+### Lifecycle Consistency
+
+The runtime applies these invariants uniformly across the lifecycle:
+
+- **Disabled-layer skip.** A layer with an `init` hook but no stored state (because `init` was skipped via `onInitError: 'disable'`) is skipped by *every* later hook — `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`, `onItemAppend`, `projectHistory`, `beforeToolCall`, `afterModelCall`. An init-*less* layer has legitimately `undefined` state and is NOT skipped.
+- **State clearing.** `store` (and `onComplete`) detect the returned object with `'state' in result`, not `result.state !== undefined`, so a layer MAY clear its state by returning `{ state: undefined }`. Clearing skips the durable-storage mirror (nothing to persist).
+- **`onReturn` requirements.** Only the *child*'s state is required to merge. A parent that never initialized state can still be seeded from the child; `onReturn` is skipped only when the child produced no state.
+- **`onSpawn` for init-less layers.** `onSpawn` runs for layers with no `init` hook (state legitimately `undefined`), consistent with `recall`. Only disabled layers (init present, no state) are skipped.
 
 ---
 
@@ -336,52 +368,60 @@ type ExecutionOutcome = 'success' | 'failure' | 'aborted';
 
 ## Budget Allocation
 
+There is a single allocator, `allocateBudgets` (in `memory/budget.ts`). It splits the recall budget derived from the resolved `ProjectionPolicy` across layers, leaving a reserve for conversation history. The naive per-layer ceiling is gone.
+
+### Policy Resolution
+
+The policy that drives both allocation and view assembly is resolved per LLM step:
+
+```
+step.projection  >  harness.projection  >  DEFAULT_PROJECTION
+```
+
+```typescript
+const DEFAULT_PROJECTION: ProjectionPolicy = {
+  tokenBudget: 128_000,
+  responseReserve: 4_000,
+  overflow: 'sliding_window',
+};
+```
+
+`DEFAULT_PROJECTION` is a conservative fallback. Configure `harness.projection` or `step.projection` to match the target model's real context length.
+
 ### Algorithm (Normative)
 
 ```typescript
-function allocateBudgets(
-  layers: MemoryLayer[],
-  totalBudget: number,
-  responseReserve: number,
-  systemPromptTokens: number,
-): Map<string, number> {
-  const available = totalBudget - responseReserve - systemPromptTokens;
-  const budgets = new Map<string, number>();
-  const configs = layers.map(l => ({ id: l.id, ...normalizeBudget(l.budget) }));
+function allocateBudgets(opts: {
+  layers: MemoryLayer[];
+  totalBudget: number;       // policy.tokenBudget
+  systemPromptTokens: number;
+  responseReserve: number;   // policy.responseReserve
+}): { allocations: { layerId: string; allocated: number }[]; historyBudget: number } {
+  const available = opts.totalBudget - opts.responseReserve - opts.systemPromptTokens;
+  if (available <= 0) {
+    // Every layer gets 0; history gets 0.
+  }
 
-  // Phase 1: Satisfy minimum guarantees
+  // Phase 1: satisfy each layer's minimum first.
   let remaining = available;
-  for (const cfg of configs) {
-    const allocated = Math.min(cfg.min, remaining);
-    budgets.set(cfg.id, allocated);
-    remaining -= allocated;
+  for (const layer of opts.layers) {
+    const min = extractMin(layer.budget);   // {min,max}.min, else 0
+    allocate(layer.id, min);
+    remaining -= min;
   }
 
-  // Phase 2: Distribute remaining proportionally up to max
-  const unsatisfied = configs.filter(c => budgets.get(c.id)! < c.max);
-  const totalCapacity = unsatisfied.reduce(
-    (sum, c) => sum + (c.max - budgets.get(c.id)!), 0
-  );
-
-  if (totalCapacity > 0 && remaining > 0) {
-    const forLayers = Math.floor(remaining * 0.6);  // 40% reserved for history
-    for (const cfg of unsatisfied) {
-      const headroom = cfg.max - budgets.get(cfg.id)!;
-      const share = Math.floor(forLayers * (headroom / totalCapacity));
-      budgets.set(cfg.id, budgets.get(cfg.id)! + Math.min(share, headroom));
-    }
-  }
-
-  // Phase 3: Remaining goes to conversation history (implicit)
-  return budgets;
-}
-
-function normalizeBudget(b: BudgetConfig | undefined): { min: number; max: number } {
-  if (b === undefined || b === 'auto') return { min: 0, max: Infinity };
-  if (typeof b === 'number') return { min: 0, max: b };
-  return b;
+  // Phase 2: distribute a proportional pool above the minimums.
+  //   60% of what remains funds the layers (by headroom = max - min,
+  //   where 'auto'/undefined max is +Infinity), 40% is reserved for history.
+  const layerPool = remaining * 0.6;
+  const historyBudget = remaining * 0.4;
+  // each layer's share is its headroom proportion of layerPool, clamped to headroom
 }
 ```
+
+- **Minimums are satisfied first**, in array order.
+- The remaining budget is split: **60% into a proportional pool** distributed across layers by headroom (`max − min`; `'auto'`/`undefined` budgets have infinite headroom and split the pool among themselves after finite layers take their share), and **40% reserved for conversation history** (`historyBudget`).
+- A layer's final allocation never exceeds its `max`.
 
 ### Budget Yielding
 
@@ -390,6 +430,21 @@ When `recall()` returns `tokenCount` less than allocated, the difference goes to
 ### Budget Verification
 
 The agent harness independently counts tokens. If layer-reported count diverges by >10%, the agent harness count is authoritative and a warning is emitted.
+
+## Recall Modes
+
+Each layer's `recallMode` controls whether its `recall()` blocks the model call:
+
+- **`'atomic'` (default)** — recall runs synchronously in the hot path. The harness waits for it before assembling the view, so the current turn always sees fresh output.
+- **`'eventual'`** — recall is served from a per-harness cache and never blocks. A cold or invalidated entry is recalled and cached; a warm entry is returned as-is. The cache entry is marked stale when the layer's own `store()` produces new state, so the *next* turn re-runs recall against the fresh state. This keeps a slow layer's `recall()` off the critical path.
+
+Both modes recall once per LLM step. The harness runs atomic layers (`recallLayersAtomic`) and eventual layers (`recallLayersEventual`) and merges the two result sets in slot order.
+
+A harness configured with `forceAtomicRecall: true` treats **every** layer as atomic regardless of its `recallMode` — the eventual cache is bypassed entirely.
+
+## Re-render
+
+An `onItemAppend` hook MAY set `rerender: true` to request that affected layers re-run `recall()` after their input transformed the log. The harness collects these requests from the append pipeline, then calls `executeRerender`, which re-recalls the layers selected by each request's `scope` (`'self'`, `'slot-after'`, or `'all'`) and returns fresh layer output. That output is merged over the base recall results **by layer id** (same-id entries replaced, new entries appended, slot order preserved). Re-render depth is bounded (max 3) to prevent infinite cascades.
 
 ---
 
@@ -645,11 +700,22 @@ interface ProjectionPolicy {
 ```
 1. Count system prompt tokens
 2. Allocate budgets to layers
-3. Run recall() hooks (sequential, slot order)
-4. Assemble: system prompt item (role: system) + layer output items (role: developer) + conversation history items
+3. Run recall() hooks (atomic in the hot path; eventual from cache)
+4. Assemble: system prompt items (role: system) + layer output items (role: developer) + conversation history items
 5. Conversation history gets remaining budget after layers, with overflow policy applied
 6. Result is Item[] — directly passable to the LLM provider
 ```
+
+### Hard Token Cap (`assembleView`)
+
+Given a `ProjectionPolicy`, `assembleView` holds the assembled view to a hard budget of `policy.tokenBudget − policy.responseReserve`, in priority order:
+
+1. **System items are always kept** — they anchor the conversation and are never dropped.
+2. **Layer output is kept low-slot-first.** Items are retained from the front of the slot-ascending list until the budget is reached, so foundational (low-slot) layer output survives and the **highest-slot output is dropped first** when space is tight.
+3. **History takes the remainder, keeping the most recent turns.** Older items are dropped first; an optional `windowSize` caps item count before the token pass (sliding-window overflow).
+4. **Orphan tool calls are stripped** at the slice boundary — any dangling `function_call` / `function_call_output` left after trimming history is removed.
+
+Without a `policy`, the inputs are concatenated as-is (optionally sliding the history window by `windowSize`).
 
 ### Conversation History is Not a Memory Layer
 
@@ -661,7 +727,7 @@ The ItemLog's rendering is handled by the Projector natively. Memory layers get 
 
 | Hook              | On Error                                                                |
 |-------------------|-------------------------------------------------------------------------|
-| `init`            | Layer **disabled** for this execution. Warning emitted.                 |
+| `init`            | **Fail-loud by default**: the error is surfaced and the execution **aborts**. A layer with `onInitError: 'disable'` is instead **disabled** for the execution (diagnostic logged). |
 | `recall`          | Layer **skipped** this iteration. Warning emitted.                      |
 | `store`           | Error **logged**. Other stores unaffected (`allSettled`).               |
 | `onItemAppend`    | Error **logged**. Items pass through unchanged.                         |
@@ -691,7 +757,7 @@ interface LayerTimeouts {
 
 ### Disabled Layer Behavior
 
-Skipped for all hooks. `dispose()` still called. Recorded in trace as `{ layerId, status: 'disabled', reason }`.
+A layer disabled via `onInitError: 'disable'` is skipped by every hook, **including `dispose()`** — nothing was initialized, so there is nothing to tear down. Recorded in trace as `{ layerId, status: 'disabled', reason }`.
 
 ---
 

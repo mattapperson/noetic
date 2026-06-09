@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SpawnOptions } from 'node:child_process';
-import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   EventKind,
@@ -8,9 +8,9 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { saveTask, tailEvents, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { saveTask, tailEvents, taskDirPaths } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { Signaller } from '../../src/tasks/runtime/agent-ci-control.js';
 import type {
   AgentCiSpawn,

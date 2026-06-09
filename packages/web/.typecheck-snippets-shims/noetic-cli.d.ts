@@ -1,10 +1,17 @@
 /**
- * Minimal `@noetic/cli` shim for doc-snippet type-checking. The real cli source
+ * Minimal `@noetic-tools/cli` shim for doc-snippet type-checking. The real cli source
  * pulls in Bun globals and other runtime-only deps that aren't available in the
  * snippet harness, so we expose just the public types referenced by documentation.
  */
 
-import type { MemoryLayer, Tool } from '@noetic-tools/core';
+import type { LastLayerUsage, MemoryLayer, StorageAdapter, Tool } from '@noetic-tools/core';
+
+export interface AgentOverride {
+  model?: string;
+  instructions?: string;
+  instructionsMode?: 'append' | 'replace';
+  tools?: string[];
+}
 
 export interface AgentConfig {
   model?: string;
@@ -13,8 +20,14 @@ export interface AgentConfig {
   maxTurns?: number;
   systemPrompt?: string;
   systemPromptMode?: 'compose' | 'replace';
-  tools?: ReadonlyArray<Tool>;
-  memoryLayers?: ReadonlyArray<MemoryLayer>;
+  trustProjectEmbeddedCommands?: boolean;
+  plugins?: ReadonlyArray<unknown>;
+  tools?: {
+    include?: string[];
+    exclude?: string[];
+    tasks?: boolean;
+  };
+  memory?: string[];
   worktree?: {
     'worktree-path'?: string;
     branch?: string;
@@ -28,17 +41,46 @@ export interface AgentConfig {
   history?: {
     maxItems?: number;
   };
-  plugins?: ReadonlyArray<unknown>;
+  shell?: {
+    useRtk?: boolean;
+  };
+  setup?: {
+    ignoredBinaries?: string[];
+  };
   ui?: {
     doublePressWindowMs?: number;
   };
-  trustProjectEmbeddedCommands?: boolean;
+  agents?: Record<string, AgentOverride>;
 }
+
+export interface CallModelMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface CallModelInput {
+  messages: ReadonlyArray<CallModelMessage>;
+  model?: string;
+  temperature?: number;
+  signal?: AbortSignal;
+}
+
+export interface CallModelResponse {
+  text: string;
+  modelId: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export type CallModel = (input: CallModelInput) => Promise<CallModelResponse>;
 
 export interface PluginContext {
   config: AgentConfig;
-  callModel: (request: { system?: string; user: string }) => Promise<string>;
-  dataDir: (scope: 'project' | 'user') => string;
+  callModel: CallModel;
+  pluginStorage: (scope: 'project' | 'user') => StorageAdapter;
 }
 
 export interface NoeticPlugin {
@@ -67,8 +109,8 @@ export interface NoeticPlugin {
 
 export interface FooterContext {
   model: string;
-  status: string;
-  lastLayerUsage: unknown;
+  status: 'ready' | 'submitted' | 'streaming' | 'error';
+  lastLayerUsage: LastLayerUsage | undefined;
   contextLimit: number;
 }
 

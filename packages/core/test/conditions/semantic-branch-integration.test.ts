@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import type { ContextMemory } from '@noetic-tools/memory';
 import { branch } from '../../src/builders/control-flow-builders';
-import { otherwise, semanticRoute, when } from '../../src/conditions';
+import { otherwise, semanticRoute, when } from '../../src/conditions/conditions';
 import { executeBranch } from '../../src/interpreter/execute-control';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { ContextMemory } from '../../src/types/memory';
 import { makeMockHarness, mockEmbed, simpleExecute } from '../_helpers';
 
 describe('semantic branch integration', () => {

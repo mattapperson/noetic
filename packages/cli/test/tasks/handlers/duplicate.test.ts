@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { TaskLifecycleStatus, TaskReviewStatus, TaskSource } from '@noetic/code-agent/tasks/schema';
-import { loadTask, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
+import {
+  TaskLifecycleStatus,
+  TaskReviewStatus,
+  TaskSource,
+} from '@noetic-tools/code-agent/tasks/schema';
+import { loadTask, taskDirPaths } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import {
   createTaskHandler,
   duplicateTaskHandler,

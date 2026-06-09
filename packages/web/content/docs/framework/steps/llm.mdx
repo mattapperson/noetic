@@ -10,7 +10,7 @@ import { step } from '@noetic-tools/core';
 
 const chat = step.llm({
   id: 'chat',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'You are a helpful assistant.',
 });
 ```
@@ -26,7 +26,7 @@ const chat = step.llm({
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `model` | `string` | Yes | Model identifier (e.g. `'gpt-4o'`, `'claude-sonnet-4-20250514'`) |
+| `model` | `string` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`) |
 | `instructions` | `string` | No | System prompt prepended to the conversation |
 | `tools` | `Tool[]` | No | Allowed tool subset (`undefined` = all, `[]` = none) |
 | `output` | `ZodType<O>` | No | Zod schema for structured output |
@@ -55,7 +55,7 @@ import { step } from '@noetic-tools/core';
 
 const extract = step.llm({
   id: 'extract-entities',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Extract named entities from the text.',
   output: z.object({
     people: z.array(z.string()),
@@ -71,9 +71,9 @@ If the model response does not match the schema, a validation error is thrown.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic-tools/core';
+import { step, tool } from '@noetic-tools/core';
 
-const searchTool = {
+const searchTool = tool({
   name: 'search',
   description: 'Search the knowledge base',
   input: z.object({
@@ -87,11 +87,11 @@ const searchTool = {
       results: ['Result 1', 'Result 2'],
     };
   },
-};
+});
 
 const researcher = step.llm({
   id: 'research',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Answer the question using the search tool.',
   tools: [searchTool],
 });
@@ -118,7 +118,7 @@ import { step } from '@noetic-tools/core';
 
 const creative = step.llm({
   id: 'brainstorm',
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   instructions: 'Generate creative ideas.',
   params: {
     temperature: 0.9,

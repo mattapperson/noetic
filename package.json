@@ -4,16 +4,17 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "evals"
   ],
   "devDependencies": {
     "@biomejs/biome": "^2.3.11"
   },
   "scripts": {
     "postinstall": "node scripts/patch-sdk.js",
-    "test": "bun --cwd packages/core run test && bun --cwd packages/code-agent run test && bun --cwd packages/eval run test",
-    "test:coverage": "bun --cwd packages/core run test:coverage && bun --cwd packages/code-agent run test && bun --cwd packages/eval run test:coverage",
-    "test:ci": "bun --cwd packages/core run test:ci && bun --cwd packages/code-agent run test && bun --cwd packages/eval run test:ci",
+    "test": "bun --cwd=packages/types run test && bun --cwd=packages/memory run test && bun --cwd=packages/core run test && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test",
+    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/memory run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test:coverage",
+    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/memory run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test:ci",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",

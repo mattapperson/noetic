@@ -12,35 +12,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
-import type { CollapsedReadGroup, DisplayEntry } from '../grouping/types.js';
-import { isCollapsedReadGroup, toStaticEntryItems } from '../grouping/types.js';
+import type { DisplayEntry } from '../grouping/types.js';
+import { toStaticEntryItems } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
-import {
-  extractReasoning,
-  extractTextContent,
-  getItemId,
-  isErrorEntry,
-  isSystemEntry,
-  isUserEntry,
-} from '../item-utils.js';
-import { previewToolArgs } from '../tool-args-preview.js';
-import type { SpinnerMode, ToolCallStatus } from './items/index.js';
-import {
-  AssistantText,
-  BashResult,
-  CollapsedReadGroupView,
-  EditResult,
-  LoadingSpinner,
-  LspResult,
-  Reasoning,
-  SystemMessage,
-  ToolCall,
-  ToolResult,
-  UserPrompt,
-} from './items/index.js';
+import { isErrorEntry, isSystemEntry, isUserEntry } from '../item-utils.js';
+import type { SpinnerMode } from './items/loading-spinner.js';
+import { LoadingSpinner } from './items/loading-spinner.js';
+import type { RenderEntryCtx } from './items/render-entry.js';
+import { buildCallInfoMap, computeCategories, renderEntry } from './items/render-entry.js';
 import type { ChatStatus, PromptInputMessage } from './prompt-input.js';
 import { PromptInput } from './prompt-input.js';
-import type { CallInfo } from './transcript-view.js';
 import { TranscriptView } from './transcript-view.js';
 
 //#region Types
@@ -70,263 +51,6 @@ export interface ResponsesChatProps {
    * fetched on demand when the request-items overlay (Ctrl+R) opens.
    */
   getRequestItems?: () => Promise<ReadonlyArray<Item>>;
-}
-
-/**
- * Visual category of an entry — drives vertical spacing between consecutive
- * entries. `tool-result` never gets a top margin; other categories get one
- * when they follow an entry of a different category.
- */
-type EntryCategory =
-  | 'user'
-  | 'assistant-text'
-  | 'reasoning'
-  | 'tool-call'
-  | 'tool-result'
-  | 'system';
-
-interface RenderContext {
-  chatStatus: ChatStatus;
-  callInfoMap: Map<string, CallInfo>;
-  entryCount: number;
-  categories: EntryCategory[];
-}
-
-//#endregion
-
-//#region Status Mapping
-
-function mapItemStatus(status: string | undefined): ToolCallStatus {
-  if (status === 'completed') {
-    return 'completed';
-  }
-  if (status === 'in_progress' || status === 'searching' || status === 'generating') {
-    return 'running';
-  }
-  if (status === 'incomplete' || status === 'failed') {
-    return 'error';
-  }
-  return 'pending';
-}
-
-function buildCallInfoMap(entries: ConversationEntry[]): Map<string, CallInfo> {
-  const info = new Map<string, CallInfo>();
-  for (const entry of entries) {
-    if (isUserEntry(entry) || isErrorEntry(entry) || isSystemEntry(entry)) {
-      continue;
-    }
-    if (entry.type === 'function_call') {
-      info.set(entry.callId, {
-        name: entry.name,
-        status: mapItemStatus(entry.status),
-      });
-    }
-  }
-  return info;
-}
-
-function categorize(entry: DisplayEntry): EntryCategory {
-  if (isCollapsedReadGroup(entry)) {
-    return 'tool-result';
-  }
-  if (isUserEntry(entry)) {
-    return 'user';
-  }
-  if (isErrorEntry(entry) || isSystemEntry(entry)) {
-    return 'system';
-  }
-  if (entry.type === 'message') {
-    return 'assistant-text';
-  }
-  if (entry.type === 'reasoning') {
-    return 'reasoning';
-  }
-  if (entry.type === 'function_call_output') {
-    return 'tool-result';
-  }
-  return 'tool-call';
-}
-
-function computeCategories(entries: ReadonlyArray<DisplayEntry>): EntryCategory[] {
-  return entries.map(categorize);
-}
-
-function shouldAddMargin(categories: EntryCategory[], index: number): boolean {
-  if (index <= 0) {
-    return false;
-  }
-  const current = categories[index];
-  const previous = categories[index - 1];
-  if (current === undefined || previous === undefined) {
-    return false;
-  }
-  if (current === 'tool-result') {
-    return false;
-  }
-  return previous !== current;
-}
-
-/**
- * True when the previous entry is part of an assistant turn — used to decide
- * whether a system/error message should render as a sub-response (⎿ prefix)
- * under the assistant turn rather than as a standalone top-level line.
- */
-function isPartOfAssistantTurn(categories: EntryCategory[], index: number): boolean {
-  if (index <= 0) {
-    return false;
-  }
-  const previous = categories[index - 1];
-  return (
-    previous === 'assistant-text' ||
-    previous === 'reasoning' ||
-    previous === 'tool-call' ||
-    previous === 'tool-result'
-  );
-}
-
-//#endregion
-
-//#region Entry Dispatch
-
-function renderCollapsedGroup(group: CollapsedReadGroup): ReactNode {
-  return <CollapsedReadGroupView key={group.id} group={group} />;
-}
-
-function renderEntry(entry: DisplayEntry, index: number, ctx: RenderContext): ReactNode {
-  const addMargin = shouldAddMargin(ctx.categories, index);
-
-  if (isCollapsedReadGroup(entry)) {
-    return renderCollapsedGroup(entry);
-  }
-
-  if (isUserEntry(entry)) {
-    return (
-      <UserPrompt
-        key={`user-${entry.id ?? index}`}
-        text={entry.content}
-        addMargin={addMargin}
-        deliveryStatus={entry.deliveryStatus}
-      />
-    );
-  }
-
-  if (isErrorEntry(entry)) {
-    const asResponse = isPartOfAssistantTurn(ctx.categories, index);
-    return (
-      <SystemMessage
-        key={`error-${index}`}
-        text={entry.content}
-        type="error"
-        asResponse={asResponse}
-        addMargin={!asResponse && addMargin}
-      />
-    );
-  }
-
-  if (isSystemEntry(entry)) {
-    return (
-      <SystemMessage
-        key={`system-${index}`}
-        text={entry.content}
-        type="info"
-        addMargin={addMargin}
-      />
-    );
-  }
-
-  const key = getItemId(entry);
-  const isLastEntry = index === ctx.entryCount - 1;
-
-  if (entry.type === 'message') {
-    const text = extractTextContent(entry);
-    if (!text) {
-      return null;
-    }
-    const isStreaming =
-      isLastEntry && ctx.chatStatus === 'streaming' && entry.status !== 'completed';
-    return <AssistantText key={key} text={text} isStreaming={isStreaming} addMargin={addMargin} />;
-  }
-
-  if (entry.type === 'reasoning') {
-    return (
-      <Reasoning
-        key={key}
-        text={extractReasoning(entry)}
-        collapsed={entry.status === 'completed'}
-        addMargin={addMargin}
-      />
-    );
-  }
-
-  if (entry.type === 'function_call') {
-    const name = entry.name ?? 'tool';
-    return (
-      <ToolCall
-        key={key}
-        name={name}
-        status={mapItemStatus(entry.status)}
-        args={previewToolArgs(name, entry.arguments ?? '')}
-        addMargin={addMargin}
-      />
-    );
-  }
-
-  if (entry.type === 'function_call_output') {
-    const info = ctx.callInfoMap.get(entry.callId);
-    const isError = info?.status === 'error';
-    if (info?.name === 'Edit') {
-      return <EditResult key={key} output={entry.output} />;
-    }
-    if (info?.name === 'Bash') {
-      return <BashResult key={key} output={entry.output} />;
-    }
-    if (info?.name === 'lsp') {
-      return (
-        <LspResult
-          key={key}
-          output={entry.output}
-          isError={isError}
-          fallback={<ToolResult output={entry.output} isError={isError} />}
-        />
-      );
-    }
-    return <ToolResult key={key} output={entry.output} isError={isError} />;
-  }
-
-  if (entry.type === 'web_search_call') {
-    return (
-      <ToolCall
-        key={key}
-        name="web_search"
-        status={mapItemStatus(entry.status)}
-        addMargin={addMargin}
-      />
-    );
-  }
-
-  if (entry.type === 'file_search_call') {
-    return (
-      <ToolCall
-        key={key}
-        name="file_search"
-        status={mapItemStatus(entry.status)}
-        addMargin={addMargin}
-      />
-    );
-  }
-
-  if (entry.type === 'image_generation_call') {
-    return (
-      <ToolCall
-        key={key}
-        name="image_generation"
-        status={mapItemStatus(entry.status)}
-        addMargin={addMargin}
-      />
-    );
-  }
-
-  return null;
 }
 
 //#endregion
@@ -507,7 +231,7 @@ export function ResponsesChat({
     streamingEntry,
   ]);
 
-  const ctx: RenderContext = {
+  const ctx: RenderEntryCtx = {
     chatStatus: status,
     callInfoMap,
     entryCount: collapsedCompleted.length + (streamingEntry ? 1 : 0),

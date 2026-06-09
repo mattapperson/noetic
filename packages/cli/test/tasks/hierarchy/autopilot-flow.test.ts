@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   HierarchyStatus,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { saveTask, tryLoadTask } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { saveTask, tryLoadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import type { Signaller } from '../../../src/tasks/runtime/agent-ci-control.js';
 import type { AutopilotFlowDeps } from '../../../src/tasks/runtime/hierarchy/autopilot-flow.js';

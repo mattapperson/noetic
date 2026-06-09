@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { MemoryLayer, RecallParams } from '@noetic-tools/memory';
 import {
   createLayerStateStore,
+  fileReference,
   initLayers,
   runAppendPipeline,
-} from '../../src/memory/layer-lifecycle';
-import { fileReference } from '../../src/memory/layers/file-reference';
-import type { InputMessageItem, InputTextPart, Item } from '../../src/types/items';
-import type { MemoryLayer, RecallParams } from '../../src/types/memory';
+} from '@noetic-tools/memory';
+import type { InputMessageItem, InputTextPart, Item } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 function callRecall(

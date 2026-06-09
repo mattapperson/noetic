@@ -5,8 +5,8 @@ import {
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import { readLog, saveTask, tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import { readLog, saveTask, tailEvents } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { persistTaskHierarchy } from '../../src/tasks/runtime/hierarchy/persist.js';
 import { loadFeature } from '../../src/tasks/runtime/hierarchy/store.js';
 import { commitExitWrites } from '../../src/tasks/runtime/implementer-runner.js';

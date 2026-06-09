@@ -1,4 +1,4 @@
-import * as CodeAgentConfig from '@noetic/code-agent/config';
+import * as CodeAgentConfig from '@noetic-tools/code-agent/config';
 import type { FsAdapter } from '@noetic-tools/core';
 import { z } from 'zod';
 

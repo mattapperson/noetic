@@ -24,7 +24,8 @@ They are mandatory, not optional.
 | `08-runtime.md` (AgentHarness) | `runtime/` | `runtime.mdx`, `api/runtime-types.mdx` |
 | `09-error-model.md` | `errors/` | `errors.mdx` |
 | `10-observability.md` | `observability/` | `observability.mdx` |
-| `11-memory-layer-system.md`, `12-builtin-memory-layers.md` | `memory/` | `memory/`, `api/memory-types.mdx` |
+| `11-memory-layer-system.md`, `12-builtin-memory-layers.md` | `packages/memory/src/` (`MemoryLayer` contract in `packages/types/src/types/memory.ts`) | `memory/`, `api/memory-types.mdx` |
+| (foundation types) | `packages/types/src/` | `api/` |
 | `13-patterns.md` | `patterns/` | `patterns/` |
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
@@ -38,7 +39,7 @@ They are mandatory, not optional.
 
 | Source Area | Skill File |
 |-------------|------------|
-| `builders/`, `types/`, `patterns/`, `memory/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
+| `builders/`, `types/`, `patterns/`, `packages/memory/src/memory/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
 | `patterns/`, `examples/` | `.claude/skills/noetic-agent-builder/references/composition-patterns.md` |
 | Any public API change | `.claude/skills/noetic-agent-builder/SKILL.md` (if core concepts change) |
 | `packages/eval/src/runner/`, `packages/eval/src/scorers/` | `.claude/skills/noetic-eval/references/api-reference.md` |

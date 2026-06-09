@@ -5,7 +5,7 @@
  * need Node/Bun capabilities load their implementations lazily and return a
  * clean unsupported-environment result when invoked where they cannot run.
  *
- * The CLI imports `@noetic/code-agent/tools/node` for the full Node/Bun tool
+ * The CLI imports `@noetic-tools/code-agent/tools/node` for the full Node/Bun tool
  * implementations.
  */
 

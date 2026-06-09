@@ -3,7 +3,7 @@
 > **Depends On:** `11-memory-layer-system` (Slot, MemoryLayer, hooks), `12-builtin-memory-layers` (base built-ins)
 > **Status:** Stable
 
-This spec documents memory layers shipped with `@noetic/cli` that are not part of the core framework. They compose on top of the base layers defined in `12-builtin-memory-layers.md`.
+This spec documents memory layers shipped with `@noetic-tools/cli` that are not part of the core framework. They compose on top of the base layers defined in `12-builtin-memory-layers.md`.
 
 ---
 

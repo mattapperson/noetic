@@ -1,6 +1,6 @@
 /**
  * Force every TS/JS file under a foreign monorepo checkout to be re-exported
- * from the CLI's *local* workspace, so React, Ink, and `@noetic/cli` resolve
+ * from the CLI's *local* workspace, so React, Ink, and `@noetic-tools/cli` resolve
  * to a single instance regardless of where the importer lives on disk.
  *
  * Why: a user's config (`~/.config/noetic/config.ts`) typically imports
@@ -9,7 +9,7 @@
  *     import powerline from '/Users/me/dev/noetic/packages/plugin-powerline';
  *
  * When the CLI runs from a git worktree of the *same* monorepo, those plugins
- * resolve `react`/`ink`/`@noetic/cli` relative to the checkout in the import
+ * resolve `react`/`ink`/`@noetic-tools/cli` relative to the checkout in the import
  * path — not the worktree the CLI is running from. Two React instances in one
  * process break hooks: `useContext` returns null and the TUI crashes during
  * the first render.

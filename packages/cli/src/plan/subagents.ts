@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/plan';
+export * from '@noetic-tools/code-agent/plan';

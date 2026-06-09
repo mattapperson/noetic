@@ -1,4 +1,4 @@
-import type { Snapshot, Until, Verdict } from '../types/step';
+import type { Snapshot, Until, Verdict } from '@noetic-tools/types';
 
 /**
  * Combines predicates with OR semantics; stops the loop when any predicate says stop.

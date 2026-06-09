@@ -1,7 +1,12 @@
 {
-  "name": "@noetic/code-agent",
+  "name": "@noetic-tools/code-agent",
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/code-agent"
+  },
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
@@ -127,8 +132,6 @@
     }
   },
   "dependencies": {
-    "@noetic-tools/core": "workspace:*",
-    "@noetic/platform-node": "workspace:*",
     "diff": "7.0.0",
     "glob": "11.0.3",
     "pilotty": "0.0.7",
@@ -138,6 +141,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@noetic-tools/core": "workspace:*",
+    "@noetic-tools/platform-node": "workspace:*",
     "@types/diff": "^8.0.0",
     "bun-types": "latest"
   },

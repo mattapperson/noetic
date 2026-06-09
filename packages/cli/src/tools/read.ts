@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/tools/node';
+export * from '@noetic-tools/code-agent/tools/node';

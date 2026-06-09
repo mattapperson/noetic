@@ -9,7 +9,7 @@ Noetic provides a set of condition helpers that let you route pipeline inputs us
 
 Every condition is an async boolean predicate:
 
-```ts
+```ts validate=none
 type Condition<I> = (input: I, ctx: Context) => Promise<boolean>;
 ```
 
@@ -34,9 +34,9 @@ const router = branch({
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'gpt-4o' }),
-      'complaint or feedback': step.llm({ id: 'feedback', model: 'gpt-4o' }),
+      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
+      'complaint or feedback': step.llm({ id: 'feedback', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),
@@ -46,6 +46,8 @@ const router = branch({
 **Advanced form** -- multiple labels per case:
 
 ```ts
+declare const embed: EmbedFn;
+
 const router = branch({
   id: 'semantic-router',
   route: semanticSwitch({
@@ -53,14 +55,14 @@ const router = branch({
     cases: [
       {
         labels: ['greeting', 'hello', 'hi there'],
-        step: step.llm({ id: 'greet', model: 'gpt-4o-mini' }),
+        step: step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
       },
       {
         labels: 'technical question',
-        step: step.llm({ id: 'tech', model: 'gpt-4o' }),
+        step: step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
       },
     ],
-    default: step.llm({ id: 'fallback', model: 'gpt-4o-mini' }),
+    default: step.llm({ id: 'fallback', model: 'openai/gpt-4o-mini' }),
     threshold: 0.7,
   }),
 });
@@ -80,14 +82,14 @@ When no case exceeds the threshold and no `default` is provided, the route retur
 
 Evaluates condition clauses in order and returns the first match. Built from [`when`](#when) and [`otherwise`](#otherwise) clauses.
 
-```ts
+```ts validate=none
 import { branch, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
 const router = branch({
   id: 'smart-router',
   route: semanticRoute(
     when(embeddingMatch(embed, 'greeting', 0.8), greetingStep),
-    when(aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
+    when(aiCondition({ model: 'openai/gpt-4o-mini', prompt: 'Is this urgent?' }), urgentStep),
     otherwise(defaultStep),
   ),
 });
@@ -101,7 +103,7 @@ Returns `null` if no `when` matches and no `otherwise` is present.
 
 Creates a conditional clause. The condition is evaluated; if `true`, the associated step is selected.
 
-```ts
+```ts validate=none
 import { when } from '@noetic-tools/core';
 
 when(condition, step);
@@ -116,7 +118,7 @@ when(condition, step);
 
 Creates a fallback clause. Used as the last argument to `semanticRoute`.
 
-```ts
+```ts validate=none
 import { otherwise } from '@noetic-tools/core';
 
 otherwise(fallbackStep);
@@ -132,6 +134,9 @@ Returns `true` when the input is semantically similar to a label (or set of labe
 
 ```ts
 import { embeddingMatch } from '@noetic-tools/core';
+import type { EmbedFn } from '@noetic-tools/core';
+
+declare const embed: EmbedFn;
 
 const isGreeting = embeddingMatch(embed, 'greeting or salutation', 0.8);
 ```
@@ -139,6 +144,9 @@ const isGreeting = embeddingMatch(embed, 'greeting or salutation', 0.8);
 **Advanced form** -- multiple labels with match mode:
 
 ```ts
+declare const embed: EmbedFn;
+declare const myStorageAdapter: StorageAdapter;
+
 const isTechSupport = embeddingMatch({
   embed,
   labels: ['technical question', 'bug report', 'how do I'],
@@ -164,7 +172,7 @@ Uses an LLM as a boolean classifier. The model receives the input and answers a 
 import { aiCondition } from '@noetic-tools/core';
 
 const isUrgent = aiCondition({
-  model: 'gpt-4o-mini',
+  model: 'openai/gpt-4o-mini',
   prompt: 'Is this message urgent and requiring immediate attention?',
 });
 ```
@@ -184,10 +192,13 @@ Logical OR -- returns `true` if **any** condition is true. Short-circuits on the
 
 ```ts
 import { anyCondition, embeddingMatch, aiCondition } from '@noetic-tools/core';
+import type { EmbedFn } from '@noetic-tools/core';
+
+declare const embed: EmbedFn;
 
 const isGreetingOrUrgent = anyCondition(
   embeddingMatch(embed, 'greeting', 0.8),
-  aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+  aiCondition({ model: 'openai/gpt-4o-mini', prompt: 'Is this urgent?' }),
 );
 ```
 
@@ -197,10 +208,13 @@ Logical AND -- returns `true` if **all** conditions are true. Short-circuits on 
 
 ```ts
 import { allCondition, embeddingMatch, aiCondition } from '@noetic-tools/core';
+import type { EmbedFn } from '@noetic-tools/core';
+
+declare const embed: EmbedFn;
 
 const isUrgentGreeting = allCondition(
   embeddingMatch(embed, 'greeting', 0.8),
-  aiCondition({ model: 'gpt-4o-mini', prompt: 'Is this urgent?' }),
+  aiCondition({ model: 'openai/gpt-4o-mini', prompt: 'Is this urgent?' }),
 );
 ```
 
@@ -209,7 +223,11 @@ const isUrgentGreeting = allCondition(
 Any function matching `Condition<I>` works with `when`, `anyCondition`, and `allCondition`:
 
 ```ts
-import type { Condition } from '@noetic-tools/core';
+import { branch, semanticRoute, when, otherwise } from '@noetic-tools/core';
+import type { Condition, ContextMemory, Step } from '@noetic-tools/core';
+
+declare const helpStep: Step<ContextMemory, string>;
+declare const defaultStep: Step<ContextMemory, string>;
 
 const containsKeyword: Condition<string> = async (input) => {
   return input.toLowerCase().includes('help');
@@ -233,6 +251,9 @@ When a condition receives non-string input, it is serialized to JSON before embe
 Embedding-based conditions (`semanticSwitch`, `embeddingMatch`) accept an optional `cache: StorageAdapter` to persist label embeddings. This is useful in ephemeral environments like Cloudflare Workers where label vectors would otherwise be recomputed on every invocation.
 
 ```ts
+declare const embed: EmbedFn;
+declare const myStorageAdapter: StorageAdapter;
+
 const route = semanticSwitch({
   embed,
   cases: { /* ... */ },

@@ -1,1 +1,1 @@
-export * from '@noetic/code-agent/lsp';
+export * from '@noetic-tools/code-agent/lsp';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { AutopilotState } from '@noetic/code-agent/tasks/schema';
-import { loadTask } from '@noetic/code-agent/tasks/store/fs-node';
+import { AutopilotState } from '@noetic-tools/code-agent/tasks/schema';
+import { loadTask } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import { autopilotHandler } from '../../../src/tasks/runtime/handlers/autopilot.js';
 import { createTaskHandler } from '../../../src/tasks/runtime/handlers/lifecycle.js';
 import { makeStoreContext } from '../_helpers.js';

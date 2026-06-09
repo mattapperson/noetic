@@ -13,9 +13,9 @@
  * without rendering Ink.
  */
 
-import type { Task } from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { hasHierarchy, listTasks } from '@noetic/code-agent/tasks/store/fs-node';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { hasHierarchy, listTasks } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic-tools/core';
 import { Box, Text, useInput, useStdout } from 'ink';
 import type React from 'react';

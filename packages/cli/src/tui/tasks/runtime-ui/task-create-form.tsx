@@ -15,16 +15,16 @@
  * can drive it without rendering Ink.
  */
 
-import type { Task } from '@noetic/code-agent/tasks/schema';
+import type { Task } from '@noetic-tools/code-agent/tasks/schema';
 import {
   AutopilotState,
   generateTaskId,
   TaskLifecycleStatus,
   TaskReviewStatus,
   TaskSource,
-} from '@noetic/code-agent/tasks/schema';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { appendEvent, saveTask, taskDirPaths } from '@noetic/code-agent/tasks/store/fs-node';
+} from '@noetic-tools/code-agent/tasks/schema';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { appendEvent, saveTask, taskDirPaths } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { FsAdapter } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';

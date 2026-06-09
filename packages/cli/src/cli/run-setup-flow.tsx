@@ -18,7 +18,7 @@ import { BINARY_MANIFEST } from '../setup/binary-manifest.js';
 import { detectOs, detectPackageManagers } from '../setup/platform.js';
 import { resolveBinaryStatuses } from '../setup/resolver.js';
 import type { BinaryAvailability, BinaryId, BinaryStatus } from '../setup/types.js';
-import { InkProvider } from '../tui/components/index.js';
+import { InkProvider } from '../tui/components/provider.js';
 import { SetupScreen } from '../tui/screens/setup-screen.js';
 import type { AgentConfig } from '../types/config.js';
 

@@ -7,8 +7,8 @@ A **plugin** is an npm-publishable extension that contributes to the CLI's runti
 
 ## The `NoeticPlugin` interface
 
-```ts
-import type { NoeticPlugin, PluginContext } from '@noetic/cli';
+```ts validate=none
+import type { NoeticPlugin, PluginContext } from '@noetic-tools/cli';
 
 interface NoeticPlugin {
   name: string;
@@ -35,7 +35,7 @@ Pick the hooks that fit your contribution; leave the rest off. Adding fields to 
 
 Every hook receives a `PluginContext`:
 
-```ts
+```ts validate=none
 interface PluginContext {
   config: AgentConfig;                  // parsed agent config
   callModel: CallModel;                 // one-shot LLM generation (no tool loops)
@@ -57,10 +57,12 @@ Contribute new tools to the harness. Tools follow the framework's [Tool API](/do
 import { z } from 'zod';
 import type { Tool } from '@noetic-tools/core';
 
-const weatherTool: Tool = {
+const weatherInput = z.object({ city: z.string() });
+
+const weatherTool: Tool<typeof weatherInput> = {
   name: 'get_weather',
   description: 'Look up current weather for a city.',
-  input: z.object({ city: z.string() }),
+  input: weatherInput,
   output: z.object({ tempC: z.number(), summary: z.string() }),
   execute: async (args) => {
     const res = await fetch(`https://wttr.in/${args.city}?format=j1`);
@@ -83,7 +85,7 @@ Contribute [skills](/docs/code-agent-cli/skills) programmatically — useful whe
 Contribute slash commands. Plugin commands merge into the CLI's built-in registry **after** built-ins, so a plugin can't shadow `/help`, `/context`, or `/clear`.
 
 ```ts
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
 const commands: NoeticPlugin['commands'] = (ctx) => [
   {
@@ -114,7 +116,7 @@ Contribute language servers for the `lsp` tool. Built-in servers (TypeScript, Py
 Render a React/Ink component between the chat area and the prompt. The component reads live session state via `useFooterContext()`:
 
 ```ts
-import { useFooterContext } from '@noetic/cli';
+import { useFooterContext } from '@noetic-tools/cli';
 
 const StatusFooter = () => {
   const { model, status, lastLayerUsage, contextLimit } = useFooterContext();
@@ -137,6 +139,7 @@ Run once at plugin load (after the context is built, before the TUI mounts) and 
 In `noetic.config.ts`:
 
 ```ts
+import type { AgentConfig } from '@noetic-tools/cli';
 import designDeck from '@noetic/plugin-design-deck';
 import powerline from '@noetic/plugin-powerline';
 
@@ -170,7 +173,7 @@ Adds a powerline-style footer + themed working-vibes loading messages.
 
 ```tsx
 import type { ReactNode } from 'react';
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
 declare const Footer: (props: { segments: unknown; theme: unknown }) => ReactNode;
 declare function parseOptions(input: unknown): {
@@ -178,7 +181,7 @@ declare function parseOptions(input: unknown): {
   theme: unknown;
   vibe: unknown;
 };
-declare function resolveVibes(args: { options: unknown; apiKey: string }): Promise<string[]>;
+declare function resolveVibes(args: { options: unknown; apiKey: string | undefined }): Promise<string[]>;
 declare function loadTheme(theme: unknown): unknown;
 
 export default function powerline(userInput: unknown = {}): NoeticPlugin {
@@ -204,9 +207,17 @@ Demonstrates `initialize`, `loadingMessages`, and `footer`.
 Adds an interactive visual-decision modal as a slash command.
 
 ```ts
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 
-export default function designDeck(userInput = {}): NoeticPlugin {
+declare function parseOptions(input: unknown): unknown;
+declare function deckCommand(args: unknown): {
+  name: string;
+  description: string;
+  execute: (input: string, session: unknown) => Promise<unknown>;
+};
+declare const deckDiscoverCommand: typeof deckCommand;
+
+export default function designDeck(userInput: unknown = {}): NoeticPlugin {
   const options = parseOptions(userInput);
   return {
     name: '@noetic/plugin-design-deck',
@@ -227,7 +238,7 @@ A minimal plugin that contributes one tool and one slash command:
 
 ```ts
 // my-plugin/src/index.ts
-import type { NoeticPlugin } from '@noetic/cli';
+import type { NoeticPlugin } from '@noetic-tools/cli';
 import { z } from 'zod';
 
 export default function myPlugin(): NoeticPlugin {
@@ -246,10 +257,12 @@ export default function myPlugin(): NoeticPlugin {
       description: 'Have the model tell a joke about the current cwd.',
       execute: async () => {
         const joke = await ctx.callModel({
-          system: 'You tell terse, dry developer jokes.',
-          user: `Tell a joke about working in ${ctx.config.cwd}.`,
+          messages: [
+            { role: 'system', content: 'You tell terse, dry developer jokes.' },
+            { role: 'user', content: `Tell a joke about working in ${ctx.config.cwd}.` },
+          ],
         });
-        return { kind: 'message', content: joke };
+        return { kind: 'message', content: joke.text };
       },
     }],
   };
@@ -259,6 +272,7 @@ export default function myPlugin(): NoeticPlugin {
 Then in your `noetic.config.ts`:
 
 ```ts
+import type { AgentConfig } from '@noetic-tools/cli';
 import myPlugin from './my-plugin/src/index.ts';
 
 export default {

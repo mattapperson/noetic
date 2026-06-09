@@ -16,7 +16,7 @@ import {
   FeatureIdSchema,
   TaskIdSchema,
   ValidatorRunIdSchema,
-} from '@noetic/code-agent/tasks/schema';
+} from '@noetic-tools/code-agent/tasks/schema';
 import type { Tool } from '@noetic-tools/core';
 import { tool } from '@noetic-tools/core';
 import { z } from 'zod';

@@ -21,9 +21,9 @@
  * blocks.
  */
 
-import { externalTaskEventsChan } from '@noetic/code-agent/tasks/ipc-node';
-import type { TaskStoreContext } from '@noetic/code-agent/tasks/store/fs-node';
-import { tailEvents } from '@noetic/code-agent/tasks/store/fs-node';
+import { externalTaskEventsChan } from '@noetic-tools/code-agent/tasks/ipc-node';
+import type { TaskStoreContext } from '@noetic-tools/code-agent/tasks/store/fs-node';
+import { tailEvents } from '@noetic-tools/code-agent/tasks/store/fs-node';
 import type { ContextMemory, Step } from '@noetic-tools/core';
 import { every, fork, spawn, step, workingMemory } from '@noetic-tools/core';
 import { z } from 'zod';

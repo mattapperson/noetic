@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Package Overview
 
-`@noetic/cli` is the interactive coding agent CLI/TUI for the Noetic framework. It provides an Ink-based terminal UI for conversational coding with LLM-powered tools.
+`@noetic-tools/cli` is the interactive coding agent CLI/TUI for the Noetic framework. It provides an Ink-based terminal UI for conversational coding with LLM-powered tools.
 
 ## Commands
 

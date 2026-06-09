@@ -1,4 +1,4 @@
-import { createCallModel } from '@noetic/code-agent/plugins';
+import { createCallModel } from '@noetic-tools/code-agent/plugins';
 import type { AgentConfig } from '../types/config.js';
 import { createDataDir, createNodePluginStorage } from './data-dir.js';
 import type { PluginContext } from './types.js';

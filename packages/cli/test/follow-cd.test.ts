@@ -7,7 +7,6 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createLocalFsAdapter } from '@noetic/platform-node';
 import type {
   CwdState,
   ShellAdapter,
@@ -15,6 +14,7 @@ import type {
   ShellExecResult,
   ToolExecutionContext,
 } from '@noetic-tools/core';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import type { BashOutput } from '../src/tools/bash.js';
 import { BashOutputSchema, createBashTool } from '../src/tools/bash.js';
 import { createEditTool } from '../src/tools/edit.js';

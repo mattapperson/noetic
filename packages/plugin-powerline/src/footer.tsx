@@ -1,4 +1,4 @@
-import { useFooterContext } from '@noetic/cli';
+import { useFooterContext } from '@noetic-tools/cli';
 import { Box, Text, useStdout } from 'ink';
 import type { ReactNode } from 'react';
 import { Fragment, useEffect, useState } from 'react';

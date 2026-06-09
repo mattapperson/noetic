@@ -24,10 +24,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { createLocalFsAdapter } from '@noetic/platform-node';
 import type { ContextMemory, DetachedHandle, MemoryLayer, Tool } from '@noetic-tools/core';
 import { historyWindow, NoeticConfigError, react, spawn, step, tool } from '@noetic-tools/core';
 import { retargetCwdForSpawn } from '@noetic-tools/core/unstable';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { z } from 'zod';
 
 import { createAgentWorktree } from '../adapters/worktree.js';

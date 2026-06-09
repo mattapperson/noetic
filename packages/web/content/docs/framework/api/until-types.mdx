@@ -7,7 +7,7 @@ description: Type definitions for termination predicates, verdicts, snapshots, a
 
 A termination predicate function. Called after each loop iteration to decide whether to stop.
 
-```ts
+```ts validate=none
 type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 ```
 
@@ -15,7 +15,7 @@ type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
 The state visible to an `Until` predicate at the end of each iteration.
 
-```ts
+```ts validate=none
 interface Snapshot {
   stepCount: number;
   tokens: {
@@ -51,7 +51,7 @@ interface Snapshot {
 
 The return value from an `Until` predicate.
 
-```ts
+```ts validate=none
 interface Verdict {
   stop: boolean;
   reason?: string;
@@ -139,7 +139,7 @@ const stop: Until = until.custom(fn);
 
 The verification function used by `until.verified()`:
 
-```ts
+```ts validate=none
 type VerifyFn = (output: unknown) => Promise<{
   pass: boolean;
   feedback?: string;
@@ -153,7 +153,7 @@ type VerifyFn = (output: unknown) => Promise<{
 
 ## ConvergeConfig
 
-```ts
+```ts validate=none
 interface ConvergeConfig {
   threshold?: number;
   embed?: EmbedFn;

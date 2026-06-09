@@ -1,4 +1,4 @@
-import type { Context, CwdState } from '../types/context';
+import type { Context, CwdState } from '@noetic-tools/types';
 
 /**
  * @public Resolve the live cwd for a tool execution. Falls back to the

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/platform-node';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 
 import { discoverSkills } from '../src/skills/discovery.js';
 import type { SkillDefinition } from '../src/skills/types.js';
