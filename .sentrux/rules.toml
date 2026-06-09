@@ -111,11 +111,6 @@ order = 15
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[layers]]
-name = "chat-sdk"
-paths = ["packages/chat-sdk/src/**"]
-order = 50
-
-[[layers]]
 name = "code-agent"
 paths = ["packages/code-agent/src/**"]
 order = 50
@@ -133,11 +128,6 @@ order = 50
 [[layers]]
 name = "platform-browser"
 paths = ["packages/platform-browser/src/**"]
-order = 50
-
-[[layers]]
-name = "mirage"
-paths = ["packages/mirage/src/**"]
 order = 50
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -240,7 +230,7 @@ to = "packages/core/src/**"
 reason = "@noetic-tools/types is the dependency-free foundation; core builds on it, not the reverse"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Peer-package isolation at tier 50 — chat-sdk, code-agent, and eval are
+# Peer-package isolation at tier 50 — code-agent and eval are
 # siblings that depend only on @noetic-tools/core; they must not reach across.
 # Same-order layers are otherwise unconstrained, so these have to be
 # explicit.
@@ -257,34 +247,9 @@ to = "packages/cli/src/**"
 reason = "eval must not depend on cli"
 
 [[boundaries]]
-from = "packages/eval/src/**"
-to = "packages/chat-sdk/src/**"
-reason = "eval must not depend on chat-sdk"
-
-[[boundaries]]
 from = "packages/code-agent/src/**"
 to = "packages/eval/src/**"
 reason = "code-agent must not depend on eval"
-
-[[boundaries]]
-from = "packages/code-agent/src/**"
-to = "packages/chat-sdk/src/**"
-reason = "code-agent must not depend on chat-sdk"
-
-[[boundaries]]
-from = "packages/chat-sdk/src/**"
-to = "packages/code-agent/src/**"
-reason = "chat-sdk must not depend on code-agent"
-
-[[boundaries]]
-from = "packages/chat-sdk/src/**"
-to = "packages/eval/src/**"
-reason = "chat-sdk must not depend on eval"
-
-[[boundaries]]
-from = "packages/chat-sdk/src/**"
-to = "packages/cli/src/**"
-reason = "chat-sdk must not depend on cli"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform packages: runtime-isolated, peer-isolated, and core is forbidden
@@ -326,11 +291,6 @@ reason = "memory layers are platform-independent; platform packages are platform
 
 [[boundaries]]
 from = "packages/platform-node/src/**"
-to = "packages/chat-sdk/src/**"
-reason = "platform-node is a peer of chat-sdk; both depend only on @noetic-tools/core"
-
-[[boundaries]]
-from = "packages/platform-node/src/**"
 to = "packages/code-agent/src/**"
 reason = "platform-node is a peer of code-agent; both depend only on @noetic-tools/core"
 
@@ -343,11 +303,6 @@ reason = "platform-node is a peer of eval; both depend only on @noetic-tools/cor
 from = "packages/platform-node/src/**"
 to = "packages/cli/src/**"
 reason = "platform-node must not depend on cli"
-
-[[boundaries]]
-from = "packages/platform-browser/src/**"
-to = "packages/chat-sdk/src/**"
-reason = "platform-browser is a peer of chat-sdk; both depend only on @noetic-tools/core"
 
 [[boundaries]]
 from = "packages/platform-browser/src/**"
@@ -365,7 +320,7 @@ to = "packages/cli/src/**"
 reason = "platform-browser must not depend on cli"
 
 # Reverse direction: Node-only consumers must not reach into the
-# browser platform package. Nothing in cli/code-agent/eval/chat-sdk
+# browser platform package. Nothing in cli/code-agent/eval
 # should accidentally pull browser-only exports — the import itself
 # would be harmless today (platform-browser re-exports in-memory
 # adapters), but bundlers targeting Node shouldn't follow this edge
@@ -386,67 +341,6 @@ reason = "code-agent is Node-only; must not reach into the browser platform pack
 from = "packages/eval/src/**"
 to = "packages/platform-browser/src/**"
 reason = "eval is runtime-agnostic via adapter injection; a direct browser-platform import would pin its runtime"
-
-[[boundaries]]
-from = "packages/chat-sdk/src/**"
-to = "packages/platform-browser/src/**"
-reason = "chat-sdk is runtime-agnostic via adapter injection; a direct browser-platform import would pin its runtime"
-
-# Mirage bridge isolation. @noetic/mirage is a peer of the other tier-50
-# packages — core has zero knowledge of it, and the platform packages
-# consume Mirage (if they want a VFS) via their own optional peer deps
-# on @struktoai/mirage-*. Neither platform should import @noetic/mirage
-# directly, because that would couple the bridge to a specific runtime.
-
-[[boundaries]]
-from = "packages/core/src/**"
-to = "packages/mirage/src/**"
-reason = "core is runtime-agnostic and has no dependency on the Mirage bridge"
-
-[[boundaries]]
-from = "packages/memory/src/**"
-to = "packages/mirage/src/**"
-reason = "memory layers are platform-independent; Mirage is a backend-specific bridge"
-
-[[boundaries]]
-from = "packages/platform-node/src/**"
-to = "packages/mirage/src/**"
-reason = "platform-node is runtime-isolated; @noetic/mirage is a separate consumer-facing package"
-
-[[boundaries]]
-from = "packages/platform-browser/src/**"
-to = "packages/mirage/src/**"
-reason = "platform-browser is runtime-isolated; @noetic/mirage is a separate consumer-facing package"
-
-[[boundaries]]
-from = "packages/mirage/src/**"
-to = "packages/platform-node/src/**"
-reason = "@noetic/mirage must stay runtime-neutral; it types against @struktoai/mirage-core only"
-
-[[boundaries]]
-from = "packages/mirage/src/**"
-to = "packages/platform-browser/src/**"
-reason = "@noetic/mirage must stay runtime-neutral; it types against @struktoai/mirage-core only"
-
-[[boundaries]]
-from = "packages/mirage/src/**"
-to = "packages/cli/src/**"
-reason = "@noetic/mirage must not depend on cli"
-
-[[boundaries]]
-from = "packages/mirage/src/**"
-to = "packages/code-agent/src/**"
-reason = "@noetic/mirage must not depend on code-agent"
-
-[[boundaries]]
-from = "packages/mirage/src/**"
-to = "packages/eval/src/**"
-reason = "@noetic/mirage must not depend on eval"
-
-[[boundaries]]
-from = "packages/mirage/src/**"
-to = "packages/chat-sdk/src/**"
-reason = "@noetic/mirage must not depend on chat-sdk"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Docs-site isolation (@noetic/web) is enforced via packages/web/package.json

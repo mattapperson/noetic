@@ -14,14 +14,6 @@
     "@noetic-tools/core": "workspace:*",
     "zod": "^4.0.0"
   },
-  "peerDependencies": {
-    "@struktoai/mirage-node": "0.0.1"
-  },
-  "peerDependenciesMeta": {
-    "@struktoai/mirage-node": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "bun-types": "latest"
   },

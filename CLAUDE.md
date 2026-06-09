@@ -25,12 +25,12 @@ Architecture gates:
 
 ## Architecture big picture
 
-Ten workspace packages under `packages/*`. Dependency direction (arrows = "depends on"):
+Eleven workspace packages under `packages/*`. Dependency direction (arrows = "depends on"):
 
 ```
 plugins ──→ cli ──→ code-agent ──→ core ←── eval
-                                    ↑  │
-                            chat-sdk ┘  └──→ memory ──→ types
+                                       │
+                                       └──→ memory ──→ types
                                                  └───────────↗
 web (standalone — no workspace deps)
 ```
@@ -41,7 +41,7 @@ web (standalone — no workspace deps)
 - **`@noetic-tools/code-agent`** — tool implementations, plugin registry, skills, tasks, LSP, git worktree integration.
 - **`@noetic-tools/cli`** — Ink-based TUI harness. Six internal layers per `specs/22-cli-architecture.md`: `foundations → infra → domain → orchestration → presentation → entry`.
 - **`@noetic/eval`** — eval framework, scorers, GEPA optimization, regression.
-- **`@noetic/chat-sdk`**, **`@noetic/plugin-*`**, **`@noetic/web`** — peer/consumer packages.
+- **`@noetic/plugin-*`**, **`@noetic/web`** — peer/consumer packages.
 
 `specs/` is the source of architectural truth. `specs/00-overview.md` has the package graph and the numbered specs (`01-step-type` through `22-cli-architecture`) each map to a concrete source directory (see `.claude/rules/sync-spec-code-docs.md` for the table). Runtime code must stay consistent with its spec.
 

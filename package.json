@@ -4,7 +4,6 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*",
     "evals"
   ],
   "devDependencies": {

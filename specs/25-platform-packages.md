@@ -18,17 +18,15 @@ Two platform packages ship:
 
 Each platform package declares only the peer dependencies relevant to its runtime. A consumer targeting Node installs `@noetic-tools/platform-node`; a consumer targeting a browser installs `@noetic/platform-browser`. Neither pulls dependencies from the other, so bundle size stays proportional to the chosen runtime.
 
-The Mirage-backed virtual filesystem is **not** in either platform package — it lives in a dedicated `@noetic/mirage` peer package (see `24-mirage-resources`). The bridge is runtime-neutral and types against Mirage's structural `Workspace` contract; consumers pair it with whichever runtime-specific Mirage package (`@struktoai/mirage-node` or `@struktoai/mirage-browser`) matches their target.
-
 ## Motivation
 
 Prior to this split, Node-only code lived inside `@noetic-tools/core` under the `@noetic-tools/core/adapters/node` subpath export. Browser consumers either imported that subpath (and paid for `node:child_process` bundler shims) or hand-rolled their own adapters. Each package now carries exactly the deps it needs:
 
 - `@noetic-tools/core` — zero runtime-specific deps, zero third-party peers beyond `zod` and the OpenRouter SDK. Safe in every environment. Exports only contracts, in-memory adapters, and the agent harness.
-- `@noetic-tools/platform-node` — Node APIs only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`). No Mirage peer — the Mirage bridge lives in `@noetic/mirage`.
-- `@noetic/platform-browser` — web platform APIs only (`navigator.storage`, `BroadcastChannel`, `fetch`); no `node:*` imports. No Mirage peer — the bridge lives in `@noetic/mirage`.
+- `@noetic-tools/platform-node` — Node APIs only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`).
+- `@noetic/platform-browser` — web platform APIs only (`navigator.storage`, `BroadcastChannel`, `fetch`); no `node:*` imports.
 
-Consumers opt into the surface they want. Test suites that need the Node subprocess adapter add `@noetic-tools/platform-node` to their devDependencies; code-agent and cli (which are Node-only by nature) depend on it directly. Browser apps and edge workers depend on `@noetic/platform-browser`. Runtime-agnostic consumers (eval, chat-sdk) stay on `@noetic-tools/core` alone and inject whichever adapters the caller supplies.
+Consumers opt into the surface they want. Test suites that need the Node subprocess adapter add `@noetic-tools/platform-node` to their devDependencies; code-agent and cli (which are Node-only by nature) depend on it directly. Browser apps and edge workers depend on `@noetic/platform-browser`. Runtime-agnostic consumers (eval) stay on `@noetic-tools/core` alone and inject whichever adapters the caller supplies.
 
 ## Package Layout
 
@@ -57,8 +55,7 @@ export { AgentHarness, /* … */ } from './harness/agent-harness';
 Peer dependencies after the split:
 
 - `zod`, `@openrouter/agent` (unchanged).
-- No Mirage peers.
-- No runtime-specific peers (no `@struktoai/mirage-*`, no Node-only packages).
+- No runtime-specific peers (no Node-only packages).
 
 ### `@noetic-tools/platform-node`
 
@@ -83,7 +80,7 @@ export { AgentIpcProtocol } from './agent-ipc-protocol';
 export { runStepBootstrap } from './step-bootstrap';
 ```
 
-Peer dependencies: none. Runtime imports: Node built-ins only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`, `node:os`, `node:crypto`). No third-party Node deps at runtime. For a Mirage-backed VFS, install `@noetic/mirage` alongside `@struktoai/mirage-node` — the bridge is consumed directly, not re-exported through this package.
+Peer dependencies: none. Runtime imports: Node built-ins only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`, `node:os`, `node:crypto`). No third-party Node deps at runtime.
 
 ### `@noetic/platform-browser`
 
@@ -98,7 +95,7 @@ export {
 } from '@noetic-tools/core';
 ```
 
-Peer dependencies: none. Runtime imports: browser platform APIs only. No `node:*` imports — bundlers targeting browsers succeed without polyfills. For a Mirage-backed VFS, install `@noetic/mirage` alongside `@struktoai/mirage-browser`.
+Peer dependencies: none. Runtime imports: browser platform APIs only. No `node:*` imports — bundlers targeting browsers succeed without polyfills.
 
 ### Migrating `@noetic-tools/core/adapters/node`
 
@@ -119,13 +116,13 @@ The existing `@noetic-tools/core/adapters/node` subpath export is removed. Consu
                                                                                                       ↑
 browser/edge consumer  ──→  @noetic/platform-browser  ─────────────────────────────────────────────────┘
                                                                                                       ↑
-@noetic/eval, @noetic/chat-sdk  ──────────────────────────────────────────────────────────────────────┘
+@noetic/eval  ────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - `@noetic-tools/core` has no dependency on either platform package.
 - Platform packages depend only on `@noetic-tools/core` (plus their runtime's built-ins and any declared peers).
 - Node-only consumers (`@noetic-tools/cli`, `@noetic-tools/code-agent`, `@noetic/plugin-*`) depend on `@noetic-tools/platform-node`.
-- Runtime-agnostic consumers (`@noetic/eval`, `@noetic/chat-sdk`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
+- Runtime-agnostic consumers (`@noetic/eval`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
 - Browser consumers depend on `@noetic/platform-browser`.
 
 ## Sentrux Rules
@@ -190,9 +187,8 @@ Mechanical migration:
 
 1. Replace `from '@noetic-tools/core/adapters/node'` with `from '@noetic-tools/platform-node'` in every import.
 2. Add `@noetic-tools/platform-node` (or `@noetic/platform-browser`) to the package's `dependencies`.
-3. For a Mirage-backed VFS, import `createMirageAdapters` from `@noetic/mirage` directly (not from a platform package). Keep `@struktoai/mirage-node` or `@struktoai/mirage-browser` in the consumer's `dependencies` exactly as before.
 
-`@noetic-tools/code-agent` and `@noetic-tools/cli` migrate in lockstep with the package creation because they consume the Node adapters directly. `@noetic/eval` and `@noetic/chat-sdk` do not import Node adapters today; their migration is a documentation update only.
+`@noetic-tools/code-agent` and `@noetic-tools/cli` migrate in lockstep with the package creation because they consume the Node adapters directly. `@noetic/eval` does not import Node adapters today; its migration is a documentation update only.
 
 ## Tree-shakability Guarantees
 
@@ -203,5 +199,5 @@ Mechanical migration:
 ## Future Considerations
 
 - **`@noetic/platform-deno` / `@noetic/platform-bun`**: if divergence between runtimes grows large enough, per-runtime packages with their own adapter implementations may land. The current `createLocalFsAdapter` works under Bun via Node API compatibility, so this is not yet needed.
-- **Native OPFS / IndexedDB adapters**: `@noetic/platform-browser` today re-exports in-memory adapters and provides Mirage-browser helpers. A standalone `createOpfsFsAdapter` may be added once a consumer needs an OPFS-backed filesystem without going through Mirage.
+- **Native OPFS / IndexedDB adapters**: `@noetic/platform-browser` today re-exports in-memory adapters. A standalone `createOpfsFsAdapter` may be added once a consumer needs an OPFS-backed filesystem.
 - **Worker-side adapters**: Web Worker and Service Worker environments may warrant a third `@noetic/platform-worker` package if their API surface diverges enough from the main-thread browser runtime. Current assumption: browser platform package covers them.
