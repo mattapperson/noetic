@@ -1,8 +1,9 @@
 'use client';
 
-import { motion, useScroll, useTransform } from 'motion/react';
+import { motion, useReducedMotion, useScroll, useTransform } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { ValueProps } from '@/components/landing/value-props';
 import { TuiWindow } from '@/components/tui/tui-window';
 import { highlightCode } from '@/lib/syntax-highlight';
@@ -51,6 +52,42 @@ export function Hero(): ReactNode {
       'none',
     ],
   );
+
+  const reducedMotion = useReducedMotion();
+  const [glitch, setGlitch] = useState(false);
+
+  useEffect(() => {
+    if (reducedMotion) {
+      return;
+    }
+    let mounted = true;
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (): void => {
+      const delay = 1e4 + Math.random() * 1e4;
+      pending = setTimeout(() => {
+        if (!mounted) {
+          return;
+        }
+        setGlitch(true);
+        pending = setTimeout(() => {
+          if (!mounted) {
+            return;
+          }
+          setGlitch(false);
+          schedule();
+        }, 700);
+      }, delay);
+    };
+    schedule();
+    return (): void => {
+      mounted = false;
+      if (pending) {
+        clearTimeout(pending);
+      }
+    };
+  }, [
+    reducedMotion,
+  ]);
 
   return (
     <section
@@ -111,13 +148,14 @@ export function Hero(): ReactNode {
             delay: 0.15,
             duration: 0.5,
           }}
-          className="tui-glow"
+          className={glitch ? 'tui-glow tui-glitch-burst' : 'tui-glow'}
           style={{
             fontSize: 'clamp(36px, 8vw, 96px)',
             fontWeight: 800,
             color: 'var(--color-tui-green)',
             marginBottom: '16px',
             lineHeight: 1.1,
+            position: 'relative',
           }}
         >
           NOETIC
