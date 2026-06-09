@@ -8,28 +8,53 @@ import { MemoryIsometricSvg } from '@/components/landing/svgs/memory-isometric';
 const LAYERS = [
   {
     name: 'Working Memory',
-    description: 'Scratchpad for current turn',
+    description: 'Scratchpad for the current turn',
     color: 'var(--color-tui-cyan)',
   },
   {
     name: 'Observational Memory',
-    description: 'Auto-extracted facts from conversation',
+    description: 'Auto-extracted facts from the conversation',
     color: 'var(--color-tui-cyan)',
   },
   {
-    name: 'Semantic Recall',
-    description: 'Vector-indexed long-term storage',
+    name: 'Steering',
+    description: 'Always-on instructions and guardrails',
+    color: 'var(--color-tui-cyan)',
+  },
+  {
+    name: 'Static Content',
+    description: 'Pinned reference material',
+    color: 'var(--color-tui-cyan)',
+  },
+  {
+    name: 'History Window',
+    description: 'Recent turns, trimmed to a budget',
     color: 'var(--color-tui-green)',
   },
   {
-    name: 'Episodic Memory',
-    description: 'Past conversation summaries',
+    name: 'File Reference',
+    description: 'On-demand file contents',
     color: 'var(--color-tui-green)',
+  },
+  {
+    name: 'Tool Memory',
+    description: 'Recall of prior tool calls and results',
+    color: 'var(--color-tui-green)',
+  },
+  {
+    name: 'Plan Memory',
+    description: 'Task tree and execution state',
+    color: 'var(--color-tui-amber)',
   },
   {
     name: 'Durable Task State',
     description: 'Persistent agent checkpoints',
     color: 'var(--color-tui-amber)',
+  },
+  {
+    name: 'Custom Layers',
+    description: 'Build your own — semantic recall, episodic summaries',
+    color: 'var(--color-tui-muted)',
   },
 ] as const;
 
@@ -102,8 +127,8 @@ export function MemorySystem(): ReactNode {
               lineHeight: 1.7,
             }}
           >
-            Working memory, observation extraction, vector recall, episode summaries, durable
-            checkpoints. Let Noetic handle it or build your own. Token costs stay predictable as
+            Working memory, observation extraction, plan tracking, durable checkpoints, and more —
+            assemble the layers you need or build your own. Token costs stay predictable as
             conversations grow.
           </p>
         </div>

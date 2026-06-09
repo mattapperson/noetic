@@ -2,10 +2,27 @@
 
 ## Goals
 
-- Copy is accessible to developers new to AI agents without condescending to experienced engineers
-- Noetic's three differentiators are unmistakably clear: composable primitives, pre-built patterns, reactive memory
-- Each value-prop section includes an animated isometric SVG graphic (45° tube-map style, glowing sphere data flow)
-- A "Code Peek" tabbed section lets developers see the primitives in action
+- A clear, broad-audience value proposition is front and center within the hero — a static hook above the install line, plus a static 4-up pillar row below the CTA. No motion competes for attention in the first viewport.
+- The page is organized around the **agent lifecycle** as four pillars — **Compose · Remember · Endure · Prove** — so the value prop and the feature sections tell one story.
+- Copy is accessible to developers new to AI agents without condescending to experienced engineers.
+- Every claim matches the shipped surface (e.g. the nine exported memory layers; the eval framework as a shipped capability, not "coming soon").
+- Feature sections use the animated isometric SVG graphics (45° tube-map style, glowing sphere data flow) where a graphic adds clarity.
+- A "Code Peek" tabbed section lets developers see the primitives in action.
+
+---
+
+## Value Proposition
+
+The hero leads with a single broad-audience hook: a punchy subhead ("Build AI agents you'd actually trust in production.") + one supporting sentence, sized to read as the page's primary promise. Below the CTA buttons, a **static 4-up row** shows all four pillars at once — label-weight, scannable, no motion. Each column click-links to its pillar's anchor section below.
+
+| # | Pillar | Headline | Support line |
+|---|--------|----------|--------------|
+| 01 | COMPOSE | It's just TypeScript. | Seven primitives you read, fork, and own. |
+| 02 | REMEMBER | Context that doesn't blow up. | Nine memory layers keep token costs flat. |
+| 03 | ENDURE | Survives production. | Checkpoint and resume — Node, browser, or sandbox. |
+| 04 | PROVE | Prove it works. | Score and optimize like Jest tests. |
+
+The row sits inside the hero with thin top + bottom dividers and intentionally stays label-weight so it doesn't visually compete with the CTA or the code window.
 
 ---
 
@@ -24,18 +41,20 @@ All SVG graphics follow this style:
 
 ## Page Structure
 
-| # | Section |
-|---|---------|
-| 1 | Nav |
-| 2 | Hero |
-| 3 | Differentiation block |
-| 4 | Primitives |
-| 5 | Patterns |
-| 6 | Memory |
-| 7 | Code Peek |
-| 8 | Coming Soon + Footer |
+| # | Section | Pillar |
+|---|---------|--------|
+| 1 | Nav (with announcement banner) | — |
+| 2 | Hero (with embedded value-props block) | — |
+| 3 | Primitives | 01 · Compose |
+| 4 | Patterns | 01 · Compose |
+| 5 | Code Peek | 01 · Compose |
+| 6 | Memory | 02 · Remember |
+| 7 | Endurance | 03 · Endure |
+| 8 | Eval | 04 · Prove |
+| 9 | Differentiation | — |
+| 10 | Footer | — |
 
-Sections 4 (Primitives) and 5 (Patterns) render **side-by-side** on desktop.
+Each pillar's cluster is preceded by a `PillarHeader` marker (`01 · COMPOSE`, etc.) and carries a stable anchor id (`compose`, `remember`, `endure`, `prove`) so the value-props block can scroll to it. Anchors use `scroll-margin-top` (≈110px) so they clear the fixed nav + banner.
 
 ---
 
@@ -47,116 +66,174 @@ Sections 4 (Primitives) and 5 (Patterns) render **side-by-side** on desktop.
 
 | Element | Content |
 |---------|---------|
-| Tag | `// not another graph-based framework` |
+| Tag | `// constrain the agent, not the intelligence` |
 | H1 | `NOETIC` |
-| Subhead | "Build complex AI agents without the framework tax." |
-| Body | "Proven patterns for ReAct, task trees, and dual-agent loops — or compose from seven primitives directly. Reactive memory decides what to keep, compress, and retrieve so your agents stay coherent across long conversations without bloating the context window." |
-| Install | `$ bun add @noetic-tools/core` (cycling, prominent near CTAs) |
-| CTA primary | "Start building (5 min quickstart)" → `/docs` |
-| CTA secondary | "View on GitHub ★" → GitHub URL |
+| Subhead (hook) | "Build AI agents you'd actually trust in production." (clamp ~18–22px, weight 600) |
+| Body | "Noetic gives you composable TypeScript primitives, memory that keeps token costs flat, and evals that catch regressions before users do." |
+| Install | Static: `$ bun add @noetic-tools/core` with a muted `(npm · pnpm)` hint to the right — no cycling |
+| CTA primary | "Build your first agent →" → `/docs` |
+| CTA secondary | "GitHub ★" → GitHub URL |
+| Value-props row | `<ValueProps />` — static 4-up pillar row, label-weight, with top/bottom dividers; see behavior below |
 | Code block | TUI window with `react-agent.ts` snippet |
 
----
+The hero is `position: sticky; height: 100vh` and fades out on scroll; the rest of the page scrolls over it in a `position: relative; z-index: 2` container.
 
-### 3. Differentiation Block
-
-**Component:** `packages/web/components/landing/differentiation.tsx`
-
-**Section tag:** `// why noetic`
-**H2:** "Built differently than the frameworks you've tried"
-
-Four-row comparison strip (TUI-style table or bordered rows):
-
-| Framework | Pain point |
-|-----------|-----------|
-| LangChain | "Too much magic. Debugging is a nightmare." |
-| LangGraph | "Powerful, but now you're thinking in graphs." |
-| CrewAI | "Fine until you need to customize anything." |
-| **Noetic** | "**Seven primitives. Composable. You read the code.**" |
-
-The Noetic row is visually highlighted (green border/accent).
-
-**Callout below the table:**
-"Works with any model provider — OpenAI, Anthropic, local models, or your own adapter."
+**Value-props row** (`components/landing/value-props.tsx`):
+- Static, centered (`max-width 960px`); shows all four pillars at once as a single 4-up row — no rotation, no auto-advance, no motion.
+- Each column: pillar eyebrow in its pillar color (`01 · COMPOSE`), a one-line headline (label-weight, 14px), and a one-line support sentence. Click-links to the pillar's anchor (`#compose`, `#remember`, `#endure`, `#prove`).
+- Thin top + bottom dividers (1px border) frame the row so it reads as a band, not a card grid.
+- Intentionally label-weight (not headline-weight) so the row stays scannable and does not compete with the CTA or the code window.
+- Responsive via `.value-props-grid`: 4 columns desktop → 2 columns at ≤768px → 1 column at ≤480px.
+- Styling reuses existing TUI tokens; no new design tokens.
 
 ---
 
-### 4. Primitives
+### 3. Primitives — *Compose*
 
 **Component:** `packages/web/components/landing/primitives-viz.tsx`
 
-**Layout:** stacked — heading + copy at top, SVG below, bento grid at bottom. When side-by-side with Patterns, each section occupies one column.
-
 | Element | Content |
 |---------|---------|
-| Tag | `// primitives` |
-| H2 | `` llm · tool · run · branch · fork · spawn · loop `` (monospace, displayed as code) |
-| Subhead | "The smallest units of agent behavior. Each does one thing. Compose them to build any workflow." |
-| Body | "Noetic gives you seven composable steps — the foundation of every agent pattern. Combine them into reasoning loops, parallel branches, tool calls, sub-agents. No generated code, no hidden orchestration." |
-| Below | Bento grid of primitive cards |
+| Tag | `core primitives` |
+| H2 | "Meet the building blocks" |
+| Subhead | "A small set of composable primitives. Build any agent pattern by combining the pieces you need." |
+| Body | "Reasoning loops, parallel workloads, sub-agents — all of it falls out of these seven. The ReAct pattern is 15 lines. A task tree is 40. You can read both in under a minute." |
+| Below | Legend (steps = green, operators = cyan) + bento grid of the seven primitives |
 
-**SVG:** `PrimitivesIsometricSvg`
-Three nodes (`llm` green, `tool` cyan, `loop` amber) connected by 45° wires with open arrows. The `loop` node has a dashed amber feedback wire returning to `llm`, forming a visible cycle. Glowing spheres travel all wire paths.
+Seven primitives: `llm`, `tool`, `run` (steps); `spawn`, `fork`, `branch`, `loop` (operators). Each card links to its doc page.
+
+**SVG:** `PrimitivesIsometricSvg` — three nodes (`llm` green, `tool` cyan, `loop` amber) on 45° wires with open arrows; `loop` has a dashed amber feedback wire back to `llm`, forming a visible cycle. Glowing spheres travel all paths.
 
 ---
 
-### 5. Patterns
+### 4. Patterns — *Compose*
 
 **Component:** `packages/web/components/landing/patterns-grid.tsx`
 
-**Layout:** stacked — heading + copy at top, SVG below, pattern cards at bottom. Renders side-by-side with Primitives on desktop; each occupies one column.
-
 | Element | Content |
 |---------|---------|
-| Tag | `// batteries included` |
-| H2 | "ReAct. Task trees. Dual-agent loops. Adaptive plans." |
-| Subhead | "Production patterns, built from primitives you already understand." |
-| Body | "The workflows that actually work in production — each one a composition of Noetic primitives. No generated abstractions, no locked-in behavior. Read the source, fork it, make it yours." |
+| Tag | `ready to use` |
+| H2 | "Batteries included" |
+| Subhead | "Common agent patterns built-in for convenience." |
+| Body | "Each pattern is a composition of the primitives above — no special cases, no hidden behavior. Read the source. Fork it. The framework doesn't care." |
 | Below | Pattern cards |
 
-**SVG:** `PatternsIsometricSvg`
-Multiple small primitive nodes (mini-cubes) with wires converging into a larger "pattern" node, then flowing out as a result. Represents the composition story visually.
+Patterns: ReAct (~15 lines), Ralph Wiggum (~10), Task Trees (~40), Adaptive Plans (~35), Thread Weaving (~25), Dual Agent (~20). Each card shows the primitives it composes and links to its doc page.
+
+**SVG:** `PatternsIsometricSvg` — small primitive nodes converging into a larger "pattern" node, then flowing out as a result.
 
 ---
 
-### 6. Memory
-
-**Component:** `packages/web/components/landing/memory-system.tsx`
-
-**Layout:** left (copy + layer list) / right (isometric SVG)
-
-| Element | Content |
-|---------|---------|
-| Tag | `// memory` |
-| H2 | "Five memory layers. One reactive context window." |
-| Subhead | "Working memory, semantic recall, episodic state, and more — each optimized for a different kind of information." |
-| Body | "Noetic decides what to keep in context, what to compress, and what to retrieve from long-term storage. When one layer updates, dependent layers react automatically. Your agents stay coherent across long conversations. Your token bill doesn't blow up." |
-| Below | Memory layer list |
-
-**SVG:** `MemoryIsometricSvg`
-Five stacked isometric layer panels. Left wire: green sphere propagates **down** (writes & propagates). Right wire: cyan sphere travels **up** (assembleView() reads). Connector lines link each layer to both wires. LLM box at top-right receives assembled context. Callout: "raw history ≈ 6,000 tok → assembled context ≈ 680 tok".
-
----
-
-### 7. Code Peek
+### 5. Code Peek — *Compose*
 
 **Component:** `packages/web/components/landing/code-peek.tsx`
 
 | Element | Content |
 |---------|---------|
-| Tag | `// under the hood` |
-| H2 | "Every pattern is just primitives. Read it. Test it. Own it." |
-| Body | "No generated abstractions. No framework internals to debug. The ReAct loop below is the same primitives you saw above — just composed." |
+| Tag | `// read the source` |
+| H2 | "Reasoning loop in 15 lines, full memory stack in 10. No boilerplate." |
+| Body | "It's the same seven primitives from before. Once you know those, you can read — and change — anything." |
 
-Three tabs (TUI-style tab bar):
+Tabs (TUI-style tab bar), each rendering a `<TuiWindow>` snippet:
 
 | Tab label | Shows |
 |-----------|-------|
-| `ReAct reasoning loop` | ~15-line ReAct implementation using `loop`, `llm`, `tool` |
-| `5-layer memory in 10 lines` | Memory system setup with `InMemoryRuntime` and layer config |
-| `Extend any primitive` | Custom step extending `run` with typed context |
+| `ReAct reasoning loop` | ~15-line ReAct via `loop` / `llm` / `tool` + `until` |
+| `5-layer memory in 10 lines` | `AgentHarness` configured with a stack of memory layers |
+| `Sandboxed harness` | Swappable `FsAdapter` / `ShellAdapter` routing tools, skills, and memory |
+| `Extend any primitive` | Custom `step.run` with typed context |
 
-Each tab renders a `<TuiWindow>` with the code snippet.
+---
+
+### 6. Memory — *Remember*
+
+**Component:** `packages/web/components/landing/memory-system.tsx`
+
+**Layout:** left (copy + layer grid) / right (isometric SVG).
+
+| Element | Content |
+|---------|---------|
+| Tag | `// context management` |
+| H2 | "Unparalleled memory management" |
+| Subhead | "Long multi-turn conversations without blowing up the context window." |
+| Body | "Working memory, observation extraction, plan tracking, durable checkpoints, and more — assemble the layers you need or build your own. Token costs stay predictable as conversations grow." |
+| Below | Legend (working / retrieval / persistence) + grid of the nine layers and a custom-layer tile |
+
+The grid shows the **nine exported memory layers** plus a "build your own" tile:
+
+| Layer (label) | Export | Group |
+|---------------|--------|-------|
+| Working Memory | `workingMemory` | working |
+| Observational Memory | `observationalMemory` | working |
+| Steering | `steering` | working |
+| Static Content | `staticContent` | working |
+| History Window | `historyWindow` | retrieval |
+| File Reference | `fileReference` | retrieval |
+| Tool Memory | `toolMemoryLayer` | retrieval |
+| Plan Memory | `planMemory` | persistence |
+| Durable Task State | `durableTaskState` | persistence |
+| Custom Layers | (build your own — e.g. semantic recall, episodic summaries) | — |
+
+Group assignment + color follow the legend; final labels/grouping are confirmed against `docs/framework/memory/*`. "Semantic recall" and "episodic memory" are documented build-it-yourself recipes, not exported layers, so they appear only via the custom-layer tile/link (`docs/framework/memory/custom-layers`).
+
+**SVG:** `MemoryIsometricSvg` — stacked isometric layer panels. Left wire: green sphere propagates **down** (writes & propagates). Right wire: cyan sphere travels **up** (`assembleView()` reads). Connector lines link each layer to both wires. LLM box at top-right receives assembled context. Callout: "raw history ≈ 6,000 tok → assembled context ≈ 680 tok".
+
+---
+
+### 7. Endurance — *Endure*
+
+**Component:** `packages/web/components/landing/endurance.tsx`
+
+| Element | Content |
+|---------|---------|
+| Tag | `// production-grade` |
+| H2 | "Built to survive production" |
+| Subhead | "The parts that matter once an agent leaves your laptop." |
+| Below | Bento grid of three cards |
+
+| Card | Value | Link |
+|------|-------|------|
+| Durable execution | Checkpoint and resume; long runs survive crashes. | `/docs/framework/durability` |
+| Runs anywhere | Node, the browser, or a sandbox — swap `fs` / `shell` / `llm` adapters; Mirage virtual filesystem. | — (no dedicated doc page yet) |
+| JSON workflow runtime | Define and run an agent declaratively from JSON. | `/docs/framework/json-runtime` |
+
+Cards reuse the existing bento/card styles (`tui-bento`, surface backgrounds, `TuiBadge`, `HOVER_BG`). No code window — Code Peek carries the examples.
+
+---
+
+### 8. Eval — *Prove*
+
+**Component:** `packages/web/components/landing/eval-framework.tsx` (`EvalFramework`)
+
+| Element | Content |
+|---------|---------|
+| Tag | `what's next` → reframe to a shipped-capability tag |
+| H2 | "Eval Framework" |
+| Subhead | "Write evals as easily as Jest tests." |
+| Body | "Define what 'good' looks like for your agent, run it against a dataset, and let the optimizer improve it. Same primitives. Same runtime. Just a feedback loop added." |
+
+Shows a `<TuiWindow>` eval-run mockup. No "Coming Soon" badge and no RL-pipeline lines — the eval framework (`describe` / `it` / `scorer` / `optimize`, GEPA optimization, regression gating with a CLI exit code) is shipped; there is no RL pipeline.
+
+---
+
+### 9. Differentiation
+
+**Component:** `packages/web/components/landing/differentiation.tsx`
+
+**Section tag:** `// the landscape`
+**H2:** "What makes Noetic different?"
+
+Comparison strip (bordered rows), Noetic row highlighted (green accent):
+
+| Framework | Pain point |
+|-----------|-----------|
+| LangChain | "Magic on the way in. Black box on the way out." |
+| LangGraph | "Powerful. Also: now you're a graph theorist." |
+| CrewAI | "Works great until it doesn't." |
+| AI SDK | "Too magical a primitive to build anything with confidence." |
+| **Noetic** | "**Seven primitives. Read it, extend it, ship it — it's just TypeScript.**" |
+
+**Callout below the table:** "OpenAI, Anthropic, local models, or a custom adapter. Bring your own provider."
 
 ---
 
@@ -164,6 +241,9 @@ Each tab renders a `<TuiWindow>` with the code snippet.
 
 | Component | File | Description |
 |-----------|------|-------------|
+| `ValueProps` | `components/landing/value-props.tsx` | Static 4-up pillar row (no rotation), rendered inside the hero below the CTA |
+| `PillarHeader` | `components/landing/pillar-header.tsx` | Pillar marker (`01 · COMPOSE`) + anchor id for each cluster |
+| `Endurance` | `components/landing/endurance.tsx` | Bento of durable execution / runs-anywhere / JSON runtime |
 | `Differentiation` | `components/landing/differentiation.tsx` | Competitor comparison strip + model-agnostic callout |
 | `CodePeek` | `components/landing/code-peek.tsx` | Tabbed code examples |
 | `PrimitivesIsometricSvg` | `components/landing/svgs/primitives-isometric.tsx` | Animated SVG for Primitives section |
@@ -178,23 +258,35 @@ Each tab renders a `<TuiWindow>` with the code snippet.
 ```tsx
 <Nav />
 <main>
-  <Hero />
-  <Differentiation />
-  <div className="side-by-side-sections">
+  <Hero />                              {/* embeds <ValueProps /> below the CTA */}
+  <div className="post-hero">           {/* position: relative; z-index: 2; tui-bg */}
+    <PillarHeader id="compose" index="01" name="Compose" />
     <PrimitivesViz />
     <PatternsGrid />
+    <CodePeek />
+
+    <PillarHeader id="remember" index="02" name="Remember" />
+    <MemorySystem />
+
+    <PillarHeader id="endure" index="03" name="Endure" />
+    <Endurance />
+
+    <PillarHeader id="prove" index="04" name="Prove" />
+    <EvalFramework />
+
+    <Differentiation />
   </div>
-  <MemorySystem />
-  <CodePeek />
-  <ComingSoon />
 </main>
 <Footer />
 ```
 
+`PillarHeader` carries the anchor `id` directly (with `scroll-margin-top`), so cluster contents render as siblings rather than inside an outer `<section>` wrapper.
+
 ### CSS (`global.css`)
-- `.side-by-side-sections` — flexbox row on desktop, column on mobile, equal widths, shared gap
-- `.section-split` — two-column layout within Memory section (copy left, SVG right)
-- SVG animation keyframes where needed (most animations use SVG SMIL `animateMotion`)
+- Pillar anchor sections set `scroll-margin-top` (≈110px) to clear the fixed nav + announcement banner.
+- `.section-split` — two-column layout within Memory (copy left, SVG right).
+- Carousel uses `motion`/`AnimatePresence` crossfade; reduced-motion handled in component via `useReducedMotion`.
+- SVG animation keyframes where needed (most animations use SVG SMIL `animateMotion`).
 
 ---
 
@@ -343,22 +435,8 @@ Before committing a new SVG:
 
 ---
 
-## Legacy SVG Technical Spec (Deprecated)
+## Future Considerations
 
-*The above SVG Design System section replaces these older specifications.*
-
-~~### Geometry~~
-~~- All angles: 0°, 45°, or 90° only (no other angles)~~
-~~- Node depth: 14px (front→top face diagonal)~~
-~~- Wire stroke: `0.8px`~~
-~~- Arrow marker: open chevron `>`, `stroke-width: 1.5`, no fill~~
-
-~~### Animation~~
-~~- Sphere travel: SVG `<animateMotion>` with `path` attribute and `calcMode="linear"`~~
-~~- Multiple spheres per wire with staggered `begin` offsets (typically `dur/2`)~~
-~~- Glow: `<radialGradient>` + `<feGaussianBlur stdDeviation="2.5">` filter on large circle~~
-~~- No JavaScript required for SVG animations~~
-
-~~### Accessibility~~
-~~- All SVGs include `role="img"` and `aria-label` describing what they show~~
-~~- Animations respect `prefers-reduced-motion` via CSS: `@media (prefers-reduced-motion: reduce) { svg * { animation-play-state: paused; } }`~~
+- **Code CLI launch.** The Noetic Code CLI is intentionally pre-launch ("Coming Soon" in the nav banner and on `/code`). When it ships, the banner, the `/code` page, and a possible Endure/Prove cross-link are revisited.
+- **Runs-anywhere documentation.** The "Runs anywhere" card links nowhere until a platform-packages / virtual-filesystem doc page exists; add the link when that page lands.
+- **Browser demo.** A live in-browser agent demo would substantiate the "runs in the browser" claim beyond adapter support.

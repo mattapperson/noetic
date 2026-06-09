@@ -2,7 +2,6 @@
 
 import type { ReactNode } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
-import { TuiBadge } from '@/components/tui/tui-badge';
 import { TuiWindow } from '@/components/tui/tui-window';
 
 const EVAL_MOCKUP = `  EVAL RUN: agent-quality-v3
@@ -16,11 +15,10 @@ const EVAL_MOCKUP = `  EVAL RUN: agent-quality-v3
 
   Results: 4/5 passed (80%)
 
-  RL PIPELINE ━━━━━━━━━━━━━━━ READY
-  reward signal: accuracy + cost
-  policy update: pending`;
+  GEPA OPTIMIZE ━━━━━━━━━━━━━ +12% accuracy
+  baseline saved · regression gate: pass`;
 
-export function ComingSoon(): ReactNode {
+export function EvalFramework(): ReactNode {
   return (
     <section
       style={{
@@ -28,7 +26,7 @@ export function ComingSoon(): ReactNode {
         margin: '0 auto',
       }}
     >
-      <SectionHeader label="what's next" title="Eval Framework + RL Pipeline" margin="8px 0 12px" />
+      <SectionHeader label="ship with confidence" title="Eval Framework" margin="8px 0 12px" />
       <p
         style={{
           fontSize: '17px',
@@ -37,7 +35,7 @@ export function ComingSoon(): ReactNode {
           lineHeight: 1.5,
         }}
       >
-        Write evals as easily as Jest tests. Train agents with reinforcement learning.
+        Write evals as easily as Jest tests, then let the optimizer make your agent better.
       </p>
       <p
         style={{
@@ -47,21 +45,12 @@ export function ComingSoon(): ReactNode {
           lineHeight: 1.7,
         }}
       >
-        Define what "good" looks like for your agent, run it against a dataset, and let the
-        optimizer improve it. Same primitives. Same runtime. Just a feedback loop added.
+        Define what &quot;good&quot; looks like for your agent, run it against a dataset, and let
+        GEPA optimization improve it. Gate regressions in CI. Same primitives. Same runtime. Just a
+        feedback loop added.
       </p>
 
       <TuiWindow title="eval-framework">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            marginBottom: '16px',
-          }}
-        >
-          <TuiBadge color="amber">Coming Soon</TuiBadge>
-        </div>
         <pre
           style={{
             margin: 0,
