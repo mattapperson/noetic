@@ -5,8 +5,9 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
 interface InstallCommand {
-  readonly prefix: string;
-  readonly package: string;
+  readonly manager: string;
+  readonly verb: string;
+  readonly pkg: string;
 }
 
 interface CyclingCommandProps {
@@ -93,14 +94,27 @@ export function CyclingCommand({
               color: 'var(--color-tui-muted)',
             }}
           >
-            {current.prefix}
+            {'$ '}
           </span>
+          <span
+            style={{
+              color: 'var(--color-tui-amber)',
+              fontWeight: 700,
+            }}
+          >
+            {current.manager}
+          </span>
+          <span
+            style={{
+              color: 'var(--color-tui-muted)',
+            }}
+          >{` ${current.verb} `}</span>
           <span
             style={{
               color: 'var(--color-tui-fg)',
             }}
           >
-            {current.package}
+            {current.pkg}
           </span>
         </motion.span>
       </AnimatePresence>

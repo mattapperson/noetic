@@ -7,6 +7,43 @@ import { CodeMultiModel } from '@/components/landing/code/code-multi-model';
 import { Footer } from '@/components/landing/footer';
 import { Nav } from '@/components/landing/nav';
 
+const CODE_TITLE = 'Noetic Code CLI';
+const CODE_DESCRIPTION =
+  'An AI coding agent built on Noetic. Background agents, multi-model routing, durable execution, and nine memory layers. Coming soon.';
+
+export const metadata = {
+  title: CODE_TITLE,
+  description: CODE_DESCRIPTION,
+  alternates: {
+    canonical: '/code',
+  },
+  openGraph: {
+    title: CODE_TITLE,
+    description: CODE_DESCRIPTION,
+    url: '/code',
+    type: 'website',
+    siteName: 'Noetic',
+    locale: 'en_US',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'Noetic Code CLI — AI coding agent built on Noetic',
+        type: 'image/png',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: CODE_TITLE,
+    description: CODE_DESCRIPTION,
+    images: [
+      '/og-image.png',
+    ],
+  },
+};
+
 export default function CodePage(): ReactNode {
   return (
     <>

@@ -11,7 +11,7 @@ export function Nav(): ReactNode {
         <span className="banner-title">Noetic Code CLI</span>
         <span className="banner-separator"> — </span>
         <span className="banner-description">
-          AI coding agent with 10 memory layers. Coming soon.
+          AI coding agent with 9 memory layers. Coming soon.
         </span>
         <Link href="/code" className="banner-link">
           Learn more

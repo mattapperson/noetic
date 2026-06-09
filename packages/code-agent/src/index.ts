@@ -820,6 +820,24 @@ class CodeAgentImpl<TParams extends Record<string, unknown>> implements CodeAgen
     return this.harness.recallLayers(layers, input, ctx);
   }
 
+  recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]> {
+    return this.harness.recallLayersAtomic(layers, input, ctx, budgets);
+  }
+
+  recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]> {
+    return this.harness.recallLayersEventual(layers, input, ctx, budgets);
+  }
+
   previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>> {
     return this.harness.previewRequestItems(scope);
   }

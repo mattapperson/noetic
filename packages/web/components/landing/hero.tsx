@@ -3,25 +3,10 @@
 import { motion, useScroll, useTransform } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { CyclingCommand } from '@/components/landing/cycling-command';
+import { ValueProps } from '@/components/landing/value-props';
 import { TuiWindow } from '@/components/tui/tui-window';
 import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
-
-const INSTALL_COMMANDS = [
-  {
-    prefix: '$ bun add ',
-    package: '@noetic-tools/core',
-  },
-  {
-    prefix: '$ npm install ',
-    package: '@noetic-tools/core',
-  },
-  {
-    prefix: '$ pnpm add ',
-    package: '@noetic-tools/core',
-  },
-] as const;
 
 const HERO_CODE = `import { AgentHarness, react } from '@noetic-tools/core';
 
@@ -149,14 +134,15 @@ export function Hero(): ReactNode {
             delay: 0.3,
           }}
           style={{
-            fontSize: 'clamp(16px, 2.5vw, 18px)',
+            fontSize: 'clamp(18px, 2.6vw, 22px)',
+            fontWeight: 600,
             color: 'var(--color-tui-fg)',
-            maxWidth: '560px',
-            marginBottom: '12px',
-            lineHeight: 1.5,
+            maxWidth: '620px',
+            marginBottom: '14px',
+            lineHeight: 1.4,
           }}
         >
-          Composable primitives. Clean code from 10 lines to 10,000.
+          Build AI agents you&rsquo;d actually trust in production.
         </motion.p>
 
         <motion.p
@@ -170,18 +156,71 @@ export function Hero(): ReactNode {
             delay: 0.45,
           }}
           style={{
-            fontSize: 'clamp(13px, 2vw, 14px)',
-            color: 'var(--color-tui-muted)',
-            maxWidth: '560px',
-            marginBottom: '40px',
-            lineHeight: 1.7,
+            fontSize: 'clamp(13px, 2vw, 15px)',
+            color: 'var(--color-tui-secondary)',
+            maxWidth: '620px',
+            marginBottom: '32px',
+            lineHeight: 1.6,
           }}
         >
-          Start with pre-built patterns — ReAct, task trees, dual-agent loops. Or compose your own.
-          Reactive memory keeps context windows manageable automatically.
+          Noetic gives you composable TypeScript primitives, memory that keeps token costs flat, and
+          evals that catch regressions before users do.
         </motion.p>
 
-        <CyclingCommand commands={INSTALL_COMMANDS} />
+        <motion.div
+          initial={{
+            opacity: 0,
+          }}
+          animate={{
+            opacity: 1,
+          }}
+          transition={{
+            delay: 0.6,
+          }}
+          style={{
+            marginBottom: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+            fontSize: '14px',
+          }}
+        >
+          <span
+            style={{
+              background: 'var(--color-tui-surface)',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              fontFamily: 'var(--font-mono)',
+              border: '1px solid var(--color-tui-border)',
+              display: 'inline-block',
+            }}
+          >
+            <span
+              style={{
+                color: 'var(--color-tui-muted)',
+              }}
+            >
+              {'$ '}
+            </span>
+            <span
+              style={{
+                color: 'var(--color-tui-fg)',
+              }}
+            >
+              bun add @noetic-tools/core
+            </span>
+          </span>
+          <span
+            style={{
+              fontSize: '12px',
+              color: 'var(--color-tui-muted)',
+            }}
+          >
+            (npm · pnpm)
+          </span>
+        </motion.div>
 
         <motion.div
           initial={{
@@ -233,6 +272,24 @@ export function Hero(): ReactNode {
           >
             {'GitHub ★'}
           </a>
+        </motion.div>
+
+        <motion.div
+          initial={{
+            opacity: 0,
+          }}
+          animate={{
+            opacity: 1,
+          }}
+          transition={{
+            delay: 0.85,
+          }}
+          style={{
+            width: '100%',
+            marginBottom: '40px',
+          }}
+        >
+          <ValueProps />
         </motion.div>
 
         <motion.div
