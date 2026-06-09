@@ -226,7 +226,6 @@ export function MemoryIsometricSvg(): ReactNode {
     <svg
       viewBox="0 -14 500 314"
       width="100%"
-      height="auto"
       role="img"
       aria-label="Five stacked memory layers. A green write wire propagates data down through all layers. A cyan read wire assembles context upward into an LLM node."
       style={{
