@@ -5,7 +5,7 @@
  * FlowSchema patterns, PRD authoring guidelines, and read-only tool usage.
  */
 
-import type { MemoryLayer, Tool } from '@noetic-tools/core';
+import type { FunctionCallItem, Item, MemoryLayer, Tool } from '@noetic-tools/core';
 import { Slot } from '@noetic-tools/core';
 
 //#region Types
@@ -42,6 +42,104 @@ function createInitialState(isActive: boolean): PlanningModeState {
       filesExamined: 0,
     },
   };
+}
+
+function isFunctionCall(item: Item): item is FunctionCallItem {
+  return typeof item === 'object' && item !== null && item.type === 'function_call';
+}
+
+/** Mutable accumulator threaded through per-item progress updates. */
+interface ExplorationAccumulator {
+  filesExamined: number;
+  activePRDs: string[];
+  flowSchemaNodes: PlanningModeState['flowSchemaNodes'];
+}
+
+function hasStringName(value: unknown): value is {
+  name: string;
+} {
+  return (
+    typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string'
+  );
+}
+
+/** Pull the PRD name out of a `plan/updatePrd` call's JSON arguments, if present. */
+function parsePrdName(args: string): string | null {
+  try {
+    const parsed = JSON.parse(args);
+    return hasStringName(parsed) ? parsed.name : null;
+  } catch {
+    // Unparseable arguments — caller falls back to a placeholder.
+    return null;
+  }
+}
+
+/** Apply a single `plan/updatePrd` call to the accumulator's PRD list. */
+function recordPrd(acc: ExplorationAccumulator, call: FunctionCallItem): void {
+  const name = parsePrdName(call.arguments);
+  if (name === null) {
+    if (acc.activePRDs.length === 0) {
+      acc.activePRDs.push('plan.md');
+    }
+    return;
+  }
+  if (!acc.activePRDs.includes(name)) {
+    acc.activePRDs.push(name);
+  }
+}
+
+/** Per-tool handlers that update exploration progress from a function call. */
+const PROGRESS_HANDLERS: Record<
+  string,
+  (acc: ExplorationAccumulator, call: FunctionCallItem) => void
+> = {
+  Read: (acc) => {
+    acc.filesExamined += 1;
+  },
+  'plan/updatePrd': recordPrd,
+  'plan/setPlanTree': (acc) => {
+    acc.flowSchemaNodes.push({
+      type: 'execution-tree',
+      description: 'FlowSchema execution tree defined via plan/setPlanTree',
+    });
+  },
+};
+
+/** Fold new conversation items into an updated exploration accumulator. */
+function accumulateProgress(
+  newItems: ReadonlyArray<Item>,
+  state: PlanningModeState,
+): ExplorationAccumulator {
+  const acc: ExplorationAccumulator = {
+    filesExamined: state.explorationProgress.filesExamined,
+    activePRDs: [
+      ...state.activePRDs,
+    ],
+    flowSchemaNodes: [
+      ...state.flowSchemaNodes,
+    ],
+  };
+  for (const item of newItems) {
+    if (!isFunctionCall(item)) {
+      continue;
+    }
+    PROGRESS_HANDLERS[item.name]?.(acc, item);
+  }
+  return acc;
+}
+
+/** Advance the planning phase based on accumulated progress. */
+function nextPhase(
+  current: PlanningModeState['planningPhase'],
+  acc: ExplorationAccumulator,
+): PlanningModeState['planningPhase'] {
+  if (current === 'exploration' && acc.filesExamined > 10) {
+    return 'authoring';
+  }
+  if (current === 'authoring' && acc.activePRDs.length > 0) {
+    return 'review';
+  }
+  return current;
 }
 
 function getFlowSchemaGuidelines(): string {
@@ -319,62 +417,17 @@ Focus on analysis, documentation, and planning rather than implementation.
           };
         }
 
-        // Track exploration progress based on tool usage
-        let newFilesExamined = state.explorationProgress.filesExamined;
-        const newActivePRDs = [
-          ...state.activePRDs,
-        ];
-        const newFlowSchemaNodes = [
-          ...state.flowSchemaNodes,
-        ];
-
-        for (const item of newItems) {
-          if (
-            typeof item === 'object' &&
-            item !== null &&
-            'type' in item &&
-            item.type === 'function_call'
-          ) {
-            if (item.name === 'Read') {
-              newFilesExamined += 1;
-            } else if (item.name === 'plan/updatePrd') {
-              // Extract PRD name from arguments if available
-              try {
-                const args = JSON.parse(item.arguments);
-                if (args.name && !newActivePRDs.includes(args.name)) {
-                  newActivePRDs.push(args.name);
-                }
-              } catch {
-                // If we can't parse arguments, add a default placeholder
-                if (newActivePRDs.length === 0) {
-                  newActivePRDs.push('plan.md');
-                }
-              }
-            } else if (item.name === 'plan/setPlanTree') {
-              newFlowSchemaNodes.push({
-                type: 'execution-tree',
-                description: 'FlowSchema execution tree defined via plan/setPlanTree',
-              });
-            }
-          }
-        }
-
-        // Determine phase based on progress
-        let newPhase = state.planningPhase;
-        if (state.planningPhase === 'exploration' && newFilesExamined > 10) {
-          newPhase = 'authoring';
-        } else if (state.planningPhase === 'authoring' && newActivePRDs.length > 0) {
-          newPhase = 'review';
-        }
+        // Track exploration progress based on tool usage, then advance phase.
+        const acc = accumulateProgress(newItems, state);
 
         return {
           state: {
             ...state,
-            planningPhase: newPhase,
-            activePRDs: newActivePRDs,
-            flowSchemaNodes: newFlowSchemaNodes,
+            planningPhase: nextPhase(state.planningPhase, acc),
+            activePRDs: acc.activePRDs,
+            flowSchemaNodes: acc.flowSchemaNodes,
             explorationProgress: {
-              filesExamined: newFilesExamined,
+              filesExamined: acc.filesExamined,
             },
           },
         };
