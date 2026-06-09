@@ -1,6 +1,11 @@
 import type { SystemPromptInputs } from '../ai/system-prompt.js';
 import { composeSystemPrompt } from '../ai/system-prompt.js';
 import { loadAgentInstructions } from '../config/agent-md-loader.js';
+import { communicationStyleLayer } from '../memory/communication-style-layer.js';
+import { environmentContextLayer } from '../memory/environment-context-layer.js';
+import { planningModeLayer } from '../memory/planning-mode-layer.js';
+import { promptEngineeringLayer } from '../memory/prompt-engineering-layer.js';
+import { toolGuidanceLayer } from '../memory/tool-guidance-layer.js';
 import type { NoeticPlugin } from '../plugins/types.js';
 import { createTaskMutationPolicy } from '../tasks/runtime/mutation-policy.js';
 import { taskTools } from '../tasks/runtime/tools.js';
@@ -283,6 +288,9 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       rtkIgnored,
     });
   const mode: AgentMode = opts.mode ?? 'act';
+  // Enhanced prompt-engineering layers model mode as 'normal' | 'planning';
+  // map the harness's 'act' onto 'normal' for those layers.
+  const layerMode: 'normal' | 'planning' = mode === 'planning' ? 'planning' : 'normal';
   const planHooks = opts.planHooks;
 
   const availableTools = {
@@ -460,6 +468,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
   const isTaskRun = (process.env.NOETIC_TASK_DIR ?? '').length > 0;
 
   const memory: MemoryLayer[] = [
+    // Core memory layers
     teammateInboxLayer({
       teammates,
     }),
@@ -481,10 +490,50 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       loader: () => Promise.resolve(agentInstructions),
     }),
     observationalMemory(),
+
+    // Enhanced prompt engineering layers
+    //
+    // NOTE on budget min-reservation (see core budget.ts Phase 1):
+    //   The framework's allocateBudgets reserves each layer's `min` budget
+    //   UNCONDITIONALLY in Phase 1, even for layers whose recall() returns
+    //   null in the current mode. This means every enhanced layer added here
+    //   consumes at least its `min` tokens from the prompt budget every turn.
+    //
+    //   planningModeLayer is intentionally gated behind `mode === 'planning'`
+    //   (below) so its 400-token min is NOT reserved in normal mode.
+    //   toolGuidanceLayer (min: 300) always returns a string in both modes,
+    //   so its min is always justified. environmentContextLayer (min: 200)
+    //   always returns context once initialized. If a layer can return null
+    //   (e.g. a layer with no data for the current mode), consider gating it
+    //   conditionally like planningModeLayer to avoid dead min reservations.
+    promptEngineeringLayer(),
+    communicationStyleLayer(),
+    environmentContextLayer({
+      config,
+      shell,
+    }),
+    toolGuidanceLayer({
+      tools,
+      mode: layerMode,
+    }),
+
+    // Mode-specific layers
+    ...(mode === 'planning'
+      ? [
+          planningModeLayer({
+            availableTools: tools,
+            currentMode: layerMode,
+          }),
+        ]
+      : []),
+
+    // Existing layers continue
     fileReference(),
     durableTaskState(),
     ...toolMemoryLayer(tools),
     ...pluginMemory,
+
+    // Skills layer
     ...(allSkills.length > 0
       ? [
           skillsLayer(filterSkillsForMode(allSkills, mode), {

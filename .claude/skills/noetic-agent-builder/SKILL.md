@@ -78,6 +78,8 @@ Memory layers inject context into the LLM view (via `recall`) and persist state 
 - **`staticContent()`** -- immutable instruction injection from loaded content
 - **`toolMemoryLayer()`** -- auto-generated layers from tool `memory` declarations
 
+The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
+
 Recall can return a `RecallResult` object or a plain `string` (shorthand -- the agent harness wraps it in a developer message).
 
 ## How to Build an Agent

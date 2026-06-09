@@ -498,6 +498,23 @@ interface PlanState {
 
 ---
 
+## CLI-Specific Layers (`packages/cli`)
+
+The CLI package (`packages/cli/src/memory/`) provides several memory layers built on the `@noetic-tools/memory` interface. These implement prompt engineering patterns adapted from Claude Code's system:
+
+| Layer | Source | Purpose |
+|-------|--------|---------|
+| `promptEngineeringLayer()` | `packages/cli/src/memory/prompt-engineering-layer.ts` | Core behavioral guidelines, tool usage tracking, error-based adaptation |
+| `communicationStyleLayer()` | `packages/cli/src/memory/communication-style-layer.ts` | Adaptive communication patterns (concise/normal/verbose) based on user message analysis |
+| `environmentContextLayer(config)` | `packages/cli/src/memory/environment-context-layer.ts` | Dynamic environment detection (platform, git, Node.js, shell, package manager) |
+| `toolGuidanceLayer(config)` | `packages/cli/src/memory/tool-guidance-layer.ts` | Context-aware tool preference hierarchy and mode-specific guidance |
+| `planningModeLayer(config)` | `packages/cli/src/memory/planning-mode-layer.ts` | Plan-mode instructions with FlowSchema types, PRD authoring, phase tracking |
+| `skillsLayer(definitions, config)` | `@noetic-tools/code-agent` (`packages/code-agent/src/memory/skills-layer.ts`), re-exported via `packages/cli/src/memory/skills-layer.ts` | Progressive skill disclosure with inline command processing |
+
+These layers all use `execution` scope and `Slot.PROCEDURAL` (250) or `Slot.OBSERVATIONS` (200). They are assembled in the harness factory (`src/harness/factory.ts`) and activate when the CLI harness is created. For full documentation of each layer's slot, budget, state shape, and behavior, see `packages/cli/docs/enhanced-prompt-engineering.md`.
+
+---
+
 ## Checklist for Custom Layer Authors
 
 1. Pick a unique `id`. Namespace it: `'mycompany/layer-name'`.

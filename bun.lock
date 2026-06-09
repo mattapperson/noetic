@@ -116,7 +116,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "dependencies": {
         "@noetic-tools/memory": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -161,7 +161,7 @@
     },
     "packages/memory": {
       "name": "@noetic-tools/memory",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -271,7 +271,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",

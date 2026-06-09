@@ -21,6 +21,8 @@ import planAgentSource from './plan/SKILL.md' with { type: 'text' };
 // @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
 import planModeSkillSource from './plan-mode/SKILL.md' with { type: 'text' };
 // @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
+import promptOptimizationSkillSource from './prompt-optimization/SKILL.md' with { type: 'text' };
+// @ts-expect-error — the `with` import attribute is not yet part of TS lib defaults.
 import verificationAgentSource from './verification/SKILL.md' with { type: 'text' };
 
 //#region Helpers
@@ -75,6 +77,10 @@ const BUILT_IN_INPUTS: ReadonlyArray<BuiltInSkillInput> = [
   {
     dirName: 'verification',
     source: verificationAgentSource,
+  },
+  {
+    dirName: 'prompt-optimization',
+    source: promptOptimizationSkillSource,
   },
 ];
 
