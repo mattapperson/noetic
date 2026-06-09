@@ -212,6 +212,56 @@
   }
 }
 
+@keyframes tui-glitch-tear {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 0;
+    clip-path: polygon(0 18%, 100% 18%, 100% 42%, 0 42%);
+  }
+  4% {
+    transform: translateX(14px);
+    opacity: 0.95;
+    text-shadow: -2px 0 rgba(255, 77, 203, 0.8);
+    clip-path: polygon(0 18%, 100% 18%, 100% 42%, 0 42%);
+  }
+  12% {
+    transform: translateX(10px);
+    opacity: 0.9;
+  }
+  20% {
+    transform: translateX(-18px);
+    opacity: 0.95;
+    text-shadow: 2px 0 rgba(56, 189, 248, 0.8);
+    clip-path: polygon(0 18%, 100% 18%, 100% 42%, 0 42%);
+  }
+  26% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  54% {
+    transform: translateX(-12px);
+    opacity: 0;
+    clip-path: polygon(0 58%, 100% 58%, 100% 80%, 0 80%);
+  }
+  60% {
+    transform: translateX(-12px);
+    opacity: 0.8;
+    text-shadow: 2px 0 rgba(56, 189, 248, 0.6);
+    clip-path: polygon(0 58%, 100% 58%, 100% 80%, 0 80%);
+  }
+  68% {
+    transform: translateX(10px);
+    opacity: 0.7;
+    text-shadow: -2px 0 rgba(255, 77, 203, 0.6);
+    clip-path: polygon(0 58%, 100% 58%, 100% 80%, 0 80%);
+  }
+  74% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+}
+
 @keyframes pulse-dot {
   0%,
   100% {
@@ -278,6 +328,21 @@
 
 .tui-glitch-burst {
   animation: tui-glitch-burst 0.7s steps(28, end);
+}
+
+.tui-glitch-burst::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  color: var(--color-tui-green);
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  pointer-events: none;
+  opacity: 0;
+  clip-path: polygon(0 18%, 100% 18%, 100% 42%, 0 42%);
+  animation: tui-glitch-tear 0.7s steps(24, end);
 }
 
 .tui-glitch-burst::after {
@@ -477,6 +542,7 @@
   .tui-phosphor,
   .tui-pulse,
   .tui-glitch-burst,
+  .tui-glitch-burst::before,
   .tui-glitch-burst::after {
     animation: none;
   }

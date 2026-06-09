@@ -149,6 +149,7 @@ export function Hero(): ReactNode {
             duration: 0.5,
           }}
           className={glitch ? 'tui-glow tui-glitch-burst' : 'tui-glow'}
+          data-text="NOETIC"
           style={{
             fontSize: 'clamp(36px, 8vw, 96px)',
             fontWeight: 800,
