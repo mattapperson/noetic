@@ -9,7 +9,7 @@ They are mandatory, not optional.
 2. **Code → Docs**: When code changes alter public API surface, behavior, or configuration, update the corresponding doc pages.
 3. **Spec → Docs**: When a spec is added or revised, ensure the docs reflect the new specification.
 4. **Code → Skill (agent-builder)**: When public API surface changes (new builders, patterns, memory layers, tool APIs, or runtime methods), update the `noetic-agent-builder` skill at `.claude/skills/noetic-agent-builder/`. Update `references/api-reference.md` for API changes and `references/composition-patterns.md` for new patterns or usage examples.
-5. **Code → Skill (eval)**: When `@noetic/core` or `@noetic/eval` changes affect the eval framework (scorers, runner, optimization, CLI, adapters, regression), update the `noetic-eval` skill at `.claude/skills/noetic-eval/`. Update `SKILL.md` for workflow/concept changes and `references/api-reference.md` for API signature changes.
+5. **Code → Skill (eval)**: When `@noetic-tools/core` or `@noetic/eval` changes affect the eval framework (scorers, runner, optimization, CLI, adapters, regression), update the `noetic-eval` skill at `.claude/skills/noetic-eval/`. Update `SKILL.md` for workflow/concept changes and `references/api-reference.md` for API signature changes.
 
 ## Reference Mapping
 
@@ -24,18 +24,22 @@ They are mandatory, not optional.
 | `08-runtime.md` (AgentHarness) | `runtime/` | `runtime.mdx`, `api/runtime-types.mdx` |
 | `09-error-model.md` | `errors/` | `errors.mdx` |
 | `10-observability.md` | `observability/` | `observability.mdx` |
-| `11-memory-layer-system.md`, `12-builtin-memory-layers.md` | `memory/` | `memory/`, `api/memory-types.mdx` |
+| `11-memory-layer-system.md`, `12-builtin-memory-layers.md` | `packages/memory/src/` (`MemoryLayer` contract in `packages/types/src/types/memory.ts`) | `memory/`, `api/memory-types.mdx` |
+| (foundation types) | `packages/types/src/` | `api/` |
 | `13-patterns.md` | `patterns/` | `patterns/` |
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
+| `22-cli-architecture.md` | `packages/cli/src/` | (cli docs TBD) |
+| `24-mirage-resources.md` | `packages/mirage/src/` | `framework/virtual-filesystem.mdx` |
+| `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
 
-**Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/`, Docs → `packages/web/content/docs/`
+**Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 
 ## Skill Mapping
 
 | Source Area | Skill File |
 |-------------|------------|
-| `builders/`, `types/`, `patterns/`, `memory/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
+| `builders/`, `types/`, `patterns/`, `packages/memory/src/memory/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
 | `patterns/`, `examples/` | `.claude/skills/noetic-agent-builder/references/composition-patterns.md` |
 | Any public API change | `.claude/skills/noetic-agent-builder/SKILL.md` (if core concepts change) |
 | `packages/eval/src/runner/`, `packages/eval/src/scorers/` | `.claude/skills/noetic-eval/references/api-reference.md` |

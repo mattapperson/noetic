@@ -1,10 +1,11 @@
 //#region Adapters
 
 /** @public */
-export { createLocalFsAdapter } from './adapters/local-fs-adapter';
-
+export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
 /** @public */
-export { createLocalShellAdapter } from './adapters/local-shell-adapter';
+export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
+/** @public */
+export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
 
 /** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
@@ -17,6 +18,10 @@ export { createOpenRouterEmbed } from './adapters/openrouter';
 export { channel } from './builders/channel-builder';
 /** @public */
 export { branch, fork } from './builders/control-flow-builders';
+/** @public */
+export type { EveryOptions } from './builders/every';
+/** @public */
+export { every } from './builders/every';
 /** @public */
 export { layerData, layerFn } from './builders/layer-provides-builders';
 /** @public */
@@ -33,34 +38,64 @@ export { spawn } from './builders/spawn-builder';
 export { step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
+/** @public */
+export type { HydrationContext } from './builders/workflow-hydrator';
+/** @public */
+export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
 
 //#endregion
 
 //#region Conditions
 
 /** @public */
-export type { Condition, OtherwiseClause, WhenClause } from './conditions';
+export type { Condition, OtherwiseClause, WhenClause } from './conditions/conditions';
 /** @public */
 export {
   aiCondition,
   allCondition,
   anyCondition,
-  cosineSimilarity,
   embeddingMatch,
   otherwise,
   semanticRoute,
   semanticSwitch,
   when,
-} from './conditions';
+} from './conditions/conditions';
+/** @public */
+export { cosineSimilarity } from './conditions/cosine-similarity';
 
 //#endregion
 
 //#region Errors
 
 /** @public */
-export { isNoeticConfigError, NoeticConfigError } from './errors/noetic-config-error';
 /** @public */
-export { isNoeticError, NoeticErrorImpl } from './errors/noetic-error';
+export {
+  isNoeticConfigError,
+  isNoeticError,
+  NoeticConfigError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
+
+//#endregion
+
+//#region Ask-User Schemas
+
+/** @public */
+export type {
+  AskUserAnnotation,
+  AskUserInput,
+  AskUserOption,
+  AskUserOutput,
+  AskUserQuestion,
+} from './types/ask-user-types';
+/** @public */
+export {
+  AskUserAnnotationSchema,
+  AskUserInputSchema,
+  AskUserOptionSchema,
+  AskUserOutputSchema,
+  AskUserQuestionSchema,
+} from './types/ask-user-types';
 
 //#endregion
 
@@ -74,50 +109,84 @@ export { execute } from './interpreter/execute';
 //#region Memory Layers
 
 /** @public */
-export type { DurableTaskState, DurableTaskStateConfig } from './memory/layers/durable-task-state';
 /** @public */
-export { durableTaskState } from './memory/layers/durable-task-state';
 /** @public */
-export { fileReference } from './memory/layers/file-reference';
+/** @public */
+/** @public */
 /** @public */
 export type {
+  DurableTaskState,
+  DurableTaskStateConfig,
+  FactExtractor,
+  FactSearcher,
+  HistoryWindowConfig,
   ObservationalMemoryConfig,
   ObservationalState,
-} from './memory/layers/observational-memory';
-/** @public */
-export { observationalMemory } from './memory/layers/observational-memory';
-/** @public */
-export type {
   PlanEnterSessionCallback,
   PlanExecutionEntry,
   PlanExitCallback,
   PlanMemoryConfig,
   PlanState,
-} from './memory/layers/plan';
+  TemporalFact,
+  TemporalMemoryConfig,
+  TemporalSearchResult,
+  WorkingMemoryConfig,
+  WorkingMemoryState,
+} from '@noetic-tools/memory';
 /** @public */
-export { PlanPhase, planMemory } from './memory/layers/plan';
 /** @public */
-export { staticContent } from './memory/layers/static-content';
 /** @public */
-export { steering } from './memory/layers/steering';
 /** @public */
-export { toolMemoryLayer } from './memory/layers/tool-memory-layer';
 /** @public */
-export type { WorkingMemoryConfig, WorkingMemoryState } from './memory/layers/working-memory';
 /** @public */
-export { workingMemory } from './memory/layers/working-memory';
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+/** @public */
+export {
+  durableTaskState,
+  fileReference,
+  findFunctionCall,
+  historyWindow,
+  observationalMemory,
+  PlanPhase,
+  planMemory,
+  staticContent,
+  steering,
+  stripUnresolvedToolCalls,
+  temporalMemory,
+  toolMemoryLayer,
+  workingMemory,
+} from '@noetic-tools/memory';
+
+//#endregion
+
+//#region Message Utilities
+
+/** @public */
+export { createMessage, estimateTokens } from '@noetic-tools/types';
 
 //#endregion
 
 //#region Observability
 
 /** @public */
+export { GenAI, ToolAttr } from './observability/genai-attributes';
+/** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
+/** @public */
+export { createInMemoryStorage } from './runtime/in-memory-storage';
 
 //#endregion
 
 //#region Patterns
 
+/** @public */
+export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './patterns/dynamic-workflow';
+/** @public */
+export { dynamicWorkflow, parseAndRunWorkflow } from './patterns/dynamic-workflow';
 /** @public */
 export type {
   FlowNode,
@@ -129,6 +198,10 @@ export type {
 } from './patterns/flow';
 /** @public */
 export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
+/** @public */
+export type { InterviewOpts, InterviewQuestionAnswer, InterviewResult } from './patterns/interview';
+/** @public */
+export { interview } from './patterns/interview';
 /** @public */
 export type { PlanConstraints, PlanNode } from './patterns/plans';
 /** @public */
@@ -143,19 +216,79 @@ export { react } from './patterns/react';
 //#region Runtime
 
 /** @public */
-export { AgentHarness } from './runtime/agent-harness';
+export { AgentHarness } from './harness/agent-harness';
+/** @public */
+export type {
+  AfterFirstTurnContext,
+  CheckpointStore,
+  CreateCheckpointStoreOptions,
+  CreateNudgeMessageOpts,
+  DetachedSignal,
+  RunnableLoopHarness,
+  RunnableLoopOpts,
+  SessionSeedHarness,
+  StallNudgeOpts,
+} from './runtime/durable';
+/** @public */
+export {
+  CheckpointKeys,
+  createCheckpointStore,
+  createDetachedSignal,
+  createNudgeMessage,
+  createStallNudgeHook,
+  DEFAULT_NUDGE_MESSAGE_TEXT,
+  runnableLoop,
+  seedFromItems,
+} from './runtime/durable';
+/** @public */
+export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
+
+//#endregion
+
+//#region Schemas
+
+/** @public */
+export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
+/** @public */
+export type {
+  BranchRoute,
+  BranchWorkflowNode,
+  EveryWorkflowNode,
+  ForkWorkflowNode,
+  LlmWorkflowNode,
+  LoopWorkflowNode,
+  MergeStrategy,
+  ProvideWorkflowNode,
+  SequenceWorkflowNode,
+  SpawnWorkflowNode,
+  ToolWorkflowNode,
+  UntilPredicate,
+  WorkflowDocument,
+  WorkflowNode,
+} from './schemas/workflow';
+/** @public */
+export {
+  MergeStrategySchema,
+  UntilPredicateSchema,
+  validateWorkflow,
+  WorkflowDocumentSchema,
+  WorkflowNodeSchema,
+  walkWorkflow,
+  workflowDepth,
+} from './schemas/workflow';
 
 //#endregion
 
 //#region Types — Channels
 
 /** @public */
-export type { Channel, ChannelHandle, ExternalChannel } from './types/channel';
+export type { Channel, ChannelHandle, ExternalChannel } from '@noetic-tools/types';
 
 //#endregion
 
 //#region Types — Common
 
+/** @public */
 /** @public */
 export type {
   LLMResponse,
@@ -166,23 +299,34 @@ export type {
   TokenUsage,
   Tool,
   ToolMemoryDeclaration,
-} from './types/common';
+} from '@noetic-tools/types';
 
 //#endregion
 
 //#region Types — Context
 
 /** @public */
-export type { Context, ItemLog, LastLayerUsage, LayerUsageEntry } from './types/context';
+/** @public */
+/** @public */
+export type {
+  Context,
+  ContextHarness,
+  CwdState,
+  ItemLog,
+  LastLayerUsage,
+  LayerUsageEntry,
+} from '@noetic-tools/types';
+/** @public */
+export { getToolCwd, setToolCwd, snapshotCwdState } from './runtime/cwd-helpers';
 
 //#endregion
 
 //#region Types — Detached
 
 /** @public */
-export type { DetachedHandle } from './types/detached';
+export type { DetachedHandle } from '@noetic-tools/types';
 /** @public */
-export { DetachedStatus } from './types/detached';
+export { DetachedStatus } from '@noetic-tools/types';
 
 //#endregion
 
@@ -193,10 +337,32 @@ export type { EmbedFn } from './types/embed';
 
 //#endregion
 
+//#region Types — Checkpoint
+
+/** @public */
+export type {
+  CheckpointSnapshot,
+  CwdSnapshot,
+  FrontierFrame,
+  ItemLogSnapshot,
+  PendingAskUserSnapshot,
+} from './types/checkpoint';
+/** @public */
+export {
+  CheckpointSchemaVersion,
+  CheckpointSnapshotSchema,
+  CwdSnapshotSchema,
+  FrontierFrameSchema,
+  ItemLogSnapshotSchema,
+  PendingAskUserSnapshotSchema,
+} from './types/checkpoint';
+
+//#endregion
+
 //#region Types — Error
 
 /** @public */
-export type { NoeticError } from './types/error';
+export type { NoeticError } from '@noetic-tools/types';
 
 //#endregion
 
@@ -205,14 +371,23 @@ export type { NoeticError } from './types/error';
 /** @public */
 export type {
   ContentPart,
+  DeveloperMessageExtensionItem,
   ExecuteInput,
+  ExtendedItem,
+  ExtensionItem,
   FileSearchItem,
   FunctionCallItem,
   FunctionCallOutputItem,
   ImageGenerationItem,
+  InferExtendedItem,
+  InputContentPart,
+  InputFilePart,
+  InputImagePart,
   InputMessageItem,
   InputTextPart,
   Item,
+  ItemBase,
+  ItemSchemaExtensions,
   MessageItem,
   OutputItem,
   OutputTextPart,
@@ -222,7 +397,7 @@ export type {
   ServerToolItem,
   SummaryTextPart,
   WebSearchItem,
-} from './types/items';
+} from '@noetic-tools/types';
 
 //#endregion
 
@@ -234,8 +409,6 @@ export type {
   CompleteParams,
   ContextMemory,
   DisposeParams,
-  ExecutionContext,
-  ExecutionOutcome,
   InferMemory,
   InferMemoryShape,
   InitParams,
@@ -247,7 +420,6 @@ export type {
   MemoryConfig,
   MemoryHooks,
   MemoryLayer,
-  MemoryScope,
   ProjectionPolicy,
   RecallParams,
   RecallResult,
@@ -259,16 +431,23 @@ export type {
   StorageAdapter,
   StoreParams,
   StoreResult,
-} from './types/memory';
+} from '@noetic-tools/memory';
 /** @public */
-export { Slot } from './types/memory';
+export { Slot } from '@noetic-tools/memory';
+/** @public */
+export type {
+  ExecutionContext,
+  ExecutionOutcome,
+  MemoryCallModelRequest,
+  MemoryScope,
+} from '@noetic-tools/types';
 
 //#endregion
 
 //#region Types — Observability
 
 /** @public */
-export type { MemoryTraceSpan, Span, TraceExporter } from './types/observability';
+export type { MemoryTraceSpan, Span, TraceExporter } from '@noetic-tools/types';
 
 //#endregion
 
@@ -281,7 +460,7 @@ export type {
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,
-} from './types/harness-result';
+} from '@noetic-tools/types';
 
 //#endregion
 
@@ -298,7 +477,7 @@ export type {
   HarnessStatus,
   RecallLayerOutput,
   SessionScope,
-} from './types/runtime';
+} from '@noetic-tools/types';
 
 //#endregion
 
@@ -315,9 +494,9 @@ export type {
   SteeringDecision,
   SteeringRule,
   SteeringState,
-} from './types/steering';
+} from '@noetic-tools/types';
 /** @public */
-export { LedgerEntryKind, SteeringAction } from './types/steering';
+export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';
 
 //#endregion
 
@@ -342,28 +521,48 @@ export type {
   StepTool,
   Until,
   Verdict,
-} from './types/step';
+} from '@noetic-tools/types';
 
 //#endregion
 
 //#region Types — Filesystem
 
 /** @public */
-export type { FsAdapter, FsStats } from './types/fs-adapter';
+export type { FsAdapter, FsStats } from '@noetic-tools/types';
 
 //#endregion
 
 //#region Types — Shell
 
 /** @public */
-export type { ShellAdapter, ShellExecOptions, ShellExecResult } from './types/shell-adapter';
+/** @public */
+export type {
+  ProcessSubprocessRequest,
+  SerializedError,
+  ShellAdapter,
+  ShellExecOptions,
+  ShellExecResult,
+  StepSubprocessOverrides,
+  StepSubprocessRequest,
+  SubprocessAdapter,
+  SubprocessControlResult,
+  SubprocessHandle,
+  SubprocessHandleMetadata,
+  SubprocessRequest,
+  SubprocessStatus,
+  SubprocessStopResult,
+} from '@noetic-tools/types';
+/** @public */
+export { TIMEOUT_ERROR_PREFIX } from '@noetic-tools/types';
+/** @public Reusable error-serialiser used by custom SubprocessAdapter implementations. */
+export { serializeError } from './adapters/in-memory-subprocess/metadata';
 
 //#endregion
 
 //#region Types — Tool Context
 
 /** @public */
-export type { ToolExecutionContext, ToolMemory } from './types/tool-context';
+export type { ToolExecutionContext, ToolMemory } from '@noetic-tools/types';
 
 //#endregion
 

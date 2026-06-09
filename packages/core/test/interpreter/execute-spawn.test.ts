@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import { createLayerStateStore, Slot } from '@noetic-tools/memory';
+import type { Context, Item, StepSpawn } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeSpawn } from '../../src/interpreter/execute-spawn';
-import { createLayerStateStore } from '../../src/memory/layer-lifecycle';
+import { channel } from '../../src/builders/channel-builder';
+import { executeSpawn } from '../../src/interpreter/execute-action';
+import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { Context } from '../../src/types/context';
-import type { Item } from '../../src/types/items';
-import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
-import { Slot } from '../../src/types/memory';
-import type { StepSpawn } from '../../src/types/step';
-import { makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
+import { getItemId, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
@@ -197,7 +196,7 @@ describe('executeSpawn', () => {
       expect(childItems).toHaveLength(1);
       const firstItem = childItems[0];
       assert(firstItem !== undefined);
-      expect(firstItem.id).toBe('spawn-1');
+      expect(getItemId(firstItem)).toBe('spawn-1');
     });
   });
 
@@ -303,7 +302,7 @@ describe('executeSpawn', () => {
       expect(childItems).toHaveLength(1);
       const item = childItems[0];
       assert(item !== undefined);
-      expect(item.id).toBe('spawn-item');
+      expect(getItemId(item)).toBe('spawn-item');
     });
   });
 
@@ -367,8 +366,48 @@ describe('executeSpawn', () => {
       assert(first !== undefined);
       assert(second !== undefined);
       // Lower slot (WORKING_MEMORY=100) should come before higher slot (EPISODIC=300)
-      expect(first.id).toBe('low-item');
-      expect(second.id).toBe('high-item');
+      expect(getItemId(first)).toBe('low-item');
+      expect(getItemId(second)).toBe('high-item');
+    });
+  });
+
+  describe('channel store inheritance', () => {
+    it('child context inherits channelStore so it can read/write parent channels', async () => {
+      const ch = channel<number>('spawn-share', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      const channelStore = new ChannelStore();
+
+      let sendError: unknown = null;
+      let received: number | undefined;
+
+      const step: StepSpawn<ContextMemory, void, void> = {
+        kind: 'spawn',
+        id: 'channel-spawn',
+        child: {
+          kind: 'run',
+          id: 'child',
+          execute: async (_input, c) => {
+            try {
+              c.send(ch, 13);
+            } catch (e) {
+              sendError = e;
+            }
+            const v = c.tryRecv(ch);
+            received = v ?? undefined;
+          },
+        },
+      };
+
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        channelStore,
+      });
+      await executeSpawn(step, undefined, ctx, simpleExecute);
+      expect(sendError).toBeNull();
+      assert(received !== undefined);
+      expect(received).toBe(13);
     });
   });
 });

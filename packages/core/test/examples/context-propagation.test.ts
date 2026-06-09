@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import type {
+  AgentHarnessContract,
+  DetachedHandle,
+  ToolExecutionContext,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { createAsyncLaunchTool, createSyncDelegateTool } from '../../examples/delegate-tools';
 import { channel } from '../../src/builders/channel-builder';
-import { AgentHarness } from '../../src/runtime/agent-harness';
-import type { DetachedHandle } from '../../src/types/detached';
-import type { AgentHarnessContract } from '../../src/types/runtime';
-import type { ToolExecutionContext } from '../../src/types/tool-context';
+import { AgentHarness } from '../../src/harness/agent-harness';
 
 function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionContext {
   const ctx = harness.createContext({
@@ -44,8 +46,17 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured
-      if (!(err instanceof Error && err.message.includes('callModel'))) {
+      // Expected: the spawned agent's model call fails because this bare test
+      // harness configures no LLM provider / callModel override. The harness
+      // surfaces this as either "No callModel override configured." or "No LLM
+      // provider configured on this harness." — tolerate both; anything else
+      // is a real failure. The assertion below is what this test verifies.
+      if (
+        !(
+          err instanceof Error &&
+          (err.message.includes('callModel') || err.message.includes('LLM provider'))
+        )
+      ) {
         throw err;
       }
     }
@@ -79,8 +90,17 @@ describe('context propagation in delegate tools', () => {
         toolCtx,
       );
     } catch (err) {
-      // Expected: no callModel configured
-      if (!(err instanceof Error && err.message.includes('callModel'))) {
+      // Expected: the spawned agent's model call fails because this bare test
+      // harness configures no LLM provider / callModel override. The harness
+      // surfaces this as either "No callModel override configured." or "No LLM
+      // provider configured on this harness." — tolerate both; anything else
+      // is a real failure. The assertion below is what this test verifies.
+      if (
+        !(
+          err instanceof Error &&
+          (err.message.includes('callModel') || err.message.includes('LLM provider'))
+        )
+      ) {
         throw err;
       }
     }

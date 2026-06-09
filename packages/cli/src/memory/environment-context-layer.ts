@@ -16,8 +16,8 @@
  * dropped until the output fits.
  */
 
-import type { FsAdapter, MemoryLayer, RecallParams, ShellAdapter } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { FsAdapter, MemoryLayer, RecallParams, ShellAdapter } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 import type { AgentConfig } from '../types/config.js';
 

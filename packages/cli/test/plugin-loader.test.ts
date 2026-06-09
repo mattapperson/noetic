@@ -110,6 +110,62 @@ describe('plugin loader', () => {
     expect(typeof plugins[0]?.loadingMessages).toBe('function');
   });
 
+  it('rejects plugins where reminderTriggers is not a function', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'noetic-cli-plugin-'));
+    await writeFile(
+      join(dir, 'bad-reminder.ts'),
+      [
+        'export default {',
+        "  name: 'bad-reminder',",
+        "  version: '1.0.0',",
+        "  reminderTriggers: 'not a function',",
+        '};',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      loadPlugins(
+        {
+          ...baseConfig,
+          plugins: [
+            './bad-reminder.ts',
+          ],
+        },
+        dir,
+        buildCtx,
+      ),
+    ).rejects.toThrow('reminderTriggers');
+  });
+
+  it('rejects plugins where subagentPresets is not a function', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'noetic-cli-plugin-'));
+    await writeFile(
+      join(dir, 'bad-presets.ts'),
+      [
+        'export default {',
+        "  name: 'bad-presets',",
+        "  version: '1.0.0',",
+        '  subagentPresets: [],',
+        '};',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      loadPlugins(
+        {
+          ...baseConfig,
+          plugins: [
+            './bad-presets.ts',
+          ],
+        },
+        dir,
+        buildCtx,
+      ),
+    ).rejects.toThrow('subagentPresets');
+  });
+
   it('rejects plugins where footer is not a function', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'noetic-cli-plugin-'));
     await writeFile(

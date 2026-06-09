@@ -1,0 +1,23 @@
+{
+  "name": "@noetic/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end evaluations running shipping Noetic agents against external benchmarks",
+  "scripts": {
+    "longmem": "bun longmem/run.ts",
+    "longmem:download": "bun longmem/download.ts",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix ."
+  },
+  "dependencies": {
+    "@noetic-tools/code-agent": "workspace:*",
+    "@noetic-tools/core": "workspace:*",
+    "@noetic/eval": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

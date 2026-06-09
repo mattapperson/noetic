@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createLocalFsAdapter } from '@noetic/core';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { createEmulatedShellAdapter } from '../../src/adapters/emulated-shell-adapter.js';
 
 describe('createEmulatedShellAdapter', () => {

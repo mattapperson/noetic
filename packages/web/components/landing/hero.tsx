@@ -1,29 +1,15 @@
 'use client';
 
-import { AnimatePresence, motion, useScroll, useTransform } from 'motion/react';
+import { motion, useReducedMotion, useScroll, useTransform } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ValueProps } from '@/components/landing/value-props';
 import { TuiWindow } from '@/components/tui/tui-window';
 import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 
-const INSTALL_COMMANDS = [
-  {
-    prefix: '$ bun add ',
-    package: '@noetic/core',
-  },
-  {
-    prefix: '$ npm install ',
-    package: '@noetic/core',
-  },
-  {
-    prefix: '$ pnpm add ',
-    package: '@noetic/core',
-  },
-] as const;
-
-const HERO_CODE = `import { react, AgentHarness } from '@noetic/core';
+const HERO_CODE = `import { AgentHarness, react } from '@noetic-tools/core';
 
 const agent = react({
   model: 'gpt-4o',
@@ -36,14 +22,13 @@ const harness = new AgentHarness({
   initialStep: agent,
   params: {},
 });
-const result = await harness.execute('Find recent AI news');`;
 
-const CYCLE_INTERVAL = 3e3;
+await harness.execute('Find recent AI news');
+const { text } = await harness.getAgentResponse();`;
+
+const HIGHLIGHTED_HERO_CODE = highlightCode(HERO_CODE);
 
 export function Hero(): ReactNode {
-  const [commandIndex, setCommandIndex] = useState(0);
-  const containerRef = useRef<HTMLElement>(null);
-
   const { scrollY } = useScroll();
   const opacity = useTransform(
     scrollY,
@@ -68,23 +53,47 @@ export function Hero(): ReactNode {
     ],
   );
 
-  const cycleCommand = useCallback((): void => {
-    setCommandIndex((prev) => (prev + 1) % INSTALL_COMMANDS.length);
-  }, []);
+  const reducedMotion = useReducedMotion();
+  const [glitch, setGlitch] = useState(false);
 
   useEffect(() => {
-    const interval = setInterval(cycleCommand, CYCLE_INTERVAL);
-    return (): void => clearInterval(interval);
+    if (reducedMotion) {
+      return;
+    }
+    let mounted = true;
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (): void => {
+      const delay = 1e4 + Math.random() * 1e4;
+      pending = setTimeout(() => {
+        if (!mounted) {
+          return;
+        }
+        setGlitch(true);
+        pending = setTimeout(() => {
+          if (!mounted) {
+            return;
+          }
+          setGlitch(false);
+          schedule();
+        }, 700);
+      }, delay);
+    };
+    schedule();
+    return (): void => {
+      mounted = false;
+      if (pending) {
+        clearTimeout(pending);
+      }
+    };
   }, [
-    cycleCommand,
+    reducedMotion,
   ]);
 
   return (
     <section
-      ref={containerRef}
       style={{
         position: 'sticky',
-        inset: '64px 0px 0px',
+        inset: '102px 0px 0px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -139,13 +148,15 @@ export function Hero(): ReactNode {
             delay: 0.15,
             duration: 0.5,
           }}
-          className="tui-glow"
+          className={glitch ? 'tui-glow tui-glitch-burst' : 'tui-glow'}
+          data-text="NOETIC"
           style={{
             fontSize: 'clamp(36px, 8vw, 96px)',
             fontWeight: 800,
             color: 'var(--color-tui-green)',
             marginBottom: '16px',
             lineHeight: 1.1,
+            position: 'relative',
           }}
         >
           NOETIC
@@ -162,14 +173,15 @@ export function Hero(): ReactNode {
             delay: 0.3,
           }}
           style={{
-            fontSize: 'clamp(16px, 2.5vw, 18px)',
+            fontSize: 'clamp(18px, 2.6vw, 22px)',
+            fontWeight: 600,
             color: 'var(--color-tui-fg)',
-            maxWidth: '560px',
-            marginBottom: '12px',
-            lineHeight: 1.5,
+            maxWidth: '620px',
+            marginBottom: '14px',
+            lineHeight: 1.4,
           }}
         >
-          Composable primitives. Clean code from 10 lines to 10,000.
+          Build AI agents you&rsquo;d actually trust in production.
         </motion.p>
 
         <motion.p
@@ -183,15 +195,15 @@ export function Hero(): ReactNode {
             delay: 0.45,
           }}
           style={{
-            fontSize: 'clamp(13px, 2vw, 14px)',
-            color: 'var(--color-tui-muted)',
-            maxWidth: '560px',
-            marginBottom: '40px',
-            lineHeight: 1.7,
+            fontSize: 'clamp(13px, 2vw, 15px)',
+            color: 'var(--color-tui-secondary)',
+            maxWidth: '620px',
+            marginBottom: '32px',
+            lineHeight: 1.6,
           }}
         >
-          Start with pre-built patterns — ReAct, task trees, dual-agent loops. Or compose your own.
-          Reactive memory keeps context windows manageable automatically.
+          Noetic gives you composable TypeScript primitives, memory that keeps token costs flat, and
+          evals that catch regressions before users do.
         </motion.p>
 
         <motion.div
@@ -205,53 +217,48 @@ export function Hero(): ReactNode {
             delay: 0.6,
           }}
           style={{
-            marginBottom: '40px',
+            marginBottom: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
             fontSize: '14px',
           }}
         >
-          <AnimatePresence mode="wait">
-            <motion.span
-              key={commandIndex}
-              initial={{
-                opacity: 0,
-                y: 8,
-              }}
-              animate={{
-                opacity: 1,
-                y: 0,
-              }}
-              exit={{
-                opacity: 0,
-                y: -8,
-              }}
-              transition={{
-                duration: 0.15,
-              }}
+          <span
+            style={{
+              background: 'var(--color-tui-surface)',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              fontFamily: 'var(--font-mono)',
+              border: '1px solid var(--color-tui-border)',
+              display: 'inline-block',
+            }}
+          >
+            <span
               style={{
-                background: 'var(--color-tui-surface)',
-                padding: '8px 16px',
-                borderRadius: '4px',
-                fontFamily: 'var(--font-mono)',
-                border: '1px solid var(--color-tui-border)',
-                display: 'inline-block',
+                color: 'var(--color-tui-muted)',
               }}
             >
-              <span
-                style={{
-                  color: 'var(--color-tui-muted)',
-                }}
-              >
-                {INSTALL_COMMANDS[commandIndex].prefix}
-              </span>
-              <span
-                style={{
-                  color: 'var(--color-tui-fg)',
-                }}
-              >
-                {INSTALL_COMMANDS[commandIndex].package}
-              </span>
-            </motion.span>
-          </AnimatePresence>
+              {'$ '}
+            </span>
+            <span
+              style={{
+                color: 'var(--color-tui-fg)',
+              }}
+            >
+              bun add @noetic-tools/core
+            </span>
+          </span>
+          <span
+            style={{
+              fontSize: '12px',
+              color: 'var(--color-tui-muted)',
+            }}
+          >
+            (npm · pnpm)
+          </span>
         </motion.div>
 
         <motion.div
@@ -309,6 +316,24 @@ export function Hero(): ReactNode {
         <motion.div
           initial={{
             opacity: 0,
+          }}
+          animate={{
+            opacity: 1,
+          }}
+          transition={{
+            delay: 0.85,
+          }}
+          style={{
+            width: '100%',
+            marginBottom: '40px',
+          }}
+        >
+          <ValueProps />
+        </motion.div>
+
+        <motion.div
+          initial={{
+            opacity: 0,
             y: 20,
           }}
           animate={{
@@ -325,7 +350,7 @@ export function Hero(): ReactNode {
           }}
         >
           <TuiWindow title="react-agent.ts">
-            <pre style={CODE_PRE_STYLE}>{highlightCode(HERO_CODE)}</pre>
+            <pre style={CODE_PRE_STYLE}>{HIGHLIGHTED_HERO_CODE}</pre>
           </TuiWindow>
         </motion.div>
       </motion.div>

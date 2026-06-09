@@ -1,0 +1,19 @@
+{
+  "title": "Code Agent CLI",
+  "description": "noetic — the interactive terminal coding agent built on the framework.",
+  "root": true,
+  "pages": [
+    "index",
+    "configuration",
+    "---Project Instructions---",
+    "agent-md",
+    "rules",
+    "hooks",
+    "---Extensibility---",
+    "skills",
+    "plugins",
+    "custom-flows",
+    "---Reference---",
+    "tasks"
+  ]
+}

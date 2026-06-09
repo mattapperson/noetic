@@ -1,0 +1,33 @@
+{
+  "name": "noetic-compat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-platform deployment smoke tests for @noetic-tools/core and @noetic-tools/code-agent (Node, Bun, Deno, browser, Cloudflare Workers).",
+  "scripts": {
+    "pack:packages": "bun scripts/pack.ts",
+    "build:bundles": "bun scripts/build-bundles.ts",
+    "smoke:node": "node dist/node/run.mjs",
+    "smoke:bun": "bun --no-install runtimes/cli.ts",
+    "smoke:deno": "deno run --allow-net --allow-env --allow-read --node-modules-dir runtimes/cli.ts",
+    "smoke:browser": "bun runtimes/browser/run.ts",
+    "smoke:cloudflare": "bun runtimes/cloudflare/run.ts",
+    "all": "bun --no-install run.ts"
+  },
+  "dependencies": {
+    "@noetic-tools/code-agent": "file:./vendor/noetic-code-agent.tgz",
+    "@noetic-tools/core": "file:./vendor/noetic-core.tgz",
+    "@noetic-tools/memory": "file:./vendor/noetic-memory.tgz",
+    "@noetic-tools/types": "file:./vendor/noetic-types.tgz",
+    "@openrouter/agent": "0.6.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250507.0",
+    "esbuild": "0.25.4",
+    "esbuild-plugin-polyfill-node": "0.3.0",
+    "playwright": "1.50.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.14.4"
+  }
+}

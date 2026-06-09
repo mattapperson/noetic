@@ -1,0 +1,124 @@
+---
+title: ReAct
+description: The Observe-Think-Act loop pattern -- the most common agent architecture, built from loop + llm + tool primitives.
+---
+
+## Overview
+
+ReAct (Reason + Act) is the foundational agent pattern. The agent loops over an LLM call, invoking tools as needed, until the model responds without tool calls or a step/cost limit is reached.
+
+## Signature
+
+```ts validate=none
+declare function react(opts: {
+  model: string;
+  instructions?: string;
+  tools: Tool[];
+  maxSteps?: number;
+  maxCost?: number;
+  memory?: MemoryConfig | MemoryLayer[];
+}): StepLoop<ContextMemory, string, string> | StepSpawn<ContextMemory, string, string>;
+```
+
+| Parameter | Type | Default | Purpose |
+|---|---|---|---|
+| `model` | `string` | -- | Model identifier (e.g., `'openai/gpt-4o'`) |
+| `instructions` | `string` | -- | System prompt |
+| `tools` | `Tool[]` | -- | Available tools for the agent |
+| `maxSteps` | `number` | `10` | Maximum loop iterations |
+| `maxCost` | `number` | -- | Optional USD cost cap |
+| `memory` | `MemoryConfig \| MemoryLayer[]` | -- | When provided, the loop is wrapped in a `spawn` with these layers; the return type becomes `StepSpawn`. |
+
+**Returns**: a `StepLoop<ContextMemory, string, string>` when no `memory` is supplied, or a `StepSpawn<ContextMemory, string, string>` (loop wrapped in spawn) when memory layers are passed.
+
+## Example
+
+```ts
+import { z } from 'zod';
+import { react, tool } from '@noetic-tools/core';
+
+const searchTool = tool({
+  name: 'search',
+  description: 'Search the web',
+  input: z.object({ query: z.string() }),
+  output: z.object({ result: z.string() }),
+  execute: async ({ query }) => ({ result: `Results for: ${query}` }),
+});
+
+const agent = react({
+  model: 'openai/gpt-4o',
+  instructions: 'You are a research assistant.',
+  tools: [searchTool],
+  maxSteps: 5,
+  maxCost: 0.5,
+});
+```
+
+## How It Works
+
+Under the hood, `react()` composes three primitives:
+
+1. **`step.llm`** -- calls the model with the current conversation and available tools
+2. **`until.noToolCalls()`** -- stops when the model responds with plain text (no tool calls)
+3. **`until.maxSteps(n)`** -- safety limit on iterations
+4. **`until.maxCost(usd)`** -- optional cost cap
+
+These are combined with `any()` (stop if any predicate fires):
+
+```ts
+import { any, step, until } from '@noetic-tools/core';
+import type { Tool } from '@noetic-tools/core';
+
+function reactImpl(opts: {
+  model: string;
+  instructions?: string;
+  tools: Tool[];
+  maxSteps?: number;
+  maxCost?: number;
+}) {
+  const llmStep = step.llm({
+    id: 'react-step',
+    model: opts.model,
+    instructions: opts.instructions,
+    tools: opts.tools,
+  });
+
+  return {
+    kind: 'loop' as const,
+    id: 'react-loop',
+    steps: [llmStep],
+    until: any(
+      until.noToolCalls(),
+      until.maxSteps(opts.maxSteps ?? 10),
+      ...(opts.maxCost ? [until.maxCost(opts.maxCost)] : []),
+    ),
+  };
+}
+```
+
+## When to Use
+
+- Single-agent tasks with tool access
+- Question answering with retrieval
+- Code generation with execution feedback
+- Any task where the agent decides when it is done
+
+## Customizing
+
+When called without `memory`, `react()` returns a plain `StepLoop`, so you can mutate the returned step's loop hooks before handing it to the harness:
+
+```ts
+import { react } from '@noetic-tools/core';
+import type { ContextMemory, StepLoop, Tool } from '@noetic-tools/core';
+
+declare const tools: Tool[];
+
+const myReact = react({ model: 'openai/gpt-4o', tools }) as StepLoop<ContextMemory, string, string>;
+
+myReact.onError = (error) => {
+  if (error.kind === 'llm_rate_limit') return 'retry';
+  return 'abort';
+};
+
+myReact.prepareNext = (output) => `Previous output: ${output}\nContinue.`;
+```

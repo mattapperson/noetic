@@ -1,7 +1,7 @@
 {
-  "name": "Noetic — Agent Framework",
+  "name": "Noetic — Build AI agents you’d actually trust in production.",
   "short_name": "Noetic",
-  "description": "Build AI agents with composable primitives",
+  "description": "Build AI agents you’d actually trust in production. Composable TypeScript primitives, memory that keeps token costs flat, and evals that catch regressions before users do.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#050505",

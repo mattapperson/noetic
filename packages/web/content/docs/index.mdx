@@ -1,63 +1,22 @@
 ---
-title: Getting Started
-description: Install Noetic and build your first agent in under 5 minutes.
+title: Noetic Documentation
+description: Pick a product to dive into.
 ---
 
-## Installation
+Noetic ships two products. Pick the one you're using:
 
-```package-install
-npm i @noetic/core
-```
+## [Framework](/docs/framework)
 
-Or with your preferred package manager:
+The library you import from `@noetic-tools/core` and `@noetic/eval` to build your own agents.
 
-```bash
-bun add @noetic/core
-pnpm add @noetic/core
-```
+`Step`, `every`, `fork`, `spawn`, `branch`, memory layers, channels, patterns like `react`, and the eval / scorer / optimizer toolkit. Read this if you're writing TypeScript and composing primitives.
 
-## Your First Agent
+→ [Get started](/docs/framework)
 
-Build a ReAct agent in under 10 lines. This agent loops over an LLM step, calling tools until the model decides it has the answer.
+## [Code Agent CLI](/docs/code-agent-cli)
 
-```ts
-import { z } from 'zod';
-import { react, step, until } from '@noetic/core';
+`noetic` — the interactive terminal coding agent built on the framework.
 
-const searchTool = {
-  name: 'search',
-  description: 'Search the web for information',
-  input: z.object({
-    query: z.string(),
-  }),
-  output: z.object({
-    result: z.string(),
-  }),
-  execute: async (args) => {
-    return { result: `Results for: ${args.query}` };
-  },
-};
+A TUI you run from your terminal. Install it, drop a `noetic.config.ts` in your repo, and chat. Configure it with `AGENT.md`, rules files, hooks, skills, plugins, and custom flows.
 
-const agent = react({
-  model: 'gpt-4o',
-  instructions: 'You are a helpful research assistant.',
-  tools: [searchTool],
-  maxSteps: 5,
-});
-```
-
-The `react` pattern composes three primitives under the hood: `step.llm`, `until.noToolCalls`, and a `loop`. You can build the same thing yourself for full control -- see [Loop & Until](/docs/operators/loop-and-until).
-
-## What Happens When You Run It
-
-1. The LLM receives the system prompt and user input.
-2. If the model calls a tool, Noetic executes it and feeds the result back.
-3. The loop repeats until the model responds without tool calls, or the step limit is reached.
-4. The final text output is returned.
-
-## Next Steps
-
-- [Overview](/docs/overview) -- understand Noetic's philosophy and the 7 primitives.
-- [Steps](/docs/steps) -- learn about `step.run`, `step.llm`, and `step.tool`.
-- [Control Flow](/docs/operators) -- branch and fork for conditional and parallel logic.
-- [Loop & Until](/docs/operators/loop-and-until) -- iteration with termination predicates.
+→ [Get started](/docs/code-agent-cli)

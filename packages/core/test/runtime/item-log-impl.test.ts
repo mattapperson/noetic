@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
-import { ItemLogImpl } from '../../src/runtime/item-log-impl';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -9,7 +7,9 @@ import type {
   MessageItem,
   ReasoningItem,
   ServerToolItem,
-} from '../../src/types/items';
+} from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
+import { ItemLogImpl } from '../../src/runtime/item-log-impl';
 
 const makeInputMessage = (
   id: string,

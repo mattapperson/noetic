@@ -1,4 +1,4 @@
-import { JetBrains_Mono } from 'next/font/google';
+import { Instrument_Serif, JetBrains_Mono } from 'next/font/google';
 
 export const jetbrainsMono = JetBrains_Mono({
   subsets: [
@@ -6,4 +6,17 @@ export const jetbrainsMono = JetBrains_Mono({
   ],
   display: 'swap',
   variable: '--font-mono',
+});
+
+export const instrumentSerif = Instrument_Serif({
+  subsets: [
+    'latin',
+  ],
+  weight: '400',
+  style: [
+    'normal',
+    'italic',
+  ],
+  display: 'swap',
+  variable: '--font-serif',
 });

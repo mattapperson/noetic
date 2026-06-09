@@ -1,8 +1,8 @@
 # Built-In Memory Layers
 
-> **Package:** `@noetic/memory`
+> **Module:** `@noetic-tools/memory` (source at `packages/memory/src/memory/layers/**`); re-exported by `@noetic-tools/core`.
 > **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `temporalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `TemporalMemoryConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
 
 ---
 
@@ -38,7 +38,7 @@ function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryS
 **Behavior:**
 - `init`: Loads state from `ScopedStorage`. Defaults to `{}` (schema) or `''` (freeform).
 - `recall`: Renders state as `<working_memory>` block in a `MessageItem` with `role: developer`. Returns `null` if empty.
-- `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Validates against schema if provided. Deep-merges structured state.
+- `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Validates against schema if provided. Deep-merges structured state (object-valued keys merge recursively; arrays and primitives replace).
 - `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
 
 **Provides:**
@@ -57,18 +57,17 @@ provides: {
     description: 'Update the agent working memory with new key-value pairs.',
     input: z.record(z.string(), z.unknown()),
     output: z.void(),
-    execute: async (args, state) => {
-      // Prototype poisoning protection: __proto__ and constructor are stripped
-      const merged = { ...state, ...safeArgs };
-      return { result: undefined, state: merged };
-    },
+    // Deep-merges args into state recursively (objects merge, arrays/primitives
+    // replace). __proto__ / constructor are stripped at every depth.
+    execute: async (args, state) => ({ result: undefined, state: deepMerge(state, args) }),
   }),
 }
 ```
 
 - **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.memory['working-memory'].snapshot`, which returns the full `WorkingMemoryState`.
 - **`update`** — A function declaration. Code steps call it as `await ctx.memory['working-memory'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism.
-- **Prototype poisoning protection:** The `update` function strips `__proto__` and `constructor` keys from incoming arguments before merging.
+- **Deep merge:** Updates merge recursively — nested object keys are deep-merged rather than overwritten; arrays and primitives replace. When the prior state is a freeform **string** and an object update arrives, the prior string is preserved under a `_previous` key instead of being silently discarded.
+- **Prototype poisoning protection:** The merge strips `__proto__` and `constructor` keys from incoming arguments at every depth.
 - **Backward compatibility:** The `store` hook still detects `findFunctionCall(newItems, 'updateWorkingMemory')` for LLMs that emit the legacy function-call convention. Both paths apply the same prototype-stripping and merge logic.
 - **Type-safe access:** The `workingMemory()` factory returns its result `satisfies MemoryLayer<WorkingMemoryState>`, preserving the literal layer id and provides shape at the type level. Combine `memory([workingMemory()])` with `InferMemory<typeof mem>` to get compile-time typed access to `ctx.memory['working-memory']`.
 
@@ -141,13 +140,75 @@ function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<Ob
 | **scope** | `config.scope ?? 'resource'` |
 | **budget** | `{ min: 500, max: 2500 }` |
 | **timeouts** | `{ store: 60_000 }` |
-| **hooks** | `init`, `recall`, `store`, `onSpawn` |
+| **hooks** | `init`, `recall`, `store`, `onItemAppend`, `onSpawn` |
 
 **Behavior:**
 - `init`: Loads versioned state from storage.
-- `recall`: Renders observations as `<observations>` bullet list in a `MessageItem` with `role: developer`.
-- `store`: Accumulates tokens. When threshold reached, runs observer LLM on unprocessed items. Compacts if over `maxObservations`.
+- `recall`: Renders observations as `<observations>` bullet list in a `MessageItem` with `role: developer`. Trims output to the allocated budget.
+- `store`: Buffers **assistant output** items. When the token threshold is reached, runs the observer LLM on the buffer. Compacts if over `maxObservations`.
+- `onItemAppend`: Buffers **user input and tool output** items the same way `store` buffers assistant output, so observations are distilled from the full conversation, not just the model's replies.
 - `onSpawn`: Clones observations to child.
+
+---
+
+## `temporalMemory()`
+
+Non-atomic, LLM-backed long-term memory for time-anchored recall. Distills the conversation into a key-value ledger of timestamped facts and answers temporal queries on demand. Addresses the failure class that pure recall cannot fix: relative-date arithmetic and event ordering ("what did I do three weeks ago?").
+
+```typescript
+interface TemporalFact { ts: string; fact: string }        // ts = ISO-8601
+
+interface TemporalSearchResult {
+  facts: string[];
+  date?: string;        // resolved date when the query implies one
+  fuzzy?: boolean;      // true when the date is approximate
+}
+
+// Host-injected LLM capabilities (keep the layer tree-shakable / LLM-agnostic)
+type FactExtractor = (input: { transcript: string; now: string }) => Promise<TemporalFact[]>;
+type FactSearcher = (input: { query: string; facts: TemporalFact[]; now: string }) => Promise<TemporalSearchResult>;
+
+interface TemporalMemoryConfig {
+  now?: () => Date;            // injectable clock (tests/replay); default () => new Date()
+  scope?: 'thread' | 'resource';
+  extract?: FactExtractor;     // store-side distillation; omitted → buffer only, never fabricate
+  search?: FactSearcher;       // searchMemory backing; omitted → tool returns the raw ledger
+  bufferThreshold?: number;    // tokens before extract runs, default 2000
+  maxFacts?: number;           // ledger cap, default 200 (oldest timestamps dropped)
+  groundDateTime?: boolean;    // inject <current_datetime> on recall, default true
+  injectLedger?: boolean;      // also inject <remembered_facts> on recall, default false
+}
+
+function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<TemporalState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'temporal'` |
+| **slot** | `Slot.REMINDER` (80) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 0, max: config.injectLedger ? 800 : 200 }` |
+| **timeouts** | `{ store: 60_000 }` |
+| **hooks** | `init`, `recall`, `store`, `onItemAppend`, `onSpawn` |
+
+**State:** `{ facts: Record<isoTs, string[]>, buffer: string[], bufferTokens: number, version: number }`.
+
+**Behavior:**
+- `init`: Loads versioned state from `ScopedStorage`. Defaults to an empty ledger.
+- `recall`: When `groundDateTime`, emits a `<current_datetime>` block so the model can resolve relative time and compute date differences (deterministic — no LLM call). When `injectLedger`, also emits a `<remembered_facts>` block trimmed to the allocated budget. Returns `null` when both are off/empty.
+- `store`: Buffers text from **assistant output** items. Once `bufferTokens >= bufferThreshold` and an `extract` callback is configured, calls `extract({ transcript, now })`, merges the returned facts into the ledger keyed by ISO timestamp, caps to `maxFacts`, clears the buffer, and bumps `version`. With no `extract`, it keeps buffering — it never invents facts.
+- `onItemAppend`: Buffers **user input and tool output** items into the same buffer, so facts are extracted from the full conversation rather than only the model's replies.
+- `onSpawn`: Deep-clones state to the child execution.
+
+**Ledger cap (fact granularity):** `maxFacts` is enforced per *fact*, not per timestamp. When the ledger exceeds `maxFacts`, facts are flattened chronologically and only the newest `maxFacts` are kept — so a single oversized extraction at one instant cannot evict the just-added newest facts.
+
+**Provides:**
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `searchMemory` | `layerFn` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
+
+**Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observationalMemory`'s `observer`), so `memory/` stays tree-shakable. The code agent wires structured `step.llm` calls as the callbacks and installs `temporalMemory()` in its default stack.
 
 ---
 
@@ -220,7 +281,7 @@ function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableT
 |----------|-------|
 | **id** | `'durable-task-state'` |
 | **slot** | `Slot.WORKING_MEMORY + 10` (110) |
-| **scope** | `'execution'` |
+| **scope** | `'thread'` |
 | **budget** | `{ min: 100, max: 800 }` |
 | **timeouts** | `{ store: 30_000 }` |
 | **hooks** | `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete` |
@@ -233,7 +294,7 @@ function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableT
 - `onReturn`: Merges child files/checkpoints/data back into parent.
 - `onComplete`: Final checkpoint with outcome label. Git commit if enabled.
 
-**Key design:** Always crosses spawn boundaries. Dual persistence (disk + storage). Git integration is optional. Recalls into the View so the LLM can see progress.
+**Key design:** Scope is `'thread'` so the state persists across executions/iterations within the same thread (an `'execution'` scope would rotate its key every run and defeat durable rehydration). Always crosses spawn boundaries. Dual persistence (disk + storage). Git integration is optional. Recalls into the View so the LLM can see progress.
 
 ---
 
@@ -260,7 +321,7 @@ interface SteeringConfig {
   model?: string;
   /** Max entries retained in the per-execution violation ledger. Default: 100. */
   maxLedgerEntries?: number;
-  /** Max retries for LLM-evaluated rule calls before treating as pass. Default: 2. */
+  /** Max retries on unparseable LLM verdicts before treating as pass. Default: 1. */
   maxRetries?: number;
 }
 
@@ -280,7 +341,7 @@ function steering(config: SteeringConfig): MemoryLayer<SteeringState>
 - `beforeToolCall`: Runs each rule whose `hook` is `'beforeToolCall'` (the default). Programmatic rules call `check(toolName, toolArgs)`. LLM-evaluated rules send a prompt to the LLM (via `ctx.harness`) with the rule description and the pending call; a violation response blocks the tool. If any rule returns a violation, tool execution is blocked and the violation message is surfaced as a tool error. The violation is recorded in the in-memory ledger.
 - `afterModelCall`: Runs each rule whose `hook` is `'afterModelCall'`. LLM-evaluated rules receive the full model response text. A violation aborts the current turn with the violation message.
 - **Ledger**: Each execution maintains a bounded log of `{ ruleId, hook, toolName?, violation, timestamp }` entries. Capped at `maxLedgerEntries`. Accessible via `getLayerState(executionId, 'steering')`.
-- **LLM evaluation**: When a rule has no `check` function, the layer sends a structured prompt: the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`). The model responds with `{ violation: true | false, reason?: string }`. Retried up to `maxRetries` on parse failure; treated as pass on exhaustion. If no LLM provider is configured (no `callModel` on the execution context), LLM-evaluated rules throw a `NoeticConfigError` with code `MISSING_CALL_MODEL` — this is a fail-closed design to prevent silent bypass of security rules.
+- **LLM evaluation**: When a rule has no programmatic `check`, the layer sends a structured prompt — the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`) — and asks the model to reply with exactly `ALLOW`, `DENY`, or `GUIDE: <guidance text>`. The verdict is parsed by matching one of those keywords at the start of the response on a **word boundary** (so `DENYALL` is not a `DENY`), **case-insensitively**, while the guidance text after `DENY`/`GUIDE` is preserved verbatim (original casing). Unparseable output is retried up to `maxRetries`; on exhaustion the rule is treated as a pass (`ALLOW`). If no LLM provider is configured (no `callModel` on the execution context), LLM-evaluated rules throw a `NoeticConfigError` with code `MISSING_CALL_MODEL` — a fail-closed design to prevent silent bypass of security rules.
 - **Slot 90**: Runs before all other layers (slot 100+) in `beforeToolCall` and `afterModelCall` to ensure policy enforcement precedes any side effects.
 
 ```typescript
@@ -310,6 +371,39 @@ steering({
     },
   ],
 });
+```
+
+---
+
+## `historyWindow()`
+
+Caps the trailing items projected to the LLM on every turn. Slot `275` (after recall-contributing layers), scope `'execution'`. Hooks: `init` (returns `null` state) and `projectHistory`.
+
+```typescript
+function historyWindow(config?: { maxItems?: number }): MemoryLayer<null>
+```
+
+**Default**: `maxItems = 40` (validated to an integer in `[2, 10000]`).
+
+**Algorithm per LLM call**:
+1. Slice `items.slice(-maxItems)`.
+2. If the slice lacks a user `message` or an assistant `message`, expand backward until both are present (minimum-exchange guarantee). This expansion is **bounded**: it may exceed `maxItems` only up to a hard cap of `maxItems × 4`, so a tool-only burst (many `function_call`/`function_call_output` items with no role messages) cannot grow the window back to the start of history. Excess beyond the cap drops the oldest items.
+3. **Re-attach a head system/anchor message.** If a `system` message in the leading items fell outside the window, it is prepended so core instructions survive windowing (only the first few leading items are scanned).
+4. Run `stripUnresolvedToolCalls(window)` to drop any orphan `function_call` / `function_call_output` left at the slice boundary.
+
+**Storage isolation**: this layer never mutates `itemLog`, `accumulatedItems`, or session JSON. Session save/restore, `getAgentResponse`, and TUI transcript views remain whole. The cap is purely a read-side projection over the value handed to `assembleView`.
+
+**Mid-round flow is uncapped**: within a single `callModel` invocation's tool loop, that round's own `function_call` / `function_call_output` items keep accumulating in `conversationInput`. The cap fires at turn boundaries, not mid-call — the in-flight tool loop is intentionally preserved.
+
+The CLI exposes the cap via `AgentConfig.history.maxItems`. When unset, the layer is not installed and history is uncapped.
+
+```typescript
+// Direct usage in core
+const memory = [
+  workingMemory(),
+  observationalMemory(),
+  historyWindow({ maxItems: 40 }),
+];
 ```
 
 ---
@@ -406,7 +500,7 @@ interface PlanState {
 
 ## CLI-Specific Layers (`packages/cli`)
 
-The CLI package (`packages/cli/src/memory/`) provides several memory layers built on the `@noetic/memory` interface. These implement prompt engineering patterns adapted from Claude Code's system:
+The CLI package (`packages/cli/src/memory/`) provides several memory layers built on the `@noetic-tools/memory` interface. These implement prompt engineering patterns adapted from Claude Code's system:
 
 | Layer | Source | Purpose |
 |-------|--------|---------|
@@ -415,7 +509,7 @@ The CLI package (`packages/cli/src/memory/`) provides several memory layers buil
 | `environmentContextLayer(config)` | `packages/cli/src/memory/environment-context-layer.ts` | Dynamic environment detection (platform, git, Node.js, shell, package manager) |
 | `toolGuidanceLayer(config)` | `packages/cli/src/memory/tool-guidance-layer.ts` | Context-aware tool preference hierarchy and mode-specific guidance |
 | `planningModeLayer(config)` | `packages/cli/src/memory/planning-mode-layer.ts` | Plan-mode instructions with FlowSchema types, PRD authoring, phase tracking |
-| `skillsLayer(definitions, config)` | `packages/cli/src/memory/skills-layer.ts` | Progressive skill disclosure with behavioral guidelines and inline command processing |
+| `skillsLayer(definitions, config)` | `@noetic-tools/code-agent` (`packages/code-agent/src/memory/skills-layer.ts`), re-exported via `packages/cli/src/memory/skills-layer.ts` | Progressive skill disclosure with inline command processing |
 
 These layers all use `execution` scope and `Slot.PROCEDURAL` (250) or `Slot.OBSERVATIONS` (200). They are assembled in the harness factory (`src/harness/factory.ts`) and activate when the CLI harness is created. For full documentation of each layer's slot, budget, state shape, and behavior, see `packages/cli/docs/enhanced-prompt-engineering.md`.
 

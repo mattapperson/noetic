@@ -1,0 +1,11 @@
+export type { AgentMode, PlanHooks } from '../../harness/factory.js';
+export { createAgentHarness, createLspService } from '../../harness/factory.js';
+export { createPlanSession, writeFlow, writePrd } from '../../plan/file-store.js';
+export { createPluginContextBuilder } from '../../plugins/context.js';
+export type { FooterContext, NoeticPlugin } from '../../plugins/types.js';
+export type { SaveResult } from '../../sessions/store.js';
+export { loadSession, loadSessionByIdAnywhere, saveSession } from '../../sessions/store.js';
+export { stripUnresolvedToolCalls } from '../../sessions/strip-unresolved.js';
+export type { AgentRuntimeConfig } from '../../types/config.js';
+export { getModelContextLimit } from '../../types/model-context.js';
+export type { SessionFile } from '../../types/session.js';

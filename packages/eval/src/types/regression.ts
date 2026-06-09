@@ -1,11 +1,3 @@
-import type { SuiteResult } from './eval';
-
-export interface Baseline {
-  suiteResult: SuiteResult;
-  createdAt: string;
-  version: string;
-}
-
 export interface RegressionConfig {
   baseline?: string;
   maxRegression?: number;

@@ -3,25 +3,87 @@
  */
 
 import { expect } from 'bun:test';
+import * as fsp from 'node:fs/promises';
+import type { FsAdapter, FsStats, ShellAdapter } from '@noetic-tools/types';
 import { z } from 'zod';
-import { createLocalFsAdapter } from '../src/adapters/local-fs-adapter';
-import { createLocalShellAdapter } from '../src/adapters/local-shell-adapter';
-import { frameworkCast } from '../src/interpreter/framework-cast';
-import type { LLMResponse, Tool } from '../src/types/common';
-import type { Context, ItemLog } from '../src/types/context';
-import type { EmbedFn } from '../src/types/embed';
+import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
+
+//#region Test-only Node adapters
+//
+// Core is runtime-agnostic and ships no `node:*` adapters; those live in
+// `@noetic-tools/platform-node`. Core tests that exercise filesystem-dependent
+// memory layers need real disk access, so we inline a minimal
+// Node-backed `FsAdapter` and a no-op `ShellAdapter` here. Keeping these
+// helpers local to `test/` prevents the production bundle from pulling
+// `node:fs/promises`.
+
+function toFsStats(s: {
+  size: number;
+  isDirectory: () => boolean;
+  isSymbolicLink: () => boolean;
+  isFile: () => boolean;
+}): FsStats {
+  return {
+    size: s.size,
+    isDirectory: () => s.isDirectory(),
+    isSymbolicLink: () => s.isSymbolicLink(),
+    isFile: () => s.isFile(),
+  };
+}
+
+function createNodeFsAdapter(): FsAdapter {
+  return {
+    readFile: async (p) => fsp.readFile(p),
+    readFileText: async (p) => fsp.readFile(p, 'utf-8'),
+    writeFile: async (p, content) => fsp.writeFile(p, content, 'utf-8'),
+    writeFileBytes: async (p, content) => fsp.writeFile(p, content),
+    appendFile: async (p, content) => fsp.appendFile(p, content, 'utf-8'),
+    mkdir: async (dir) => {
+      await fsp.mkdir(dir, {
+        recursive: true,
+      });
+    },
+    rename: async (o, n) => fsp.rename(o, n),
+    rm: async (p, options) => {
+      await fsp.rm(p, options);
+    },
+    access: async (p, mode) => fsp.access(p, mode),
+    stat: async (p) => toFsStats(await fsp.stat(p)),
+    lstat: async (p) => toFsStats(await fsp.lstat(p)),
+    readdir: async (p) => fsp.readdir(p),
+  };
+}
+
+function createNoopShellAdapter(): ShellAdapter {
+  return {
+    exec: async () => ({
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+    }),
+  };
+}
+
+import type { ExecutionContext, ScopedStorage, StorageAdapter } from '@noetic-tools/memory';
+//#endregion
 import type {
+  AgentHarnessContract,
+  CallModelRequest,
+  Context,
+  ExecuteStepFn,
   FunctionCallItem,
   FunctionCallOutputItem,
   InputMessageItem,
   Item,
+  ItemLog,
+  LLMResponse,
   MessageItem,
-} from '../src/types/items';
-import type { ExecutionContext, ScopedStorage, StorageAdapter } from '../src/types/memory';
-import type { AgentHarnessContract, CallModelRequest } from '../src/types/runtime';
-import { SteeringAction } from '../src/types/steering';
-import type { ExecuteStepFn, Step } from '../src/types/step';
-import type { ToolExecutionContext } from '../src/types/tool-context';
+  Step,
+  Tool,
+  ToolExecutionContext,
+} from '@noetic-tools/types';
+import { frameworkCast, SteeringAction } from '@noetic-tools/types';
+import type { EmbedFn } from '../src/types/embed';
 
 // ── Storage ──────────────────────────────────────────────────────────
 
@@ -72,13 +134,14 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
       output: 0,
     },
     cost: 0,
-    fs: createLocalFsAdapter(),
-    shell: createLocalShellAdapter(),
+    fs: createNodeFsAdapter(),
+    shell: createNoopShellAdapter(),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute() {},
       addEvent() {},
     },
+    readLayerState: <T>(_layerId: string): T | undefined => undefined,
     ...overrides,
   };
 }
@@ -206,6 +269,10 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     harness,
     fs: harness.fs,
     shell: harness.shell,
+    subprocess: harness.subprocess,
+    cwdState: {
+      cwd: process.cwd(),
+    },
     layers: undefined,
     memory: {},
     recv: async () => {
@@ -337,8 +404,9 @@ export function makeMockHarness(): AgentHarnessContract {
       name: 'test-harness',
       params: {},
     },
-    fs: createLocalFsAdapter(),
-    shell: createLocalShellAdapter(),
+    fs: createNodeFsAdapter(),
+    shell: createNoopShellAdapter(),
+    subprocess: createInMemorySubprocessAdapter(),
     callModel: async () => {
       throw new Error('not impl');
     },
@@ -393,6 +461,11 @@ export function makeMockHarness(): AgentHarnessContract {
       kind: 'idle',
     }),
     getQueueSize: () => 0,
+    seedSessionHistory: () => {},
+    rootCwdState: {
+      cwd: process.cwd(),
+    },
+    setRootCwd: () => {},
     run: async () => {
       throw new Error('not impl');
     },
@@ -413,6 +486,11 @@ export function makeMockHarness(): AgentHarnessContract {
     },
     initLayers: async () => {},
     recallLayers: async () => [],
+    // Default to delegating atomic recall to recallLayers so tests that mock
+    // recallLayers keep working; eventual recall contributes nothing by default.
+    recallLayersAtomic: async (layers, input, ctx) => harness.recallLayers(layers, input, ctx),
+    recallLayersEventual: async () => [],
+    previewRequestItems: async () => [],
     storeLayers: async () => {},
     disposeLayers: async () => {},
     checkpoint: async () => {},
@@ -434,6 +512,7 @@ export function makeMockHarness(): AgentHarnessContract {
     afterModelCall: async () => ({
       action: SteeringAction.Allow,
     }),
+    projectHistory: async (_layers, items) => items,
     runAppendPipeline: async (_layers, items) => ({
       items,
       rerenderRequests: [],
@@ -453,6 +532,11 @@ export function makeMockContextWithClient(script: LLMResponse[]): Context {
   return makeMockContext({
     harness,
   });
+}
+
+/** Wall-clock sleep for tests that exercise real timers. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -575,6 +659,14 @@ const VALID_STATUSES = new Set([
   'searching',
   'generating',
 ]);
+
+/** Returns `item.id` when the variant carries one; `undefined` otherwise. */
+export function getItemId(item: Item): string | undefined {
+  if ('id' in item && typeof item.id === 'string') {
+    return item.id;
+  }
+  return undefined;
+}
 
 /**
  * Asserts that every item in a log conforms to the OpenResponses item shape.

@@ -1,4 +1,4 @@
-import type { FooterContext } from '@noetic/cli';
+import type { FooterContext } from '@noetic-tools/cli';
 import type { GitStatus } from '../git-status.js';
 import type { IconSet } from '../icons.js';
 import type { Theme } from '../theme.js';

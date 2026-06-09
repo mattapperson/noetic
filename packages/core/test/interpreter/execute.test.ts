@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, Step } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { isNoeticError } from '../../src/errors/noetic-error';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
-import { AgentHarness } from '../../src/runtime/agent-harness';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { Context } from '../../src/types/context';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Step } from '../../src/types/step';
 import { createScriptedCallModel, makeLLMResponse, makeMockHarness } from '../_helpers';
 
 describe('execute() switch', () => {

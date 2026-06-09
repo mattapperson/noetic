@@ -1,6 +1,6 @@
 # Enhanced Prompt Engineering
 
-The CLI provides memory layers that implement prompt engineering patterns adapted from Claude Code's system. These layers inject behavioral guidelines, tool usage instructions, communication style rules, environment context, and planning-mode guidance into the agent's context. They are layered on top of the core memory layers from `@noetic/memory` and live in `packages/cli/src/memory/`.
+The CLI provides memory layers that implement prompt engineering patterns adapted from Claude Code's system. These layers inject behavioral guidelines, tool usage instructions, communication style rules, environment context, and planning-mode guidance into the agent's context. They are layered on top of the core memory layers from `@noetic-tools/memory` (re-exported by `@noetic-tools/core`) and live in `packages/cli/src/memory/`.
 
 All layers use `Slot.PROCEDURAL` (250) execution scope with configured min/max token budgets. They are assembled in the harness factory at `src/harness/factory.ts` and activate automatically when the harness is created in `normal` or `planning` mode.
 
@@ -165,11 +165,11 @@ function planningModeLayer(config: PlanningModeConfig): MemoryLayer<PlanningMode
 - `store`: Updates exploration progress by counting Read function calls. Transitions phase automatically: exploration to authoring after 10 files examined; authoring to review when PRDs exist. Returns state unchanged if not active.
 - `onSpawn`: Clones planning state to child. Resets exploration progress.
 
-## Enhanced Skills Layer
+## Skills Layer
 
-Skills layer with integrated behavioral guidelines and progressive disclosure.
+Progressive skill disclosure with inline command processing. The implementation lives in `@noetic-tools/code-agent` (`packages/code-agent/src/memory/skills-layer.ts`); `packages/cli/src/memory/skills-layer.ts` is a thin shim that re-exports it. It is assembled by the harness factory directly from the code-agent barrel, not from the CLI memory barrel.
 
-**Source:** `src/memory/skills-layer.ts`
+**Source:** `@noetic-tools/code-agent` (`packages/code-agent/src/memory/skills-layer.ts`), re-exported via `src/memory/skills-layer.ts`
 
 | Property | Value |
 |----------|-------|
@@ -195,7 +195,7 @@ function skillsLayer(
 **Behavior:**
 
 - `init`: Loads skill definitions into state. No skills are activated at start.
-- `recall`: When skills are defined but none activated, renders an `<available_skills>` block listing each skill's name, description, when-to-use guidance, and the `activateSkill` prompt. When skills are activated, additionally injects behavioral guidelines (communication style, tool usage hierarchy, file operation rules, progress update rules) and each activated skill's full processed instructions.
+- `recall`: When skills are defined but none activated, renders an `<available_skills>` block listing each skill's name, description, when-to-use guidance, and the `activateSkill` prompt. When skills are activated, additionally injects each activated skill's full processed instructions.
 - `store`: Detects `activateSkill` function calls via `findFunctionCall`. Validates the target skill exists and is model-invocable. Processes instructions (expanding inline shell commands using `processSkillContent`) and caches the result. Maintains LRU eviction when cache exceeds `MAX_CACHE_SIZE` (50).
 - `onSpawn`: Clones definitions, activated skills, and processed instruction cache to child.
 
@@ -204,27 +204,29 @@ function skillsLayer(
 The layers are assembled in `src/harness/factory.ts` in this order:
 
 ```
-Core layers:           planMemory, workingMemory, observationalMemory
+Core layers:           teammateInboxLayer, reminderLayer, planMemory,
+                       createSteeringFileLayer [only on task runs],
+                       workingMemory, agentMdLayer, observationalMemory
 Enhanced layers:       promptEngineeringLayer, communicationStyleLayer,
                        environmentContextLayer(config, shell),
                        toolGuidanceLayer(tools, mode)
 Mode-specific:         planningModeLayer(tools, mode) [only when mode=planning]
 Existing layers:       fileReference, durableTaskState, toolMemoryLayer, plugin layers
 Skills:                skillsLayer(skills, cwd) [only when skills exist]
+History:               historyWindow(maxItems) [only when configured]
 ```
 
-Mode switching between `normal` and `planning` is controlled by the `/plan` CLI command. The `planningModeLayer` activates only in planning mode; the `toolGuidanceLayer` includes mode-appropriate guidance for either mode.
+The harness models mode as `act` | `planning`; the enhanced layers model it as `normal` | `planning`, so the factory maps `act` onto `normal` when wiring `toolGuidanceLayer` and `planningModeLayer`. Mode switching between act and planning is controlled by the `/plan` CLI command. The `planningModeLayer` activates only in planning mode; the `toolGuidanceLayer` includes mode-appropriate guidance for either mode.
 
 ## Export
 
-All layers are exported from `src/memory/index.ts`:
+The enhanced prompt-engineering layers are exported from `src/memory/index.ts`. The skills layer is not re-exported here — it is consumed by the factory directly from `@noetic-tools/code-agent` (see the shim in `src/memory/skills-layer.ts`).
 
 ```typescript
 export { communicationStyleLayer } from './communication-style-layer.js';
 export { environmentContextLayer } from './environment-context-layer.js';
 export { planningModeLayer } from './planning-mode-layer.js';
 export { promptEngineeringLayer } from './prompt-engineering-layer.js';
-export { skillsLayer } from './skills-layer.js';
 export { toolGuidanceLayer } from './tool-guidance-layer.js';
 ```
 

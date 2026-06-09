@@ -47,6 +47,8 @@ const result = await harness.run(step, input, ctx);
 
 The agent harness manages execution, context creation, channels, memory lifecycle, and detached spawns. When no `callModel` is provided, `AgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
 
+The harness always holds a `SubprocessAdapter` — every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
+
 ### Tools
 
 Tools are defined with Zod schemas for input/output validation. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `memory` accessors:
@@ -76,7 +78,7 @@ Memory layers inject context into the LLM view (via `recall`) and persist state 
 - **`staticContent()`** -- immutable instruction injection from loaded content
 - **`toolMemoryLayer()`** -- auto-generated layers from tool `memory` declarations
 
-The `@noetic/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`, `skillsLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, plan-mode guidance, and progressive skill disclosure. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
+The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
 
 Recall can return a `RecallResult` object or a plain `string` (shorthand -- the agent harness wraps it in a developer message).
 
@@ -175,7 +177,7 @@ Observability:
 
 ## Key Rules
 
-1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic/core` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
+1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic-tools/core` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
 2. **Tools receive the harness via `toolCtx.harness`** -- never pass the harness as a closure parameter to tool factories
 2. **`spawn` creates context boundaries** -- memory layers decide what state crosses via `onSpawn`/`onReturn` hooks
 3. **Detached spawns use `toolCtx.ctx`** -- always use the parent context, never `harness.createContext()`, to preserve depth tracking and thread/resource IDs
@@ -183,6 +185,8 @@ Observability:
 5. **`until.noToolCalls()` checks the outer loop** -- the inner tool call loop is handled by `callModel`
 6. **Memory slot ordering matters** -- lower slots appear first in the LLM view. Use `Slot` constants
 7. **Fork paths get cloned state** -- mutations in one path don't affect siblings
+8. **SubprocessAdapter precedence is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`** -- reach for a per-step override to run one specific spawn out-of-process while keeping the rest in-process, or a per-call override on `detachedSpawn` to do the same without touching the step definition
+9. **Durability is opt-in and composed of three surfaces** -- `checkpointStore` (parent execution state), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). Configure the ones you need; absent surfaces are no-ops and the harness degrades gracefully
 
 ## API Reference
 
@@ -195,9 +199,9 @@ For complete builder signatures, memory layer APIs, agent harness methods, and s
 | Builders | `packages/core/src/builders/` |
 | Step types | `packages/core/src/types/step.ts` |
 | Tool types | `packages/core/src/types/common.ts` |
-| Memory types | `packages/core/src/types/memory.ts` |
+| Memory types | `packages/types/src/types/memory.ts` |
 | Patterns | `packages/core/src/patterns/` |
-| Memory layers | `packages/core/src/memory/layers/` |
+| Memory layers | `packages/memory/src/memory/layers/` |
 | AgentHarness | `packages/core/src/runtime/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
 | Specs | `specs/` (numbered 00-16) |

@@ -1,4 +1,4 @@
-import type { Step } from '@noetic/core';
+import type { Step } from '@noetic-tools/core';
 
 import type { OptimizeConfig } from '../types/eval';
 import { OptimizeScope } from '../types/eval';

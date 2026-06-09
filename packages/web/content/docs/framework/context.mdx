@@ -1,0 +1,274 @@
+---
+title: Context & Event Log
+description: The Context object tracks execution state, metrics, and conversation history.
+---
+
+## Quick Example
+
+```ts
+import { step } from '@noetic-tools/core';
+
+const greet = step.run({ id: 'greet', execute: async (input: string, ctx) => {
+  console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
+  console.log(`Tokens so far: ${ctx.tokens.total}`);
+
+  // Append a user message to the event log
+  ctx.itemLog.append({
+    id: crypto.randomUUID(),
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: input }],
+    status: 'completed',
+  });
+
+  return `Hello, ${input}!`;
+}});
+```
+
+Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, memory layer handles, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
+
+## Context Interface
+
+```ts
+type ContextShape<TMemory = ContextMemory, TState = unknown> = Context<TMemory, TState>;
+```
+
+The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `InferMemory<typeof config>` to supply a fully typed shape.
+
+| Property | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique identifier for this execution. |
+| `stepCount` | `number` | Number of steps executed so far. |
+| `tokens` | [`TokenUsage`](#tokenusage) | Cumulative token counts (input, output, total). |
+| `elapsed` | `number` | Wall-clock milliseconds since context creation. |
+| `cost` | `number` | Cumulative cost estimate for LLM calls. |
+| `state` | `TState` | Mutable, generic state object. You can read and write to this freely. |
+| `memory` | `TMemory` | Layer provides keyed by layer ID. See [Memory](#memory) below. |
+| `parent` | `Context \| null` | Parent context when running inside a spawn. |
+| `depth` | `number` | Nesting depth (0 for root). |
+| `span` | [`Span`](/docs/framework/observability) | The active tracing span for this execution. |
+| `threadId` | `string` | Conversation thread identifier. |
+| `resourceId` | `string \| undefined` | Optional resource identifier (e.g., a user or tenant ID). |
+| `itemLog` | [`ItemLog`](#itemlog) | The conversation event log. |
+| `lastStepMeta` | `StepMeta \| null` | Metadata from the most recently completed step (tool calls, usage, cost). |
+
+### Memory
+
+The `ctx.memory` property is a readonly object keyed by layer ID. Each key maps to a handle containing the data projections and callable functions that the layer declared in its `provides` field.
+
+```ts
+declare const ctx: Context<Record<string, { snapshot: unknown; update: (next: unknown) => Promise<void> }>>;
+
+const snap = ctx.memory['working-memory'].snapshot;
+
+await ctx.memory['working-memory'].update({ key: 'value' });
+```
+
+At runtime, data entries use getters (reading live state on each access), while function entries are async closures that validate input via Zod and may update the layer's internal state.
+
+When layers are wrapped with the `memory()` builder, use `InferMemory<typeof config>` to get compile-time types:
+
+```ts
+import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
+
+const mem = memory([workingMemory()]);
+type Mem = InferMemory<typeof mem>;
+
+// ctx: Context<Mem> gives fully typed ctx.memory
+```
+
+### TokenUsage
+
+```ts validate=none
+interface TokenUsage {
+  input: number;
+  output: number;
+  total: number;
+}
+```
+
+## Item Log
+
+The `ItemLog` is an append-only log of every message, tool call, and reasoning trace produced during an execution.
+
+```ts validate=none
+interface ItemLog {
+  readonly items: ReadonlyArray<Item>;
+  append(item: Item): void;
+}
+```
+
+- **`items`** -- read the full history at any time.
+- **`append(item)`** -- add a new item. The runtime also appends items automatically after each LLM step.
+
+## Channel Methods
+
+Context exposes three methods for communicating over [Channels](/docs/framework/operators/channels):
+
+| Method | Signature | Description |
+|---|---|---|
+| `recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for the next value. Throws `channel_timeout` if the timeout expires. |
+| `send` | `send<T>(channel: Channel<T>, value: T): void` | Push a value into a channel. |
+| `tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
+
+```ts
+import { channel } from '@noetic-tools/core';
+import type { Context } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const approvals = channel('approvals', {
+  schema: z.boolean(),
+  mode: 'queue',
+});
+
+declare const ctx: Context;
+ctx.send(approvals, true);
+const approved = await ctx.recv(approvals, { timeout: 5_000 });
+const maybe = ctx.tryRecv(approvals);
+```
+
+## Lifecycle Controls
+
+### Checkpoint
+
+```ts
+declare const ctx: Context;
+await ctx.checkpoint();
+```
+
+Persists the current execution state so it can be restored later. In the `AgentHarness` this is a no-op; durable agent harnesses use it for crash recovery.
+
+### Complete
+
+```ts
+declare const ctx: Context;
+declare const finalValue: unknown;
+ctx.complete(finalValue);
+```
+
+Signals that the execution has a result and should stop. After calling `complete`:
+
+| Property | Value |
+|---|---|
+| `ctx.completed` | `true` |
+| `ctx.completionValue` | The value you passed |
+
+### Abort
+
+```ts
+declare const ctx: Context;
+ctx.abort('user cancelled');
+```
+
+Signals that the execution should be cancelled. After calling `abort`:
+
+| Property | Value |
+|---|---|
+| `ctx.aborted` | `true` |
+| `ctx.abortReason` | The reason string you passed |
+
+Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` error if set.
+
+## Item Types
+
+Every entry in the item log is one of these discriminated union variants. All items share a base shape:
+
+```ts validate=none
+interface ItemBase {
+  readonly id: string;
+  readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
+}
+```
+
+### MessageItem
+
+```ts validate=none
+interface MessageItem extends ItemBase {
+  readonly type: 'message';
+  readonly role: 'user' | 'assistant' | 'system' | 'developer';
+  readonly content: ContentPart[];
+}
+```
+
+### FunctionCallItem
+
+```ts validate=none
+interface FunctionCallItem extends ItemBase {
+  readonly type: 'function_call';
+  readonly callId: string;
+  readonly name: string;
+  readonly arguments: string;
+}
+```
+
+### FunctionCallOutputItem
+
+```ts validate=none
+interface FunctionCallOutputItem extends ItemBase {
+  readonly type: 'function_call_output';
+  readonly callId: string;
+  readonly output: string;
+}
+```
+
+### ReasoningItem
+
+```ts validate=none
+interface ReasoningItem extends ItemBase {
+  readonly type: 'reasoning';
+  readonly content: ContentPart[];
+  readonly summary?: ContentPart[];
+  readonly encryptedContent?: string;
+}
+```
+
+### ExtensionItem
+
+Custom item types using the `prefix:name` convention (e.g., `noetic:analytics`, `openrouter:web_search`):
+
+```ts validate=none
+interface ExtensionItem extends ItemBase {
+  readonly type: `${string}:${string}`;
+  readonly data: Record<string, unknown>;
+}
+```
+
+For the complete reference of all item shapes, streaming events, and how they map to the OpenResponses specification, see [Items & Events](/docs/framework/api/items-and-events).
+
+### ContentPart
+
+Content arrays use these discriminated variants:
+
+| `type` | Fields | Purpose |
+|---|---|---|
+| `output_text` | `text: string` | Model-generated text |
+| `input_text` | `text: string` | User-provided text |
+| `input_image` | `imageUrl: string`, `detail?: 'auto' \| 'low' \| 'high'` | User-provided image |
+| `input_file` | `fileData?: string`, `fileId?: string \| null`, `fileUrl?: string`, `filename?: string` | User-provided file |
+| `refusal` | `refusal: string` | Model refusal message |
+
+## Per-Layer Usage Breakdown
+
+`ctx.lastLayerUsage` exposes how the most recent `callModel` decomposed the context window across its contributors. The runtime captures this snapshot after every successful LLM step and overwrites it on the next call.
+
+```ts
+declare const ctx: Context;
+const usage = ctx.lastLayerUsage;
+if (usage) {
+  for (const layer of usage.layers) {
+    console.log(`${layer.layerId}: ${layer.tokenCount} tokens`);
+  }
+  console.log(`system: ${usage.systemPromptTokens}, history: ${usage.historyTokens}`);
+}
+```
+
+Each entry's `tokenCount` is self-reported by the layer's `recall()` output; `systemPromptTokens`, `toolsTokens`, and `historyTokens` are estimates derived from the rendered request. The sum is `totalUsedTokens`. The same snapshot is also surfaced on `HarnessResponse.lastLayerUsage` so external callers (CLIs, dashboards) can read it after the run completes without holding a Context reference.
+
+See [Context Types](/docs/framework/api/context-types) for the `LastLayerUsage` and `LayerUsageEntry` interfaces.
+
+## Related Pages
+
+- [AgentHarness](/docs/framework/runtime) -- creates and manages contexts.
+- [Channels](/docs/framework/operators/channels) -- typed messaging between steps.
+- [Observability](/docs/framework/observability) -- the `span` property and tracing.
+- [Error Model](/docs/framework/errors) -- errors thrown when abort or timeout occurs.

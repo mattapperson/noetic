@@ -6,8 +6,8 @@
  * on Claude Code's sophisticated tool preference patterns.
  */
 
-import type { MemoryLayer, Tool } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { MemoryLayer, Tool } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 //#region Types
 

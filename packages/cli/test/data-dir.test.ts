@@ -3,23 +3,24 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createDataDir, pluginNameToDirSegment } from '../src/plugins/data-dir.js';
+import { safePluginNameSegment } from '@noetic-tools/code-agent/utils';
+import { createDataDir } from '../src/plugins/data-dir.js';
 
-describe('pluginNameToDirSegment', () => {
+describe('safePluginNameSegment', () => {
   it('strips scope prefix', () => {
-    expect(pluginNameToDirSegment('@noetic/plugin-powerline')).toBe('plugin-powerline');
+    expect(safePluginNameSegment('@noetic/plugin-powerline')).toBe('plugin-powerline');
   });
 
   it('leaves un-scoped names alone', () => {
-    expect(pluginNameToDirSegment('plain-plugin')).toBe('plain-plugin');
+    expect(safePluginNameSegment('plain-plugin')).toBe('plain-plugin');
   });
 
   it('sanitises spaces and slashes to dashes', () => {
-    expect(pluginNameToDirSegment('weird/one/with spaces')).toBe('weird-one-with-spaces');
+    expect(safePluginNameSegment('weird/one/with spaces')).toBe('weird-one-with-spaces');
   });
 
   it('strips scope prefix then sanitises rest', () => {
-    expect(pluginNameToDirSegment('@scope/plugin/sub')).toBe('plugin-sub');
+    expect(safePluginNameSegment('@scope/plugin/sub')).toBe('plugin-sub');
   });
 });
 

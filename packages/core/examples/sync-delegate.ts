@@ -6,9 +6,10 @@
  *
  * Flow: User input → LLM loop → delegate tool call → sub-agent executes → result returned
  */
+
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { StepLoop, StepSpawn } from '@noetic-tools/types';
 import { react } from '../src/patterns/react';
-import type { ContextMemory } from '../src/types/memory';
-import type { StepLoop, StepSpawn } from '../src/types/step';
 import { createSyncDelegateTool } from './delegate-tools';
 
 //#region Agent Builder
@@ -20,7 +21,7 @@ export function buildSyncDelegateAgent():
   const delegateTool = createSyncDelegateTool();
 
   return react({
-    model: 'gpt-4o',
+    model: 'openai/gpt-4o',
     instructions: 'You are an assistant that can delegate research tasks to a sub-agent.',
     tools: [
       delegateTool,

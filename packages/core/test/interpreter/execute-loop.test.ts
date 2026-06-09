@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Snapshot } from '@noetic-tools/types';
+import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
-import { isNoeticError, NoeticErrorImpl } from '../../src/errors/noetic-error';
-import { executeLoop } from '../../src/interpreter/execute-loop';
+import { executeLoop } from '../../src/interpreter/execute-control';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { ContextMemory } from '../../src/types/memory';
-import type { Snapshot } from '../../src/types/step';
 import { until } from '../../src/until/predicates';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 

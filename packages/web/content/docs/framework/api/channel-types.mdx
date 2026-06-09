@@ -1,0 +1,86 @@
+---
+title: Channel Types
+description: Type definitions for channels, external channels, and channel handles in Noetic.
+---
+
+## Channel
+
+A typed communication channel for inter-step message passing.
+
+```ts validate=none
+interface Channel<T> {
+  readonly name: string;
+  readonly schema: ZodType<T>;
+  readonly mode: 'value' | 'queue' | 'topic';
+  readonly capacity?: number;
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | yes | Unique channel name |
+| `schema` | `ZodType<T>` | yes | Zod schema for message validation |
+| `mode` | `'value' \| 'queue' \| 'topic'` | yes | Channel semantics |
+| `capacity` | `number` | no | Maximum buffered messages (for queue/topic modes) |
+
+### Channel Modes
+
+| Mode | Behavior |
+|---|---|
+| `'value'` | Holds a single value. New sends overwrite the previous value. |
+| `'queue'` | FIFO buffer. Sends enqueue, receives dequeue. |
+| `'topic'` | Pub/sub broadcast. All receivers get every message. |
+
+## ExternalChannel
+
+An external channel extends `Channel` with an `external` flag, enabling cross-process communication.
+
+```ts validate=none
+interface ExternalChannel<T> extends Channel<T> {
+  readonly external: true;
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | yes | Unique channel name |
+| `schema` | `ZodType<T>` | yes | Zod schema for message validation |
+| `mode` | `'value' \| 'queue' \| 'topic'` | yes | Channel semantics |
+| `capacity` | `number` | no | Maximum buffered messages |
+| `external` | `true` | yes | Marks channel as externally accessible |
+
+## ChannelHandle
+
+A handle for sending messages into a channel from outside the agent execution context.
+
+```ts validate=none
+interface ChannelHandle<T> {
+  send(value: T): void;
+  readonly closed: boolean;
+  readonly channel: Channel<T>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `send` | `(value: T) => void` | Send a value into the channel |
+| `closed` | `boolean` | Whether the handle is closed (execution completed) |
+| `channel` | `Channel<T>` | Reference to the underlying channel |
+
+## Context Channel Methods
+
+The `Context` object provides three methods for channel interaction:
+
+```ts validate=none
+interface Context {
+  send<T>(channel: Channel<T>, value: T): void;
+  recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
+  tryRecv<T>(channel: Channel<T>): T | null;
+}
+```
+
+| Method | Description |
+|---|---|
+| `send(channel, value)` | Send a value to the channel. Non-blocking. |
+| `recv(channel, opts?)` | Receive a value. Blocks until available or timeout. |
+| `tryRecv(channel)` | Non-blocking receive. Returns `null` if no value available. |

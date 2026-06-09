@@ -1,4 +1,5 @@
-import { spawn as spawnProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
 
 import type { ApplyResult, CodingAgent, OptimizationRecommendation } from '../../types/optimizer';
 
@@ -34,6 +35,18 @@ function buildRpcRequest(recommendation: OptimizationRecommendation): string {
   });
 }
 
+/**
+ * Bun's ChildProcess types omit EventEmitter methods (.on, .once, etc.)
+ * even though the runtime object IS an EventEmitter. This helper validates
+ * the instance at runtime and returns it typed correctly for events.once().
+ */
+function asEmitter(obj: unknown): EventEmitter {
+  if (!(obj instanceof EventEmitter)) {
+    throw new Error('Expected an EventEmitter instance');
+  }
+  return obj;
+}
+
 //#endregion
 
 //#region Public API
@@ -51,56 +64,49 @@ export class PiMonoAgent implements CodingAgent {
     }
   }
 
-  private sendRpcRequest(recommendation: OptimizationRecommendation): Promise<ApplyResult> {
-    return new Promise((resolve, reject) => {
-      const child = spawnProcess(
-        'pi',
-        [
-          '--mode',
-          'rpc',
+  private async sendRpcRequest(recommendation: OptimizationRecommendation): Promise<ApplyResult> {
+    const child = spawn(
+      'pi',
+      [
+        '--mode',
+        'rpc',
+      ],
+      {
+        stdio: [
+          'pipe',
+          'pipe',
+          'pipe',
         ],
-        {
-          stdio: [
-            'pipe',
-            'pipe',
-            'pipe',
-          ],
-        },
-      );
+      },
+    );
 
-      let stdout = '';
-      let stderr = '';
+    let stdout = '';
+    let stderr = '';
 
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      child.stdin?.write(buildRpcRequest(recommendation));
-      child.stdin?.end();
-
-      child.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`pi-mono exited with code ${code}: ${stderr}`));
-          return;
-        }
-        try {
-          resolve(parseRpcResponse(stdout));
-        } catch {
-          reject(new Error(`Failed to parse pi-mono response: ${stdout}`));
-        }
-      });
-
-      child.on('error', (err) => {
-        reject(
-          new Error(
-            `Failed to spawn pi-mono: ${err.message}. Is @mariozechner/pi-coding-agent installed?`,
-          ),
-        );
-      });
+    child.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
     });
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    child.stdin?.write(buildRpcRequest(recommendation));
+    child.stdin?.end();
+
+    // once() resolves on 'close' with [code, signal], and rejects if
+    // 'error' fires first (e.g. binary not found), matching the original
+    // child.on('close')/child.on('error') behavior with proper Bun types.
+    const closeArgs = await once(asEmitter(child), 'close');
+    const code = typeof closeArgs[0] === 'number' ? closeArgs[0] : null;
+
+    if (code !== 0) {
+      throw new Error(`pi-mono exited with code ${code}: ${stderr}`);
+    }
+    try {
+      return parseRpcResponse(stdout);
+    } catch {
+      throw new Error(`Failed to parse pi-mono response: ${stdout}`);
+    }
   }
 }
 

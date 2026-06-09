@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import type { MemoryLayer, MemoryScope } from '@noetic-tools/memory';
+import { resolveLayerTools, Slot, workingMemory } from '@noetic-tools/memory';
+import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
-import { createLocalFsAdapter } from '../../src/adapters/local-fs-adapter';
-import { createLocalShellAdapter } from '../../src/adapters/local-shell-adapter';
+import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
+import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
 import { layerData, layerFn } from '../../src/builders/layer-provides-builders';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
-import { resolveLayerTools } from '../../src/memory/layer-api';
-import { workingMemory } from '../../src/memory/layers/working-memory';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { MemoryLayer, MemoryScope } from '../../src/types/memory';
-import { Slot } from '../../src/types/memory';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 //#region Test Helpers
@@ -464,13 +462,14 @@ describe('workingMemory provides', () => {
           output: 0,
         },
         cost: 0,
-        fs: createLocalFsAdapter(),
-        shell: createLocalShellAdapter(),
+        fs: createInMemoryFsAdapter(),
+        shell: createInMemoryShellAdapter(),
         tokenize: () => 0,
         trace: {
           setAttribute() {},
           addEvent() {},
         },
+        readLayerState: () => undefined,
       },
     );
     expect(result.result).toBeUndefined();

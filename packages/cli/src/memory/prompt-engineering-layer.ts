@@ -6,8 +6,13 @@
  * recent errors, and conversation context.
  */
 
-import type { FunctionCallItem, FunctionCallOutputItem, Item, MemoryLayer } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type {
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  Item,
+  MemoryLayer,
+} from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 //#region Types
 

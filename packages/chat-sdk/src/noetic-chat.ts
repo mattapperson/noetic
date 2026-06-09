@@ -1,4 +1,9 @@
-import type { ExecuteInput, ExecuteOptions, HarnessResponse, SessionScope } from '@noetic/core';
+import type {
+  ExecuteInput,
+  ExecuteOptions,
+  HarnessResponse,
+  SessionScope,
+} from '@noetic-tools/core';
 import type {
   ActionHandler,
   Adapter,

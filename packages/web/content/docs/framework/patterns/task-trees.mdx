@@ -1,0 +1,125 @@
+---
+title: Task Trees
+description: Build tree-structured multi-agent workflows using compilePlan() to coordinate sequential and parallel execution across agent roles.
+---
+
+## Overview
+
+Task Trees let you define a hierarchical plan where each node is assigned to an agent role and specifies whether its children run sequentially or in parallel. `compilePlan()` compiles this tree into a single `Step` that the runtime executes.
+
+## PlanNode
+
+```ts validate=none
+interface PlanNode {
+  id: string;
+  description: string;
+  assignee: string;
+  execution: 'sequential' | 'parallel';
+  children?: PlanNode[];
+}
+```
+
+| Field | Type | Purpose |
+|---|---|---|
+| `id` | `string` | Unique node identifier |
+| `description` | `string` | Task description passed to the assigned agent |
+| `assignee` | `string` | Key into the agents registry |
+| `execution` | `'sequential' \| 'parallel'` | How children are executed |
+| `children` | `PlanNode[]` | Sub-tasks (optional -- leaf nodes are executed directly) |
+
+## compilePlan()
+
+```ts validate=none
+function compilePlan<O, A = unknown>(
+  plan: PlanNode,
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>,
+  constraints?: PlanConstraints,
+  executeStep?: ExecuteStepFn,
+): Step<ContextMemory, string, O>
+```
+
+| Parameter | Type | Purpose |
+|---|---|---|
+| `plan` | `PlanNode` | The task tree to compile |
+| `agents` | `Record<string, (prompt: string) => Step>` | Factory functions keyed by agent role |
+| `constraints` | `PlanConstraints` | Optional execution constraints |
+| `executeStep` | `ExecuteStepFn` | Optional custom step executor |
+
+## PlanConstraints
+
+```ts validate=none
+interface PlanConstraints {
+  toolAllowlist?: Record<string, string[]>;
+  maxStepsPerNode?: number;
+  requireApproval?: string[];
+  validate?: (taskId: string, input: unknown, ctx: Context) => Promise<boolean>;
+}
+```
+
+## Example
+
+```ts validate=none
+import { compilePlan, react } from '@noetic-tools/core';
+
+const agents = {
+  researcher: (prompt: string) => react({
+    model: 'openai/gpt-4o',
+    instructions: prompt,
+    tools: [searchTool],
+  }),
+  writer: (prompt: string) => react({
+    model: 'openai/gpt-4o',
+    instructions: prompt,
+    tools: [writeTool],
+  }),
+  reviewer: (prompt: string) => react({
+    model: 'openai/gpt-4o',
+    instructions: prompt,
+    tools: [],
+  }),
+};
+
+const plan: PlanNode = {
+  id: 'write-article',
+  description: 'Write a technical article',
+  assignee: 'writer',
+  execution: 'sequential',
+  children: [
+    {
+      id: 'research',
+      description: 'Research the topic',
+      assignee: 'researcher',
+      execution: 'parallel',
+      children: [
+        { id: 'search-papers', description: 'Find academic papers', assignee: 'researcher', execution: 'sequential' },
+        { id: 'search-blogs', description: 'Find blog posts', assignee: 'researcher', execution: 'sequential' },
+      ],
+    },
+    { id: 'draft', description: 'Write the first draft', assignee: 'writer', execution: 'sequential' },
+    { id: 'review', description: 'Review and improve', assignee: 'reviewer', execution: 'sequential' },
+  ],
+};
+
+const step = compilePlan(plan, agents);
+```
+
+## How It Works
+
+1. **Leaf nodes** call the agent factory with the node's `description` and return the resulting step.
+2. **Parallel nodes** compile children into a `fork({ mode: 'all' })` that runs them concurrently.
+3. **Sequential nodes** compile children into a `run` step that chains execution, passing each output as the next input.
+
+The `PlanNodeSchema` Zod schema is also exported, so you can have an LLM generate plans and validate them at runtime:
+
+```ts
+import { PlanNodeSchema } from '@noetic-tools/core';
+
+declare const llmOutput: unknown;
+
+const plan = PlanNodeSchema.parse(llmOutput);
+```
+
+## Next Steps
+
+- [Adaptive Plans](/docs/framework/patterns/adaptive-plans) -- dynamic plans that revise themselves on failure
+- [ReAct](/docs/framework/patterns/react) -- the agent pattern used inside each tree node

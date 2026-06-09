@@ -1,9 +1,8 @@
+import type { ContextMemory, MemoryConfig, MemoryLayer } from '@noetic-tools/memory';
+import type { StepLoop, StepSpawn, Tool } from '@noetic-tools/types';
 import { loop } from '../builders/loop-builder';
 import { spawn } from '../builders/spawn-builder';
 import { step } from '../builders/step-builders';
-import type { Tool } from '../types/common';
-import type { ContextMemory, MemoryConfig, MemoryLayer } from '../types/memory';
-import type { StepLoop, StepSpawn } from '../types/step';
 import { any } from '../until/combinators';
 import { until } from '../until/predicates';
 

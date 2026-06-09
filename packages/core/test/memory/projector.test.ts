@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { assembleView } from '../../src/memory/projector';
+import { assembleView } from '@noetic-tools/memory';
 import { makeMessage } from '../_helpers';
 
 describe('assembleView', () => {
@@ -138,5 +138,42 @@ describe('assembleView', () => {
       },
     });
     expect(view).toHaveLength(5);
+  });
+
+  it('keeps capped history items after layerOutputItems', () => {
+    const layers = [
+      makeMessage('developer', 'recall-a'),
+      makeMessage('developer', 'recall-b'),
+    ];
+    const history = Array.from(
+      {
+        length: 10,
+      },
+      (_, i) => makeMessage('user', `h-${i}`),
+    );
+    const view = assembleView({
+      systemPromptItems: [],
+      layerOutputItems: layers,
+      historyItems: history,
+      policy: {
+        tokenBudget: 1e4,
+        responseReserve: 1e3,
+        overflow: 'sliding_window',
+        windowSize: 2,
+      },
+    });
+    // 2 layer items + 2 capped history items
+    expect(view).toHaveLength(4);
+    assert(view[0].type === 'message');
+    expect(view[0].role).toBe('developer');
+    assert(view[1].type === 'message');
+    expect(view[1].role).toBe('developer');
+    assert(view[2].type === 'message');
+    expect(view[2].role).toBe('user');
+    assert(view[2].content[0].type === 'input_text');
+    expect(view[2].content[0].text).toBe('h-8');
+    assert(view[3].type === 'message');
+    assert(view[3].content[0].type === 'input_text');
+    expect(view[3].content[0].text).toBe('h-9');
   });
 });

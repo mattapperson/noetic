@@ -179,6 +179,12 @@ Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe
 
 Channels are scoped to an execution tree. A channel created in a parent is accessible to all descendants unless a `spawn` boundary (see `04-spawn`) uses `contextIn: 'fresh'`. Fresh contexts get a new channel namespace — **except** for external channels, which survive fresh boundaries (scoped to root execution). To pass a non-external channel across a fresh boundary, use `contextIn: 'custom'` explicitly — this is the "you opted into this" escape hatch.
 
+`fork` and `spawn` child contexts inherit the parent's channel store by default — sibling fork paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created.
+
+### Wake-only subscription
+
+`every({ wakeOn })` (see `05-loop-and-until`) subscribes to a channel for wake notification *without* consuming any value. After a `send`, all wake subscribers fire once and are removed; queue/value-mode messages stay in their channel state for the body's next iteration to drain. This lets a body that uses `tryRecv` to drain a queue still see the wake message that woke it.
+
 ### Lifecycle
 
 Channels are created on first reference and garbage-collected when the execution tree completes. Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.

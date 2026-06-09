@@ -1,24 +1,31 @@
 /**
- * Built-in commands index.
+ * Non-presentation built-in command index.
  */
 
 import type { Command } from '../types.js';
 
+import { agentCi } from './agent-ci/index.js';
+import { agentReadiness } from './agent-readiness.js';
 import { clear } from './clear.js';
-import { context } from './context.js';
 import { mode } from './mode.js';
 import { plan } from './plan.js';
-import { skills } from './skills.js';
+import { rename } from './rename.js';
+import { resume } from './resume.js';
+import { session } from './session.js';
+import { tag } from './tag.js';
+import { tasks } from './tasks.js';
 
-/**
- * All built-in commands.
- */
 export const BUILTIN_COMMANDS: ReadonlyArray<Command> = [
+  agentCi,
+  agentReadiness,
   clear,
-  context,
   mode,
   plan,
-  skills,
+  rename,
+  resume,
+  session,
+  tag,
+  tasks,
 ];
 
-export { clear, context, mode, plan, skills };
+export { agentCi, agentReadiness, clear, mode, plan, rename, resume, session, tag, tasks };

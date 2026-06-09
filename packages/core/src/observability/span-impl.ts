@@ -1,4 +1,4 @@
-import type { Span } from '../types/observability';
+import type { Span } from '@noetic-tools/types';
 
 export class SpanImpl implements Span {
   readonly traceId: string;

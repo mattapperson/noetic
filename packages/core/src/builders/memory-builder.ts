@@ -1,5 +1,5 @@
-import { frameworkCast } from '../interpreter/framework-cast';
-import type { MemoryConfig, MemoryLayer } from '../types/memory';
+import type { MemoryConfig, MemoryLayer } from '@noetic-tools/memory';
+import { frameworkCast } from '@noetic-tools/types';
 
 /**
  * Creates a type-safe memory configuration from a tuple of memory layers.

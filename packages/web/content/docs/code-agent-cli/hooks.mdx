@@ -1,0 +1,128 @@
+---
+title: Hooks
+description: Worktree lifecycle hooks — pre-start, post-start, post-merge, pre-remove — for sub-agent isolation.
+---
+
+When the agent calls the `agent` tool with `isolation: 'worktree'`, the CLI creates a fresh git worktree for the sub-agent and runs **hooks** at each lifecycle point. This lets you set up environment files, install dependencies, run linters, and rebuild bundles without ad-hoc tool calls.
+
+The `worktree` namespace mirrors a subset of [worktrunk's](https://worktrunk.dev/config/) config schema. The CLI interprets these directly — there is no `wt` binary dependency.
+
+## Schema
+
+```ts
+import type { AgentConfig } from '@noetic-tools/cli';
+
+export default {
+  // ...
+  worktree: {
+    'worktree-path': '{{ repo_path }}/.worktrees/{{ agent_id | sanitize }}',
+    branch: 'noetic/{{ agent_id }}',
+
+    'pre-start': 'git fetch origin',
+    'post-start': {
+      'setup-env': 'cp .env.example .env',
+      'install-playwright': 'bunx playwright install --with-deps',
+    },
+    'post-merge': {
+      'install-deps': 'bun install',
+      'rebuild': 'bun run build',
+    },
+    'pre-remove': 'bun run lint',
+
+    'clone-files': ['.env*', 'config/.env*', '*.local', 'certificates/*'],
+    cleanup: 'if-clean',
+  },
+} satisfies AgentConfig;
+```
+
+## Lifecycle
+
+| Hook | Fires when | Notes |
+|---|---|---|
+| `pre-start` | Before the worktree is created. | Useful for `git fetch` to ensure the new branch is based on a fresh remote. |
+| `post-start` | After the worktree is created, before the sub-agent runs. | `bun install` is added automatically; you typically use this for `.env` setup, browser/playwright install, codegen. |
+| `post-merge` | After the sub-agent's branch is merged back to the parent. | Lockfile updates, rebuilds, dependency reinstalls. |
+| `pre-remove` | Before the worktree is deleted (subject to `cleanup` policy). | Run a lint or test suite as a tripwire — non-zero exit aborts removal. |
+
+## Hook value forms
+
+A hook can be either a single command string or a named table of commands.
+
+```ts
+import type { AgentConfig } from '@noetic-tools/cli';
+
+const hooks = {
+  'pre-start': 'git fetch origin',
+  'post-start': {
+    'setup-env': 'cp .env.example .env',
+    'install-playwright': 'bunx playwright install --with-deps',
+  },
+} satisfies Pick<NonNullable<AgentConfig['worktree']>, 'pre-start' | 'post-start'>;
+```
+
+Use the named-table form when you have multiple independent setup steps — names appear in the CLI's status output so you can tell which hook is currently running. Commands within a table run sequentially in object-key order.
+
+A non-zero exit code from any hook aborts the lifecycle transition. `pre-start` failures cancel the worktree creation; `pre-remove` failures cancel the removal (the worktree stays on disk for inspection).
+
+## Templates
+
+`worktree-path`, `branch`, and hook commands accept these template variables:
+
+| Variable | Value |
+|---|---|
+| `{{ repo }}` | Bare repo name (e.g. `noetic`) |
+| `{{ repo_path }}` | Absolute path to the parent repo |
+| `{{ branch }}` | The worktree's branch name |
+| `{{ worktree_path }}` | Absolute path to the worktree |
+| `{{ worktree_name }}` | Last segment of `worktree_path` |
+| `{{ default_branch }}` | The repo's default branch (e.g. `main`) |
+| `{{ agent_id }}` | The sub-agent's stable id |
+
+Filters (with `|` syntax):
+
+| Filter | Effect |
+|---|---|
+| `sanitize` | Replace `/` and `\` with `-` so an `agent_id` is safe in a path. |
+| `hash_port` | Deterministic 10000–19999 — useful for assigning per-worktree dev-server ports. |
+
+These match worktrunk's filter semantics.
+
+## `clone-files`
+
+A list of glob patterns. Matching files are copied from the parent worktree into the new worktree right after `post-start`. Use this for files that aren't in git but the sub-agent needs to run:
+
+```ts
+import type { AgentConfig } from '@noetic-tools/cli';
+
+const cloneFiles: NonNullable<AgentConfig['worktree']>['clone-files'] = [
+  '.env*',
+  'config/.env*',
+  '*.local',
+  'certificates/*',
+];
+```
+
+Globs are evaluated relative to the parent worktree.
+
+## `cleanup`
+
+Controls whether the worktree is removed after the sub-agent finishes (or is detached and reaped by the [reconcile flow](/docs/code-agent-cli/custom-flows#reconcile)).
+
+| Value | Behavior |
+|---|---|
+| `'always'` | Always remove the worktree, even when there are uncommitted changes. Destructive. |
+| `'if-clean'` (recommended) | Remove only when the worktree is clean; otherwise leave it for inspection. |
+| `'never'` | Always leave the worktree; manual cleanup. |
+
+Set `'never'` while developing flows you want to inspect post-mortem; set `'if-clean'` for normal use.
+
+## Embedded `!command` in AGENT.md
+
+Hooks are different from the `!command` lines you can embed in [AGENT.md](/docs/code-agent-cli/agent-md#embedded-command-lines) and [Rules](/docs/code-agent-cli/rules#embedded-commands):
+
+| Mechanism | Fires | Trust |
+|---|---|---|
+| Worktree hooks | Sub-agent worktree lifecycle | Run with project trust regardless of `trustProjectEmbeddedCommands` — they're explicit config the user wrote. |
+| AGENT.md / rules `!command` | Loader, every session start | Project-origin commands gated by `trustProjectEmbeddedCommands: true`; user-origin always runs. |
+
+Both produce process side effects, but worktree hooks are scoped to a per-sub-agent transient checkout, while `!` lines mutate the user's terminal session.

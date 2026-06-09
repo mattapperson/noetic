@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildPipelineAgent } from '../../examples/pipeline-agent';
-import { AgentHarness } from '../../src/runtime/agent-harness';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('pipeline agent', () => {

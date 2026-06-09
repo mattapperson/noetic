@@ -1,24 +1,4 @@
 {
   "title": "Noetic",
-  "pages": [
-    "index",
-    "overview",
-    "---Primitives---",
-    "steps",
-    "operators",
-    "---Infrastructure---",
-    "context",
-    "runtime",
-    "errors",
-    "observability",
-    "---Memory---",
-    "memory",
-    "---Patterns---",
-    "patterns",
-    "---Examples---",
-    "examples",
-    "---Reference---",
-    "design-decisions",
-    "api"
-  ]
+  "pages": ["index", "framework", "code-agent-cli"]
 }

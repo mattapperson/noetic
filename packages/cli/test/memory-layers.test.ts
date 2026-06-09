@@ -21,8 +21,8 @@ import type {
   ShellExecResult,
   StoreParams,
   Tool,
-} from '@noetic/core';
-import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic/core';
+} from '@noetic-tools/core';
+import { createLocalFsAdapter, createLocalShellAdapter } from '@noetic-tools/platform-node';
 import { z } from 'zod';
 
 import { communicationStyleLayer } from '../src/memory/communication-style-layer.js';
@@ -69,6 +69,9 @@ function makeCtx(shell: ShellAdapter = createLocalShellAdapter()): ExecutionCont
     trace: {
       setAttribute() {},
       addEvent() {},
+    },
+    readLayerState() {
+      return undefined;
     },
   };
 }

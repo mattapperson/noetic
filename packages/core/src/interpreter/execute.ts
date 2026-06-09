@@ -1,20 +1,159 @@
-import { NoeticErrorImpl } from '../errors/noetic-error';
+import type { ContextMemory, LayerStateStore, MemoryLayer } from '@noetic-tools/memory';
+import type {
+  Context,
+  Step,
+  StepRun,
+  StepSpawn,
+  StepSubprocessRequest,
+  SubprocessAdapter,
+} from '@noetic-tools/types';
+import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
-import type { Context } from '../types/context';
-import type { ContextMemory } from '../types/memory';
-import type { Step } from '../types/step';
-import { executeBranch } from './execute-branch';
-import { executeFork } from './execute-fork';
-import { executeLLM } from './execute-llm';
-import { executeLoop } from './execute-loop';
-import { executeProvide } from './execute-provide';
-import { executeRun } from './execute-run';
-import { executeSpawn } from './execute-spawn';
-import { executeTool } from './execute-tool';
-import { frameworkCast } from './framework-cast';
+import { ContextImpl } from '../runtime/context-impl';
+import { DetachedHandleImpl } from '../runtime/detached-handle';
+import {
+  executeLLM,
+  executeProvide,
+  executeRun,
+  executeSpawn,
+  executeTool,
+} from './execute-action';
+import { executeBranch, executeEvery, executeFork, executeLoop } from './execute-control';
 import { isMutableContext } from './typeguards';
 
+//#region Constants
+
 const MAX_DEPTH = 64;
+
+//#endregion
+
+//#region Helpers
+
+/**
+ * Return the underlying `ContextImpl` when the context is one we produced
+ * in-process. Out-of-process descendants reach us through the adapter
+ * boundary and are not `ContextImpl` instances, so frontier bookkeeping is
+ * a no-op for them.
+ */
+function asContextImpl(ctx: Context): ContextImpl | null {
+  return ctx instanceof ContextImpl ? ctx : null;
+}
+
+/**
+ * Extract the parent's memory layers and layer-state store so `executeSpawn`
+ * can propagate them to the child context per `specs/04-spawn.md`: when a
+ * spawn step has no explicit `memory` config, parent layers inherit and their
+ * `onSpawn`/`onReturn` hooks run across the boundary.
+ *
+ * `ctx.harness.layerStateStore` is not on the public `AgentHarnessContract`
+ * (it's an internal runtime surface). Accessing it via `frameworkCast`
+ * matches the internal-only pattern used elsewhere in the interpreter.
+ */
+interface HarnessWithLayerStore {
+  layerStateStore: LayerStateStore;
+}
+
+function harnessWithLayerStore<TMemory>(ctx: Context<TMemory>): HarnessWithLayerStore {
+  return frameworkCast<HarnessWithLayerStore>(ctx.harness);
+}
+
+function buildSpawnOpts<TMemory>(ctx: Context<TMemory>): {
+  itemSchemas: Context['itemSchemas'];
+  parentLayers: MemoryLayer[] | undefined;
+  layerStore: LayerStateStore;
+} {
+  const baseCtx = frameworkCast<Context>(ctx);
+  return {
+    itemSchemas: baseCtx.itemSchemas,
+    parentLayers: baseCtx.layers,
+    layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
+  };
+}
+
+/**
+ * Resolve the subprocess adapter that should handle dispatch for this step.
+ * Precedence is `step.subprocess ?? ctx.harness.subprocess`. Per-call
+ * `detachedSpawn` overrides layer above this in the harness itself.
+ */
+function resolveStepAdapter<TMemory, I, O>(
+  step: Step<TMemory, I, O>,
+  ctx: Context<TMemory>,
+): SubprocessAdapter {
+  if ((step.kind === 'run' || step.kind === 'spawn') && step.subprocess) {
+    return step.subprocess;
+  }
+  return ctx.harness.subprocess;
+}
+
+/**
+ * Dispatch a run/spawn step through the resolved subprocess adapter.
+ *
+ * The `_localExecutor` closure carries the in-process fallback path — the
+ * in-memory adapter invokes it directly, preserving the pre-refactor
+ * dispatch semantics including parent-context inheritance, layer lifecycle,
+ * and synchronous error propagation. Out-of-process adapters ignore
+ * `_localExecutor` and run the step in a child runtime.
+ */
+async function dispatchViaAdapter<TMemory, I, O>(
+  step: StepRun<TMemory, I, O> | StepSpawn<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
+  executor: () => Promise<O>,
+): Promise<O> {
+  const adapter = resolveStepAdapter(step, ctx);
+  const request: StepSubprocessRequest = {
+    kind: 'step',
+    stepId: step.id,
+    serializedInput: input,
+    executionId: ctx.id,
+    overrides: {
+      threadId: ctx.threadId,
+      resourceId: ctx.resourceId,
+    },
+    _localExecutor: () => executor(),
+  };
+  const spawnPromise = adapter.spawn(request);
+  const handle = new DetachedHandleImpl<O>({
+    id: ctx.id,
+    stepId: step.id,
+    adapter,
+    spawnPromise,
+  });
+  return handle.await();
+}
+
+/**
+ * @internal
+ * Dispatch a step at the per-kind handler level without adapter routing.
+ *
+ * Used as the top-level `_localExecutor` for `StepRun` / `StepSpawn`
+ * dispatches: the outer adapter call already recorded the request, so
+ * running the handler directly avoids a re-entrant adapter round-trip
+ * inside the same logical step. Nested step dispatches (e.g. `executeSpawn`
+ * descending into `step.child`) still go through `execute()` and route
+ * through the adapter as normal, so per-step overrides on descendants
+ * continue to work.
+ */
+export async function executeNoAdapter<TMemory, I, O>(
+  step: Step<TMemory, I, O>,
+  input: I,
+  ctx: Context<TMemory>,
+): Promise<O> {
+  switch (step.kind) {
+    case 'run':
+      return executeRun(step, input, ctx);
+    case 'spawn':
+      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx));
+    default:
+      // Kinds that don't currently route through the adapter (llm, tool,
+      // branch, fork, provide, loop, every). Delegate back to `execute()`
+      // so they exercise the normal dispatch table, framework-event emits,
+      // abort checks, and depth guard.
+      return execute(step, input, ctx);
+  }
+}
+
+//#endregion
 
 /**
  * Executes a step within the interpreter, dispatching to the appropriate handler by step kind.
@@ -73,40 +212,63 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     });
   }
 
+  // Push onto the durable frontier so checkpoints can record exactly which
+  // step was in flight when the snapshot fired. Steps with empty ids are
+  // skipped — they are not reattachable by id and would pollute the stack.
+  const impl = asContextImpl(baseCtx);
+  if (impl && step.id.length > 0) {
+    impl.enterStep({
+      stepId: step.id,
+      input,
+    });
+  }
+
   let result: O;
-  switch (step.kind) {
-    case 'run':
-      result = await executeRun(step, input, ctx);
-      break;
-    case 'llm':
-      result = await executeLLM(step, input, ctx, baseCtx.layers);
-      break;
-    case 'tool':
-      result = await executeTool(step, input, ctx, baseCtx.harness);
-      break;
-    case 'branch':
-      result = await executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
-      break;
-    case 'fork':
-      result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
-      break;
-    case 'spawn':
-      result = await executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c));
-      break;
-    case 'provide':
-      result = await executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));
-      break;
-    case 'loop':
-      result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
-      break;
-    default: {
-      const _exhaustive: never = step;
-      throw new NoeticErrorImpl({
-        kind: 'step_failed',
-        stepId: 'unknown',
-        cause: new Error('Unknown step kind'),
-        retriesExhausted: false,
-      });
+  try {
+    switch (step.kind) {
+      case 'run':
+        result = await dispatchViaAdapter(step, input, ctx, () => executeRun(step, input, ctx));
+        break;
+      case 'llm':
+        result = await executeLLM(step, input, ctx, baseCtx.layers);
+        break;
+      case 'tool':
+        result = await executeTool(step, input, ctx, baseCtx.harness);
+        break;
+      case 'branch':
+        result = await executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'fork':
+        result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'spawn':
+        result = await dispatchViaAdapter(step, input, ctx, () =>
+          executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx)),
+        );
+        break;
+      case 'provide':
+        result = await executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'loop':
+        result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'every':
+        result = await executeEvery(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      default: {
+        const _exhaustive: never = step;
+        void _exhaustive;
+        throw new NoeticErrorImpl({
+          kind: 'step_failed',
+          stepId: 'unknown',
+          cause: new Error('Unknown step kind'),
+          retriesExhausted: false,
+        });
+      }
+    }
+  } finally {
+    if (impl && step.id.length > 0) {
+      impl.leaveStep(step.id);
     }
   }
 

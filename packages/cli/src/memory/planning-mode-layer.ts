@@ -5,8 +5,8 @@
  * FlowSchema patterns, PRD authoring guidelines, and read-only tool usage.
  */
 
-import type { MemoryLayer, Tool } from '@noetic/core';
-import { Slot } from '@noetic/core';
+import type { MemoryLayer, Tool } from '@noetic-tools/core';
+import { Slot } from '@noetic-tools/core';
 
 //#region Types
 

@@ -1,0 +1,67 @@
+---
+title: provide
+description: Attach memory layers to descendant steps without creating an isolated context.
+---
+
+## Quick Example
+
+```ts validate=none
+import { provide, step } from '@noetic-tools/core';
+
+const withLayers = provide({
+  id: 'with-knowledge',
+  child: step.llm({
+    id: 'researcher',
+    model: 'openai/gpt-4o',
+    instructions: 'Research the topic thoroughly.',
+  }),
+  memory: [knowledgeLayer, steeringLayer],
+});
+```
+
+## What It Does
+
+`provide` attaches memory layers to a subtree of steps without creating an isolated context. Like React's `Context.Provider`, layers become available to all descendant steps -- the child shares the parent's `ItemLog` and conversation history.
+
+This is the primitive for scoping memory layers to a section of your execution tree. Any `StepLLM` descendant will have access to the provided layers during recall, store, and steering hooks.
+
+`spawn` and `detachedSpawn` break the inheritance chain. If a descendant step spawns a child, the provided layers do not propagate into the spawn boundary.
+
+## API Reference
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `child` | `Step<TMemory, I, O>` | Yes | The step to execute with the provided layers |
+| `memory` | `MemoryConfig \| MemoryLayer[]` | Yes | Memory layers available to all descendant steps |
+
+## Example: Scoped Knowledge Layer
+
+Attach a knowledge base layer only to a specific subtree, without affecting sibling steps:
+
+```ts validate=none
+import { provide, step } from '@noetic-tools/core';
+
+const researchPhase = provide({
+  id: 'research-with-knowledge',
+  child: {
+    kind: 'loop',
+    id: 'research-loop',
+    steps: [step.llm({
+      id: 'researcher-llm',
+      model: 'openai/gpt-4o',
+      instructions: 'You are a research assistant.',
+      tools: [searchTool],
+    })],
+    until: until.noToolCalls(),
+    maxIterations: 10,
+  },
+  memory: [semanticMemory, steeringLayer],
+});
+```
+
+## Related
+
+- [spawn](/docs/framework/operators/spawn) -- context isolation with spawn-local memory layers.
+- [Memory](/docs/framework/memory) -- memory layer system overview.
+- [Overview](/docs/framework/overview) -- how provide fits into the step primitives.

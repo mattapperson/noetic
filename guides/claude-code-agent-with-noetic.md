@@ -51,7 +51,7 @@ Everything runs through a single `AgentHarness` instance.
 All execution — the coordinator loop, every branched agent step, and any spawned sub-agents — shares one `AgentHarness`. The harness provides the LLM client, channel store, tracing, and storage.
 
 ```typescript
-import { AgentHarness } from '@noetic/core';
+import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'claude-code-agent',
@@ -85,7 +85,7 @@ Claude Code has 5 built-in agent types. The primary difference between them is t
 Define each as a pre-built `step.llm()`:
 
 ```typescript
-import { step } from '@noetic/core';
+import { step } from '@noetic-tools/core';
 
 const readOnlyTools = createCodebaseTools(rootDir);          // glob, grep, read, bash-readonly
 const fullTools = [...readOnlyTools, ...createWriteTools(rootDir)]; // + write, edit, bash
@@ -141,7 +141,7 @@ No factories, no resolvers, no dynamic step construction. Each agent type is a s
 The core pattern: the loop body contains a `branch` that routes each iteration to the appropriate `step.llm()` based on state. The model's output from one iteration feeds into the routing decision for the next.
 
 ```typescript
-import { branch } from '@noetic/core';
+import { branch } from '@noetic-tools/core';
 
 const agentRouter = branch({
   id: 'agent-type-router',
@@ -229,8 +229,8 @@ The loop body has two steps per iteration:
 import {
   AgentHarness, loop, step, branch,
   workingMemory, observationalMemory,
-} from '@noetic/core';
-import { any, until } from '@noetic/core';
+} from '@noetic-tools/core';
+import { any, until } from '@noetic-tools/core';
 
 const MODEL = 'anthropic/claude-sonnet-4-20250514';
 const ROOT_DIR = process.cwd();
@@ -467,7 +467,7 @@ A 4-stage pipeline (snip → microcompact → context collapse → autocompact) 
 `observationalMemory()` buffers raw conversation items. When the buffer crosses a token threshold, it calls an `observer` function to distill them into compact observations. This is a **memory layer** — it controls what the model sees in its prompt, not what tools are available:
 
 ```typescript
-import { observationalMemory } from '@noetic/core';
+import { observationalMemory } from '@noetic-tools/core';
 
 const compactor = observationalMemory({
   bufferThreshold: 50_000, // tokens before distilling
@@ -495,7 +495,7 @@ A lifecycle hook inspects conversation history for repetitive patterns and injec
 `steering()` is a memory layer that can intercept tool calls (`beforeToolCall`) and model responses (`afterModelCall`). For doom loop detection, we use `afterModelCall` to check for repetitive patterns and inject guidance:
 
 ```typescript
-import { steering, SteeringAction } from '@noetic/core';
+import { steering, SteeringAction } from '@noetic-tools/core';
 
 const doomLoopDetector = steering({
   rules: [{
@@ -533,8 +533,8 @@ When `Guide` is returned, the guidance is injected as a developer message and th
 import {
   AgentHarness, step, branch, loop, spawn, tool, channel,
   workingMemory, observationalMemory, steering, SteeringAction,
-} from '@noetic/core';
-import { any, until } from '@noetic/core';
+} from '@noetic-tools/core';
+import { any, until } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const MODEL = 'anthropic/claude-sonnet-4-20250514';

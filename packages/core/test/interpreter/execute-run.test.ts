@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeRun } from '../../src/interpreter/execute-run';
-import type { Context } from '../../src/types/context';
-import type { ContextMemory } from '../../src/types/memory';
-import type { StepRun } from '../../src/types/step';
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { Context, StepRun } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
+import { executeRun } from '../../src/interpreter/execute-action';
 import { makeMockContext } from '../_helpers';
 
 const mockCtx: Context = makeMockContext();

@@ -28,7 +28,9 @@ export type { EvalExecution, ScorerFn } from './scorers/types';
 export { discoverFieldsFromSource } from './static-analysis/ast-field-discovery';
 export type { AdapterConfig, FieldMapping } from './types/adapter';
 // Types — eval
+// Types — regression
 export type {
+  Baseline,
   CaseResult,
   EvalSuiteOptions,
   OptimizeConfig,
@@ -46,8 +48,7 @@ export type {
   OptimizationResult,
 } from './types/optimizer';
 export { FieldKind } from './types/optimizer';
-// Types — regression
-export type { Baseline, RegressionConfig, RegressionResult } from './types/regression';
+export type { RegressionConfig, RegressionResult } from './types/regression';
 // Types — scorer
 export type {
   AnalyzeConfig,

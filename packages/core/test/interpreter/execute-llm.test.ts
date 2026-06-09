@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory, ExecutionContext, MemoryLayer } from '@noetic-tools/memory';
+import { historyWindow, projectHistoryLayers } from '@noetic-tools/memory';
+import type { CallModelRequest, StepLLM } from '@noetic-tools/types';
+import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { isNoeticError } from '../../src/errors/noetic-error';
-import { executeLLM } from '../../src/interpreter/execute-llm';
+import { executeLLM } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
-import type { CallModelRequest } from '../../src/types/runtime';
-import type { StepLLM } from '../../src/types/step';
 import {
   makeLLMResponse,
   makeMockContext,
@@ -446,5 +446,142 @@ describe('executeLLM', () => {
     // Side-effect invariant: the user input also lands in the item log.
     expect(ctx.itemLog.items.some((i) => i.type === 'message' && i.role === 'user')).toBe(true);
     expect(ctx.lastStepMeta).not.toBeNull();
+  });
+
+  it('caps history items via projectHistory before sending to the model', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('done');
+    };
+    // Slice the trailing 4 items — emulates a historyWindow with maxItems: 4.
+    harness.projectHistory = async (_layers, items) => items.slice(-4);
+    const ctx = new ContextImpl({
+      harness,
+    });
+    // Seed 20 prior items.
+    for (let i = 0; i < 10; i++) {
+      ctx.itemLog.append({
+        id: `u-${i}`,
+        type: 'message',
+        role: 'user',
+        status: 'completed',
+        content: [
+          {
+            type: 'input_text',
+            text: `q-${i}`,
+          },
+        ],
+      });
+      ctx.itemLog.append({
+        id: `a-${i}`,
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [
+          {
+            type: 'output_text',
+            text: `r-${i}`,
+          },
+        ],
+      });
+    }
+    const layers: MemoryLayer[] = [
+      {
+        id: 'history-window',
+        slot: 275,
+        scope: 'execution',
+        hooks: {},
+      },
+    ];
+
+    await executeLLM(step, '', ctx, layers);
+
+    assert(capturedRequest !== undefined);
+    // The recorded request must contain at most 4 items (the cap), even though
+    // ctx.itemLog has 20+ pre-existing items.
+    expect(capturedRequest.items.length).toBe(4);
+    // Storage isn't shrunk by the projection — the seeded 20 plus the LLM
+    // response item all remain in the log.
+    expect(ctx.itemLog.items.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it('integrates the real historyWindow layer end-to-end via projectHistoryLayers', async () => {
+    const step: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'test',
+      model: 'gpt-4',
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('done');
+    };
+    const realLayer = historyWindow({
+      maxItems: 4,
+    });
+    // Wire the real layer's projectHistory hook through projectHistoryLayers
+    // so this exercises the full pipeline (slot sort, hook dispatch, slice +
+    // expansion + strip-orphans) instead of a stub.
+    harness.projectHistory = async (layers, items, ctx) =>
+      projectHistoryLayers({
+        layers,
+        items,
+        ctx: frameworkCast<ExecutionContext>({
+          executionId: ctx.id,
+        }),
+        store: {
+          get: <T>() => frameworkCast<T>(null),
+          set: () => {},
+          cleanup: () => {},
+          diagnostic: () => {},
+        },
+      });
+    const ctx = new ContextImpl({
+      harness,
+    });
+    for (let i = 0; i < 10; i++) {
+      ctx.itemLog.append({
+        id: `u-${i}`,
+        type: 'message',
+        role: 'user',
+        status: 'completed',
+        content: [
+          {
+            type: 'input_text',
+            text: `q-${i}`,
+          },
+        ],
+      });
+      ctx.itemLog.append({
+        id: `a-${i}`,
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [
+          {
+            type: 'output_text',
+            text: `r-${i}`,
+          },
+        ],
+      });
+    }
+
+    await executeLLM(step, '', ctx, [
+      realLayer,
+    ]);
+
+    assert(capturedRequest !== undefined);
+    // The real layer applies maxItems: 4 (history is all alternating user/
+    // assistant pairs, no tool calls, so no expansion needed).
+    expect(capturedRequest.items.length).toBe(4);
+    expect(ctx.itemLog.items.length).toBeGreaterThanOrEqual(20);
   });
 });

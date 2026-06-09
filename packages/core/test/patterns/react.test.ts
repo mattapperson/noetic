@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type { LLMResponse } from '@noetic-tools/types';
 import { z } from 'zod';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import { react } from '../../src/patterns/react';
-import { AgentHarness } from '../../src/runtime/agent-harness';
-import type { LLMResponse } from '../../src/types/common';
 import { createScriptedCallModel } from '../_helpers';
 
 describe('ReAct pattern', () => {

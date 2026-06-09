@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { InputMessageItem, Item, MessageItem } from '@noetic/core';
+import type { InputMessageItem, Item, MessageItem } from '@noetic-tools/core';
 import { Message, parseMarkdown } from 'chat';
 
 import { toNoeticItems } from '../src/messages';
@@ -138,8 +138,11 @@ describe('toNoeticItems', () => {
 
     expect(items).toHaveLength(1);
     const item = getUserItem(items, 0);
-    expect(item.content[0].type).toBe('input_text');
-    expect(item.content[0].text).toBe('Valid');
+    const part = item.content[0];
+    if (part.type !== 'input_text') {
+      throw new Error('Expected input_text content part');
+    }
+    expect(part.text).toBe('Valid');
   });
 
   test('preserves message order', () => {

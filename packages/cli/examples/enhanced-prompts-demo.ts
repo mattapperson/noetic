@@ -5,9 +5,10 @@
  * instructions that adapt based on usage patterns and environment.
  */
 
-import type { BudgetConfig } from '@noetic/core';
-import { createLocalFsAdapter } from '@noetic/core';
+import type { BudgetConfig } from '@noetic-tools/core';
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 import { createAgentHarness } from '../src/harness/factory.js';
+import { createPluginContextBuilder } from '../src/plugins/context.js';
 import type { AgentConfig } from '../src/types/config.js';
 
 function formatBudget(budget: BudgetConfig | undefined): string {
@@ -40,7 +41,8 @@ async function demonstrateEnhancedPrompts() {
     config: demoConfig,
     plugins: [],
     fs: createLocalFsAdapter(),
-    mode: 'normal', // Start in normal mode
+    buildContext: createPluginContextBuilder(demoConfig),
+    mode: 'act', // Start in act (normal) mode
   });
 
   console.log('📋 Memory Layers Active:');
@@ -75,6 +77,7 @@ async function demonstrateEnhancedPrompts() {
     config: demoConfig,
     plugins: [],
     fs: createLocalFsAdapter(),
+    buildContext: createPluginContextBuilder(demoConfig),
     mode: 'planning', // Planning mode
   });
 

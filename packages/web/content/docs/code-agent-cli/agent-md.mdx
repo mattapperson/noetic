@@ -1,0 +1,92 @@
+---
+title: AGENT.md
+description: Persistent project and user instructions surfaced into every agent turn.
+---
+
+`AGENT.md` is a markdown file that the CLI loads into context on every execution. It is the canonical place to put **persistent, repo-wide guidance** for the agent: how to run tests, what the architecture looks like, conventions you want enforced, packages to avoid, and so on.
+
+The file is loaded by the `agent-md` memory layer, which sits just above observations in the [memory budget](/docs/framework/memory). Total budget is **15 KB recall**; per-file content cap is 25 KB; aggregate cap across all sources is 60 KB. When the aggregate cap is exceeded, lower-precedence sources are dropped and a note is appended.
+
+## Discovery order
+
+The loader walks these locations and concatenates everything it finds, in order:
+
+1. `<cwd>/AGENT.md`
+2. `<cwd>/.agent/AGENT.md`
+3. `<cwd>/.agent/rules/*.md` (alphabetical) — see [Rules](/docs/code-agent-cli/rules).
+4. **Ancestor walk** from `cwd` up to the git repo root: each ancestor's `AGENT.md` is treated as a "nested package" instruction. The walk stops at the parent of the repo root or at `$HOME`, whichever comes first. When `cwd` is outside a git repo, the ancestor walk is skipped — this prevents a stray `/tmp/AGENT.md` from being loaded on a shared host.
+5. `~/.config/noetic/AGENT.md` (XDG)
+6. `~/.config/noetic/rules/*.md`
+7. `~/.noetic/AGENT.md`
+8. `~/.noetic/rules/*.md`
+
+Each source renders with a `Contents of <path> (<role>):` header so the model can tell project-origin from user-origin context.
+
+## Compatibility with `CLAUDE.md`
+
+Many existing repos already have a `CLAUDE.md`. The convention is to symlink it:
+
+```bash
+ln -s CLAUDE.md AGENT.md
+```
+
+This repo does exactly that: `AGENT.md → CLAUDE.md`. Symlinks are canonicalised with `realpath`, so cycles via symlinks are caught by the import deduper.
+
+## `@import` transclusion
+
+You can split AGENT.md across files by writing `@path.md` on its own line. The loader resolves the path relative to the importing file, follows symlinks, and inlines the content. Each transcluded body is fenced in HTML comments so a truncated import with an unclosed code fence can't poison the parent's markdown.
+
+```markdown
+# AGENT.md
+
+@./docs/conventions.md
+@~/personal/global-rules.md
+```
+
+Limits: max 5 levels of nesting. Beyond that, imports are skipped with a comment marker.
+
+## Embedded `!command` lines
+
+A line that starts with `!` is treated as a shell command — the loader runs it and substitutes the output:
+
+```markdown
+## Current branch
+!git branch --show-current
+```
+
+By default, this only runs in **user-origin** files (`~/...`). Project-origin files (`./AGENT.md`, `./.agent/rules/*.md`) are **not** trusted: their `!` lines are skipped unless you opt in with `trustProjectEmbeddedCommands: true` in your config. This is a supply-chain mitigation — a malicious dependency PR can't add a command line to your `AGENT.md` that exfiltrates env vars on the next session.
+
+## Caps
+
+| Limit | Default | Purpose |
+|---|---|---|
+| Per-file lines | 200 | Truncate verbose docs without dropping the file. |
+| Per-file bytes | 25 KB | Hard cap on a single source. |
+| Total bytes | 60 KB | Aggregate cap across all sources. |
+| Import depth | 5 | Limit `@import` chains. |
+| Recall budget | 15 KB | What actually goes to the LLM each turn. |
+
+When the recall budget bites, the layer renders the highest-precedence sources first and trims the rest with a note.
+
+## What goes in AGENT.md
+
+Good:
+- Build / test / lint commands the agent should run.
+- Architectural overview and module layout.
+- Naming conventions, type-safety rules, dependency policies.
+- "Don't do X" — patterns that are subtly wrong in this codebase.
+
+Better in [Rules](/docs/code-agent-cli/rules):
+- Long checklists scoped to one concern (frontend, testing, security).
+- Anything you'd want to lint a sub-agent against without dragging in the rest of `AGENT.md`.
+
+Better in [Skills](/docs/code-agent-cli/skills):
+- Procedural workflows triggered by intent (e.g. "review this PR", "set up a session-start hook"). Skills are loaded only when activated; AGENT.md is always loaded.
+
+## Inspecting what the agent sees
+
+Run `/context` inside the TUI to see the rendered AGENT.md content for the current session, plus its byte size and which sources contributed.
+
+## Reserved tags
+
+The loader escapes `<system-reminder>` and `</system-reminder>` so attacker-controlled AGENT.md content cannot forge a runtime reminder. Any other tag is passed through verbatim.

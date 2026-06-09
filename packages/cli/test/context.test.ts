@@ -4,14 +4,14 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { Item, LastLayerUsage } from '@noetic/core';
+import type { Item, LastLayerUsage } from '@noetic-tools/core';
 import {
   buildBar,
   buildRows,
   formatTokens,
   getModelContextLimit,
   summarizeItem,
-} from '../src/commands/builtins/context.js';
+} from '../src/tui/commands/context.js';
 
 //#region Fixtures
 

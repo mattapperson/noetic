@@ -12,7 +12,7 @@
 1. **"How good is this agent?"** — Run a step against labeled or unlabeled examples, score the outputs, report metrics.
 2. **"Can this agent be better?"** — Discover tunable fields in the step tree, mutate them, evaluate, and write back improvements.
 
-The package is separate from `@noetic/core` because evaluation is a development-time concern. It depends on `@noetic/core` as a peer dependency and adds no runtime overhead to production agents.
+The package is separate from `@noetic-tools/core` because evaluation is a development-time concern. It depends on `@noetic-tools/core` as a peer dependency and adds no runtime overhead to production agents.
 
 ---
 
@@ -462,7 +462,7 @@ Matching is by `stepId` + `fieldKind` + `value`. This two-phase approach (runtim
 
 ### `createAdapter` — Third-Party SDK Integration
 
-Adapters bridge third-party LLM SDKs into the eval system, allowing evaluation of agents built outside `@noetic/core`.
+Adapters bridge third-party LLM SDKs into the eval system, allowing evaluation of agents built outside `@noetic-tools/core`.
 
 ```typescript
 interface EvalAdapter {
@@ -529,7 +529,7 @@ describe('vercel-agent-eval', { adapter: vercelAdapter, scorers: [answerRelevanc
 
 **Invariant:** Adapters must return `metadata.duration` — it is the only required metadata field. All other metadata fields are optional and scorers that depend on them gracefully degrade (return `{ value: 0, reason: 'missing metadata' }`).
 
-**Rationale:** The adapter layer means `@noetic/eval` is useful beyond the noetic ecosystem. Teams can adopt scored evaluation for any LLM application, then optionally migrate to `@noetic/core` for the optimization features.
+**Rationale:** The adapter layer means `@noetic/eval` is useful beyond the noetic ecosystem. Teams can adopt scored evaluation for any LLM application, then optionally migrate to `@noetic-tools/core` for the optimization features.
 
 ---
 

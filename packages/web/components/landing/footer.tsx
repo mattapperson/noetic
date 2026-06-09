@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FOOTER_RULE, GITHUB_URL, NAV_LINK_STYLE } from '@/lib/tui-theme';
 
-const INSTALL_CMD = 'npm install @noetic/core';
+const INSTALL_CMD = 'npm install @noetic-tools/core';
 const COPY_FEEDBACK_MS = 2e3;
 
 export function Footer(): ReactNode {
@@ -115,7 +115,7 @@ export function Footer(): ReactNode {
               GitHub
             </a>
             <a
-              href="https://www.npmjs.com/package/@noetic/core"
+              href="https://www.npmjs.com/package/@noetic-tools/core"
               target="_blank"
               rel="noopener noreferrer"
               style={NAV_LINK_STYLE}

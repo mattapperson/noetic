@@ -1,0 +1,123 @@
+---
+title: Working Memory
+description: A scratchpad memory layer that persists structured or free-form notes across turns within a single execution.
+---
+
+## Overview
+
+Working Memory is the simplest built-in memory layer. It acts as a scratchpad that the agent can read and write each turn. The LLM sees the current state as a `<working_memory>` block in the prompt, and updates it by calling an `updateWorkingMemory` tool.
+
+- **Slot**: `100` (`Slot.WORKING_MEMORY`)
+- **Default scope**: `execution`
+- **Default budget**: `{ min: 200, max: 1500 }`
+
+## Usage
+
+```ts
+import { workingMemory } from '@noetic-tools/core';
+
+const layer = workingMemory({
+  scope: 'thread',
+  readOnly: false,
+});
+```
+
+Register the layer with a `react` pattern (or `spawn`'s `memory` option):
+
+```ts validate=none
+const agent = react({
+  model: 'openai/gpt-4o',
+  instructions: 'You are a helpful assistant.',
+  memory: [layer],
+});
+```
+
+## Configuration
+
+```ts validate=none
+interface WorkingMemoryConfig {
+  scope?: 'thread' | 'resource';
+  schema?: ZodType;
+  template?: string;
+  readOnly?: boolean;
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `scope` | `'thread' \| 'resource'` | `'thread'` | Persistence boundary |
+| `schema` | `ZodType` | -- | Optional Zod schema for structured state (state becomes `Record<string, unknown>`) |
+| `template` | `string` | -- | Initial template content |
+| `readOnly` | `boolean` | `false` | When `true`, the `store` hook skips updates |
+
+## State Type
+
+```ts validate=none
+type WorkingMemoryState = string | Record<string, unknown>;
+```
+
+When no `schema` is provided, state is a plain string. When a schema is provided, state is an object and updates are shallow-merged.
+
+## How It Works
+
+### init
+
+Loads saved state from `ScopedStorage`. Falls back to an empty string (no schema) or empty object (with schema).
+
+### recall
+
+If state is non-empty, wraps it in a `<working_memory>` XML block and injects it as a `developer` message item.
+
+### store
+
+Watches for `updateWorkingMemory` function calls in the LLM response. When found, parses the JSON arguments and shallow-merges them into the current state. Prototype keys (`__proto__`, `constructor`) are stripped for safety.
+
+If `readOnly` is `true`, the store hook is a no-op.
+
+### onSpawn
+
+When scope is `'resource'`, the parent state is deep-cloned to the child. For `'thread'` scope, children do not inherit working memory.
+
+## Example: Structured Scratchpad
+
+```ts
+import { z } from 'zod';
+import { workingMemory } from '@noetic-tools/core';
+
+const layer = workingMemory({
+  schema: z.object({
+    currentGoal: z.string(),
+    completedSteps: z.array(z.string()),
+    blockers: z.array(z.string()),
+  }),
+});
+```
+
+The LLM can then call `updateWorkingMemory({ currentGoal: 'Deploy v2', completedSteps: ['write tests'] })` to update specific fields without overwriting the rest.
+
+## Provides
+
+Working Memory exposes two entries via the `provides` API, making them accessible on `ctx.memory['working-memory']`:
+
+### `snapshot` (data)
+
+A read-only projection of the current working memory state.
+
+```ts validate=none
+const current = ctx.memory['working-memory'].snapshot;
+// Returns WorkingMemoryState (string | Record<string, unknown>)
+```
+
+### `update` (function)
+
+Merges key-value pairs into the current state. Accepts a `Record<string, unknown>` argument.
+
+```ts validate=none
+await ctx.memory['working-memory'].update({ currentGoal: 'Ship v2' });
+```
+
+Because `update` is a `layerFn`, the runtime automatically injects it as an LLM tool named `working-memory/update`. The model can call this tool directly to modify working memory during a conversation turn.
+
+### Backward Compatibility
+
+The `store` hook also detects the legacy `updateWorkingMemory` function-call convention. If the model emits an `updateWorkingMemory` call (rather than `working-memory/update`), the layer handles it identically -- shallow-merging the arguments into state.

@@ -1,0 +1,108 @@
+---
+title: API Reference
+description: Complete type reference for all @noetic-tools/core exports, organized by category.
+---
+
+## Builders
+
+| Export | Kind | Description |
+|---|---|---|
+| `step.run()` | function | Custom async function step |
+| `step.llm()` | function | LLM inference step |
+| `step.tool()` | function | Tool invocation step |
+| `tool()` | function | Typed tool definition builder |
+| `branch()` | function | Conditional routing |
+| `fork()` | function | Parallel execution (race/all/settle) |
+| `spawn()` | function | Isolated child execution |
+| `channel()` | function | Typed communication channel |
+
+## Patterns
+
+| Export | Kind | Description |
+|---|---|---|
+| `react()` | function | ReAct agent loop |
+| `ralphWiggum()` | function | Self-refining agent |
+| `compilePlan()` | function | Static plan compilation |
+| `adaptivePlan()` | function | Dynamic plan with revision |
+| `PlanNodeSchema` | Zod schema | Validator for `PlanNode` objects |
+
+## AgentHarness
+
+| Export | Kind | Description |
+|---|---|---|
+| `AgentHarness` | class | Built-in agent harness implementation |
+| `ContextImpl` | class | Context implementation |
+| `ItemLogImpl` | class | Item log implementation |
+| `ChannelStore` | class | Channel state management |
+| `execute()` | function | Top-level step executor |
+| `executeLLM()` | function | LLM step executor |
+| `executeRun()` | function | Run step executor |
+| `executeTool()` | function | Tool step executor |
+| `executeBranch()` | function | Branch step executor |
+| `executeFork()` | function | Fork step executor |
+| `executeSpawn()` | function | Spawn step executor |
+| `executeLoop()` | function | Loop step executor |
+
+## Memory
+
+| Export | Kind | Description |
+|---|---|---|
+| `workingMemory()` | function | Working memory layer factory |
+| `observationalMemory()` | function | Observational memory layer factory |
+| `durableTaskState()` | function | Durable task state layer factory |
+| `assembleView()` | function | Merge layer outputs into prompt |
+| `allocateBudgets()` | function | Distribute token budgets across layers |
+| `checkBudget()` | function | Verify budget constraints |
+| `initLayers()` | function | Initialize all memory layers |
+| `recallLayers()` | function | Run recall on all layers |
+| `storeLayers()` | function | Run store on all layers |
+| `disposeLayers()` | function | Dispose all memory layers |
+| `completeLayers()` | function | Run onComplete on all layers |
+| `spawnLayers()` | function | Run onSpawn on all layers |
+| `returnLayers()` | function | Run onReturn on all layers |
+| `createLayerStateStore()` | function | Create layer state storage |
+| `createScopedStorage()` | function | Create scoped storage adapter |
+| `resolveScopeKey()` | function | Resolve scope key for a layer |
+| `Slot` | const | Memory slot constants |
+
+## Until
+
+| Export | Kind | Description |
+|---|---|---|
+| `until.maxSteps()` | function | Stop after N iterations |
+| `until.maxCost()` | function | Stop after USD cost limit |
+| `until.maxDuration()` | function | Stop after time limit |
+| `until.noToolCalls()` | function | Stop when LLM responds without tool calls |
+| `until.verified()` | function | Stop when verify function passes |
+| `until.converged()` | function | Stop when output stabilizes |
+| `until.outputContains()` | function | Stop when output contains a marker |
+| `until.custom()` | function | Wrap a custom predicate |
+| `all()` | function | Combine predicates with AND |
+| `any()` | function | Combine predicates with OR |
+
+## Observability
+
+| Export | Kind | Description |
+|---|---|---|
+| `SpanImpl` | class | Span implementation |
+| `InMemoryExporter` | class | In-memory trace exporter |
+| `NoopExporter` | class | No-op trace exporter |
+| `GenAI` | const | Semantic convention attribute keys |
+| `ToolAttr` | const | Tool attribute constants |
+
+## Errors
+
+| Export | Kind | Description |
+|---|---|---|
+| `NoeticErrorImpl` | class | Error implementation |
+| `isNoeticError()` | function | Type guard for NoeticError |
+
+## Type Reference Pages
+
+- [Step Types](/docs/framework/api/step-types) -- Step, StepRun, StepLLM, StepTool, StepBranch, StepFork, StepSpawn, StepLoop
+- [Channel Types](/docs/framework/api/channel-types) -- Channel, ExternalChannel, ChannelHandle
+- [Context Types](/docs/framework/api/context-types) -- Context, ItemLog, Item, ContentPart
+- [Items & Events](/docs/framework/api/items-and-events) -- Standard items, extension items, streaming events, OpenResponses compatibility
+- [AgentHarness Types](/docs/framework/api/runtime-types) -- AgentHarness, AgentConfig, AgentHooks
+- [Memory Types](/docs/framework/api/memory-types) -- MemoryLayer, MemoryHooks, ProjectionPolicy, StorageAdapter
+- [Until Types](/docs/framework/api/until-types) -- Until, Verdict, Snapshot, VerifyFn

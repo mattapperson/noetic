@@ -1,0 +1,88 @@
+---
+title: Adaptive Plans
+description: Dynamic planning where an LLM generates a plan, executes it, and revises the plan on failure -- up to a maximum number of revisions.
+---
+
+## Overview
+
+Adaptive Plans combine LLM-powered plan generation with automatic error-driven revision. An LLM planner generates a `PlanNode` tree, the runtime compiles and executes it, and if execution fails, the error is fed back to the planner to produce a revised plan.
+
+## Signature
+
+```ts validate=none
+function adaptivePlan<O, A = unknown>(opts: {
+  planner: Step<ContextMemory, string, PlanNode>;
+  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>;
+  constraints?: PlanConstraints;
+  maxRevisions: number;
+  executeStep?: ExecuteStepFn;
+}): Step<ContextMemory, string, O>
+```
+
+| Parameter | Type | Purpose |
+|---|---|---|
+| `planner` | `Step<TMemory, string, PlanNode>` | A step that takes a task description and returns a `PlanNode` tree |
+| `agents` | `Record<string, (prompt: string) => Step>` | Agent factories keyed by role name |
+| `constraints` | `PlanConstraints` | Optional constraints on execution |
+| `maxRevisions` | `number` | Maximum number of plan revisions before giving up |
+| `executeStep` | `ExecuteStepFn` | Optional custom step executor |
+
+## Example
+
+```ts validate=none
+import { adaptivePlan, react, step, PlanNodeSchema } from '@noetic-tools/core';
+
+const planner = step.llm({
+  id: 'plan-generator',
+  model: 'openai/gpt-4o',
+  instructions: 'Generate a task plan as a PlanNode tree. Available agents: researcher, coder.',
+  output: PlanNodeSchema,
+});
+
+const agents = {
+  researcher: (prompt: string) => react({
+    model: 'openai/gpt-4o',
+    instructions: prompt,
+    tools: [searchTool],
+  }),
+  coder: (prompt: string) => react({
+    model: 'openai/gpt-4o',
+    instructions: prompt,
+    tools: [codeTool, testTool],
+  }),
+};
+
+const agent = adaptivePlan({
+  planner,
+  agents,
+  maxRevisions: 3,
+});
+```
+
+## How It Works
+
+1. The `planner` step receives the user input and generates a `PlanNode` tree.
+2. The tree is compiled via `compilePlan()` into an executable `Step`.
+3. The compiled step is executed.
+4. If execution throws an error, the error message is appended to the original input: `"{input}\n\nPrevious plan failed: {error.message}"`.
+5. The planner generates a revised plan with this context.
+6. Steps 2-5 repeat until execution succeeds or `maxRevisions` is exhausted.
+
+On the final revision, if execution still fails, the error is thrown to the caller.
+
+## When to Use
+
+- Tasks where the optimal decomposition is not known upfront
+- Complex workflows where sub-tasks may fail unpredictably
+- Scenarios where you want the agent to self-correct its approach
+
+## Tips
+
+- Keep `maxRevisions` low (2-5). If the plan fails repeatedly, the problem is likely in the agents or tools, not the plan structure.
+- Use `PlanConstraints.validate` to reject invalid plans before execution.
+- The `planner` can be any step that returns a `PlanNode` -- it does not have to be an LLM call.
+
+## Next Steps
+
+- [Task Trees](/docs/framework/patterns/task-trees) -- static plan compilation
+- [Ralph Wiggum](/docs/framework/patterns/ralph-wiggum) -- self-refinement at the output level rather than the plan level

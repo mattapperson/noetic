@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { OpenResponsesResult as OpenResponsesNonStreamingResponse } from '@openrouter/agent';
+import type { OpenResponsesResult } from '@openrouter/agent';
+
+type OpenResponsesNonStreamingResponse = OpenResponsesResult;
 
 type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
 
+import type { Item, ReasoningItem } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import {
   extractOutputItems,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
 } from '../../src/adapters/openrouter';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
-import type { Item, ReasoningItem } from '../../src/types/items';
 import { makeFunctionCall, makeFunctionCallOutput, makeMessage } from '../_helpers';
 
 describe('extractSystemInstruction', () => {
@@ -48,6 +50,47 @@ describe('itemsToInput', () => {
         role: string;
       }>(input[0]).role,
     ).toBe('user');
+  });
+
+  it('preserves structured user message parts for provider input', () => {
+    const item: Item = {
+      id: 'msg-with-attachments',
+      type: 'message',
+      role: 'user',
+      status: 'completed',
+      content: [
+        {
+          type: 'input_text',
+          text: 'inspect this',
+        },
+        {
+          type: 'input_image',
+          imageUrl: 'data:image/png;base64,aGVsbG8=',
+          detail: 'auto',
+        },
+        {
+          type: 'input_file',
+          filename: 'notes.txt',
+          fileData: 'data:text/plain;base64,aGVsbG8=',
+        },
+      ],
+    };
+
+    const input = itemsToInput([
+      item,
+    ]);
+
+    expect(input).toHaveLength(1);
+    const message = frameworkCast<{
+      content: ReadonlyArray<{
+        type: string;
+      }>;
+    }>(input[0]);
+    expect(message.content.map((part) => part.type)).toEqual([
+      'input_text',
+      'input_image',
+      'input_file',
+    ]);
   });
 
   it('converts function_call items to OpenRouter format with callId', () => {

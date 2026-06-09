@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { executeProvide } from '../../src/interpreter/execute-provide';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
+import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import { Slot } from '@noetic-tools/memory';
+import type { Context, ExecuteStepFn, StepProvide } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
+import { executeProvide } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { Context } from '../../src/types/context';
-import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
-import { Slot } from '../../src/types/memory';
-import type { ExecuteStepFn, StepProvide } from '../../src/types/step';
-import { makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
+import { getItemId, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
@@ -149,8 +148,8 @@ describe('executeProvide', () => {
 
       await executeProvide(step, 'input', ctx, simpleExecute);
       expect(ctx.itemLog.items).toHaveLength(2);
-      expect(ctx.itemLog.items[0].id).toBe('p1');
-      expect(ctx.itemLog.items[1].id).toBe('c1');
+      expect(getItemId(ctx.itemLog.items[0])).toBe('p1');
+      expect(getItemId(ctx.itemLog.items[1])).toBe('c1');
     });
 
     it('state mutations in child are visible to parent', async () => {

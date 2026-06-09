@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isNoeticConfigError } from '../../src/errors/noetic-config-error';
-import { frameworkCast } from '../../src/interpreter/framework-cast';
+import type { MemoryLayer } from '@noetic-tools/memory';
 import {
   afterModelCallLayers,
   beforeToolCallLayers,
   createLayerStateStore,
   initLayers,
-} from '../../src/memory/layer-lifecycle';
-import { steering } from '../../src/memory/layers/steering';
-import type { MemoryLayer } from '../../src/types/memory';
-import type { SteeringConfig, SteeringRule, SteeringState } from '../../src/types/steering';
-import { SteeringAction } from '../../src/types/steering';
+  steering,
+} from '@noetic-tools/memory';
+import type { SteeringConfig, SteeringRule, SteeringState } from '@noetic-tools/types';
+import { frameworkCast, isNoeticConfigError, SteeringAction } from '@noetic-tools/types';
 import { makeCtx, makeLLMResponse, makeStorage } from '../_helpers';
 
 /** Create a steering layer cast to MemoryLayer for use in lifecycle functions. */

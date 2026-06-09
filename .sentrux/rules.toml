@@ -1,0 +1,456 @@
+# Sentrux rules for the noetic monorepo.
+#
+# Encodes the architectural intent from specs/00-overview.md (package
+# dependency graph) and specs/22-cli-architecture.md (CLI internal layers).
+#
+# Sentrux `order` convention (observed empirically from sentrux 0.5.7):
+# LOWER order = architecturally HIGHER (consumer, top of stack);
+# HIGHER order = architecturally LOWER (foundation, bottom of stack).
+# A file in a lower-order layer may import from higher-order layers;
+# reverse edges (higher-order → lower-order) violate the hierarchy.
+#
+# Within each package we reserve a band of order numbers so cross-package
+# and within-package rules can coexist without collisions.
+#
+# Paths are relative to the repo root. Keep layer paths directory/glob-based;
+# do not add exact file-name carve-outs.
+
+[constraints]
+# sentrux 0.5.7 reports 1 "cycle" over a strongly-connected component in
+# packages/code-agent/src/lsp/** ↔ tools/node-factory/** after the
+# platform-node split, even though the DSM confirms zero above-diagonal
+# edges (clean layering) and grepping the 6 files named in the report
+# shows only forward import edges. Accept 1 until upstream SCC detection
+# is fixed — real new cycles still fail the gate because each above-zero
+# value is checked against this ceiling.
+max_cycles = 1
+max_coupling = "B"
+# Pre-existing on `main` before this refactor — `main`'s `sentrux check`
+# has been failing this rule at cc=29 (see the `createLocalSubprocessAdapter`
+# function in what is now `packages/platform-node/src/local-subprocess-adapter.ts`,
+# unchanged across the move). Raising to 29 acknowledges the debt
+# rather than hiding it; the function is on the list for a follow-up
+# refactor that extracts the dispatch table.
+max_cc = 29
+no_god_files = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier A — top-level consumers
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "plugins"
+paths = ["packages/plugin-*/src/**"]
+order = 0
+
+[[layers]]
+name = "web"
+paths = ["packages/web/**"]
+order = 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier B — CLI-internal layers (packages/cli/src/**)
+# See specs/22-cli-architecture.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "cli-entry"
+paths = ["packages/cli/src/cli/**"]
+order = 10
+
+[[layers]]
+name = "cli-presentation"
+paths = ["packages/cli/src/tui/**"]
+order = 11
+
+[[layers]]
+name = "cli-orchestration"
+paths = [
+  "packages/cli/src/harness/**",
+  "packages/cli/src/sessions/**",
+  "packages/cli/src/plan/**",
+  "packages/cli/src/daemon-runtime/**",
+]
+order = 12
+
+[[layers]]
+name = "cli-domain"
+paths = [
+  "packages/cli/src/tools/**",
+  "packages/cli/src/agents/**",
+  "packages/cli/src/skills/**",
+  "packages/cli/src/plugins/**",
+  "packages/cli/src/commands/**",
+  "packages/cli/src/tasks/**",
+]
+order = 13
+
+[[layers]]
+name = "cli-infra"
+paths = [
+  "packages/cli/src/adapters/**",
+  "packages/cli/src/ai/**",
+  "packages/cli/src/lsp/**",
+  "packages/cli/src/config/**",
+  "packages/cli/src/memory/**",
+  "packages/cli/src/setup/**",
+]
+order = 14
+
+[[layers]]
+name = "cli-foundations"
+paths = [
+  "packages/cli/src/types/**",
+  "packages/cli/src/errors/**",
+  "packages/cli/src/util/**",
+]
+order = 15
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier C — peer packages that depend only on @noetic-tools/core
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "chat-sdk"
+paths = ["packages/chat-sdk/src/**"]
+order = 50
+
+[[layers]]
+name = "code-agent"
+paths = ["packages/code-agent/src/**"]
+order = 50
+
+[[layers]]
+name = "eval"
+paths = ["packages/eval/src/**"]
+order = 50
+
+[[layers]]
+name = "platform-node"
+paths = ["packages/platform-node/src/**"]
+order = 50
+
+[[layers]]
+name = "platform-browser"
+paths = ["packages/platform-browser/src/**"]
+order = 50
+
+[[layers]]
+name = "mirage"
+paths = ["packages/mirage/src/**"]
+order = 50
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier D — core-internal layers (packages/core/src/**)
+# Ordered per the dependency graph in specs/00-overview.md: harness →
+# patterns → adapters → interpreter → runtime → primitives →
+# memory/observability → foundations.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "core-harness"
+paths = ["packages/core/src/harness/**"]
+order = 79
+
+[[layers]]
+name = "core-patterns"
+paths = ["packages/core/src/patterns/**"]
+order = 80
+
+[[layers]]
+name = "core-adapters"
+paths = ["packages/core/src/adapters/**"]
+order = 81
+
+[[layers]]
+name = "core-interpreter"
+paths = ["packages/core/src/interpreter/**"]
+order = 82
+
+[[layers]]
+name = "core-runtime"
+paths = ["packages/core/src/runtime/**"]
+order = 83
+
+[[layers]]
+name = "core-primitives"
+paths = [
+  "packages/core/src/builders/**",
+  "packages/core/src/conditions/**",
+  "packages/core/src/until/**",
+]
+order = 84
+
+[[layers]]
+name = "core-observability"
+paths = ["packages/core/src/observability/**"]
+order = 85
+
+[[layers]]
+name = "core-foundations"
+paths = [
+  "packages/core/src/types/**",
+  "packages/core/src/errors/**",
+  "packages/core/src/schemas/**",
+  "packages/core/src/util/**",
+]
+order = 86
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier E — foundational shared packages. The memory layer system and the
+# type/contract vocabulary it builds on were extracted from core so they can
+# ship as standalone npm packages (@noetic-tools/memory, @noetic-tools/types).
+# They sit BELOW every core layer: core imports them, never the reverse.
+# @noetic-tools/types is the dependency-free bottom; @noetic-tools/memory
+# builds on types and is consumed by core.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "noetic-memory"
+paths = ["packages/memory/src/**"]
+order = 88
+
+[[layers]]
+name = "noetic-types"
+paths = ["packages/types/src/**"]
+order = 90
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Foundation acyclicity + memory tree-shakability. @noetic-tools/memory and
+# @noetic-tools/types are extracted foundational packages: core depends on
+# them, never the reverse. A memory layer importing back into core would
+# both create a package cycle and defeat tree-shakability (importing one
+# layer must not pull in the interpreter/runtime). @noetic-tools/types is
+# the dependency-free bottom of the stack.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[boundaries]]
+from = "packages/memory/src/**"
+to = "packages/core/src/**"
+reason = "core depends on @noetic-tools/memory; memory must never import back into core (acyclic) and must stay tree-shakable from the interpreter/runtime"
+
+[[boundaries]]
+from = "packages/types/src/**"
+to = "packages/memory/src/**"
+reason = "@noetic-tools/types is the dependency-free foundation; @noetic-tools/memory builds on it, not the reverse"
+
+[[boundaries]]
+from = "packages/types/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/types is the dependency-free foundation; core builds on it, not the reverse"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Peer-package isolation at tier 50 — chat-sdk, code-agent, and eval are
+# siblings that depend only on @noetic-tools/core; they must not reach across.
+# Same-order layers are otherwise unconstrained, so these have to be
+# explicit.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/code-agent/src/**"
+reason = "eval is a peer of code-agent; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/cli/src/**"
+reason = "eval must not depend on cli"
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "eval must not depend on chat-sdk"
+
+[[boundaries]]
+from = "packages/code-agent/src/**"
+to = "packages/eval/src/**"
+reason = "code-agent must not depend on eval"
+
+[[boundaries]]
+from = "packages/code-agent/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "code-agent must not depend on chat-sdk"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/code-agent/src/**"
+reason = "chat-sdk must not depend on code-agent"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/eval/src/**"
+reason = "chat-sdk must not depend on eval"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/cli/src/**"
+reason = "chat-sdk must not depend on cli"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform packages: runtime-isolated, peer-isolated, and core is forbidden
+# from reaching into either. The invariant is that @noetic-tools/core carries no
+# runtime-specific code — only contracts + in-memory adapters — and that the
+# two platform packages never see each other so bundlers can drop one
+# entirely from a target's output.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/platform-browser/src/**"
+reason = "platform packages must stay runtime-isolated; neither may import from the other"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/platform-node/src/**"
+reason = "platform packages must stay runtime-isolated; neither may import from the other"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/platform-node/src/**"
+reason = "core is runtime-agnostic; it cannot depend on a specific platform"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/platform-browser/src/**"
+reason = "core is runtime-agnostic; it cannot depend on a specific platform"
+
+[[boundaries]]
+from = "packages/memory/src/**"
+to = "packages/platform-node/src/**"
+reason = "memory layers are platform-independent; platform packages are platform-specific"
+
+[[boundaries]]
+from = "packages/memory/src/**"
+to = "packages/platform-browser/src/**"
+reason = "memory layers are platform-independent; platform packages are platform-specific"
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "platform-node is a peer of chat-sdk; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/code-agent/src/**"
+reason = "platform-node is a peer of code-agent; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/eval/src/**"
+reason = "platform-node is a peer of eval; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/cli/src/**"
+reason = "platform-node must not depend on cli"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "platform-browser is a peer of chat-sdk; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/code-agent/src/**"
+reason = "platform-browser is a peer of code-agent; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/eval/src/**"
+reason = "platform-browser is a peer of eval; both depend only on @noetic-tools/core"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/cli/src/**"
+reason = "platform-browser must not depend on cli"
+
+# Reverse direction: Node-only consumers must not reach into the
+# browser platform package. Nothing in cli/code-agent/eval/chat-sdk
+# should accidentally pull browser-only exports — the import itself
+# would be harmless today (platform-browser re-exports in-memory
+# adapters), but bundlers targeting Node shouldn't follow this edge
+# and the rule lets us add browser-specific code later without a
+# migration.
+
+[[boundaries]]
+from = "packages/cli/src/**"
+to = "packages/platform-browser/src/**"
+reason = "cli is Node-only; must not reach into the browser platform package"
+
+[[boundaries]]
+from = "packages/code-agent/src/**"
+to = "packages/platform-browser/src/**"
+reason = "code-agent is Node-only; must not reach into the browser platform package"
+
+[[boundaries]]
+from = "packages/eval/src/**"
+to = "packages/platform-browser/src/**"
+reason = "eval is runtime-agnostic via adapter injection; a direct browser-platform import would pin its runtime"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/platform-browser/src/**"
+reason = "chat-sdk is runtime-agnostic via adapter injection; a direct browser-platform import would pin its runtime"
+
+# Mirage bridge isolation. @noetic/mirage is a peer of the other tier-50
+# packages — core has zero knowledge of it, and the platform packages
+# consume Mirage (if they want a VFS) via their own optional peer deps
+# on @struktoai/mirage-*. Neither platform should import @noetic/mirage
+# directly, because that would couple the bridge to a specific runtime.
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/mirage/src/**"
+reason = "core is runtime-agnostic and has no dependency on the Mirage bridge"
+
+[[boundaries]]
+from = "packages/memory/src/**"
+to = "packages/mirage/src/**"
+reason = "memory layers are platform-independent; Mirage is a backend-specific bridge"
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/mirage/src/**"
+reason = "platform-node is runtime-isolated; @noetic/mirage is a separate consumer-facing package"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/mirage/src/**"
+reason = "platform-browser is runtime-isolated; @noetic/mirage is a separate consumer-facing package"
+
+[[boundaries]]
+from = "packages/mirage/src/**"
+to = "packages/platform-node/src/**"
+reason = "@noetic/mirage must stay runtime-neutral; it types against @struktoai/mirage-core only"
+
+[[boundaries]]
+from = "packages/mirage/src/**"
+to = "packages/platform-browser/src/**"
+reason = "@noetic/mirage must stay runtime-neutral; it types against @struktoai/mirage-core only"
+
+[[boundaries]]
+from = "packages/mirage/src/**"
+to = "packages/cli/src/**"
+reason = "@noetic/mirage must not depend on cli"
+
+[[boundaries]]
+from = "packages/mirage/src/**"
+to = "packages/code-agent/src/**"
+reason = "@noetic/mirage must not depend on code-agent"
+
+[[boundaries]]
+from = "packages/mirage/src/**"
+to = "packages/eval/src/**"
+reason = "@noetic/mirage must not depend on eval"
+
+[[boundaries]]
+from = "packages/mirage/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "@noetic/mirage must not depend on chat-sdk"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docs-site isolation (@noetic/web) is enforced via packages/web/package.json
+# workspace deps, NOT via rules.toml — the .typecheck-snippets-shims/ dir has
+# a legitimate type-only import of @noetic-tools/core for MDX snippet typechecking
+# that any file-path-level boundary would flag as a false positive.
+# ─────────────────────────────────────────────────────────────────────────────

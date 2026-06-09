@@ -1,0 +1,397 @@
+---
+title: Memory Types
+description: Type definitions for memory layers, hooks, storage adapters, and projection policies in Noetic.
+---
+
+## MemoryLayer
+
+The core memory layer interface.
+
+```ts
+declare interface MemoryLayerShape<TState = unknown> {
+  id: string;
+  name?: string;
+  slot: number;
+  scope: MemoryScope;
+  budget?: BudgetConfig;
+  hooks: MemoryHooks<TState>;
+  timeouts?: Partial<LayerTimeouts>;
+  provides?: unknown;
+  itemSchemas?: unknown;
+  rerenderTiming?: 'immediate' | 'batched';
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | `string` | yes | Unique layer identifier. |
+| `name` | `string` | no | Human-readable name for debugging and trace output. |
+| `slot` | `number` | yes | Ordering slot (lower = recalled first). Use the [`Slot`](#slot-constants) constants for well-known positions. |
+| `scope` | `MemoryScope` | yes | Persistence boundary. |
+| `budget` | `BudgetConfig` | no | Token budget allocation: a fixed number, a `{ min, max }` range, or `'auto'`. |
+| `hooks` | `MemoryHooks<TState>` | yes | Lifecycle callbacks. |
+| `timeouts` | `Partial<LayerTimeouts>` | no | Per-hook timeout overrides (ms). |
+| `provides` | `LayerProvides` | no | Typed data and function declarations exposed on `ctx.memory['layerId']`. Function entries are also auto-injected as LLM tools. |
+| `itemSchemas` | `Pick<ItemSchemaExtensions, 'developerMessages' \| 'items'>` | no | Optional item schemas contributed by this layer, primarily for developer-role memory items. |
+| `rerenderTiming` | `'immediate' \| 'batched'` | no | Default re-render timing when `onItemAppend` requests a re-render. |
+
+## MemoryScope
+
+```ts validate=none
+type MemoryScope = 'thread' | 'resource' | 'global' | 'execution';
+```
+
+## BudgetConfig
+
+```ts validate=none
+type BudgetConfig =
+  | number
+  | { min: number; max: number }
+  | 'auto';
+```
+
+## Slot Constants
+
+```ts
+const SlotShape = {
+  REMINDER: 80,
+  STEERING: 90,
+  WORKING_MEMORY: 100,
+  ENTITY: 150,
+  OBSERVATIONS: 200,
+  PROCEDURAL: 250,
+  EPISODIC: 300,
+  RAG: 350,
+  SEMANTIC_RECALL: 400,
+} as const satisfies Record<string, number>;
+```
+
+The runtime exports the `Slot` constant from `@noetic-tools/core` with these values; pass any of them as a layer's `slot` field to position it consistently with built-in layers.
+
+## MemoryHooks
+
+```ts validate=none
+interface MemoryHooks<TState = unknown> {
+  init?: (params: InitParams) => Promise<InitResult<TState>>;
+  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | string | null>;
+  store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
+  onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
+  onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
+  onComplete?: (params: CompleteParams<TState>) => Promise<void | { state: TState }>;
+  dispose?: (params: DisposeParams<TState>) => Promise<void>;
+}
+```
+
+## Hook Parameter Types
+
+### InitParams
+
+| Field | Type | Description |
+|---|---|---|
+| `storage` | `ScopedStorage` | Scoped storage for this layer |
+| `scopeKey` | `string` | Resolved scope key |
+| `ctx` | `ExecutionContext` | Execution context |
+
+### InitResult
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `TState` | Initial layer state |
+
+### RecallParams
+
+| Field | Type | Description |
+|---|---|---|
+| `log` | `ItemLog` | Current conversation log |
+| `query` | `string` | Current user query |
+| `ctx` | `ExecutionContext` | Execution context |
+| `state` | `TState` | Current layer state |
+| `budget` | `number` | Allocated token budget |
+
+### RecallResult
+
+| Field | Type | Description |
+|---|---|---|
+| `items` | `Item[]` | Items to inject into the prompt |
+| `tokenCount` | `number` | Tokens consumed by the items |
+| `state` | `TState` | Updated state (optional) |
+
+### StoreParams
+
+| Field | Type | Description |
+|---|---|---|
+| `newItems` | `Item[]` | New items from the LLM response |
+| `log` | `ItemLog` | Full conversation log |
+| `response` | `LLMResponse` | Complete LLM response |
+| `ctx` | `ExecutionContext` | Execution context |
+| `state` | `TState` | Current layer state |
+
+### StoreResult
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `TState` | Updated state |
+
+### SpawnParams
+
+| Field | Type | Description |
+|---|---|---|
+| `parentState` | `TState` | Parent layer state |
+| `childCtx` | `ExecutionContext` | Child execution context |
+
+### SpawnResult
+
+| Field | Type | Description |
+|---|---|---|
+| `childState` | `TState \| null` | State for the child (null = don't propagate) |
+| `items` | `Item[]` | Additional items for the child (optional) |
+
+### ReturnParams
+
+| Field | Type | Description |
+|---|---|---|
+| `childState` | `TState` | Child's final state |
+| `childLog` | `ItemLog` | Child's conversation log |
+| `parentState` | `TState` | Parent's current state |
+| `result` | `unknown` | Child's completion result |
+
+### ReturnResult
+
+| Field | Type | Description |
+|---|---|---|
+| `parentState` | `TState` | Updated parent state |
+| `result` | `unknown` | Transformed result for pipeline (optional) |
+
+### CompleteParams
+
+| Field | Type | Description |
+|---|---|---|
+| `log` | `ItemLog` | Full conversation log |
+| `ctx` | `ExecutionContext` | Execution context |
+| `state` | `TState` | Current layer state |
+| `outcome` | `ExecutionOutcome` | How the execution ended |
+
+### DisposeParams
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `TState` | Final layer state |
+
+## ExecutionOutcome
+
+```ts validate=none
+type ExecutionOutcome = 'success' | 'failure' | 'aborted';
+```
+
+## ExecutionContext
+
+Context available to memory layer hooks (different from the step `Context`).
+
+```ts validate=none
+interface ExecutionContext {
+  executionId: string;
+  threadId: string;
+  resourceId?: string;
+  depth: number;
+  stepNumber: number;
+  tokenUsage: { input: number; output: number };
+  cost: number;
+  model?: string;
+  fs: FsAdapter;
+  tokenize(text: string): number;
+  trace: {
+    setAttribute(key: string, value: string | number | boolean): void;
+    addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+  };
+}
+```
+
+`fs` is the `FsAdapter` from `ctx.harness.fs`, giving memory layer hooks access to the same filesystem backend as tools and skill discovery (real, in-memory, or remote).
+
+## LayerTimeouts
+
+| Field | Type | Description |
+|---|---|---|
+| `init` | `number` | Timeout for init hook (ms, optional) |
+| `recall` | `number` | Timeout for recall hook (ms, optional) |
+| `store` | `number` | Timeout for store hook (ms, optional) |
+| `onSpawn` | `number` | Timeout for onSpawn hook (ms, optional) |
+| `onReturn` | `number` | Timeout for onReturn hook (ms, optional) |
+| `onComplete` | `number` | Timeout for onComplete hook (ms, optional) |
+| `dispose` | `number` | Timeout for dispose hook (ms, optional) |
+
+## ProjectionPolicy
+
+```ts validate=none
+interface ProjectionPolicy {
+  tokenBudget: number;
+  responseReserve: number;
+  overflow: 'truncate' | 'summarize' | 'sliding_window';
+  overflowModel?: string;
+  windowSize?: number;
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tokenBudget` | `number` | yes | Total token budget for all layers |
+| `responseReserve` | `number` | yes | Tokens reserved for the model response |
+| `overflow` | `'truncate' \| 'summarize' \| 'sliding_window'` | yes | Strategy when total recall exceeds budget |
+| `overflowModel` | `string` | no | Model for summarization overflow |
+| `windowSize` | `number` | no | Items to keep for sliding window overflow |
+
+## StorageAdapter
+
+```ts validate=none
+interface StorageAdapter {
+  get<T>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<void>;
+  list(prefix: string): Promise<string[]>;
+}
+```
+
+| Method | Description |
+|---|---|
+| `get(key)` | Retrieve a value by key (returns null if not found) |
+| `set(key, value)` | Store a value |
+| `delete(key)` | Delete a value |
+| `list(prefix)` | List all keys with the given prefix |
+
+## ScopedStorage
+
+Same interface as `StorageAdapter` but scoped to a specific layer and scope key.
+
+```ts validate=none
+interface ScopedStorage {
+  get<T>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<void>;
+  list(prefix?: string): Promise<string[]>;
+}
+```
+
+## MemoryTraceSpan
+
+Observability data for a single memory hook execution.
+
+```ts validate=none
+interface MemoryTraceSpan {
+  layerId: string;
+  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  durationMs: number;
+  status: 'ok' | 'error' | 'timeout' | 'skipped';
+  budget?: { allocated: number; used: number; yielded: number };
+  itemCount?: number;
+  error?: { message: string; stack?: string };
+}
+```
+
+## ContextMemory
+
+The default memory shape used when no typed memory config is provided.
+
+```ts validate=none
+type ContextMemory = Readonly<Record<string, Record<string, unknown>>>;
+```
+
+## MemoryConfig
+
+A typed memory configuration that carries a phantom `_shape` for compile-time memory access. Created via the `memory()` builder.
+
+```ts validate=none
+interface MemoryConfig<TLayers extends MemoryLayer[] = MemoryLayer[]> {
+  layers: TLayers;
+  _shape: InferMemoryShape<TLayers>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `layers` | `TLayers` | Array of memory layers |
+| `_shape` | `InferMemoryShape<TLayers>` | Phantom field for compile-time shape inference (never set at runtime) |
+
+## InferMemory
+
+Extracts the memory shape type from a `MemoryConfig`.
+
+```ts validate=none
+type InferMemory<T extends { readonly _shape: unknown }> = T['_shape'];
+```
+
+## InferMemoryShape
+
+A mapped type that collects each layer's `provides` declarations into a record keyed by layer `id`. Each key maps to the resolved data/function types declared by that layer.
+
+## LayerProvides
+
+```ts validate=none
+type LayerProvides = Record<string, LayerDataDecl | LayerFunctionDecl>;
+```
+
+A record of named declarations that a layer exposes on `ctx.memory[layerId]`.
+
+## LayerDataDecl
+
+```ts validate=none
+interface LayerDataDecl<T = unknown, TState = unknown> {
+  kind: 'data';
+  read: (state: TState) => T;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `'data'` | Discriminant |
+| `read` | `(state: TState) => T` | Derives the value from layer state |
+
+## LayerFunctionDecl
+
+```ts validate=none
+interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknown> {
+  kind: 'function';
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (args: TInput, state: TState) => Promise<TOutput>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `'function'` | Discriminant |
+| `description` | `string` | Human-readable description for the LLM |
+| `input` | `ZodType<TInput>` | Zod schema for input validation |
+| `output` | `ZodType<TOutput>` | Zod schema for output validation |
+| `execute` | `(args: TInput, state: TState) => Promise<TOutput>` | Execution function |
+
+## Builder Functions
+
+### layerData
+
+```ts validate=none
+function layerData<T, TState>(read: (state: TState) => T): LayerDataDecl<T, TState>;
+```
+
+Creates a `LayerDataDecl` that derives a value from layer state.
+
+### layerFn
+
+```ts validate=none
+function layerFn<TInput, TOutput, TState>(opts: {
+  description: string;
+  input: ZodType<TInput>;
+  output: ZodType<TOutput>;
+  execute: (args: TInput, state: TState) => Promise<TOutput>;
+}): LayerFunctionDecl<TInput, TOutput, TState>;
+```
+
+Creates a `LayerFunctionDecl` that exposes a callable function on the memory object.
+
+### memory
+
+```ts validate=none
+function memory<TLayers extends MemoryLayer[]>(...layers: TLayers): MemoryConfig<TLayers>;
+```
+
+Collects layers into a `MemoryConfig` with inferred `_shape`. Pass the result to `StepSpawn.memory` or `AgentConfig` to get typed `ctx.memory` access.

@@ -15,6 +15,12 @@ interface SpawnOpts<I, O> {
   child: Step<I, O>;
   memory?: MemoryLayer[];
   timeout?: number;
+  /**
+   * Per-step subprocess adapter override. Takes precedence over the harness
+   * default when the interpreter dispatches this spawn. See "SubprocessAdapter
+   * Routing" below.
+   */
+  subprocess?: SubprocessAdapter;
 }
 ```
 
@@ -147,3 +153,76 @@ Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-unt
 3. The loop parks on the inbox after `until` says stop
 4. When the sub-agent completes, the inbox message wakes the loop
 5. The LLM sees the result as a developer message and incorporates it
+
+---
+
+## SubprocessAdapter Routing
+
+Every `step.run(...)`, `spawn(...)`, and `harness.detachedSpawn(...)` dispatches through a `SubprocessAdapter`. In-process vs out-of-process is a property of the adapter, never of the step. The harness always holds one; `AgentHarness` defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their current synchronous, in-process behaviour.
+
+### Adapter Resolution
+
+When the interpreter dispatches a `run` or `spawn`, it resolves the active adapter as:
+
+```
+resolveStepAdapter(step, detachedOverride) =
+  detachedOverride.subprocess ?? step.subprocess ?? harness.subprocess
+```
+
+Precedence:
+
+1. **Per-call override** — the `overrides.subprocess` argument to `harness.detachedSpawn(step, input, ctx, overrides)`.
+2. **Per-step override** — the `subprocess` field on `StepRun` / `StepSpawn`.
+3. **Harness default** — `harness.subprocess`.
+
+Other step kinds (`llm`, `tool`, `branch`, `fork`, `provide`, `loop`, `every`) always fall through to the harness default; they do not carry their own `subprocess` field.
+
+### The Step Request
+
+Every dispatch builds a `StepSubprocessRequest`:
+
+```typescript
+interface StepSubprocessRequest {
+  kind: 'step';
+  stepId: string;                    // registry key
+  serializedInput: unknown;          // input passed to the step
+  executionId: string;               // stable id (the child context id)
+  overrides: {                       // applied to the child context
+    threadId?: string;
+    resourceId?: string;
+    cwdInit?: string;
+  };
+  metadata?: Record<string, unknown>; // adapter-specific tags
+}
+```
+
+and calls `adapter.spawn(request)`. The adapter returns a `SubprocessHandle`; for `run` the interpreter awaits settlement and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the adapter's handle is wrapped in a `DetachedHandle` whose `.await()` polls `adapter.get()` until the status reaches a terminal value.
+
+### Step Registry and Cross-Process Lookup
+
+When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared **step registry** (`@noetic-tools/core/runtime/step-registry`):
+
+- `registerStep(step)` — called automatically by `step.run()`, `step.llm()`, `step.tool()`, `spawn()`, `provide()`, `loop()`, and other constructors whenever `step.id` is non-empty.
+- `lookupStep(id)` — called by the child runtime (after importing the user's entry module) to retrieve the step definition.
+- `getRegistry()` — read-only view, mainly for tests and debugging.
+
+Registry policy is **latest registration wins**. Dispatch-and-lookup happen in the same tick, so the live entry is always the one the caller just built. Strict duplicate-id rejection is a tracked follow-up; today the registry silently overwrites on collision.
+
+Cross-process callers share the registry by importing the same entry module. The out-of-process adapter's bootstrap reads `NOETIC_REGISTRY_ENTRY` (or equivalent adapter configuration), imports that module, and then resolves `stepId` via `lookupStep`.
+
+### Durable Handle Manifests
+
+Adapters that opt into durability persist a manifest per handle through the harness's `StorageAdapter`:
+
+- `handleId` — opaque adapter identifier.
+- `stepId` — the step being executed.
+- `serializedInput` — input argument.
+- `executionId` — parent execution context id, used to correlate with `harness.restore(executionId)`.
+- Transport-specific identity (pid + `pidStarttime` for OS processes; `socketPath` for unix-socket IPC).
+- Caller-supplied tags on `metadata` (e.g. `taskRole: 'planner'`, `taskId: 'T-...'`, `featureId: 'F-...'`).
+
+On host restart the surviving handle can be rediscovered via `adapter.listLive()` and re-bound via `adapter.reattach(handleId)`. The parent context can be rehydrated by `harness.restore(executionId)` against the matching `CheckpointStore` snapshot. Full model, storage layout, and IPC semantics live in `23-durable-execution`.
+
+### Idempotency Guidance
+
+Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `step.run` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.

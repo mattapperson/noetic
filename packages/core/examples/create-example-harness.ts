@@ -4,7 +4,7 @@
  * Creates an AgentHarness wired to a real OpenRouter client,
  * reading the API key from the OPENROUTER_API_KEY environment variable.
  */
-import { AgentHarness } from '../src/runtime/agent-harness';
+import { AgentHarness } from '../src/harness/agent-harness';
 
 export function createExampleHarness(): AgentHarness {
   return new AgentHarness({

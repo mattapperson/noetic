@@ -7,17 +7,25 @@
  * and other framework extensions. Do not depend on them in application code.
  */
 
-/** @unstable Unsafe cast utility for bridging internal type boundaries. */
-export { frameworkCast } from './interpreter/framework-cast';
 /** @unstable Budget allocation algorithm for memory layer token budgets. */
-export type { BudgetAllocation, BudgetLimits } from './memory/budget';
-/** @unstable Budget allocation and checking utilities. */
-export { allocateBudgets, checkBudget } from './memory/budget';
 /** @unstable Layer state store type for managing per-layer state during execution. */
-export type { LayerStateStore } from './memory/layer-lifecycle';
+export type { BudgetAllocation, BudgetLimits, LayerStateStore } from '@noetic-tools/memory';
+/** @unstable Budget allocation and checking utilities. */
 /** @unstable Factory for creating layer state stores. */
-export { createLayerStateStore } from './memory/layer-lifecycle';
 /** @unstable View assembly algorithm that converges memory layer outputs into the LLM context. */
-export { assembleView } from './memory/projector';
 /** @unstable Factory for creating scoped storage wrappers around a StorageAdapter. */
-export { createScopedStorage } from './memory/scope';
+export {
+  allocateBudgets,
+  assembleView,
+  checkBudget,
+  createLayerStateStore,
+  createScopedStorage,
+} from '@noetic-tools/memory';
+/** @unstable Unsafe cast utility for bridging internal type boundaries. */
+export { frameworkCast } from '@noetic-tools/types';
+/**
+ * @unstable Internal helper used by sync agent-spawn paths (worktree isolation)
+ * to seed a child's cwd snapshot without touching `previousCwd`. Not part of
+ * the public surface — call sites must hold exclusive use of the parent ctx.
+ */
+export { retargetCwdForSpawn } from './runtime/cwd-helpers';

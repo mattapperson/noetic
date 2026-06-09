@@ -1,7 +1,8 @@
+import type { StorageAdapter } from '@noetic-tools/memory';
+import type { Snapshot, Until, Verdict } from '@noetic-tools/types';
 import { cosineSimilarity } from '../conditions/cosine-similarity';
 import type { EmbedFn } from '../types/embed';
-import type { StorageAdapter } from '../types/memory';
-import type { Snapshot, Until, Verdict } from '../types/step';
+import { never } from './never';
 
 /** @public Async verification function that checks loop output and optionally returns feedback. */
 export type VerifyFn = (output: unknown) => Promise<{
@@ -66,6 +67,9 @@ export const until = {
       };
     };
   },
+
+  /** Never stops the loop — pairs with operators like `every` that rely on cancellation. @public */
+  never,
 
   /** Stops the loop when the verify function returns `{ pass: true }`. @public */
   verified(fn: VerifyFn): Until {
@@ -148,6 +152,21 @@ export const until = {
     return (snap: Snapshot): Verdict => ({
       stop: snap.lastText.includes(marker),
       reason: snap.lastText.includes(marker) ? `Output contains marker: ${marker}` : undefined,
+    });
+  },
+
+  /**
+   * Stops the loop when the last output text exactly equals the given
+   * sentinel string. Prefer this over `outputContains` when the marker is a
+   * dedicated exit sentinel produced by a terminator step — exact equality
+   * avoids substring collisions with unrelated step output that happens to
+   * quote the sentinel.
+   * @public
+   */
+  outputEquals(sentinel: string): Until {
+    return (snap: Snapshot): Verdict => ({
+      stop: snap.lastText === sentinel,
+      reason: snap.lastText === sentinel ? `Output matched sentinel: ${sentinel}` : undefined,
     });
   },
 

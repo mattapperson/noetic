@@ -2,98 +2,146 @@
  * Root TUI application — Ink-rendered interactive agent loop.
  */
 
-import type {
-  AgentHarness,
-  LastLayerUsage,
-  MemoryLayer,
-  PlanState,
-  StreamEvent,
-} from '@noetic/core';
 import { render } from 'ink';
-import type { ReactNode } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
+import type {
+  Command,
+  CommandContext,
+  SessionRestartTarget,
+  SessionSnapshot,
+  ViewMode,
+} from './app-parts/commands.js';
 import {
   BUILTIN_COMMANDS,
   commandsToPromptSuggestions,
+  ensureChatTarget,
+  ensureDaemon,
   executeCommand,
   findCommand,
   isSlashCommand,
+  parseBashCommand,
   parseSlashCommand,
-} from '../commands/index.js';
-import type { Command, CommandContext } from '../commands/types.js';
-import type { AgentMode, PlanHooks } from '../harness/factory.js';
-import { createAgentHarness } from '../harness/factory.js';
-import { createPlanSession, writeFlow, writePrd } from '../plan/file-store.js';
-import { createPluginContextBuilder } from '../plugins/context.js';
-import type { FooterContext as FooterContextValue, NoeticPlugin } from '../plugins/types.js';
-import { buildSkillCatalog } from '../skills/catalog.js';
-import type { SkillDefinition } from '../skills/types.js';
-import type { AgentRuntimeConfig } from '../types/config.js';
-import { getModelContextLimit } from '../types/model-context.js';
-import type { ChatStatus } from './components/index.js';
-import { InkProvider, ResponsesChat } from './components/index.js';
-import { PlanApprovalModal } from './components/plan-approval-modal.js';
-import { FooterContextProvider } from './footer-context.js';
-import type { ConversationEntry, ErrorEntry, SystemEntry, UserEntry } from './item-utils.js';
-import { appendOrUpdateEntry, extractActivatedSkills, isUserEntry } from './item-utils.js';
-
-//#region Helpers
-
-function buildErrorEntry(error: unknown): ErrorEntry {
-  return {
-    role: 'system',
-    type: 'error',
-    content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-  };
-}
-
-function isFrameworkEvent(event: StreamEvent): event is Extract<
-  StreamEvent,
-  {
-    source: 'framework';
-  }
-> {
-  return event.source === 'framework';
-}
-
-function extractEventSuffix(type: string): string {
-  const idx = type.indexOf(':');
-  if (idx < 0) {
-    return type;
-  }
-  return type.slice(idx + 1);
-}
-
-/** Flip matching queued UserEntry to 'sent' by id. Returns a new array if any
- *  entry was updated; otherwise returns the input reference. */
-function markUserEntrySent(entries: ConversationEntry[], id: string): ConversationEntry[] {
-  const idx = entries.findIndex((e) => isUserEntry(e) && e.id === id);
-  if (idx < 0) {
-    return entries;
-  }
-  const entry = entries[idx];
-  if (!entry || !isUserEntry(entry)) {
-    return entries;
-  }
-  const updated: UserEntry = {
-    ...entry,
-    deliveryStatus: 'sent',
-  };
-  const next = [
-    ...entries,
-  ];
-  next[idx] = updated;
-  return next;
-}
-
-//#endregion
+} from './app-parts/commands.js';
+import type {
+  AgentHarness,
+  AskUserOutput,
+  InputContentPart,
+  InputMessageItem,
+  Item,
+  LastLayerUsage,
+  LspService,
+  MemoryLayer,
+  PendingAskUserRequest,
+  PlanState,
+  ShellAdapter,
+  SkillDefinition,
+  TeammateRegistry,
+} from './app-parts/deps.js';
+import {
+  buildSkillCatalog,
+  createAskUserService,
+  createLocalShellAdapter,
+} from './app-parts/deps.js';
+import {
+  augmentTextWithPendingBash,
+  buildErrorEntry,
+  countUserMessages,
+  deriveFirstPrompt,
+  extractEventSuffix,
+  isFrameworkEvent,
+  markUserEntrySent,
+  normalizeEntriesForResume,
+} from './app-parts/helpers.js';
+import type {
+  AgentMode,
+  AgentRuntimeConfig,
+  FooterContext,
+  NoeticPlugin,
+  PlanHooks,
+  SaveResult,
+  SessionFile,
+} from './app-parts/services.js';
+import {
+  createAgentHarness,
+  createLspService,
+  createPlanSession,
+  createPluginContextBuilder,
+  getModelContextLimit,
+  loadSession,
+  loadSessionByIdAnywhere,
+  saveSession,
+  stripUnresolvedToolCalls,
+  writeFlow,
+  writePrd,
+} from './app-parts/services.js';
+import type {
+  AssistantEntry,
+  ChatStatus,
+  ConversationEntry,
+  ErrorEntry,
+  ExitActionStatus,
+  LiveTokens,
+  LocalBashResult,
+  PromptInputMessage,
+  StreamMetricsRefs,
+  SystemEntry,
+  UserEntry,
+} from './app-parts/ui.js';
+import {
+  AskUserModal,
+  appendOrUpdateEntry,
+  buildBashCommandEntry,
+  buildCdBashResult,
+  buildCdEntry,
+  buildCdErrorEntry,
+  buildCdSplitNoticeEntry,
+  extractActivatedSkills,
+  extractTextContent,
+  FooterContextProvider,
+  getDefaultImageStore,
+  getFirstCommand,
+  getItemId,
+  handleCd,
+  InkProvider,
+  installSuspendResumeHandlers,
+  PlanApprovalModal,
+  parseCdArg,
+  ResponsesChat,
+  reattachLiveChildren,
+  resolvePromptAttachments,
+  runUserShellCommand,
+  StreamMetricsProvider,
+  useExitOnInterrupt,
+} from './app-parts/ui.js';
+import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
+import { TaskBoard } from './tasks/runtime-ui/task-board.js';
 
 //#region Types
 
 interface AppProps {
   config: AgentRuntimeConfig;
   plugins: ReadonlyArray<NoeticPlugin>;
+  /** A persisted session to resume. `null` starts fresh. */
+  initialSession: SessionFile | null;
+  /** When true, session saves are skipped. Resume still works from existing files. */
+  disablePersistence: boolean;
+  /** From `-n/--name`. Applied as `customTitle` on the next save. */
+  name?: string;
+  /**
+   * From `--session-id <uuid>`. When set and no session is being resumed,
+   * this UUID is used as the thread id / session id so the first save lands
+   * at that path. Ignored on resume (the saved session's id wins).
+   */
+  forcedSessionId?: string;
+  /** Called by `/resume` when the user wants to restart against a different session. */
+  onRestart: (target: SessionRestartTarget) => void;
+  /**
+   * Called when the user explicitly asks to exit the TUI (e.g. via the
+   * Ctrl+C double-press). The runner is responsible for unmounting Ink and
+   * resolving the session promise; the App just signals intent.
+   */
+  onRequestExit: () => void;
 }
 
 interface ModalState {
@@ -110,6 +158,35 @@ interface ConsumeItemsOpts {
   harness: AgentHarness;
   threadId: string;
   setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}
+
+/**
+ * For each streaming assistant message item, bump the live output-char counter
+ * by whatever new text appeared since the last yield of that item. The
+ * counter is reset per-turn by `consumeFullStream` on `turn_started`.
+ */
+function trackLiveOutput(opts: {
+  item: AssistantEntry;
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}): void {
+  if (opts.item.type !== 'message') {
+    return;
+  }
+  const id = getItemId(opts.item);
+  const currentLen = extractTextContent(opts.item).length;
+  const previousLen = opts.perItemCharsRef.current.get(id) ?? 0;
+  if (currentLen <= previousLen) {
+    return;
+  }
+  const delta = currentLen - previousLen;
+  opts.perItemCharsRef.current.set(id, currentLen);
+  opts.streamMetrics.liveOutputChars.current += delta;
+  if (opts.streamMetrics.firstTokenAt.current === null) {
+    opts.streamMetrics.firstTokenAt.current = Date.now();
+  }
 }
 
 async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
@@ -117,6 +194,11 @@ async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
     for await (const item of opts.harness.getItemStream({
       threadId: opts.threadId,
     })) {
+      trackLiveOutput({
+        item,
+        streamMetrics: opts.streamMetrics,
+        perItemCharsRef: opts.perItemCharsRef,
+      });
       opts.setEntries((prev) => appendOrUpdateEntry(prev, item));
     }
   } catch (err: unknown) {
@@ -139,6 +221,30 @@ interface ConsumeEventsOpts {
   pendingMessageIdsRef: {
     current: Set<string>;
   };
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+  /** Called once per turn_completed/turn_aborted with the latest response. No-op if persistence is disabled. */
+  onTurnSettled: (resp: {
+    items: ReadonlyArray<Item>;
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      cachedTokens?: number;
+    };
+    cost?: number;
+    lastLayerUsage: LastLayerUsage | undefined;
+  }) => void;
+}
+
+function resetTurnMetrics(opts: {
+  streamMetrics: StreamMetricsRefs;
+  perItemCharsRef: MutableRefObject<Map<string, number>>;
+}): void {
+  opts.streamMetrics.turnStartedAt.current = Date.now();
+  opts.streamMetrics.firstTokenAt.current = null;
+  opts.streamMetrics.liveOutputChars.current = 0;
+  opts.streamMetrics.liveTokens.current = null;
+  opts.perItemCharsRef.current.clear();
 }
 
 async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
@@ -165,6 +271,10 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
           }
           return next;
         });
+        resetTurnMetrics({
+          streamMetrics: opts.streamMetrics,
+          perItemCharsRef: opts.perItemCharsRef,
+        });
         opts.setStatus('streaming');
         continue;
       }
@@ -175,14 +285,31 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
           });
           opts.lastLayerUsageRef.current = resp.lastLayerUsage;
           opts.setLastLayerUsage(resp.lastLayerUsage);
+          const exact: LiveTokens = {
+            input: resp.usage.inputTokens,
+            output: resp.usage.outputTokens,
+            cached: resp.usage.cachedTokens,
+          };
+          opts.streamMetrics.liveTokens.current = exact;
+          opts.onTurnSettled({
+            items: resp.items,
+            usage: resp.usage,
+            cost: resp.cost,
+            lastLayerUsage: resp.lastLayerUsage,
+          });
         } catch {
           // getAgentResponse can only reject if no session exists; here it does.
         }
-        if (
-          opts.harness.getQueueSize({
-            threadId: opts.threadId,
-          }) === 0
-        ) {
+        // Trust the runner's kind: if the next turn is already running
+        // ('generating'), its turn_started will bounce us back to 'streaming';
+        // otherwise we're genuinely idle and can accept input again.
+        const runnerStatus = opts.harness.getStatus({
+          threadId: opts.threadId,
+        });
+        if (runnerStatus.kind === 'generating') {
+          opts.setStatus('streaming');
+        } else {
+          opts.streamMetrics.turnStartedAt.current = null;
           opts.setStatus('ready');
         }
       }
@@ -196,13 +323,47 @@ async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
 
 //#region App Component
 
-function App({ config, plugins }: AppProps): ReactNode {
-  const [entries, setEntries] = useState<ConversationEntry[]>([]);
+function App({
+  config,
+  plugins,
+  initialSession,
+  disablePersistence,
+  name,
+  forcedSessionId,
+  onRestart,
+  onRequestExit,
+}: AppProps): ReactNode {
+  useEffect(() => {
+    try {
+      ensureDaemon(config.cwd);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[warn] [tasks daemon] startup failed: ${message}\n`);
+    }
+  }, [
+    config.cwd,
+  ]);
+
+  const initialEntries = useMemo(
+    () => (initialSession ? normalizeEntriesForResume(initialSession.entries) : []),
+    [
+      initialSession,
+    ],
+  );
+  const [entries, setEntries] = useState<ConversationEntry[]>(initialEntries);
   const [status, setStatus] = useState<ChatStatus>('ready');
   const [skills, setSkills] = useState<ReadonlyArray<SkillDefinition>>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [pluginCommands, setPluginCommands] = useState<ReadonlyArray<Command>>([]);
-  const [agentMode, setAgentModeState] = useState<AgentMode>('normal');
+  const [agentMode, setAgentModeState] = useState<AgentMode>(initialSession?.agentMode ?? 'act');
+  const [viewMode, setViewMode] = useState<ViewMode>({
+    kind: 'chat',
+  });
+  const [model, setModelState] = useState<string>(config.model);
+  const harnessModelRef = useRef<string>(config.model);
+  const [effectiveCwd, setEffectiveCwd] = useState<string>(
+    initialSession?.effectiveCwd ?? config.cwd,
+  );
 
   const buildCtx = useMemo(
     () => createPluginContextBuilder(config),
@@ -212,15 +373,86 @@ function App({ config, plugins }: AppProps): ReactNode {
   );
 
   const harnessRef = useRef<AgentHarness | null>(null);
-  const harnessModeRef = useRef<AgentMode>('normal');
-  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(undefined);
-  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(undefined);
+  const harnessDisposeRef = useRef<(() => Promise<void>) | null>(null);
+  /**
+   * Set to true after the first harness creation performs its one-shot
+   * `reattachLiveChildren` pass. Re-harnessing on /model or /plan must
+   * not re-run reattach — the adapter is shared across swaps and has
+   * already rebound any durable children.
+   */
+  const reattachDoneRef = useRef<boolean>(false);
+  // Owned by the TUI (not the harness) so language-server subprocesses survive
+  // /model and /plan swaps, which recreate the harness.
+  const lspServiceRef = useRef<LspService | null>(null);
+  const harnessModeRef = useRef<AgentMode>(initialSession?.agentMode ?? 'act');
+  const lastLayerUsageRef = useRef<LastLayerUsage | undefined>(initialSession?.lastLayerUsage);
+  const [lastLayerUsage, setLastLayerUsage] = useState<LastLayerUsage | undefined>(
+    initialSession?.lastLayerUsage,
+  );
   const memoryLayersRef = useRef<ReadonlyArray<MemoryLayer>>([]);
+  const teammatesRef = useRef<TeammateRegistry | null>(null);
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
-  const threadIdRef = useRef<string>(crypto.randomUUID());
-  const sessionStartedAtRef = useRef<number>(Date.now());
+  // Created once per TUI session; survives harness swaps on /model or /plan.
+  const askUserService = useMemo(() => createAskUserService(), []);
+  const [askUserRequest, setAskUserRequest] = useState<PendingAskUserRequest | null>(null);
+  const threadIdRef = useRef<string>(
+    initialSession?.sessionId ?? forcedSessionId ?? crypto.randomUUID(),
+  );
+  const sessionStartedAtRef = useRef<number>(
+    initialSession ? Date.parse(initialSession.createdAt) : Date.now(),
+  );
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
+
+  /** Holds the canonical item list used to seed every harness recreation —
+   *  seeded from the resumed session's items on mount and refreshed after
+   *  every settled turn. A stale copy would mean a subsequent `/model` or
+   *  `/plan` swap reseeds with pre-swap history only, dropping any turns
+   *  that landed in between. */
+  const resumedItemsRef = useRef<ReadonlyArray<Item> | null>(
+    initialSession ? stripUnresolvedToolCalls(initialSession.items) : null,
+  );
+  const createdAtRef = useRef<string>(initialSession?.createdAt ?? new Date().toISOString());
+  const customTitleRef = useRef<string | undefined>(name ?? initialSession?.customTitle);
+  const tagRef = useRef<string | undefined>(initialSession?.tag);
+  const cumulativeUsageRef = useRef<{
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+  }>(
+    initialSession?.cumulativeUsage ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    },
+  );
+  const cumulativeCostRef = useRef<number>(initialSession?.cumulativeCost ?? 0);
+  const lastSaveMtimeRef = useRef<number | undefined>(undefined);
+
+  const turnStartedAtRef = useRef<number | null>(null);
+  const firstTokenAtRef = useRef<number | null>(null);
+  const liveOutputCharsRef = useRef<number>(0);
+  const liveTokensRef = useRef<LiveTokens | null>(null);
+  const perItemCharsRef = useRef<Map<string, number>>(new Map());
+
+  const streamMetrics = useMemo<StreamMetricsRefs>(
+    () => ({
+      turnStartedAt: turnStartedAtRef,
+      firstTokenAt: firstTokenAtRef,
+      liveOutputChars: liveOutputCharsRef,
+      liveTokens: liveTokensRef,
+    }),
+    [],
+  );
+
+  const shellRef = useRef<ShellAdapter | null>(null);
+  if (shellRef.current === null) {
+    shellRef.current = createLocalShellAdapter();
+  }
+  const effectiveCwdRef = useRef<string>(initialSession?.effectiveCwd ?? config.cwd);
+  const prevCwdRef = useRef<string | null>(null);
+  const pendingBashOutputsRef = useRef<LocalBashResult[]>([]);
+  const cdNoticeShownRef = useRef<boolean>(false);
 
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -303,11 +535,100 @@ function App({ config, plugins }: AppProps): ReactNode {
     setEntries([]);
   }, []);
 
+  const clearSession = useCallback(() => {
+    // Full session reset: everything a `noetic --resume` would rebuild, plus UI.
+    threadIdRef.current = crypto.randomUUID();
+    createdAtRef.current = new Date().toISOString();
+    sessionStartedAtRef.current = Date.now();
+    resumedItemsRef.current = null;
+    customTitleRef.current = undefined;
+    tagRef.current = undefined;
+    cumulativeUsageRef.current = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
+    cumulativeCostRef.current = 0;
+    lastSaveMtimeRef.current = undefined;
+    lastLayerUsageRef.current = undefined;
+    setLastLayerUsage(undefined);
+    harnessRef.current = null;
+    streamWiredHarnessRef.current = null;
+    pendingMessageIdsRef.current.clear();
+    pendingBashOutputsRef.current = [];
+    askUserService.cancelAll('session cleared');
+    getDefaultImageStore().clear();
+    setEntries([]);
+    setStatus('ready');
+  }, [
+    askUserService,
+  ]);
+
+  const setCustomTitle = useCallback((name: string | undefined) => {
+    customTitleRef.current = name;
+  }, []);
+
+  const setTag = useCallback((next: string | undefined) => {
+    tagRef.current = next;
+  }, []);
+
+  const buildSessionSnapshot = useCallback(
+    (currentEntries: ReadonlyArray<ConversationEntry>): SessionSnapshot => ({
+      sessionId: threadIdRef.current,
+      cwd: config.cwd,
+      effectiveCwd: effectiveCwdRef.current,
+      model: harnessModelRef.current,
+      createdAt: createdAtRef.current,
+      customTitle: customTitleRef.current,
+      tag: tagRef.current,
+      firstPrompt: deriveFirstPrompt(currentEntries),
+      messageCount: countUserMessages(currentEntries),
+      cumulativeUsage: {
+        ...cumulativeUsageRef.current,
+      },
+      cumulativeCost: cumulativeCostRef.current,
+      persistenceEnabled: !disablePersistence,
+    }),
+    [
+      config.cwd,
+      disablePersistence,
+    ],
+  );
+
+  const restartWithSession = useCallback(
+    async (target: SessionRestartTarget): Promise<string | undefined> => {
+      if (target.kind !== 'id') {
+        onRestart(target);
+        return undefined;
+      }
+      const file =
+        (await loadSession(config.cwd, target.sessionId)) ??
+        (await loadSessionByIdAnywhere(target.sessionId));
+      if (file === null) {
+        return `Session ${target.sessionId} not found.`;
+      }
+      onRestart({
+        kind: 'file',
+        file,
+      });
+      return undefined;
+    },
+    [
+      config.cwd,
+      onRestart,
+    ],
+  );
+
   const handleModalClose = useCallback(() => {
     if (!modal) {
       return;
     }
-    if (pendingApprovalRef.current) {
+    // Dispatch by command name so the right owner is notified — never fire
+    // both the plan-approval reject and the ask-user cancel for one dismiss.
+    if (modal.commandName === 'ask-user') {
+      askUserService.cancelAll('modal dismissed');
+      installedAskUserIdRef.current = null;
+    } else if (pendingApprovalRef.current) {
       pendingApprovalRef.current(false);
       pendingApprovalRef.current = null;
     }
@@ -322,6 +643,90 @@ function App({ config, plugins }: AppProps): ReactNode {
     setModal(null);
   }, [
     modal,
+    askUserService,
+  ]);
+
+  // Subscribe to ask-user requests from the running tool and drive modal state.
+  useEffect(() => {
+    return askUserService.subscribe((pending) => {
+      setAskUserRequest(pending);
+    });
+  }, [
+    askUserService,
+  ]);
+
+  const handleAskUserSubmit = useCallback(
+    (id: string, output: AskUserOutput): void => {
+      askUserService.resolve(id, output);
+      setModal(null);
+    },
+    [
+      askUserService,
+    ],
+  );
+
+  const handleAskUserCancel = useCallback(
+    (id: string, reason: string): void => {
+      askUserService.cancel(id, reason);
+      setModal(null);
+    },
+    [
+      askUserService,
+    ],
+  );
+
+  // Tracks the pending ask-user id currently installed as a modal, so the
+  // effect below is idempotent: if the modal is already ours for the current
+  // request, we don't re-run setModal (which would create a new object each
+  // render and loop).
+  const installedAskUserIdRef = useRef<string | null>(null);
+
+  // Render the ask-user modal whenever a request is pending and no other modal is active.
+  // Also tear down any orphan ask-user modal when the underlying request goes away
+  // (harness swap, programmatic cancelAll, etc.), so the dialog can't outlive
+  // its owner.
+  useEffect(() => {
+    if (askUserRequest === null) {
+      installedAskUserIdRef.current = null;
+      // If our modal is still on screen but the request behind it is gone,
+      // clear it so the user isn't left interacting with a dead dialog.
+      if (modal?.commandName === 'ask-user') {
+        setModal(null);
+      }
+      return;
+    }
+    if (installedAskUserIdRef.current === askUserRequest.id) {
+      return;
+    }
+    if (modal !== null && modal.commandName !== 'ask-user') {
+      // Another modal (e.g. plan approval) already holds the screen; defer.
+      return;
+    }
+    installedAskUserIdRef.current = askUserRequest.id;
+    setModal({
+      commandName: 'ask-user',
+      dismissMessage: 'Ask-user dialog dismissed (treated as cancellation).',
+      content: (
+        <AskUserModal
+          input={askUserRequest.input}
+          isPlanMode={agentMode === 'planning'}
+          onSubmit={(output) => handleAskUserSubmit(askUserRequest.id, output)}
+          onCancel={(reason) => handleAskUserCancel(askUserRequest.id, reason)}
+          onFinishPlanInterview={() => {
+            // In plan mode, short-circuit to ExitPlanMode semantics: cancel the
+            // ask-user request, then let the agent proceed to exitPlanMode on
+            // its next turn.
+            handleAskUserCancel(askUserRequest.id, 'user pressed Finish Interview');
+          }}
+        />
+      ),
+    });
+  }, [
+    askUserRequest,
+    modal,
+    agentMode,
+    handleAskUserSubmit,
+    handleAskUserCancel,
   ]);
 
   const planHooks = useMemo<PlanHooks>(
@@ -375,52 +780,191 @@ function App({ config, plugins }: AppProps): ReactNode {
     [],
   );
 
+  /**
+   * Build the session save payload from current state and persist atomically.
+   * Fire-and-forget; errors land on stderr. No-op when `--no-session-persistence`
+   * is set.
+   */
+  const persistSession = useCallback(
+    async (cleanedItems: ReadonlyArray<Item>): Promise<void> => {
+      if (disablePersistence) {
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      const currentEntries = entriesRef.current;
+      const file: SessionFile = {
+        version: 1,
+        sessionId: threadIdRef.current,
+        cwd: config.cwd,
+        effectiveCwd: effectiveCwdRef.current,
+        model: harnessModelRef.current,
+        agentMode: harnessModeRef.current,
+        createdAt: createdAtRef.current,
+        modifiedAt: nowIso,
+        customTitle: customTitleRef.current,
+        tag: tagRef.current,
+        firstPrompt: deriveFirstPrompt(currentEntries),
+        messageCount: countUserMessages(currentEntries),
+        cumulativeUsage: {
+          ...cumulativeUsageRef.current,
+        },
+        cumulativeCost: cumulativeCostRef.current,
+        lastLayerUsage: lastLayerUsageRef.current,
+        items: [
+          ...cleanedItems,
+        ],
+        entries: [
+          ...currentEntries,
+        ],
+      };
+      try {
+        const result: SaveResult = await saveSession(file, {
+          lastKnownMtimeMs: lastSaveMtimeRef.current,
+        });
+        lastSaveMtimeRef.current = result.mtimeMs;
+        if (result.conflict) {
+          process.stderr.write(
+            `Warning: concurrent write detected for session ${file.sessionId}; overwrote anyway.\n`,
+          );
+        }
+      } catch (err: unknown) {
+        process.stderr.write(
+          `Session save failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    },
+    [
+      config.cwd,
+      disablePersistence,
+    ],
+  );
+
   /** Wire long-lived consumers to the harness's session streams. Called once
    *  per harness instance via `getOrCreateHarness`. */
-  const wireStreams = useCallback((harness: AgentHarness) => {
-    if (streamWiredHarnessRef.current === harness) {
-      return;
-    }
-    streamWiredHarnessRef.current = harness;
-    const threadId = threadIdRef.current;
+  const wireStreams = useCallback(
+    (harness: AgentHarness) => {
+      if (streamWiredHarnessRef.current === harness) {
+        return;
+      }
+      streamWiredHarnessRef.current = harness;
+      const threadId = threadIdRef.current;
 
-    void consumeItemStream({
-      harness,
-      threadId,
-      setEntries,
-    });
-    void consumeFullStream({
-      harness,
-      threadId,
-      setEntries,
-      setStatus,
-      setLastLayerUsage,
-      lastLayerUsageRef,
-      pendingMessageIdsRef,
-    });
-  }, []);
+      void consumeItemStream({
+        harness,
+        threadId,
+        setEntries,
+        streamMetrics,
+        perItemCharsRef,
+      });
+      void consumeFullStream({
+        harness,
+        threadId,
+        setEntries,
+        setStatus,
+        setLastLayerUsage,
+        lastLayerUsageRef,
+        pendingMessageIdsRef,
+        streamMetrics,
+        perItemCharsRef,
+        onTurnSettled: (resp) => {
+          cumulativeUsageRef.current = {
+            inputTokens: cumulativeUsageRef.current.inputTokens + resp.usage.inputTokens,
+            outputTokens: cumulativeUsageRef.current.outputTokens + resp.usage.outputTokens,
+            cachedTokens: cumulativeUsageRef.current.cachedTokens + (resp.usage.cachedTokens ?? 0),
+          };
+          if (resp.cost !== undefined) {
+            cumulativeCostRef.current += resp.cost;
+          }
+          // Keep the ref in sync so a later `/model` or `/plan` swap reseeds
+          // from the latest items rather than the original resume snapshot.
+          const cleaned = stripUnresolvedToolCalls(resp.items);
+          resumedItemsRef.current = cleaned;
+          void persistSession(cleaned);
+          // The agent's Bash `cd` mutates `harness.rootCwdState.cwd`. Mirror
+          // that into the TUI's render state so the prompt path follows.
+          const liveCwd = harnessRef.current?.rootCwdState.cwd;
+          if (liveCwd !== undefined && liveCwd !== effectiveCwdRef.current) {
+            effectiveCwdRef.current = liveCwd;
+            setEffectiveCwd(liveCwd);
+          }
+        },
+      });
+    },
+    [
+      streamMetrics,
+      persistSession,
+    ],
+  );
 
   const getOrCreateHarness = useCallback(
-    async (mode: AgentMode): Promise<AgentHarness> => {
-      if (harnessRef.current !== null && harnessModeRef.current === mode) {
+    async (mode: AgentMode, activeModel: string): Promise<AgentHarness> => {
+      if (
+        harnessRef.current !== null &&
+        harnessModeRef.current === mode &&
+        harnessModelRef.current === activeModel
+      ) {
         return harnessRef.current;
+      }
+      if (lspServiceRef.current === null) {
+        lspServiceRef.current = await createLspService({
+          plugins,
+          buildCtx,
+          cwd: config.cwd,
+          fs: config.fs,
+        });
       }
       const {
         harness,
         skills: resolvedSkills,
         memoryLayers,
+        dispose,
+        teammates,
       } = await createAgentHarness({
-        config,
+        config: {
+          ...config,
+          model: activeModel,
+        },
         plugins,
         fs: config.fs,
         mode,
         planHooks,
         buildContext: buildCtx,
+        lspService: lspServiceRef.current,
+        askUserService,
+        binaryAvailability: config.binaryAvailability,
       });
+      // Dispose any previously-held harness resources before swapping.
+      const previousDispose = harnessDisposeRef.current;
+      if (previousDispose) {
+        previousDispose().catch(() => {});
+      }
+      harnessDisposeRef.current = dispose;
       harnessRef.current = harness;
       harnessModeRef.current = mode;
+      harnessModelRef.current = activeModel;
       memoryLayersRef.current = memoryLayers;
+      teammatesRef.current = teammates;
+      // Seed the new harness with any cwd accumulated from `!cd`s issued
+      // before the first turn or during a /model or /plan harness swap.
+      // Without this, the next turn's tools reset to launch-time cwd.
+      harness.setRootCwd(effectiveCwdRef.current);
+      // One-shot rediscovery of live subprocess children across a
+      // parent-process restart. Cheap no-op when no durable storage is
+      // configured on the adapter — see reattach-live-children.ts.
+      if (!reattachDoneRef.current) {
+        reattachDoneRef.current = true;
+        await reattachLiveChildren(harness).catch((err: unknown) => {
+          console.warn('reattachLiveChildren failed:', err);
+        });
+      }
       setSkills(resolvedSkills);
+      if (resumedItemsRef.current !== null) {
+        // Seed BEFORE wiring streams — wireStreams triggers lazy session
+        // creation inside the harness via requireSession, and the session
+        // runner reads session.accumulatedItems on each turn. Seeding first
+        // ensures the first turn after resume has the full prior history.
+        harness.seedSessionHistory(threadIdRef.current, resumedItemsRef.current);
+      }
       wireStreams(harness);
       return harness;
     },
@@ -430,104 +974,280 @@ function App({ config, plugins }: AppProps): ReactNode {
       planHooks,
       buildCtx,
       wireStreams,
+      askUserService,
     ],
   );
 
-  const setAgentMode = useCallback(async (mode: AgentMode): Promise<void> => {
-    if (harnessModeRef.current !== mode) {
-      harnessRef.current = null;
-      streamWiredHarnessRef.current = null;
+  /** Discard the current harness so the next submit recreates it with fresh config. */
+  const invalidateHarness = useCallback((): void => {
+    // Drops the registry's references to running teammates. Does NOT abort
+    // in-flight executions — DetachedHandle has no cancel API. Settle notices
+    // posted by the dropped child go via WeakRef and are silently discarded.
+    teammatesRef.current?.dropAll();
+    teammatesRef.current = null;
+    const dispose = harnessDisposeRef.current;
+    harnessDisposeRef.current = null;
+    if (dispose) {
+      dispose().catch(() => {});
     }
-    setAgentModeState(mode);
-  }, []);
+    harnessRef.current = null;
+    streamWiredHarnessRef.current = null;
+    // Reject any in-flight ask-user request — its owning harness is gone, so
+    // the dialog must close and the model's tool call gets a cancelled error.
+    askUserService.cancelAll('harness invalidated');
+  }, [
+    askUserService,
+  ]);
 
-  const handleStop = useCallback(async () => {
+  // On unmount, tear down LSP server subprocesses. The harness-owned dispose is
+  // a no-op when the TUI owns the service; the service dispose below actually
+  // kills subprocesses. A .catch is fine because the process is exiting — we
+  // just don't want to leak zombies.
+  useEffect(
+    () => () => {
+      const dispose = harnessDisposeRef.current;
+      harnessDisposeRef.current = null;
+      if (dispose) {
+        dispose().catch(() => {});
+      }
+      const service = lspServiceRef.current;
+      lspServiceRef.current = null;
+      if (service) {
+        service.dispose().catch(() => {});
+      }
+    },
+    [],
+  );
+
+  const setAgentMode = useCallback(
+    async (mode: AgentMode): Promise<void> => {
+      if (harnessModeRef.current !== mode) {
+        invalidateHarness();
+      }
+      setAgentModeState(mode);
+    },
+    [
+      invalidateHarness,
+    ],
+  );
+
+  const setModel = useCallback(
+    async (nextModel: string): Promise<void> => {
+      if (harnessModelRef.current !== nextModel) {
+        invalidateHarness();
+      }
+      setModelState(nextModel);
+    },
+    [
+      invalidateHarness,
+    ],
+  );
+
+  const handleStop = useCallback(async (): Promise<void> => {
     const harness = harnessRef.current;
     if (!harness) {
       return;
     }
+    const wasGenerating =
+      harness.getStatus({
+        threadId: threadIdRef.current,
+      }).kind === 'generating';
     await harness.abort({
       threadId: threadIdRef.current,
       reason: 'user-requested',
     });
+    // If the agent was mid-tool waiting on the user, kill the dialog and let
+    // the abort propagate the cancelled error back to the model.
+    askUserService.cancelAll('user stopped turn');
+    if (!wasGenerating) {
+      return;
+    }
+    setEntries((prev) => [
+      ...prev,
+      {
+        role: 'system',
+        type: 'info',
+        content: 'Canceled by user',
+      } satisfies SystemEntry,
+    ]);
+  }, [
+    askUserService,
+  ]);
+
+  const handleGracefulExit = useCallback(async (): Promise<void> => {
+    const harness = harnessRef.current;
+    if (harness) {
+      try {
+        await harness.abort({
+          threadId: threadIdRef.current,
+          reason: 'user-requested',
+        });
+      } catch {
+        // best-effort: harness teardown may already be in progress
+      }
+    }
+    askUserService.cancelAll('user exit');
+    onRequestExit();
+  }, [
+    askUserService,
+    onRequestExit,
+  ]);
+
+  const exitInterruptStatus: ExitActionStatus =
+    modal !== null ? 'modal' : status === 'streaming' || status === 'submitted' ? status : 'idle';
+
+  const { isHintArmed: exitHintArmed } = useExitOnInterrupt({
+    status: exitInterruptStatus,
+    inputBufferEmpty: true,
+    doublePressWindowMs: config.ui?.doublePressWindowMs,
+    enabledKeys: [
+      'ctrl-c',
+    ],
+    onAbortTurn: handleStop,
+    onExitGracefully: handleGracefulExit,
+  });
+
+  /** Run a `cd` in-process and update the session-scoped `effectiveCwd`. */
+  const runCd = useCallback((command: string): void => {
+    const result = handleCd({
+      arg: parseCdArg(command),
+      effectiveCwd: effectiveCwdRef.current,
+      prevCwd: prevCwdRef.current,
+    });
+    if (result.kind === 'error') {
+      setEntries((prev) => [
+        ...prev,
+        buildCdErrorEntry(result.message),
+      ]);
+      return;
+    }
+    prevCwdRef.current = result.previousCwd;
+    effectiveCwdRef.current = result.newCwd;
+    setEffectiveCwd(result.newCwd);
+    // Single source of truth: the harness's `rootCwdState` is what the
+    // agent's tools (Bash, Read, Write, ...) will read on their next call.
+    harnessRef.current?.setRootCwd(result.newCwd);
+    pendingBashOutputsRef.current.push(buildCdBashResult(command, result.newCwd));
+
+    const extras: SystemEntry[] = [];
+    extras.push(buildCdEntry(result.newCwd));
+    if (!cdNoticeShownRef.current) {
+      cdNoticeShownRef.current = true;
+      extras.push(buildCdSplitNoticeEntry());
+    }
+    setEntries((prev) => [
+      ...prev,
+      ...extras,
+    ]);
   }, []);
 
-  const handleSubmit = useCallback(
-    async (text: string): Promise<void> => {
-      if (isSlashCommand(text)) {
-        const parsed = parseSlashCommand(text);
-        if (parsed) {
-          const cmd = findCommand(parsed.commandName, commands);
-          if (cmd) {
-            const activatedSkills = extractActivatedSkills(entriesRef.current);
-            const ctx: CommandContext = {
-              config,
-              cwd: config.cwd,
-              entries: entriesRef.current,
-              skills,
-              activatedSkills,
-              commands,
-              clearEntries,
-              lastLayerUsage: lastLayerUsageRef.current,
-              memoryLayers: memoryLayersRef.current,
-              agentMode,
-              setAgentMode,
-            };
+  /** Execute a `!` or auto-detected command locally, append transcript
+   *  entry, and stash the result for the next agent turn. */
+  const runLocalBash = useCallback(
+    async (command: string): Promise<void> => {
+      if (getFirstCommand(command) === 'cd') {
+        runCd(command);
+        return;
+      }
+      const shell = shellRef.current;
+      if (shell === null) {
+        return;
+      }
+      try {
+        const result = await runUserShellCommand({
+          shell,
+          cwd: effectiveCwdRef.current,
+          command,
+        });
+        pendingBashOutputsRef.current.push(result);
+        setEntries((prev) => [
+          ...prev,
+          buildBashCommandEntry(result),
+        ]);
+      } catch (error) {
+        setEntries((prev) => [
+          ...prev,
+          buildErrorEntry(error),
+        ]);
+      }
+    },
+    [
+      runCd,
+    ],
+  );
 
-            try {
-              const result = await executeCommand({
-                command: cmd,
-                args: parsed.args,
-                ctx,
-                options: {
-                  onJsxComplete: (summary) => {
-                    if (summary) {
-                      setEntries((prev) => [
-                        ...prev,
-                        {
-                          role: 'system',
-                          type: 'info',
-                          content: summary,
-                        } satisfies SystemEntry,
-                      ]);
-                    }
-                    setModal(null);
+  const handleSubmit = useCallback(
+    async (message: PromptInputMessage): Promise<void> => {
+      const text = message.text;
+      const sendUserMessage = async (
+        messageText: string,
+        contentParts?: ReadonlyArray<InputContentPart>,
+      ): Promise<void> => {
+        // Snapshot pending bash outputs now so any `!cmd` the user runs during
+        // the agent turn falls through to the NEXT flush instead of being
+        // dropped here.
+        const pendingSnapshot: ReadonlyArray<LocalBashResult> = [
+          ...pendingBashOutputsRef.current,
+        ];
+        const augmented = augmentTextWithPendingBash(messageText, pendingSnapshot);
+        const input =
+          contentParts === undefined
+            ? augmented
+            : ({
+                id: `user-${crypto.randomUUID()}`,
+                type: 'message',
+                role: 'user',
+                status: 'completed',
+                content: [
+                  {
+                    type: 'input_text',
+                    text: augmented,
                   },
-                },
-              });
-              if (result.type === 'text') {
-                setEntries((prev) => [
-                  ...prev,
-                  {
-                    role: 'system',
-                    type: 'info',
-                    content: result.value,
-                  } satisfies SystemEntry,
-                ]);
-              } else if (result.type === 'modal') {
-                setEntries((prev) => [
-                  ...prev,
-                  {
-                    role: 'system',
-                    type: 'info',
-                    content: `/${result.commandName}`,
-                  } satisfies SystemEntry,
-                ]);
-                setModal({
-                  content: result.node,
-                  commandName: result.commandName,
-                  dismissMessage: result.dismissMessage,
-                });
-              }
-            } catch (error) {
-              setEntries((prev) => [
-                ...prev,
-                buildErrorEntry(error),
-              ]);
-            }
-            return;
+                  ...contentParts.filter((part) => part.type !== 'input_text'),
+                ],
+              } satisfies InputMessageItem);
+        try {
+          const harness = await getOrCreateHarness(agentMode, model);
+          const isBusy =
+            harness.getStatus({
+              threadId: threadIdRef.current,
+            }).kind !== 'idle';
+          const messageId = `msg-${crypto.randomUUID()}`;
+          const userEntry: UserEntry = {
+            role: 'user',
+            content: messageText,
+            id: messageId,
+            deliveryStatus: isBusy ? 'queued' : 'sent',
+          };
+          setEntries((prev) => [
+            ...prev,
+            userEntry,
+          ]);
+
+          if (isBusy) {
+            pendingMessageIdsRef.current.add(messageId);
           }
+          setStatus('submitted');
+
+          await harness.execute(input, {
+            threadId: threadIdRef.current,
+            messageId,
+          });
+          // Drop only what we sent — any output appended during the await from
+          // a concurrent `!cmd` must survive to ride the next turn.
+          if (pendingSnapshot.length > 0) {
+            pendingBashOutputsRef.current.splice(0, pendingSnapshot.length);
+          }
+        } catch (error) {
+          setEntries((prev) => [
+            ...prev,
+            buildErrorEntry(error),
+          ]);
+          setStatus('ready');
         }
+      };
+
+      const appendUnknownCommand = (): void => {
         setEntries((prev) => [
           ...prev,
           {
@@ -536,43 +1256,142 @@ function App({ config, plugins }: AppProps): ReactNode {
             content: `Unknown command: ${text}`,
           } satisfies ErrorEntry,
         ]);
+      };
+
+      const bashCommand = parseBashCommand(text);
+      if (bashCommand !== null) {
+        await runLocalBash(bashCommand);
         return;
       }
 
-      // Regular message — enqueue on the session and let streams drive the UI.
-      try {
-        const harness = await getOrCreateHarness(agentMode);
-        const isBusy =
-          harness.getStatus({
-            threadId: threadIdRef.current,
-          }).kind !== 'idle';
-        const messageId = `msg-${crypto.randomUUID()}`;
-        const userEntry: UserEntry = {
-          role: 'user',
-          content: text,
-          id: messageId,
-          deliveryStatus: isBusy ? 'queued' : 'sent',
-        };
+      const resolvedAttachments = await resolvePromptAttachments({
+        text,
+        cwd: effectiveCwdRef.current,
+      });
+      if (resolvedAttachments.errors.length > 0) {
         setEntries((prev) => [
           ...prev,
-          userEntry,
+          ...resolvedAttachments.errors.map(
+            (content): ErrorEntry => ({
+              role: 'system',
+              type: 'error',
+              content,
+            }),
+          ),
         ]);
+      }
+      const hasAttachments =
+        resolvedAttachments.attachments.length > 0 || message.attachments.length > 0;
 
-        if (isBusy) {
-          pendingMessageIdsRef.current.add(messageId);
-        }
-        setStatus('submitted');
+      if (!isSlashCommand(text) || hasAttachments) {
+        await sendUserMessage(text, hasAttachments ? resolvedAttachments.contentParts : undefined);
+        return;
+      }
 
-        await harness.execute(text, {
-          threadId: threadIdRef.current,
-          messageId,
+      const parsed = parseSlashCommand(text);
+      if (!parsed) {
+        appendUnknownCommand();
+        return;
+      }
+      const cmd = findCommand(parsed.commandName, commands);
+      if (!cmd) {
+        appendUnknownCommand();
+        return;
+      }
+
+      const activatedSkills = extractActivatedSkills(entriesRef.current);
+      const ctx: CommandContext = {
+        config: {
+          ...config,
+          model,
+        },
+        cwd: config.cwd,
+        harness: harnessRef.current ?? undefined,
+        askUserService,
+        entries: entriesRef.current,
+        skills,
+        activatedSkills,
+        commands,
+        clearEntries,
+        lastLayerUsage: lastLayerUsageRef.current,
+        memoryLayers: memoryLayersRef.current,
+        agentMode,
+        setAgentMode,
+        setModel,
+        sessionSnapshot: buildSessionSnapshot(entriesRef.current),
+        setCustomTitle,
+        setTag,
+        clearSession,
+        restartWithSession,
+        setViewMode,
+      };
+
+      try {
+        const result = await executeCommand({
+          command: cmd,
+          args: parsed.args,
+          ctx,
+          options: {
+            onJsxComplete: (summary) => {
+              setModal(null);
+              if (summary === undefined) {
+                return;
+              }
+              if (typeof summary === 'string') {
+                if (summary.length > 0) {
+                  setEntries((prev) => [
+                    ...prev,
+                    {
+                      role: 'system',
+                      type: 'info',
+                      content: summary,
+                    } satisfies SystemEntry,
+                  ]);
+                }
+                return;
+              }
+              if (summary.type === 'prompt') {
+                void sendUserMessage(summary.value);
+              }
+            },
+          },
         });
+        if (result.type === 'text') {
+          setEntries((prev) => [
+            ...prev,
+            {
+              role: 'system',
+              type: 'info',
+              content: result.value,
+            } satisfies SystemEntry,
+          ]);
+          return;
+        }
+        if (result.type === 'modal') {
+          setEntries((prev) => [
+            ...prev,
+            {
+              role: 'system',
+              type: 'info',
+              content: `/${result.commandName}`,
+            } satisfies SystemEntry,
+          ]);
+          setModal({
+            content: result.node,
+            commandName: result.commandName,
+            dismissMessage: result.dismissMessage,
+          });
+          return;
+        }
+        if (result.type === 'prompt') {
+          await sendUserMessage(result.value);
+          return;
+        }
       } catch (error) {
         setEntries((prev) => [
           ...prev,
           buildErrorEntry(error),
         ]);
-        setStatus('ready');
       }
     },
     [
@@ -583,45 +1402,147 @@ function App({ config, plugins }: AppProps): ReactNode {
       getOrCreateHarness,
       agentMode,
       setAgentMode,
+      model,
+      setModel,
+      runLocalBash,
+      buildSessionSnapshot,
+      setCustomTitle,
+      setTag,
+      clearSession,
+      askUserService,
+      restartWithSession,
     ],
   );
 
-  const footerValue = useMemo<FooterContextValue>(
+  const footerValue = useMemo<FooterContext>(
     () => ({
-      model: config.model,
-      cwd: config.cwd,
+      model,
+      cwd: effectiveCwd,
       status,
       lastLayerUsage,
-      contextLimit: getModelContextLimit(config.model),
+      contextLimit: getModelContextLimit(model),
       threadId: threadIdRef.current,
       sessionStartedAt: sessionStartedAtRef.current,
       entryCount: entries.length,
       agentMode,
     }),
     [
-      config.model,
-      config.cwd,
+      effectiveCwd,
       status,
       lastLayerUsage,
       entries.length,
       agentMode,
+      model,
+    ],
+  );
+
+  const handleToggleAgentMode = useCallback((): void => {
+    const next: AgentMode = agentMode === 'planning' ? 'act' : 'planning';
+    setAgentMode(next).catch(() => {});
+  }, [
+    agentMode,
+    setAgentMode,
+  ]);
+
+  // Stable identity so the request-items overlay doesn't refetch on every parent
+  // render while open; reads through the refs each invocation.
+  const getRequestItems = useCallback(
+    async () =>
+      harnessRef.current?.previewRequestItems({
+        threadId: threadIdRef.current,
+      }) ?? [],
+    [],
+  );
+
+  const exitToChat = useCallback((): void => {
+    setViewMode({
+      kind: 'chat',
+    });
+  }, []);
+
+  const handleOpenChat = useCallback(
+    (task: { id: string }): void => {
+      void (async (): Promise<void> => {
+        const ctx = {
+          fs: config.fs,
+          projectRoot: config.cwd,
+        };
+        const harness = harnessRef.current;
+        if (harness === null) {
+          return;
+        }
+        const found = await ensureChatTarget(ctx, task.id, {
+          subprocess: harness.subprocess,
+          onSpawning: () =>
+            setViewMode({
+              kind: 'taskChatSpawning',
+              taskId: task.id,
+            }),
+        });
+        setViewMode((current) => {
+          // Bail if the user navigated away to a different spawning task
+          // mid-poll — clobbering their current view would be disorienting.
+          if (current.kind === 'taskChatSpawning' && current.taskId !== task.id) {
+            return current;
+          }
+          if (found === null) {
+            return {
+              kind: 'taskBoard',
+            };
+          }
+          return {
+            kind: 'taskChat',
+            socketPath: found.socketPath,
+            taskId: task.id,
+            roleLabel: found.roleLabel,
+          };
+        });
+      })();
+    },
+    [
+      config.fs,
+      config.cwd,
     ],
   );
 
   return (
     <InkProvider>
       <FooterContextProvider value={footerValue}>
-        <ResponsesChat
-          entries={entries}
-          status={status}
-          onSubmit={handleSubmit}
-          onStop={handleStop}
-          model={config.model}
-          commands={commandSuggestions}
-          modalContent={modal?.content}
-          onModalClose={handleModalClose}
-          plugins={plugins}
-        />
+        <StreamMetricsProvider value={streamMetrics}>
+          {viewMode.kind === 'taskBoard' ? (
+            <TaskBoard
+              fs={config.fs}
+              projectRoot={config.cwd}
+              onExit={exitToChat}
+              onOpenChat={handleOpenChat}
+            />
+          ) : viewMode.kind === 'taskChat' ? (
+            <TaskChatView
+              socketPath={viewMode.socketPath}
+              taskId={viewMode.taskId}
+              roleLabel={viewMode.roleLabel}
+              onExit={exitToChat}
+            />
+          ) : viewMode.kind === 'taskChatSpawning' ? (
+            <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitToChat} />
+          ) : (
+            <ResponsesChat
+              entries={entries}
+              status={status}
+              onSubmit={handleSubmit}
+              onStop={handleStop}
+              model={model}
+              agentMode={agentMode}
+              onToggleMode={handleToggleAgentMode}
+              commands={commandSuggestions}
+              modalContent={modal?.content}
+              onModalClose={handleModalClose}
+              plugins={plugins}
+              exitHintArmed={exitHintArmed}
+              getRequestItems={getRequestItems}
+            />
+          )}
+        </StreamMetricsProvider>
       </FooterContextProvider>
     </InkProvider>
   );
@@ -631,12 +1552,164 @@ function App({ config, plugins }: AppProps): ReactNode {
 
 //#region Entry Point
 
+export interface RunAgentOptions {
+  initialSession?: SessionFile | null;
+  disablePersistence?: boolean;
+  /** From `-n/--name`; overrides the saved `customTitle` when provided. */
+  name?: string;
+  /** From `--session-id`; forces a specific session id for a fresh session. */
+  forcedSessionId?: string;
+}
+
+/**
+ * Run the TUI until the user exits or restarts via `/resume`. Returns once
+ * Ink unmounts for good (either by user Ctrl+D or after an explicit restart
+ * leaves the loop with `initialSession` resolved to the new target).
+ */
 export async function runAgent(
   plugins: ReadonlyArray<NoeticPlugin>,
   config: AgentRuntimeConfig,
+  options: RunAgentOptions = {},
 ): Promise<void> {
-  const { waitUntilExit } = render(<App config={config} plugins={plugins} />);
-  await waitUntilExit();
+  let currentSession = options.initialSession ?? null;
+  let currentName = options.name;
+
+  // Loop so `/resume` can swap the session without quitting the process.
+  while (true) {
+    const outcome = await runOneSession({
+      plugins,
+      config,
+      disablePersistence: options.disablePersistence ?? false,
+      initialSession: currentSession,
+      name: currentName,
+      // Only apply --session-id to the initial session — after a /resume
+      // swap, the loaded session's id wins (the fallback is never consulted).
+      forcedSessionId: currentSession === null ? options.forcedSessionId : undefined,
+    });
+    if (outcome.kind === 'exit') {
+      return;
+    }
+    if (outcome.kind === 'restart-file') {
+      currentSession = outcome.file;
+      currentName = undefined;
+      continue;
+    }
+    // 'restart-picker' — render the picker, then loop back with the choice.
+    const picked = await (await import('./run-picker.js')).runPicker(config.cwd);
+    if (picked === null) {
+      return;
+    }
+    currentSession = picked;
+    currentName = undefined;
+  }
+}
+
+type RunOneSessionOutcome =
+  | {
+      kind: 'exit';
+    }
+  | {
+      kind: 'restart-file';
+      file: SessionFile;
+    }
+  | {
+      kind: 'restart-picker';
+    };
+
+interface RunOneSessionOpts {
+  plugins: ReadonlyArray<NoeticPlugin>;
+  config: AgentRuntimeConfig;
+  disablePersistence: boolean;
+  initialSession: SessionFile | null;
+  name: string | undefined;
+  forcedSessionId: string | undefined;
+}
+
+async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutcome> {
+  return new Promise<RunOneSessionOutcome>((resolve) => {
+    let resolved = false;
+    const resolveOnce = (outcome: RunOneSessionOutcome): void => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(outcome);
+    };
+
+    const requestExit = (): void => {
+      // The Ink instance has a guard so unmount() is idempotent. After
+      // unmount, the waitUntilExit() promise below resolves and we report
+      // a normal exit outcome.
+      try {
+        instance.unmount();
+      } catch {
+        // Already torn down — ignore.
+      }
+    };
+    const instance = render(
+      <App
+        config={opts.config}
+        plugins={opts.plugins}
+        initialSession={opts.initialSession}
+        disablePersistence={opts.disablePersistence}
+        name={opts.name}
+        forcedSessionId={opts.forcedSessionId}
+        onRestart={(target) => {
+          instance.unmount();
+          resolveOnce(
+            target.kind === 'file'
+              ? {
+                  kind: 'restart-file',
+                  file: target.file,
+                }
+              : {
+                  kind: 'restart-picker',
+                },
+          );
+        }}
+        onRequestExit={requestExit}
+      />,
+      {
+        // Ink's default sends SIGINT and exits on Ctrl+C, which skips our
+        // graceful abort + terminal restore. We own that path via
+        // useExitOnInterrupt instead.
+        exitOnCtrlC: false,
+      },
+    );
+    const disposeSuspend = installSuspendResumeHandlers({
+      on: (signal, handler) => {
+        process.on(signal, handler);
+      },
+      off: (signal, handler) => {
+        process.off(signal, handler);
+      },
+      raise: (signal) => {
+        process.kill(process.pid, signal);
+      },
+      stdout: process.stdout,
+      setRawMode:
+        process.stdin.isTTY && typeof process.stdin.setRawMode === 'function'
+          ? (raw) => process.stdin.setRawMode(raw)
+          : undefined,
+      onResume: () => {
+        // Force Ink to repaint everything from scratch — this re-emits
+        // the enter sequences (raw mode, bracketed paste, etc.) so the
+        // terminal returns to TUI mode after `fg`.
+        try {
+          instance.clear();
+        } catch {
+          // Ink may have unmounted already; nothing to redraw.
+        }
+      },
+    });
+
+    instance.waitUntilExit().then(() => {
+      disposeSuspend();
+      resolveOnce({
+        kind: 'exit',
+      });
+    });
+  });
 }
 
 //#endregion

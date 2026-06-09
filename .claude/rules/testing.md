@@ -21,7 +21,7 @@ All scripting should be done in TypeScript.
 
 - Run `bun test --coverage` to generate a coverage report
 - Coverage is enforced as a diff gate (fail if per-file drops > 2pp from baseline)
-- Initial floors: `@noetic/core` 85% branches, 80% lines/functions; `@noetic/eval` 75% all
+- Initial floors: `@noetic-tools/core` 85% branches, 80% lines/functions; `@noetic/eval` 75% all
 - Branches threshold is set HIGHER than lines — control flow and error paths are where runtime bugs hide
 - Coverage excludes: `_helpers.ts`, `**/index.ts`, `**/cli/cli.ts`
 - Adapter tests: unit mock tests always run (included in coverage); live tests use `test.skipIf(!HAS_API_KEY)`
@@ -46,5 +46,8 @@ All scripting should be done in TypeScript.
 
 All Node packages must expose:
 - `test` — fast, no coverage (existing)
-- `test:coverage` — text + json output, no enforcement
-- `test:ci` — json output, diff enforcement, NO bail flag
+- `test:coverage` — text + lcov output, no enforcement
+- `test:ci` — lcov output, NO bail flag
+
+> Bun's coverage reporter accepts only `text` and `lcov` (the `json` reporter was
+> removed in Bun 1.3). Use `lcov` for machine-readable CI output.

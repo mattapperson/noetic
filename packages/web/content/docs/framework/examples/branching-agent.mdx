@@ -1,0 +1,95 @@
+---
+title: Branching Agent
+description: A support ticket router using branch, step.run, step.llm, and loop to classify and handle tickets by keyword.
+---
+
+## Overview
+
+A support ticket router that classifies incoming tickets by keyword and routes them to different handlers. Demonstrates how `branch` selects a step at runtime based on input, combined with `loop` to process the ticket.
+
+**Primitives used**: `branch` + `step.run` + `step.llm` + `loop`
+
+## How It Works
+
+1. Input arrives as a support ticket string
+2. `branch` inspects the input for keyword matches:
+   - Billing keywords (invoice, refund, etc.) -> deterministic `step.run` response
+   - Technical keywords (error, bug, etc.) -> `step.llm` for reasoning
+   - Everything else -> `step.run` fallback
+3. The branch is wrapped in `loop({ until: until.maxSteps(1) })` to show branch inside a loop body
+
+## Code
+
+```ts
+import { branch } from '@noetic-tools/core';
+import type { ContextMemory } from '@noetic-tools/core';
+import { loop } from '@noetic-tools/core';
+import { step } from '@noetic-tools/core';
+import { until } from '@noetic-tools/core';
+
+const BILLING_KEYWORDS = ['invoice', 'charge', 'refund', 'billing', 'payment', 'subscription'];
+const TECHNICAL_KEYWORDS = ['error', 'bug', 'crash', 'broken', 'fix', 'debug', 'logs'];
+
+function containsKeyword(input: string, keywords: readonly string[]): boolean {
+  const lower = input.toLowerCase();
+  return keywords.some((kw) => lower.includes(kw));
+}
+
+const billingHandler = step.run<ContextMemory, string, string>({
+  id: 'billing-handler',
+  execute: async (input) => {
+    return [
+      'Billing Support Response:',
+      `Your ticket: "${input}"`,
+      '',
+      'Please visit your account dashboard at /billing to review charges.',
+      'For refunds, allow 5-7 business days after approval.',
+      'A billing specialist will follow up within 24 hours.',
+    ].join('\n');
+  },
+});
+
+const technicalHandler = step.llm<ContextMemory, string, string>({
+  id: 'technical-handler',
+  model: 'openai/gpt-4o',
+  instructions: 'You are a technical support specialist. Analyze the issue and provide troubleshooting steps.',
+});
+
+const fallbackHandler = step.run<ContextMemory, string, string>({
+  id: 'fallback-handler',
+  execute: async (input) => {
+    return `General Support: We received your ticket: "${input}". Expected response: 48 hours.`;
+  },
+});
+
+export function buildBranchingAgent() {
+  const router = branch<ContextMemory, string, string>({
+    id: 'ticket-router',
+    route: (input) => {
+      if (containsKeyword(input, BILLING_KEYWORDS)) return billingHandler;
+      if (containsKeyword(input, TECHNICAL_KEYWORDS)) return technicalHandler;
+      return fallbackHandler;
+    },
+  });
+
+  return loop({
+    id: 'ticket-processing-loop',
+    steps: [router],
+    until: until.maxSteps(1),
+  });
+}
+```
+
+## Key Concepts
+
+### Branch as Router
+
+`branch` takes a `route` function that receives the input and returns a step (or `null` to skip). This makes it ideal for content-based routing -- inspecting the input to decide which handler runs.
+
+### Mixing Deterministic and LLM Steps
+
+Not every path needs an LLM call. Billing tickets get a deterministic `step.run` response (fast, cheap, predictable), while technical tickets use `step.llm` for reasoning. This is a practical pattern for production agents where some paths are well-understood.
+
+### Branch Inside Loop
+
+Wrapping `branch` in `loop` is how you build agents that process multiple items or iterate on a decision. Here `maxSteps(1)` processes a single ticket, but increasing it (with `prepareNext`) enables batch processing.

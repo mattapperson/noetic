@@ -1,0 +1,75 @@
+name: Release @noetic-tools/core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/**'
+      - '.github/workflows/release-core.yml'
+      # Root build config that can affect core's published output.
+      - 'biome.json'
+      - 'bun.lock'
+  workflow_dispatch:
+
+concurrency:
+  group: release-core
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/core
+
+      - name: Typecheck
+        run: bun --cwd=packages/core run typecheck
+
+      # @noetic-tools/core depends on @noetic-tools/types and @noetic-tools/memory.
+      # Build those dists first so core's own build (run by `prepublishOnly`) and
+      # the Node ESM smoke test can resolve them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/memory run build
+
+      - name: Build
+        run: bun --cwd=packages/core run build
+
+      # semantic-release runs `npm version`, which builds the full workspace tree
+      # and chokes on sibling packages' `workspace:*` deps (EUNSUPPORTEDPROTOCOL).
+      # Drop the root `workspaces` field so npm treats core as a standalone package.
+      # core's own `workspace:*` deps (@noetic-tools/types, @noetic-tools/memory) are
+      # pinned to concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts). The runner is ephemeral; not committed back.
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/core
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo

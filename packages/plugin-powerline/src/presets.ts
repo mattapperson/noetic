@@ -1,6 +1,7 @@
 import type { PresetName } from './options.js';
+import type { SegmentName } from './segments/registry.js';
 
-export const PRESETS: Record<PresetName, ReadonlyArray<string>> = {
+export const PRESETS: Record<PresetName, ReadonlyArray<SegmentName>> = {
   default: [
     'noetic',
     'model',

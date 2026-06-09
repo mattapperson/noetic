@@ -7,11 +7,12 @@
  * perspective (historical, technical, societal). Uses fork.all with a merge
  * function that combines results into a multi-section summary.
  */
+
+import type { ContextMemory } from '@noetic-tools/memory';
+import type { StepForkAll } from '@noetic-tools/types';
 import { fork } from '../src/builders/control-flow-builders';
 import { spawn } from '../src/builders/spawn-builder';
 import { step } from '../src/builders/step-builders';
-import type { ContextMemory } from '../src/types/memory';
-import type { StepForkAll } from '../src/types/step';
 
 //#region Perspective Definitions
 
@@ -63,7 +64,7 @@ export function buildParallelResearchAgent(): StepForkAll<ContextMemory, string,
           id: `research-${perspective.id}`,
           child: step.llm<ContextMemory, string, string>({
             id: `llm-${perspective.id}`,
-            model: 'gpt-4o',
+            model: 'openai/gpt-4o',
             instructions: perspective.instructions,
           }),
         }),

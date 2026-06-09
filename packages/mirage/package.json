@@ -1,0 +1,43 @@
+{
+  "name": "@noetic/mirage",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@noetic-tools/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@struktoai/mirage-browser": "0.0.1",
+    "@struktoai/mirage-core": "0.0.1",
+    "@struktoai/mirage-node": "0.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@struktoai/mirage-browser": {
+      "optional": true
+    },
+    "@struktoai/mirage-core": {
+      "optional": true
+    },
+    "@struktoai/mirage-node": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --coverage --coverage-reporter=lcov",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix ."
+  }
+}

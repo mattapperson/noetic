@@ -1,0 +1,344 @@
+---
+title: Custom Memory Layers
+description: How to build your own memory layer by implementing MemoryHooks, choosing a slot and scope, and configuring budgets and timeouts.
+---
+
+## Overview
+
+Every built-in memory layer is just a `MemoryLayer` object. You can build your own by implementing the same interface. This guide walks through each decision point.
+
+## Step 1: Define Your State Type
+
+Your layer manages a single state object of type `TState`. Define what you need to track:
+
+```ts
+interface MyLayerState {
+  entries: string[];
+  lastUpdated: number;
+}
+```
+
+## Step 2: Choose a Slot
+
+The slot determines where your layer's output appears in the assembled prompt. Lower slots appear first.
+
+```ts validate=none
+import { Slot } from '@noetic-tools/core';
+
+// Use a built-in constant...
+const slot = Slot.PROCEDURAL; // 250
+
+// ...or pick your own number
+const slot = 275; // between PROCEDURAL and EPISODIC
+```
+
+Built-in slot constants for reference:
+
+| Constant | Value |
+|---|---|
+| `WORKING_MEMORY` | `100` |
+| `ENTITY` | `150` |
+| `OBSERVATIONS` | `200` |
+| `PROCEDURAL` | `250` |
+| `EPISODIC` | `300` |
+| `RAG` | `350` |
+| `SEMANTIC_RECALL` | `400` |
+
+## Step 3: Choose a Scope
+
+Scope controls when state is shared or isolated:
+
+| Scope | Use When |
+|---|---|
+| `'execution'` | State should not survive past the current run |
+| `'thread'` | State should persist per conversation thread |
+| `'resource'` | State should be shared across threads for the same resource |
+| `'global'` | State should be shared across everything |
+
+## Step 4: Configure the Budget
+
+The budget controls how many tokens your layer can inject during `recall`:
+
+```ts
+import type { BudgetConfig } from '@noetic-tools/core';
+
+const fixedBudget: BudgetConfig = 500;
+
+const rangeBudget: BudgetConfig = { min: 200, max: 1500 };
+
+const autoBudget: BudgetConfig = 'auto';
+```
+
+## Step 5: Implement Hooks
+
+Implement only the hooks you need. All hooks are optional.
+
+```ts validate=none
+import { createMessage } from '@noetic-tools/core';
+import type { MemoryLayer, MemoryHooks } from '@noetic-tools/core';
+
+function myCustomLayer(): MemoryLayer<MyLayerState> {
+  return {
+    id: 'my-custom-layer',
+    name: 'My Custom Layer',
+    slot: 275,
+    scope: 'thread',
+    budget: { min: 200, max: 1000 },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<MyLayerState>('state');
+        return {
+          state: saved ?? { entries: [], lastUpdated: 0 },
+        };
+      },
+
+      async recall({ state, budget }) {
+        if (!state.entries.length) return null;
+
+        const text = state.entries.join('\n');
+        const content = `<my_context>\n${text}\n</my_context>`;
+
+        return {
+          items: [createMessage(content, 'developer')],
+          tokenCount: Math.ceil(content.length / 4),
+        };
+      },
+
+      async store({ newItems, state }) {
+        // Extract assistant text from the model's latest output
+        const texts: string[] = [];
+        for (const item of newItems) {
+          if (item.type !== 'message' || item.role !== 'assistant') continue;
+          const parts = Array.isArray(item.content) ? item.content : [item.content];
+          for (const part of parts) {
+            if (part.type === 'output_text') texts.push(part.text);
+          }
+        }
+
+        if (!texts.length) return;
+
+        return {
+          state: {
+            entries: [...state.entries, ...texts],
+            lastUpdated: Date.now(),
+          },
+        };
+      },
+
+      async onComplete({ state, outcome }) {
+        // Optionally finalize state based on outcome
+        return {
+          state: {
+            ...state,
+            lastUpdated: Date.now(),
+          },
+        };
+      },
+    },
+  };
+}
+```
+
+## Step 6: Set Timeouts (Optional)
+
+If any hook makes network calls or runs LLM inference, set a timeout to prevent hangs:
+
+```ts
+import type { LayerTimeouts } from '@noetic-tools/core';
+
+const timeouts: Partial<LayerTimeouts> = {
+  store: 30_000,
+  recall: 10_000,
+};
+```
+
+## Step 7: Register with the Agent
+
+Pass custom layers to a `react` pattern (or `spawn`'s `memory` option):
+
+```ts validate=none
+const agent = react({
+  model: 'openai/gpt-4o',
+  instructions: 'You are a helpful assistant.',
+  memory: [
+    workingMemory(),
+    myCustomLayer(),
+    observationalMemory(),
+  ],
+});
+```
+
+Configure persistence via `AgentConfig.storage` on the harness:
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  storage: myStorageAdapter,
+});
+```
+
+Layers are ordered by slot number regardless of array order. The runtime calls each layer's hooks in slot order.
+
+## Hook Parameter Reference
+
+### InitParams
+
+| Field | Type |
+|---|---|
+| `storage` | `ScopedStorage` |
+| `scopeKey` | `string` |
+| `ctx` | `ExecutionContext` |
+
+### RecallParams
+
+| Field | Type |
+|---|---|
+| `log` | `ItemLog` |
+| `query` | `string` |
+| `ctx` | `ExecutionContext` |
+| `state` | `TState` |
+| `budget` | `number` |
+
+### StoreParams
+
+| Field | Type |
+|---|---|
+| `newItems` | `Item[]` |
+| `log` | `ItemLog` |
+| `response` | `LLMResponse` |
+| `ctx` | `ExecutionContext` |
+| `state` | `TState` |
+
+### SpawnParams
+
+| Field | Type |
+|---|---|
+| `parentState` | `TState` |
+| `childCtx` | `ExecutionContext` |
+| `spawnOpts` | `SpawnOptions` |
+
+### ReturnParams
+
+| Field | Type |
+|---|---|
+| `childState` | `TState` |
+| `childLog` | `ItemLog` |
+| `parentState` | `TState` |
+| `result` | `unknown` |
+
+### CompleteParams
+
+| Field | Type |
+|---|---|
+| `log` | `ItemLog` |
+| `ctx` | `ExecutionContext` |
+| `state` | `TState` |
+| `outcome` | `ExecutionOutcome` |
+
+### DisposeParams
+
+| Field | Type |
+|---|---|
+| `state` | `TState` |
+
+## Step 8: Add a `provides` Map (Optional)
+
+The `provides` field exposes typed data and functions from your layer. Data entries are accessible in code steps via `ctx.memory['layerId'].prop`. Function entries are also automatically injected as LLM tools, namespaced as `layerId/fnName`.
+
+Use the `layerData()` and `layerFn()` builders:
+
+```ts
+import { z } from 'zod';
+import { createMessage, layerData, layerFn } from '@noetic-tools/core';
+import type { MemoryLayer } from '@noetic-tools/core';
+
+interface MyLayerState {
+  entries: string[];
+  lastUpdated: number;
+}
+
+function myCustomLayer() {
+  return {
+    id: 'my-custom-layer' as const,
+    name: 'My Custom Layer',
+    slot: 275,
+    scope: 'thread',
+    budget: { min: 200, max: 1e3 },
+    provides: {
+      // Data: read-only projection from state
+      entryCount: layerData<number, MyLayerState>({
+        read: (state) => state.entries.length,
+      }),
+      // Function: callable from code and auto-injected as LLM tool
+      addEntry: layerFn<{ text: string }, void, MyLayerState>({
+        description: 'Add a new entry to the custom layer.',
+        input: z.object({ text: z.string() }),
+        output: z.void(),
+        execute: async (args, state) => ({
+          result: undefined,
+          state: {
+            entries: [...state.entries, args.text],
+            lastUpdated: Date.now(),
+          },
+        }),
+      }),
+    },
+    hooks: {
+      async init({ storage }) {
+        const saved = await storage.get<MyLayerState>('state');
+        return { state: saved ?? { entries: [], lastUpdated: 0 } };
+      },
+      async recall({ state }) {
+        if (!state.entries.length) return null;
+        const text = state.entries.join('\n');
+        const content = `<my_context>\n${text}\n</my_context>`;
+        return {
+          items: [createMessage(content, 'developer')],
+          tokenCount: Math.ceil(content.length / 4),
+        };
+      },
+    },
+  } satisfies MemoryLayer<MyLayerState>;
+}
+```
+
+Note the `as const` on the `id` field and the `satisfies MemoryLayer<MyLayerState>` pattern. This preserves the literal `'my-custom-layer'` type so that `InferMemory` can map the layer ID to its provides shape at compile time.
+
+### Type-Safe Access with `memory()` and `InferMemory`
+
+Wrap your layers in the `memory()` builder to get full type inference:
+
+```ts validate=none
+import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
+
+const mem = memory([workingMemory(), myCustomLayer()]);
+type Mem = InferMemory<typeof mem>;
+
+// Mem is:
+// {
+//   'working-memory': { snapshot: WorkingMemoryState; update: (args: Record<string, unknown>) => Promise<void> };
+//   'my-custom-layer': { entryCount: number; addEntry: (args: { text: string }) => Promise<void> };
+// }
+```
+
+In a `step.run`, access the typed memory:
+
+```ts validate=none
+const myStep = step.run({
+  id: 'use-memory',
+  execute: async (input: string, ctx: Context<Mem>) => {
+    const count = ctx.memory['my-custom-layer'].entryCount;
+    await ctx.memory['my-custom-layer'].addEntry({ text: input });
+    return count;
+  },
+});
+```
+
+### Auto-Injected LLM Tools
+
+Every `layerFn` in a layer's `provides` is automatically registered as an LLM tool. The tool name follows the `layerId/fnName` convention. In the example above, the model sees a tool named `my-custom-layer/addEntry` with the description and input schema you defined.
+
+## See Also
+
+- [Tool Memory](/docs/framework/memory/tool-memory) -- imperative state access via `toolCtx.memory` and function-call memory patterns

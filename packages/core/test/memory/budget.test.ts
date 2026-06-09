@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { isNoeticError } from '../../src/errors/noetic-error';
-import { allocateBudgets, checkBudget } from '../../src/memory/budget';
+import type { BudgetConfig, MemoryLayer } from '@noetic-tools/memory';
+import { allocateBudgets, checkBudget, Slot } from '@noetic-tools/memory';
+import { isNoeticError } from '@noetic-tools/types';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import type { BudgetConfig, MemoryLayer } from '../../src/types/memory';
-import { Slot } from '../../src/types/memory';
 import { makeMockHarness } from '../_helpers';
 
 function makeLayer(id: string, budget: BudgetConfig): MemoryLayer {

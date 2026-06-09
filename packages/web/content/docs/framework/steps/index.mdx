@@ -1,0 +1,107 @@
+---
+title: Steps
+description: The three step primitives -- run, llm, and tool -- are the atomic units of work in Noetic.
+---
+
+Steps are the building blocks of every Noetic agent. Each step takes typed input, does one thing, and returns typed output. There are three kinds.
+
+## step.run -- Custom Logic
+
+Execute any async function. Use it for API calls, database queries, transformations, or anything that is not an LLM call.
+
+```ts
+import { step } from '@noetic-tools/core';
+
+const fetchUser = step.run({
+  id: 'fetch-user',
+  execute: async (userId: string, ctx) => {
+    const res = await fetch(`https://api.example.com/users/${userId}`);
+    return res.json();
+  },
+});
+```
+
+`execute` receives the step input and a `Context` object. Return whatever your downstream steps need.
+
+See [step.run deep dive](/docs/framework/steps/run).
+
+## step.llm -- Language Model Call
+
+Call a language model with a system prompt, optional tools, and optional structured output.
+
+```ts
+import { z } from 'zod';
+import { step } from '@noetic-tools/core';
+
+const classify = step.llm({
+  id: 'classify-intent',
+  model: 'openai/gpt-4o-mini',
+  instructions: 'Classify the user message as one of: question, command, chitchat.',
+  output: z.object({
+    intent: z.enum([
+      'question',
+      'command',
+      'chitchat',
+    ]),
+  }),
+});
+```
+
+When you provide an `output` Zod schema, the framework requests structured output from the model and validates the response at runtime.
+
+See [step.llm deep dive](/docs/framework/steps/llm).
+
+## step.tool -- Direct Tool Invocation
+
+Invoke a single tool without going through an LLM. Useful when you know exactly which tool to call and with what arguments.
+
+```ts
+import { z } from 'zod';
+import { step, tool } from '@noetic-tools/core';
+
+const weatherTool = tool({
+  name: 'get-weather',
+  description: 'Get current weather for a city',
+  input: z.object({
+    city: z.string(),
+  }),
+  output: z.object({
+    temp: z.number(),
+    condition: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      temp: 72,
+      condition: 'sunny',
+    };
+  },
+});
+
+const getWeather = step.tool({
+  id: 'weather-lookup',
+  tool: weatherTool,
+  args: {
+    city: 'San Francisco',
+  },
+});
+```
+
+The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input.
+
+See [step.tool deep dive](/docs/framework/steps/tool).
+
+## Comparison
+
+| | `step.run` | `step.llm` | `step.tool` |
+| --- | --- | --- | --- |
+| Custom code | Yes | No | No |
+| LLM call | No | Yes | No |
+| Tool execution | No | Via `tools` array | Direct |
+| Structured output | You control | Via Zod `output` | Via tool `output` schema |
+| Retry policy | Yes | No | No |
+
+## Next Steps
+
+- [Control Flow](/docs/framework/operators) -- route between steps with `branch` and `fork`.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- repeat steps with termination conditions.
+- [Spawn](/docs/framework/operators/spawn) -- run steps in isolated child contexts.

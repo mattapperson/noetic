@@ -4,19 +4,15 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
+import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import type { NoeticError, Step } from '@noetic-tools/types';
+import { isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
-import { isNoeticError } from '../src/errors/noetic-error';
 import { branch, channel, fork, loop, NoeticErrorImpl, step } from '../src/index';
-import { executeBranch } from '../src/interpreter/execute-branch';
-import { executeFork } from '../src/interpreter/execute-fork';
-import { executeLLM } from '../src/interpreter/execute-llm';
-import { executeLoop } from '../src/interpreter/execute-loop';
+import { executeLLM } from '../src/interpreter/execute-action';
+import { executeBranch, executeFork, executeLoop } from '../src/interpreter/execute-control';
 import { ChannelStore } from '../src/runtime/channel-store';
 import { ContextImpl } from '../src/runtime/context-impl';
-import type { NoeticError } from '../src/types/error';
-import type { ContextMemory, MemoryLayer } from '../src/types/memory';
-import { SteeringAction } from '../src/types/steering';
-import type { Step } from '../src/types/step';
 import { until } from '../src/until/predicates';
 
 import {

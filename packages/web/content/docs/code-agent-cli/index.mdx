@@ -1,0 +1,62 @@
+---
+title: Code Agent CLI
+description: noetic — the interactive terminal coding agent built on the framework.
+---
+
+`noetic` is an interactive coding agent that runs in your terminal. You drop a `noetic.config.ts` in your repo, run `noetic`, and chat with an LLM that has read/write/edit/bash/grep/find/ls/lsp tools, plus a sub-agent system, persistent sessions, and a background daemon for long-running task automation.
+
+It is built on top of `@noetic-tools/core` — every long-lived behavior (the autopilot loop, validator queue, worktree reaper, file-watcher reconciler) is a `Step` composition. You can extend it without forking by writing a plugin.
+
+## Install
+
+```bash
+npm i -g @noetic-tools/cli
+# or: bun add -g @noetic-tools/cli
+```
+
+You also need an OpenRouter API key in `OPENROUTER_API_KEY` (or `NOETIC_API_KEY`).
+
+## First run
+
+```bash
+cd path/to/your/project
+noetic
+```
+
+If no config file is found, the CLI uses CLI-arg defaults: model `anthropic/claude-sonnet-4`, max turns 50, and the OpenRouter key from your environment. The TUI launches and you can start chatting.
+
+For anything beyond a one-shot trial, write a `noetic.config.ts`:
+
+```ts
+import type { AgentConfig } from '@noetic-tools/cli';
+
+export default {
+  model: 'anthropic/claude-sonnet-4',
+  apiKey: process.env.NOETIC_API_KEY!,
+  cwd: process.cwd(),
+  maxTurns: 100,
+} satisfies AgentConfig;
+```
+
+See [Configuration](/docs/code-agent-cli/configuration) for the full schema.
+
+## Mental model
+
+Three layers stack to make up a session:
+
+1. **The TUI** (Ink + React) renders the chat, autocomplete, slash commands, and modals (ask-user, plan approval, model picker, session resume).
+2. **The harness** is a [`AgentHarness`](/docs/framework/runtime) from `@noetic-tools/core` configured with a tool pool, memory layers, skills, and an OpenRouter LLM client. Each user turn drives one harness execution.
+3. **The daemon** (optional) is a separate long-lived process that runs the [task system](/docs/code-agent-cli/tasks) — autopilot, validator, health, reconcile flows — alongside your interactive sessions.
+
+## What you can configure
+
+Each surface has its own page:
+
+- [**Configuration**](/docs/code-agent-cli/configuration) — `noetic.config.ts` schema, discovery order, env vars, built-in commands, built-in tools.
+- [**AGENT.md**](/docs/code-agent-cli/agent-md) — project & user instruction files surfaced into every turn.
+- [**Rules**](/docs/code-agent-cli/rules) — granular `.agent/rules/*.md` files attached to AGENT.md.
+- [**Hooks**](/docs/code-agent-cli/hooks) — worktree lifecycle hooks (`pre-start`, `post-start`, `post-merge`, `pre-remove`).
+- [**Skills**](/docs/code-agent-cli/skills) — markdown + YAML personas, sub-agent presets, slash-command-invocable workflows.
+- [**Plugins**](/docs/code-agent-cli/plugins) — npm-installable extensions that contribute tools, memory layers, skills, commands, footer UI, sub-agent presets, reminder triggers, and language servers.
+- [**Custom flows**](/docs/code-agent-cli/custom-flows) — programmatic state machines composed from `every` / `fork` / `spawn` / `branch` / `step.run`, plus plan-mode JSON flows.
+- [**Tasks**](/docs/code-agent-cli/tasks) — the unified `noetic tasks` system: hierarchies, kanban, autopilot, validator runs.

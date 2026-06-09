@@ -1,4 +1,4 @@
-import type { StreamEvent } from '../types/harness-result';
+import type { StreamEvent } from '@noetic-tools/types';
 
 //#region Types
 

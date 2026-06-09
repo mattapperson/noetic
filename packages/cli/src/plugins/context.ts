@@ -1,11 +1,6 @@
-/**
- * PluginContext factory. The CLI builds one of these per process and then
- * stamps out a per-plugin context (with plugin-scoped `dataDir`) on demand.
- */
-
-import { createCallModel } from '../ai/plugin-call-model.js';
+import { createCallModel } from '@noetic-tools/code-agent/plugins';
 import type { AgentConfig } from '../types/config.js';
-import { createDataDir, pluginNameToDirSegment } from './data-dir.js';
+import { createDataDir, createNodePluginStorage } from './data-dir.js';
 import type { PluginContext } from './types.js';
 
 export type PluginContextBuilder = (pluginName: string) => PluginContext;
@@ -18,6 +13,9 @@ export function createPluginContextBuilder(config: AgentConfig): PluginContextBu
   return (pluginName: string) => ({
     config,
     callModel,
-    dataDir: createDataDir(config.cwd, pluginNameToDirSegment(pluginName)),
+    pluginStorage: (scope) => createNodePluginStorage(config.cwd, pluginName, scope),
+    dataDir: createDataDir(config.cwd, pluginName),
   });
 }
+
+export type { PluginContext } from './types.js';

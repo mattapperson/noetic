@@ -1,4 +1,4 @@
-import type { SuiteDefinition } from './describe';
+import type { SuiteDefinition } from './suite-types';
 
 //#region State
 

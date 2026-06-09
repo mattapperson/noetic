@@ -1,6 +1,5 @@
-import type { Tool } from '../types/common';
-import type { Step } from '../types/step';
-import { frameworkCast } from './framework-cast';
+import type { Step, Tool } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 
 /**
  * Recursively walks a step tree and collects all Tool instances
@@ -35,7 +34,11 @@ export function deduplicateTools(tools: ReadonlyArray<Tool>): Tool[] {
 function walkStep(step: Step, out: Tool[]): void {
   switch (step.kind) {
     case 'llm':
-      if (step.tools) {
+      // Skip function-form tools: they're resolved per execution from `ctx`
+      // and cannot contribute to the pre-computed unified set. Consumers that
+      // need those tools in the pool should register them via
+      // `AgentHarness.tools` instead.
+      if (Array.isArray(step.tools)) {
         out.push(...step.tools);
       }
       return;
@@ -72,6 +75,10 @@ function walkStep(step: Step, out: Tool[]): void {
       for (const child of step.steps) {
         walkStep(child, out);
       }
+      return;
+
+    case 'every':
+      walkStep(step.step, out);
       return;
 
     default:

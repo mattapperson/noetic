@@ -1,11 +1,13 @@
-import { describe as bunDescribe, expect, test } from 'bun:test';
-import { AgentHarness, step } from '@noetic/core';
+import * as bun from 'bun:test';
+import { AgentHarness, step } from '@noetic-tools/core';
 import { describe } from '../../src/runner/describe';
 import type { EvalContext } from '../../src/runner/eval-context';
 import { it } from '../../src/runner/it';
 import { clearSuites, getSuites } from '../../src/runner/registry';
 
-bunDescribe('it.each()', () => {
+const { expect, test } = bun;
+
+bun.describe('it.each()', () => {
   test('registers one case per dataset item with inline array', () => {
     clearSuites();
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createScopedStorage, resolveScopeKey } from '../../src/memory/scope';
+import { createScopedStorage, resolveScopeKey } from '@noetic-tools/memory';
 import { makeCtx, makeStorage } from '../_helpers';
 
 describe('resolveScopeKey', () => {

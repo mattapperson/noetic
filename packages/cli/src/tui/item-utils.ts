@@ -1,61 +1,34 @@
 /**
  * Shared utilities for processing StreamableOutputItem from @openrouter/agent.
+ *
+ * The persisted entry types/schemas/guards live in `sessions/types.ts`; this
+ * module re-exports them so existing importers keep working, and adds UI-only
+ * helpers (item-id stability, text extraction, dedup, skill activation).
  */
 
-import type { Item, StreamingItem } from '@noetic/core';
+import type { AssistantEntry, ConversationEntry } from '../types/session.js';
+import { isErrorEntry, isSystemEntry, isUserEntry } from '../types/session.js';
 
-//#region Types
+export type {
+  AssistantEntry,
+  ConversationEntry,
+  ErrorEntry,
+  SystemEntry,
+  UserEntry,
+} from '../types/session.js';
+export {
+  ConversationEntrySchema,
+  isErrorEntry,
+  isSystemEntry,
+  isUserEntry,
+} from '../types/session.js';
 
-export interface UserEntry {
-  role: 'user';
-  content: string;
-  /** Stable id assigned when the entry is created. Used to flip `deliveryStatus`
-   *  from `queued` to `sent` once the message is delivered to the agent. */
-  id?: string;
-  /** `queued` when the message was enqueued while the session was generating;
-   *  `sent` once the session has started a turn that includes it. Undefined
-   *  defaults to `sent` in the UI (i.e. messages sent while idle). */
-  deliveryStatus?: 'queued' | 'sent';
-}
-
-export interface ErrorEntry {
-  role: 'system';
-  type: 'error';
-  content: string;
-}
-
-export interface SystemEntry {
-  role: 'system';
-  type: 'info';
-  content: string;
-}
-
-export type AssistantEntry = Item | StreamingItem;
-export type ConversationEntry = AssistantEntry | UserEntry | ErrorEntry | SystemEntry;
 type MessageContentPart = Extract<
   AssistantEntry,
   {
     type: 'message';
   }
 >['content'][number];
-
-//#endregion
-
-//#region Type Guards
-
-export function isUserEntry(entry: ConversationEntry): entry is UserEntry {
-  return 'role' in entry && entry.role === 'user';
-}
-
-export function isErrorEntry(entry: ConversationEntry): entry is ErrorEntry {
-  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'error';
-}
-
-export function isSystemEntry(entry: ConversationEntry): entry is SystemEntry {
-  return 'role' in entry && entry.role === 'system' && 'type' in entry && entry.type === 'info';
-}
-
-//#endregion
 
 //#region Item ID
 
@@ -68,12 +41,21 @@ export function getItemId(item: AssistantEntry): string {
   if (item.type === 'function_call_output') {
     return item.id ?? `call-output-${item.callId}`;
   }
-  return item.id ?? `anon-${++anonCounter}`;
+  return 'id' in item && item.id ? item.id : `anon-${++anonCounter}`;
 }
 
 //#endregion
 
 //#region Text Extraction
+
+function isTextPart(part: MessageContentPart): part is Extract<
+  MessageContentPart,
+  {
+    type: 'output_text' | 'input_text';
+  }
+> {
+  return part.type === 'output_text' || part.type === 'input_text';
+}
 
 export function extractTextContent(item: AssistantEntry): string {
   if (item.type !== 'message') {
@@ -83,15 +65,8 @@ export function extractTextContent(item: AssistantEntry): string {
     return '';
   }
   return item.content
-    .filter(
-      (
-        part: MessageContentPart,
-      ): part is {
-        type: 'output_text';
-        text: string;
-      } => part.type === 'output_text',
-    )
-    .map((part: { type: 'output_text'; text: string }) => part.text)
+    .filter(isTextPart)
+    .map((part) => part.text)
     .join('');
 }
 

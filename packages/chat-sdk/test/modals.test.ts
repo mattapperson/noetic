@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { InputMessageItem, Item } from '@noetic/core';
+import type { InputMessageItem, Item } from '@noetic-tools/core';
 
 import type { ModalSubmitValues } from '../src/modals';
 import { modalToNoeticInput } from '../src/modals';
@@ -58,7 +58,11 @@ describe('modalToNoeticInput', () => {
       throw new Error('Expected InputMessageItem');
     }
     expect(item.role).toBe('user');
-    expect(item.content[0].text).toContain('feedback: Great product');
+    const part = item.content[0];
+    if (part.type !== 'input_text') {
+      throw new Error('Expected input_text content part');
+    }
+    expect(part.text).toContain('feedback: Great product');
   });
 
   test('custom mapper overrides mode', () => {
@@ -113,6 +117,11 @@ describe('modalToNoeticInput', () => {
     if (!isItemArray(result1) || !isItemArray(result2)) {
       throw new Error('Expected Item arrays');
     }
-    expect(result1[0].id).not.toBe(result2[0].id);
+    const first = result1[0];
+    const second = result2[0];
+    if (!isInputMessageItem(first) || !isInputMessageItem(second)) {
+      throw new Error('Expected input message items');
+    }
+    expect(first.id).not.toBe(second.id);
   });
 });

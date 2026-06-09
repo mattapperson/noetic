@@ -1,7 +1,7 @@
 # Context and Item Log
 
 > **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
-> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
+> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `InputImagePart`, `InputFilePart`, `InputContentPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
 
 ---
 
@@ -32,6 +32,12 @@ interface Context<TState = unknown> {
   // Last step execution metadata (tool calls, token usage, cost)
   readonly lastStepMeta: StepMeta | null;
 
+  // Mutable cwd state shared with the tools bound to this context. Tools
+  // resolve relative paths from `cwdState.cwd` at execution time so that an
+  // agent `cd` propagates to subsequent tool calls. The reference is fixed
+  // for the Context's lifetime; mutate via `setToolCwd`.
+  readonly cwdState: CwdState;
+
   // Per-memory-layer breakdown of the context window as of the most recent
   // callModel in this execution. See "Per-Layer Usage Breakdown" below.
   readonly lastLayerUsage?: LastLayerUsage;
@@ -44,11 +50,32 @@ interface Context<TState = unknown> {
   tryRecv<T>(channel: Channel<T>): T | null;
 
   // Lifecycle
+  /**
+   * Snapshot the execution state (frontier, layer states, cwd, ask-user queue,
+   * item log) to the harness's StorageAdapter for crash recovery. Fires
+   * automatically at checkpoint boundaries (post-execute, post-spawn,
+   * post-ask-user-enqueue, post-append) and may be called explicitly.
+   * Keyed by `ctx.id` (the executionId); idempotent — successive snapshots
+   * overwrite. No-op when the harness was not constructed with a
+   * CheckpointStore. See 23-durable-execution.
+   */
   checkpoint(): Promise<void>;
   complete<T>(value: T): void;
   abort(reason?: string): void;
 }
+
+interface CwdState {
+  cwd: string;            // absolute path; tools resolve relative input against this
+  previousCwd?: string;   // populated on `cd`; enables `cd -`
+}
 ```
+
+### `cwdState` semantics
+
+- The Bash tool intercepts plain `cd <path>` and mutates `cwdState` via `setToolCwd`. Compound forms (`cd foo && bar`) still go through the shell and do not persist cwd, matching POSIX.
+- Other path-using tools (Read, Write, Edit, Ls, Grep, Find, lsp, InteractiveTerminal) resolve paths from `cwdState.cwd` at execution time via the `getToolCwd(ctx, fallback)` helper. Their factory `cwd` becomes a fallback used only when `cwdState` is absent (e.g. partial test contexts).
+- Spawned and forked children receive a snapshot of the parent's `cwdState`; child mutations do not propagate to the parent (POSIX-fork semantics).
+- The mutation policy's `sessionCwd` stays anchored to the harness launch cwd. `cd` does not widen the sandbox.
 
 ---
 
@@ -62,6 +89,8 @@ interface ItemLog {
   append(item: Item): void;
 }
 ```
+
+`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by memory layers via the `projectHistory` hook (see `11-memory-layer-system`); the canonical built-in is `historyWindow` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
 
 ---
 
@@ -84,14 +113,33 @@ interface InputTextPart {
   readonly text: string;
 }
 
+/** User image input. */
+interface InputImagePart {
+  readonly type: 'input_image';
+  readonly imageUrl: string;
+  readonly detail?: 'auto' | 'low' | 'high';
+}
+
+/** User file input. */
+interface InputFilePart {
+  readonly type: 'input_file';
+  readonly fileData?: string;
+  readonly fileId?: string | null;
+  readonly fileUrl?: string;
+  readonly filename?: string;
+}
+
 /** Reasoning trace content. */
 type ReasoningTextPart = ReasoningTextContent;
 
 /** Reasoning summary content. */
 type SummaryTextPart = ReasoningSummaryText;
 
+/** User/developer input content variants. */
+type InputContentPart = InputTextPart | InputImagePart | InputFilePart;
+
 /** Content part variants for message items. */
-type ContentPart = OutputTextPart | RefusalPart | InputTextPart;
+type ContentPart = OutputTextPart | RefusalPart | InputContentPart;
 ```
 
 ### Output Items (from the model)
@@ -149,7 +197,7 @@ interface InputMessageItem {
   readonly type: 'message';
   readonly role: 'user' | 'system' | 'developer';
   readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
-  readonly content: InputTextPart[];
+  readonly content: InputContentPart[];
 }
 
 /**
@@ -252,6 +300,42 @@ Layer tokens come from each layer's `recall()` self-reported `tokenCount` (see `
 ### Stability
 
 The snapshot reflects the most recent LLM call only; it is overwritten on the next call. Long-lived telemetry should be exported via `Span` attributes on the `ctx.span` (see `10-observability`).
+
+## Crash Recovery
+
+Long-running executions can survive a parent-process crash when the harness is configured with a durable `StorageAdapter` and a `CheckpointStore`. The context and item log expose the surface the recovery flow relies on; the end-to-end model is specified in `23-durable-execution`.
+
+### Item Log as the Conversation Record
+
+Each `Item` appended to the log carries a stable identifier set by the producer. Assistant responses carry the provider-supplied response id (on `MessageItem.id` / `FunctionCallItem.id` via the `@openrouter/sdk` types); framework-created items (`InputMessageItem`, `FunctionCallOutputItem`) carry a Noetic-assigned id. The runtime uses these ids to deduplicate writes when a checkpoint-and-replay round trip re-issues items that already landed.
+
+### Snapshot Boundaries
+
+`ctx.checkpoint()` fires automatically at four points:
+
+1. After each `execute()` call that mutates the item log.
+2. After `spawn()` and `detachedSpawn()` settle.
+3. When an ask-user prompt is enqueued (so a restarted TUI can replay it).
+4. After `runAppendPipeline()` — layer state can mutate as items land, and the snapshot must follow that mutation.
+
+Any caller may also call `ctx.checkpoint()` explicitly. The call is a no-op when no `CheckpointStore` is configured on the harness, so zero-config setups pay nothing for the machinery.
+
+### Replay Semantics
+
+On restart, `harness.restore(executionId)` returns a `Context` whose `itemLog.items` replay the snapshot's committed items in order. A host that wants to continue an interrupted turn re-issues the user input; the interpreter walks the re-constructed frontier and resumes. The item log's id-keyed dedupe guards prevent double-appending items that survived the crash.
+
+### LLM Mid-Stream Is Out of Scope
+
+If the host process dies while the model is actively streaming, there is no partial-response resume. On restart the turn is re-issued and the model is called again with the same input. The response id dedupe means:
+
+- If the model produces an identical response (same response id) — nothing new is appended; the prior response wins.
+- If the model produces a different response (new response id) — the new response is appended and drives the next turn.
+
+This is acceptable for interactive and batch workloads; it is not a resumable stream. Callers that need strict once-only token generation must gate with their own idempotency key outside the framework.
+
+### Non-Idempotent `step.run` Bodies
+
+Durable execution can replay a step body whose prior execution completed but whose completion checkpoint never landed. Arbitrary user code cannot be made idempotent by the framework. Use stable step ids, and write `step.run` bodies whose side effects are safe to re-execute (or guarded by an external idempotency key that the body consults).
 
 ## Circular Reference with Channels
 

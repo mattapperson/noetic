@@ -1,0 +1,310 @@
+---
+title: AgentHarness Types
+description: Type definitions for the AgentHarnessContract interface, AgentConfig, and related types in Noetic.
+---
+
+## AgentHarnessContract
+
+The core execution engine interface. The exported `AgentHarness` class implements this contract. Use the contract type when you want to be agnostic about the concrete implementation (e.g., for tests or custom harnesses).
+
+```ts
+declare interface HarnessApi<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  readonly config: AgentConfig<TParams>;
+  readonly fs: FsAdapter;
+  readonly shell: ShellAdapter;
+  readonly rootCwdState: { cwd: string; previousCwd?: string };
+
+  callModel(request: CallModelRequest): Promise<LLMResponse>;
+  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
+  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
+  getTextStream(scope?: SessionScope): AsyncIterable<string>;
+  getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
+  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+  getStatus(scope?: SessionScope): HarnessStatus;
+  getQueueSize(scope?: SessionScope): number;
+  seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
+  setRootCwd(nextCwd: string): void;
+
+  run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  detachedSpawn<I, O>(
+    step: Step<ContextMemory, I, O>,
+    input: I,
+    parentCtx: Context,
+    overrides?: { threadId?: string; resourceId?: string; cwdInit?: string },
+  ): DetachedHandle<O>;
+  createContext(opts?: {
+    parent?: Context;
+    items?: Item[];
+    state?: unknown;
+    threadId?: string;
+    resourceId?: string;
+    memory?: MemoryLayer[];
+    cwdInit?: string;
+  }): Context;
+
+  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
+  getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+
+  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
+  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  getLayerState<T>(executionId: string, layerId: string): T | undefined;
+  setLayerState<T>(executionId: string, layerId: string, state: T): void;
+
+  beforeToolCall(
+    layers: MemoryLayer[],
+    toolName: string,
+    toolArgs: unknown,
+    ctx: Context,
+  ): Promise<unknown>;
+  afterModelCall(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<unknown>;
+
+  checkpoint(ctx: Context): Promise<void>;
+  restore(executionId: string): Promise<Context | null>;
+  cancel(ctx: Context, reason?: string): Promise<void>;
+  createSpan(name: string, parent: Span | null): Span;
+}
+```
+
+### AgentHarnessContract Methods
+
+| Method | Description |
+|---|---|
+| `config` | The `AgentConfig<TParams>` the harness was constructed with. |
+| `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and memory layers — route through this adapter. |
+| `shell` | The `ShellAdapter` (defaults to `createLocalShellAdapter()`). Tools that need a real shell go through this. |
+| `rootCwdState` | Long-lived shared cwd state, seeded into every root context the harness creates so successive runs and the TUI observe each other's `cd`s. |
+| `callModel(request)` | Issue a single LLM call, bypassing the session/queue runner. Used by plugins that need one-shot generation. |
+| `execute(input, options?)` | Enqueue a message on the session identified by `options.threadId`. Resolves once the message is accepted into the queue — not when the model responds. |
+| `getAgentResponse(scope?)` | Resolves with the accumulated response once the session drains. |
+| `getItemStream(scope?)` | Yields cumulative Item snapshots across every turn in the session. |
+| `getTextStream(scope?)` | Yields text deltas across every turn. |
+| `getReasoningStream(scope?)` | Yields reasoning-token deltas. |
+| `getFullStream(scope?)` | Yields all raw SDK + framework events. |
+| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. |
+| `getStatus(scope?)` | Session status snapshot. |
+| `getQueueSize(scope?)` | Messages currently queued on the session. |
+| `seedSessionHistory(threadId, items)` | Pre-populate a session's accumulated history with prior items. Used by resume flows. |
+| `setRootCwd(nextCwd)` | Update the harness root cwd (e.g., from a TUI `! cd`). |
+| `run(step, input, ctx)` | Run a step with the given input and context. |
+| `detachedSpawn(step, input, parentCtx, overrides?)` | Launch a step concurrently, returning a `DetachedHandle`. Optional `overrides.threadId` / `overrides.resourceId` / `overrides.cwdInit` decouple the child's session-scoped state from the parent's. |
+| `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
+| `send(channel, value, ctx)` | Send a value to a channel. |
+| `recv(channel, ctx, opts?)` | Receive from a channel (blocking). |
+| `tryRecv(channel, ctx)` | Non-blocking receive. |
+| `getChannelHandle(channel, executionId)` | Get external channel handle. |
+| `initLayers(layers, ctx, storage)` | Initialize memory layers. |
+| `recallLayers(layers, input, ctx)` | Run recall on all layers. |
+| `previewRequestItems(scope?)` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs. Read-mostly; no session is allocated for unknown thread ids. |
+| `storeLayers(layers, response, ctx)` | Run store on all layers. |
+| `disposeLayers(layers, ctx)` | Dispose all layers. |
+| `getLayerState(executionId, layerId)` | Read a layer's state for a given execution. |
+| `setLayerState(executionId, layerId, state)` | Overwrite a layer's state for a given execution. |
+| `beforeToolCall(layers, toolName, toolArgs, ctx)` | Invoke each layer's `beforeToolCall` steering hook and aggregate the decision. |
+| `afterModelCall(layers, response, ctx)` | Invoke each layer's `afterModelCall` steering hook. |
+| `checkpoint(ctx)` | Persist current execution state. |
+| `restore(executionId)` | Restore a previously checkpointed context. |
+| `cancel(ctx, reason?)` | Cancel an execution. |
+| `createSpan(name, parent)` | Create an observability span. |
+
+## DeliveryMode
+
+```ts validate=none
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+```
+
+| Mode | Behaviour |
+|---|---|
+| `next-turn` (default) | Queue and run after the current turn completes. |
+| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
+| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
+
+## ExecuteOptions
+
+```ts validate=none
+interface ExecuteOptions {
+  threadId?: string;
+  resourceId?: string;
+  state?: unknown;
+  memory?: MemoryLayer[];
+  deliveryMode?: DeliveryMode;
+}
+
+interface SessionScope {
+  threadId?: string;
+}
+```
+
+## HarnessStatus
+
+```ts validate=none
+type HarnessStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'aborting'; readonly turnId: string };
+```
+
+## HarnessResponse
+
+```ts validate=none
+interface HarnessResponse {
+  readonly items: ReadonlyArray<Item>;
+  readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
+  readonly cost?: number;
+  readonly text: string;
+  readonly lastLayerUsage?: LastLayerUsage;
+}
+```
+
+## StreamEvent
+
+```ts validate=none
+type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
+
+interface SdkStreamEvent {
+  readonly source: 'sdk';
+  readonly type: string;
+  readonly data: Record<string, unknown>;
+  readonly outputIndex?: number;
+  readonly contentIndex?: number;
+}
+
+interface FrameworkStreamEvent {
+  readonly source: 'framework';
+  readonly type: `${string}:${string}`;
+  readonly data: Record<string, unknown>;
+}
+```
+
+## StreamingItem
+
+```ts validate=none
+type StreamingItem = Item & { readonly isComplete: boolean };
+```
+
+## AgentConfig
+
+Declarative configuration for an agent harness. Generic over `TParams`, an arbitrary key-value record accessible via `ctx.harness.config.params`. Filesystem and shell adapters are passed to the `AgentHarness` constructor and exposed as `harness.fs` / `harness.shell`; they are not part of `AgentConfig` itself.
+
+```ts
+declare interface AgentConfigShape<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+> {
+  name: string;
+  storage?: StorageAdapter;
+  hooks?: AgentHooks;
+  params: TParams;
+  itemSchemas?: unknown;
+  strictItemSchemas?: boolean;
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | yes | Agent name. |
+| `storage` | `StorageAdapter` | no | Storage backend for memory persistence. Defaults to an in-memory adapter. |
+| `hooks` | `AgentHooks` | no | Before/after step hooks. |
+| `params` | `TParams` | yes | Arbitrary key-value parameters available to every step and tool via `ctx.harness.config.params`. |
+| `itemSchemas` | `ItemSchemaExtensions` | no | Harness-wide item-schema extensions used to validate emitted and returned items. |
+| `strictItemSchemas` | `boolean` | no | Whether unknown extension item types must match a registered schema. Defaults to `true`. |
+
+## AgentHooks
+
+```ts validate=none
+interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+```
+
+| Hook | Parameters | Description |
+|---|---|---|
+| `beforeStep` | `(step, ctx)` | Called before each step executes |
+| `afterStep` | `(step, result, ctx)` | Called after each step completes |
+
+## DetachedHandle
+
+A handle returned by `harness.detachedSpawn()` to track a concurrently running child step.
+
+```ts validate=none
+interface DetachedHandle<O> {
+  readonly id: string;
+  readonly status: DetachedStatus;
+  readonly result: O | undefined;
+  readonly error: string | undefined;
+  await(timeout?: number): Promise<O>;
+}
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique handle identifier (child context ID) |
+| `status` | `DetachedStatus` | Current execution status |
+| `result` | `O \| undefined` | Child output (set when completed) |
+| `error` | `string \| undefined` | Error message (set when failed) |
+| `await(timeout?)` | `Promise<O>` | Wait for completion, optionally with timeout in ms |
+
+## DetachedStatus
+
+```ts validate=none
+const DetachedStatus = {
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+} as const;
+type DetachedStatus = (typeof DetachedStatus)[keyof typeof DetachedStatus];
+```
+
+| Value | Description |
+|---|---|
+| `'running'` | Child step is still executing |
+| `'completed'` | Child step finished successfully |
+| `'failed'` | Child step threw an error |
+
+## RecallLayerOutput
+
+The output from a single memory layer's recall hook.
+
+```ts validate=none
+interface RecallLayerOutput {
+  layerId: string;
+  items: Item[];
+  tokenCount: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `layerId` | `string` | Which layer produced this output |
+| `items` | `Item[]` | Items to inject into the prompt |
+| `tokenCount` | `number` | Token cost of the items |
+
+## LLMResponse
+
+The response from an LLM call.
+
+```ts validate=none
+interface LLMResponse {
+  items: Item[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens?: number;
+  };
+  cost?: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `items` | `Item[]` | Response items (messages, function calls, etc.) |
+| `usage.inputTokens` | `number` | Input tokens consumed |
+| `usage.outputTokens` | `number` | Output tokens generated |
+| `usage.cachedTokens` | `number` | Cached tokens used (optional) |
+| `cost` | `number` | Cost in USD (optional) |
