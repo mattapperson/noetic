@@ -14,7 +14,10 @@ interface PlanningModeState {
   isActive: boolean;
   planningPhase: 'exploration' | 'authoring' | 'review';
   activePRDs: string[];
-  flowSchemaNodes: Array<{ type: string; description: string }>;
+  flowSchemaNodes: Array<{
+    type: string;
+    description: string;
+  }>;
   explorationProgress: {
     filesExamined: number;
     componentsIdentified: string[];
@@ -127,23 +130,33 @@ Brief description of what this project accomplishes.
 }
 
 function getPlanModeToolGuidance(availableTools: string[]): string {
-  const readOnlyTools = availableTools.filter(name => 
-    ['Read', 'Grep', 'Find', 'Bash'].includes(name) || name.startsWith('plan/')
+  const readOnlyTools = availableTools.filter(
+    (name) =>
+      [
+        'Read',
+        'Grep',
+        'Find',
+        'Bash',
+      ].includes(name) || name.startsWith('plan/'),
   );
-  
-  const restrictedTools = availableTools.filter(name => 
-    ['Write', 'Edit'].includes(name)
+
+  const restrictedTools = availableTools.filter((name) =>
+    [
+      'Write',
+      'Edit',
+    ].includes(name),
   );
 
   return `## Plan Mode Tool Usage
 
 ### Available Tools (Read-Only Mode):
-${readOnlyTools.map(tool => `- **${tool}**: ${getToolDescription(tool)}`).join('\n')}
+${readOnlyTools.map((tool) => `- **${tool}**: ${getToolDescription(tool)}`).join('\n')}
 
 ### Restricted Tools:
-${restrictedTools.length > 0 ? 
-  `${restrictedTools.map(tool => `- **${tool}**: Disabled in plan mode`).join('\n')}` :
-  'None - all planning tools are available'
+${
+  restrictedTools.length > 0
+    ? `${restrictedTools.map((tool) => `- **${tool}**: Disabled in plan mode`).join('\n')}`
+    : 'None - all planning tools are available'
 }
 
 ### Tool Usage Strategy:
@@ -161,28 +174,30 @@ ${restrictedTools.length > 0 ?
 
 function getToolDescription(toolName: string): string {
   const descriptions: Record<string, string> = {
-    'Read': 'Read file contents, supports images and PDFs',
-    'Grep': 'Search file contents with patterns',
-    'Find': 'Search for files by name/pattern',
-    'Bash': 'Execute read-only shell commands',
+    Read: 'Read file contents, supports images and PDFs',
+    Grep: 'Search file contents with patterns',
+    Find: 'Search for files by name/pattern',
+    Bash: 'Execute read-only shell commands',
     'plan/updatePrd': 'Update plan.md PRD files',
     'plan/setPlanTree': 'Define FlowSchema execution trees',
   };
-  
+
   return descriptions[toolName] || 'Tool for planning mode operations';
 }
 
 function getExplorationGuidance(progress: PlanningModeState['explorationProgress']): string {
-  const guidance = [`## Exploration Progress`];
-  
+  const guidance = [
+    '## Exploration Progress',
+  ];
+
   if (progress.filesExamined > 0) {
     guidance.push(`- **Files examined**: ${progress.filesExamined}`);
   }
-  
+
   if (progress.componentsIdentified.length > 0) {
     guidance.push(`- **Components identified**: ${progress.componentsIdentified.join(', ')}`);
   }
-  
+
   if (progress.requirementsGathered.length > 0) {
     guidance.push(`- **Requirements gathered**: ${progress.requirementsGathered.length} items`);
   }
@@ -263,7 +278,7 @@ export function planningModeLayer(config: PlanningModeConfig): MemoryLayer<Plann
       min: 400,
       max: 1500,
     },
-    
+
     hooks: {
       async init() {
         const isActive = config.currentMode === 'planning';
@@ -271,14 +286,14 @@ export function planningModeLayer(config: PlanningModeConfig): MemoryLayer<Plann
           state: createInitialState(isActive),
         };
       },
-      
+
       async recall({ state }) {
         if (!state.isActive) {
           return null;
         }
 
         const sections: string[] = [];
-        
+
         // Core planning mode guidance
         sections.push(`# Plan Mode Active
 
@@ -293,36 +308,47 @@ Focus on analysis, documentation, and planning rather than implementation.
 
         // FlowSchema guidelines
         sections.push(getFlowSchemaGuidelines());
-        
+
         // PRD authoring guidelines
         sections.push(getPRDAuthoringGuidelines());
-        
+
         // Tool usage for planning mode
-        const toolNames = config.availableTools.map(t => t.name);
+        const toolNames = config.availableTools.map((t) => t.name);
         sections.push(getPlanModeToolGuidance(toolNames));
-        
+
         // Phase-specific guidance
         sections.push(getPhaseSpecificGuidance(state.planningPhase));
-        
+
         // Progress-specific guidance
         sections.push(getExplorationGuidance(state.explorationProgress));
-        
+
         return sections.join('\n\n');
       },
 
       async store({ newItems, state }) {
         if (!state.isActive) {
-          return { state };
+          return {
+            state,
+          };
         }
 
         // Track exploration progress based on tool usage
         let newFilesExamined = state.explorationProgress.filesExamined;
-        const newComponents = [...state.explorationProgress.componentsIdentified];
-        const newRequirements = [...state.explorationProgress.requirementsGathered];
+        const newComponents = [
+          ...state.explorationProgress.componentsIdentified,
+        ];
+        const newRequirements = [
+          ...state.explorationProgress.requirementsGathered,
+        ];
 
         // Simple tracking - could be enhanced with actual tool result analysis
         for (const item of newItems) {
-          if (typeof item === 'object' && item !== null && 'type' in item && item.type === 'function_call') {
+          if (
+            typeof item === 'object' &&
+            item !== null &&
+            'type' in item &&
+            item.type === 'function_call'
+          ) {
             if (item.name === 'Read') {
               newFilesExamined += 1;
             }

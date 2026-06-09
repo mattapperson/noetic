@@ -1,13 +1,27 @@
 /**
  * Demo script showing the enhanced prompt engineering system in action.
- * 
+ *
  * This demonstrates how the memory layers provide dynamic, context-aware
  * instructions that adapt based on usage patterns and environment.
  */
 
-import { createAgentHarness } from '../src/harness/factory.js';
+import type { BudgetConfig } from '@noetic/core';
 import { createLocalFsAdapter } from '@noetic/core';
+import { createAgentHarness } from '../src/harness/factory.js';
 import type { AgentConfig } from '../src/types/config.js';
+
+function formatBudget(budget: BudgetConfig | undefined): string {
+  if (budget === undefined) {
+    return 'auto';
+  }
+  if (typeof budget === 'number') {
+    return `${budget}`;
+  }
+  if (budget === 'auto') {
+    return 'auto';
+  }
+  return `${budget.min}-${budget.max}`;
+}
 
 // Example configuration
 const demoConfig: AgentConfig = {
@@ -20,9 +34,9 @@ const demoConfig: AgentConfig = {
 
 async function demonstrateEnhancedPrompts() {
   console.log('🚀 Enhanced Prompt Engineering Demo\n');
-  
+
   // Create harness with enhanced prompt layers
-  const { harness, memoryLayers } = await createAgentHarness({
+  const { memoryLayers } = await createAgentHarness({
     config: demoConfig,
     plugins: [],
     fs: createLocalFsAdapter(),
@@ -30,29 +44,21 @@ async function demonstrateEnhancedPrompts() {
   });
 
   console.log('📋 Memory Layers Active:');
-  memoryLayers.forEach(layer => {
+  for (const layer of memoryLayers) {
     console.log(`  - ${layer.name} (${layer.id})`);
-    console.log(`    Slot: ${layer.slot}, Budget: ${layer.budget.min}-${layer.budget.max}`);
-  });
+    console.log(`    Slot: ${layer.slot}, Budget: ${formatBudget(layer.budget)}`);
+  }
 
   // Demonstrate layer content generation
   console.log('\n🧠 Sample Layer Outputs:\n');
 
   // Find and demonstrate specific layers
-  const promptLayer = memoryLayers.find(l => l.id === 'prompt-engineering');
-  const toolLayer = memoryLayers.find(l => l.id === 'tool-guidance');
-  const commLayer = memoryLayers.find(l => l.id === 'communication-style');
-  const envLayer = memoryLayers.find(l => l.id === 'environment-context');
+  const promptLayer = memoryLayers.find((l) => l.id === 'prompt-engineering');
+  const envLayer = memoryLayers.find((l) => l.id === 'environment-context');
 
   if (promptLayer) {
     console.log('📝 Prompt Engineering Layer:');
-    try {
-      const { state } = await promptLayer.hooks.init!({} as any);
-      const content = await promptLayer.hooks.recall!({ state, ctx: {} as any });
-      console.log(content?.substring(0, 200) + '...\n');
-    } catch (error) {
-      console.log('  (Layer initialization would occur during actual agent run)\n');
-    }
+    console.log('  Provides: Core behavioral guidelines, adaptive tool/error guidance\n');
   }
 
   if (envLayer) {
@@ -63,7 +69,7 @@ async function demonstrateEnhancedPrompts() {
 
   // Show mode switching capability
   console.log('🔄 Mode Switching Demo:\n');
-  
+
   // Create planning mode harness
   const { memoryLayers: planLayers } = await createAgentHarness({
     config: demoConfig,
@@ -73,7 +79,7 @@ async function demonstrateEnhancedPrompts() {
   });
 
   console.log('📊 Planning Mode Layers Added:');
-  const planLayer = planLayers.find(l => l.id === 'planning-mode');
+  const planLayer = planLayers.find((l) => l.id === 'planning-mode');
   if (planLayer) {
     console.log(`  + ${planLayer.name} (${planLayer.id})`);
     console.log('    Provides: FlowSchema guidance, PRD authoring, read-only tool usage');
@@ -116,7 +122,7 @@ async function demonstrateAdvancedPatterns() {
 // Comparison with Claude Code's approach
 function compareWithClaudeCode() {
   console.log('\n📊 Comparison with Claude Code:\n');
-  
+
   console.log('Claude Code Approach:');
   console.log('  ❌ Static prompt concatenation');
   console.log('  ❌ No learning or adaptation');
@@ -140,7 +146,7 @@ async function runDemo() {
     await demonstrateEnhancedPrompts();
     await demonstrateAdvancedPatterns();
     compareWithClaudeCode();
-    
+
     console.log('\n🎉 Enhanced Prompt Engineering Demo Complete!');
     console.log('\nTo see the system in action:');
     console.log('  1. Run the CLI with any agent configuration');
@@ -153,7 +159,7 @@ async function runDemo() {
 }
 
 // Export for use or run directly
-export { demonstrateEnhancedPrompts, demonstrateAdvancedPatterns, compareWithClaudeCode };
+export { compareWithClaudeCode, demonstrateAdvancedPatterns, demonstrateEnhancedPrompts };
 
 // Run if called directly
 if (import.meta.main) {

@@ -14,7 +14,11 @@ import { Slot } from '@noetic/core';
 interface ToolGuidanceState {
   availableTools: string[];
   currentMode: 'normal' | 'planning';
-  recentToolFailures: Array<{ tool: string; reason: string; timestamp: number }>;
+  recentToolFailures: Array<{
+    tool: string;
+    reason: string;
+    timestamp: number;
+  }>;
 }
 
 interface ToolGuidanceConfig {
@@ -26,9 +30,12 @@ interface ToolGuidanceConfig {
 
 //#region Helpers
 
-function createInitialState(tools: ReadonlyArray<Tool>, mode: 'normal' | 'planning' = 'normal'): ToolGuidanceState {
+function createInitialState(
+  tools: ReadonlyArray<Tool>,
+  mode: 'normal' | 'planning' = 'normal',
+): ToolGuidanceState {
   return {
-    availableTools: tools.map(t => t.name),
+    availableTools: tools.map((t) => t.name),
     currentMode: mode,
     recentToolFailures: [],
   };
@@ -38,7 +45,7 @@ function getFileOperationGuidance(toolNames: string[]): string {
   const hasRead = toolNames.includes('Read');
   const hasEdit = toolNames.includes('Edit');
   const hasWrite = toolNames.includes('Write');
-  
+
   if (!hasRead && !hasEdit && !hasWrite) {
     return '';
   }
@@ -51,14 +58,18 @@ ${hasWrite && hasEdit ? '- Prefer editing existing files over creating new ones'
 ${hasRead ? '- File paths must be absolute, not relative' : ''}
 
 ### Format Requirements for Edit Tool:
-${hasEdit ? `- Line prefix format: [number][tab][content]
+${
+  hasEdit
+    ? `- Line prefix format: [number][tab][content]
 - Never include line numbers in old_string/new_string
-- Ensure old_string is unique within the file` : ''}`;
+- Ensure old_string is unique within the file`
+    : ''
+}`;
 }
 
 function getToolPreferenceHierarchy(toolNames: string[]): string {
   const preferences: string[] = [];
-  
+
   if (toolNames.includes('Read')) {
     preferences.push('File reading: Use Read tool (NOT cat/head/tail)');
   }
@@ -75,16 +86,18 @@ function getToolPreferenceHierarchy(toolNames: string[]): string {
     preferences.push('Content search: Use Grep tool (NOT grep/rg)');
   }
   if (toolNames.includes('Bash')) {
-    preferences.push('Shell operations: Reserve Bash for system commands requiring shell execution');
+    preferences.push(
+      'Shell operations: Reserve Bash for system commands requiring shell execution',
+    );
   }
-  
+
   if (preferences.length === 0) {
     return '';
   }
 
   return `## Tool Usage Hierarchy
 NEVER use generic tools when specific ones exist:
-${preferences.map(p => `- ${p}`).join('\n')}
+${preferences.map((p) => `- ${p}`).join('\n')}
 
 ### Tool Integration Guidelines
 - Call multiple independent tools in parallel when possible
@@ -93,12 +106,21 @@ ${preferences.map(p => `- ${p}`).join('\n')}
 }
 
 function getPlanModeGuidance(toolNames: string[]): string {
-  const readOnlyTools = toolNames.filter(name => 
-    ['Read', 'Grep', 'Find', 'Bash'].includes(name) || name.startsWith('plan/')
+  const readOnlyTools = toolNames.filter(
+    (name) =>
+      [
+        'Read',
+        'Grep',
+        'Find',
+        'Bash',
+      ].includes(name) || name.startsWith('plan/'),
   );
-  
-  const restrictedTools = toolNames.filter(name => 
-    ['Write', 'Edit'].includes(name)
+
+  const restrictedTools = toolNames.filter((name) =>
+    [
+      'Write',
+      'Edit',
+    ].includes(name),
   );
 
   return `## Plan Mode Tool Usage
@@ -123,10 +145,14 @@ Use plan/setPlanTree to update execution plans with FlowSchema nodes.`;
 }
 
 function getAgentDelegationGuidance(toolNames: string[]): string {
-  const hasAgentTools = toolNames.some(name => 
-    ['spawn', 'subagent', 'Agent'].includes(name)
+  const hasAgentTools = toolNames.some((name) =>
+    [
+      'spawn',
+      'subagent',
+      'Agent',
+    ].includes(name),
   );
-  
+
   if (!hasAgentTools) {
     return '';
   }
@@ -159,23 +185,29 @@ function getAgentDelegationGuidance(toolNames: string[]): string {
 - Include specific requirements and constraints`;
 }
 
-function getToolFailureGuidance(failures: Array<{ tool: string; reason: string; timestamp: number }>): string {
+function getToolFailureGuidance(
+  failures: Array<{
+    tool: string;
+    reason: string;
+    timestamp: number;
+  }>,
+): string {
   if (failures.length === 0) {
     return '';
   }
 
-  const recentFailures = failures.filter(f => Date.now() - f.timestamp < 300000); // Last 5 minutes
+  const recentFailures = failures.filter((f) => Date.now() - f.timestamp < 300000); // Last 5 minutes
   if (recentFailures.length === 0) {
     return '';
   }
 
-  const failuresByTool = recentFailures.reduce((acc, failure) => {
-    acc[failure.tool] = (acc[failure.tool] || []).concat(failure.reason);
-    return acc;
-  }, {} as Record<string, string[]>);
+  const failuresByTool: Record<string, string[]> = {};
+  for (const failure of recentFailures) {
+    failuresByTool[failure.tool] = (failuresByTool[failure.tool] || []).concat(failure.reason);
+  }
 
-  const toolEntries = Object.entries(failuresByTool).map(([tool, reasons]) => 
-    `- ${tool}: ${reasons[0]}` // Show most recent reason
+  const toolEntries = Object.entries(failuresByTool).map(
+    ([tool, reasons]) => `- ${tool}: ${reasons[0]}`, // Show most recent reason
   );
 
   return `## Recent Tool Issues
@@ -194,77 +226,70 @@ ${toolEntries.join('\n')}
 
 export function toolGuidanceLayer(config: ToolGuidanceConfig): MemoryLayer<ToolGuidanceState> {
   const { tools, mode = 'normal' } = config;
-  
+
   return {
     id: 'tool-guidance',
-    name: 'Tool Guidance', 
+    name: 'Tool Guidance',
     slot: Slot.PROCEDURAL,
     scope: 'execution',
     budget: {
       min: 300,
       max: 1200,
     },
-    
+
     hooks: {
       async init() {
         return {
           state: createInitialState(tools, mode),
         };
       },
-      
+
       async recall({ state }) {
         const toolNames = state.availableTools;
         const guidance: string[] = [];
-        
+
         // Core tool preference hierarchy
         const preferences = getToolPreferenceHierarchy(toolNames);
         if (preferences) {
           guidance.push(preferences);
         }
-        
+
         // File operation specific guidance
         const fileOps = getFileOperationGuidance(toolNames);
         if (fileOps) {
           guidance.push(fileOps);
         }
-        
+
         // Mode-specific guidance
         if (state.currentMode === 'planning') {
           guidance.push(getPlanModeGuidance(toolNames));
         }
-        
+
         // Agent delegation guidance (if applicable)
         const agentGuidance = getAgentDelegationGuidance(toolNames);
         if (agentGuidance) {
           guidance.push(agentGuidance);
         }
-        
+
         // Tool failure recovery guidance
         const failureGuidance = getToolFailureGuidance(state.recentToolFailures);
         if (failureGuidance) {
           guidance.push(failureGuidance);
         }
-        
+
         if (guidance.length === 0) {
           return null;
         }
-        
+
         return `# Tool Usage Guidelines\n\n${guidance.join('\n\n')}`;
       },
 
-      async store({ newItems, state }) {
-        // Track tool failures for adaptive guidance
-        // This is a simplified implementation - in practice you'd parse tool results
-        // to detect failures and their reasons
-        
-        // For now, just return current state
-        // In a full implementation, you'd detect tool failures and update recentToolFailures
-        
+      async store({ state }) {
+        // Tool failure tracking is not yet implemented; pass state through
+        // unchanged. A full implementation would parse tool results here to
+        // detect failures and update `recentToolFailures`.
         return {
-          state: {
-            ...state,
-            // Tool failure detection would go here
-          },
+          state,
         };
       },
 

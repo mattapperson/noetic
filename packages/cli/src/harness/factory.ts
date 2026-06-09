@@ -182,22 +182,35 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     }),
     workingMemory(),
     observationalMemory(),
-    
+
     // Enhanced prompt engineering layers
     promptEngineeringLayer(),
     communicationStyleLayer(),
-    environmentContextLayer({ config, shell }),
-    toolGuidanceLayer({ tools, mode }),
-    
+    environmentContextLayer({
+      config,
+      shell,
+    }),
+    toolGuidanceLayer({
+      tools,
+      mode,
+    }),
+
     // Mode-specific layers
-    ...(mode === 'planning' ? [planningModeLayer({ availableTools: tools, currentMode: mode })] : []),
-    
+    ...(mode === 'planning'
+      ? [
+          planningModeLayer({
+            availableTools: tools,
+            currentMode: mode,
+          }),
+        ]
+      : []),
+
     // Existing layers continue
     fileReference(),
     durableTaskState(),
     ...toolMemoryLayer(tools),
     ...pluginMemory,
-    
+
     // Enhanced skills layer (now with behavioral guidelines)
     ...(allSkills.length > 0
       ? [

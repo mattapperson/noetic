@@ -14,7 +14,7 @@ interface CommunicationStyleState {
   style: 'concise' | 'normal' | 'verbose';
   userPreferences: {
     prefersExplanations: boolean;
-    prefersDirectAnswers: boolean; 
+    prefersDirectAnswers: boolean;
     asksTechnicalQuestions: boolean;
   };
   conversationMetrics: {
@@ -27,24 +27,20 @@ interface CommunicationStyleState {
 
 //#endregion
 
-//#region Type Guards
+//#region Item Extraction
 
-function isUserMessage(item: Item): boolean {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'role' in item &&
-    item.role === 'user'
-  );
-}
-
-function hasTextContent(item: Item): item is Item & { content: string } {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'content' in item &&
-    typeof item.content === 'string'
-  );
+/**
+ * Extract the concatenated text of a user message item, or `null` if the item
+ * is not a user message. Reads the Open Responses `InputTextPart[]` content.
+ */
+function extractUserMessageText(item: Item): string | null {
+  if (item.type !== 'message' || item.role !== 'user') {
+    return null;
+  }
+  return item.content
+    .filter((part) => part.type === 'input_text')
+    .map((part) => part.text)
+    .join('');
 }
 
 //#endregion
@@ -76,37 +72,69 @@ function analyzeUserMessage(content: string): {
   prefersDirectAnswer: boolean;
 } {
   const length = content.length;
-  const isQuestion = content.includes('?') || 
-    Boolean(content.toLowerCase().match(/^(what|how|why|when|where|which|can you|could you|would you|do you)/));
-  
+  const isQuestion =
+    content.includes('?') ||
+    Boolean(
+      content
+        .toLowerCase()
+        .match(/^(what|how|why|when|where|which|can you|could you|would you|do you)/),
+    );
+
   // Technical indicators
   const technicalKeywords = [
-    'function', 'class', 'method', 'api', 'database', 'algorithm',
-    'implementation', 'architecture', 'pattern', 'framework', 'library',
-    'code', 'debug', 'error', 'exception', 'syntax', 'typescript', 'javascript'
+    'function',
+    'class',
+    'method',
+    'api',
+    'database',
+    'algorithm',
+    'implementation',
+    'architecture',
+    'pattern',
+    'framework',
+    'library',
+    'code',
+    'debug',
+    'error',
+    'exception',
+    'syntax',
+    'typescript',
+    'javascript',
   ];
-  const isTechnical = technicalKeywords.some(keyword => 
-    content.toLowerCase().includes(keyword)
-  );
-  
+  const isTechnical = technicalKeywords.some((keyword) => content.toLowerCase().includes(keyword));
+
   // Explanation preference indicators
   const explanationKeywords = [
-    'explain', 'why', 'how does', 'what is', 'help me understand',
-    'walk me through', 'break down', 'elaborate', 'detail'
+    'explain',
+    'why',
+    'how does',
+    'what is',
+    'help me understand',
+    'walk me through',
+    'break down',
+    'elaborate',
+    'detail',
   ];
-  const prefersExplanation = explanationKeywords.some(keyword =>
-    content.toLowerCase().includes(keyword)
+  const prefersExplanation = explanationKeywords.some((keyword) =>
+    content.toLowerCase().includes(keyword),
   );
-  
-  // Direct answer preference indicators  
+
+  // Direct answer preference indicators
   const directAnswerKeywords = [
-    'just', 'simply', 'quick', 'brief', 'short', 'directly',
-    'yes or no', 'straight answer', 'bottom line'
+    'just',
+    'simply',
+    'quick',
+    'brief',
+    'short',
+    'directly',
+    'yes or no',
+    'straight answer',
+    'bottom line',
   ];
-  const prefersDirectAnswer = directAnswerKeywords.some(keyword =>
-    content.toLowerCase().includes(keyword)
+  const prefersDirectAnswer = directAnswerKeywords.some((keyword) =>
+    content.toLowerCase().includes(keyword),
   );
-  
+
   return {
     length,
     isQuestion,
@@ -118,30 +146,34 @@ function analyzeUserMessage(content: string): {
 
 function adaptStyleBasedOnAnalysis(
   currentState: CommunicationStyleState,
-  recentAnalyses: Array<ReturnType<typeof analyzeUserMessage>>
+  recentAnalyses: Array<ReturnType<typeof analyzeUserMessage>>,
 ): 'concise' | 'normal' | 'verbose' {
   if (recentAnalyses.length === 0) {
     return currentState.style;
   }
 
-  const directAnswerRequests = recentAnalyses.filter(a => a.prefersDirectAnswer).length;
-  const explanationRequests = recentAnalyses.filter(a => a.prefersExplanation).length;
-  const technicalQuestions = recentAnalyses.filter(a => a.isTechnical).length;
-  const averageLength = recentAnalyses.reduce((sum, a) => sum + a.length, 0) / recentAnalyses.length;
-  
+  const directAnswerRequests = recentAnalyses.filter((a) => a.prefersDirectAnswer).length;
+  const explanationRequests = recentAnalyses.filter((a) => a.prefersExplanation).length;
+  const technicalQuestions = recentAnalyses.filter((a) => a.isTechnical).length;
+  const averageLength =
+    recentAnalyses.reduce((sum, a) => sum + a.length, 0) / recentAnalyses.length;
+
   // Adapt based on patterns
   if (directAnswerRequests > explanationRequests && averageLength < 50) {
     return 'concise';
-  } else if (explanationRequests > directAnswerRequests || technicalQuestions > recentAnalyses.length / 2) {
-    return 'verbose';
-  } else {
-    return 'normal';
   }
+  if (
+    explanationRequests > directAnswerRequests ||
+    technicalQuestions > recentAnalyses.length / 2
+  ) {
+    return 'verbose';
+  }
+  return 'normal';
 }
 
 function getCommunicationGuidelines(
   style: 'concise' | 'normal' | 'verbose',
-  preferences: CommunicationStyleState['userPreferences']
+  preferences: CommunicationStyleState['userPreferences'],
 ): string {
   const baseGuidelines = `# Communication Style: ${style.charAt(0).toUpperCase() + style.slice(1)}
 
@@ -172,7 +204,7 @@ function getCommunicationGuidelines(
 - Provide detailed explanations and context
 - Include reasoning and background information
 - Use structured formatting extensively
-- Anticipate follow-up questions with thorough answers`
+- Anticipate follow-up questions with thorough answers`,
   };
 
   const preferenceGuidelines = [];
@@ -189,22 +221,26 @@ function getCommunicationGuidelines(
   return [
     baseGuidelines,
     styleSpecificGuidelines[style],
-    preferenceGuidelines.length > 0 ? `\n## User Preferences\n${preferenceGuidelines.join('\n')}` : ''
-  ].filter(Boolean).join('\n');
+    preferenceGuidelines.length > 0
+      ? `\n## User Preferences\n${preferenceGuidelines.join('\n')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function updateUserPreferences(
   current: CommunicationStyleState['userPreferences'],
-  analyses: Array<ReturnType<typeof analyzeUserMessage>>
+  analyses: Array<ReturnType<typeof analyzeUserMessage>>,
 ): CommunicationStyleState['userPreferences'] {
   if (analyses.length === 0) {
     return current;
   }
 
-  const explanationCount = analyses.filter(a => a.prefersExplanation).length;
-  const directAnswerCount = analyses.filter(a => a.prefersDirectAnswer).length;
-  const technicalCount = analyses.filter(a => a.isTechnical).length;
-  
+  const explanationCount = analyses.filter((a) => a.prefersExplanation).length;
+  const directAnswerCount = analyses.filter((a) => a.prefersDirectAnswer).length;
+  const technicalCount = analyses.filter((a) => a.isTechnical).length;
+
   return {
     prefersExplanations: explanationCount > analyses.length * 0.3,
     prefersDirectAnswers: directAnswerCount > analyses.length * 0.3,
@@ -214,19 +250,20 @@ function updateUserPreferences(
 
 function updateConversationMetrics(
   current: CommunicationStyleState['conversationMetrics'],
-  newUserMessages: string[]
+  newUserMessages: string[],
 ): CommunicationStyleState['conversationMetrics'] {
   if (newUserMessages.length === 0) {
     return current;
   }
 
   const newTotal = current.totalUserMessages + newUserMessages.length;
-  const totalLength = (current.averageUserMessageLength * current.totalUserMessages) +
+  const totalLength =
+    current.averageUserMessageLength * current.totalUserMessages +
     newUserMessages.reduce((sum, msg) => sum + msg.length, 0);
   const newAverage = totalLength / newTotal;
-  
-  const questionCount = newUserMessages.filter(msg => 
-    msg.includes('?') || msg.toLowerCase().match(/^(what|how|why|when|where|which)/)
+
+  const questionCount = newUserMessages.filter(
+    (msg) => msg.includes('?') || msg.toLowerCase().match(/^(what|how|why|when|where|which)/),
   ).length;
 
   return {
@@ -250,38 +287,39 @@ export function communicationStyleLayer(): MemoryLayer<CommunicationStyleState> 
       min: 150,
       max: 500,
     },
-    
+
     hooks: {
       async init() {
         return {
           state: createInitialState(),
         };
       },
-      
+
       async recall({ state }) {
         return getCommunicationGuidelines(state.style, state.userPreferences);
       },
 
       async store({ newItems, state }) {
-        // Extract user messages from new items
+        // Extract user message text from new items
         const userMessages = newItems
-          .filter(isUserMessage)
-          .filter(hasTextContent)
-          .map(item => item.content);
+          .map(extractUserMessageText)
+          .filter((text): text is string => text !== null);
 
         if (userMessages.length === 0) {
-          return { state };
+          return {
+            state,
+          };
         }
 
         // Analyze each user message
         const analyses = userMessages.map(analyzeUserMessage);
-        
+
         // Update user preferences based on recent messages
         const updatedPreferences = updateUserPreferences(state.userPreferences, analyses);
-        
+
         // Update conversation metrics
         const updatedMetrics = updateConversationMetrics(state.conversationMetrics, userMessages);
-        
+
         // Adapt communication style based on recent patterns
         const adaptedStyle = adaptStyleBasedOnAnalysis(state, analyses);
 

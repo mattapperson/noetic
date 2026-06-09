@@ -176,13 +176,13 @@ export function skillsLayer(
         }
 
         const sections: string[] = [];
-        
+
         // Add behavioral guidelines for activated skills
         if (state.activatedSkills.length > 0) {
           sections.push(getBehavioralGuidelines(state.activatedSkills));
           sections.push('');
         }
-        
+
         sections.push('<available_skills>');
 
         // List all model-invocable skills with descriptions

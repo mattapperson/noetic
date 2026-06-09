@@ -1,6 +1,6 @@
 /**
  * Memory layers for enhanced prompt engineering.
- * 
+ *
  * These layers implement sophisticated prompt engineering patterns
  * inspired by Claude Code's system, adapted for the memory layer architecture.
  */

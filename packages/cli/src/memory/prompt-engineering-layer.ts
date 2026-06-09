@@ -1,7 +1,7 @@
 /**
  * Prompt engineering memory layer — sophisticated behavioral guidelines.
  *
- * Provides dynamic context-aware instructions based on Claude Code's 
+ * Provides dynamic context-aware instructions based on Claude Code's
  * prompt engineering patterns. Adapts based on tool usage patterns,
  * recent errors, and conversation context.
  */
@@ -13,7 +13,11 @@ import { Slot } from '@noetic/core';
 
 interface PromptEngineeringState {
   currentMode: 'normal' | 'planning';
-  recentErrors: Array<{ tool: string; error: string; timestamp: number }>;
+  recentErrors: Array<{
+    tool: string;
+    error: string;
+    timestamp: number;
+  }>;
   toolUsagePatterns: Map<string, number>;
   communicationStyle: 'concise' | 'normal' | 'verbose';
   lastContextUpdate: number;
@@ -81,7 +85,7 @@ Avoid: step-by-step narration, routine operations`;
 
 function getToolUsageGuidelines(patterns: Map<string, number>): string {
   const mostUsedTools = Array.from(patterns.entries())
-    .sort(([,a], [,b]) => b - a)
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
     .map(([name]) => name);
 
@@ -99,20 +103,26 @@ Frequently used: ${mostUsedTools.join(', ')}
 - Reserve bash for system commands requiring shell execution`;
 }
 
-function getErrorBasedGuidance(errors: Array<{ tool: string; error: string; timestamp: number }>): string {
+function getErrorBasedGuidance(
+  errors: Array<{
+    tool: string;
+    error: string;
+    timestamp: number;
+  }>,
+): string {
   if (errors.length === 0) {
     return '';
   }
 
-  const recentErrors = errors.filter(e => Date.now() - e.timestamp < 300000); // Last 5 minutes
+  const recentErrors = errors.filter((e) => Date.now() - e.timestamp < 300000); // Last 5 minutes
   if (recentErrors.length === 0) {
     return '';
   }
 
-  const errorsByTool = recentErrors.reduce((acc, err) => {
-    acc[err.tool] = (acc[err.tool] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const errorsByTool: Record<string, number> = {};
+  for (const err of recentErrors) {
+    errorsByTool[err.tool] = (errorsByTool[err.tool] || 0) + 1;
+  }
 
   return `## Recent Error Context
 Tools with issues: ${Object.keys(errorsByTool).join(', ')}
@@ -125,34 +135,45 @@ Tools with issues: ${Object.keys(errorsByTool).join(', ')}
 
 function adaptCommunicationStyle(
   currentStyle: 'concise' | 'normal' | 'verbose',
-  toolUsage: Map<string, number>
+  toolUsage: Map<string, number>,
 ): 'concise' | 'normal' | 'verbose' {
   // Simple heuristic: if using many tools frequently, tend toward concise
   const totalUsage = Array.from(toolUsage.values()).reduce((sum, count) => sum + count, 0);
-  
+
   if (totalUsage > 20) {
     return 'concise';
-  } else if (totalUsage > 10) {
-    return 'normal';  
   }
-  
+  if (totalUsage > 10) {
+    return 'normal';
+  }
+
   return currentStyle;
 }
 
-function detectErrors(items: ReadonlyArray<Item>): Array<{ tool: string; error: string; timestamp: number }> {
-  const errors: Array<{ tool: string; error: string; timestamp: number }> = [];
-  
+function detectErrors(items: ReadonlyArray<Item>): Array<{
+  tool: string;
+  error: string;
+  timestamp: number;
+}> {
+  const errors: Array<{
+    tool: string;
+    error: string;
+    timestamp: number;
+  }> = [];
+
   for (let i = 0; i < items.length - 1; i++) {
     const item = items[i];
     const nextItem = items[i + 1];
-    
+
     if (isFunctionCall(item) && isToolResult(nextItem)) {
       // Check if the tool result indicates an error
       if (typeof nextItem === 'object' && 'content' in nextItem) {
         const content = String(nextItem.content || '');
-        if (content.toLowerCase().includes('error') || 
-            content.toLowerCase().includes('failed') ||
-            content.toLowerCase().includes('permission denied')) {
+        if (
+          content.toLowerCase().includes('error') ||
+          content.toLowerCase().includes('failed') ||
+          content.toLowerCase().includes('permission denied')
+        ) {
           errors.push({
             tool: item.name,
             error: content.substring(0, 200), // First 200 chars
@@ -162,7 +183,7 @@ function detectErrors(items: ReadonlyArray<Item>): Array<{ tool: string; error: 
       }
     }
   }
-  
+
   return errors;
 }
 
@@ -180,7 +201,7 @@ export function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState> {
       min: 200,
       max: 1000,
     },
-    
+
     hooks: {
       async init() {
         return {
@@ -190,22 +211,22 @@ export function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState> {
 
       async recall({ state }) {
         const guidelines: string[] = [];
-        
+
         // Always include core behavioral guidelines
         guidelines.push(getCoreBehavioralGuidelines());
-        
+
         // Add tool-specific guidance based on usage patterns
         const toolGuidance = getToolUsageGuidelines(state.toolUsagePatterns);
         if (toolGuidance) {
           guidelines.push(toolGuidance);
         }
-        
+
         // Add error-based learning if there are recent errors
         const errorGuidance = getErrorBasedGuidance(state.recentErrors);
         if (errorGuidance) {
           guidelines.push(errorGuidance);
         }
-        
+
         // Add communication style context
         if (state.communicationStyle === 'concise') {
           guidelines.push(`## Current Style: Concise Mode
@@ -213,14 +234,14 @@ export function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState> {
 - Lead with actions and results
 - Skip reasoning unless specifically requested`);
         }
-        
+
         return guidelines.join('\n\n');
       },
 
       async store({ newItems, state }) {
         // Track tool usage patterns
         const newPatterns = new Map(state.toolUsagePatterns);
-        
+
         // Update tool usage counts
         for (const item of newItems) {
           if (isFunctionCall(item)) {
@@ -228,14 +249,16 @@ export function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState> {
             newPatterns.set(item.name, current + 1);
           }
         }
-        
+
         // Detect and track errors
-        const newErrors = [...state.recentErrors, ...detectErrors(newItems)]
-          .slice(-10); // Keep last 10 errors
-        
+        const newErrors = [
+          ...state.recentErrors,
+          ...detectErrors(newItems),
+        ].slice(-10); // Keep last 10 errors
+
         // Adapt communication style based on usage patterns
         const adaptedStyle = adaptCommunicationStyle(state.communicationStyle, newPatterns);
-        
+
         return {
           state: {
             ...state,
