@@ -59,18 +59,23 @@ least a patch. To skip a release: don't touch the release-triggering paths
 (`packages/core/**`, `biome.json`, `bun.lock`), or add `[skip ci]` to the commit
 to skip the workflow entirely.
 
-## What Triggers a Core npm Release
+## What Triggers an npm Release
 
-The `release-core.yml` workflow runs on push to `main` when `packages/core/**`,
-`biome.json`, or `bun.lock` changes. It:
-1. Runs lint, typecheck, build
-2. Scans commits since last `core-v*` tag (scoped to `packages/core` by
+The `release-packages.yml` workflow runs on push to `main` when
+`packages/types/**`, `packages/memory/**`, `packages/core/**`, `biome.json`,
+or `bun.lock` changes. It releases the three packages as **sequential jobs in
+dependency order (types → memory → core)** — never in parallel, so the
+`chore: release` commit each job pushes back to main can't strand a sibling,
+and a dependent never publishes pinned to a dependency version that isn't on
+npm yet. Each job:
+1. Runs lint, typecheck, build (plus dependency dists for memory/core)
+2. Scans commits since the last `<pkg>-v*` tag (scoped to its package by
    `semantic-release-monorepo`)
 3. Determines the version bump from commit types — **major** for breaking,
    **minor** for `feat`, **patch** for everything else (including untyped /
    squash-stripped commits)
 4. Publishes to npm with provenance
-5. Creates a GitHub release and git tag (`core-v<version>`)
+5. Creates a GitHub release and git tag (`<pkg>-v<version>`)
 
 > Note: because of `semantic-release-monorepo` scoping, a release is cut only
 > when the analyzed commits touched `packages/core/**`. A change to *only*

@@ -14,6 +14,10 @@ both of which re-export the parts relevant to their public surface. Application
 code normally imports these types from `@noetic-tools/core` rather than from
 this package directly.
 
+The `MemoryLayer` contract is additionally exported at the
+`@noetic-tools/types/contract` subpath for memory-layer authors who want the
+contract without the rest of the vocabulary.
+
 ## License
 
 Apache-2.0

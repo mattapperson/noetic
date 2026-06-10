@@ -1,0 +1,188 @@
+name: Release packages
+
+# Single workflow releasing @noetic-tools/types -> memory -> core as
+# SEQUENTIAL jobs in dependency order. They used to be three independent
+# workflows, which raced: each semantic-release pushes a `chore: release`
+# commit to main, and every concurrently-running sibling then saw "local
+# branch main is behind the remote one" and silently no-op'd with a green
+# check (and one types run half-released: tag + sigstore entry created,
+# npm publish never landed). Sequencing also guarantees a dependent never
+# publishes pinned to a dependency version that isn't on npm yet.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/types/**'
+      - 'packages/memory/**'
+      - 'packages/core/**'
+      - '.github/workflows/release-packages.yml'
+      # Root build config that can affect the published output.
+      - 'biome.json'
+      - 'bun.lock'
+  workflow_dispatch:
+
+concurrency:
+  group: release-packages
+  cancel-in-progress: false
+
+jobs:
+  types:
+    name: Release @noetic-tools/types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      # Check out the BRANCH, not github.sha: a preceding job in this run
+      # may have pushed a `chore: release` commit, and semantic-release
+      # refuses to run from a stale checkout.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/types
+
+      - name: Typecheck
+        run: bun --cwd=packages/types run typecheck
+
+      - name: Build
+        run: bun --cwd=packages/types run build
+
+      # semantic-release runs `npm version`, which builds the full workspace tree
+      # and chokes on sibling packages' `workspace:*` deps (EUNSUPPORTEDPROTOCOL).
+      # Drop the root `workspaces` field so npm treats the package as standalone.
+      # The runner is ephemeral and this file is never committed back.
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/types
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  memory:
+    name: Release @noetic-tools/memory
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: types
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/memory
+
+      - name: Typecheck
+        run: bun --cwd=packages/memory run typecheck
+
+      # @noetic-tools/memory depends on @noetic-tools/types. Build the dependency's
+      # dist first so memory's own build (run by `prepublishOnly`) and the Node
+      # ESM smoke test can resolve `@noetic-tools/types` via node_modules.
+      - name: Build dependency (@noetic-tools/types)
+        run: bun --cwd=packages/types run build
+
+      - name: Build
+        run: bun --cwd=packages/memory run build
+
+      # See the types job. memory's own `workspace:*` deps are pinned to concrete
+      # versions at publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/memory
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  core:
+    name: Release @noetic-tools/core
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: memory
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/core
+
+      - name: Typecheck
+        run: bun --cwd=packages/core run typecheck
+
+      # @noetic-tools/core depends on @noetic-tools/types and @noetic-tools/memory.
+      # Build those dists first so core's own build (run by `prepublishOnly`) and
+      # the Node ESM smoke test can resolve them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/memory run build
+
+      - name: Build
+        run: bun --cwd=packages/core run build
+
+      # See the types job. core's own `workspace:*` deps (@noetic-tools/types,
+      # @noetic-tools/memory) are pinned to concrete versions at publish time by
+      # `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/core
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
