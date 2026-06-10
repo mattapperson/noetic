@@ -91,22 +91,14 @@ The allocation algorithm:
 
 This ensures the LLM always has room for a response, and layers compete fairly for prompt space.
 
-## Context Strategies for Spawn
+## Context Flow for Spawn
 
-Rather than a single inheritance model, `spawn()` offers four `contextIn` strategies and three `contextOut` strategies:
+Rather than a fixed inheritance model, `spawn()` starts every child with an empty `ItemLog` and delegates context flow to **spawn-local memory layers**:
 
-**Context In:**
-- `'inherit'` -- child gets a copy of the parent's full history
-- `'fresh'` -- child starts empty, receives only the input string
-- `'subset'` -- child gets a filtered selection via a `select` function
-- `'custom'` -- you build the child's initial items from scratch
+- **`onSpawn` hooks** decide what the child starts with. Each layer can derive a child state from the parent's state and inject items (relevant history, cached knowledge, instructions) into the child's fresh context.
+- **`onReturn` hooks** decide what flows back. Each layer can merge the child's final state into the parent's and transform the child's result (summarize, filter, restructure) before it reaches the parent.
 
-**Context Out:**
-- `'full'` -- return the child's raw output
-- `'summary'` -- summarize the child's output via an LLM call
-- `'schema'` -- parse the child's output through a Zod schema
-
-This flexibility enables patterns like Ralph Wiggum (fresh context per iteration), recursive LLM (fresh with summary out), and task trees (inherit with full out).
+Because context flow is just layers, the same mechanism scales from "fully fresh child" (no layers) to selective history injection, summarized hand-backs, and typed state merging — enabling patterns like Ralph Wiggum (fresh context per iteration) and recursive LLM (fresh child, distilled result out). See [Spawn](/docs/framework/operators/spawn) for the full mechanics.
 
 ## Why No Class-Based Agents
 

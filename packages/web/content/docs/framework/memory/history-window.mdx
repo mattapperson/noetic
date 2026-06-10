@@ -24,13 +24,18 @@ const memory = [
 ];
 ```
 
+## Configuration
+
+`maxItems` is validated at construction time: it must be an integer in `[2, 10000]`, otherwise `historyWindow()` throws a `NoeticConfigError` with code `INVALID_HISTORY_WINDOW_MAX_ITEMS`.
+
 ## Algorithm
 
 On every LLM step, the layer:
 
 1. Slices the trailing `maxItems` from the input.
-2. Walks backward to ensure the projected window contains at least one user `message` AND one assistant `message`. If the slice lacks either role, the cap is temporarily exceeded — the **minimum-exchange guarantee**.
-3. Drops any orphan `function_call` / `function_call_output` whose pair fell outside the slice. (OpenRouter rejects unpaired tool items, so this is required.)
+2. Walks backward to ensure the projected window contains at least one user `message` AND one assistant `message`. If the slice lacks either role, the cap is temporarily exceeded — the **minimum-exchange guarantee**. The expansion is bounded by a hard cap of **`maxItems × 4`**, so a tool-only burst (many `function_call` / `function_call_output` items with no role messages) cannot grow the window back to the start of history.
+3. **Re-attaches a head system/anchor message.** If a `system` message in the leading items fell outside the window, it is prepended to the projection so core instructions survive windowing (only the first few leading items are scanned).
+4. Drops any orphan `function_call` / `function_call_output` whose pair fell outside the slice. (OpenRouter rejects unpaired tool items, so this is required.)
 
 ## Storage isolation
 
@@ -55,10 +60,15 @@ The CLI installs `historyWindow` only when `AgentConfig.history.maxItems` is set
   import type { AgentConfig } from '@noetic-tools/cli';
 
   export default {
-    // ...
+    model: 'anthropic/claude-sonnet-4.5',
+    cwd: process.cwd(),
+    apiKey: process.env.OPENROUTER_API_KEY ?? '',
+    maxTurns: 50,
     history: { maxItems: 40 },
   } satisfies AgentConfig;
   ```
+
+  (`model`, `cwd`, `apiKey`, and `maxTurns` are required fields on `AgentConfig`.)
 
 - `/config` slash command → **Memory** tab → **History Window (items)**. Leave blank to disable.
 

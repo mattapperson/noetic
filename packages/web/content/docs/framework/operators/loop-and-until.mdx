@@ -139,6 +139,22 @@ Stop when the output text contains a specific marker string.
 const predicate = until.outputContains('FINAL ANSWER:');
 ```
 
+### until.outputEquals(sentinel)
+
+Stop when the output text **exactly equals** the sentinel string. Prefer this over `outputContains` when the marker is a dedicated exit sentinel produced by a terminator step — exact equality avoids substring collisions with unrelated output that happens to quote the sentinel.
+
+```ts
+const predicate = until.outputEquals('DONE');
+```
+
+### until.never()
+
+Never stop the loop. Pairs with operators like `every` that rely on external cancellation to terminate.
+
+```ts
+const predicate = until.never();
+```
+
 ### until.custom(fn)
 
 Pass through a raw `Until` function for full control.

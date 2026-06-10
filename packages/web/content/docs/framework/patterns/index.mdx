@@ -17,7 +17,7 @@ Every pattern returns a `Step` (usually a `StepLoop`), which means you can nest 
 | [Ralph Wiggum](/docs/framework/patterns/ralph-wiggum) | `ralphWiggum()` | Self-refining agent with verification |
 | [Task Trees](/docs/framework/patterns/task-trees) | `compilePlan()` | Tree-structured multi-agent workflows |
 | [Adaptive Plans](/docs/framework/patterns/adaptive-plans) | `adaptivePlan()` | Dynamic planning with error-driven revision |
-| [Recursive LLM](/docs/framework/patterns/recursive-llm) | `spawn()` with `contextIn: 'fresh'` | Recursive sub-task delegation |
+| [Recursive LLM](/docs/framework/patterns/recursive-llm) | `spawn()` with a fresh child context | Recursive sub-task delegation |
 | [Thread Weaving](/docs/framework/patterns/thread-weaving) | `fork(mode: 'all')` | Parallel analysis with merged results |
 | [Dual Agent](/docs/framework/patterns/dual-agent) | `spawn()` + `channel()` | Two agents communicating via channels |
 | [A2A Remote](/docs/framework/patterns/a2a-remote) | `ExternalChannel` | Inter-process agent communication |

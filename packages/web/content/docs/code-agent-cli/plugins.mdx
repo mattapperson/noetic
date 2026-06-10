@@ -39,13 +39,13 @@ Every hook receives a `PluginContext`:
 interface PluginContext {
   config: AgentConfig;                  // parsed agent config
   callModel: CallModel;                 // one-shot LLM generation (no tool loops)
-  dataDir: (scope: 'project' | 'user') => string;
+  pluginStorage: (scope: 'project' | 'user') => StorageAdapter;
 }
 ```
 
 - `config` — the parsed `noetic.config.ts` (model, apiKey, cwd, ...).
 - `callModel` — issue a one-shot LLM call. Plugins that need tool loops should register tools instead and let the harness drive the turn.
-- `dataDir('project')` returns `<cwd>/.noetic/<plugin-name>/`; `dataDir('user')` returns `~/.noetic/<plugin-name>/`. Created on first call.
+- `pluginStorage(scope)` — plugin-scoped key-value storage. `'project'` is backed by `<cwd>/.noetic/<plugin-name>/`; `'user'` by `~/.noetic/<plugin-name>/`. Created on first use.
 
 ## Extension points
 
@@ -84,20 +84,28 @@ Contribute [skills](/docs/code-agent-cli/skills) programmatically — useful whe
 
 Contribute slash commands. Plugin commands merge into the CLI's built-in registry **after** built-ins, so a plugin can't shadow `/help`, `/context`, or `/clear`.
 
+A `Command` is a `CommandBase` (name, description, optional aliases/visibility) plus a discriminated implementation: `type: 'local'` for commands that return text, or `type: 'local-jsx'` for commands that render an Ink modal. The implementation is **lazy** — `load()` returns the module containing the `call` function, so heavy command code isn't loaded until first use.
+
 ```ts
-import type { NoeticPlugin } from '@noetic-tools/cli';
+import type { Command, NoeticPlugin } from '@noetic-tools/cli';
 
 const commands: NoeticPlugin['commands'] = (ctx) => [
   {
+    type: 'local',
     name: 'deploy-preview',
     description: 'Build and deploy a preview environment for the current branch.',
-    execute: async (_input, _session) => {
-      // read from ctx.config, write to ctx.dataDir('project'), call shell, etc.
-      void ctx;
-    },
-  },
+    load: async () => ({
+      call: async (_args, _cmdCtx) => {
+        // read from ctx.config, write via ctx.pluginStorage('project'), etc.
+        void ctx;
+        return { type: 'text', value: 'Preview deployed.' };
+      },
+    }),
+  } satisfies Command,
 ];
 ```
+
+`call` receives the raw argument string and a `CommandContext` (config, cwd, session controls) and returns `{ type: 'text', value }` to post output, `{ type: 'skip' }` for silent commands, or `{ type: 'prompt', value }` to submit `value` as the next user turn.
 
 ### `subagentPresets`
 
@@ -144,7 +152,10 @@ import designDeck from '@noetic/plugin-design-deck';
 import powerline from '@noetic/plugin-powerline';
 
 export default {
-  // ...
+  model: 'anthropic/claude-sonnet-4.5',
+  cwd: process.cwd(),
+  apiKey: process.env.OPENROUTER_API_KEY ?? '',
+  maxTurns: 50,
   plugins: [
     designDeck({ generateCount: 3 }),                      // factory call → NoeticPlugin object
     '@noetic/plugin-powerline',                            // string → dynamic import
@@ -152,6 +163,8 @@ export default {
   ],
 } satisfies AgentConfig;
 ```
+
+(`model`, `cwd`, `apiKey`, and `maxTurns` are required fields on `AgentConfig`.)
 
 Three valid forms:
 
@@ -207,14 +220,10 @@ Demonstrates `initialize`, `loadingMessages`, and `footer`.
 Adds an interactive visual-decision modal as a slash command.
 
 ```ts
-import type { NoeticPlugin } from '@noetic-tools/cli';
+import type { Command, NoeticPlugin } from '@noetic-tools/cli';
 
 declare function parseOptions(input: unknown): unknown;
-declare function deckCommand(args: unknown): {
-  name: string;
-  description: string;
-  execute: (input: string, session: unknown) => Promise<unknown>;
-};
+declare function deckCommand(args: unknown): Command;
 declare const deckDiscoverCommand: typeof deckCommand;
 
 export default function designDeck(userInput: unknown = {}): NoeticPlugin {
@@ -229,6 +238,8 @@ export default function designDeck(userInput: unknown = {}): NoeticPlugin {
   };
 }
 ```
+
+`deckCommand` builds a `type: 'local-jsx'` command whose lazily loaded `call(onDone, ctx, args)` renders the deck modal and resolves through `onDone` when the user picks a design.
 
 Demonstrates `commands`.
 
@@ -253,17 +264,20 @@ export default function myPlugin(): NoeticPlugin {
       execute: async ({ text }) => ({ count: text.trim().split(/\s+/).length }),
     }],
     commands: (ctx) => [{
+      type: 'local',
       name: 'tell-joke',
       description: 'Have the model tell a joke about the current cwd.',
-      execute: async () => {
-        const joke = await ctx.callModel({
-          messages: [
-            { role: 'system', content: 'You tell terse, dry developer jokes.' },
-            { role: 'user', content: `Tell a joke about working in ${ctx.config.cwd}.` },
-          ],
-        });
-        return { kind: 'message', content: joke.text };
-      },
+      load: async () => ({
+        call: async (_args, _cmdCtx) => {
+          const joke = await ctx.callModel({
+            messages: [
+              { role: 'system', content: 'You tell terse, dry developer jokes.' },
+              { role: 'user', content: `Tell a joke about working in ${ctx.config.cwd}.` },
+            ],
+          });
+          return { type: 'text', value: joke.text };
+        },
+      }),
     }],
   };
 }
@@ -276,7 +290,10 @@ import type { AgentConfig } from '@noetic-tools/cli';
 import myPlugin from './my-plugin/src/index.ts';
 
 export default {
-  // ...
+  model: 'anthropic/claude-sonnet-4.5',
+  cwd: process.cwd(),
+  apiKey: process.env.OPENROUTER_API_KEY ?? '',
+  maxTurns: 50,
   plugins: [myPlugin()],
 } satisfies AgentConfig;
 ```

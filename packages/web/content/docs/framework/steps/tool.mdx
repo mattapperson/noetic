@@ -49,7 +49,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `step.l
 | `description` | `string` | Yes | Human-readable description for the model |
 | `input` | `ZodType<I>` | Yes | Zod schema defining the tool's input |
 | `output` | `ZodType<O>` | Yes | Zod schema defining the tool's output |
-| `execute` | `(args: I, ctx: Context) => Promise<O>` | Yes | The function that runs the tool |
+| `execute` | `(args: I, toolCtx: ToolExecutionContext) => Promise<O>` | Yes | The function that runs the tool. The second argument is a `ToolExecutionContext` — `{ ctx, harness, fs, shell, memory, assembledView, lastStepMeta }` — not the step `Context` itself (which is available as `toolCtx.ctx`) |
 | `needsApproval` | `boolean` | No | If `true`, the runtime should ask for human approval before executing |
 
 ## API Reference

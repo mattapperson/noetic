@@ -16,6 +16,8 @@ declare interface MemoryLayerShape<TState = unknown> {
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
   timeouts?: Partial<LayerTimeouts>;
+  onInitError?: 'throw' | 'disable';
+  recallMode?: 'atomic' | 'eventual';
   provides?: unknown;
   itemSchemas?: unknown;
   rerenderTiming?: 'immediate' | 'batched';
@@ -31,6 +33,8 @@ declare interface MemoryLayerShape<TState = unknown> {
 | `budget` | `BudgetConfig` | no | Token budget allocation: a fixed number, a `{ min, max }` range, or `'auto'`. |
 | `hooks` | `MemoryHooks<TState>` | yes | Lifecycle callbacks. |
 | `timeouts` | `Partial<LayerTimeouts>` | no | Per-hook timeout overrides (ms). |
+| `onInitError` | `'throw' \| 'disable'` | no | What to do when `init` throws. `'throw'` (default) surfaces the error and aborts the execution; `'disable'` logs a diagnostic and runs the execution without this layer. Opt into `'disable'` only for non-critical layers. |
+| `recallMode` | `'atomic' \| 'eventual'` | no | Whether `recall()` blocks the model call. `'atomic'` (default) runs in the hot path; `'eventual'` serves recall from cache and refreshes after `store()`, so the next turn sees the update. A harness configured with `forceAtomicRecall` treats every layer as atomic. |
 | `provides` | `LayerProvides` | no | Typed data and function declarations exposed on `ctx.memory['layerId']`. Function entries are also auto-injected as LLM tools. |
 | `itemSchemas` | `Pick<ItemSchemaExtensions, 'developerMessages' \| 'items'>` | no | Optional item schemas contributed by this layer, primarily for developer-role memory items. |
 | `rerenderTiming` | `'immediate' \| 'batched'` | no | Default re-render timing when `onItemAppend` requests a re-render. |
@@ -81,8 +85,17 @@ interface MemoryHooks<TState = unknown> {
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
   onComplete?: (params: CompleteParams<TState>) => Promise<void | { state: TState }>;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
+  beforeToolCall?: (params: BeforeToolCallParams<TState>) => Promise<BeforeToolCallResult<TState>>;
+  afterModelCall?: (params: AfterModelCallParams<TState>) => Promise<AfterModelCallResult<TState>>;
+  onItemAppend?: (params: OnItemAppendParams<TState>) => Promise<OnItemAppendResult<TState>>;
+  projectHistory?: (params: ProjectHistoryParams<TState>) => Promise<ProjectHistoryResult>;
 }
 ```
+
+- **`recall`** may also return a bare `string` shorthand — the runtime wraps it in a developer message and estimates its token count — or `null` to contribute nothing this turn.
+- **`beforeToolCall` / `afterModelCall`** are the steering hooks: they return a `SteeringDecision` (allow / deny / guide) plus updated state. A deny surfaces as a `NoeticError` kind `steering_denied`.
+- **`onItemAppend`** runs when input items (user messages, tool outputs) are about to be appended — layers compose in slot order, each receiving the previous layer's output. It can transform, drop, or inject items, and may request a context re-render. Not called for LLM response items (use `store`).
+- **`projectHistory`** projects (caps, transforms) the history portion of the context window once per LLM step. Read-side only — `itemLog` storage is never mutated.
 
 ## Hook Parameter Types
 
@@ -198,17 +211,19 @@ interface ExecutionContext {
   stepNumber: number;
   tokenUsage: { input: number; output: number };
   cost: number;
-  model?: string;
   fs: FsAdapter;
+  shell: ShellAdapter;
+  callModel?: (request: MemoryCallModelRequest) => Promise<LLMResponse>;
   tokenize(text: string): number;
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
   };
+  readLayerState<T>(layerId: string): T | undefined;
 }
 ```
 
-`fs` is the `FsAdapter` from `ctx.harness.fs`, giving memory layer hooks access to the same filesystem backend as tools and skill discovery (real, in-memory, or remote).
+`fs` is the `FsAdapter` from `ctx.harness.fs`, giving memory layer hooks access to the same filesystem backend as tools and skill discovery (real, in-memory, or remote). `shell` is the corresponding `ShellAdapter`. `callModel` is the minimal model-call surface (`{ model, items, instructions? }`) — present only when the harness has an LLM provider configured, so LLM-backed layers must handle its absence. `readLayerState` snapshots a sibling layer's state by its `layer.id`.
 
 ## LayerTimeouts
 
@@ -221,6 +236,10 @@ interface ExecutionContext {
 | `onReturn` | `number` | Timeout for onReturn hook (ms, optional) |
 | `onComplete` | `number` | Timeout for onComplete hook (ms, optional) |
 | `dispose` | `number` | Timeout for dispose hook (ms, optional) |
+| `beforeToolCall` | `number` | Timeout for beforeToolCall steering hook (ms, optional) |
+| `afterModelCall` | `number` | Timeout for afterModelCall steering hook (ms, optional) |
+| `onItemAppend` | `number` | Timeout for onItemAppend hook (ms, optional) |
+| `projectHistory` | `number` | Timeout for projectHistory hook (ms, optional) |
 
 ## ProjectionPolicy
 
@@ -387,7 +406,7 @@ interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknow
   description: string;
   input: ZodType<TInput>;
   output: ZodType<TOutput>;
-  execute: (args: TInput, state: TState) => Promise<TOutput>;
+  execute(args: TInput, state: TState, ctx: ExecutionContext): Promise<{ result: TOutput; state?: TState }>;
 }
 ```
 
@@ -397,17 +416,19 @@ interface LayerFunctionDecl<TInput = unknown, TOutput = unknown, TState = unknow
 | `description` | `string` | Human-readable description for the LLM |
 | `input` | `ZodType<TInput>` | Zod schema for input validation |
 | `output` | `ZodType<TOutput>` | Zod schema for output validation |
-| `execute` | `(args: TInput, state: TState) => Promise<TOutput>` | Execution function |
+| `execute` | `(args: TInput, state: TState, ctx: ExecutionContext) => Promise<{ result: TOutput; state?: TState }>` | Execution function. Returns the result plus an optional state update; omit `state` to leave the layer's state untouched. |
 
 ## Builder Functions
 
 ### layerData
 
 ```ts validate=none
-function layerData<T, TState>(read: (state: TState) => T): LayerDataDecl<T, TState>;
+function layerData<T, TState>(opts: {
+  read: (state: TState) => T;
+}): LayerDataDecl<T, TState>;
 ```
 
-Creates a `LayerDataDecl` that derives a value from layer state.
+Creates a `LayerDataDecl` that derives a value from layer state. Takes an options object with a single `read` function.
 
 ### layerFn
 
@@ -416,16 +437,20 @@ function layerFn<TInput, TOutput, TState>(opts: {
   description: string;
   input: ZodType<TInput>;
   output: ZodType<TOutput>;
-  execute: (args: TInput, state: TState) => Promise<TOutput>;
+  execute: (
+    args: TInput,
+    state: TState,
+    ctx: ExecutionContext,
+  ) => Promise<{ result: TOutput; state?: TState }>;
 }): LayerFunctionDecl<TInput, TOutput, TState>;
 ```
 
-Creates a `LayerFunctionDecl` that exposes a callable function on the memory object.
+Creates a `LayerFunctionDecl` that exposes a callable function on the memory object. `execute` returns `{ result, state? }`; include `state` to persist an updated layer state.
 
 ### memory
 
 ```ts validate=none
-function memory<TLayers extends MemoryLayer[]>(...layers: TLayers): MemoryConfig<TLayers>;
+function memory<const T extends readonly MemoryLayer[]>(layers: T): MemoryConfig<T>;
 ```
 
-Collects layers into a `MemoryConfig` with inferred `_shape`. Pass the result to `StepSpawn.memory` or `AgentConfig` to get typed `ctx.memory` access.
+Collects an **array** of layers into a `MemoryConfig` with inferred `_shape` — e.g. `memory([workingMemory(), planMemory()])`. Pass the result to `StepSpawn.memory` or `AgentConfig` to get typed `ctx.memory` access.

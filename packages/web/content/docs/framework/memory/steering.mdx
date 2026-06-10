@@ -1,0 +1,92 @@
+---
+title: Steering
+description: A memory layer that enforces behavioral rules before tool calls and after model responses, with programmatic and LLM-evaluated rules.
+---
+
+## Overview
+
+The Steering layer evaluates rules at the two enforcement points the runtime exposes: `beforeToolCall` (block or guide a pending tool call) and `afterModelCall` (review a model response). Rules are either **programmatic** (a synchronous predicate) or **LLM-evaluated** (a secondary model call that returns an ALLOW / DENY / GUIDE verdict). Every evaluation is recorded in a bounded per-scope ledger.
+
+- **Slot**: `90` (`Slot.STEERING`) — runs before all other layers so policy enforcement precedes side effects
+- **Default scope**: `execution`
+- **Default budget**: `{ min: 0, max: 500 }` (recall only emits queued async feedback)
+- **Hook timeouts**: `beforeToolCall` `5000` ms, `afterModelCall` `10000` ms
+
+## Usage
+
+```ts
+import { steering, SteeringAction } from '@noetic-tools/core';
+import type { AfterModelCallParams, BeforeToolCallParams } from '@noetic-tools/core';
+
+const layer = steering({
+  rules: [
+    {
+      id: 'no-delete-outside-workspace',
+      appliesTo: ['beforeToolCall'],
+      predicate: (params: BeforeToolCallParams | AfterModelCallParams) => {
+        if (!('toolName' in params) || params.toolName !== 'deleteFile') {
+          return { action: SteeringAction.Allow };
+        }
+        const args = params.toolArgs as { path: string };
+        if (!args.path.startsWith('/workspace/')) {
+          return {
+            action: SteeringAction.Deny,
+            guidance: 'Deletion outside /workspace/ is not allowed.',
+          };
+        }
+        return { action: SteeringAction.Allow };
+      },
+    },
+  ],
+});
+```
+
+## Configuration
+
+```ts validate=none
+interface SteeringConfig {
+  rules: SteeringRule[];
+  maxLedgerEntries?: number;  // default 100
+  maxRetries?: number;        // default 1
+  scope?: MemoryScope;        // default 'execution'
+}
+
+interface SteeringRule {
+  id: string;
+  name?: string;
+  appliesTo: ('beforeToolCall' | 'afterModelCall')[];
+  /** Programmatic check. Returns a SteeringDecision; omit to use llmEval. */
+  predicate?: (params: BeforeToolCallParams | AfterModelCallParams) => SteeringDecision;
+  /** LLM-evaluated rule. `mode` decides whether the verdict blocks the hook. */
+  llmEval?: {
+    mode: 'sync' | 'async';
+    prompt: string;
+    model?: string; // defaults to 'openai/gpt-4o-mini'
+  };
+}
+
+interface SteeringDecision {
+  action: 'allow' | 'deny' | 'guide';
+  guidance?: string;
+}
+```
+
+## How Rules Are Evaluated
+
+For each hook invocation, the layer runs every rule whose `appliesTo` includes that hook, in order:
+
+1. **Programmatic rules** call `predicate(params)`. A `deny` decision short-circuits evaluation immediately.
+2. **Sync LLM rules** (`llmEval.mode: 'sync'`) block the hook: the rule's prompt plus a context summary (tool name and args, or response item count) is sent to the eval model, which must respond with exactly `ALLOW`, `DENY`, or `GUIDE: <guidance>`. The verdict keyword is matched case-insensitively on a word boundary; guidance text is preserved verbatim. Unparseable output is retried up to `maxRetries`; on exhaustion the rule passes (`allow`).
+3. **Async LLM rules** (`llmEval.mode: 'async'`) never block: the evaluation is fired and forgotten, and any non-allow verdict is queued.
+
+The hook's aggregate decision is the **most restrictive** across rules (deny > guide > allow). A deny surfaces to the agent as a `NoeticError` of kind `steering_denied`, with the rule's `guidance` attached so the model can correct course.
+
+LLM-evaluated rules require a configured model provider: if `ctx.callModel` is unavailable, the layer throws a `NoeticConfigError` with code `MISSING_CALL_MODEL` — fail-closed, so security rules cannot be silently bypassed.
+
+## Async Feedback Delivery
+
+Async verdicts resolve outside the hook, so they are delivered on the **next recall**: the layer's `recall` drains the pending queue and injects the verdicts as a `<steering_feedback>` block (one `[ruleId] guidance` line each). Each verdict is delivered exactly once; a verdict resolving mid-turn is never lost — it simply surfaces one recall later.
+
+## The Ledger
+
+Every `beforeToolCall` and `afterModelCall` evaluation appends a `LedgerEntry` (tool name/args or token usage, the action taken, and any guidance), and `onComplete` appends a final entry with the execution outcome. The ledger is capped at `maxLedgerEntries` (oldest dropped) and is readable via `getLayerState(executionId, 'steering')`. On spawn, the child inherits a clone of the ledger but starts with an empty async-feedback queue.

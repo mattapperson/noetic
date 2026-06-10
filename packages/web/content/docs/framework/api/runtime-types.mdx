@@ -12,6 +12,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   readonly config: AgentConfig<TParams>;
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
+  readonly subprocess: SubprocessAdapter;
   readonly rootCwdState: { cwd: string; previousCwd?: string };
 
   callModel(request: CallModelRequest): Promise<LLMResponse>;
@@ -44,13 +45,42 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
     cwdInit?: string;
   }): Context;
 
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void>;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
 
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  recallLayersAtomic(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]>;
+  recallLayersEventual(
+    layers: MemoryLayer[],
+    input: string,
+    ctx: Context,
+    budgets: Map<string, number>,
+  ): Promise<RecallLayerOutput[]>;
+  projectHistory(
+    layers: MemoryLayer[],
+    items: ReadonlyArray<Item>,
+    ctx: Context,
+  ): Promise<ReadonlyArray<Item>>;
+  runAppendPipeline(
+    layers: MemoryLayer[],
+    items: Item[],
+    ctx: Context,
+  ): Promise<{ items: Item[]; rerenderRequests: RerenderRequest[] }>;
+  executeRerender(
+    requests: RerenderRequest[],
+    layers: MemoryLayer[],
+    ctx: Context,
+    budgets: Map<string, number>,
+    query?: string,
+  ): Promise<RecallLayerOutput[]>;
   previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
@@ -70,6 +100,13 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   cancel(ctx: Context, reason?: string): Promise<void>;
   createSpan(name: string, parent: Span | null): Span;
 }
+
+declare interface RerenderRequest {
+  layerId: string;
+  slot: number;
+  timing: 'immediate' | 'batched';
+  scope: 'self' | 'slot-after' | 'all';
+}
 ```
 
 ### AgentHarnessContract Methods
@@ -79,6 +116,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
 | `config` | The `AgentConfig<TParams>` the harness was constructed with. |
 | `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and memory layers — route through this adapter. |
 | `shell` | The `ShellAdapter` (defaults to `createLocalShellAdapter()`). Tools that need a real shell go through this. |
+| `subprocess` | The `SubprocessAdapter` used by `step.run.subprocess` requests and detached spawns. Defaults to an in-memory adapter. |
 | `rootCwdState` | Long-lived shared cwd state, seeded into every root context the harness creates so successive runs and the TUI observe each other's `cd`s. |
 | `callModel(request)` | Issue a single LLM call, bypassing the session/queue runner. Used by plugins that need one-shot generation. |
 | `execute(input, options?)` | Enqueue a message on the session identified by `options.threadId`. Resolves once the message is accepted into the queue — not when the model responds. |
@@ -95,12 +133,17 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
 | `run(step, input, ctx)` | Run a step with the given input and context. |
 | `detachedSpawn(step, input, parentCtx, overrides?)` | Launch a step concurrently, returning a `DetachedHandle`. Optional `overrides.threadId` / `overrides.resourceId` / `overrides.cwdInit` decouple the child's session-scoped state from the parent's. |
 | `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
-| `send(channel, value, ctx)` | Send a value to a channel. |
-| `recv(channel, ctx, opts?)` | Receive from a channel (blocking). |
+| `send(channel, value, ctx)` | Send a value to a channel. Returns a `Promise<void>` that resolves immediately unless the target queue channel is at capacity, in which case the send parks until a consumer frees a slot (back-pressure; default 30s timeout → `channel_timeout`, abort → `cancelled`). |
+| `recv(channel, ctx, opts?)` | Receive from a channel (blocking). Rejects with kind `'cancelled'` when the context is aborted while waiting. |
 | `tryRecv(channel, ctx)` | Non-blocking receive. |
 | `getChannelHandle(channel, executionId)` | Get external channel handle. |
 | `initLayers(layers, ctx, storage)` | Initialize memory layers. |
 | `recallLayers(layers, input, ctx)` | Run recall on all layers. |
+| `recallLayersAtomic(layers, input, ctx, budgets)` | Run recall on the atomic-mode layers only, blocking until each completes within its budget. |
+| `recallLayersEventual(layers, input, ctx, budgets)` | Serve recall for eventual-mode layers from cache without blocking; the cache refreshes after `store()`. |
+| `projectHistory(layers, items, ctx)` | Run each layer's `projectHistory` hook in slot order to project (cap, transform) the history portion of the context window. Read-side only. |
+| `runAppendPipeline(layers, items, ctx)` | Run input items through each layer's `onItemAppend` hook in slot order, returning the transformed items plus any re-render requests. |
+| `executeRerender(requests, layers, ctx, budgets, query?)` | Re-run recall for the layers selected by the given re-render requests and return their fresh outputs. |
 | `previewRequestItems(scope?)` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs. Read-mostly; no session is allocated for unknown thread ids. |
 | `storeLayers(layers, response, ctx)` | Run store on all layers. |
 | `disposeLayers(layers, ctx)` | Dispose all layers. |

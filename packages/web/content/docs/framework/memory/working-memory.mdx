@@ -8,7 +8,7 @@ description: A scratchpad memory layer that persists structured or free-form not
 Working Memory is the simplest built-in memory layer. It acts as a scratchpad that the agent can read and write each turn. The LLM sees the current state as a `<working_memory>` block in the prompt, and updates it by calling an `updateWorkingMemory` tool.
 
 - **Slot**: `100` (`Slot.WORKING_MEMORY`)
-- **Default scope**: `execution`
+- **Default scope**: `thread`
 - **Default budget**: `{ min: 200, max: 1500 }`
 
 ## Usage
@@ -56,7 +56,7 @@ interface WorkingMemoryConfig {
 type WorkingMemoryState = string | Record<string, unknown>;
 ```
 
-When no `schema` is provided, state is a plain string. When a schema is provided, state is an object and updates are shallow-merged.
+When no `schema` is provided, state is a plain string. When a schema is provided, state is an object and updates are deep-merged: object-valued keys merge recursively, while arrays and primitives replace. Prototype-pollution keys (`__proto__`, `constructor`) are stripped at every depth.
 
 ## How It Works
 
@@ -122,4 +122,4 @@ Because `update` is a `layerFn`, the runtime automatically injects it as an LLM 
 
 ### Backward Compatibility
 
-The `store` hook also detects the legacy `updateWorkingMemory` function-call convention. If the model emits an `updateWorkingMemory` call (rather than `working-memory/update`), the layer handles it identically -- shallow-merging the arguments into state.
+The `store` hook also detects the legacy `updateWorkingMemory` function-call convention. If the model emits an `updateWorkingMemory` call (rather than `working-memory/update`), the layer handles it identically -- deep-merging the arguments into state.

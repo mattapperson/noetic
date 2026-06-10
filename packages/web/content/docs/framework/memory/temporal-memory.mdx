@@ -1,0 +1,89 @@
+---
+title: Temporal Memory
+description: An LLM-backed memory layer that distills the conversation into a ledger of timestamped facts and answers relative-time queries on demand.
+---
+
+## Overview
+
+Temporal Memory addresses a failure class that pure recall cannot fix: relative-date arithmetic and event ordering ("what did I do three weeks ago?"). It buffers conversation text, distills it into a key-value ledger of timestamped facts (key = ISO-8601 timestamp), and exposes a `temporal/searchMemory` tool for time-anchored lookup. By default it also injects a `<current_datetime>` grounding block on every recall so the model can resolve relative time deterministically.
+
+- **Slot**: `80` (`Slot.REMINDER`)
+- **Default scope**: `resource`
+- **Default budget**: `{ min: 0, max: 200 }` (`max: 800` when `injectLedger` is on)
+- **Hook timeouts**: `store` and `onItemAppend` both `60000` ms (both run the LLM-backed extraction path)
+
+## Usage
+
+```ts validate=none
+import { temporalMemory } from '@noetic-tools/core';
+
+const layer = temporalMemory({
+  extract: async ({ transcript, now }) => {
+    // LLM call that returns [{ ts: '2026-06-01T10:00:00Z', fact: '...' }, ...]
+    return extractFacts(transcript, now);
+  },
+  search: async ({ query, facts, now }) => {
+    // LLM call that returns { facts, date?, fuzzy? }
+    return searchFacts(query, facts, now);
+  },
+});
+```
+
+## Configuration
+
+```ts validate=none
+interface TemporalMemoryConfig {
+  now?: () => Date;
+  scope?: MemoryScope;
+  extract?: FactExtractor;
+  search?: FactSearcher;
+  bufferThreshold?: number;
+  maxFacts?: number;
+  groundDateTime?: boolean;
+  injectLedger?: boolean;
+}
+
+type FactExtractor = (input: { transcript: string; now: string }) => Promise<TemporalFact[]>;
+type FactSearcher = (input: {
+  query: string;
+  facts: ReadonlyArray<TemporalFact>;
+  now: string;
+}) => Promise<TemporalSearchResult>;
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `now` | `() => Date` | system clock | Injectable clock for date grounding and extraction (tests/replay) |
+| `scope` | `MemoryScope` | `'resource'` | Persistence boundary (long-term, cross-session by default) |
+| `extract` | `FactExtractor` | -- | LLM-backed fact extractor. Omitted → the layer only buffers; it never fabricates facts |
+| `search` | `FactSearcher` | -- | LLM-backed fact searcher. Omitted → `searchMemory` returns the raw ledger |
+| `bufferThreshold` | `number` | `2000` | Buffered tokens that trigger an extraction pass |
+| `maxFacts` | `number` | `200` | Maximum facts retained (oldest dropped beyond this) |
+| `groundDateTime` | `boolean` | `true` | Inject a `<current_datetime>` grounding block on recall |
+| `injectLedger` | `boolean` | `false` | Also inject a `<remembered_facts>` block on recall (vs. on-demand via the search tool) |
+
+## How It Works
+
+- **`recall`** — When `groundDateTime` is on, emits a `<current_datetime>` block (no LLM call) so the model can compute date differences explicitly. When `injectLedger` is on, also emits a `<remembered_facts>` block, greedily including the most recent facts first within the allocated budget. Returns `null` when both are off/empty.
+- **`store`** — Buffers text from **assistant output**. Once buffered tokens reach `bufferThreshold` and an `extract` callback is configured, distills the buffer into ledger facts, clears the buffer, and bumps the state version.
+- **`onItemAppend`** — Buffers **user input and tool output** into the same buffer, so facts come from the full conversation rather than only the model's replies.
+- **`onSpawn`** — Deep-clones state to the child execution.
+- **Ledger cap** — `maxFacts` is enforced per *fact*, not per timestamp: when over the cap, facts are flattened chronologically and only the newest `maxFacts` are kept, so one oversized extraction cannot evict the just-added newest facts.
+
+## The `searchMemory` Tool
+
+The layer provides one `layerFn`, exposed to the model as the `temporal/searchMemory` tool and to code as `ctx.memory['temporal'].searchMemory({ query })`:
+
+```ts validate=none
+type TemporalSearchResult = {
+  facts: string[];   // matching facts, most relevant first
+  date?: string;     // resolved date when the query implies one
+  fuzzy?: boolean;   // true when the date is approximate
+};
+```
+
+Without an injected `search` callback the tool degrades gracefully, returning the raw `[ts] fact` ledger.
+
+## Design
+
+The layer is LLM-agnostic: `extract` and `search` are host-injected (mirroring `observationalMemory`'s `observer`), keeping the memory package tree-shakable. The code agent wires structured `step.llm` calls as the callbacks and installs `temporalMemory()` in its default stack.

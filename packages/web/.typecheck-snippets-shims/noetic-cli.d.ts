@@ -14,10 +14,10 @@ export interface AgentOverride {
 }
 
 export interface AgentConfig {
-  model?: string;
-  cwd?: string;
-  apiKey?: string;
-  maxTurns?: number;
+  model: string;
+  cwd: string;
+  apiKey: string;
+  maxTurns: number;
   systemPrompt?: string;
   systemPromptMode?: 'compose' | 'replace';
   trustProjectEmbeddedCommands?: boolean;
@@ -83,6 +83,64 @@ export interface PluginContext {
   pluginStorage: (scope: 'project' | 'user') => StorageAdapter;
 }
 
+export type LocalCommandResult =
+  | {
+      type: 'text';
+      value: string;
+    }
+  | {
+      type: 'skip';
+    }
+  | {
+      type: 'prompt';
+      value: string;
+    };
+
+export interface CommandContext {
+  config: AgentConfig;
+  cwd: string;
+  clearSession: () => void;
+}
+
+export interface CommandBase {
+  name: string;
+  aliases?: ReadonlyArray<string>;
+  description: string;
+  isEnabled?: () => boolean;
+  isHidden?: boolean;
+}
+
+export type LocalCommandCall = (args: string, ctx: CommandContext) => Promise<LocalCommandResult>;
+
+export type LocalCommand = {
+  type: 'local';
+  load: () => Promise<{
+    call: LocalCommandCall;
+  }>;
+};
+
+export type LocalJsxCommandCall = (
+  onDone: (
+    result?:
+      | string
+      | {
+          type: 'prompt';
+          value: string;
+        },
+  ) => void,
+  ctx: CommandContext,
+  args: string,
+) => Promise<unknown>;
+
+export type LocalJsxCommand = {
+  type: 'local-jsx';
+  load: () => Promise<{
+    call: LocalJsxCommandCall;
+  }>;
+};
+
+export type Command = CommandBase & (LocalCommand | LocalJsxCommand);
+
 export interface NoeticPlugin {
   name: string;
   version: string;
@@ -91,11 +149,7 @@ export interface NoeticPlugin {
     ctx: PluginContext,
   ) => ReadonlyArray<MemoryLayer> | Promise<ReadonlyArray<MemoryLayer>>;
   skills?: (ctx: PluginContext) => ReadonlyArray<unknown> | Promise<ReadonlyArray<unknown>>;
-  commands?: (ctx: PluginContext) => ReadonlyArray<{
-    name: string;
-    description: string;
-    execute: (input: string, session: unknown) => Promise<unknown> | unknown;
-  }>;
+  commands?: (ctx: PluginContext) => ReadonlyArray<Command> | Promise<ReadonlyArray<Command>>;
   subagentPresets?: () => Record<string, unknown> | Promise<Record<string, unknown>>;
   reminderTriggers?: (
     ctx: PluginContext,

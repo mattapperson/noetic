@@ -107,8 +107,8 @@ Context exposes three methods for communicating over [Channels](/docs/framework/
 
 | Method | Signature | Description |
 |---|---|---|
-| `recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for the next value. Throws `channel_timeout` if the timeout expires. |
-| `send` | `send<T>(channel: Channel<T>, value: T): void` | Push a value into a channel. |
+| `recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for the next value. Throws `channel_timeout` if the timeout expires; rejects with `cancelled` if the context is aborted while waiting. |
+| `send` | `send<T>(channel: Channel<T>, value: T): Promise<void>` | Push a value into a channel. Resolves immediately for value/topic channels and for queue channels below capacity; when a queue channel is full, the promise parks until a consumer frees a slot (back-pressure; default 30s timeout → `channel_timeout`, abort → `cancelled`). |
 | `tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 
 ```ts
@@ -167,7 +167,7 @@ Signals that the execution should be cancelled. After calling `abort`:
 | `ctx.aborted` | `true` |
 | `ctx.abortReason` | The reason string you passed |
 
-Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` error if set.
+Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` error if set. Aborting also promptly rejects any blocked `recv` waiters and parked `send` calls on this context with a `cancelled` error, so channel-blocked steps unwind immediately instead of waiting out their timeouts.
 
 ## Item Types
 

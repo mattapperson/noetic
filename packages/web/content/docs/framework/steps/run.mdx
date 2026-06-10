@@ -52,6 +52,7 @@ declare const stepRun: <TMemory, I, O>(
 | `id` | `string` | Yes | Unique step identifier |
 | `execute` | `(input: I, ctx: Context<TMemory>) => Promise<O>` | Yes | The async function to run |
 | `retry` | `RetryPolicy` | No | Retry configuration on failure |
+| `subprocess` | `SubprocessAdapter` | No | Per-step subprocess adapter override. When set, the interpreter dispatches this step through the given adapter instead of the harness default (resolution order: `detachedSpawn` overrides → `step.subprocess` → `harness.subprocess`) |
 
 ### RetryPolicy
 

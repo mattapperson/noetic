@@ -26,11 +26,15 @@ const chat = step.llm({
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `model` | `string` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`) |
-| `instructions` | `string` | No | System prompt prepended to the conversation |
-| `tools` | `Tool[]` | No | Allowed tool subset (`undefined` = all, `[]` = none) |
+| `model` | `Lazy<string>` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`), or a `(ctx) => string` getter resolved per execution |
+| `instructions` | `Lazy<string \| undefined>` | No | System prompt prepended to the conversation. Accepts a `(ctx) => string \| undefined` getter |
+| `tools` | `Lazy<Tool[] \| undefined>` | No | Allowed tool subset (`undefined` = all, `[]` = none). Accepts a `(ctx) => Tool[] \| undefined` getter; function-form tools are resolved per execution and do not contribute to the pre-computed `ctx.unifiedTools` |
 | `output` | `ZodType<O>` | No | Zod schema for structured output |
 | `params` | `ModelParams` | No | Generation parameters |
+| `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step. Defaults to `true`; `false` suppresses all framework events; a filter function decides per event |
+| `projection` | `ProjectionPolicy` | No | Projection policy for this step's context window, overriding the harness-level default |
+
+`Lazy<T>` means `T | ((ctx: Context) => T | Promise<T>)` — pass a plain value, or a function that the interpreter resolves against the live context each time the step runs (useful for model routing, dynamic prompts, and context-dependent tool sets).
 
 ### ModelParams
 

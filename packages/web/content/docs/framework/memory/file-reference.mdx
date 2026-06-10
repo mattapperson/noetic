@@ -1,0 +1,71 @@
+---
+title: File Reference
+description: A memory layer that tracks #path file references in user messages and injects priority-scored file contents into the context.
+---
+
+## Overview
+
+The File Reference layer watches user messages for `#path/to/file.ts`-style references. Each referenced file is read, scored for relevance, and injected into the context as a `# Referenced Files` developer message, ordered by priority. On every new message the layer re-checks tracked files for changes and triggers an immediate context re-render when content has changed, so the model always sees current file contents.
+
+- **Slot**: `350` (`Slot.RAG`) by default
+- **Scope**: `thread`
+- **Budget**: `'auto'`
+- **Re-render timing**: `immediate`
+- **Hook timeouts**: `onItemAppend` `30000` ms — it reads files *and* runs an LLM scoring call per new reference, so the 5s pipeline default would silently drop the transform
+
+## Usage
+
+```ts
+import { fileReference } from '@noetic-tools/core';
+
+const layer = fileReference({
+  baseDir: '/workspace/my-project',
+  maxFileSize: 512 * 1024,
+});
+```
+
+A user message like `Look at #src/index.ts and #package.json` tracks both files; the reference text is rewritten to markdown anchor links (`[#src/index.ts](#src-index-ts)`).
+
+## Configuration
+
+```ts validate=none
+interface FileReferenceOptions {
+  baseDir?: string;             // base for resolving relative paths (default: cwd)
+  slot?: number;                // default Slot.RAG (350)
+  scoringModel?: string;        // model for priority scoring
+  maxFileSize?: number;         // default 1 MB
+  followSymlinks?: boolean;     // default false (security)
+  allowedExtensions?: string[]; // default: common code/text extensions
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `baseDir` | `string` | `process.cwd()` | All references resolve relative to this directory |
+| `slot` | `number` | `350` | Position of injected file contents |
+| `scoringModel` | `string` | a small fast model | Used for the relevance-scoring LLM call |
+| `maxFileSize` | `number` | `1048576` | Files larger than this are rejected with `FILE_TOO_LARGE` |
+| `followSymlinks` | `boolean` | `false` | When `false`, any symlinked path component is rejected |
+| `allowedExtensions` | `string[]` | code/text set | Extension (or exact filename, e.g. `Dockerfile`) allowlist |
+
+## How It Works
+
+### onItemAppend
+
+1. Scans incoming user messages for the `#path` pattern (requires a file-like shape — `#hashtag`, `#123`, `#region` are not matched).
+2. New references are read and **priority-scored 0-100** via an LLM call against the current user query (path-match heuristic when no model is available; parse failures default to 50). Absolute paths are rejected — only relative paths under `baseDir` are allowed.
+3. Already-tracked files are re-read for **change detection** (content hash); changes, deletions, and reappearances update the tracked state and request an immediate re-render.
+4. Reference text in the message is transformed into markdown anchor links.
+
+### recall
+
+Injects a `# Referenced Files` developer message containing each tracked file's content in a fenced block, ordered by priority (highest first) and trimmed to fit the layer budget (head + tail with a truncation marker for oversized files). Deleted or unreadable files contribute a short warning block instead of content.
+
+## Security
+
+Reads go through several gates, each producing a tracked error instead of file content:
+
+- **Containment** — the resolved path must stay within `baseDir` (`PATH_TRAVERSAL` otherwise).
+- **Symlink rejection** — unless `followSymlinks: true`, every path component below `baseDir` is `lstat`-checked and any symlink (directory or leaf) is rejected. Lexical containment alone is not enough: `baseDir/link → /etc` keeps the unresolved string inside `baseDir` while the OS resolves the symlink and escapes the sandbox.
+- **Extension allowlist** — `DISALLOWED_EXTENSION` for anything not in `allowedExtensions`.
+- **Size cap** — `FILE_TOO_LARGE` beyond `maxFileSize`.

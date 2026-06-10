@@ -1,0 +1,58 @@
+---
+title: Static Content
+description: A read-only memory layer that loads instructional content once at init and injects it into every recall, wrapped in an XML tag.
+---
+
+## Overview
+
+Static Content is the simplest way to put fixed instructional material — style guides, project conventions, persona text — in front of the model on every turn. The content is loaded once by an async `load` function at `init`, wrapped in an XML tag, and returned verbatim from `recall`.
+
+- **Default slot**: `105` (`Slot.WORKING_MEMORY + 5`)
+- **Default scope**: `resource`
+- **Budget**: none declared (treated as `'auto'`)
+
+## Usage
+
+```ts validate=none
+import { staticContent } from '@noetic-tools/core';
+
+const conventions = staticContent({
+  id: 'project-conventions',
+  tag: 'project_conventions',
+  load: async () => readFile('CONVENTIONS.md', 'utf-8'),
+});
+```
+
+The model then sees:
+
+```text
+<project_conventions>
+...file contents...
+</project_conventions>
+```
+
+## Configuration
+
+```ts validate=none
+interface StaticContentOpts {
+  id?: string;            // default 'static-content'
+  slot?: number;          // default Slot.WORKING_MEMORY + 5
+  scope?: MemoryScope;    // default 'resource'
+  load: () => Promise<string>;
+  tag?: string;           // default 'instructions'
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `id` | `string` | `'static-content'` | Layer id — set one per instance when stacking several static layers |
+| `slot` | `number` | `105` | Position in the assembled view |
+| `scope` | `MemoryScope` | `'resource'` | Persistence boundary |
+| `load` | `() => Promise<string>` | required | Loads the content once at `init`. An empty result yields an empty layer |
+| `tag` | `string` | `'instructions'` | XML tag name wrapping the content |
+
+## Behavior
+
+- **`init`** — calls `load()` once and stores the content wrapped as `<tag>...</tag>`. An empty load result stores the empty string, and `recall` then contributes nothing.
+- **`recall`** — returns the stored block as-is. When the content exceeds the allocated budget, it is trimmed to fit **while keeping the XML well-formed**: the text is cut to the budget (minus the closing tag) and the closing `</tag>` is re-appended.
+- **Zero budget fails open** — a `budget` of `0` (or negative) skips the trim entirely and returns the full content rather than silently dropping load-bearing instructions.

@@ -13,7 +13,10 @@ The `worktree` namespace mirrors a subset of [worktrunk's](https://worktrunk.dev
 import type { AgentConfig } from '@noetic-tools/cli';
 
 export default {
-  // ...
+  model: 'anthropic/claude-sonnet-4.5',
+  cwd: process.cwd(),
+  apiKey: process.env.OPENROUTER_API_KEY ?? '',
+  maxTurns: 50,
   worktree: {
     'worktree-path': '{{ repo_path }}/.worktrees/{{ agent_id | sanitize }}',
     branch: 'noetic/{{ agent_id }}',
@@ -34,6 +37,8 @@ export default {
   },
 } satisfies AgentConfig;
 ```
+
+(`model`, `cwd`, `apiKey`, and `maxTurns` are required on `AgentConfig`; the `worktree` namespace is the part this page is about.)
 
 ## Lifecycle
 

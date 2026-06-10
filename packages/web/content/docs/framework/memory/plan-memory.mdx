@@ -5,7 +5,7 @@ description: PRD authoring and plan execution lifecycle with tool restrictions d
 
 ## Overview
 
-Plan Memory manages a structured planning workflow: the agent enters a restricted "plan mode" where only read-only tools are allowed, writes a PRD document, structures a `PlanNode` execution tree, then exits to execute the plan with full tool access.
+Plan Memory manages a structured planning workflow: the agent enters a restricted "plan mode" where only read-only tools are allowed, writes a PRD document, optionally structures a `FlowNode` execution tree, then exits to execute the plan with full tool access.
 
 - **Slot**: `240` (`Slot.PROCEDURAL - 10`)
 - **Scope**: `thread` (default)
@@ -29,6 +29,9 @@ interface PlanMemoryConfig {
   additionalAllowedTools?: string[];
   maxPrdLength?: number;
   maxTreeDepth?: number;
+  additionalPlanInstructions?: string;
+  onEnterSession?: () => Promise<{ slug: string }>;
+  onExit?: (state: PlanState) => Promise<{ approved: boolean }>;
 }
 ```
 
@@ -38,6 +41,9 @@ interface PlanMemoryConfig {
 | `additionalAllowedTools` | `string[]` | -- | Extra tools allowed during plan mode |
 | `maxPrdLength` | `number` | `50000` | Maximum PRD content length |
 | `maxTreeDepth` | `number` | `5` | Maximum plan tree nesting depth |
+| `additionalPlanInstructions` | `string` | -- | Extra free-form instructions appended to the planning-phase recall payload |
+| `onEnterSession` | `() => Promise<{ slug: string }>` | -- | Host callback invoked once on the Idle → Planning transition. Returns a session identifier the host owns (e.g. an on-disk plan directory slug), stored on the state as `planSlug` |
+| `onExit` | `(state: PlanState) => Promise<{ approved: boolean }>` | -- | Host callback invoked when the model requests `plan/exitPlanMode` with `action: 'execute'`. Return `{ approved: false }` to keep the layer in Planning — the model is told the user rejected the plan and should revise it before requesting approval again |
 
 ## Phase Lifecycle
 
@@ -49,6 +55,8 @@ The layer manages a state machine with five phases:
 4. **completed** — Execution succeeded. Outcome recorded.
 5. **failed** — Execution failed or was aborted. Outcome recorded.
 
+When `onExit` is configured, the Planning → Executing transition requires approval: if `onExit` returns `{ approved: false }` (e.g. the user rejected the plan in the UI), the layer stays in **planning** and the model is prompted to address the feedback and call `plan/exitPlanMode` again.
+
 ## LLM Tools
 
 The layer exposes four LLM tools and one data projection via its `provides` map:
@@ -57,7 +65,7 @@ The layer exposes four LLM tools and one data projection via its `provides` map:
 |---|---|
 | `plan/enterPlanMode` | Enter plan mode. Accepts optional `goal` string. |
 | `plan/updatePrd` | Replace PRD content with new markdown. |
-| `plan/setPlanTree` | Set the `PlanNode` execution tree. |
+| `plan/setPlanTree` | Set the optional `FlowNode` execution tree (validated against `FlowSchema`). |
 | `plan/exitPlanMode` | Exit plan mode (`execute` or `cancel`). |
 | `status` (data) | Read-only: `{ phase, hasPrd, hasPlanTree, version }` |
 
@@ -65,19 +73,26 @@ The layer exposes four LLM tools and one data projection via its `provides` map:
 
 During the `planning` phase, `beforeToolCall` restricts tool usage:
 
-- **Allowed**: `Read`, `Grep`, `Find`, `Ls`, `activateSkill`, and all `plan/*` tools
+- **Allowed**: `Read`, `Grep`, `Find`, `Ls`, `AskUserQuestion`, `activateSkill`, the sub-agent coordination tools (`agent`, `checkAgent`, `sendMessage`), `requestPlanApproval`, and all `plan/*` tools
 - **Denied**: All other tools (`Write`, `Edit`, `Bash`, etc.)
 
 Additional tools can be allowed via `additionalAllowedTools` in the config.
 
-## Integration with compilePlan
+## The Plan Tree is a FlowNode
 
-The plan layer stores the `PlanNode` tree produced by the LLM. For programmatic execution, extract the tree and pass it to `compilePlan()`:
+`plan/setPlanTree` stores a **flow** — a JSON-serialisable subset of Noetic's `Step` shape defined by `FlowSchema` (exported from `@noetic-tools/core`):
 
 ```ts validate=none
-import { compilePlan } from '@noetic-tools/core';
-
-const compiled = compilePlan(planTree, agents, constraints);
+type FlowNode =
+  | { kind: 'llm'; id: string; instructions: string; model?: string; tools?: string[] }
+  | { kind: 'subagent'; id: string; preset: string; prompt: string }
+  | { kind: 'fork'; id: string; mode: 'all' | 'race' | 'settle'; paths: FlowNode[] }
+  | { kind: 'spawn'; id: string; child: FlowNode }
+  | { kind: 'sequence'; id: string; steps: FlowNode[] };
 ```
 
-The default CLI flow uses context injection instead — the plan is recalled into the LLM's view and the model executes by making tool calls directly.
+Structural nodes (`sequence`, `fork`, `spawn`) nest child nodes; leaf nodes (`llm`, `subagent`) carry execution instructions. Tool references inside `llm` nodes are name strings, resolved against the harness's live tool registry when the flow runs. The runtime expands each node into a concrete `Step` via the existing builders (`step.llm`, `fork`, `spawn`) at execute time; `validateFlow()`, `walkFlow()`, and `flowDepth()` are the supporting utilities.
+
+This is a different shape from `PlanNode` (`{ id, description, assignee, execution, children }`), which belongs to the standalone `compilePlan()` pattern for compiling task-assignment trees into step graphs — the plan layer's tree cannot be passed to `compilePlan()`.
+
+The default CLI flow uses context injection — the plan is recalled into the LLM's view as an `<active_plan>` block and the model executes by making tool calls directly.

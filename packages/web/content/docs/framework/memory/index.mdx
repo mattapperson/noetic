@@ -14,24 +14,28 @@ Every memory layer implements this interface:
 ```ts validate=none
 interface MemoryLayer<TState = unknown> {
   id: string;
-  name: string;
+  name?: string;
   slot: number;
   scope: MemoryScope;
   budget?: BudgetConfig;
   hooks: MemoryHooks<TState>;
   timeouts?: Partial<LayerTimeouts>;
+  onInitError?: 'throw' | 'disable';
+  recallMode?: 'atomic' | 'eventual';
 }
 ```
 
 | Field | Type | Purpose |
 |---|---|---|
 | `id` | `string` | Unique identifier for the layer |
-| `name` | `string` | Human-readable display name |
+| `name` | `string` (optional) | Human-readable display name |
 | `slot` | `number` | Ordering priority -- lower slots appear first in the assembled view |
 | `scope` | `MemoryScope` | Persistence boundary for stored state |
 | `budget` | `BudgetConfig` | Token budget allocation for this layer |
 | `hooks` | `MemoryHooks<TState>` | Lifecycle callbacks |
 | `timeouts` | `Partial<LayerTimeouts>` | Per-hook timeout overrides in milliseconds |
+| `onInitError` | `'throw' \| 'disable'` | What to do when `init` throws: `'throw'` (default) aborts the execution; `'disable'` skips this layer for the run |
+| `recallMode` | `'atomic' \| 'eventual'` | Whether `recall()` blocks the model call (`'atomic'`, default) or is served from a cache that refreshes after `store()` (`'eventual'`) |
 
 ## Slot Constants
 
@@ -39,6 +43,8 @@ Slots determine the order in which layer outputs are injected into the prompt. L
 
 ```ts validate=none
 const Slot = {
+  REMINDER: 80,
+  STEERING: 90,
   WORKING_MEMORY: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
@@ -120,6 +126,9 @@ init → recall → [LLM call] → store → ... (loop) → onComplete → dispo
 | `init` | Agent starts | Load persisted state from storage |
 | `recall` | Before each LLM call | Inject items into the prompt |
 | `projectHistory` | Before each LLM call, after `recall` | Cap or transform the history items projected to the LLM (read-side; never mutates `itemLog`) |
+| `onItemAppend` | Input items about to be appended | Filter, transform, or inject user/tool input items; may request a context re-render. Layers compose in slot order. Not called for LLM response items |
+| `beforeToolCall` | Before each tool execution | Steering: allow, deny, or guide the pending tool call |
+| `afterModelCall` | After each LLM response | Steering: review the response and allow, deny, or guide |
 | `store` | After each LLM response | Extract and persist new knowledge |
 | `onSpawn` | Child agent spawned | Decide what state the child inherits |
 | `onReturn` | Child agent completes | Merge child results back into parent state |
@@ -131,8 +140,11 @@ init → recall → [LLM call] → store → ... (loop) → onComplete → dispo
 ```ts validate=none
 interface MemoryHooks<TState = unknown> {
   init?: (params: InitParams) => Promise<InitResult<TState>>;
-  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | null>;
+  recall?: (params: RecallParams<TState>) => Promise<RecallResult<TState> | string | null>;
   projectHistory?: (params: ProjectHistoryParams<TState>) => Promise<ProjectHistoryResult>;
+  onItemAppend?: (params: OnItemAppendParams<TState>) => Promise<OnItemAppendResult<TState>>;
+  beforeToolCall?: (params: BeforeToolCallParams<TState>) => Promise<BeforeToolCallResult<TState>>;
+  afterModelCall?: (params: AfterModelCallParams<TState>) => Promise<AfterModelCallResult<TState>>;
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
@@ -140,6 +152,8 @@ interface MemoryHooks<TState = unknown> {
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
 }
 ```
+
+`recall` may return a bare `string` as shorthand — the runtime wraps it in a developer message and estimates its token count — or `null` to contribute nothing this turn.
 
 ## assembleView()
 
@@ -176,10 +190,14 @@ interface LayerTimeouts {
   onReturn?: number;
   onComplete?: number;
   dispose?: number;
+  beforeToolCall?: number;
+  afterModelCall?: number;
+  onItemAppend?: number;
+  projectHistory?: number;
 }
 ```
 
-If a hook exceeds its timeout, the runtime logs a warning and continues without that layer's contribution.
+If a non-init hook exceeds its timeout, the runtime logs a diagnostic and continues without that layer's contribution for that phase. `init` is different: an `init` failure (including timeout) **re-throws and aborts the execution by default** — memory is load-bearing, and silently disabling a layer would hide failures. A layer opts into skip-on-failure by setting `onInitError: 'disable'`, in which case the runtime logs a diagnostic and runs the execution without that layer.
 
 ## Layer Provides API
 
@@ -206,6 +224,10 @@ See [Custom Layers](/docs/framework/memory/custom-layers) for how to define your
 
 - [Working Memory](/docs/framework/memory/working-memory) -- scratchpad for the current turn
 - [Observational Memory](/docs/framework/memory/observational-memory) -- auto-extracted facts
+- [Temporal Memory](/docs/framework/memory/temporal-memory) -- timestamped fact ledger with relative-time recall
+- [Steering](/docs/framework/memory/steering) -- rule-based allow/deny/guide control over tool calls and responses
+- [File Reference](/docs/framework/memory/file-reference) -- `#path` file tracking with priority-scored content injection
+- [Static Content](/docs/framework/memory/static-content) -- load-once instructional content
 - [History Window](/docs/framework/memory/history-window) -- cap items sent to the LLM
 - [Custom Layers](/docs/framework/memory/custom-layers) -- build your own
 - [Plan Memory](/docs/framework/memory/plan-memory) -- PRD authoring and plan execution lifecycle

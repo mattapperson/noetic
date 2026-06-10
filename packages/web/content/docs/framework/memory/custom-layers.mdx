@@ -36,6 +36,8 @@ Built-in slot constants for reference:
 
 | Constant | Value |
 |---|---|
+| `REMINDER` | `80` |
+| `STEERING` | `90` |
 | `WORKING_MEMORY` | `100` |
 | `ENTITY` | `150` |
 | `OBSERVATIONS` | `200` |
@@ -139,6 +141,13 @@ function myCustomLayer(): MemoryLayer<MyLayerState> {
 }
 ```
 
+### Input-side and read-side hooks
+
+Beyond `recall`/`store`, two hooks let a layer shape what the model sees without touching storage:
+
+- **`onItemAppend`** runs when input items (user messages, tool outputs — never LLM responses) are about to be appended. Layers compose in slot order, each receiving the previous layer's output. Return the items to actually append: pass them through unchanged, transform them, return `[]` to drop them, or include extras to inject. The result may also carry an updated `state` and a `rerender: true` request (with optional `timing` and `scope`) to re-run recall mid-turn.
+- **`projectHistory`** runs once per LLM step to project (cap, summarize, redact) the history portion of the context window. It is read-side only — `itemLog` storage is never mutated. See [History Window](/docs/framework/memory/history-window) for a layer built entirely from this hook.
+
 ## Step 6: Set Timeouts (Optional)
 
 If any hook makes network calls or runs LLM inference, set a timeout to prevent hangs:
@@ -151,6 +160,15 @@ const timeouts: Partial<LayerTimeouts> = {
   recall: 10_000,
 };
 ```
+
+Timeouts exist for every hook, including `beforeToolCall`, `afterModelCall`, `onItemAppend`, and `projectHistory`.
+
+### Failure and recall modes
+
+Two top-level fields tune how the runtime treats your layer:
+
+- **`onInitError`** — what happens when `init` throws (or times out). The default `'throw'` aborts the execution: memory is load-bearing, and silently dropping a layer hides failures. Set `'disable'` only for genuinely non-critical layers; the runtime then logs a diagnostic and skips the layer's hooks for the run.
+- **`recallMode`** — `'atomic'` (default) runs `recall()` in the hot path before every model call. Set `'eventual'` for expensive recalls that can tolerate staleness: recall is served from a cache that refreshes after `store()`, so the next turn sees the update and the model call is never blocked. A harness configured with `forceAtomicRecall` overrides this and treats every layer as atomic.
 
 ## Step 7: Register with the Agent
 
@@ -218,7 +236,6 @@ State written by **any** path — `store()` hooks, `provides` functions, `onComp
 |---|---|
 | `parentState` | `TState` |
 | `childCtx` | `ExecutionContext` |
-| `spawnOpts` | `SpawnOptions` |
 
 ### ReturnParams
 
