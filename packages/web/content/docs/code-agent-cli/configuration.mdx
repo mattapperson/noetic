@@ -62,7 +62,7 @@ export default {
 |---|---|---|---|
 | `systemPrompt` | `string` | — | Custom system prompt. See `systemPromptMode` for how it combines with built-ins. |
 | `systemPromptMode` | `'compose' \| 'replace'` | `'compose'` | `compose` replaces only the intro section; cyber-risk, doing-tasks, tone/style, and env-info sections are still appended. `replace` fully replaces the built-in prompt. |
-| `trustProjectEmbeddedCommands` | `boolean` | `false` | If `true`, project-origin AGENT.md and rules files execute `!command` lines at session start. User-origin files (`~/...`) always execute commands. Off by default for supply-chain safety. |
+| `trustProjectEmbeddedCommands` | `boolean` | `false` | If `true`, project-origin AGENT.md/rules files and project-origin skills execute `!command` lines (at session start and on skill activation respectively). User-origin files (`~/...`) and user/built-in/plugin skills always execute commands. Off by default for supply-chain safety. All executed embedded commands pass the Bash tool's preflight (command validation + mutation policy). |
 | `plugins` | `PluginSpec[]` | `[]` | See [Plugins](/docs/code-agent-cli/plugins). |
 | `tools.include` | `string[]` | — | Whitelist of tool names. When set, only these register. |
 | `tools.exclude` | `string[]` | — | Blacklist of tool names. Applied after `include`. |

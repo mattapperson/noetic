@@ -211,7 +211,7 @@ declare interface AgentConfigShape<
 | `storage` | `StorageAdapter` | no | Storage backend for memory persistence. Defaults to an in-memory adapter. |
 | `hooks` | `AgentHooks` | no | Before/after step hooks. |
 | `params` | `TParams` | yes | Arbitrary key-value parameters available to every step and tool via `ctx.harness.config.params`. |
-| `itemSchemas` | `ItemSchemaExtensions` | no | Harness-wide item-schema extensions used to validate emitted and returned items. |
+| `itemSchemas` | `ItemSchemaExtensions` | no | Harness-wide item-schema extensions used to validate emitted and returned items. Global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Extension schemas are gates, not normalizers — the original item is returned on match. Mismatches raise `NoeticError` kind `item_schema_mismatch`. |
 | `strictItemSchemas` | `boolean` | no | Whether unknown extension item types must match a registered schema. Defaults to `true`. |
 
 ## AgentHooks

@@ -529,7 +529,6 @@ export class AgentHarnessModelCaller {
       await this.executeToolRound({
         functionCalls,
         request,
-        roundItemSchemas,
         allItems,
         conversationInput,
         round,
@@ -689,13 +688,12 @@ export class AgentHarnessModelCaller {
       }
     >[];
     request: CallModelRequest;
-    roundItemSchemas: ItemSchemaRegistry;
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     round: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   }): Promise<void> {
-    const { functionCalls, request, roundItemSchemas, allItems, conversationInput } = params;
+    const { functionCalls, request, allItems, conversationInput } = params;
     params.emitIfAllowed('tool_round_started', {
       round: params.round,
       toolCount: functionCalls.length,
@@ -716,7 +714,6 @@ export class AgentHarnessModelCaller {
       await this.executeFunctionCall({
         fc,
         request,
-        roundItemSchemas,
         allItems,
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
@@ -736,12 +733,11 @@ export class AgentHarnessModelCaller {
       }
     >;
     request: CallModelRequest;
-    roundItemSchemas: ItemSchemaRegistry;
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   }): Promise<void> {
-    const { fc, request, roundItemSchemas, allItems, conversationInput } = params;
+    const { fc, request, allItems, conversationInput } = params;
     params.emitIfAllowed('tool_call_started', {
       name: fc.name,
       callId: fc.callId,
@@ -753,7 +749,6 @@ export class AgentHarnessModelCaller {
       this.recordMalformedToolCall({
         fc,
         request,
-        roundItemSchemas,
         allItems,
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
@@ -776,10 +771,13 @@ export class AgentHarnessModelCaller {
       harness: this.opts.harness,
       layers: request.layers,
     });
+    // Owner-scoped result validation: a tool's `toolResults` schemas apply
+    // only to that tool's own result items. Harness-level `opts.itemSchemas`
+    // stay global by design; sibling tools' schemas never reject this item.
     const outputItem = createToolResultItem({
       output: toolResult.output,
       callId: fc.callId,
-      roundItemSchemas,
+      roundItemSchemas: this.opts.itemSchemas.extend(toolForCall?.itemSchemas),
       tool: toolForCall,
       callItem: fc,
       args: parsedArgs,
@@ -807,18 +805,18 @@ export class AgentHarnessModelCaller {
       }
     >;
     request: CallModelRequest;
-    roundItemSchemas: ItemSchemaRegistry;
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   }): void {
-    const { fc, request, roundItemSchemas, allItems, conversationInput } = params;
+    const { fc, request, allItems, conversationInput } = params;
     const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
     const toolForCall = request.tools?.find((tool) => tool.name === fc.name);
+    // Owner-scoped result validation (see executeFunctionCall).
     const outputItem = createToolResultItem({
       output: errorOutput,
       callId: fc.callId,
-      roundItemSchemas,
+      roundItemSchemas: this.opts.itemSchemas.extend(toolForCall?.itemSchemas),
       tool: toolForCall,
       callItem: fc,
       error: true,

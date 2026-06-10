@@ -41,10 +41,18 @@ const MUTATING_COMMANDS = new Set([
   'truncate',
 ]);
 
-const PACKAGE_MUTATION_PATTERN = /\b(?:bun|npm|pnpm|yarn)\s+(?:add|install|i|remove|rm|unlink)\b/;
+// Known gaps, by design ("Probably" — this is a heuristic gate, not an
+// adversarial security boundary): compound commands where the mutator is not
+// the first token (`true && rm -rf x`), `dd of=file`, and interpreter
+// one-liners (`python -c "open(..., 'w')"`) are not detected.
+const PACKAGE_MUTATION_PATTERN =
+  /\b(?:bun|npm|pnpm|yarn)\s+(?:add|install|i|remove|rm|uninstall|unlink|un|ci|update|up|link)\b/;
 const GIT_MUTATION_PATTERN =
-  /\bgit\s+(?:add|am|apply|branch\s+-D|checkout|cherry-pick|clean|commit|merge|mv|rebase|reset|restore|rm|stash|switch|worktree\s+(?:add|move|prune|remove|repair))\b/;
-const IN_PLACE_EDIT_PATTERN = /\b(?:sed|perl)\b[^\n;&|]*\s-[A-Za-z]*i(?:\s|$|['"]|[A-Za-z0-9._-])/;
+  /\bgit\s+(?:add|am|apply|branch\s+(?:-[dDmM]\b|--delete|--move)|checkout|cherry-pick|clean|commit|merge|mv|rebase|reset|restore|rm|stash|switch|worktree\s+(?:add|move|prune|remove|repair))\b/;
+// Matches both short-option in-place forms (`-i`, `-i.bak`, `-ni`, …) and
+// GNU sed's long form (`--in-place`, `--in-place=.bak`).
+const IN_PLACE_EDIT_PATTERN =
+  /\b(?:sed|perl)\b[^\n;&|]*\s(?:-[A-Za-z]*i(?:\s|$|['"]|[A-Za-z0-9._-])|--in-place(?:[=\s]|$))/;
 const REDIRECT_WRITE_PATTERN = /(^|[^0-9])(?:>>?|&>)\s*[^&\s]/;
 
 export function isProbablyMutatingShellCommand(command: string): boolean {

@@ -71,6 +71,15 @@ agent-omit-claude-md: false
 
 The body of `SKILL.md` (everything after the frontmatter) is the **instructions**. When the skill activates, the body is processed (`@import`s resolved, trusted `!command` lines executed) and rendered into context.
 
+### Inline `!command` trust and safety
+
+Inline `!command` lines follow the same trust gate as [AGENT.md](/docs/code-agent-cli/agent-md):
+
+- **User, built-in, and plugin skills** execute embedded commands on activation.
+- **Project-origin skills** (`.noetic/skills`, `.agent/skills` inside the repo) only execute commands when `trustProjectEmbeddedCommands: true` is set in config. Otherwise the `!` lines are left visible but **not executed**, tagged with an explanatory comment — a skill file planted in a cloned repo can't run commands just because the model activates it.
+
+Every command that does execute passes the same preflight pipeline as the Bash tool: banned-command / high-risk-pattern / interactive-TUI validation, plus the mutation-policy approval gate for probably-mutating commands. Blocked commands render as a `<!-- error executing \`cmd\`: blocked: <reason> -->` comment instead of running; activation never throws.
+
 ## How activation works
 
 A skill goes from "discovered" to "activated" in three ways:

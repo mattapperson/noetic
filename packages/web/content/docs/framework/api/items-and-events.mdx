@@ -227,6 +227,12 @@ interface InputMessageItem {
 | `content` | `InputTextPart[]` | Input text content segments |
 | `status` | `string` | Lifecycle status. Includes `failed` as a Noetic extension beyond the Open Responses spec. |
 
+`UserMessageItem` is `InputMessageItem` narrowed to `role: 'user'` — the type the `isUserMessage` guard narrows to:
+
+```ts validate=none
+type UserMessageItem = InputMessageItem & { readonly role: 'user' };
+```
+
 ### FunctionCallOutputItem
 
 Tool execution output created by the harness during the tool loop. This is an input-only item type in Open Responses (sent by the developer, not the model).

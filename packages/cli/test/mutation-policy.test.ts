@@ -81,6 +81,37 @@ describe('mutation policy', () => {
     expect(isProbablyMutatingShellCommand('echo hi > file.txt')).toBe(true);
   });
 
+  test('detects GNU sed --in-place long option', () => {
+    expect(isProbablyMutatingShellCommand("sed --in-place 's/x/y/' file.ts")).toBe(true);
+    expect(isProbablyMutatingShellCommand("sed --in-place=.bak 's/x/y/' file.ts")).toBe(true);
+    expect(isProbablyMutatingShellCommand('sed --in-place')).toBe(true);
+    expect(isProbablyMutatingShellCommand("sed 's/x/y/' file.ts")).toBe(false);
+    expect(isProbablyMutatingShellCommand("perl --in-place -e 's/x/y/' file.ts")).toBe(true);
+  });
+
+  test('detects git branch delete/move/rename flags', () => {
+    expect(isProbablyMutatingShellCommand('git branch -D feature')).toBe(true);
+    expect(isProbablyMutatingShellCommand('git branch -d feature')).toBe(true);
+    expect(isProbablyMutatingShellCommand('git branch -m old new')).toBe(true);
+    expect(isProbablyMutatingShellCommand('git branch -M old new')).toBe(true);
+    expect(isProbablyMutatingShellCommand('git branch --delete feature')).toBe(true);
+    expect(isProbablyMutatingShellCommand('git branch --move old new')).toBe(true);
+    expect(isProbablyMutatingShellCommand('git branch --list')).toBe(false);
+    expect(isProbablyMutatingShellCommand('git branch')).toBe(false);
+  });
+
+  test('detects additional package-manager mutation subcommands', () => {
+    expect(isProbablyMutatingShellCommand('npm uninstall lodash')).toBe(true);
+    expect(isProbablyMutatingShellCommand('npm un lodash')).toBe(true);
+    expect(isProbablyMutatingShellCommand('npm ci')).toBe(true);
+    expect(isProbablyMutatingShellCommand('npm update')).toBe(true);
+    expect(isProbablyMutatingShellCommand('pnpm up')).toBe(true);
+    expect(isProbablyMutatingShellCommand('npm link')).toBe(true);
+    expect(isProbablyMutatingShellCommand('yarn unlink left-pad')).toBe(true);
+    expect(isProbablyMutatingShellCommand('npm ls')).toBe(false);
+    expect(isProbablyMutatingShellCommand('npm view lodash')).toBe(false);
+  });
+
   test('Bash blocks mutating commands before shell execution when policy denies', async () => {
     const { shell, commands } = stubShell();
     const tool = createBashTool('/repo', shell, denyPolicy);

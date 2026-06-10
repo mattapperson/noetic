@@ -19,6 +19,7 @@ type NoeticError =
   | { kind: 'channel_closed';       channelName: string }
   | { kind: 'cancelled';            reason?: string }
   | { kind: 'budget_exceeded';      field: 'cost' | 'steps' | 'duration'; limit: number; actual: number }
+  | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string }
 ```
 
 ---
@@ -53,6 +54,10 @@ The child's work succeeded — don't discard it. Throw `spawn_summary_failed` wi
 ### LLM Parse Error
 
 The LLM returned text that didn't match the Zod schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
+
+### Item Schema Mismatch
+
+Thrown by `ItemSchemaRegistry` when an item fails extension-schema validation at a trust boundary (model output parsing, session restore, tool-result decoration). `category` names the schema category consulted; `itemType` is set when an unknown item type was rejected under `strictUnknownExtensions`. Tool-result validation is owner-scoped (see `08-runtime`): only the called tool's own `toolResults` schemas can raise this for its result items.
 
 ### Channel Closed
 

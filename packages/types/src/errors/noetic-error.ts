@@ -68,6 +68,10 @@ function formatMessage(error: NoeticError): string {
       return `Budget exceeded: ${error.field} limit ${error.limit}, actual ${error.actual}`;
     case 'steering_denied':
       return `Steering denied${error.guidance ? `: ${error.guidance}` : ''}`;
+    case 'item_schema_mismatch':
+      return error.itemType
+        ? `Item type '${error.itemType}' did not match any registered item extension schema.`
+        : `Item did not match any registered ${error.category} extension schema.`;
     case 'handle_evicted':
       return `Subprocess handle '${error.handleId}' evicted (step '${error.stepId}'): adapter returned null for ${error.gracePeriodMs}ms`;
     default: {

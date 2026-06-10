@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import type { ContextMemory } from '@noetic-tools/memory';
 import type { CallModelRequest, Item, LLMResponse, Step } from '@noetic-tools/types';
-import { ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
+import { ItemSchema, ItemSchemaRegistry, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { makeMessage, textOnlyResponse } from '../_helpers';
@@ -262,7 +263,8 @@ describe('ItemSchema', () => {
       ],
     });
 
-    expect(() =>
+    let caught: unknown;
+    try {
       registry.parseWithCategory(
         {
           type: 'function_call_output',
@@ -270,7 +272,13 @@ describe('ItemSchema', () => {
           output: '{}',
         },
         'toolResults',
-      ),
-    ).toThrow(/toolResults/);
+      );
+    } catch (e) {
+      caught = e;
+    }
+    assert(isNoeticError(caught));
+    expect(caught.noeticError.kind).toBe('item_schema_mismatch');
+    assert(caught.noeticError.kind === 'item_schema_mismatch');
+    expect(caught.noeticError.category).toBe('toolResults');
   });
 });

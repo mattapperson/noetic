@@ -162,8 +162,17 @@ tool<I, O>({
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
   needsApproval?: boolean;
   memory?: ToolMemoryDeclaration;
+  itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
+  decorateResultItem?: (params) => Item;  // enrich the harness-created tool-result item
 }): Tool
 ```
+
+**`itemSchemas` contract** — extension schemas are additive and owner-scoped:
+
+- A tool's `toolResults` schemas validate ONLY that tool's own result items (strictly: a result matching none of them fails the round with `NoeticError` kind `item_schema_mismatch`). They never reject a sibling tool's results; tools without `itemSchemas` fall back to the base structural parse.
+- Schemas are **gates, not normalizers**: on match the original item is returned unchanged (undeclared fields like the framework-generated `id`/`status` survive). Zod `.transform()` / `.default()` in extension schemas are unsupported.
+- `decorateResultItem` output must satisfy the tool's own `toolResults` schemas — including for error outputs (e.g. malformed-arguments results), so declare error-shaped results or make decorated fields tolerant.
+- Harness-level `itemSchemas` (on `AgentHarness` opts) stay global and apply to every item at trust boundaries.
 
 ### channel
 

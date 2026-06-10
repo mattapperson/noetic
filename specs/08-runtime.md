@@ -595,6 +595,15 @@ Dedupe is **name-based, first-wins**. The merge order is `[...stepCollectedTools
 
 Ordering at resolve time: an eager `step.tools` array still wins for its own call (used as the per-call allowed set); `unifiedTools` (populated from the merge above) is the superset sent to every LLM call.
 
+### Item schema registry (extension-item validation)
+
+The harness validates items at trust boundaries (model output parsing, session restore, tool-result decoration) through an `ItemSchemaRegistry` seeded from harness-level `itemSchemas`. Harness-level schemas are global by design. Tool and memory-layer extension schemas are **additive and owner-scoped**:
+
+- **Model output parsing** uses the harness registry extended with the round's memory-layer and tool schemas. Items matching a known base type always pass even when extension schemas are registered.
+- **Tool result items** are validated against the harness registry extended with **only the called tool's** `itemSchemas.toolResults` — one tool's schemas never reject a sibling tool's result items, and tools without schemas fall back to the base structural parse.
+- Extension schemas are **gates, not normalizers**: on match the original item is returned unchanged, including fields the schema does not declare. Zod transforms and defaults in extension schemas are unsupported.
+- Validation failures raise `NoeticError` kind `item_schema_mismatch` (see `09-error-model`).
+
 ### What's NOT on the AgentHarness
 
 - **`assembleView`** — view assembly (the Projector) is a standalone function in `memory/projector.ts`. It calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.

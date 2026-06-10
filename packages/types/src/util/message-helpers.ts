@@ -23,7 +23,12 @@ export function isAssistantMessage(item: unknown): item is MessageItem {
   );
 }
 
-export function isUserMessage(item: unknown): item is MessageItem {
+/** @public Input message item narrowed to the `user` role. */
+export type UserMessageItem = InputMessageItem & {
+  readonly role: 'user';
+};
+
+export function isUserMessage(item: unknown): item is UserMessageItem {
   return (
     typeof item === 'object' &&
     item !== null &&
@@ -52,7 +57,7 @@ export function isTextPart(part: { type: string }): part is {
 /** Extracts assistant/output text from items for memory buffering (one string per message). */
 export function collectOutputText(items: ReadonlyArray<Item>): string[] {
   return items
-    .filter((i): i is MessageItem => i.type === 'message')
+    .filter(isAssistantMessage)
     .map((i) =>
       i.content
         .filter(isOutputText)

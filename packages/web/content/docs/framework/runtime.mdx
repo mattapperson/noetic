@@ -64,7 +64,7 @@ const harness = new AgentHarness({
 | `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Memory layers, tools, and skill discovery all route through this adapter. |
 | `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
 | `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
-| `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. |
+| `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. Global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Mismatches raise `NoeticError` kind `item_schema_mismatch`. |
 | `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |

@@ -51,6 +51,19 @@ export type NoeticError =
       reason?: string;
     }
   | {
+      /**
+       * Raised by `ItemSchemaRegistry` when an item fails extension-schema
+       * validation: either a category item (e.g. a tool result) matches none
+       * of the schemas registered for its category, or — under
+       * `strictUnknownExtensions` — an unknown item type matches no
+       * registered extension schema. `itemType` is set for the
+       * unknown-item-type case.
+       */
+      kind: 'item_schema_mismatch';
+      category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults';
+      itemType?: string;
+    }
+  | {
       kind: 'budget_exceeded';
       field: 'cost' | 'steps' | 'duration';
       limit: number;

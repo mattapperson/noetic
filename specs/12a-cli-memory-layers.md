@@ -124,12 +124,16 @@ See `packages/cli/src/config/agent-md-loader.ts` for the authoritative list. Sum
 
 Each discovered file is processed in three passes:
 1. **`@import` resolution** — lines matching `^@(\S+\.md)\s*$` are transcluded inline. Cycle-safe (visited set) and depth-limited (5).
-2. **Embedded `!command` execution** — via `processSkillContent` (reused from `packages/cli/src/skills/processor.ts`). User-origin files execute by default; project-origin files require `config.trustProjectEmbeddedCommands: true`.
+2. **Embedded `!command` execution** — via `processSkillContent` (from `packages/code-agent/src/skills/processor.ts`). User-origin files execute by default; project-origin files require `config.trustProjectEmbeddedCommands: true`.
 3. **Truncation** — 200 lines / 25KB per file, 60KB total. Lowest-precedence sources drop first.
 
 ### Security
 
-Embedded commands are a supply-chain risk for project-origin files (any contributor could add a `!curl | sh` line). The default (`trustProjectEmbeddedCommands: false`) leaves the command text intact but skips execution, tagging the line with an HTML comment explaining why.
+Embedded commands are a supply-chain risk for project-origin files (any contributor could add a `!curl | sh` line). The default (`trustProjectEmbeddedCommands: false`) leaves the command text intact but skips execution, tagging the line with an HTML comment explaining why (`neutralizeEmbeddedCommands` in the skills processor).
+
+The same trust gate covers **skill activation**: user, built-in, and plugin skills execute their inline `!` commands on activation; project-origin skills (`.noetic/skills`, `.agent/skills`) require `trustProjectEmbeddedCommands: true`, otherwise their command lines are neutralized identically. The gate is implemented in the `skills` layer (`SkillsLayerConfig.trustProjectEmbeddedCommands`).
+
+Every embedded command that does execute — in AGENT.md/rules files and in skills — passes the Bash tool's preflight pipeline (`preflightShellCommand`: banned-command / high-risk-pattern / interactive-TUI validation plus the mutation-policy check for probably-mutating commands). Blocked commands render as failure comments (`blocked: <reason>`); processing never throws.
 
 ---
 

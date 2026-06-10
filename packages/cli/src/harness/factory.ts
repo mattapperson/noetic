@@ -432,6 +432,7 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
     fs,
     shell,
     trustProjectEmbeddedCommands: config.trustProjectEmbeddedCommands === true,
+    mutationPolicy,
   });
 
   // Assemble the reminder registry: built-ins + plugin-contributed triggers.
@@ -538,6 +539,8 @@ export async function createAgentHarness(opts: CreateAgentHarnessOpts): Promise<
       ? [
           skillsLayer(filterSkillsForMode(allSkills, mode), {
             cwd: config.cwd,
+            mutationPolicy,
+            trustProjectEmbeddedCommands: config.trustProjectEmbeddedCommands === true,
           }),
         ]
       : []),

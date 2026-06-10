@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextMemory } from '@noetic-tools/memory';
 import type { LLMResponse, Step, StreamEvent } from '@noetic-tools/types';
-import { frameworkCast, ItemSchemaRegistry, isNoeticConfigError } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  ItemSchemaRegistry,
+  isNoeticConfigError,
+  isNoeticError,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
@@ -167,6 +172,11 @@ class InvalidStateRecoveryClient {
 class DecoratingToolClient {
   calls = 0;
 
+  constructor(
+    private readonly toolName: string = 'count',
+    private readonly toolArguments: string = '{"count":3}',
+  ) {}
+
   callModel(): {
     getFullResponsesStream: () => AsyncIterable<unknown>;
     getResponse: () => Promise<MockModelResponse>;
@@ -177,16 +187,16 @@ class DecoratingToolClient {
         this.calls += 1;
         return this.calls === 1
           ? frameworkCast<MockModelResponse>({
-              id: 'resp-count-call',
+              id: `resp-${this.toolName}-call`,
               status: 'completed',
               output: [
                 {
-                  id: 'fc-count',
+                  id: `fc-${this.toolName}`,
                   status: 'completed',
                   type: 'function_call',
-                  callId: 'call-count',
-                  name: 'count',
-                  arguments: '{"count":3}',
+                  callId: `call-${this.toolName}`,
+                  name: this.toolName,
+                  arguments: this.toolArguments,
                 },
               ],
               usage: {
@@ -194,7 +204,7 @@ class DecoratingToolClient {
                 outputTokens: 1,
               },
             })
-          : messageResponse('count-final', 'done');
+          : messageResponse(`${this.toolName}-final`, 'done');
       },
     };
   }
@@ -1007,8 +1017,9 @@ describe('AgentHarness — item schema extensions', () => {
     }>(harness).client = fakeClient;
     const ctx = harness.createContext();
 
-    await expect(
-      harness.callModel({
+    let caught: unknown;
+    try {
+      await harness.callModel({
         model: 'test/model',
         items: [
           makeMessage('user', 'count'),
@@ -1017,8 +1028,162 @@ describe('AgentHarness — item schema extensions', () => {
           invalidDecoratingTool,
         ],
         ctx,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    assert(isNoeticError(caught));
+    expect(caught.noeticError.kind).toBe('item_schema_mismatch');
+    assert(caught.noeticError.kind === 'item_schema_mismatch');
+    expect(caught.noeticError.category).toBe('toolResults');
+  });
+
+  it("one tool's toolResults schemas do not reject a plain sibling tool's results", async () => {
+    const ToolResultSchema = z.object({
+      id: z.string(),
+      status: z.literal('completed'),
+      type: z.literal('function_call_output'),
+      callId: z.string(),
+      output: z.string(),
+      card: z.object({
+        title: z.string(),
       }),
-    ).rejects.toThrow(/toolResults/);
+    });
+    const schemaTool = tool({
+      name: 'count',
+      description: 'Counts items',
+      input: z.object({
+        count: z.number(),
+      }),
+      output: z.object({
+        count: z.number(),
+      }),
+      itemSchemas: {
+        toolResults: [
+          ToolResultSchema,
+        ],
+      },
+      execute: async (args) => ({
+        count: args.count,
+      }),
+      decorateResultItem: ({ baseItem }) => ({
+        ...baseItem,
+        card: {
+          title: 'Count complete',
+        },
+      }),
+    });
+    const plainTool = tool({
+      name: 'ping',
+      description: 'Pings',
+      input: z.object({}),
+      output: z.object({
+        pong: z.boolean(),
+      }),
+      execute: async () => ({
+        pong: true,
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    // Model calls ONLY the plain tool; the schema-bearing sibling is merely registered.
+    const fakeClient = new DecoratingToolClient('ping', '{}');
+    frameworkCast<{
+      client: DecoratingToolClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'ping'),
+      ],
+      tools: [
+        schemaTool,
+        plainTool,
+      ],
+      ctx,
+    });
+
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function_call_output',
+        callId: 'call-ping',
+      }),
+    );
+    expect(response.usage.inputTokens).toBeGreaterThan(0);
+  });
+
+  it('decorated tool results keep framework id/status when the tool schema omits them', async () => {
+    const PartialToolResultSchema = z.object({
+      type: z.literal('function_call_output'),
+      callId: z.string(),
+      output: z.string(),
+      card: z.object({
+        title: z.string(),
+      }),
+    });
+    const partialSchemaTool = tool({
+      name: 'count',
+      description: 'Counts items',
+      input: z.object({
+        count: z.number(),
+      }),
+      output: z.object({
+        count: z.number(),
+      }),
+      itemSchemas: {
+        toolResults: [
+          PartialToolResultSchema,
+        ],
+      },
+      execute: async (args) => ({
+        count: args.count,
+      }),
+      decorateResultItem: ({ baseItem }) => ({
+        ...baseItem,
+        card: {
+          title: 'Count complete',
+        },
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const fakeClient = new DecoratingToolClient();
+    frameworkCast<{
+      client: DecoratingToolClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'count'),
+      ],
+      tools: [
+        partialSchemaTool,
+      ],
+      ctx,
+    });
+
+    const resultItem = response.items.find((i) => i.type === 'function_call_output');
+    assert(resultItem);
+    // Gate, not normalizer: the partial schema must not strip the
+    // framework-generated id/status from the decorated item.
+    expect(resultItem).toMatchObject({
+      type: 'function_call_output',
+      callId: 'call-count',
+      status: 'completed',
+      card: {
+        title: 'Count complete',
+      },
+    });
+    assert('id' in resultItem && typeof resultItem.id === 'string');
+    expect(resultItem.id.length).toBeGreaterThan(0);
   });
 
   it('rejects unregistered extension response items by default', async () => {

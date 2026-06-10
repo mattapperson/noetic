@@ -220,8 +220,8 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 | `input` | `ZodType<I>` | Zod schema validating tool input arguments. |
 | `output` | `ZodType<O>` | Zod schema validating tool return value. |
 | `event` | `ZodType` | Optional Zod schema validating streaming events yielded during execution. |
-| `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. |
-| `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. |
+| `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. `toolResults` schemas are owner-scoped: they validate only this tool's own result items and never reject a sibling tool's results. Schemas are pure shape validators (gates, not normalizers) — the original item is returned on match, and Zod transforms/defaults are unsupported. |
+| `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. The decorated item must satisfy this tool's own `itemSchemas.toolResults` (when declared) — including for error outputs such as malformed-arguments results — or the round fails with `NoeticError` kind `item_schema_mismatch`. |
 | `execute` | `(args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>> \| AsyncGenerator<unknown, z.infer<O>>` | Async function (or generator) that performs the tool's work. |
 | `needsApproval` | `boolean` | Optional. When `true`, execution pauses for human approval before running. |
 | `memory` | `ToolMemoryDeclaration` | Optional. Declares tool-owned memory the runtime materializes into a `MemoryLayer`. |

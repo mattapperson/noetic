@@ -38,6 +38,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
 | `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()`. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately. |
 | `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
+| `item_schema_mismatch` | `category: 'items' \| 'developerMessages' \| 'toolCalls' \| 'toolResults'`, `itemType?: string` | An item failed extension-schema validation in the `ItemSchemaRegistry`: a category item (e.g. a tool result) matched none of the schemas registered for its category, or an unknown item type matched no registered schema under strict mode. `itemType` is set for the unknown-type case. |
 
 ### Full Type Definition
 
@@ -52,7 +53,8 @@ type NoeticError =
   | { kind: 'channel_timeout'; channelName: string; timeout: number }
   | { kind: 'channel_closed'; channelName: string }
   | { kind: 'cancelled'; reason?: string }
-  | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number };
+  | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number }
+  | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string };
 ```
 
 ## NoeticErrorImpl Class

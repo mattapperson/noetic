@@ -4,17 +4,24 @@
  * Lists all skill names in recall. When the LLM calls activateSkill,
  * the store hook detects it and full instructions appear in the next recall.
  * Inline shell commands (!) are executed when skills are first activated.
+ *
+ * Trust gate (mirrors the AGENT.md loader, spec 12a): user, built-in, and
+ * plugin skills execute embedded commands by default; project-origin skills
+ * require `trustProjectEmbeddedCommands: true`, otherwise their `!` lines
+ * are neutralized (left visible, never executed). Executed commands pass the
+ * shared Bash preflight pipeline (command validation + mutation policy).
  */
 
 import type { FunctionCallItem, Item, MemoryLayer } from '@noetic-tools/core';
 import { Slot } from '@noetic-tools/core';
 
-import { processSkillContent } from '../skills/processor.js';
+import { neutralizeEmbeddedCommands, processSkillContent } from '../skills/processor.js';
 import type {
   ProcessedInstructionEntry,
   SkillDefinition,
   SkillsLayerState,
 } from '../skills/types.js';
+import type { MutationPolicy } from '../tools/mutation-policy.js';
 
 //#region Constants
 
@@ -108,13 +115,22 @@ function evictLruEntries(
 export interface SkillsLayerConfig {
   /** Current working directory for inline command execution */
   cwd: string;
+  /** Mutation policy consulted for probably-mutating inline commands. */
+  mutationPolicy?: MutationPolicy;
+  /**
+   * If `true`, project-origin skills execute embedded `!` commands on
+   * activation. Default: `false` — project skills are neutralized (commands
+   * shown but not run). User, built-in, and plugin skills always execute.
+   */
+  trustProjectEmbeddedCommands?: boolean;
 }
 
 export function skillsLayer(
   skills: SkillDefinition[],
   config: SkillsLayerConfig,
 ): MemoryLayer<SkillsLayerState> {
-  const { cwd } = config;
+  const { cwd, mutationPolicy } = config;
+  const trustProjectEmbeddedCommands = config.trustProjectEmbeddedCommands === true;
 
   return {
     id: 'skills-memory',
@@ -191,10 +207,21 @@ export function skillsLayer(
           return;
         }
 
-        // Process instructions now (during store, not recall) to avoid mutation during recall
+        // Process instructions now (during store, not recall) to avoid mutation during recall.
+        // Trust gate: project-origin skills only execute embedded commands when
+        // trustProjectEmbeddedCommands is set; otherwise their `!` lines are
+        // neutralized. Trusted sources run through the shared Bash preflight.
         let processedInstructions = new Map(state.processedInstructions);
         if (!processedInstructions.has(name)) {
-          const processed = await processSkillContent(skill.instructions, cwd, ctx.shell);
+          const canRunCommands = skill.source !== 'project' || trustProjectEmbeddedCommands;
+          const processed = canRunCommands
+            ? await processSkillContent({
+                content: skill.instructions,
+                cwd,
+                shell: ctx.shell,
+                mutationPolicy,
+              })
+            : neutralizeEmbeddedCommands(skill.instructions);
           processedInstructions.set(name, {
             content: processed,
             lastAccess: Date.now(),

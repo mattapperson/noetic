@@ -18,7 +18,8 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { FsAdapter, ShellAdapter } from '@noetic-tools/core';
 import { createLocalShellAdapter } from '@noetic-tools/platform-node';
-import { processSkillContent } from '../util/skill-processor.js';
+import type { MutationPolicy } from '../tools/mutation-policy.js';
+import { neutralizeEmbeddedCommands, processSkillContent } from '../util/skill-processor.js';
 
 //#region Types
 
@@ -80,6 +81,12 @@ export interface LoadAgentInstructionsOpts {
    * User-origin files (`~/...`) always execute commands (parity with the skills layer).
    */
   trustProjectEmbeddedCommands?: boolean;
+  /**
+   * Mutation policy consulted by the shared shell preflight for embedded
+   * `!command` lines. Command validation (banned/high-risk/interactive)
+   * always runs regardless.
+   */
+  mutationPolicy?: MutationPolicy;
 }
 
 //#endregion
@@ -269,6 +276,7 @@ interface LoaderCtx {
   maxBytesPerFile: number;
   maxImportDepth: number;
   trustProjectEmbeddedCommands: boolean;
+  mutationPolicy?: MutationPolicy;
 }
 
 //#endregion
@@ -479,7 +487,12 @@ async function processCandidate(
 
   const canRunCommands = candidate.origin === 'user' || ctx.trustProjectEmbeddedCommands === true;
   const afterCommands = canRunCommands
-    ? await processSkillContent(afterImports, ctx.cwd, ctx.shell)
+    ? await processSkillContent({
+        content: afterImports,
+        cwd: ctx.cwd,
+        shell: ctx.shell,
+        mutationPolicy: ctx.mutationPolicy,
+      })
     : neutralizeEmbeddedCommands(afterImports);
 
   const { content: truncatedContent, truncated } = truncateContent(
@@ -503,17 +516,6 @@ async function processCandidate(
     byteSize: Buffer.byteLength(content, 'utf-8'),
     resolvedImports,
   };
-}
-
-/**
- * When embedded-command execution is disabled for project files, leave the
- * `!cmd` lines intact so the model can see the author's intent, but tag them
- * with a comment explaining why they did not run.
- */
-function neutralizeEmbeddedCommands(text: string): string {
-  return text.replace(/^(\s*)!(.+)$/gm, (_match, indent: string, rest: string) => {
-    return `${indent}!${rest}\n${indent}<!-- project embedded command not executed; enable via config.trustProjectEmbeddedCommands -->`;
-  });
 }
 
 //#endregion
@@ -569,6 +571,7 @@ export async function loadAgentInstructions(
     maxBytesPerFile: opts.maxBytesPerFile ?? DEFAULT_MAX_BYTES_PER_FILE,
     maxImportDepth: opts.maxImportDepth ?? DEFAULT_MAX_IMPORT_DEPTH,
     trustProjectEmbeddedCommands: opts.trustProjectEmbeddedCommands ?? false,
+    mutationPolicy: opts.mutationPolicy,
   };
   const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
 

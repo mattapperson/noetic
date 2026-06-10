@@ -11,7 +11,7 @@ export {
   type ReminderTrigger,
   type ReminderTriggerContext,
 } from './reminder-triggers.js';
-export { skillsLayer } from './skills-layer.js';
+export { type SkillsLayerConfig, skillsLayer } from './skills-layer.js';
 export { createSteeringFileLayer } from './steering-file-layer.js';
 export {
   createDeveloperMessage,

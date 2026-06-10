@@ -18,8 +18,7 @@ import {
 import { z } from 'zod';
 import { handleCd, isPlainCdCommand, parseCdArg } from './cd-helper.js';
 import type { MutationPolicy } from './mutation-policy.js';
-import { isProbablyMutatingShellCommand } from './mutation-policy.js';
-import { validateCommand } from './security.js';
+import { preflightShellCommand } from './preflight.js';
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from './truncate.js';
 
 //#region Constants
@@ -289,28 +288,15 @@ async function enforceBashPreflight(args: {
   liveCwd: string;
   mutationPolicy?: MutationPolicy;
 }): Promise<BashOutput | null> {
-  const validation = validateCommand(args.command);
-  if (!validation.valid) {
-    return {
-      output: `Error: ${validation.error}`,
-      command: args.command,
-      cancelled: false,
-      truncated: false,
-      timeout: args.timeout,
-    };
-  }
-  const decision = isProbablyMutatingShellCommand(args.command)
-    ? await args.mutationPolicy?.check({
-        kind: 'bash',
-        cwd: args.liveCwd,
-        command: args.command,
-      })
-    : undefined;
-  if (!decision || decision.allowed) {
+  const preflight = await preflightShellCommand(args.command, {
+    cwd: args.liveCwd,
+    mutationPolicy: args.mutationPolicy,
+  });
+  if (preflight.ok) {
     return null;
   }
   return {
-    output: `Error: ${decision.message}`,
+    output: `Error: ${preflight.reason}`,
     command: args.command,
     cancelled: false,
     truncated: false,

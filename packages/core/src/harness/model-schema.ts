@@ -41,6 +41,14 @@ export function buildItemSchemaRegistry({
     .extend(collectToolItemSchemaExtensions(tools));
 }
 
+/**
+ * Build and validate a `function_call_output` item for a tool result.
+ *
+ * `roundItemSchemas` must be the OWNER-SCOPED registry for the called tool
+ * (harness base extended with only that tool's `itemSchemas`), so one tool's
+ * `toolResults` schemas never reject a sibling tool's result items. Tools
+ * without `itemSchemas` fall back to the base structural parse.
+ */
 export function createToolResultItem({
   output,
   callId,

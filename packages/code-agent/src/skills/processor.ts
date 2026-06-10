@@ -3,9 +3,15 @@
  *
  * Processes skill instructions by executing inline shell commands
  * (lines starting with `!`) and replacing them with their output.
+ *
+ * Every command passes the shared Bash-tool preflight
+ * (`preflightShellCommand`: command validation + mutation policy) before
+ * execution; blocked commands render as failure comments instead of running.
  */
 
 import type { ShellAdapter } from '@noetic-tools/core';
+import type { MutationPolicy } from '../tools/mutation-policy.js';
+import { preflightShellCommand } from '../tools/preflight.js';
 
 //#region Constants
 
@@ -53,22 +59,45 @@ function truncateOutput(
 
 //#region Public API
 
+/** Arguments for `processSkillContent`. */
+export interface ProcessSkillContentArgs {
+  /** The raw skill instructions. */
+  content: string;
+  /** Working directory for command execution. */
+  cwd: string;
+  /** Shell adapter to execute commands through. */
+  shell: ShellAdapter;
+  /**
+   * Mutation policy consulted for probably-mutating inline commands.
+   * Command validation (banned/high-risk/interactive) always runs.
+   */
+  mutationPolicy?: MutationPolicy;
+}
+
+/**
+ * When embedded-command execution is disabled (untrusted project-origin
+ * content), leave the `!cmd` lines intact so the model can see the author's
+ * intent, but tag them with a comment explaining why they did not run.
+ */
+export function neutralizeEmbeddedCommands(text: string): string {
+  return text.replace(COMMAND_PATTERN, (_match, indent: string, rest: string) => {
+    return `${indent}!${rest}\n${indent}<!-- project embedded command not executed; enable via config.trustProjectEmbeddedCommands -->`;
+  });
+}
+
 /**
  * Process skill content by executing inline shell commands.
  *
  * Lines starting with `!` (after optional whitespace) are treated as shell commands.
- * The command is executed and its output replaces the line.
+ * Each command is preflighted through the shared Bash-tool pipeline
+ * (`validateCommand` + mutation policy); blocked commands are replaced with a
+ * failure comment (`blocked: <reason>`) — activation never throws. Allowed
+ * commands are executed and their output replaces the line.
  *
- * @param content - The raw skill instructions
- * @param cwd - Working directory for command execution
- * @param shell - Shell adapter to execute commands through
  * @returns Processed content with command outputs
  */
-export async function processSkillContent(
-  content: string,
-  cwd: string,
-  shell: ShellAdapter,
-): Promise<string> {
+export async function processSkillContent(args: ProcessSkillContentArgs): Promise<string> {
+  const { content, cwd, shell, mutationPolicy } = args;
   const matches: Array<{
     full: string;
     indent: string;
@@ -96,6 +125,14 @@ export async function processSkillContent(
   // Execute commands and collect results
   const results = await Promise.allSettled(
     matches.map(async ({ command }) => {
+      const preflight = await preflightShellCommand(command, {
+        cwd,
+        mutationPolicy,
+      });
+      if (!preflight.ok) {
+        throw new Error(`blocked: ${preflight.reason}`);
+      }
+
       const result = await shell.exec(command, {
         cwd,
         timeout: COMMAND_TIMEOUT_S,

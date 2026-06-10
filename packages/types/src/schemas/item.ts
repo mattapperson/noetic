@@ -11,9 +11,15 @@
  * Use this at trust boundaries (loading persisted session files, accepting
  * externally-supplied transcripts) where we need to reject garbage JSON but
  * don't need to re-validate every provider field TypeScript already types.
+ *
+ * Extension schemas registered on the registry are **gates, not
+ * normalizers**: they validate item shape and the ORIGINAL value is returned
+ * on match. Zod transforms, defaults, and key-stripping in extension schemas
+ * are unsupported — their output is discarded. Declare pure shape validators.
  */
 
 import { z } from 'zod';
+import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Item, ItemSchemaExtensions } from '../types/items';
 
 function isItemLike(value: unknown): value is Item {
@@ -107,17 +113,21 @@ function isKnownBaseType(type: string): boolean {
   );
 }
 
-function schemaMismatch(category: ItemSchemaCategory): z.ZodError {
-  return new z.ZodError([
-    {
-      code: 'custom',
-      message: `Item did not match any registered ${category} extension schema.`,
-      path: [],
-    },
-  ]);
+function schemaMismatch(category: ItemSchemaCategory): NoeticErrorImpl {
+  return new NoeticErrorImpl({
+    kind: 'item_schema_mismatch',
+    category,
+  });
 }
 
-/** @public Runtime item validator with optional tool, memory-layer, and harness extension schemas. */
+/**
+ * @public Runtime item validator with optional tool, memory-layer, and harness extension schemas.
+ *
+ * Extension schemas are pure shape validators (gate, not normalizer): on
+ * match the original value is returned unchanged, including fields the schema
+ * does not declare. Transforms and defaults in extension schemas are
+ * unsupported — their parsed output is never used.
+ */
 export class ItemSchemaRegistry {
   readonly extensions: ItemSchemaExtensions;
   readonly strictUnknownExtensions: boolean;
@@ -149,20 +159,18 @@ export class ItemSchemaRegistry {
     for (const schema of schemas) {
       const parsed = schema.safeParse(value);
       if (parsed.success) {
-        return ItemSchema.parse(parsed.data);
+        // Gate, not normalizer: return the original value, not the
+        // zod-stripped clone, so undeclared fields survive validation.
+        return base;
       }
     }
 
     if (this.strictUnknownExtensions && !isKnownBaseType(base.type)) {
-      throw new z.ZodError([
-        {
-          code: 'custom',
-          message: `Item type '${base.type}' did not match any registered item extension schema.`,
-          path: [
-            'type',
-          ],
-        },
-      ]);
+      throw new NoeticErrorImpl({
+        kind: 'item_schema_mismatch',
+        category: 'items',
+        itemType: base.type,
+      });
     }
 
     return base;
@@ -172,6 +180,13 @@ export class ItemSchemaRegistry {
     return Array.from(values, (value) => this.parse(value));
   }
 
+  /**
+   * Validate `value` against the schemas registered for `category` only.
+   *
+   * When no schemas are registered for the category, falls back to
+   * `parse()`. Throws a `NoeticErrorImpl` with kind `item_schema_mismatch`
+   * when schemas exist for the category and none match.
+   */
   parseWithCategory(value: unknown, category: ItemSchemaCategory): Item {
     const schemas = schemasForCategory(this.extensions, category);
     if (schemas.length === 0) {
@@ -180,7 +195,8 @@ export class ItemSchemaRegistry {
     for (const schema of schemas) {
       const parsed = schema.safeParse(value);
       if (parsed.success) {
-        return ItemSchema.parse(parsed.data);
+        // Gate, not normalizer: validate shape, return the original value.
+        return ItemSchema.parse(value);
       }
     }
     throw schemaMismatch(category);
