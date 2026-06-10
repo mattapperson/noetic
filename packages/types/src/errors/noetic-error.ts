@@ -18,12 +18,32 @@ export class NoeticErrorImpl extends Error {
 /**
  * Type guard for `NoeticErrorImpl`.
  *
+ * Uses an `instanceof` fast path, then falls back to a structural check
+ * (`Error` carrying a `noeticError.kind: string`). The fallback keeps the
+ * guard reliable when multiple copies of `@noetic-tools/types` are loaded
+ * (e.g. mixed `src`/`dist` resolution or duplicated node_modules), where
+ * `instanceof` fails across realms. The inner `kind` is deliberately not
+ * validated against the closed `NoeticError` union so errors minted by a
+ * newer copy of the package still pass (forward compatibility).
+ *
  * @public
  * @param e - Value to check.
- * @returns `true` if `e` is a `NoeticErrorImpl`.
+ * @returns `true` if `e` is a `NoeticErrorImpl` (or structurally equivalent).
  */
 export function isNoeticError(e: unknown): e is NoeticErrorImpl {
-  return e instanceof NoeticErrorImpl;
+  if (e instanceof NoeticErrorImpl) {
+    return true;
+  }
+  if (!(e instanceof Error)) {
+    return false;
+  }
+  if (!('noeticError' in e)) {
+    return false;
+  }
+  const inner = e.noeticError;
+  return (
+    typeof inner === 'object' && inner !== null && 'kind' in inner && typeof inner.kind === 'string'
+  );
 }
 
 function formatMessage(error: NoeticError): string {

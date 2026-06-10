@@ -27,7 +27,7 @@ interface Context<TMemory = ContextMemory, TState = unknown> {
   readonly lastStepMeta: StepMeta | null;
   readonly lastLayerUsage?: LastLayerUsage;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
-  send<T>(channel: Channel<T>, value: T): void;
+  send<T>(channel: Channel<T>, value: T): Promise<void>;
   tryRecv<T>(channel: Channel<T>): T | null;
   checkpoint(): Promise<void>;
   complete<T>(value: T): void;
@@ -68,7 +68,7 @@ interface Context<TMemory = ContextMemory, TState = unknown> {
 | Method | Signature | Description |
 |---|---|---|
 | `recv` | `<T>(channel, opts?) => Promise<T>` | Receive from a channel (blocking) |
-| `send` | `<T>(channel, value) => void` | Send to a channel |
+| `send` | `<T>(channel, value) => Promise<void>` | Send to a channel. Parks when a queue channel is at capacity (back-pressure: `channel_timeout` after 30s, `cancelled` on abort) |
 | `tryRecv` | `<T>(channel) => T \| null` | Non-blocking receive |
 | `checkpoint` | `() => Promise<void>` | Persist current state |
 | `complete` | `<T>(value) => void` | Signal completion with a value |

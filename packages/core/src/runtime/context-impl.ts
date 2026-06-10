@@ -73,6 +73,15 @@ export class ContextImpl implements Context<ContextMemory> {
   private _completed = false;
   private _aborted = false;
   private _abortReason?: string;
+  /**
+   * Per-context abort fan-out. `abort()` fires it so operations blocked on
+   * this context (channel `recv` waiters, parked back-pressure senders)
+   * reject promptly with `{ kind: 'cancelled' }` instead of hanging until
+   * their timeout (spec 09, Cancellation item 2). Each fork/spawn child
+   * constructs its own ContextImpl and therefore its own controller —
+   * aborting a child never rejects the parent's waiters.
+   */
+  private readonly _abortController = new AbortController();
   private _memory?: ContextMemory;
   /**
    * Stack of steps currently in flight on this context, most-recent last.
@@ -172,14 +181,19 @@ export class ContextImpl implements Context<ContextMemory> {
     if (!this.channelStore) {
       return Promise.reject(new Error('No channel store configured'));
     }
-    return this.channelStore.recv(ch, opts?.timeout);
+    return this.channelStore.recv(ch, opts?.timeout, this._abortController.signal);
   }
 
-  send<T>(ch: Channel<T>, value: T): void {
+  send<T>(ch: Channel<T>, value: T): Promise<void> {
     if (!this.channelStore) {
-      throw new Error('No channel store configured');
+      return Promise.reject(new Error('No channel store configured'));
     }
-    this.channelStore.send(ch, value);
+    // Internal sender: back-pressured on full queue channels (default 30s →
+    // channel_timeout); aborting this context rejects a parked send with
+    // 'cancelled' via the shared abort signal.
+    return this.channelStore.send(ch, value, {
+      signal: this._abortController.signal,
+    });
   }
 
   tryRecv<T>(ch: Channel<T>): T | null {
@@ -215,6 +229,20 @@ export class ContextImpl implements Context<ContextMemory> {
   abort(reason?: string): void {
     this._aborted = true;
     this._abortReason = reason;
+    // Reject everything blocked on this context (channel recv waiters,
+    // parked back-pressure senders) with { kind: 'cancelled' }. Idempotent —
+    // a second abort() leaves the already-aborted signal untouched.
+    this._abortController.abort(reason ?? 'context aborted');
+  }
+
+  /**
+   * @internal
+   * Abort signal scoped to this context. Channel operations register on it
+   * so `abort()` rejects them promptly. Not part of the public Context
+   * interface.
+   */
+  get abortSignal(): AbortSignal {
+    return this._abortController.signal;
   }
 
   /**

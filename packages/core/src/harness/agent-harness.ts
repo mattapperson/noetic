@@ -590,18 +590,26 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  send<T>(channel: Channel<T>, value: T, _ctx: Context): void {
-    this.channelStore.send(channel, value);
+  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void> {
+    // Internal sender: back-pressured on full queue channels. The calling
+    // context's abort signal rejects a parked send with 'cancelled'.
+    const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;
+    return this.channelStore.send(channel, value, {
+      signal,
+    });
   }
 
   recv<T>(
     channel: Channel<T>,
-    _ctx: Context,
+    ctx: Context,
     opts?: {
       timeout?: number;
     },
   ): Promise<T> {
-    return this.channelStore.recv(channel, opts?.timeout);
+    // Wire the calling context's abort signal so ctx.abort() rejects a
+    // pending recv with { kind: 'cancelled' } instead of hanging.
+    const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;
+    return this.channelStore.recv(channel, opts?.timeout, signal);
   }
 
   tryRecv<T>(channel: Channel<T>, _ctx: Context): T | null {

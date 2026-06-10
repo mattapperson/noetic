@@ -192,7 +192,7 @@ function buildIteration(deps: ValidatorDeps): Step<ContextMemory, void, void> {
         if (req === null) return;             // queue drained
 
         const outcome = await deps.runTests(req.featureId);
-        ctx.send(validatorOutcomeChan, {
+        await ctx.send(validatorOutcomeChan, {
           taskId: req.taskId,
           featureId: req.featureId,
           status: outcome.status,

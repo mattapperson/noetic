@@ -155,7 +155,12 @@ export function buildValidatorIterationStep(
             previousLoopState: msg.previousLoopState,
             loopState: msg.loopState,
           };
-          ctx.send(featureLoopStateChan, message);
+          // publishLoopStateChange is a sync callback; surface a parked
+          // (back-pressured) send failure as a warning rather than blocking.
+          void ctx.send(featureLoopStateChan, message).catch((e: unknown) => {
+            const detail = e instanceof Error ? e.message : String(e);
+            console.warn(`[noetic/cli] Failed to publish loop-state change: ${detail}`);
+          });
         },
       };
       const requests = await drainValidatorRequests(() => ctx.tryRecv(validatorRequestChan));

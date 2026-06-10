@@ -34,9 +34,9 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `llm_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
 | `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Some fork paths succeeded and others failed (settle mode). |
 | `spawn_summary_failed` | `stepId`, `childOutput`, `summaryCause: Error` | A spawn's summary step failed after the child completed. |
-| `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call exceeded its timeout. |
+| `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call — or a back-pressured `send()` parked on a full queue — exceeded its timeout. |
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
-| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()`. |
+| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()`. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately. |
 | `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
 
 ### Full Type Definition
@@ -82,7 +82,7 @@ import { isNoeticError } from '@noetic-tools/core';
 function isNoeticError(e: unknown): e is NoeticErrorImpl;
 ```
 
-This is an `instanceof` check against `NoeticErrorImpl`.
+This is an `instanceof` check against `NoeticErrorImpl` with a structural fallback: any `Error` carrying a `noeticError` object whose `kind` is a string also passes. The fallback keeps the guard reliable when more than one copy of the framework is loaded (mixed `src`/`dist` resolution, duplicated `node_modules`), where a plain `instanceof` would fail across module copies. The inner `kind` is not validated against the closed union, so errors minted by a newer framework version still pass.
 
 ## Handling Errors in Loops
 

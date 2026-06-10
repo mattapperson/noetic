@@ -30,7 +30,7 @@ const writerStep = step.run({
     const draft = await generateDraft(input);
 
     // Send to reviewer via channel
-    ctx.send(reviewChannel, { approved: false, comments: draft });
+    await ctx.send(reviewChannel, { approved: false, comments: draft });
 
     // Wait for feedback
     const feedback = await ctx.recv(reviewChannel, { timeout: 30_000 });
@@ -52,7 +52,7 @@ const reviewerStep = step.run({
     const review = await reviewDraft(draft.comments);
 
     // Send feedback back
-    ctx.send(reviewChannel, review);
+    await ctx.send(reviewChannel, review);
     return review;
   },
 });
@@ -79,8 +79,8 @@ const dualAgent = fork({
 From within a step, use the context to interact with channels:
 
 ```ts validate=none
-// Send a value
-ctx.send(channel, value);
+// Send a value (parks when a queue channel is at capacity — back-pressure)
+await ctx.send(channel, value);
 
 // Receive (blocks until a value is available or timeout)
 const value = await ctx.recv(channel, { timeout: 10_000 });

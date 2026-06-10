@@ -247,7 +247,13 @@ export interface AgentHarnessContract<
   readonly rootCwdState: CwdState;
   /** Update the harness root cwd. Used by the TUI when the user issues a `! cd`. */
   setRootCwd(nextCwd: string): void;
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  /**
+   * Internal-sender channel write (back-pressured): resolves immediately
+   * unless the queue channel is at capacity, in which case it parks until a
+   * consumer frees a slot (30s default timeout → `channel_timeout`; context
+   * abort → `cancelled`).
+   */
+  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void>;
   recv<T>(
     channel: Channel<T>,
     ctx: Context,

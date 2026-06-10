@@ -16,7 +16,7 @@ const notifications = channel('notifications', {
 });
 
 const producer = step.run({ id: 'produce', execute: async (input: string, ctx) => {
-  ctx.send(notifications, { message: input, level: 'info' });
+  await ctx.send(notifications, { message: input, level: 'info' });
   return input;
 }});
 
@@ -64,8 +64,8 @@ const config = channel('config', {
   mode: 'value',
 });
 
-// Writer sets the value
-ctx.send(config, { temperature: 0.7 });
+// Writer sets the value (value-mode sends always resolve immediately)
+await ctx.send(config, { temperature: 0.7 });
 
 // Any reader gets the latest value immediately
 const current = ctx.tryRecv(config);
@@ -76,7 +76,7 @@ Best for: shared configuration, latest-status indicators, feature flags.
 
 ### Queue Mode
 
-FIFO buffer. Each value is consumed by exactly one reader. Values accumulate up to `capacity`; when full, new messages are dropped (with a warning). If the queue is empty, `recv` blocks until a value arrives.
+FIFO buffer. Each value is consumed by exactly one reader. Values accumulate up to `capacity`; when full, `ctx.send` parks (back-pressure) until a consumer dequeues an item — see [Back-Pressure](#back-pressure) below. If the queue is empty, `recv` blocks until a value arrives.
 
 ```ts validate=none
 const tasks = channel('tasks', {
@@ -85,9 +85,9 @@ const tasks = channel('tasks', {
   capacity: 50,
 });
 
-// Producer adds work
-ctx.send(tasks, { url: 'https://example.com/page1' });
-ctx.send(tasks, { url: 'https://example.com/page2' });
+// Producer adds work (resolves immediately while below capacity)
+await ctx.send(tasks, { url: 'https://example.com/page1' });
+await ctx.send(tasks, { url: 'https://example.com/page2' });
 
 // Consumer takes one item at a time
 const task = await ctx.recv(tasks);
@@ -110,8 +110,8 @@ const events = channel('events', {
 const listener1 = ctx.recv(events, { timeout: 10_000 });
 const listener2 = ctx.recv(events, { timeout: 10_000 });
 
-// Both receive the same value
-ctx.send(events, { type: 'update', payload: { status: 'done' } });
+// Both receive the same value (topic sends always resolve immediately)
+await ctx.send(events, { type: 'update', payload: { status: 'done' } });
 ```
 
 Best for: event broadcasting, fan-out notifications, real-time updates.
@@ -135,8 +135,8 @@ Channels are accessed through the [Context](/docs/framework/context) or [AgentHa
 
 | Method | Signature | Description |
 |---|---|---|
-| `ctx.send` | `send<T>(channel: Channel<T>, value: T): void` | Send a value. Synchronous. |
-| `ctx.recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for a value. Throws `channel_timeout` on expiry (default 30s). |
+| `ctx.send` | `send<T>(channel: Channel<T>, value: T): Promise<void>` | Send a value. Resolves immediately unless a queue channel is at capacity, in which case it parks until a consumer frees a slot (default 30s timeout → `channel_timeout`; abort → `cancelled`). |
+| `ctx.recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for a value. Throws `channel_timeout` on expiry (default 30s). Rejects with `cancelled` if the context is aborted while waiting — even with `timeout: 0`. |
 | `ctx.tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 
 ### From the AgentHarness
@@ -144,7 +144,7 @@ Channels are accessed through the [Context](/docs/framework/context) or [AgentHa
 The agent harness provides the same three methods, taking an additional `ctx` parameter:
 
 ```ts validate=none
-harness.send(channel, value, ctx);
+await harness.send(channel, value, ctx);
 const val = await harness.recv(channel, ctx, { timeout: 5_000 });
 const maybe = harness.tryRecv(channel, ctx);
 ```
@@ -230,10 +230,20 @@ const scores = channel('scores', {
   mode: 'queue',
 });
 
-ctx.send(scores, 85);    // OK
-ctx.send(scores, 101);   // Throws ZodError: Number must be <= 100
-ctx.send(scores, 'high'); // Throws ZodError: Expected number, received string
+await ctx.send(scores, 85);    // OK
+await ctx.send(scores, 101);   // Throws ZodError: Number must be <= 100
+await ctx.send(scores, 'high'); // Throws ZodError: Expected number, received string
 ```
+
+## Back-Pressure
+
+`ctx.send` (and `harness.send`) returns a `Promise<void>`. For value and topic channels — and queue channels below `capacity` — it resolves immediately. When a queue channel is full, the sender **parks** until a consumer dequeues an item:
+
+- Parked senders resolve in FIFO order as `recv`/`tryRecv` free slots; the parked value lands at the queue tail.
+- A parked send rejects with `channel_timeout` after 30 seconds (the value never enters the queue).
+- Aborting the sending context rejects a parked send with `cancelled`.
+
+External senders are different: `ChannelHandle.send` is synchronous and never blocks. At capacity it drops the **oldest** queued item (with a warning) so external callers like HTTP handlers can't be wedged by a full queue.
 
 ## Mode Comparison
 
@@ -242,7 +252,7 @@ ctx.send(scores, 'high'); // Throws ZodError: Expected number, received string
 | Buffered | Latest only | Up to capacity | Not buffered |
 | Multiple readers | All get same value | Each gets unique item | All waiting readers get copy |
 | `tryRecv` when empty | `null` | `null` | Always `null` |
-| Backpressure | Overwrites | Drops at capacity | Drops if no listeners |
+| Backpressure | Overwrites | Internal sends park at capacity; external handle drops oldest | Drops if no listeners |
 
 ## Related Pages
 

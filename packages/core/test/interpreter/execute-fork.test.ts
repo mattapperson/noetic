@@ -11,9 +11,12 @@ import type {
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
+import { loop } from '../../src/builders/loop-builder';
+import { execute } from '../../src/interpreter/execute';
 import { executeFork } from '../../src/interpreter/execute-control';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import { until } from '../../src/until/predicates';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
 const _StateSchema = z.record(z.string(), z.unknown());
@@ -636,6 +639,253 @@ describe('executeFork', () => {
       expect(senderError).toBeNull();
       assert(received !== undefined);
       expect(received).toBe(7);
+    });
+  });
+
+  describe('all mode fail-fast cancellation (real execute)', () => {
+    function sleep(ms: number): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    it("first failure aborts in-flight siblings: the sibling's second step never runs", async () => {
+      let siblingSecondStepRan = 0;
+      const slowSibling = loop<ContextMemory, number, number>({
+        id: 'slow-sibling',
+        steps: [
+          {
+            kind: 'run',
+            id: 'slow-1',
+            execute: async (i: number) => {
+              await sleep(100);
+              return i;
+            },
+          },
+          {
+            kind: 'run',
+            id: 'slow-2',
+            execute: async (i: number) => {
+              siblingSecondStepRan++;
+              return i;
+            },
+          },
+        ],
+        until: until.maxSteps(1),
+      });
+      const step: StepForkAll<ContextMemory, number, number> = {
+        kind: 'fork',
+        id: 'fail-fast-fork',
+        mode: 'all',
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'fail-fast',
+            execute: async () => {
+              throw new Error('instant boom');
+            },
+          },
+          slowSibling,
+        ],
+        merge: (results) => results.reduce((a, b) => a + b, 0),
+      };
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      try {
+        await executeFork(step, 1, ctx, execute);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'fork_partial');
+        expect(oe.succeeded).toHaveLength(0);
+        expect(oe.failed).toHaveLength(2);
+        const failedKinds = new Map(
+          oe.failed.map((f) => [
+            f.stepId,
+            f.error.kind,
+          ]),
+        );
+        expect(failedKinds.get('fail-fast')).toBe('step_failed');
+        // The aborted sibling surfaces as cancelled inside failed[].
+        expect(failedKinds.get('slow-sibling')).toBe('cancelled');
+      }
+      // The abort landed before the sibling's second step could dispatch.
+      expect(siblingSecondStepRan).toBe(0);
+      expect(ctx.aborted).toBe(false);
+    });
+
+    it('concurrency 1: paths queued behind a failure are skipped without executing', async () => {
+      const executed: string[] = [];
+      const step: StepForkAll<ContextMemory, number, number> = {
+        kind: 'fork',
+        id: 'queued-skip-fork',
+        mode: 'all',
+        concurrency: 1,
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'p1',
+            execute: async () => {
+              executed.push('p1');
+              throw new Error('boom');
+            },
+          },
+          {
+            kind: 'run',
+            id: 'p2',
+            execute: async (i: number) => {
+              executed.push('p2');
+              return i;
+            },
+          },
+          {
+            kind: 'run',
+            id: 'p3',
+            execute: async (i: number) => {
+              executed.push('p3');
+              return i;
+            },
+          },
+        ],
+        merge: (results) => results.reduce((a, b) => a + b, 0),
+      };
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      try {
+        await executeFork(step, 1, ctx, execute);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'fork_partial');
+        expect(oe.failed).toHaveLength(3);
+        const failedKinds = new Map(
+          oe.failed.map((f) => [
+            f.stepId,
+            f.error.kind,
+          ]),
+        );
+        expect(failedKinds.get('p1')).toBe('step_failed');
+        expect(failedKinds.get('p2')).toBe('cancelled');
+        expect(failedKinds.get('p3')).toBe('cancelled');
+      }
+      expect(executed).toEqual([
+        'p1',
+      ]);
+      expect(ctx.itemLog.items).toHaveLength(0);
+    });
+
+    it('a path that completed before the failure lands in succeeded', async () => {
+      const step: StepForkAll<ContextMemory, number, number> = {
+        kind: 'fork',
+        id: 'partial-success-fork',
+        mode: 'all',
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'quick-success',
+            execute: async (i: number) => {
+              await sleep(10);
+              return i * 2;
+            },
+          },
+          {
+            kind: 'run',
+            id: 'late-failure',
+            execute: async () => {
+              await sleep(50);
+              throw new Error('late boom');
+            },
+          },
+        ],
+        merge: (results) => results.reduce((a, b) => a + b, 0),
+      };
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      try {
+        await executeFork(step, 3, ctx, execute);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'fork_partial');
+        expect(oe.succeeded).toEqual([
+          {
+            stepId: 'quick-success',
+            value: 6,
+          },
+        ]);
+        expect(oe.failed).toHaveLength(1);
+        expect(oe.failed[0].stepId).toBe('late-failure');
+        expect(oe.failed[0].error.kind).toBe('step_failed');
+      }
+    });
+
+    it('parent abort mid-fork surfaces cancelled, not fork_partial', async () => {
+      const step: StepForkAll<ContextMemory, number, number> = {
+        kind: 'fork',
+        id: 'parent-abort-fork',
+        mode: 'all',
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'steady',
+            execute: async (i: number) => {
+              await sleep(50);
+              return i;
+            },
+          },
+        ],
+        merge: (results) => results.reduce((a, b) => a + b, 0),
+      };
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      setTimeout(() => {
+        ctx.abort('caller cancelled');
+      }, 10);
+      try {
+        await executeFork(step, 1, ctx, execute);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'cancelled');
+        expect(oe.reason).toBe('caller cancelled');
+      }
+    });
+
+    it('all-success regression: fail-fast machinery does not disturb a clean fork', async () => {
+      const step: StepForkAll<ContextMemory, number, number> = {
+        kind: 'fork',
+        id: 'clean-fork',
+        mode: 'all',
+        concurrency: 2,
+        paths: () => [
+          {
+            kind: 'run',
+            id: 'a',
+            execute: async (i: number) => i + 1,
+          },
+          {
+            kind: 'run',
+            id: 'b',
+            execute: async (i: number) => i + 2,
+          },
+          {
+            kind: 'run',
+            id: 'c',
+            execute: async (i: number) => i + 3,
+          },
+        ],
+        merge: (results) => results.reduce((a, b) => a + b, 0),
+      };
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      expect(await executeFork(step, 10, ctx, execute)).toBe(36);
     });
   });
 });

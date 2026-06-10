@@ -122,7 +122,7 @@ const approvals = channel('approvals', {
 });
 
 declare const ctx: Context;
-ctx.send(approvals, true);
+await ctx.send(approvals, true);
 const approved = await ctx.recv(approvals, { timeout: 5_000 });
 const maybe = ctx.tryRecv(approvals);
 ```

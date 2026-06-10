@@ -134,7 +134,13 @@ export class EventBroadcaster {
 
 class BroadcastIterator implements AsyncIterator<StreamEvent> {
   private cursor = 0;
-  private waiter?: Waiter;
+  /**
+   * Parked `next()` calls, FIFO. The AsyncIterator protocol allows pipelined
+   * `next()` calls (calling again before the previous promise settles), so a
+   * single waiter slot would orphan all but the latest call — the overwritten
+   * promises would never settle. `notify()` drains in arrival order.
+   */
+  private readonly waiters: Waiter[] = [];
   private returned = false;
   private readonly broadcaster: EventBroadcaster;
 
@@ -149,19 +155,21 @@ class BroadcastIterator implements AsyncIterator<StreamEvent> {
 
   /** Called by the broadcaster when new data or completion is available. */
   notify(): void {
-    if (!this.waiter) {
-      return;
-    }
-    const w = this.waiter;
-    this.waiter = undefined;
-    try {
-      const result = this.tryRead();
-      if (result) {
-        w.resolve(result);
+    while (this.waiters.length > 0) {
+      let result: IteratorResult<StreamEvent> | null;
+      try {
+        result = this.tryRead();
+      } catch (err: unknown) {
+        // Reject so the error propagates through the async iterator. The
+        // broadcaster stays finished-with-error, so the loop drains every
+        // remaining waiter with the same rejection.
+        this.waiters.shift()!.reject(err);
+        continue;
       }
-    } catch (err: unknown) {
-      // Reject the waiter's promise so the error propagates through the async iterator
-      w.reject(err);
+      if (!result) {
+        return;
+      }
+      this.waiters.shift()!.resolve(result);
     }
   }
 
@@ -172,28 +180,45 @@ class BroadcastIterator implements AsyncIterator<StreamEvent> {
         value: undefined,
       };
     }
-    const result = this.tryRead();
-    if (result) {
-      return result;
+    // Only read ahead when no one is parked — a pipelined next() must queue
+    // BEHIND earlier calls so events are handed out in FIFO order.
+    if (this.waiters.length === 0) {
+      const result = this.tryRead();
+      if (result) {
+        return result;
+      }
     }
 
     return new Promise<IteratorResult<StreamEvent>>((resolve, reject) => {
-      this.waiter = {
+      this.waiters.push({
         resolve,
         reject,
-      };
+      });
     });
+  }
+
+  /** Settle every parked waiter with `{ done: true }` — used on early exit. */
+  private settleWaiters(): void {
+    const drained = this.waiters.splice(0, this.waiters.length);
+    for (const waiter of drained) {
+      waiter.resolve({
+        done: true,
+        value: undefined,
+      });
+    }
   }
 
   async throw(err: Error): Promise<IteratorResult<StreamEvent>> {
     this.returned = true;
     this.broadcaster.removeIterator(this);
+    this.settleWaiters();
     throw err;
   }
 
   async return(): Promise<IteratorResult<StreamEvent>> {
     this.returned = true;
     this.broadcaster.removeIterator(this);
+    this.settleWaiters();
     return {
       done: true,
       value: undefined,

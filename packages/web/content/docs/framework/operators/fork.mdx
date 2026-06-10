@@ -83,7 +83,7 @@ const allExample = fork({
 });
 ```
 
-If any path throws, the entire fork throws.
+If any path throws, the entire fork throws `fork_partial`. The first genuine failure also cancels the remaining paths: siblings still queued behind the `concurrency` limit are skipped, and in-flight siblings are aborted cooperatively (they stop at their next step boundary or blocked channel operation) and then awaited. Cancelled siblings appear in `fork_partial.failed` with `error.kind === 'cancelled'`; paths that completed before the failure stay in `succeeded`. If the parent context itself is aborted mid-fork, the fork throws `cancelled` instead of `fork_partial`.
 
 ### settle
 

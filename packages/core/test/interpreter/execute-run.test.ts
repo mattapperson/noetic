@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextMemory } from '@noetic-tools/memory';
 import type { Context, StepRun } from '@noetic-tools/types';
-import { isNoeticError } from '@noetic-tools/types';
+import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { executeRun } from '../../src/interpreter/execute-action';
-import { makeMockContext } from '../_helpers';
+import { ContextImpl } from '../../src/runtime/context-impl';
+import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx: Context = makeMockContext();
 
@@ -258,6 +259,130 @@ describe('executeRun', () => {
     } finally {
       restore();
     }
+  });
+
+  describe('cancellation (not retriable)', () => {
+    it('rethrows cancelled immediately without consuming retry attempts', async () => {
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      let attempts = 0;
+      const s: StepRun<ContextMemory, string, string> = {
+        kind: 'run',
+        id: 'cancel-test',
+        execute: async () => {
+          attempts++;
+          throw new NoeticErrorImpl({
+            kind: 'cancelled',
+            reason: 'user dismissed dialog',
+          });
+        },
+        retry: {
+          maxAttempts: 3,
+          backoff: 'fixed',
+          initialDelay: 1,
+        },
+      };
+      try {
+        await executeRun(s, 'test', ctx);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'cancelled');
+        expect(oe.reason).toBe('user dismissed dialog');
+      }
+      expect(attempts).toBe(1);
+      expect(ctx.itemLog.items).toHaveLength(0);
+    });
+
+    it('throws cancelled before re-executing when the context aborts between attempts', async () => {
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      let attempts = 0;
+      const s: StepRun<ContextMemory, string, string> = {
+        kind: 'run',
+        id: 'abort-between',
+        execute: async () => {
+          attempts++;
+          // Simulate an abort arriving while the first attempt is failing.
+          ctx.abort('shutting down');
+          throw new Error('transient');
+        },
+        retry: {
+          maxAttempts: 3,
+          backoff: 'fixed',
+          initialDelay: 1,
+        },
+      };
+      try {
+        await executeRun(s, 'test', ctx);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'cancelled');
+        expect(oe.reason).toBe('shutting down');
+      }
+      // The second attempt never ran — the top-of-attempt abort check fired.
+      expect(attempts).toBe(1);
+      expect(ctx.itemLog.items).toHaveLength(0);
+    });
+  });
+
+  describe('retry attempt boundaries (maxAttempts = 3)', () => {
+    function failUntil(succeedOnAttempt: number): {
+      step: StepRun<ContextMemory, string, string>;
+      attempts: () => number;
+    } {
+      let attempts = 0;
+      return {
+        step: {
+          kind: 'run',
+          id: `boundary-${succeedOnAttempt}`,
+          execute: async () => {
+            attempts++;
+            if (attempts < succeedOnAttempt) {
+              throw new Error('not yet');
+            }
+            return 'ok';
+          },
+          retry: {
+            maxAttempts: 3,
+            backoff: 'fixed',
+            initialDelay: 1,
+          },
+        },
+        attempts: () => attempts,
+      };
+    }
+
+    it('succeeds on attempt N-1 (2 of 3)', async () => {
+      const { step: s, attempts } = failUntil(2);
+      expect(await executeRun(s, 'test', mockCtx)).toBe('ok');
+      expect(attempts()).toBe(2);
+    });
+
+    it('succeeds on attempt N (3 of 3)', async () => {
+      const { step: s, attempts } = failUntil(3);
+      expect(await executeRun(s, 'test', mockCtx)).toBe('ok');
+      expect(attempts()).toBe(3);
+    });
+
+    it('fails when success would come on attempt N+1 (4 of 3)', async () => {
+      const { step: s, attempts } = failUntil(4);
+      try {
+        await executeRun(s, 'test', mockCtx);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        const oe = e.noeticError;
+        assert(oe.kind === 'step_failed');
+        expect(oe.retriesExhausted).toBe(true);
+      }
+      expect(attempts()).toBe(3);
+    });
   });
 
   it('wraps non-Error throws in NoeticErrorImpl', async () => {

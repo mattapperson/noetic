@@ -13,7 +13,7 @@ Long-lived runner loops — the tasks-system planner / implementer / agent-ci su
 
 - `createDetachedSignal<T>()` — single-shot resolve/reject signal used by the runner loop to surface the final outcome.
 - `runnableLoop(opts)` — generic turn-driver: seed the session from prior items, run the first turn, and await the signal.
-- `createStallNudgeHook(opts)` — two-strike nudge composable with the runner loop.
+- `createStallNudgeHook(opts)` — two-strike nudge composable with the runner loop. After sending the nudge it awaits the nudged turn's real completion via `harness.getAgentResponse` (raced against the outcome signal) before re-checking for a stall — `execute()` is enqueue-only, so a microtask-scale wait would always escalate.
 - `seedFromItems(harness, threadId, items)` — path-free session seeding that accepts an `Item[]` the caller has loaded.
 
 These are the generic composition parts the built-in tasks runners use under the hood; they are exported so third-party runners (custom agents, CI wrappers, daemons) can build the same shape against any `SubprocessAdapter`.

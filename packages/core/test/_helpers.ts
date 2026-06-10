@@ -476,7 +476,7 @@ export function makeMockHarness(): AgentHarnessContract {
       makeMockContext({
         harness,
       }),
-    send: () => {},
+    send: async () => {},
     recv: async () => {
       throw new Error('not impl');
     },

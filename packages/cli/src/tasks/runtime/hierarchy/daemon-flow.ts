@@ -90,7 +90,7 @@ export function buildEventsBridgeTickStep(ctx: TaskStoreContext): Step<ContextMe
         if (evt.id > sinceId) {
           sinceId = evt.id;
         }
-        runCtx.send(externalTaskEventsChan, evt);
+        await runCtx.send(externalTaskEventsChan, evt);
       }
     },
   });

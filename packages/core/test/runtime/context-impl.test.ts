@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { Channel, InputMessageItem } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
+import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockHarness } from '../_helpers';
 
@@ -99,9 +101,67 @@ describe('ContextImpl', () => {
       schema: z.unknown(),
       mode: 'value' as const,
     } satisfies Channel<unknown>;
-    expect(() => ctx.send(fakeChannel, 'val')).toThrow('No channel store configured');
+    expect(ctx.send(fakeChannel, 'val')).rejects.toThrow('No channel store configured');
     expect(() => ctx.tryRecv(fakeChannel)).toThrow('No channel store configured');
     expect(ctx.recv(fakeChannel)).rejects.toThrow('No channel store configured');
+  });
+
+  test('ctx.abort() rejects a pending ctx.recv with kind cancelled (timeout 0)', async () => {
+    const store = new ChannelStore();
+    const ch = {
+      name: 'abort-recv',
+      schema: z.string(),
+      mode: 'queue' as const,
+    } satisfies Channel<string>;
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+      channelStore: store,
+    });
+    const pending = ctx.recv(ch, {
+      timeout: 0,
+    });
+    ctx.abort('cleanup');
+    try {
+      await pending;
+      throw new Error('should have rejected');
+    } catch (e) {
+      if (!isNoeticError(e)) {
+        throw e;
+      }
+      const oe = e.noeticError;
+      if (oe.kind !== 'cancelled') {
+        throw new Error(`expected cancelled, got ${oe.kind}`);
+      }
+      expect(oe.reason).toBe('cleanup');
+    }
+  });
+
+  test("aborting one context does not reject a sibling context's recv on the shared store", async () => {
+    const store = new ChannelStore();
+    const ch = {
+      name: 'sibling-recv',
+      schema: z.string(),
+      mode: 'queue' as const,
+    } satisfies Channel<string>;
+    const harness = makeMockHarness();
+    const abortedCtx = new ContextImpl({
+      harness,
+      channelStore: store,
+    });
+    const survivorCtx = new ContextImpl({
+      harness,
+      channelStore: store,
+    });
+    const abortedRecv = abortedCtx.recv(ch, {
+      timeout: 1_000,
+    });
+    const survivorRecv = survivorCtx.recv(ch, {
+      timeout: 1_000,
+    });
+    abortedCtx.abort('one down');
+    await expect(abortedRecv).rejects.toThrow('Cancelled');
+    store.send(ch, 'delivered');
+    expect(await survivorRecv).toBe('delivered');
   });
 
   test('lastStepMeta starts null, can be set', () => {

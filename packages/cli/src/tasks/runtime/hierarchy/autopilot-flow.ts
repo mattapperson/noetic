@@ -298,7 +298,7 @@ export function buildAutopilotTickStep(
           taskId: entry.taskId,
           featureId: entry.feature.id,
         };
-        ctx.send(validatorRequestChan, request);
+        await ctx.send(validatorRequestChan, request);
       }
       return report;
     },

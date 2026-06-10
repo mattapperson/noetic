@@ -37,7 +37,7 @@ describe('async delegate demo', () => {
     const ctx = harness.createContext();
 
     // Pre-load an inbox message to simulate sub-agent completion
-    harness.send(
+    await harness.send(
       agentInbox,
       '[Sub-agent sub-1 completed] Result: Quantum computing uses qubits for computation.',
       ctx,

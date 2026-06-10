@@ -280,6 +280,8 @@ const resilientLoop = loop({
 
 If `onError` is not provided, errors propagate immediately.
 
+`onError` is never consulted for a `cancelled` error: cancellation is not a retriable error, so it bypasses `onError` entirely and terminates the loop immediately — `'retry'` and `'skip'` cannot swallow it.
+
 ## The ReAct Pattern
 
 The built-in `react()` helper is just a loop with `until.noToolCalls()`.

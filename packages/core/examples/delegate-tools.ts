@@ -89,20 +89,18 @@ function notifyInboxOnSettlement(opts: {
   void opts.handle.await().then(
     (result) => {
       opts.handles.delete(opts.handle.id);
-      opts.harness.send(
-        opts.inbox,
-        `[Sub-agent ${opts.handle.id} completed] ${result}`,
-        opts.ctx.ctx,
-      );
+      // Fire-and-forget: a full inbox parks the send; if it times out the
+      // notification is dropped, which is acceptable for this example.
+      void opts.harness
+        .send(opts.inbox, `[Sub-agent ${opts.handle.id} completed] ${result}`, opts.ctx.ctx)
+        .catch(() => {});
     },
     (err: unknown) => {
       opts.handles.delete(opts.handle.id);
       const message = err instanceof Error ? err.message : String(err);
-      opts.harness.send(
-        opts.inbox,
-        `[Sub-agent ${opts.handle.id} failed] ${message}`,
-        opts.ctx.ctx,
-      );
+      void opts.harness
+        .send(opts.inbox, `[Sub-agent ${opts.handle.id} failed] ${message}`, opts.ctx.ctx)
+        .catch(() => {});
     },
   );
 }

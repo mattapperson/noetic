@@ -120,6 +120,6 @@ This mirrors `spawn`'s deep-clone guarantee (see `04-spawn`) and prevents race c
 
 ### Error Behavior
 
-- **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results.
+- **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results. Cancellation is cooperative: paths still queued behind the `concurrency` limit are skipped, in-flight siblings are aborted and awaited (they stop at their next step boundary or blocked channel operation), and cancelled paths appear in `failed` with `{ kind: 'cancelled' }`. If the parent context itself is aborted mid-fork, the fork throws `cancelled`, not `fork_partial`.
 - **`mode: 'settle'`** — Never throws. Failed paths appear as `{ status: 'rejected' }` in the merge function's `SettleResult[]`. If ALL paths reject, the merge function still runs with an array of all-rejected `SettleResult` entries — it is the merge function's responsibility to handle this case (e.g., by throwing).
 - **`mode: 'race'`** — First success wins. If all fail, throw `fork_partial`.

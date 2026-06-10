@@ -38,6 +38,8 @@ prepareNext: (output, verdict, ctx) => {
 - `'skip'` — move to the next iteration using the last successful output
 - `'abort'` — propagate the error (default behavior if `onError` is not specified)
 
+`onError` is never consulted for a `cancelled` error — cancellation is not a retriable error and always terminates the loop immediately (see `09-error-model`, Cancellation Propagation Semantics).
+
 ### Memory Layer Interaction
 
 On each loop iteration, the full memory layer lifecycle runs: `recall()` before the LLM call, `store()` after. This means memory layers (working memory, observations, etc.) can evolve across iterations even though the ItemLog grows linearly.

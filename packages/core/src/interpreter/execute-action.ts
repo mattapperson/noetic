@@ -7,6 +7,7 @@ import {
   estimateTokens,
   extractAssistantText,
   frameworkCast,
+  isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
@@ -70,9 +71,22 @@ export async function executeRun<TMemory, I, O>(
   let lastError = new Error('No attempts executed');
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Cancellation is not a retriable error (spec 09) — an abort that
+    // arrived between attempts must stop the loop before re-executing.
+    if (ctx.aborted) {
+      throw new NoeticErrorImpl({
+        kind: 'cancelled',
+        reason: ctx.abortReason ?? 'context aborted',
+      });
+    }
     try {
       return await step.execute(input, ctx);
     } catch (e) {
+      // Rethrow cancellation immediately — retrying it would re-run side
+      // effects after abort and bury the 'cancelled' kind under step_failed.
+      if (isNoeticError(e) && e.noeticError.kind === 'cancelled') {
+        throw e;
+      }
       lastError = e instanceof Error ? e : new Error(String(e));
 
       if (attempt < maxAttempts - 1 && retry) {
@@ -432,6 +446,12 @@ export async function executeLLM<TMemory, I, O>(
         };
     const response = await baseCtx.harness.callModel(request);
 
+    // Track tokens/cost for EVERY model call, including responses steering
+    // subsequently rejects (Deny throw / Guide retry below) — the spend is
+    // real, and until.maxCost / HarnessResponse.usage must see it (spec 07:
+    // tokens accumulate across all LLM calls).
+    trackUsage(baseCtx, response);
+
     if (hasLayers) {
       const decision = await baseCtx.harness.afterModelCall(layers, response, baseCtx);
 
@@ -469,7 +489,6 @@ export async function executeLLM<TMemory, I, O>(
     if (isMutableContext(baseCtx)) {
       baseCtx.lastStepMeta = meta;
     }
-    trackUsage(baseCtx, response);
 
     commitLayerUsage(
       baseCtx,

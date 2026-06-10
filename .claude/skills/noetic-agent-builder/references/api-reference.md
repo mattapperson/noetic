@@ -178,6 +178,8 @@ channel<T>(name: string, {
 }): Channel<T>
 ```
 
+`ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity.
+
 ## Termination Predicates
 
 ```typescript
@@ -1047,7 +1049,7 @@ const osChildHandle = harness.detachedSpawn(step, input, ctx, {
 });
 
 // Channels
-harness.send(channel, value, ctx);
+await harness.send(channel, value, ctx); // back-pressured on full queue channels
 const msg = await harness.recv(channel, ctx);
 const msg2 = harness.tryRecv(channel, ctx);
 ```

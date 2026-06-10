@@ -64,7 +64,7 @@ describe('dynamic delegate demo', () => {
     const ctx = harness.createContext();
 
     // Pre-load inbox message to simulate sub-agent completion
-    harness.send(delegateInbox, '[Sub-agent bg-1 completed] Topic is interesting.', ctx);
+    await harness.send(delegateInbox, '[Sub-agent bg-1 completed] Topic is interesting.', ctx);
 
     const agent = buildDynamicDelegateAgent({
       inbox: delegateInbox,
@@ -103,7 +103,7 @@ describe('dynamic delegate demo', () => {
     const ctx = harness.createContext();
 
     // Pre-load inbox message for the async agent
-    harness.send(delegateInbox, '[Sub-agent bg-2 completed] Background findings.', ctx);
+    await harness.send(delegateInbox, '[Sub-agent bg-2 completed] Background findings.', ctx);
 
     const agent = buildDynamicDelegateAgent({
       inbox: delegateInbox,

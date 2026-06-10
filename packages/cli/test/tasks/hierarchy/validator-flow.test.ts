@@ -197,7 +197,7 @@ describe('validatorIterationStep — pass result', () => {
     const recvPromise = childCtx.recv(featureLoopStateChan, {
       timeout: 5_000,
     });
-    childCtx.send(validatorRequestChan, {
+    await childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
     });
@@ -245,7 +245,7 @@ describe('validatorIterationStep — fail result', () => {
       })),
     );
 
-    childCtx.send(validatorRequestChan, {
+    await childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
     });
@@ -283,7 +283,7 @@ describe('validatorIterationStep — fail result', () => {
       })),
     );
 
-    childCtx.send(validatorRequestChan, {
+    await childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
     });
@@ -322,7 +322,7 @@ describe('validatorIterationStep — blocked result', () => {
     const recvPromise = childCtx.recv(featureLoopStateChan, {
       timeout: 5_000,
     });
-    childCtx.send(validatorRequestChan, {
+    await childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
     });
@@ -357,7 +357,7 @@ describe('validatorIterationStep — validator throws', () => {
       }),
     );
 
-    childCtx.send(validatorRequestChan, {
+    await childCtx.send(validatorRequestChan, {
       taskId: seed.taskId,
       featureId: seed.featureId,
     });

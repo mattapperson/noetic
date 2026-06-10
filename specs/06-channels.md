@@ -55,8 +55,8 @@ step.run({
   id: 'research',
   execute: async (query, ctx) => {
     const results = await search(query);
-    ctx.send(findings, results);        // type-checked: must be string[]
-    ctx.send(status, 'done');           // type-checked: must be 'running' | 'done' | 'error'
+    await ctx.send(findings, results);  // type-checked: must be string[]
+    await ctx.send(status, 'done');     // type-checked: must be 'running' | 'done' | 'error'
   },
 });
 
@@ -200,9 +200,17 @@ ctx.recv(status, { timeout: 0 });         // no timeout (use with caution)
 
 Setting `timeout: 0` disables the timeout — this is an explicit opt-in to potential deadlock. The agent harness SHOULD emit a warning when `timeout: 0` is used.
 
+A pending `recv` never outlives its context: when the context is aborted, the blocked `recv` immediately rejects with `{ kind: 'cancelled' }` — even with `timeout: 0` (see `09-error-model`, Cancellation item 2). Abort only rejects waiters belonging to the aborted context; siblings sharing the channel store keep waiting.
+
 ### Back-Pressure (Internal Senders)
 
-When a queue channel's buffer reaches `capacity`, `ctx.send` returns a `Promise` that resolves when space is available (a consumer calls `recv`). Like `recv`, back-pressure `send` is subject to the default 30-second timeout. If the timeout fires, the agent harness throws `channel_timeout` with the channel name. This prevents silent deadlocks where a producer and consumer are both blocked.
+`ctx.send` returns a `Promise<void>`. For value and topic channels, and for queue channels below `capacity`, the promise resolves immediately (delivery is synchronous). When a queue channel's buffer is at `capacity`, the sender is **parked** until space frees up:
+
+- Parked senders form a FIFO queue. When a consumer dequeues an item (`recv` or `tryRecv`), the oldest parked sender's value moves into the freed slot and that sender's promise resolves.
+- Like `recv`, a parked `send` is subject to the default 30-second timeout. If the timeout fires, the promise rejects with `channel_timeout` (the value never enters the queue). This prevents silent deadlocks where a producer and consumer are both blocked.
+- If the sending context is aborted while parked, the promise rejects with `{ kind: 'cancelled' }` (see `09-error-model`, Cancellation item 2).
+
+External senders are never back-pressured — see External Sender Back-Pressure above.
 
 ### Blocking Model
 
@@ -213,25 +221,47 @@ When a queue channel's buffer reaches `capacity`, `ctx.send` returns a `Promise`
 const channelState = new Map<string, {
   mode: 'value' | 'queue' | 'topic';
   buffer: unknown[];
+  capacity: number;
   waiters: Array<{ resolve: (value: unknown) => void }>;
+  pendingSenders: Array<{ value: unknown; resolve: () => void }>;
 }>();
 
-function send<T>(ch: Channel<T>, value: T): void {
+async function send<T>(ch: Channel<T>, value: T): Promise<void> {
   const state = channelState.get(ch.name);
-  if (state.waiters.length > 0) {
-    state.waiters.shift()!.resolve(value);
-  } else if (state.mode === 'queue') {
-    state.buffer.push(value);
-  } else if (state.mode === 'value') {
-    state.buffer = [value]; // last-write-wins
+  if (state.mode === 'value') {
+    state.buffer = [value];                       // last-write-wins
+    for (const w of state.waiters.splice(0)) {
+      w.resolve(value);                            // drain ALL parked waiters
+    }
+    return;
   }
-  // topic: deliver to ALL waiters, drop if none
+  if (state.mode === 'queue') {
+    if (state.waiters.length > 0) {
+      state.waiters.shift()!.resolve(value);       // direct handoff
+      return;
+    }
+    if (state.buffer.length < state.capacity) {
+      state.buffer.push(value);
+      return;
+    }
+    // At capacity: park until a recv frees a slot (30s default timeout ->
+    // channel_timeout; context abort -> cancelled).
+    return new Promise(resolve =>
+      state.pendingSenders.push({ value, resolve }));
+  }
+  // topic: deliver to ALL current subscribers, drop if none
 }
 
 async function recv<T>(ch: Channel<T>): Promise<T> {
   const state = channelState.get(ch.name);
   if (state.buffer.length > 0) {
-    return state.buffer.shift() as T;
+    const head = state.buffer.shift() as T;
+    const sender = state.pendingSenders.shift();   // promote oldest parked sender
+    if (sender) {
+      state.buffer.push(sender.value);
+      sender.resolve();
+    }
+    return head;
   }
   return new Promise(resolve => state.waiters.push({ resolve }));
 }
@@ -240,9 +270,14 @@ function tryRecv<T>(ch: Channel<T>): T | null {
   const state = channelState.get(ch.name);
   if (state.mode === 'topic') return null;
   if (state.buffer.length > 0) {
-    return (state.mode === 'queue'
-      ? state.buffer.shift()
-      : state.buffer[0]) as T;
+    if (state.mode === 'value') return state.buffer[0] as T;
+    const head = state.buffer.shift() as T;        // queue: also promotes
+    const sender = state.pendingSenders.shift();   // a parked sender, as recv
+    if (sender) {
+      state.buffer.push(sender.value);
+      sender.resolve();
+    }
+    return head;
   }
   return null;
 }

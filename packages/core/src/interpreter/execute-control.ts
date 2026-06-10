@@ -216,12 +216,51 @@ async function executeAll<TMemory, I, O>(
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
-  const tasks = paths.map(
-    (path, i) => () =>
-      executeStep<TMemory, I, O>(path, _input, frameworkCast<Context<TMemory>>(childContexts[i])),
-  );
+  // Fail-fast (specs 03/09): the first genuine path failure aborts every
+  // sibling child context. Cancellation is cooperative — in-flight siblings
+  // are still awaited (they stop at their next step boundary / blocked
+  // channel op) so fork_partial's succeeded/failed stay accurate; paths
+  // still queued behind the concurrency limit are skipped outright. Skipped
+  // and aborted paths appear in `failed` with kind 'cancelled'.
+  let firstFailureSeen = false;
+
+  const tasks = paths.map((path, i) => async (): Promise<O> => {
+    if (firstFailureSeen) {
+      throw new NoeticErrorImpl({
+        kind: 'cancelled',
+        reason: `fork '${step.id}' sibling failed`,
+      });
+    }
+    try {
+      return await executeStep<TMemory, I, O>(
+        path,
+        _input,
+        frameworkCast<Context<TMemory>>(childContexts[i]),
+      );
+    } catch (e) {
+      const isCancellation = isNoeticError(e) && e.noeticError.kind === 'cancelled';
+      if (!isCancellation && !firstFailureSeen) {
+        firstFailureSeen = true;
+        for (let j = 0; j < childContexts.length; j++) {
+          if (j !== i) {
+            childContexts[j].abort(`fork '${step.id}' sibling failed`);
+          }
+        }
+      }
+      throw e;
+    }
+  });
   const settled = await runWithConcurrency(tasks, concurrency);
   const { succeeded, failed } = classifyResults(settled, paths);
+
+  // If the PARENT context was aborted mid-fork, the whole fork is cancelled —
+  // surface 'cancelled', not a partial-failure shape (spec 09, item 3).
+  if (ctx.aborted) {
+    throw new NoeticErrorImpl({
+      kind: 'cancelled',
+      reason: ctx.abortReason ?? 'context aborted',
+    });
+  }
 
   if (failed.length > 0) {
     throw new NoeticErrorImpl({
@@ -315,7 +354,7 @@ async function executeSettle<TMemory, I, O>(
   step: StepForkSettle<TMemory, I, O>,
   paths: Step<TMemory, I, O>[],
   input: I,
-  _ctx: Context<TMemory>,
+  ctx: Context<TMemory>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
@@ -325,6 +364,15 @@ async function executeSettle<TMemory, I, O>(
       executeStep<TMemory, I, O>(path, input, frameworkCast<Context<TMemory>>(childContexts[i])),
   );
   const settled = await runWithConcurrency(tasks, concurrency);
+
+  // Parent aborted mid-fork: the fork is cancelled, merge never runs
+  // (spec 09, Cancellation item 3 — same rule as mode 'all').
+  if (ctx.aborted) {
+    throw new NoeticErrorImpl({
+      kind: 'cancelled',
+      reason: ctx.abortReason ?? 'context aborted',
+    });
+  }
 
   const results: SettleResult<O>[] = settled.map((result, i) => {
     if (result.status === 'fulfilled') {
@@ -341,7 +389,7 @@ async function executeSettle<TMemory, I, O>(
     };
   });
 
-  return step.merge(results, _ctx);
+  return step.merge(results, ctx);
 }
 
 //#endregion
@@ -367,7 +415,11 @@ async function recvInboxWithTimeout(ctx: Context, step: InboxFields): Promise<st
     return await ctx.recv(step.inbox, {
       timeout: step.parkTimeout,
     });
-  } catch {
+  } catch (e) {
+    // Cancellation must terminate the loop, not read as "no message".
+    if (isNoeticError(e) && e.noeticError.kind === 'cancelled') {
+      throw e;
+    }
     // Expected: channel_timeout error when parkTimeout expires with no message.
     return null;
   }
@@ -445,6 +497,12 @@ export async function executeLoop<TMemory, I, O>(
       stepCount++;
     } catch (e) {
       if (!step.onError || !isNoeticError(e)) {
+        throw e;
+      }
+      // Cancellation is not a retriable error (spec 09): it must terminate
+      // the loop promptly rather than be consumed by 'retry'/'skip'. Same
+      // guard as executeEvery's 'continue' policy below.
+      if (e.noeticError.kind === 'cancelled') {
         throw e;
       }
       const action = step.onError(e.noeticError, ctx);

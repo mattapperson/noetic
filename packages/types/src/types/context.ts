@@ -192,7 +192,13 @@ export interface ContextHarness {
   ): Promise<ReadonlyArray<import('./items').Item>>;
   storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   previewRequestItems(scope?: unknown): Promise<ReadonlyArray<import('./items').Item>>;
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  /**
+   * Internal-sender channel write. Resolves immediately unless the target
+   * queue channel is at capacity, in which case the send parks until a
+   * consumer frees a slot (back-pressure; default 30s timeout →
+   * `channel_timeout`, abort → `cancelled`).
+   */
+  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void>;
   recv<T>(
     channel: Channel<T>,
     ctx: Context,
@@ -264,7 +270,14 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
       timeout?: number;
     },
   ): Promise<T>;
-  send<T>(channel: Channel<T>, value: T): void;
+  /**
+   * Send a value into a channel. Resolves immediately for value/topic
+   * channels and for queue channels below capacity. When a queue channel is
+   * at capacity the returned promise parks until a consumer dequeues an item
+   * (back-pressure): after the default 30s timeout it rejects with
+   * `channel_timeout`, and aborting the context rejects it with `cancelled`.
+   */
+  send<T>(channel: Channel<T>, value: T): Promise<void>;
   tryRecv<T>(channel: Channel<T>): T | null;
   checkpoint(): Promise<void>;
   complete<T>(value: T): void;

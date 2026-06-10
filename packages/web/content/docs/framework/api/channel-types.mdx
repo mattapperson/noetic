@@ -63,7 +63,7 @@ interface ChannelHandle<T> {
 
 | Field | Type | Description |
 |---|---|---|
-| `send` | `(value: T) => void` | Send a value into the channel |
+| `send` | `(value: T) => void` | Send a value into the channel. Synchronous — external senders are never back-pressured; at capacity the oldest queued item is dropped (with a warning) |
 | `closed` | `boolean` | Whether the handle is closed (execution completed) |
 | `channel` | `Channel<T>` | Reference to the underlying channel |
 
@@ -73,7 +73,7 @@ The `Context` object provides three methods for channel interaction:
 
 ```ts validate=none
 interface Context {
-  send<T>(channel: Channel<T>, value: T): void;
+  send<T>(channel: Channel<T>, value: T): Promise<void>;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>): T | null;
 }
@@ -81,6 +81,6 @@ interface Context {
 
 | Method | Description |
 |---|---|
-| `send(channel, value)` | Send a value to the channel. Non-blocking. |
-| `recv(channel, opts?)` | Receive a value. Blocks until available or timeout. |
+| `send(channel, value)` | Send a value to the channel. Resolves immediately unless a queue channel is at capacity, in which case the send parks until a consumer frees a slot (back-pressure): default 30s timeout rejects with `channel_timeout`; aborting the context rejects with `cancelled`. |
+| `recv(channel, opts?)` | Receive a value. Blocks until available or timeout (`channel_timeout`). Rejects with `cancelled` when the context is aborted while waiting. |
 | `tryRecv(channel)` | Non-blocking receive. Returns `null` if no value available. |

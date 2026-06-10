@@ -250,6 +250,9 @@ describe('runnableLoop with createStallNudgeHook (C8 regression)', () => {
     expect(onStallFired).toBe(1);
     // Two executions: the framing message + the nudge.
     expect(stub.executeCalls).toHaveLength(2);
+    // Two real turn-completion waits: the loop's post-framing wait and the
+    // hook's post-nudge wait (the hook must not escalate on a microtask).
+    expect(stub.responseRequests).toBe(2);
     const second = stub.executeCalls[1];
     if (second === undefined || typeof second === 'string' || Array.isArray(second)) {
       throw new Error('expected second execute call to be a single Item');
@@ -258,6 +261,171 @@ describe('runnableLoop with createStallNudgeHook (C8 regression)', () => {
       throw new Error(`expected second execute call to be a message Item, got ${second.type}`);
     }
     expect(second.id).toBe('nudge-1');
+  });
+
+  it('does NOT escalate when the agent answers the nudge after real async work', async () => {
+    type Outcome =
+      | {
+          kind: 'done';
+        }
+      | {
+          kind: 'stalled';
+        };
+    const signal = createDetachedSignal<Outcome>();
+    // First turn genuinely stalls; the agent answers the NUDGE turn via a
+    // terminal tool 5ms after the nudge is enqueued. Before the fix the
+    // hook waited one microtask and escalated, dropping this resolve.
+    const stub = makeHarnessStub({
+      onExecute: (input) => {
+        const isNudge =
+          typeof input === 'object' &&
+          !Array.isArray(input) &&
+          input.type === 'message' &&
+          input.id === 'nudge-1';
+        if (isNudge) {
+          setTimeout(() => {
+            signal.resolve({
+              kind: 'done',
+            });
+          }, 5);
+        }
+      },
+      response: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return emptyResponse('turn');
+      },
+    });
+
+    const outcome = await runnableLoop<Outcome>({
+      harness: stub.harness,
+      threadId: 'test-thread',
+      initialMessage: devMessage('seed-1', 'start'),
+      signal,
+      afterFirstTurn: createStallNudgeHook({
+        harness: stub.harness,
+        threadId: 'test-thread',
+        signal,
+        nudgeMessage: createNudgeMessage({
+          id: 'nudge-1',
+        }),
+        hasPendingExternal: () => false,
+        onStall: async () => {
+          throw new Error('onStall must not fire when the agent answers the nudge');
+        },
+        buildStalledOutcome: () => {
+          throw new Error('stalled outcome must not be built');
+        },
+      }),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'done',
+    });
+    // Framing message + nudge — the agent's answer settles the signal.
+    expect(stub.executeCalls).toHaveLength(2);
+  });
+
+  it('does NOT escalate when pending external input arises during the nudged turn', async () => {
+    const signal = createDetachedSignal<{
+      kind: 'done';
+    }>();
+    let pendingExternal = false;
+    const stub = makeHarnessStub({
+      onExecute: (input) => {
+        const isNudge =
+          typeof input === 'object' &&
+          !Array.isArray(input) &&
+          input.type === 'message' &&
+          input.id === 'nudge-1';
+        if (isNudge) {
+          // Agent responds to the nudge by asking the user a question.
+          pendingExternal = true;
+        }
+      },
+      response: async () => emptyResponse('turn'),
+    });
+
+    const loopPromise = runnableLoop({
+      harness: stub.harness,
+      threadId: 'test-thread',
+      initialMessage: devMessage('seed-1', 'start'),
+      signal,
+      afterFirstTurn: createStallNudgeHook({
+        harness: stub.harness,
+        threadId: 'test-thread',
+        signal,
+        nudgeMessage: createNudgeMessage({
+          id: 'nudge-1',
+        }),
+        hasPendingExternal: () => pendingExternal,
+        onStall: async () => {
+          throw new Error('onStall must not fire when ask-user is pending after the nudge');
+        },
+        buildStalledOutcome: () => {
+          throw new Error('stalled outcome must not be built');
+        },
+      }),
+    });
+
+    // Let the hook run its nudge + wait, then rescue the signal so the
+    // loop returns (the agent is legitimately waiting on the user).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    signal.resolve({
+      kind: 'done',
+    });
+    const outcome = await loopPromise;
+
+    expect(outcome).toEqual({
+      kind: 'done',
+    });
+    // Framing message + nudge were sent; no escalation happened.
+    expect(stub.executeCalls).toHaveLength(2);
+  });
+
+  it('does not crash the hook when getAgentResponse rejects', async () => {
+    type Outcome =
+      | {
+          kind: 'done';
+        }
+      | {
+          kind: 'stalled';
+        };
+    const signal = createDetachedSignal<Outcome>();
+    const stub = makeHarnessStub({
+      response: async () => {
+        throw new Error('response stream broke');
+      },
+    });
+
+    let onStallFired = 0;
+    const outcome = await runnableLoop<Outcome>({
+      harness: stub.harness,
+      threadId: 'test-thread',
+      initialMessage: devMessage('seed-1', 'start'),
+      signal,
+      afterFirstTurn: createStallNudgeHook({
+        harness: stub.harness,
+        threadId: 'test-thread',
+        signal,
+        nudgeMessage: createNudgeMessage({
+          id: 'nudge-1',
+        }),
+        hasPendingExternal: () => false,
+        onStall: async () => {
+          onStallFired += 1;
+        },
+        buildStalledOutcome: () => ({
+          kind: 'stalled',
+        }),
+      }),
+    });
+
+    // A rejecting getAgentResponse is swallowed by the hook's race; the
+    // run still settles via the normal two-strike escalation.
+    expect(outcome).toEqual({
+      kind: 'stalled',
+    });
+    expect(onStallFired).toBe(1);
   });
 
   it('awaits getAgentResponse before dispatching the hook', async () => {

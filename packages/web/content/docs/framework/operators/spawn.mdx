@@ -200,7 +200,7 @@ const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 // In a tool's execute function — use the parent ctx passed to execute(args, ctx):
 const handle = harness.detachedSpawn(subAgentStep, task, parentCtx);
 handle.await().then((result) => {
-  harness.send(inbox, `[Sub-agent done] ${result}`, parentCtx);
+  void harness.send(inbox, `[Sub-agent done] ${result}`, parentCtx);
 });
 
 // The parent loop uses the inbox to wake when results arrive:
@@ -254,8 +254,10 @@ const launchTool = tool({
     const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
     // Notify the parent loop when the sub-agent finishes
     handle.await().then(
-      (result) => toolCtx.harness.send(inbox, `[Agent ${handle.id} done] ${result}`, toolCtx.ctx),
-      (err) => toolCtx.harness.send(inbox, `[Agent ${handle.id} failed] ${err}`, toolCtx.ctx),
+      (result) =>
+        void toolCtx.harness.send(inbox, `[Agent ${handle.id} done] ${result}`, toolCtx.ctx),
+      (err) =>
+        void toolCtx.harness.send(inbox, `[Agent ${handle.id} failed] ${err}`, toolCtx.ctx),
     );
     return { agentId: handle.id };
   },

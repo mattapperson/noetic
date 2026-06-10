@@ -350,7 +350,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     const sendStep = step.run<ContextMemory, string, string>({
       id: 'send-finding',
       execute: async (input, ctx) => {
-        ctx.send(findingsChannel, {
+        await ctx.send(findingsChannel, {
           source: 'test',
           finding: input,
         });

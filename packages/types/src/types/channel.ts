@@ -26,6 +26,12 @@ export interface ExternalChannel<T> extends Channel<T> {
 
 /** @public Handle for sending messages to a channel and checking its closed state. */
 export interface ChannelHandle<T> {
+  /**
+   * External-sender write: synchronous and never back-pressured. When a
+   * queue channel is at capacity the OLDEST item is dropped (with a warning)
+   * so external callers (HTTP handlers, CLI prompts) never block. Internal
+   * senders (`ctx.send`) get async back-pressure instead.
+   */
   send(value: T): void;
   readonly closed: boolean;
   readonly channel: Channel<T>;

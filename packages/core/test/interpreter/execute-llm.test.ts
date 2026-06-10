@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import type { ContextMemory, ExecutionContext, MemoryLayer } from '@noetic-tools/memory';
 import { historyWindow, projectHistoryLayers } from '@noetic-tools/memory';
 import type { CallModelRequest, StepLLM } from '@noetic-tools/types';
-import { frameworkCast, isNoeticError } from '@noetic-tools/types';
+import { frameworkCast, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
 import { executeLLM } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
@@ -583,5 +583,129 @@ describe('executeLLM', () => {
     // assistant pairs, no tool calls, so no expansion needed).
     expect(capturedRequest.items.length).toBe(4);
     expect(ctx.itemLog.items.length).toBeGreaterThanOrEqual(20);
+  });
+
+  describe('steering usage accounting', () => {
+    const STEERING_LAYER: MemoryLayer = {
+      id: 'steering-dummy',
+      slot: 1e2,
+      scope: 'execution',
+      hooks: {},
+    };
+
+    interface SteeringHarnessOpts {
+      decisions: Array<'guide' | 'allow' | 'deny'>;
+    }
+
+    function makeSteeringCtx(opts: SteeringHarnessOpts): ReturnType<typeof makeMockContext> {
+      const harness = makeMockHarness();
+      let callCount = 0;
+      harness.callModel = async () => {
+        callCount++;
+        return makeLLMResponse(`response-${callCount}`, {
+          cost: 0.01,
+        });
+      };
+      let decisionIndex = 0;
+      harness.afterModelCall = async () => {
+        const decision = opts.decisions[Math.min(decisionIndex, opts.decisions.length - 1)];
+        decisionIndex++;
+        if (decision === 'deny') {
+          return {
+            action: SteeringAction.Deny,
+            guidance: 'nope',
+          };
+        }
+        if (decision === 'guide') {
+          return {
+            action: SteeringAction.Guide,
+            guidance: 'adjust',
+          };
+        }
+        return {
+          action: SteeringAction.Allow,
+        };
+      };
+      return makeMockContext({
+        harness,
+      });
+    }
+
+    const llmStep: StepLLM<ContextMemory, string, string> = {
+      kind: 'llm',
+      id: 'steered-usage',
+      model: 'test/model',
+    };
+
+    it('accumulates usage for Guide-rejected calls (Guide, Guide, Allow)', async () => {
+      const ctx = makeSteeringCtx({
+        decisions: [
+          'guide',
+          'guide',
+          'allow',
+        ],
+      });
+      const result = await executeLLM(llmStep, 'input', ctx, [
+        STEERING_LAYER,
+      ]);
+      expect(result).toBe('response-3');
+      // 3 billed calls at 10 in / 5 out / $0.01 each.
+      expect(ctx.tokens.input).toBe(30);
+      expect(ctx.tokens.output).toBe(15);
+      expect(ctx.tokens.total).toBe(45);
+      expect(ctx.cost).toBeCloseTo(0.03, 10);
+    });
+
+    it('tracks the denied call before throwing steering_denied', async () => {
+      const ctx = makeSteeringCtx({
+        decisions: [
+          'deny',
+        ],
+      });
+      try {
+        await executeLLM(llmStep, 'input', ctx, [
+          STEERING_LAYER,
+        ]);
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        assert(isNoeticError(e));
+        expect(e.noeticError.kind).toBe('steering_denied');
+      }
+      expect(ctx.tokens.input).toBe(10);
+      expect(ctx.tokens.output).toBe(5);
+      expect(ctx.cost).toBeCloseTo(0.01, 10);
+    });
+
+    it('accounts all four calls at the MAX_STEERING_RETRIES boundary', async () => {
+      const ctx = makeSteeringCtx({
+        decisions: [
+          'guide',
+        ],
+      });
+      // Always Guide: 1 original + 3 retries, then the 4th response falls
+      // through (retry budget exhausted).
+      const result = await executeLLM(llmStep, 'input', ctx, [
+        STEERING_LAYER,
+      ]);
+      expect(result).toBe('response-4');
+      expect(ctx.tokens.input).toBe(40);
+      expect(ctx.tokens.output).toBe(20);
+      expect(ctx.cost).toBeCloseTo(0.04, 10);
+    });
+
+    it('does not double-count a single accepted call', async () => {
+      const ctx = makeSteeringCtx({
+        decisions: [
+          'allow',
+        ],
+      });
+      const result = await executeLLM(llmStep, 'input', ctx, [
+        STEERING_LAYER,
+      ]);
+      expect(result).toBe('response-1');
+      expect(ctx.tokens.input).toBe(10);
+      expect(ctx.tokens.output).toBe(5);
+      expect(ctx.cost).toBeCloseTo(0.01, 10);
+    });
   });
 });

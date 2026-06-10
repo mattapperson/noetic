@@ -114,6 +114,10 @@ NoeticConfigError: Missing required environment variable.
   docsUrl: https://noetic.tools/docs/errors#MISSING_API_KEY
 ```
 
+### Type Guards
+
+`isNoeticError(e)` narrows an `unknown` value to `NoeticErrorImpl`. It uses an `instanceof` fast path with a structural fallback (an `Error` carrying `noeticError.kind: string`), so the guard keeps working when two copies of the types package are loaded (mixed `src`/`dist` resolution, duplicated node_modules). The inner `kind` is not validated against the closed union — errors minted by a newer package version still pass.
+
 ### Budget Exceeded
 
 Budget limits (`maxCost`, `maxSteps`, `maxDuration`) are enforced by `until` predicates, which return `Verdict` objects — they do NOT throw. The `budget_exceeded` error kind exists for cases where budget enforcement happens **outside** a loop's `until` predicate — for example, when the runtime itself detects that an agent-level budget (set on `AgentConfig`) has been exceeded between steps. In that case, the runtime throws `budget_exceeded` directly.

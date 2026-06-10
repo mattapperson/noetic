@@ -234,3 +234,90 @@ describe('EventBroadcaster', () => {
     expect(bc.bufferSize).toBe(2);
   });
 });
+
+describe('BroadcastIterator pipelined next() (C9)', () => {
+  function getText(result: IteratorResult<StreamEvent>): string {
+    if (result.done) {
+      throw new Error('expected a value result');
+    }
+    const data = result.value.data;
+    if (typeof data !== 'object' || data === null || !('delta' in data)) {
+      throw new Error('expected a text delta event');
+    }
+    return String(data.delta);
+  }
+
+  it('two pipelined next() calls receive emitted events in FIFO order', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    const first = iter.next();
+    const second = iter.next();
+    bc.emit(textDelta('a'));
+    bc.emit(textDelta('b'));
+
+    expect(getText(await first)).toBe('a');
+    expect(getText(await second)).toBe('b');
+  });
+
+  it('complete() settles all pipelined waiters with done', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    const first = iter.next();
+    const second = iter.next();
+    bc.complete();
+
+    expect((await first).done).toBe(true);
+    expect((await second).done).toBe(true);
+  });
+
+  it('error() rejects all pipelined waiters', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    const first = iter.next();
+    const second = iter.next();
+    // Attach handlers before triggering so neither rejection is ever
+    // observed as unhandled.
+    const settled = Promise.allSettled([
+      first,
+      second,
+    ]);
+    bc.error(new Error('stream broke'));
+
+    const [r1, r2] = await settled;
+    expect(r1.status).toBe('rejected');
+    expect(r2.status).toBe('rejected');
+    if (r1.status === 'rejected') {
+      expect(String(r1.reason)).toContain('stream broke');
+    }
+    if (r2.status === 'rejected') {
+      expect(String(r2.reason)).toContain('stream broke');
+    }
+  });
+
+  it('return() settles parked waiters with done', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    const first = iter.next();
+    const second = iter.next();
+    const ret = await iter.return!();
+
+    expect(ret.done).toBe(true);
+    expect((await first).done).toBe(true);
+    expect((await second).done).toBe(true);
+  });
+
+  it('for-await consumption is unaffected (regression)', async () => {
+    const bc = new EventBroadcaster();
+    bc.emit(textDelta('x'));
+    bc.emit(textDelta('y'));
+    queueMicrotask(() => {
+      bc.complete();
+    });
+    const events = await collect(bc);
+    expect(events).toHaveLength(2);
+  });
+});

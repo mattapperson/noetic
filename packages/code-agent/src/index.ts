@@ -790,8 +790,8 @@ class CodeAgentImpl<TParams extends Record<string, unknown>> implements CodeAgen
     this.harness.setRootCwd(nextCwd);
   }
 
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void {
-    void this.channels.publish(channel, value, ctx);
+  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void> {
+    return this.channels.publish(channel, value, ctx);
   }
 
   recv<T>(
@@ -982,7 +982,14 @@ export async function createCodeAgent(
         return;
       }
       if (channelBridgeCtx) {
-        harness.send(channel, parsed.data, channelBridgeCtx);
+        // Transport receive is synchronous; a parked (back-pressured) send
+        // failing here can only be surfaced as a warning.
+        void harness.send(channel, parsed.data, channelBridgeCtx).catch((e: unknown) => {
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn(
+            `[noetic/code-agent] Failed to deliver inbound frame for channel '${frame.channel}': ${message}`,
+          );
+        });
       }
       for (const handler of inboundSubscribers.get(frame.channel) ?? []) {
         handler(parsed.data);
@@ -1013,7 +1020,7 @@ export async function createCodeAgent(
     async publish(channel, value, ctx) {
       registerChannel(channel);
       if (ctx) {
-        harness.send(channel, value, ctx);
+        await harness.send(channel, value, ctx);
       }
       const frame = {
         channel: channel.name,

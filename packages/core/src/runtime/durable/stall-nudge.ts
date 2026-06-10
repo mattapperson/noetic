@@ -5,11 +5,14 @@
  * and without the agent asking for external input — i.e. the agent
  * stopped without calling either a terminal tool or an ask-user-style
  * tool. That's a soft failure: rather than wait forever, we nudge the
- * agent once to remind it of its options. If the second turn also
- * ends in the same stalled shape we escalate: the caller-supplied
- * `onStall` callback records the escalation (task pause, metrics,
- * whatever the domain demands) and we settle the signal ourselves with
- * a canonical "stalled" outcome so the parent unwinds cleanly.
+ * agent once to remind it of its options and wait for the nudged turn
+ * to actually complete (`harness.execute` is enqueue-only, so the hook
+ * awaits `getAgentResponse` — raced against the signal — before
+ * re-checking). If the second turn also ends in the same stalled shape
+ * we escalate: the caller-supplied `onStall` callback records the
+ * escalation (task pause, metrics, whatever the domain demands) and we
+ * settle the signal ourselves with a canonical "stalled" outcome so
+ * the parent unwinds cleanly.
  *
  * The helper factors the state machine out of the loop so callers can
  * opt in per-runner. Task-specific concerns (how "pending external
@@ -104,10 +107,14 @@ export function createNudgeMessage(opts: CreateNudgeMessageOpts): InputMessageIt
  *   - the caller reports pending external input (`hasPendingExternal`
  *     returns true — e.g. an outstanding ask-user request).
  *
- * Otherwise it sends the nudge message via `harness.execute`, waits
- * for microtasks to flush, and re-checks the same two conditions. If
- * the agent still hasn't progressed, the hook fires `onStall` and
- * resolves the signal with `buildStalledOutcome()`.
+ * Otherwise it sends the nudge message via `harness.execute` and waits
+ * for the nudged turn to actually complete. `execute()` only enqueues
+ * the message — the turn runs asynchronously through the session
+ * runner — so the hook awaits `harness.getAgentResponse(threadId)`
+ * (raced against `signal.done` so a terminal tool that settles the
+ * signal mid-turn short-circuits the wait) before re-checking the same
+ * two conditions. If the agent still hasn't progressed, the hook fires
+ * `onStall` and resolves the signal with `buildStalledOutcome()`.
  */
 export function createStallNudgeHook<TOutcome>(
   opts: StallNudgeOpts<TOutcome>,
@@ -124,7 +131,23 @@ export function createStallNudgeHook<TOutcome>(
     await opts.harness.execute(opts.nudgeMessage, {
       threadId: opts.threadId,
     });
-    await Promise.resolve();
+
+    // Wait for the nudged turn to genuinely finish. A one-microtask wait
+    // would escalate before the agent's LLM round trip even starts —
+    // `execute()` resolves as soon as the message is enqueued. Errors from
+    // `getAgentResponse` are swallowed: a failed response fetch must not
+    // crash the hook, it just means we proceed to the stall re-check.
+    await Promise.race([
+      opts.harness
+        .getAgentResponse({
+          threadId: opts.threadId,
+        })
+        .catch(() => undefined),
+      opts.signal.done.then(
+        () => undefined,
+        () => undefined,
+      ),
+    ]);
 
     if (ctx.signalSettled()) {
       return;

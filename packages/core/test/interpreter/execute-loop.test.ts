@@ -166,6 +166,86 @@ describe('executeLoop', () => {
     }
   });
 
+  it('cancelled body bypasses onError retry and surfaces kind cancelled', async () => {
+    let executions = 0;
+    let onErrorCalls = 0;
+    const loopStep = loop<ContextMemory, string, string>({
+      id: 'cancel-retry-loop',
+      steps: [
+        {
+          kind: 'run',
+          id: 'cancelled-body',
+          execute: async () => {
+            executions++;
+            throw new NoeticErrorImpl({
+              kind: 'cancelled',
+              reason: 'child aborted',
+            });
+          },
+        },
+      ],
+      until: until.maxSteps(5),
+      maxIterations: 5,
+      onError: () => {
+        onErrorCalls++;
+        return 'retry';
+      },
+    });
+
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    try {
+      await executeLoop(loopStep, 'go', ctx, simpleExecute);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
+      assert(oe.kind === 'cancelled');
+      expect(oe.reason).toBe('child aborted');
+    }
+    // Exactly one execution: cancellation is not retriable (spec 09).
+    expect(executions).toBe(1);
+    // onError is never consulted for cancellation.
+    expect(onErrorCalls).toBe(0);
+    expect(ctx.itemLog.items).toHaveLength(0);
+  });
+
+  it('cancelled body bypasses onError skip', async () => {
+    let executions = 0;
+    const loopStep = loop<ContextMemory, number, number>({
+      id: 'cancel-skip-loop',
+      steps: [
+        {
+          kind: 'run',
+          id: 'cancelled-body',
+          execute: async () => {
+            executions++;
+            throw new NoeticErrorImpl({
+              kind: 'cancelled',
+            });
+          },
+        },
+      ],
+      until: until.maxSteps(5),
+      maxIterations: 5,
+      onError: () => 'skip',
+    });
+
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('cancelled');
+    }
+    expect(executions).toBe(1);
+    expect(ctx.itemLog.items).toHaveLength(0);
+  });
+
   it('predicate throw treated as stop', async () => {
     let count = 0;
     const loopStep = loop<ContextMemory, number, number>({
@@ -697,6 +777,43 @@ describe('executeLoop inbox channel', () => {
     const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
     expect(callCount).toBe(2);
     expect(result).toBe(2);
+  });
+
+  it('abort unblocks a loop parked in the inbox recv promptly with kind cancelled', async () => {
+    const { ctx } = makeInboxCtx();
+
+    const loopStep = loop<ContextMemory, number, number>({
+      id: 'inbox-abort-loop',
+      steps: [
+        {
+          kind: 'run',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
+      until: until.maxSteps(1),
+      inbox,
+      parkTimeout: 5e3,
+    });
+
+    // Abort while the loop is parked in the inbox recv.
+    setTimeout(() => {
+      ctx.abort('shutdown');
+    }, 20);
+
+    const startedAt = Date.now();
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
+      assert(oe.kind === 'cancelled');
+      expect(oe.reason).toBe('shutdown');
+    }
+    // Far below the 5s parkTimeout — abort must not wait the park out.
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(ctx.itemLog.items).toHaveLength(0);
   });
 
   it('stops after parkTimeout expires with no message', async () => {
