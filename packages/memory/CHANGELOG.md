@@ -1,3 +1,14 @@
+## @noetic-tools/memory-v1.0.0 (2026-06-10)
+
+* feat(memory)!: harden layers, budget, lifecycle ([39cc778](https://github.com/mattapperson/noetic/commit/39cc778))
+* build: resolve workspace deps to src via bun export condition ([b774d38](https://github.com/mattapperson/noetic/commit/b774d38))
+
+### BREAKING CHANGE
+
+* durableTaskState() no longer accepts a config
+object; DurableTaskStateConfig and DurableTaskStateSerializer
+are removed.
+
 ## @noetic-tools/memory-v0.2.0 (2026-06-08)
 
 * fix(core): address adversarial review findings in memory layers ([bac97a0](https://github.com/mattapperson/noetic/commit/bac97a0))
