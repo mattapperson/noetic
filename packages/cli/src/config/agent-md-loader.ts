@@ -16,9 +16,9 @@
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { MutationPolicy } from '@noetic-tools/code-agent/tools/node';
 import type { FsAdapter, ShellAdapter } from '@noetic-tools/core';
 import { createLocalShellAdapter } from '@noetic-tools/platform-node';
-import type { MutationPolicy } from '../tools/mutation-policy.js';
 import { neutralizeEmbeddedCommands, processSkillContent } from '../util/skill-processor.js';
 
 //#region Types
