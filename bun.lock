@@ -131,7 +131,7 @@
     },
     "packages/memory": {
       "name": "@noetic-tools/memory",
-      "version": "0.2.0",
+      "version": "1.0.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
