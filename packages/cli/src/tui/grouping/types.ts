@@ -20,9 +20,11 @@ export type CollapsibleToolName = (typeof CollapsibleToolName)[keyof typeof Coll
 
 export interface CollapsedReadGroup {
   kind: 'collapsed-read-group';
-  /** Stable id derived from the first member's call id — used as the key for
-   *  `<Static>` caching so the group doesn't re-render when later entries
-   *  arrive. */
+  /** Stable id derived from the first member's call id — used as the render
+   *  key in both regions. While a turn is active, a trailing group stays in
+   *  the live region (see split-static-entries.ts) so its summary keeps
+   *  updating as reads are absorbed; once frozen into `<Static>` this id
+   *  keeps it cached. */
   id: string;
   /** Distinct file paths read. */
   readPaths: ReadonlyArray<string>;

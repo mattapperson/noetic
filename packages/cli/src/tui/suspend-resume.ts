@@ -6,15 +6,22 @@
  * with raw mode and extended-input modes still on — `fg`-ing back into
  * the shell shows escape garbage and the cursor stays hidden.
  *
- * The handler:
+ * The suspend handler:
  *   1. Emits the same terminal-restore ANSI sequence we use for SIGINT —
  *      cursor visible, mouse/Kitty/bracketed-paste off.
  *   2. Drops raw mode so the shell receives plain text input.
  *   3. Raises SIGSTOP, which is *not* caught and actually suspends.
  *
- * On SIGCONT (`fg`), the resume handler invokes `onResume`. Callers wire
- * this to whatever re-establishes their TUI state (e.g. an Ink instance's
- * `clear()` method to force a redraw).
+ * On SIGCONT (`fg`) following one of OUR suspends, the resume handler
+ * re-enables raw mode FIRST and then invokes `onResume`. The raw-mode
+ * restore must live here: the suspend path disabled raw mode directly on
+ * stdin, bypassing Ink's `rawModeEnabledCount` refcount, so Ink believes
+ * raw mode is still on and will never re-enable it itself (Ink has no
+ * SIGCONT handler, and `instance.clear()` only redraws output). Callers
+ * wire `onResume` to whatever repaints their TUI (e.g. Ink's `clear()`).
+ *
+ * A stray SIGCONT with no preceding suspend (e.g. `kill -CONT`) leaves
+ * raw mode untouched and only triggers the repaint.
  */
 
 import { buildTerminalRestoreSequence } from './terminal/interrupt-safety-net.js';
@@ -54,11 +61,19 @@ export function installSuspendResumeHandlers(deps: SuspendResumeDeps): () => voi
     handler: () => void;
   }> = [];
 
+  // True between one of OUR SIGTSTP suspends and the next SIGCONT — gates
+  // the raw-mode restore so a stray SIGCONT doesn't flip raw mode on a
+  // terminal we never touched.
+  let suspended = false;
+
   const onTstp = (): void => {
+    suspended = true;
     runSuspend(deps);
   };
   const onCont = (): void => {
-    runResume(deps);
+    const wasSuspended = suspended;
+    suspended = false;
+    runResume(deps, wasSuspended);
   };
   deps.on('SIGTSTP', onTstp);
   handlers.push({
@@ -105,7 +120,18 @@ function runSuspend(deps: SuspendResumeDeps): void {
   deps.raise('SIGSTOP');
 }
 
-function runResume(deps: SuspendResumeDeps): void {
+function runResume(deps: SuspendResumeDeps, wasSuspended: boolean): void {
+  // Re-enable raw mode BEFORE the repaint: runSuspend disabled it directly
+  // on stdin behind Ink's refcount, so nothing else will ever restore it —
+  // without this, post-`fg` input is cooked (echoed, line-buffered) and
+  // keystrokes never reach Ink.
+  if (wasSuspended && deps.setRawMode) {
+    try {
+      deps.setRawMode(true);
+    } catch {
+      // not a TTY or already torn down
+    }
+  }
   try {
     deps.onResume();
   } catch {

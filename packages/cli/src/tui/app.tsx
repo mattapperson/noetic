@@ -3,8 +3,9 @@
  */
 
 import { render } from 'ink';
-import type { MutableRefObject, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createSingleFlight } from '../util/single-flight.js';
 import type {
   Command,
   CommandContext,
@@ -48,10 +49,8 @@ import {
   buildErrorEntry,
   countUserMessages,
   deriveFirstPrompt,
-  extractEventSuffix,
-  isFrameworkEvent,
-  markUserEntrySent,
   normalizeEntriesForResume,
+  resolveOpenChatTransition,
 } from './app-parts/helpers.js';
 import type {
   AgentMode,
@@ -75,8 +74,8 @@ import {
   writeFlow,
   writePrd,
 } from './app-parts/services.js';
+import { consumeFullStream, consumeItemStream } from './app-parts/stream-consumers.js';
 import type {
-  AssistantEntry,
   ChatStatus,
   ConversationEntry,
   ErrorEntry,
@@ -90,18 +89,15 @@ import type {
 } from './app-parts/ui.js';
 import {
   AskUserModal,
-  appendOrUpdateEntry,
   buildBashCommandEntry,
   buildCdBashResult,
   buildCdEntry,
   buildCdErrorEntry,
   buildCdSplitNoticeEntry,
   extractActivatedSkills,
-  extractTextContent,
   FooterContextProvider,
   getDefaultImageStore,
   getFirstCommand,
-  getItemId,
   handleCd,
   InkProvider,
   installSuspendResumeHandlers,
@@ -148,175 +144,6 @@ interface ModalState {
   content: ReactNode;
   commandName: string;
   dismissMessage: string;
-}
-
-//#endregion
-
-//#region Stream consumers
-
-interface ConsumeItemsOpts {
-  harness: AgentHarness;
-  threadId: string;
-  setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
-  streamMetrics: StreamMetricsRefs;
-  perItemCharsRef: MutableRefObject<Map<string, number>>;
-}
-
-/**
- * For each streaming assistant message item, bump the live output-char counter
- * by whatever new text appeared since the last yield of that item. The
- * counter is reset per-turn by `consumeFullStream` on `turn_started`.
- */
-function trackLiveOutput(opts: {
-  item: AssistantEntry;
-  streamMetrics: StreamMetricsRefs;
-  perItemCharsRef: MutableRefObject<Map<string, number>>;
-}): void {
-  if (opts.item.type !== 'message') {
-    return;
-  }
-  const id = getItemId(opts.item);
-  const currentLen = extractTextContent(opts.item).length;
-  const previousLen = opts.perItemCharsRef.current.get(id) ?? 0;
-  if (currentLen <= previousLen) {
-    return;
-  }
-  const delta = currentLen - previousLen;
-  opts.perItemCharsRef.current.set(id, currentLen);
-  opts.streamMetrics.liveOutputChars.current += delta;
-  if (opts.streamMetrics.firstTokenAt.current === null) {
-    opts.streamMetrics.firstTokenAt.current = Date.now();
-  }
-}
-
-async function consumeItemStream(opts: ConsumeItemsOpts): Promise<void> {
-  try {
-    for await (const item of opts.harness.getItemStream({
-      threadId: opts.threadId,
-    })) {
-      trackLiveOutput({
-        item,
-        streamMetrics: opts.streamMetrics,
-        perItemCharsRef: opts.perItemCharsRef,
-      });
-      opts.setEntries((prev) => appendOrUpdateEntry(prev, item));
-    }
-  } catch (err: unknown) {
-    opts.setEntries((prev) => [
-      ...prev,
-      buildErrorEntry(err),
-    ]);
-  }
-}
-
-interface ConsumeEventsOpts {
-  harness: AgentHarness;
-  threadId: string;
-  setEntries: (updater: (prev: ConversationEntry[]) => ConversationEntry[]) => void;
-  setStatus: (s: ChatStatus) => void;
-  setLastLayerUsage: (u: LastLayerUsage | undefined) => void;
-  lastLayerUsageRef: {
-    current: LastLayerUsage | undefined;
-  };
-  pendingMessageIdsRef: {
-    current: Set<string>;
-  };
-  streamMetrics: StreamMetricsRefs;
-  perItemCharsRef: MutableRefObject<Map<string, number>>;
-  /** Called once per turn_completed/turn_aborted with the latest response. No-op if persistence is disabled. */
-  onTurnSettled: (resp: {
-    items: ReadonlyArray<Item>;
-    usage: {
-      inputTokens: number;
-      outputTokens: number;
-      cachedTokens?: number;
-    };
-    cost?: number;
-    lastLayerUsage: LastLayerUsage | undefined;
-  }) => void;
-}
-
-function resetTurnMetrics(opts: {
-  streamMetrics: StreamMetricsRefs;
-  perItemCharsRef: MutableRefObject<Map<string, number>>;
-}): void {
-  opts.streamMetrics.turnStartedAt.current = Date.now();
-  opts.streamMetrics.firstTokenAt.current = null;
-  opts.streamMetrics.liveOutputChars.current = 0;
-  opts.streamMetrics.liveTokens.current = null;
-  opts.perItemCharsRef.current.clear();
-}
-
-async function consumeFullStream(opts: ConsumeEventsOpts): Promise<void> {
-  try {
-    for await (const event of opts.harness.getFullStream({
-      threadId: opts.threadId,
-    })) {
-      if (!isFrameworkEvent(event)) {
-        continue;
-      }
-      const suffix = extractEventSuffix(event.type);
-      if (suffix === 'turn_started') {
-        const rawIds = event.data.messageIds;
-        const ids = Array.isArray(rawIds)
-          ? rawIds.filter((id): id is string => typeof id === 'string')
-          : [];
-        opts.setEntries((prev) => {
-          let next = prev;
-          for (const id of ids) {
-            if (opts.pendingMessageIdsRef.current.has(id)) {
-              opts.pendingMessageIdsRef.current.delete(id);
-              next = markUserEntrySent(next, id);
-            }
-          }
-          return next;
-        });
-        resetTurnMetrics({
-          streamMetrics: opts.streamMetrics,
-          perItemCharsRef: opts.perItemCharsRef,
-        });
-        opts.setStatus('streaming');
-        continue;
-      }
-      if (suffix === 'turn_completed' || suffix === 'turn_aborted') {
-        try {
-          const resp = await opts.harness.getAgentResponse({
-            threadId: opts.threadId,
-          });
-          opts.lastLayerUsageRef.current = resp.lastLayerUsage;
-          opts.setLastLayerUsage(resp.lastLayerUsage);
-          const exact: LiveTokens = {
-            input: resp.usage.inputTokens,
-            output: resp.usage.outputTokens,
-            cached: resp.usage.cachedTokens,
-          };
-          opts.streamMetrics.liveTokens.current = exact;
-          opts.onTurnSettled({
-            items: resp.items,
-            usage: resp.usage,
-            cost: resp.cost,
-            lastLayerUsage: resp.lastLayerUsage,
-          });
-        } catch {
-          // getAgentResponse can only reject if no session exists; here it does.
-        }
-        // Trust the runner's kind: if the next turn is already running
-        // ('generating'), its turn_started will bounce us back to 'streaming';
-        // otherwise we're genuinely idle and can accept input again.
-        const runnerStatus = opts.harness.getStatus({
-          threadId: opts.threadId,
-        });
-        if (runnerStatus.kind === 'generating') {
-          opts.setStatus('streaming');
-        } else {
-          opts.streamMetrics.turnStartedAt.current = null;
-          opts.setStatus('ready');
-        }
-      }
-    }
-  } catch {
-    // Stream ended — normal on harness swap.
-  }
 }
 
 //#endregion
@@ -374,6 +201,9 @@ function App({
 
   const harnessRef = useRef<AgentHarness | null>(null);
   const harnessDisposeRef = useRef<(() => Promise<void>) | null>(null);
+  /** Serializes harness creation — see the single-flight wrap in
+   *  `getOrCreateHarness`. */
+  const harnessFlightRef = useRef(createSingleFlight());
   /**
    * Set to true after the first harness creation performs its one-shot
    * `reattachLiveChildren` pass. Re-harnessing on /model or /plan must
@@ -403,6 +233,13 @@ function App({
   );
   const pendingMessageIdsRef = useRef<Set<string>>(new Set());
   const streamWiredHarnessRef = useRef<AgentHarness | null>(null);
+  /** Session epoch — bumped by `/clear` and by harness invalidation. Stream
+   *  consumers wired under an older epoch treat themselves as stale and stop
+   *  producing ANY side effects (entries, usage, persistence, status). */
+  const sessionEpochRef = useRef<number>(0);
+  /** Aborts the previous wiring's stream-consumer loops when a new harness
+   *  is wired or the session is cleared. */
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   /** Holds the canonical item list used to seed every harness recreation —
    *  seeded from the resumed session's items on mount and refreshed after
@@ -534,35 +371,6 @@ function App({
   const clearEntries = useCallback(() => {
     setEntries([]);
   }, []);
-
-  const clearSession = useCallback(() => {
-    // Full session reset: everything a `noetic --resume` would rebuild, plus UI.
-    threadIdRef.current = crypto.randomUUID();
-    createdAtRef.current = new Date().toISOString();
-    sessionStartedAtRef.current = Date.now();
-    resumedItemsRef.current = null;
-    customTitleRef.current = undefined;
-    tagRef.current = undefined;
-    cumulativeUsageRef.current = {
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedTokens: 0,
-    };
-    cumulativeCostRef.current = 0;
-    lastSaveMtimeRef.current = undefined;
-    lastLayerUsageRef.current = undefined;
-    setLastLayerUsage(undefined);
-    harnessRef.current = null;
-    streamWiredHarnessRef.current = null;
-    pendingMessageIdsRef.current.clear();
-    pendingBashOutputsRef.current = [];
-    askUserService.cancelAll('session cleared');
-    getDefaultImageStore().clear();
-    setEntries([]);
-    setStatus('ready');
-  }, [
-    askUserService,
-  ]);
 
   const setCustomTitle = useCallback((name: string | undefined) => {
     customTitleRef.current = name;
@@ -848,10 +656,20 @@ function App({
       }
       streamWiredHarnessRef.current = harness;
       const threadId = threadIdRef.current;
+      // Sever the previous wiring's loops, then bind this wiring to the
+      // current epoch: if /clear or a harness swap bumps the epoch, these
+      // consumers go inert even before the abort lands.
+      streamAbortRef.current?.abort();
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+      const epoch = sessionEpochRef.current;
+      const isStale = (): boolean => sessionEpochRef.current !== epoch;
 
       void consumeItemStream({
         harness,
         threadId,
+        isStale,
+        signal: controller.signal,
         setEntries,
         streamMetrics,
         perItemCharsRef,
@@ -859,6 +677,8 @@ function App({
       void consumeFullStream({
         harness,
         threadId,
+        isStale,
+        signal: controller.signal,
         setEntries,
         setStatus,
         setLastLayerUsage,
@@ -897,77 +717,82 @@ function App({
   );
 
   const getOrCreateHarness = useCallback(
-    async (mode: AgentMode, activeModel: string): Promise<AgentHarness> => {
-      if (
-        harnessRef.current !== null &&
-        harnessModeRef.current === mode &&
-        harnessModelRef.current === activeModel
-      ) {
-        return harnessRef.current;
-      }
-      if (lspServiceRef.current === null) {
-        lspServiceRef.current = await createLspService({
+    async (mode: AgentMode, activeModel: string): Promise<AgentHarness> =>
+      // Single-flight: two submits in the cold-start window must not build
+      // two harnesses (split conversation, racing persist writers). The
+      // cached-hit check lives INSIDE the flight so a caller that waited out
+      // someone else's creation re-checks and reuses the winner's harness.
+      harnessFlightRef.current(async (): Promise<AgentHarness> => {
+        if (
+          harnessRef.current !== null &&
+          harnessModeRef.current === mode &&
+          harnessModelRef.current === activeModel
+        ) {
+          return harnessRef.current;
+        }
+        if (lspServiceRef.current === null) {
+          lspServiceRef.current = await createLspService({
+            plugins,
+            buildCtx,
+            cwd: config.cwd,
+            fs: config.fs,
+          });
+        }
+        const {
+          harness,
+          skills: resolvedSkills,
+          memoryLayers,
+          dispose,
+          teammates,
+        } = await createAgentHarness({
+          config: {
+            ...config,
+            model: activeModel,
+          },
           plugins,
-          buildCtx,
-          cwd: config.cwd,
           fs: config.fs,
+          mode,
+          planHooks,
+          buildContext: buildCtx,
+          lspService: lspServiceRef.current,
+          askUserService,
+          binaryAvailability: config.binaryAvailability,
         });
-      }
-      const {
-        harness,
-        skills: resolvedSkills,
-        memoryLayers,
-        dispose,
-        teammates,
-      } = await createAgentHarness({
-        config: {
-          ...config,
-          model: activeModel,
-        },
-        plugins,
-        fs: config.fs,
-        mode,
-        planHooks,
-        buildContext: buildCtx,
-        lspService: lspServiceRef.current,
-        askUserService,
-        binaryAvailability: config.binaryAvailability,
-      });
-      // Dispose any previously-held harness resources before swapping.
-      const previousDispose = harnessDisposeRef.current;
-      if (previousDispose) {
-        previousDispose().catch(() => {});
-      }
-      harnessDisposeRef.current = dispose;
-      harnessRef.current = harness;
-      harnessModeRef.current = mode;
-      harnessModelRef.current = activeModel;
-      memoryLayersRef.current = memoryLayers;
-      teammatesRef.current = teammates;
-      // Seed the new harness with any cwd accumulated from `!cd`s issued
-      // before the first turn or during a /model or /plan harness swap.
-      // Without this, the next turn's tools reset to launch-time cwd.
-      harness.setRootCwd(effectiveCwdRef.current);
-      // One-shot rediscovery of live subprocess children across a
-      // parent-process restart. Cheap no-op when no durable storage is
-      // configured on the adapter — see reattach-live-children.ts.
-      if (!reattachDoneRef.current) {
-        reattachDoneRef.current = true;
-        await reattachLiveChildren(harness).catch((err: unknown) => {
-          console.warn('reattachLiveChildren failed:', err);
-        });
-      }
-      setSkills(resolvedSkills);
-      if (resumedItemsRef.current !== null) {
-        // Seed BEFORE wiring streams — wireStreams triggers lazy session
-        // creation inside the harness via requireSession, and the session
-        // runner reads session.accumulatedItems on each turn. Seeding first
-        // ensures the first turn after resume has the full prior history.
-        harness.seedSessionHistory(threadIdRef.current, resumedItemsRef.current);
-      }
-      wireStreams(harness);
-      return harness;
-    },
+        // Dispose any previously-held harness resources before swapping.
+        const previousDispose = harnessDisposeRef.current;
+        if (previousDispose) {
+          previousDispose().catch(() => {});
+        }
+        harnessDisposeRef.current = dispose;
+        harnessRef.current = harness;
+        harnessModeRef.current = mode;
+        harnessModelRef.current = activeModel;
+        memoryLayersRef.current = memoryLayers;
+        teammatesRef.current = teammates;
+        // Seed the new harness with any cwd accumulated from `!cd`s issued
+        // before the first turn or during a /model or /plan harness swap.
+        // Without this, the next turn's tools reset to launch-time cwd.
+        harness.setRootCwd(effectiveCwdRef.current);
+        // One-shot rediscovery of live subprocess children across a
+        // parent-process restart. Cheap no-op when no durable storage is
+        // configured on the adapter — see reattach-live-children.ts.
+        if (!reattachDoneRef.current) {
+          reattachDoneRef.current = true;
+          await reattachLiveChildren(harness).catch((err: unknown) => {
+            console.warn('reattachLiveChildren failed:', err);
+          });
+        }
+        setSkills(resolvedSkills);
+        if (resumedItemsRef.current !== null) {
+          // Seed BEFORE wiring streams — wireStreams triggers lazy session
+          // creation inside the harness via requireSession, and the session
+          // runner reads session.accumulatedItems on each turn. Seeding first
+          // ensures the first turn after resume has the full prior history.
+          harness.seedSessionHistory(threadIdRef.current, resumedItemsRef.current);
+        }
+        wireStreams(harness);
+        return harness;
+      }),
     [
       config,
       plugins,
@@ -980,6 +805,10 @@ function App({
 
   /** Discard the current harness so the next submit recreates it with fresh config. */
   const invalidateHarness = useCallback((): void => {
+    // Stale-out the old wiring's stream consumers: anything they'd do after
+    // this point (entries, usage, persistence) belongs to the dropped
+    // harness, not to whatever gets wired next (/model and /plan swaps).
+    sessionEpochRef.current += 1;
     // Drops the registry's references to running teammates. Does NOT abort
     // in-flight executions — DetachedHandle has no cancel API. Settle notices
     // posted by the dropped child go via WeakRef and are silently discarded.
@@ -997,6 +826,57 @@ function App({
     askUserService.cancelAll('harness invalidated');
   }, [
     askUserService,
+  ]);
+
+  const clearSession = useCallback(() => {
+    // Full session reset: everything a `noetic --resume` would rebuild, plus
+    // UI. Order is load-bearing:
+    //   1. epoch++ makes the old stream consumers stale — even effects already
+    //      past an await can no longer leak into the new session;
+    //   2. aborting the stream controller unparks their `for await` loops;
+    //   3. aborting the in-flight turn stops the old harness from generating
+    //      (its partial items are intentionally discarded — /clear's contract
+    //      is to forget the resumed history);
+    //   4. invalidateHarness() drops + disposes the harness so the next
+    //      submit recreates it fresh.
+    sessionEpochRef.current += 1;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    const oldHarness = harnessRef.current;
+    const oldThreadId = threadIdRef.current;
+    if (oldHarness !== null) {
+      void oldHarness
+        .abort({
+          threadId: oldThreadId,
+          reason: 'session-cleared',
+        })
+        .catch(() => {});
+    }
+    invalidateHarness();
+    threadIdRef.current = crypto.randomUUID();
+    createdAtRef.current = new Date().toISOString();
+    sessionStartedAtRef.current = Date.now();
+    resumedItemsRef.current = null;
+    customTitleRef.current = undefined;
+    tagRef.current = undefined;
+    cumulativeUsageRef.current = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
+    cumulativeCostRef.current = 0;
+    lastSaveMtimeRef.current = undefined;
+    lastLayerUsageRef.current = undefined;
+    setLastLayerUsage(undefined);
+    pendingMessageIdsRef.current.clear();
+    pendingBashOutputsRef.current = [];
+    askUserService.cancelAll('session cleared');
+    getDefaultImageStore().clear();
+    setEntries([]);
+    setStatus('ready');
+  }, [
+    askUserService,
+    invalidateHarness,
   ]);
 
   // On unmount, tear down LSP server subprocesses. The harness-owned dispose is
@@ -1408,9 +1288,9 @@ function App({
       buildSessionSnapshot,
       setCustomTitle,
       setTag,
-      clearSession,
       askUserService,
       restartWithSession,
+      clearSession,
     ],
   );
 
@@ -1460,6 +1340,19 @@ function App({
     });
   }, []);
 
+  /** Aborts an in-flight open-chat socket poll (never the planner spawn). */
+  const openChatPollAbortRef = useRef<AbortController | null>(null);
+
+  const exitSpawningView = useCallback((): void => {
+    // Backing out of the spawning view cancels the POLL only — the planner
+    // runner is durable and keeps starting up in the background.
+    openChatPollAbortRef.current?.abort();
+    openChatPollAbortRef.current = null;
+    exitToChat();
+  }, [
+    exitToChat,
+  ]);
+
   const handleOpenChat = useCallback(
     (task: { id: string }): void => {
       void (async (): Promise<void> => {
@@ -1467,41 +1360,58 @@ function App({
           fs: config.fs,
           projectRoot: config.cwd,
         };
-        const harness = harnessRef.current;
-        if (harness === null) {
-          return;
-        }
-        const found = await ensureChatTarget(ctx, task.id, {
-          subprocess: harness.subprocess,
-          onSpawning: () =>
-            setViewMode({
-              kind: 'taskChatSpawning',
-              taskId: task.id,
-            }),
-        });
-        setViewMode((current) => {
-          // Bail if the user navigated away to a different spawning task
-          // mid-poll — clobbering their current view would be disorienting.
-          if (current.kind === 'taskChatSpawning' && current.taskId !== task.id) {
-            return current;
-          }
-          if (found === null) {
-            return {
-              kind: 'taskBoard',
-            };
-          }
-          return {
-            kind: 'taskChat',
-            socketPath: found.socketPath,
+        openChatPollAbortRef.current?.abort();
+        const pollAbort = new AbortController();
+        openChatPollAbortRef.current = pollAbort;
+        let waited = false;
+        const showSpawning = (): void => {
+          waited = true;
+          setViewMode({
+            kind: 'taskChatSpawning',
             taskId: task.id,
-            roleLabel: found.roleLabel,
-          };
-        });
+          });
+        };
+        try {
+          let harness = harnessRef.current;
+          if (harness === null) {
+            // Fresh session: the harness is created lazily on the first chat
+            // message, so opening a task chat must bootstrap it here. Show
+            // the spawning view immediately for feedback — creation takes a
+            // while (skill catalog scan, plugin loads). Safe against
+            // concurrent submits via the single-flight gate.
+            showSpawning();
+            harness = await getOrCreateHarness(agentMode, model);
+          }
+          const found = await ensureChatTarget(ctx, task.id, {
+            subprocess: harness.subprocess,
+            onSpawning: showSpawning,
+            signal: pollAbort.signal,
+          });
+          setViewMode((current) =>
+            resolveOpenChatTransition({
+              current,
+              taskId: task.id,
+              waited,
+              found,
+            }),
+          );
+        } catch (error) {
+          setViewMode({
+            kind: 'taskBoard',
+          });
+          setEntries((prev) => [
+            ...prev,
+            buildErrorEntry(error),
+          ]);
+        }
       })();
     },
     [
       config.fs,
       config.cwd,
+      getOrCreateHarness,
+      agentMode,
+      model,
     ],
   );
 
@@ -1524,7 +1434,7 @@ function App({
               onExit={exitToChat}
             />
           ) : viewMode.kind === 'taskChatSpawning' ? (
-            <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitToChat} />
+            <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitSpawningView} />
           ) : (
             <ResponsesChat
               entries={entries}
@@ -1692,9 +1602,10 @@ async function runOneSession(opts: RunOneSessionOpts): Promise<RunOneSessionOutc
           ? (raw) => process.stdin.setRawMode(raw)
           : undefined,
       onResume: () => {
-        // Force Ink to repaint everything from scratch — this re-emits
-        // the enter sequences (raw mode, bracketed paste, etc.) so the
-        // terminal returns to TUI mode after `fg`.
+        // Raw mode was already restored by the suspend-resume handler
+        // (Ink's clear() only redraws output — it does NOT touch terminal
+        // modes). All that's left is forcing a full repaint so the screen
+        // content returns after `fg`.
         try {
           instance.clear();
         } catch {

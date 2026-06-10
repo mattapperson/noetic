@@ -55,6 +55,12 @@ export interface ResolveChatTargetOptions {
 export interface WaitForChatTargetOptions extends ResolveChatTargetOptions {
   readonly timeoutMs: number;
   readonly pollIntervalMs: number;
+  /**
+   * Aborts the polling loop only (resolves `null`). The runner spawn itself
+   * is durable and is intentionally NOT cancelled — the user backing out of
+   * the spawning view must never kill the planner.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface EnsureChatTargetOptions extends ResolveChatTargetOptions {
@@ -64,6 +70,8 @@ export interface EnsureChatTargetOptions extends ResolveChatTargetOptions {
   readonly timeoutMs?: number;
   /** Interval between polls while waiting. */
   readonly pollIntervalMs?: number;
+  /** Aborts the socket poll only — see {@link WaitForChatTargetOptions.signal}. */
+  readonly signal?: AbortSignal;
   /** Override for tests — defaults to the real {@link startPlannerRun}. */
   readonly startPlannerRunFn?: typeof startPlannerRun;
 }
@@ -92,6 +100,31 @@ function readMetadataString(handle: SubprocessHandle, key: string): string | nul
   }
   const value = metadata[key];
   return typeof value === 'string' ? value : null;
+}
+
+/** Sleep that resolves early (never rejects) when the signal aborts. */
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal === undefined) {
+      setTimeout(resolve, ms);
+      return;
+    }
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, {
+      once: true,
+    });
+  });
 }
 
 //#endregion
@@ -164,6 +197,9 @@ export async function waitForChatTarget(
 ): Promise<ChatTarget | null> {
   const deadline = Date.now() + opts.timeoutMs;
   while (Date.now() < deadline) {
+    if (opts.signal?.aborted) {
+      return null;
+    }
     const target = await resolveChatTarget(ctx, taskId, {
       subprocess: opts.subprocess,
       isSocketReachable: opts.isSocketReachable,
@@ -171,7 +207,7 @@ export async function waitForChatTarget(
     if (target !== null) {
       return target;
     }
-    await new Promise<void>((resolve) => setTimeout(resolve, opts.pollIntervalMs));
+    await sleepUnlessAborted(opts.pollIntervalMs, opts.signal);
   }
   return null;
 }
@@ -219,6 +255,7 @@ export async function ensureChatTarget(
     timeoutMs: opts.timeoutMs ?? 15e3,
     pollIntervalMs: opts.pollIntervalMs ?? 250,
     isSocketReachable: opts.isSocketReachable,
+    signal: opts.signal,
   });
 }
 

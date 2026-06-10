@@ -3,6 +3,7 @@ import type { LocalBashResult } from '../bash-command.js';
 import { formatLocalStdoutBlock, LOCAL_COMMAND_CAVEAT } from '../bash-command.js';
 import type { ConversationEntry, ErrorEntry, UserEntry } from '../item-utils.js';
 import { isUserEntry } from '../item-utils.js';
+import type { ViewMode } from './commands.js';
 
 export function buildErrorEntry(error: unknown): ErrorEntry {
   return {
@@ -84,6 +85,47 @@ export function markUserEntrySent(entries: ConversationEntry[], id: string): Con
   ];
   next[idx] = updated;
   return next;
+}
+
+export interface OpenChatTransitionInput {
+  /** View mode at the moment the chat-target resolution settled. */
+  current: ViewMode;
+  taskId: string;
+  /** True when the user was shown a spawning view (harness creation and/or
+   *  planner spawn + socket poll) before resolution settled. */
+  waited: boolean;
+  found: {
+    socketPath: string;
+    roleLabel: string;
+  } | null;
+}
+
+/**
+ * Decide the final view after an "open task chat" resolution settles.
+ *
+ * Invariant: after ANY wait, only replace OUR OWN spawning view. If the user
+ * navigated elsewhere mid-wait (Esc back to chat, a different task's
+ * spawning view, ...), the late resolution must never yank them out of the
+ * view they chose. The no-wait fast path transitions unconditionally — the
+ * user just asked for the chat and nothing happened in between.
+ */
+export function resolveOpenChatTransition(input: OpenChatTransitionInput): ViewMode {
+  const inOwnSpawningView =
+    input.current.kind === 'taskChatSpawning' && input.current.taskId === input.taskId;
+  if (input.waited && !inOwnSpawningView) {
+    return input.current;
+  }
+  if (input.found === null) {
+    return {
+      kind: 'taskBoard',
+    };
+  }
+  return {
+    kind: 'taskChat',
+    socketPath: input.found.socketPath,
+    taskId: input.taskId,
+    roleLabel: input.found.roleLabel,
+  };
 }
 
 export function augmentTextWithPendingBash(

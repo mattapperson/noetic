@@ -12,8 +12,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
+import { splitStaticEntries } from '../grouping/split-static-entries.js';
 import type { DisplayEntry } from '../grouping/types.js';
-import { toStaticEntryItems } from '../grouping/types.js';
+import { staticKeyFor, toStaticEntryItems } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import { isErrorEntry, isSystemEntry, isUserEntry } from '../item-utils.js';
 import type { SpinnerMode } from './items/loading-spinner.js';
@@ -205,36 +206,35 @@ export function ResponsesChat({
     },
   );
 
-  const lastEntry = entries[entries.length - 1];
-  const hasStreamingEntry =
-    status === 'streaming' && lastEntry !== undefined && !isUserEntry(lastEntry);
-  const completedEntries = hasStreamingEntry ? entries.slice(0, -1) : entries;
-  const streamingEntry = hasStreamingEntry ? lastEntry : null;
-
-  const collapsedCompleted = useMemo<DisplayEntry[]>(
-    () => collapseReads(completedEntries),
+  const collapsedEntries = useMemo<DisplayEntry[]>(
+    () => collapseReads(entries),
     [
-      completedEntries,
+      entries,
     ],
   );
 
-  const categories = useMemo(() => {
-    const all: DisplayEntry[] = streamingEntry
-      ? [
-          ...collapsedCompleted,
-          streamingEntry,
-        ]
-      : collapsedCompleted;
-    return computeCategories(all);
-  }, [
-    collapsedCompleted,
-    streamingEntry,
-  ]);
+  // Frozen prefix goes into <Static> (rendered once, flushed to scrollback);
+  // the still-mutable suffix re-renders live. See split-static-entries.ts
+  // for what counts as still-mutable.
+  const { staticEntries, liveEntries } = useMemo(
+    () => splitStaticEntries(collapsedEntries, status),
+    [
+      collapsedEntries,
+      status,
+    ],
+  );
+
+  const categories = useMemo(
+    () => computeCategories(collapsedEntries),
+    [
+      collapsedEntries,
+    ],
+  );
 
   const ctx: RenderEntryCtx = {
     chatStatus: status,
     callInfoMap,
-    entryCount: collapsedCompleted.length + (streamingEntry ? 1 : 0),
+    entryCount: collapsedEntries.length,
     categories,
   };
 
@@ -280,9 +280,9 @@ export function ResponsesChat({
   ]);
 
   const staticItems = useMemo(
-    () => toStaticEntryItems(collapsedCompleted),
+    () => toStaticEntryItems(staticEntries),
     [
-      collapsedCompleted,
+      staticEntries,
     ],
   );
 
@@ -350,7 +350,11 @@ export function ResponsesChat({
             <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
           )}
         </Static>
-        {streamingEntry && <Box>{renderEntry(streamingEntry, collapsedCompleted.length, ctx)}</Box>}
+        {liveEntries.map((entry, i) => (
+          <Box key={staticKeyFor(entry, staticEntries.length + i)}>
+            {renderEntry(entry, staticEntries.length + i, ctx)}
+          </Box>
+        ))}
         {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
       </Box>
       {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}

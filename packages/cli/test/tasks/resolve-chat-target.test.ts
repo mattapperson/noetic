@@ -202,4 +202,39 @@ describe('ensureChatTarget', () => {
     // already-attached falls through to the poll path.
     void spawn;
   });
+
+  test('abort signal stops the poll promptly and resolves null', async () => {
+    const ctx = makeStoreContext();
+    const adapter = makeEmptySubprocess();
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = waitForChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
+      timeoutMs: 10_000,
+      pollIntervalMs: 250,
+      isSocketReachable: alwaysReachable,
+      signal: controller.signal,
+    });
+    // Abort while the loop is parked in its poll-interval sleep.
+    setTimeout(() => controller.abort(), 20);
+    const got = await pending;
+    expect(got).toBeNull();
+    // Well under the 10s timeout AND under the next 250ms poll tick.
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  test('already-aborted signal resolves null without polling', async () => {
+    const ctx = makeStoreContext();
+    const adapter = makeEmptySubprocess();
+    const controller = new AbortController();
+    controller.abort();
+    const got = await waitForChatTarget(ctx, TASK_ID, {
+      subprocess: adapter,
+      timeoutMs: 10_000,
+      pollIntervalMs: 250,
+      isSocketReachable: alwaysReachable,
+      signal: controller.signal,
+    });
+    expect(got).toBeNull();
+  });
 });

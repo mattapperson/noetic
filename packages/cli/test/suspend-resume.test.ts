@@ -95,6 +95,78 @@ describe('installSuspendResumeHandlers', () => {
     expect(onResume).toHaveBeenCalledTimes(1);
   });
 
+  test('stray SIGCONT without a prior suspend leaves raw mode untouched', () => {
+    const { deps, registered, rawModeCalls, onResume } = makeDeps();
+    installSuspendResumeHandlers(deps);
+    fire(registered, 'SIGCONT');
+    expect(rawModeCalls).toEqual([]);
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
+
+  test('SIGTSTP then SIGCONT restores raw mode before onResume', () => {
+    const base = makeDeps();
+    const order: string[] = [];
+    const deps: SuspendResumeDeps = {
+      ...base.deps,
+      setRawMode: (raw: boolean) => {
+        base.rawModeCalls.push(raw);
+        order.push(`raw-${raw}`);
+      },
+      onResume: () => {
+        order.push('resume');
+      },
+    };
+    installSuspendResumeHandlers(deps);
+    fire(base.registered, 'SIGTSTP');
+    fire(base.registered, 'SIGCONT');
+    expect(base.rawModeCalls).toEqual([
+      false,
+      true,
+    ]);
+    // Raw mode must be back ON before the repaint runs.
+    expect(order).toEqual([
+      'raw-false',
+      'raw-true',
+      'resume',
+    ]);
+  });
+
+  test('multi-cycle: each suspend/resume pair restores raw mode once', () => {
+    const { deps, registered, rawModeCalls } = makeDeps();
+    installSuspendResumeHandlers(deps);
+    fire(registered, 'SIGTSTP');
+    fire(registered, 'SIGCONT');
+    fire(registered, 'SIGTSTP');
+    fire(registered, 'SIGCONT');
+    // A trailing stray SIGCONT must not add another restore.
+    fire(registered, 'SIGCONT');
+    expect(rawModeCalls).toEqual([
+      false,
+      true,
+      false,
+      true,
+    ]);
+  });
+
+  test('setRawMode throw on resume does not block onResume', () => {
+    const base = makeDeps();
+    let rawCalls = 0;
+    const deps: SuspendResumeDeps = {
+      ...base.deps,
+      setRawMode: (raw: boolean) => {
+        rawCalls += 1;
+        if (raw) {
+          throw new Error('not a TTY');
+        }
+      },
+    };
+    installSuspendResumeHandlers(deps);
+    fire(base.registered, 'SIGTSTP');
+    fire(base.registered, 'SIGCONT');
+    expect(rawCalls).toBe(2);
+    expect(base.onResume).toHaveBeenCalledTimes(1);
+  });
+
   test('disposer removes both listeners', () => {
     const { deps, registered } = makeDeps();
     const dispose = installSuspendResumeHandlers(deps);

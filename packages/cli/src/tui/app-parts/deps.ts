@@ -7,6 +7,8 @@ export { buildSkillCatalog } from '@noetic-tools/code-agent/skills';
 export type {
   AgentHarness,
   AskUserOutput,
+  HarnessResponse,
+  HarnessStatus,
   InputContentPart,
   InputMessageItem,
   Item,
@@ -15,5 +17,6 @@ export type {
   PlanState,
   ShellAdapter,
   StreamEvent,
+  StreamingItem,
 } from '@noetic-tools/core';
 export { createLocalShellAdapter } from '@noetic-tools/platform-node';
