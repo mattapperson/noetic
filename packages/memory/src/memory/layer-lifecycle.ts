@@ -24,6 +24,16 @@ import { createScopedStorage, resolveScopeKey } from './scope';
 export interface LayerStateStore {
   get<T>(executionId: string, layerId: string): T | undefined;
   set<T>(executionId: string, layerId: string, state: T): void;
+  /**
+   * Whether ANY state entry exists for the (execution, layer) pair — including
+   * an explicit `undefined` written by a layer clearing its state. This is what
+   * lets the lifecycle distinguish "init never ran for this execution" (no
+   * entry → an init-bearing layer is skipped) from "layer legitimately cleared
+   * its state" (entry present → hooks keep running with `undefined` state).
+   * Optional so custom stores keep compiling; without it, the lifecycle falls
+   * back to the legacy sentinel (init-bearing layer with no state is skipped).
+   */
+  has?(executionId: string, layerId: string): boolean;
   cleanup(executionId: string): void;
   diagnostic: (layerId: string, hook: string, error: unknown) => void;
   /**
@@ -249,6 +259,9 @@ export function createLayerStateStore(
         entry.inFlight = writeThrough(entry);
       }
     },
+    has(executionId: string, layerId: string): boolean {
+      return states.get(executionId)?.has(layerId) ?? false;
+    },
     registerDurable(executionId: string, layerId: string, target: ScopedStorage): void {
       let execMap = durables.get(executionId);
       if (!execMap) {
@@ -302,18 +315,29 @@ interface IsLayerDisabledParams {
 }
 
 /**
- * Whether a layer is disabled for this execution (its `init` failed with
- * `onInitError: 'disable'`). Prefers the store's explicit tracking, so a
- * layer that legitimately cleared its state (`{ state: undefined }`) keeps
- * running with `undefined` state. Legacy stores without `isDisabled` fall
- * back to the old sentinel — an init-bearing layer with no state — which
- * cannot make that distinction.
+ * Whether a layer must be skipped for this execution — either explicitly
+ * disabled (its `init` failed with `onInitError: 'disable'`) or never
+ * initialized (init-bearing layer whose `init` did not run for this
+ * execution, e.g. a bare `harness.run()` outside a session). A layer that
+ * legitimately cleared its state (`{ state: undefined }`) has a state ENTRY
+ * (see `LayerStateStore.has`) and keeps running with `undefined` state.
+ * Legacy stores without `has` fall back to the old sentinel — an init-bearing
+ * layer with no state — which cannot make that distinction.
  */
 function isLayerDisabled({ store, executionId, layer, state }: IsLayerDisabledParams): boolean {
-  if (store.isDisabled) {
-    return store.isDisabled(executionId, layer.id);
+  if (store.isDisabled?.(executionId, layer.id)) {
+    return true;
   }
-  return state === undefined && layer.hooks.init !== undefined;
+  if (state !== undefined || layer.hooks.init === undefined) {
+    return false;
+  }
+  // Init-bearing layer with no state in hand: skip when no entry was ever
+  // written (uninitialized); keep running when the state was explicitly
+  // cleared. Stores without `has` cannot tell the two apart → legacy skip.
+  if (store.has) {
+    return !store.has(executionId, layer.id);
+  }
+  return true;
 }
 
 //#region Recall Cache (eventual recall)

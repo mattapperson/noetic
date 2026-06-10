@@ -8,6 +8,13 @@ import { resolve } from 'node:path';
 // targets `dist/` and ships no workspace deps. The workspace `@noetic/*` packages
 // are bundled into `dist` at build time, so they are not needed as runtime deps.
 //
+// It also strips the `bun` export conditions (which resolve to `src/*.ts` in
+// development — see CLAUDE.md). The packed tarball ships only `dist/`, so a
+// surviving `bun` condition would dangle and break bun consumers of the
+// artifact. `npm publish` strips them via each package's `prepublishOnly`
+// (scripts/strip-dev-conditions.ts), but `npm pack` — used by compat's
+// pack:packages — never runs `prepublishOnly`, so the strip must happen here.
+//
 // Runs against the ephemeral CI checkout right before `npm publish`; never committed.
 // Kept dependency-free (no zod) so it runs from the workspace root.
 
@@ -54,6 +61,24 @@ if (isRecord(publishConfig)) {
 
 delete pkg.publishConfig;
 delete pkg.devDependencies;
+
+// Strip the dev-only `bun` export conditions (recursively — conditions can
+// nest) so the manifest resolves only against the `dist/` shipped in the
+// tarball, exactly like the npm-published artifact.
+function stripBunConditions(node: unknown): void {
+  if (!isRecord(node)) {
+    return;
+  }
+  delete node.bun;
+  for (const value of Object.values(node)) {
+    stripBunConditions(value);
+  }
+}
+stripBunConditions(pkg.exports);
+if (JSON.stringify(pkg.exports ?? {}).includes('"bun":')) {
+  console.error('prepare-publish: a "bun" export condition survived stripping');
+  process.exit(1);
+}
 
 // Pin any remaining `workspace:` runtime dependency to a concrete `^<version>`
 // range read from the sibling package, so the packed/published tarball is

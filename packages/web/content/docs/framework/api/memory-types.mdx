@@ -284,6 +284,7 @@ interface LayerStateStore {
   cleanup(executionId: string): void;
   diagnostic: (layerId: string, hook: string, error: unknown) => void;
   // Optional — implemented by createLayerStateStore(); custom stores may omit them.
+  has?(executionId: string, layerId: string): boolean;
   registerDurable?(executionId: string, layerId: string, target: ScopedStorage): void;
   flush?(executionId: string): Promise<void>;
   disable?(executionId: string, layerId: string): void;
@@ -297,6 +298,7 @@ interface LayerStateStore {
 | `set(executionId, layerId, state)` | Write state; mirrored durably when a target is registered (`undefined` deletes the durable key) |
 | `cleanup(executionId)` | Drop all state and registrations for an execution |
 | `diagnostic(layerId, hook, error)` | Sink for non-fatal layer errors (mirror failures report hook `'persist'`) |
+| `has(executionId, layerId)` | Whether any state entry exists — distinguishes "init never ran" (no entry → init-bearing layer skipped) from "state explicitly cleared" (entry present → hooks keep running with `undefined` state) |
 | `registerDurable(executionId, layerId, target)` | Register the durable write-through target for a layer (non-`'execution'` scopes; called by `initLayers`/`spawnLayers`) |
 | `flush(executionId)` | Await all in-flight durable mirror writes |
 | `disable(executionId, layerId)` / `isDisabled(...)` | Explicit disabled tracking for layers whose `init` failed with `onInitError: 'disable'` |

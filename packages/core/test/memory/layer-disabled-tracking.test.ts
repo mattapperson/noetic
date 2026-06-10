@@ -406,6 +406,54 @@ describe('M10: explicit disabled-layer tracking', () => {
     expect(calls.recall).toBe(0);
   });
 
+  it('uninitialized init-bearing layer is skipped, not recalled with undefined state', async () => {
+    // Regression: a harness path that executes steps without running
+    // `initLayers` (e.g. a bare `harness.run()` outside a session) must skip
+    // init-bearing layers — never invoke `recall` with `state: undefined`.
+    // The explicit-disable tracking must not erase this distinction.
+    const { layer, calls } = makeTrackedLayer({});
+    const store = createLayerStateStore();
+    const ctx = makeCtx({
+      executionId: 'exec-uninit',
+    });
+    const results = await recallLayers({
+      layers: [
+        layer,
+      ],
+      query: '',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map(),
+      store,
+    });
+    expect(results.length).toBe(0);
+    expect(calls.recall).toBe(0);
+  });
+
+  it('state written via set() without init counts as initialized', async () => {
+    const { layer, calls } = makeTrackedLayer({});
+    const store = createLayerStateStore();
+    const ctx = makeCtx({
+      executionId: 'exec-set-only',
+    });
+    // e.g. `harness.setLayerState` seeding state before the first recall.
+    store.set(ctx.executionId, layer.id, {
+      n: 7,
+    });
+    const results = await recallLayers({
+      layers: [
+        layer,
+      ],
+      query: '',
+      ctx,
+      log: makeItemLog(),
+      budgets: new Map(),
+      store,
+    });
+    expect(results.length).toBe(1);
+    expect(calls.recall).toBe(1);
+  });
+
   it('returnLayers still skips only when the child produced no state', async () => {
     const store = createLayerStateStore();
     let onReturnRan = 0;
