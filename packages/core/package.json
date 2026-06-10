@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/core",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Step primitives, interpreter, runtime, and memory layer contract for Noetic agents.",
   "license": "Apache-2.0",

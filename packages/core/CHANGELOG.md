@@ -1,3 +1,22 @@
+## @noetic-tools/core-v1.0.0 (2026-06-10)
+
+* fix: skip uninitialized layers, strip bun exports ([3c83c57](https://github.com/mattapperson/noetic/commit/3c83c57))
+* fix: tighten item schema and shell command gates ([6d58546](https://github.com/mattapperson/noetic/commit/6d58546))
+* feat(core)!: add async channel send back-pressure ([dcbdafa](https://github.com/mattapperson/noetic/commit/dcbdafa))
+* feat(memory)!: harden layers, budget, lifecycle ([39cc778](https://github.com/mattapperson/noetic/commit/39cc778))
+* build: resolve workspace deps to src via bun export condition ([b774d38](https://github.com/mattapperson/noetic/commit/b774d38))
+
+### BREAKING CHANGE
+
+* Context.send, AgentHarnessContract.send, and
+ContextHarness.send return Promise<void> instead of void. Full
+queue channels park internal senders (back-pressure) rather than
+dropping the new value; callers must await or explicitly handle
+the returned promise.
+* durableTaskState() no longer accepts a config
+object; DurableTaskStateConfig and DurableTaskStateSerializer
+are removed.
+
 ## @noetic-tools/core-v0.3.0 (2026-06-08)
 
 * fix(core): address adversarial review findings in memory layers ([bac97a0](https://github.com/mattapperson/noetic/commit/bac97a0))
