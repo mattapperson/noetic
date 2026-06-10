@@ -25,18 +25,22 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./portable": {
+      "bun": "./src/portable.ts",
       "types": "./dist/portable.d.ts",
       "default": "./dist/portable.js"
     },
     "./unstable": {
+      "bun": "./src/unstable.ts",
       "types": "./dist/unstable.d.ts",
       "default": "./dist/unstable.js"
     },
     "./internal/test": {
+      "bun": "./src/internal-test.ts",
       "types": "./dist/internal-test.d.ts",
       "default": "./dist/internal-test.js"
     },
@@ -72,7 +76,7 @@
   "scripts": {
     "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
     "verify:esm": "bun scripts/verify-node-esm.ts",
-    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts && bun scripts/strip-dev-conditions.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "test:ci": "bun test --coverage --coverage-reporter=lcov",

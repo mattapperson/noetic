@@ -168,6 +168,8 @@ export function createMockCheckContext(opts: MockCheckContextOptions): MockCheck
     afterModelCall: () => notImpl('harness.afterModelCall'),
     runAppendPipeline: () => notImpl('harness.runAppendPipeline'),
     recallLayers: () => notImpl('harness.recallLayers'),
+    recallLayersAtomic: () => notImpl('harness.recallLayersAtomic'),
+    recallLayersEventual: () => notImpl('harness.recallLayersEventual'),
     projectHistory: () => notImpl('harness.projectHistory'),
     async storeLayers() {
       storeCallCount += 1;

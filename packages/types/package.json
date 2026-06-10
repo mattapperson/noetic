@@ -23,10 +23,12 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./contract": {
+      "bun": "./src/types/memory.ts",
       "types": "./dist/types/memory.d.ts",
       "default": "./dist/types/memory.js"
     },
@@ -60,7 +62,7 @@
   "scripts": {
     "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
     "verify:esm": "bun scripts/verify-node-esm.ts",
-    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/strip-dev-conditions.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "test:ci": "bun test --coverage --coverage-reporter=lcov",

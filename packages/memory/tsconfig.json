@@ -8,10 +8,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["bun-types"],
-    "paths": {
-      "@noetic-tools/types": ["../types/src/index.ts"],
-      "@noetic-tools/types/contract": ["../types/src/types/memory.ts"]
-    }
+    "customConditions": ["bun"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

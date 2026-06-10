@@ -12,6 +12,8 @@ All scripts run from the repo root unless noted.
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun scripts/check-export-tags.ts` — validates `@public` JSDoc tags on core's entry points
 
+In-workspace consumers resolve `@noetic-tools/types`, `@noetic-tools/memory`, and `@noetic-tools/core` straight to `src/*.ts` via the `bun` export condition (tsc matches it through `customConditions`), so no build step is needed for tests, typecheck, or the CLI — a stale `dist/` cannot break the workspace. Only `packages/web` (webpack) still consumes `dist/`; run `bun run build` in those three packages before building web. Published tarballs strip the `bun` conditions via `scripts/strip-dev-conditions.ts` in `prepublishOnly`.
+
 Per-package (`cd packages/<name>`):
 - `bun test` — package test suite
 - `bun test <path/to/file.test.ts>` — single file

@@ -11,7 +11,8 @@
     "outDir": "dist",
     "rootDir": ".",
     "skipLibCheck": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "customConditions": ["bun"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"]
 }

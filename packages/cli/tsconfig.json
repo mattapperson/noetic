@@ -12,7 +12,8 @@
     "rootDir": ".",
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "customConditions": ["bun"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
 }
