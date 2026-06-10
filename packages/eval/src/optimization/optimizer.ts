@@ -12,7 +12,7 @@ import type { SourceLocation } from '../types/source-location';
 import { discoverFields } from './field-discovery';
 import type { GepaConfig } from './gepa-bridge';
 import { optimizeWithGepa } from './gepa-bridge';
-import type { WriteBackEntry } from './source-writer';
+import type { WriteBackEntry, WriteBackReport } from './source-writer';
 import { writeOptimizedValues } from './source-writer';
 
 //#region Types
@@ -34,7 +34,14 @@ export interface OptimizeResult {
   bestCandidate: Candidate;
   score: number;
   iterations: number;
+  /**
+   * True only when at least one source literal was actually rewritten AND no
+   * entry was skipped. Unchanged candidate values produce no entries, so an
+   * optimization that found nothing better reports `writtenBack: false`.
+   */
   writtenBack: boolean;
+  /** Per-entry outcome of the write-back pass (absent under `dryRun` or when nothing changed). */
+  writeBackReport?: WriteBackReport;
 }
 
 //#endregion
@@ -47,10 +54,17 @@ function hasSourceLocation(
 ): f is OptimizableField & {
   sourceLocation: SourceLocation;
 } {
-  return f.sourceLocation !== undefined && candidate[f.path] !== undefined;
+  // Only changed values are written back; expectedValue arms the
+  // source-writer's mismatch guard against stale locations.
+  return (
+    f.sourceLocation !== undefined &&
+    candidate[f.path] !== undefined &&
+    candidate[f.path] !== f.value
+  );
 }
 
-function buildWriteBackEntries(
+/** Exported for tests. Only changed values with source locations become write-back entries. */
+export function buildWriteBackEntries(
   fields: OptimizableField[],
   bestCandidate: Candidate,
 ): WriteBackEntry[] {
@@ -64,6 +78,7 @@ function buildWriteBackEntries(
     )
     .map((f) => ({
       sourceLocation: f.sourceLocation,
+      expectedValue: f.value,
       newValue: bestCandidate[f.path],
     }));
 }
@@ -128,11 +143,16 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
   }
 
   let writtenBack = false;
+  let writeBackReport: WriteBackReport | undefined;
   if (!options.dryRun) {
     const entriesToWrite = buildWriteBackEntries(fields, result.bestCandidate);
     if (entriesToWrite.length > 0) {
-      await writeOptimizedValues(entriesToWrite);
-      writtenBack = true;
+      writeBackReport = await writeOptimizedValues(entriesToWrite);
+      for (const skip of writeBackReport.skipped) {
+        const { filePath, line, column } = skip.sourceLocation;
+        console.warn(`Write-back skipped at ${filePath}:${line}:${column}: ${skip.reason}`);
+      }
+      writtenBack = writeBackReport.written > 0 && writeBackReport.skipped.length === 0;
     }
   }
 
@@ -142,6 +162,7 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
     score: result.score,
     iterations: result.iterations,
     writtenBack,
+    writeBackReport,
   };
 }
 

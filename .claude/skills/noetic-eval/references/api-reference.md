@@ -97,7 +97,7 @@ All accessed via the `scorer` namespace:
 
 ```typescript
 // Deterministic
-scorer.latency({ target: number; maxAcceptable: number }): ScorerFn
+scorer.latency({ target: number; maxAcceptable: number }): ScorerFn  // throws RangeError when maxAcceptable < target
 scorer.cost({ budgetPerCall: number }): ScorerFn
 scorer.tokenEfficiency({ maxOutputTokens: number }): ScorerFn
 scorer.toolCallAccuracy({ expectedTools: string[]; strict?: boolean }): ScorerFn
@@ -106,13 +106,13 @@ scorer.custom(id: string, { generateScore, generateReason? }): ScorerFn
 
 // LLM-judge (all accept optional { model?, callModel? })
 scorer.answerRelevancy(config?): ScorerFn
-scorer.answerSimilarity({ expected, threshold?, model?, callModel? }): ScorerFn
+scorer.answerSimilarity({ expected, threshold?, model?, callModel? }): ScorerFn  // threshold: binary gate (>= -> 1, else 0); raw judge score in metadata.rawScore
 scorer.faithfulness({ context, model?, callModel? }): ScorerFn
 scorer.hallucination({ context?, model?, callModel? }): ScorerFn
 scorer.completeness(config?): ScorerFn
 scorer.promptAlignment(config?): ScorerFn
 scorer.toneConsistency({ target, model?, callModel? }): ScorerFn
-scorer.toxicity({ threshold?, categories?, model?, callModel? }): ScorerFn
+scorer.toxicity({ threshold?, categories?, model?, callModel? }): ScorerFn  // judge scores NON-toxicity (1 = clean); threshold gates on it
 scorer.bias({ categories?, model?, callModel? }): ScorerFn
 scorer.contextPrecision(config?): ScorerFn
 scorer.contextRelevance(config?): ScorerFn
@@ -137,9 +137,11 @@ createScorer({ id: string; judge?: { model: string; callModel?: CallModelFn } })
 .generateReason({ createPrompt: (score: number) => string }): ScorerFn
 ```
 
-### Score Clamping
+### Score Clamping and Sanitization
 
-Scorer pipelines (`createScorer`) automatically clamp scores outside [0, 1] to valid range. When clamped, the `ScoreResult` includes `metadata: { originalScore, clamped: true }`.
+Scorer pipelines (`createScorer`) automatically clamp scores outside [0, 1] to valid range; non-finite scores (`NaN`, `±Infinity`) become `0`. When clamped, the `ScoreResult` includes `metadata: { originalScore, clamped: true }`.
+
+Independently, the runner sanitizes EVERY `ScoreResult` returned through `exec.score(...)` — including builtin scorers that bypass the pipeline — clamping finite values to [0, 1], mapping non-finite values to `0`, and recording the original in `metadata.sanitizedFrom`. Baselines therefore never contain `NaN` (which would serialize to `null` and break `loadBaseline`).
 
 ## Score Utilities
 
@@ -197,7 +199,17 @@ interface OptimizeResult {
   bestCandidate: Record<string, string>;
   score: number;
   iterations: number;
+  // True only when >=1 source literal was actually rewritten AND no entry was
+  // skipped. Only CHANGED values produce write-back entries, so an
+  // optimization that found nothing better reports writtenBack: false.
   writtenBack: boolean;
+  // Per-entry outcome (absent under dryRun or when nothing changed).
+  writeBackReport?: WriteBackReport;
+}
+
+interface WriteBackReport {
+  written: number;
+  skipped: Array<{ sourceLocation: SourceLocation; reason: string }>;
 }
 
 interface GepaConfig {
@@ -237,7 +249,7 @@ AST-based static analysis that parses TypeScript source files to discover optimi
 function discoverFieldsFromSource(evalFilePath: string): OptimizableField[];
 ```
 
-Follows imports from the eval file, parses builder calls (`step.llm`, `tool`, `react`, `ralphWiggum`, etc.), and extracts `system`, `description`, `name` field values with their `SourceLocation`.
+Follows imports from the eval file, parses builder calls (`step.llm`, `tool`, `react`, `ralphWiggum`, etc.), and extracts `instructions`, `description`, `name` field values with their `SourceLocation`. `SourceLocation.line` and `.column` are 1-based package-wide (discovery, adapter stack capture, and the source writer all agree).
 
 ### `enrichWithSourceLocations(runtimeFields, astFields)`
 
@@ -283,6 +295,7 @@ function checkRegression(
 ): Promise<RegressionResult>;
 
 interface RegressionResult {
+  // False when any case regressed OR any baseline case is missing from the run.
   passed: boolean;
   regressions: Array<{
     caseName: string;
@@ -290,6 +303,10 @@ interface RegressionResult {
     currentScore: number;
     delta: number;
   }>;
+  // Baseline case names absent from the current run (deleted/renamed/never registered).
+  missingCases: string[];
+  // False when no baseline exists (check skipped, not failed).
+  baselineFound: boolean;
 }
 ```
 

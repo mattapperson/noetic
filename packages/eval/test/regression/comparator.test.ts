@@ -85,7 +85,7 @@ describe('checkRegression', () => {
     });
   });
 
-  test('no baseline exists -> passes with empty regressions', async () => {
+  test('no baseline exists -> passes with empty regressions, baselineFound false', async () => {
     const { checkRegression } = await import('../../src/regression/comparator');
     const current = makeSuiteResult([
       makeCase('case-1', 0.8),
@@ -94,6 +94,80 @@ describe('checkRegression', () => {
 
     expect(result.passed).toBe(true);
     expect(result.regressions).toHaveLength(0);
+    expect(result.missingCases).toHaveLength(0);
+    expect(result.baselineFound).toBe(false);
+  });
+
+  test('baseline case missing from current run -> fails with missingCases (zero-case run)', async () => {
+    const { checkRegression } = await import('../../src/regression/comparator');
+    const baseline = makeBaseline([
+      makeCase('case-1', 1.0),
+    ]);
+    writeBaseline(tmpDir, baseline);
+
+    const current = makeSuiteResult([]);
+    const result = await checkRegression(current);
+
+    expect(result.passed).toBe(false);
+    expect(result.regressions).toHaveLength(0);
+    expect(result.missingCases).toEqual([
+      'case-1',
+    ]);
+    expect(result.baselineFound).toBe(true);
+  });
+
+  test('renamed case is detected as missing (old name absent)', async () => {
+    const { checkRegression } = await import('../../src/regression/comparator');
+    const baseline = makeBaseline([
+      makeCase('old-name', 0.9),
+    ]);
+    writeBaseline(tmpDir, baseline);
+
+    const current = makeSuiteResult([
+      makeCase('new-name', 0.9),
+    ]);
+    const result = await checkRegression(current);
+
+    expect(result.passed).toBe(false);
+    expect(result.missingCases).toEqual([
+      'old-name',
+    ]);
+  });
+
+  test('forward direction still guards: regression detected alongside no missing cases', async () => {
+    const { checkRegression } = await import('../../src/regression/comparator');
+    const baseline = makeBaseline([
+      makeCase('case-1', 0.9),
+    ]);
+    writeBaseline(tmpDir, baseline);
+
+    const current = makeSuiteResult([
+      makeCase('case-1', 0.5),
+    ]);
+    const result = await checkRegression(current);
+
+    expect(result.passed).toBe(false);
+    expect(result.regressions).toHaveLength(1);
+    expect(result.missingCases).toHaveLength(0);
+  });
+
+  test('all baseline cases present and stable -> passed with empty missingCases', async () => {
+    const { checkRegression } = await import('../../src/regression/comparator');
+    const baseline = makeBaseline([
+      makeCase('case-1', 0.9),
+      makeCase('case-2', 0.8),
+    ]);
+    writeBaseline(tmpDir, baseline);
+
+    const current = makeSuiteResult([
+      makeCase('case-1', 0.9),
+      makeCase('case-2', 0.8),
+    ]);
+    const result = await checkRegression(current);
+
+    expect(result.passed).toBe(true);
+    expect(result.missingCases).toHaveLength(0);
+    expect(result.baselineFound).toBe(true);
   });
 
   test('score drop exactly at threshold (-0.05) -> no regression (boundary N)', async () => {

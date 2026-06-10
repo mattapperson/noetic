@@ -95,7 +95,7 @@ it.each('test/fixtures/tickets.jsonl', async (ctx) => {
 
 | Scorer | Config | Score Source |
 |--------|--------|-------------|
-| `scorer.latency({ target, maxAcceptable })` | ms thresholds | `ctx.elapsed` |
+| `scorer.latency({ target, maxAcceptable })` | ms thresholds (`maxAcceptable < target` throws `RangeError`) | `ctx.elapsed` |
 | `scorer.cost({ budgetPerCall })` | dollar amount | `ctx.cost` |
 | `scorer.tokenEfficiency({ maxOutputTokens })` | token count | `ctx.tokens.output` |
 | `scorer.toolCallAccuracy({ expectedTools, strict? })` | tool names | `ctx.lastStepMeta.toolCalls` |
@@ -109,13 +109,13 @@ All accept optional `{ model?, callModel? }` config:
 | Scorer | What It Judges |
 |--------|---------------|
 | `scorer.answerRelevancy()` | Output relevance to objective |
-| `scorer.answerSimilarity({ expected })` | Semantic similarity to expected answer |
+| `scorer.answerSimilarity({ expected, threshold? })` | Semantic similarity to expected answer; `threshold` turns the score into a binary gate (raw judge score kept in `metadata.rawScore`) |
 | `scorer.faithfulness({ context })` | Stays within provided context |
 | `scorer.hallucination({ context? })` | Detects fabricated content |
 | `scorer.completeness()` | Fully addresses the objective |
 | `scorer.promptAlignment()` | Follows system prompt instructions |
 | `scorer.toneConsistency({ target })` | Matches target tone |
-| `scorer.toxicity({ threshold?, categories? })` | Detects toxic content |
+| `scorer.toxicity({ threshold?, categories? })` | Detects toxic content; the judge scores NON-toxicity (1.0 = clean) and `threshold` gates on it (>= threshold -> 1) |
 | `scorer.bias({ categories? })` | Detects bias |
 | `scorer.contextPrecision()` | Precision of context usage |
 | `scorer.contextRelevance()` | Relevance of retrieved context |
@@ -167,8 +167,12 @@ noetic test -u --budget 10         # Cost cap
 noetic test -u --dry-run           # Preview without writing
 
 noetic test --save-baseline        # Save scores as regression baseline
-noetic test --check                # Fail if scores regress
+noetic test --check                # Fail if scores regress or baseline cases vanish
 ```
+
+Exit codes: `0` all cases passed (clean `--check`; no-baseline `--check` prints a notice and passes), `1` any failed/errored case, regression, missing baseline case, or unresolvable explicit file pattern, `2` usage error (unknown flag, invalid `--scope`/`--budget` value — never silently dropped).
+
+Watch mode spawns a fresh subprocess per run (in-process re-import is module-cached and would never re-register suites), serializes runs, coalesces changes during a run into one follow-up, and always exits `0` itself. Only the eval files are watched, not transitive imports.
 
 ## Optimization
 
@@ -176,8 +180,8 @@ noetic test --check                # Fail if scores regress
 
 1. **Field Discovery** -- walks the step tree to find optimizable text (system prompts, tool descriptions/names). Accepts an optional `scope` parameter to filter by optimization level.
 2. **AST Source Discovery** -- parses imported source files (not the eval file itself) to find exact source locations of optimizable fields. Follows variable references to declarations.
-3. **GEPA Bridge** -- implements an `AxGEPAAdapter` from `@ax-llm/ax` that evaluates candidates via `applyCandidate()` + eval suite scoring. Uses `AxGEPA.compile()` with student/teacher AI models via OpenRouter.
-4. **Source Writer** -- writes optimized values back to source files at tracked locations. Validates that the current value at each location matches expectations before writing. Supports multi-line template literals.
+3. **GEPA Bridge** -- implements an `AxGEPAAdapter` from `@ax-llm/ax`. AxGEPA keys candidates by component id, so the bridge carries all noetic field values in one instruction component as marker-delimited blocks (`=== NOETIC FIELD <path> === ... === END NOETIC FIELD ===`), discovers the component id via `getOptimizableComponents()`, and implements `propose_new_texts` so the teacher improves each field individually while the bridge preserves the marker structure. `evaluate()` parses the candidate text and scores the MUTATED step; corrupted text fails closed to the original values. The best candidate is the argmax-average pareto point.
+4. **Source Writer** -- writes optimized values back to source files at tracked 1-based locations. Only CHANGED values are written, the current value is validated (`expectedValue`) before writing, and replacement text is escaped per literal kind (`${` in backticks; newlines/U+2028/29 in quoted strings). Returns a `WriteBackReport { written, skipped[] }`; `OptimizeResult.writtenBack` is true only when something was written and nothing was skipped.
 
 ### GepaConfig
 
@@ -227,8 +231,10 @@ describe(step, {
 Save and check:
 ```bash
 noetic test --save-baseline   # Save current scores
-noetic test --check           # Fail if score drops > threshold
+noetic test --check           # Exit 1 if a score drops > threshold OR a baseline case is missing
 ```
+
+`--check` also fails (exit 1) when a case present in the baseline is absent from the run — deleting or renaming cases cannot silently green the gate. Suites without a saved baseline print a notice and pass.
 
 ## Adapters (Third-Party SDKs)
 

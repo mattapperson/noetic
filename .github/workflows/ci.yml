@@ -82,13 +82,15 @@ jobs:
       - name: Link check
         run: bun run --cwd packages/web test:links
 
+      # `noetic test --check` exits 1 on failing cases, regressions, or
+      # baseline cases missing from the run; main is a hard gate, PRs warn.
       - name: Eval regression (if baselines exist)
         if: hashFiles('.noetic/baselines/**') != ''
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            bun run --cwd packages/eval src/cli/cli.ts test --regression --fail-on-regression
+            bun run --cwd packages/eval src/cli/cli.ts test --check
           else
-            bun run --cwd packages/eval src/cli/cli.ts test --regression || echo "::warning::Eval regression detected — scores degraded on this PR"
+            bun run --cwd packages/eval src/cli/cli.ts test --check || echo "::warning::Eval regression detected — scores degraded on this PR"
           fi
 
   structural-gate:

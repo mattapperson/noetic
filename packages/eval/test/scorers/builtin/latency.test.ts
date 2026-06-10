@@ -88,6 +88,31 @@ describe('latency scorer', () => {
       maxAcceptable: 5e3,
     });
   });
+
+  test('maxAcceptable < target throws RangeError at construction', () => {
+    expect(() =>
+      latency({
+        target: 1e3,
+        maxAcceptable: 500,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  test('maxAcceptable === target acts as a step function (boundaries N-1/N/N+1)', async () => {
+    const stepScorer = latency({
+      target: 1e3,
+      maxAcceptable: 1e3,
+    });
+    expect((await stepScorer(createMockExecution(999), '', '')).score).toBe(1);
+    expect((await stepScorer(createMockExecution(1e3), '', '')).score).toBe(1);
+    expect((await stepScorer(createMockExecution(1001), '', '')).score).toBe(0);
+  });
+
+  test('score never exceeds 1 (linear branch clamped)', async () => {
+    const result = await scorer(createMockExecution(1001), '', '');
+    expect(result.score).toBeLessThanOrEqual(1);
+    expect(result.score).toBeGreaterThanOrEqual(0);
+  });
 });
 
 //#endregion

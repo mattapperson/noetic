@@ -4,128 +4,17 @@ import type { Step } from '@noetic-tools/core';
 
 import type { SuiteDefinition } from '../runner/describe';
 import type { SuiteResult } from '../types/eval';
-import { OptimizeScope } from '../types/eval';
 import type { RegressionResult } from '../types/regression';
+import type { CliArgs } from './args';
+import { parseCliArgs, UsageError } from './args';
+import type { RegressionCheckOutcome, RunOutcome } from './exit-policy';
+import { computeExitCode, ExitCode } from './exit-policy';
 import { discoverEvalFiles } from './file-discovery';
 import { reportResults, reportSummary } from './reporter';
 import { watchFiles } from './watch';
+import { buildChildArgs, createWatchRunner } from './watch-runner';
 
-//#region Types
-
-type OptimizeScopeValue = (typeof OptimizeScope)[keyof typeof OptimizeScope];
-
-interface CliArgs {
-  files: string[];
-  verbose: boolean;
-  json: boolean;
-  watch: boolean;
-  optimize: boolean;
-  scope: OptimizeScopeValue;
-  budget?: number;
-  dryRun: boolean;
-  saveBaseline: boolean;
-  check: boolean;
-}
-
-type ArgHandler = (args: CliArgs, argv: string[], index: number) => number;
-
-//#endregion
-
-//#region Constants
-
-const VALID_SCOPES: ReadonlyArray<string> = Object.values(OptimizeScope);
 const MAX_METRIC_CALLS = 10;
-
-//#endregion
-
-//#region Scope Helpers
-
-function isValidScope(value: string): value is OptimizeScopeValue {
-  return VALID_SCOPES.includes(value);
-}
-
-//#endregion
-
-//#region Arg Parsing
-
-const argHandlers: Record<string, ArgHandler> = {
-  '--verbose': (args) => {
-    args.verbose = true;
-    return 0;
-  },
-  '--json': (args) => {
-    args.json = true;
-    return 0;
-  },
-  '--watch': (args) => {
-    args.watch = true;
-    return 0;
-  },
-  '-u': (args) => {
-    args.optimize = true;
-    return 0;
-  },
-  '--scope': (args, argv, i) => {
-    const next = argv[i + 1];
-    if (next && isValidScope(next)) {
-      args.scope = next;
-      return 1;
-    }
-    return 0;
-  },
-  '--budget': (args, argv, i) => {
-    const next = argv[i + 1];
-    if (next) {
-      args.budget = Number.parseFloat(next);
-      return 1;
-    }
-    return 0;
-  },
-  '--dry-run': (args) => {
-    args.dryRun = true;
-    return 0;
-  },
-  '--save-baseline': (args) => {
-    args.saveBaseline = true;
-    return 0;
-  },
-  '--check': (args) => {
-    args.check = true;
-    return 0;
-  },
-};
-
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
-    files: [],
-    verbose: false,
-    json: false,
-    watch: false,
-    optimize: false,
-    scope: OptimizeScope.PromptsOnly,
-    dryRun: false,
-    saveBaseline: false,
-    check: false,
-  };
-
-  let i = 0;
-  while (i < argv.length) {
-    const arg = argv[i];
-    const handler = argHandlers[arg];
-    if (handler) {
-      i += handler(args, argv, i);
-    } else if (!arg.startsWith('-')) {
-      args.files.push(arg);
-    }
-    i++;
-  }
-
-  return args;
-}
-
-//#endregion
-
-//#region Helper Functions
 
 async function loadEvalFiles(files: string[]): Promise<void> {
   for (const file of files) {
@@ -143,6 +32,10 @@ function buildScoreMap(result: SuiteResult): Record<string, number> {
   return scores;
 }
 
+function countFailedCases(results: SuiteResult[]): number {
+  return results.reduce((sum, s) => sum + s.cases.filter((c) => !c.passed).length, 0);
+}
+
 async function handleBaselineSaving(results: SuiteResult[]): Promise<void> {
   const { saveBaseline } = await import('../regression/baseline');
   for (const result of results) {
@@ -151,23 +44,34 @@ async function handleBaselineSaving(results: SuiteResult[]): Promise<void> {
   console.log('Baselines saved');
 }
 
-async function handleRegressionCheck(results: SuiteResult[]): Promise<boolean> {
+async function handleRegressionCheck(results: SuiteResult[]): Promise<RegressionCheckOutcome> {
   const { checkRegression } = await import('../regression/comparator');
-  let hasRegression = false;
+  const outcome: RegressionCheckOutcome = {
+    regressed: false,
+    missingCount: 0,
+  };
   for (const result of results) {
     const regressionResult: RegressionResult = await checkRegression(result);
+    if (!regressionResult.baselineFound) {
+      console.log(`No baseline for "${result.suiteName}" — skipping regression check`);
+      continue;
+    }
     if (regressionResult.passed) {
       continue;
     }
-    hasRegression = true;
     console.log(`REGRESSION in ${result.suiteName}:`);
     for (const r of regressionResult.regressions) {
+      outcome.regressed = true;
       console.log(
         `  ${r.caseName}: ${r.baselineScore.toFixed(2)} -> ${r.currentScore.toFixed(2)} (d${r.delta.toFixed(2)})`,
       );
     }
+    for (const name of regressionResult.missingCases) {
+      outcome.missingCount++;
+      console.log(`  MISSING ${name}: present in baseline but absent from this run`);
+    }
   }
-  return hasRegression;
+  return outcome;
 }
 
 async function handleOptimization(
@@ -210,15 +114,22 @@ async function handleOptimization(
   console.log('Optimization complete');
 }
 
-//#endregion
+async function runEvals(args: CliArgs): Promise<RunOutcome> {
+  const outcome: RunOutcome = {
+    unresolvedPatterns: [],
+    failedCases: 0,
+  };
 
-//#region Run Evals
+  const discovery = discoverEvalFiles(args.files);
+  outcome.unresolvedPatterns = discovery.unresolved;
+  for (const pattern of discovery.unresolved) {
+    console.error(`No eval file found for pattern "${pattern}"`);
+  }
 
-async function runEvals(args: CliArgs): Promise<void> {
-  const files = discoverEvalFiles(args.files);
+  const files = discovery.files;
   if (files.length === 0) {
     console.log('No .eval.ts files found');
-    return;
+    return outcome;
   }
 
   console.log(`Found ${files.length} eval file(s)`);
@@ -231,7 +142,7 @@ async function runEvals(args: CliArgs): Promise<void> {
   const suites = getSuites();
   if (suites.length === 0) {
     console.log('No eval suites registered');
-    return;
+    return outcome;
   }
 
   const { runAllSuites } = await import('../runner/suite-runner');
@@ -245,47 +156,60 @@ async function runEvals(args: CliArgs): Promise<void> {
     reportSummary(results);
   }
 
+  outcome.failedCases = countFailedCases(results);
+
   if (args.saveBaseline) {
     await handleBaselineSaving(results);
   }
 
   if (args.check) {
-    const hasRegression = await handleRegressionCheck(results);
-    if (hasRegression) {
-      process.exit(1);
-    }
+    outcome.regressionCheck = await handleRegressionCheck(results);
   }
 
   if (args.optimize) {
     await handleOptimization(suites, args, files);
   }
+
+  return outcome;
 }
 
-//#endregion
-
-//#region Main
-
-async function main(): Promise<void> {
-  const rawArgs = process.argv.slice(2);
-
-  const testIdx = rawArgs.indexOf('test');
-  const cliArgv = testIdx >= 0 ? rawArgs.slice(testIdx + 1) : rawArgs;
-
-  const args = parseArgs(cliArgv);
-
-  if (!args.watch) {
-    await runEvals(args);
-    return;
-  }
-
-  const files = discoverEvalFiles(args.files);
-  console.log('Watching for changes...');
-  const watcher = watchFiles(files, () => {
-    console.log('\nRe-running evals...');
-    runEvals(args).catch(console.error);
+async function runWatchMode(args: CliArgs): Promise<void> {
+  // Fresh subprocess per run: in-process re-import() is module-cached under
+  // Bun, so eval file bodies would never re-execute on a re-run.
+  const childArgs = buildChildArgs(process.argv.slice(2));
+  const runner = createWatchRunner({
+    runChild: async () => {
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          process.argv[1],
+          ...childArgs,
+        ],
+        {
+          stdio: [
+            'inherit',
+            'inherit',
+            'inherit',
+          ],
+        },
+      );
+      return await child.exited;
+    },
+    onExit: (code) => {
+      console.log(`\nEval run exited with code ${code}. Watching for changes...`);
+    },
   });
 
-  await runEvals(args);
+  // Limitation: only the eval files themselves are watched, not their
+  // transitive imports — restart the watcher after editing agent modules.
+  const discovery = discoverEvalFiles(args.files);
+  console.log('Watching for changes...');
+  const watcher = watchFiles(discovery.files, () => {
+    console.log('\nRe-running evals...');
+    runner.trigger();
+  });
+
+  runner.trigger();
 
   process.on('SIGINT', () => {
     watcher.close();
@@ -293,9 +217,35 @@ async function main(): Promise<void> {
   });
 }
 
+async function main(): Promise<void> {
+  const rawArgs = process.argv.slice(2);
+
+  const testIdx = rawArgs.indexOf('test');
+  const cliArgv = testIdx >= 0 ? rawArgs.slice(testIdx + 1) : rawArgs;
+
+  let args: CliArgs;
+  try {
+    args = parseCliArgs(cliArgv);
+  } catch (err: unknown) {
+    if (err instanceof UsageError) {
+      console.error(err.message);
+      process.exitCode = ExitCode.Usage;
+      return;
+    }
+    throw err;
+  }
+
+  if (!args.watch) {
+    const outcome = await runEvals(args);
+    process.exitCode = computeExitCode(outcome);
+    return;
+  }
+
+  // Watch mode never exits on child failures; the watcher itself exits 0.
+  await runWatchMode(args);
+}
+
 main().catch((err: unknown) => {
   console.error(err);
-  process.exit(1);
+  process.exitCode = ExitCode.Failure;
 });
-
-//#endregion

@@ -22,6 +22,20 @@ export interface RegressionEntry {
 
 //#region Public API
 
+/**
+ * Compare a suite result against its saved baseline.
+ *
+ * Two directions are checked:
+ * - forward: a present case whose average score dropped more than the
+ *   threshold is a regression
+ * - reverse: a baseline case absent from the current run (deleted, renamed,
+ *   or never registered) is reported in `missingCases` — a vanished case is
+ *   the maximal degradation and must not pass silently
+ *
+ * `passed` is true only when there are no regressions AND no missing cases.
+ * Without a saved baseline the check is skipped (`baselineFound: false`,
+ * `passed: true`).
+ */
 export async function checkRegression(
   currentResult: SuiteResult,
   maxRegression?: number,
@@ -33,6 +47,8 @@ export async function checkRegression(
     return {
       passed: true,
       regressions: [],
+      missingCases: [],
+      baselineFound: false,
     };
   }
 
@@ -58,9 +74,16 @@ export async function checkRegression(
     }
   }
 
+  const currentNames = new Set(currentResult.cases.map((c) => c.name));
+  const missingCases = baseline.suiteResult.cases
+    .map((c) => c.name)
+    .filter((name) => !currentNames.has(name));
+
   return {
-    passed: regressions.length === 0,
+    passed: regressions.length === 0 && missingCases.length === 0,
     regressions,
+    missingCases,
+    baselineFound: true,
   };
 }
 

@@ -48,6 +48,14 @@ function clampScore(raw: number): {
   score: number;
   clamped: boolean;
 } {
+  // NaN/±Infinity must not escape: NaN serializes to null in baseline JSON
+  // and loadBaseline would then throw on the corrupted file.
+  if (!Number.isFinite(raw)) {
+    return {
+      score: 0,
+      clamped: true,
+    };
+  }
   if (raw < 0 || raw > 1) {
     return {
       score: Math.max(0, Math.min(1, raw)),

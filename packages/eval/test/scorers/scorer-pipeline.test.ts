@@ -145,6 +145,28 @@ describe('clampScore behavior', () => {
     expect(result.score).toBe(0.5);
     expect(result.metadata).toBeUndefined();
   });
+
+  test('NaN (e.g. 0/0 from an empty preprocess result) is clamped to 0', async () => {
+    const result = await scoreWithRawValue(0 / 0);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata?.clamped).toBe(true);
+    expect(Number.isNaN(result.metadata?.originalScore)).toBe(true);
+  });
+
+  test('Infinity is clamped to 0 (non-finite is invalid, not "high")', async () => {
+    const result = await scoreWithRawValue(Number.POSITIVE_INFINITY);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata?.clamped).toBe(true);
+  });
+
+  test('-Infinity is clamped to 0', async () => {
+    const result = await scoreWithRawValue(Number.NEGATIVE_INFINITY);
+
+    expect(result.score).toBe(0);
+    expect(result.metadata?.clamped).toBe(true);
+  });
 });
 
 //#endregion

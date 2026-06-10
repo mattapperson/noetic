@@ -28,10 +28,33 @@ interface RunScorersOpts {
   background: string;
 }
 
+/**
+ * Defense in depth: every ScoreResult that reaches case scores, suite
+ * aggregates, and baselines is finite and within [0, 1] — including results
+ * from builtin scorers that bypass the createScorer pipeline. Sanitized
+ * results carry the original value in `metadata.sanitizedFrom`.
+ */
+function sanitizeScoreResult(result: ScoreResult): ScoreResult {
+  const raw = result.score;
+  if (Number.isFinite(raw) && raw >= 0 && raw <= 1) {
+    return result;
+  }
+  const sanitized = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
+  return {
+    ...result,
+    score: sanitized,
+    metadata: {
+      ...result.metadata,
+      sanitizedFrom: raw,
+    },
+  };
+}
+
 async function runScorers(opts: RunScorersOpts): Promise<ScoreResult[]> {
-  return Promise.all(
+  const results = await Promise.all(
     opts.scorers.map((scorer) => scorer(opts.execution, opts.objective, opts.background)),
   );
+  return results.map(sanitizeScoreResult);
 }
 
 //#endregion

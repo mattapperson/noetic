@@ -36,9 +36,12 @@ function captureSourceLocation(): SourceLocation | undefined {
     return undefined;
   }
 
+  // Stack frames: [0] 'Error', [1] captureSourceLocation, [2] the wrapper
+  // closure created in createAdapter, [3] the actual caller — the call site
+  // to record. V8/JSC report 1-based line AND column numbers, matching the
+  // package-wide SourceLocation convention.
   const lines = stack.split('\n');
-  // Skip: Error, captureSourceLocation, wrapper fn, actual caller
-  const callerLine = lines[4];
+  const callerLine = lines[3];
   if (!callerLine) {
     return undefined;
   }

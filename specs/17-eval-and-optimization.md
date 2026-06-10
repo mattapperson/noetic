@@ -106,7 +106,7 @@ function maxScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
 function stddevScore(scores: ReadonlyArray<Pick<ScoreResult, 'score'>>): number;
 ```
 
-**Invariant:** Every scorer returns a `value` in `[0.0, 1.0]`. Values outside this range cause the eval runner to throw `EvalError`.
+**Invariant:** Every score that reaches case results, suite aggregates, and baselines is finite and in `[0.0, 1.0]`. The runner sanitizes any out-of-range or non-finite (`NaN`/`Infinity`) scorer result — clamping finite values, mapping non-finite values to `0`, and recording the original value in `metadata.sanitizedFrom`.
 
 **Invariant:** `describe()` blocks are isolated. Suite-level config does not leak between sibling `describe()` calls.
 
@@ -154,7 +154,7 @@ Deterministic scorers require no LLM calls. They are fast, cheap, and reproducib
 
 | Scorer | Measures | Score |
 |--------|----------|-------|
-| `latency()` | Execution wall-clock time | `1.0 - clamp(duration / threshold, 0, 1)` |
+| `latency()` | Execution wall-clock time | `1.0` at/below `target`, falling linearly to `0` at `maxAcceptable`, clamped to `[0, 1]` |
 | `cost()` | Total LLM cost from context metadata | `1.0 - clamp(totalCost / budget, 0, 1)` |
 | `tokenEfficiency()` | Output tokens vs total tokens | `outputTokens / totalTokens` |
 | `toolCallAccuracy()` | Tool calls matching expected sequence | Jaccard similarity of tool call names |
@@ -162,7 +162,9 @@ Deterministic scorers require no LLM calls. They are fast, cheap, and reproducib
 | `custom(name, fn)` | User-defined deterministic logic | User-provided `[0.0, 1.0]` value |
 
 ```typescript
-function latency(threshold: number): ScorerFn;
+// Throws RangeError at construction when maxAcceptable < target.
+// target === maxAcceptable degenerates to a step function around target.
+function latency(opts: { target: number; maxAcceptable: number }): ScorerFn;
 function cost(budget: number): ScorerFn;
 function tokenEfficiency(): ScorerFn;
 function toolCallAccuracy(expectedTools: string[]): ScorerFn;
@@ -198,7 +200,7 @@ function hallucination(opts?: { model?: string }): ScorerFn;
 function completeness(opts?: { model?: string }): ScorerFn;
 function promptAlignment(opts?: { model?: string }): ScorerFn;
 function toneConsistency(opts?: { model?: string }): ScorerFn;
-function toxicity(opts?: { model?: string }): ScorerFn;
+function toxicity(opts?: { model?: string; threshold?: number; categories?: string[] }): ScorerFn;
 function bias(opts?: { model?: string }): ScorerFn;
 function contextPrecision(opts?: { model?: string }): ScorerFn;
 function contextRelevance(opts?: { model?: string }): ScorerFn;
@@ -207,6 +209,8 @@ function directoryReview(opts?: { model?: string }): ScorerFn;
 ```
 
 All LLM-judge scorers accept an optional `model` override. The default model is configurable at the suite level.
+
+**Threshold gating:** `answerSimilarity` and `toxicity` accept an optional `threshold`. When set, the score becomes a binary gate — a raw judge score at or above the threshold maps to `1`, below maps to `0` — and the raw judge score is preserved in `metadata.rawScore`. Note `toxicity`'s inversion: the judge scores NON-toxicity (`1.0` = clean), so `toxicity({ threshold: 0.8 })` passes only outputs rated at least 0.8 clean.
 
 ### `createScorer` — 4-Step Pipeline
 
@@ -384,50 +388,62 @@ interface OptimizeParams {
 function optimizeWithGepa(params: OptimizeParams): Promise<OptimizationResult>;
 ```
 
+AxGEPA keys candidates by the ax program's optimizable-component ids, not by noetic field paths. The bridge therefore carries ALL noetic field values inside a single instruction component as marker-delimited blocks:
+
+```
+=== NOETIC FIELD <path> ===
+<value>
+=== END NOETIC FIELD ===
+```
+
+`serializeFields()`/`parseFieldText()` round-trip this format; the parser re-serializes and compares against its input, so any corrupted text (including values embedding an exact marker line) fails closed to the original values.
+
 The bridge:
-1. Creates an `AxGEPAAdapter` that evaluates candidates by applying field mutations via `applyCandidate()` and running the eval suite.
-2. Builds a reflective dataset from evaluation scores to guide the teacher model's prompt improvements.
-3. Initializes `AxGEPA` with student/teacher AI services resolved from `OPENROUTER_API_KEY`.
-4. Calls `AxGEPA.compile()` with the adapter, forwarding `maxMetricCalls` for budget control.
-5. Extracts the best candidate from the Pareto front and returns it with the final score.
+1. Builds a fixed carrier program (`currentText:string -> improvedText:string`) whose instruction holds the serialized fields, and discovers the carrier's component id via `program.getOptimizableComponents()` (the `kind === 'instruction'` entry) — never hardcoded.
+2. Creates an `AxGEPAAdapter` whose `evaluate()` parses the candidate's serialized text and runs the eval suite against the MUTATED step (via `applyCandidate()`); destroyed markers evaluate the original step.
+3. Implements `propose_new_texts` — taking precedence over GEPA's free-form reflection, which would destroy the markers. The teacher model improves each field value individually and the bridge reassembles the marker structure; a failed proposal falls back to the current value.
+4. Builds a reflective dataset from evaluation scores to guide the teacher model's improvements.
+5. Initializes `AxGEPA` with student/teacher AI services resolved from `OPENROUTER_API_KEY` and calls `AxGEPA.compile()` with the adapter, forwarding `maxMetricCalls` for budget control.
+6. Extracts the best candidate as the **argmax of average score** over the Pareto front, decoding `configuration.componentMap[componentId]` (falling back to `configuration.instruction`); unparseable points fall back to the initial values.
 
 **Fallback:** If `OPENROUTER_API_KEY` is not set, the bridge evaluates the initial candidate once and returns it unchanged (no optimization). This allows eval suites to run without optimization infrastructure.
 
 **Rationale:** GEPA is the mutation strategy, not the eval strategy. The eval package owns scoring; GEPA owns search. This separation means alternative search strategies (grid search, Bayesian optimization) can be swapped in without changing the eval or mutator layers.
 
-### Phase 4: Source Writer (AST-Based Writeback)
+### Phase 4: Source Writer (Location-Based Writeback)
 
-After optimization, the source writer updates the original TypeScript source files with the optimized values.
+After optimization, the source writer updates the original TypeScript source files with the optimized values at the discovered string-literal locations.
 
 ```typescript
-interface WritebackPlan {
-  file: string;
-  changes: Array<{
-    field: DiscoveredField;
-    oldValue: unknown;
-    newValue: unknown;
-    location: { line: number; column: number };
-  }>;
+interface WriteBackEntry {
+  /** Position of the opening quote of the target string literal (1-based). */
+  sourceLocation: SourceLocation;
+  /** Current value; a mismatch at the location throws instead of writing. */
+  expectedValue?: string;
+  newValue: string;
 }
 
-function planWriteback(
-  original: Step<unknown, unknown>,
-  optimized: Step<unknown, unknown>,
-  sourceFiles: string[],
-): WritebackPlan[];
+interface WriteBackReport {
+  /** Literals actually replaced. */
+  written: number;
+  /** Entries skipped (stale line, column not on a quote), each with a reason. */
+  skipped: Array<{ sourceLocation: SourceLocation; reason: string }>;
+}
 
-function executeWriteback(plans: WritebackPlan[]): void;
+function writeOptimizedValues(entries: WriteBackEntry[]): Promise<WriteBackReport>;
 ```
 
 The source writer:
-1. Parses source files into ASTs.
-2. Locates the builder call sites corresponding to each changed field (matched by step `id` and field name).
-3. Replaces the AST node value with the optimized value.
-4. Prints the modified AST back to source, preserving formatting.
+1. Groups entries by file and applies them bottom-up, right-to-left — sorted by `(line desc, column desc)` — so earlier replacements never shift the coordinates of later ones (including two entries on one line).
+2. Replaces the string literal whose opening quote sits at the entry's 1-based `line`/`column`. A location that does not land on a quote character is **reported as skipped with a reason**, never silently dropped; a file whose entries were all skipped is left untouched.
+3. Escapes replacement values for their literal kind — backslash first, then the quote character; `${` in template literals (a live interpolation otherwise); `\r`, `\n`, and U+2028/U+2029 in quoted literals (a split literal otherwise). LLM-proposed text can never corrupt a source file.
+4. Validates `expectedValue` (when set) against the current literal and throws on mismatch.
 
-**Invariant:** `planWriteback` is pure — it computes changes without applying them. `executeWriteback` applies the changes. This two-phase design supports `--dry-run`.
+**Invariant:** `SourceLocation.line` and `SourceLocation.column` are 1-based package-wide — AST discovery, stack capture, and the writer all share the convention.
 
-**Invariant:** The source writer only modifies string literals, number literals, and array literals. It does not rewrite function bodies or control flow. L3 topology changes that require structural code modification are delegated to the pluggable coding agent.
+**Invariant:** The optimizer only emits entries for values that actually CHANGED, always sets `expectedValue`, and reports `writtenBack: true` only when at least one literal was written and nothing was skipped. `OptimizeResult.writeBackReport` exposes the per-entry outcome.
+
+**Invariant:** The source writer only modifies string literals. It does not rewrite function bodies or control flow. L3 topology changes that require structural code modification are delegated to the pluggable coding agent.
 
 ### AST-Based Source Location Discovery
 
@@ -561,35 +577,40 @@ Baselines are stored as JSON files (default: `.noetic/baselines/<suite-name>.jso
 
 ```typescript
 interface RegressionResult {
-  suite: string;
-  case: string;
-  scorer: string;
-  baseline: number;
-  current: number;
-  delta: number;
-  regressed: boolean;
+  /** False when any case regressed OR any baseline case is missing from the run. */
+  passed: boolean;
+  regressions: Array<{
+    caseName: string;
+    baselineScore: number;
+    currentScore: number;
+    delta: number;
+  }>;
+  /** Baseline case names absent from the current run (deleted, renamed, or never registered). */
+  missingCases: string[];
+  /** False when no baseline exists for the suite (the check is skipped, not failed). */
+  baselineFound: boolean;
 }
 
-function compareBaseline(
-  baseline: Baseline,
-  current: EvalSuiteResult[],
-  opts?: { tolerance?: number },
-): RegressionResult[];
+function checkRegression(
+  currentResult: SuiteResult,
+  maxRegression?: number, // default: 0.05
+): Promise<RegressionResult>;
 ```
 
-**Default tolerance:** `0.05` (5%). A score drop exceeding the tolerance on any scorer/case pair is flagged as a regression.
+**Default tolerance:** `0.05` (5%). A case whose average score drops more than the tolerance is flagged as a regression.
+
+**Reverse pass:** every baseline case must still exist in the current run. A vanished case (deleted, renamed — note dataset cases are named from the dataset path — or a registration bug running zero cases) is the maximal degradation and appears in `missingCases`; `passed` requires no regressions AND no missing cases.
 
 ### `--check` Flag
 
 When `noetic test --check` is used:
 
-1. Load the baseline for each suite.
-2. Run all eval cases.
-3. Compare results against the baseline.
-4. Exit with code `1` if any regression is detected.
-5. Print a diff table showing all changes.
+1. Run all eval cases.
+2. Load the baseline for each suite. A suite without a baseline prints a notice and is skipped (not failed).
+3. Compare results against the baseline in both directions (score drops AND missing baseline cases).
+4. Exit with code `1` if any regression is detected or any baseline case is missing from the run; print `REGRESSION`/`MISSING` lines per offending case.
 
-This is designed for CI — add `noetic test --check` to the pipeline to catch regressions before merge.
+This is designed for CI — the repo's `ci.yml` runs `noetic test --check` as a hard gate on `main` (PRs downgrade the failure to a `::warning`).
 
 **Rationale:** Baselines decouple "what is good enough" from "what is the current score." A team can lock baselines at a known-good state and flag any degradation, even if the absolute scores are not perfect.
 
@@ -611,13 +632,29 @@ noetic test [files...] [flags]
 |------|------|---------|-------------|
 | `--verbose` | `boolean` | `false` | Print per-case score breakdowns and scorer reasons |
 | `--json` | `boolean` | `false` | Output results as JSON (for CI integration) |
-| `--watch` | `boolean` | `false` | Re-run evals when source or eval files change |
-| `-u` | `boolean` | `false` | Update baselines with current results |
-| `--scope` | `string` | `'*'` | Glob pattern to filter suites by name |
-| `--budget` | `number` | (none) | Maximum cost in dollars for the entire eval run |
-| `--dry-run` | `boolean` | `false` | Discover and report what would run without executing |
-| `--save-baseline` | `string` | (none) | Save results as a baseline to the given path |
-| `--check` | `boolean` | `false` | Compare against saved baseline, exit `1` on regression |
+| `--watch` | `boolean` | `false` | Re-run evals when the eval files change (fresh subprocess per run) |
+| `-u` | `boolean` | `false` | Run GEPA optimization after evaluation |
+| `--scope` | `enum` | `prompts-only` | Optimization scope: `prompts-only`, `flow-structure`, or `full` |
+| `--budget` | `number` | (none) | Maximum cost in dollars for the optimization run |
+| `--dry-run` | `boolean` | `false` | Optimize without writing values back to source |
+| `--save-baseline` | `boolean` | `false` | Save each suite's results as its regression baseline (`.noetic/baselines/<suite>.json`) |
+| `--check` | `boolean` | `false` | Compare against saved baselines; exit `1` on regression or missing baseline case |
+
+Unknown flags and invalid flag values (e.g. a typo'd `--scope` value) are usage errors: the CLI prints the problem and exits `2` — nothing is silently dropped or misread as a file pattern.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every case passed; under `--check`, no regressions and no missing baseline cases. Empty discovery without explicit patterns is OK; `--check` with no saved baseline prints a notice and passes. |
+| `1` | Any failed/errored case, a `--check` regression or missing baseline case, an explicit file pattern that resolved to nothing, or an infrastructure error. `--save-baseline` with failing cases still saves, then exits `1`. |
+| `2` | Usage error (unknown flag, invalid flag value). |
+
+The CLI sets `process.exitCode` (never calls `process.exit()` mid-run), so in-flight writes flush before termination.
+
+### Watch Mode
+
+`--watch` runs each eval pass in a **fresh subprocess** (`[execPath, cliPath, ...argv-without---watch]`, stdio inherited). Re-importing eval files in-process is impossible: ESM dynamic `import()` is module-cached, so suite registration would never re-execute. Runs are serialized — file changes that land during a run coalesce into exactly one follow-up run, and children are never killed mid-run. The watcher reports each child's exit code but always exits `0` itself; child failures never terminate the watch loop. Only the eval files themselves are watched, not their transitive imports — restart the watcher after editing agent modules.
 
 ### Output Format
 
@@ -642,10 +679,10 @@ A case "fails" when any scorer returns a value below `0.5` (configurable via `Ev
 ### Optimization via CLI
 
 ```
-noetic test --optimize [--level L1|L2|L3] [--budget 5.00] [files...]
+noetic test -u [--scope prompts-only|flow-structure|full] [--budget 5.00] [files...]
 ```
 
-Runs the optimization pipeline after evaluation. The `--level` flag controls the optimization level. Results are printed as a diff showing before/after scores. With `--dry-run`, the writeback plan is printed without applying changes.
+Runs the optimization pipeline after evaluation. The `--scope` flag controls the optimization level (L1 `prompts-only`, L2 `flow-structure`, L3 `full`). With `--dry-run`, nothing is written back to source.
 
 ---
 

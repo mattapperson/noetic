@@ -9,6 +9,11 @@ export { discoverFields, enrichWithSourceLocations } from './optimization/field-
 export { applyCandidate } from './optimization/mutator';
 export type { OptimizeOptions, OptimizeResult } from './optimization/optimizer';
 export { optimize } from './optimization/optimizer';
+export type {
+  SkippedWrite,
+  WriteBackEntry,
+  WriteBackReport,
+} from './optimization/source-writer';
 // Regression
 export { loadBaseline, saveBaseline } from './regression/baseline';
 export { checkRegression } from './regression/comparator';

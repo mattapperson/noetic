@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { ScoreResult } from '../../types/eval';
 import type { EvalExecution, ScorerFn } from '../../types/scorer';
+import { applyThreshold } from './apply-threshold';
 import type { JudgeConfig } from './llm-judge';
 import { runJudge } from './llm-judge';
 
@@ -38,12 +39,14 @@ Respond with a similarity score and brief reasoning.`,
       judge: config,
     });
 
+    // threshold gates pass/fail: similarity >= threshold -> 1, below -> 0.
     return {
       scorerId: 'answer-similarity',
-      score: result.similarity,
+      score: applyThreshold(result.similarity, config.threshold),
       reason: result.reasoning,
       metadata: {
         threshold: config.threshold,
+        rawScore: result.similarity,
       },
     };
   };
