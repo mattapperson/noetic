@@ -77,7 +77,7 @@ type BudgetConfig =
   | 'auto';                   // let the runtime decide
 ```
 
-When using a `{ min, max }` range, the budget allocator guarantees at least `min` tokens and distributes remaining capacity up to `max`.
+When using a `{ min, max }` range, the budget allocator guarantees at least `min` tokens and distributes remaining capacity up to `max`. An omitted `budget` behaves like `'auto'` — the layer splits the proportional pool with the other auto layers after finite layers take their share. The pool is conserved: finite shares plus the auto layers' split always account for the full layer pool. NaN budget inputs throw a `NoeticConfigError` (`INVALID_BUDGET_INPUT`); `Infinity` means uncapped.
 
 ## ProjectionPolicy
 

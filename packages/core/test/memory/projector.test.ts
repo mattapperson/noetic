@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { assembleView } from '@noetic-tools/memory';
+import type { Item } from '@noetic-tools/types';
+import { estimateTokens } from '@noetic-tools/types';
 import { makeMessage } from '../_helpers';
+
+/** Serialized token cost — mirrors the projector's conservative estimate. */
+function itemCost(item: Item): number {
+  return estimateTokens(JSON.stringify(item));
+}
+
+/** Extract the text of every message item in the view (for order assertions). */
+function viewTexts(view: Item[]): string[] {
+  const texts: string[] = [];
+  for (const item of view) {
+    assert(item.type === 'message');
+    const part = item.content[0];
+    assert('text' in part && typeof part.text === 'string');
+    texts.push(part.text.slice(0, 12));
+  }
+  return texts;
+}
 
 describe('assembleView', () => {
   it('concatenates system + layer + history', () => {
@@ -175,5 +194,98 @@ describe('assembleView', () => {
     assert(view[3].type === 'message');
     assert(view[3].content[0].type === 'input_text');
     expect(view[3].content[0].text).toBe('h-9');
+  });
+
+  describe('layer-output budget drops non-fitting items individually (M3)', () => {
+    function policyFor(layerBudget: number) {
+      return {
+        tokenBudget: layerBudget,
+        responseReserve: 0,
+        overflow: 'sliding_window' as const,
+      };
+    }
+
+    it('an oversized low-slot item does not evict a fitting higher-slot item (verifier repro)', () => {
+      const oversized = makeMessage('developer', 'BIG '.repeat(1_237)); // ≫ 1000 tokens
+      const small = makeMessage('developer', `small ${'y'.repeat(500)}`); // ~137 tokens
+      expect(itemCost(oversized)).toBeGreaterThan(1_000);
+      expect(itemCost(small)).toBeLessThan(1_000);
+
+      const view = assembleView({
+        systemPromptItems: [],
+        layerOutputItems: [
+          oversized,
+          small,
+        ],
+        historyItems: [],
+        policy: policyFor(1_000),
+      });
+      expect(view).toHaveLength(1);
+      expect(viewTexts(view)[0].startsWith('small')).toBe(true);
+    });
+
+    it.each([
+      [
+        -1,
+        0,
+      ],
+      [
+        0,
+        1,
+      ],
+      [
+        1,
+        1,
+      ],
+    ])('exact-fit boundary: budget = cost%+d keeps %d item(s)', (delta, keptCount) => {
+      const item = makeMessage('developer', 'exact-fit-content');
+      const view = assembleView({
+        systemPromptItems: [],
+        layerOutputItems: [
+          item,
+        ],
+        historyItems: [],
+        policy: policyFor(itemCost(item) + delta),
+      });
+      expect(view).toHaveLength(keptCount);
+    });
+
+    it('[fits, oversized, fits] keeps the first and third items', () => {
+      const a = makeMessage('developer', 'aaa-fits');
+      const big = makeMessage('developer', 'Z'.repeat(8_000));
+      const c = makeMessage('developer', 'ccc-fits');
+      const view = assembleView({
+        systemPromptItems: [],
+        layerOutputItems: [
+          a,
+          big,
+          c,
+        ],
+        historyItems: [],
+        policy: policyFor(itemCost(a) + itemCost(c)),
+      });
+      expect(viewTexts(view)).toEqual([
+        'aaa-fits',
+        'ccc-fits',
+      ]);
+    });
+
+    it('equal-cost items: the lower-slot (earlier) item wins the last budget slot', () => {
+      const first = makeMessage('developer', 'slot-low-AAA');
+      const second = makeMessage('developer', 'slot-hi-BBBB');
+      expect(itemCost(first)).toBe(itemCost(second));
+      const view = assembleView({
+        systemPromptItems: [],
+        layerOutputItems: [
+          first,
+          second,
+        ],
+        historyItems: [],
+        policy: policyFor(itemCost(first)),
+      });
+      expect(viewTexts(view)).toEqual([
+        'slot-low-AAA',
+      ]);
+    });
   });
 });

@@ -128,6 +128,9 @@ export function observationalMemory(config?: ObservationalMemoryConfig) {
     },
     timeouts: {
       store: 60_000,
+      // onItemAppend runs the same LLM-backed accumulate/distill path as
+      // store — it needs the same headroom, not the 5s pipeline default.
+      onItemAppend: 60_000,
     },
     hooks: {
       async init({ storage }) {

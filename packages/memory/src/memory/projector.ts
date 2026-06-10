@@ -29,9 +29,12 @@ function totalTokens(items: ReadonlyArray<Item>): number {
 }
 
 /**
- * Keep items from the FRONT of a slot-ascending list until `budget` is reached.
- * Lower-slot (foundational) layer output is retained; higher-slot output at the
- * tail is dropped first when the budget is tight.
+ * Keep items from a slot-ascending list within `budget`, considering items in
+ * slot order and dropping each non-fitting item INDIVIDUALLY. Layer-output
+ * items are independent contributions (no contiguity requirement, unlike
+ * history), so an oversized low-slot item must not evict later items that
+ * still fit — lower-slot output gets first claim on the budget, and
+ * higher-slot output is dropped first when space runs out.
  */
 function keepFrontWithinBudget(items: ReadonlyArray<Item>, budget: number): Item[] {
   const kept: Item[] = [];
@@ -39,7 +42,7 @@ function keepFrontWithinBudget(items: ReadonlyArray<Item>, budget: number): Item
   for (const item of items) {
     const cost = itemTokens(item);
     if (used + cost > budget) {
-      break;
+      continue;
     }
     kept.push(item);
     used += cost;

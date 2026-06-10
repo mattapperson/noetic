@@ -484,7 +484,7 @@ describe('AUDIT-6 withTimeout', () => {
 //#region Extra probes
 
 describe('AUDIT-EXTRA', () => {
-  it('E1: a layer CANNOT clear its state to undefined via store (write skipped on `!== undefined`)', async () => {
+  it('E1: a layer CAN clear its state to undefined via store and stays active', async () => {
     const store = createLayerStateStore();
     const layer: MemoryLayer<
       | {
@@ -527,9 +527,11 @@ describe('AUDIT-EXTRA', () => {
       store,
       storage: makeStorage(),
     });
-    // CORRECT: returning {state: undefined} should clear state. It does not —
-    // the `result.state !== undefined` guard drops the write.
+    // Returning {state: undefined} clears the state…
     expect(store.get('exec-clear', 'clearable')).toBeUndefined();
+    // …and the layer is NOT considered disabled — cleared and disabled are
+    // tracked separately (explicit `isDisabled` on the store).
+    expect(store.isDisabled?.('exec-clear', 'clearable')).toBe(false);
   });
 
   it('E2: onComplete CAN clear state (uses `in`) — inconsistent with every other hook', async () => {

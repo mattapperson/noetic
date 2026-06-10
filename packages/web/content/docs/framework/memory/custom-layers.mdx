@@ -180,6 +180,8 @@ const harness = new AgentHarness({
 
 Layers are ordered by slot number regardless of array order. The runtime calls each layer's hooks in slot order.
 
+State written by **any** path — `store()` hooks, `provides` functions, `onComplete`, the append pipeline — is durably mirrored for non-`'execution'` scopes, so the next execution's `init` can rehydrate it from `ScopedStorage` (key `'state'`). Returning `{ state: undefined }` clears the state and deletes the durable key. Mirror failures are reported as diagnostics and never interrupt the agent.
+
 ## Hook Parameter Reference
 
 ### InitParams

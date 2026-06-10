@@ -336,13 +336,13 @@ interface StepLLM {
 }
 ```
 
-- A single allocator (`allocateBudgets`) splits the recall budget: each layer's `budget.min` is satisfied first, then ~60% of the remainder funds a proportional pool across layers (by headroom `max − min`) and ~40% is reserved for conversation history. A layer never exceeds its `max`.
-- `assembleView` then holds the final view to a hard cap (`tokenBudget − responseReserve`): system items are always kept, layer output is kept low-slot-first (highest-slot dropped when tight), history keeps the most recent turns, and orphan tool calls are stripped at the boundary.
+- A single allocator (`allocateBudgets`) splits the recall budget: each layer's `budget.min` is satisfied first, then ~60% of the remainder funds a proportional pool across layers (by headroom `max − min`; `'auto'` and **omitted** budgets have infinite headroom and split the pool after finite layers take their share — the pool is fully conserved) and ~40% is reserved for conversation history. A layer never exceeds its `max`. NaN inputs throw `NoeticConfigError` (`INVALID_BUDGET_INPUT`); `Infinity` = uncapped.
+- `assembleView` then holds the final view to a hard cap (`tokenBudget − responseReserve`): system items are always kept, layer output is kept slot-ascending with each non-fitting item dropped **individually** (later-slot items that still fit are kept), history keeps the most recent turns, and orphan tool calls are stripped at the boundary.
 - `forceAtomicRecall: true` makes every layer atomic regardless of `recallMode`.
 
 ### workingMemory
 
-Thread/resource-scoped structured state, updated via the `working-memory/update` tool (or the legacy `updateWorkingMemory` function call). Updates **deep-merge** into state: nested object keys merge recursively while arrays and primitives replace; `__proto__`/`constructor` are stripped at every depth. An object update applied over prior freeform-string state preserves the old string under a `_previous` key.
+Thread/resource-scoped structured state, updated via the `working-memory/update` tool (or the legacy `updateWorkingMemory` function call). Updates **deep-merge** into state: nested object keys merge recursively while arrays and primitives replace; `__proto__`/`constructor` are stripped at every depth. An object update applied over prior freeform-string state preserves the old string under a `_previous` key. With a `schema`, the **merged** state is validated on both update paths — a violating tool update throws (the model sees the error), a violating legacy update is dropped with a diagnostic, and corrupt persisted state falls back to `{}` at init.
 
 ```typescript
 workingMemory({ scope?, schema?, template?, readOnly? })
@@ -377,15 +377,24 @@ temporalMemory({
 
 ### durableTaskState
 
-Persists file lists and checkpoints across executions/iterations within a thread (scope `'thread'`, not `'execution'` — an execution-scoped key would rotate each run and defeat durable rehydration).
+Persists file lists and checkpoints across executions/iterations within a thread (scope `'thread'`, not `'execution'` — an execution-scoped key would rotate each run and defeat durable rehydration). Checkpoints are capped at the newest 50; `recall` trims its `<task_state>` render to the allocated budget (oldest checkpoints dropped first).
 
 ```typescript
-durableTaskState({ baseDir?, gitCommit?, schema?, serializer? })
+durableTaskState()  // no configuration
+```
+
+### fileReference
+
+Tracks `#path/to/file` references in user messages: transforms them to anchor links, reads + LLM-scores each referenced file, and injects contents on recall (priority-ordered, budget-trimmed). New references are read and scored **in parallel**; the layer sets `timeouts: { onItemAppend: 30_000 }` since its append hook does fs + LLM work. Path security: lexical containment in `baseDir` plus a per-component symlink walk (any symlinked path component below `baseDir` is rejected unless `followSymlinks: true`).
+
+```typescript
+fileReference({ baseDir?, slot?, scoringModel?, maxFileSize?, followSymlinks?, allowedExtensions? })
+// id 'file-reference', slot Slot.RAG (350), scope 'thread', budget 'auto'
 ```
 
 ### staticContent
 
-Loads content at init, injects as tagged XML block in every recall.
+Loads content at init, injects as tagged XML block in every recall. When over budget, the recalled block is trimmed with the closing tag preserved (well-formed XML); a zero budget is fail-open (full content).
 
 ```typescript
 staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })

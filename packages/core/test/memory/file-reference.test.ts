@@ -923,6 +923,229 @@ describe('fileReference', () => {
     });
   });
 
+  describe('symlinked path component rejection (M9)', () => {
+    interface TrackedFileProbe {
+      content: string | null;
+      error?: string;
+    }
+
+    interface PipelineRunResult {
+      layer: MemoryLayer;
+      ctx: ReturnType<typeof makeCtx>;
+      state:
+        | {
+            files: Map<string, TrackedFileProbe>;
+          }
+        | undefined;
+    }
+
+    async function runFileRefPipeline(args: {
+      executionId: string;
+      baseDir: string;
+      message: string;
+      followSymlinks?: boolean;
+    }): Promise<PipelineRunResult> {
+      const store = createLayerStateStore();
+      const layer = fileReference({
+        baseDir: args.baseDir,
+        followSymlinks: args.followSymlinks,
+      });
+      const ctx = makeCtx({
+        executionId: args.executionId,
+      });
+      await initLayers({
+        layers: [
+          layer,
+        ],
+        ctx,
+        storage: makeStorage(),
+        store,
+      });
+      await runAppendPipeline({
+        layers: [
+          layer,
+        ],
+        items: [
+          makeUserMessage(args.message),
+        ],
+        ctx,
+        log: makeItemLog(),
+        store,
+      });
+      const state = store.get<{
+        files: Map<string, TrackedFileProbe>;
+      }>(args.executionId, 'file-reference');
+      return {
+        layer,
+        ctx,
+        state,
+      };
+    }
+
+    /** Creates base/ and outside/ dirs with outside/secret.ts + base/link → outside. */
+    async function createSymlinkedDirEscape(): Promise<{
+      baseDir: string;
+      outsideContent: string;
+    }> {
+      const baseDir = path.join(tempDir, 'base');
+      const outsideDir = path.join(tempDir, 'outside');
+      const outsideContent = 'TOP_SECRET_OUTSIDE_CONTENT';
+      await fs.mkdir(baseDir, {
+        recursive: true,
+      });
+      await fs.mkdir(outsideDir, {
+        recursive: true,
+      });
+      await fs.writeFile(path.join(outsideDir, 'secret.ts'), outsideContent);
+      await fs.symlink(outsideDir, path.join(baseDir, 'link'));
+      return {
+        baseDir,
+        outsideContent,
+      };
+    }
+
+    it('rejects a symlinked directory inside baseDir pointing outside; recall never injects the outside content', async () => {
+      const { baseDir, outsideContent } = await createSymlinkedDirEscape();
+
+      const { layer, ctx, state } = await runFileRefPipeline({
+        executionId: 'exec-symdir',
+        baseDir,
+        message: 'Check #link/secret.ts',
+      });
+
+      const tracked = state?.files.get('link/secret.ts');
+      expect(tracked?.error).toContain('SYMLINK: Symlinks not allowed');
+      expect(tracked?.content).toBeNull();
+
+      const recallResult = await callRecall(layer, {
+        state,
+        budget: 10000,
+        query: '',
+        ctx,
+        log: makeItemLog(),
+      });
+      const content = getRecallContent(recallResult);
+      expect(content).toContain('SYMLINK: Symlinks not allowed');
+      expect(content).not.toContain(outsideContent);
+    });
+
+    it('still rejects a symlink at the leaf (regression)', async () => {
+      const baseDir = path.join(tempDir, 'base');
+      const outsideDir = path.join(tempDir, 'outside');
+      await fs.mkdir(baseDir, {
+        recursive: true,
+      });
+      await fs.mkdir(outsideDir, {
+        recursive: true,
+      });
+      await fs.writeFile(path.join(outsideDir, 'real.ts'), 'outside leaf content');
+      await fs.symlink(path.join(outsideDir, 'real.ts'), path.join(baseDir, 'link.ts'));
+
+      const { state } = await runFileRefPipeline({
+        executionId: 'exec-symleaf',
+        baseDir,
+        message: 'Check #link.ts',
+      });
+
+      const tracked = state?.files.get('link.ts');
+      expect(tracked?.error).toContain('SYMLINK: Symlinks not allowed');
+      expect(tracked?.content).toBeNull();
+    });
+
+    it('followSymlinks: true reads through symlinked directories', async () => {
+      const { baseDir, outsideContent } = await createSymlinkedDirEscape();
+
+      const { layer, ctx, state } = await runFileRefPipeline({
+        executionId: 'exec-symfollow',
+        baseDir,
+        message: 'Check #link/secret.ts',
+        followSymlinks: true,
+      });
+
+      const tracked = state?.files.get('link/secret.ts');
+      expect(tracked?.error).toBeUndefined();
+      expect(tracked?.content).toBe(outsideContent);
+
+      const recallResult = await callRecall(layer, {
+        state,
+        budget: 10000,
+        query: '',
+        ctx,
+        log: makeItemLog(),
+      });
+      expect(getRecallContent(recallResult)).toContain(outsideContent);
+    });
+
+    it('detects a symlinked component at depth 3 of a 4-deep path', async () => {
+      const baseDir = path.join(tempDir, 'base');
+      const outsideDir = path.join(tempDir, 'outside');
+      await fs.mkdir(path.join(baseDir, 'a/b'), {
+        recursive: true,
+      });
+      await fs.mkdir(outsideDir, {
+        recursive: true,
+      });
+      await fs.writeFile(path.join(outsideDir, 'd.ts'), 'deep outside content');
+      await fs.symlink(outsideDir, path.join(baseDir, 'a/b/c'));
+
+      const { state } = await runFileRefPipeline({
+        executionId: 'exec-symdeep',
+        baseDir,
+        message: 'Check #a/b/c/d.ts',
+      });
+
+      const tracked = state?.files.get('a/b/c/d.ts');
+      expect(tracked?.error).toContain('SYMLINK: Symlinks not allowed');
+      expect(tracked?.content).toBeNull();
+    });
+
+    it('reads a clean deep path with no symlink components', async () => {
+      const baseDir = path.join(tempDir, 'base');
+      await fs.mkdir(path.join(baseDir, 'a/b/c'), {
+        recursive: true,
+      });
+      await fs.writeFile(path.join(baseDir, 'a/b/c/d.ts'), 'clean deep content');
+
+      const { state } = await runFileRefPipeline({
+        executionId: 'exec-cleandeep',
+        baseDir,
+        message: 'Check #a/b/c/d.ts',
+      });
+
+      const tracked = state?.files.get('a/b/c/d.ts');
+      expect(tracked?.error).toBeUndefined();
+      expect(tracked?.content).toBe('clean deep content');
+    });
+
+    it('works with a /tmp baseDir (base and its ancestors are never symlink-checked)', async () => {
+      // macOS: /tmp itself is a symlink to /private/tmp. Components AT or
+      // ABOVE baseDir must never be lstat-checked or every read under /tmp
+      // would be rejected.
+      const baseDir = await fs.mkdtemp('/tmp/file-ref-m9-');
+      try {
+        await fs.mkdir(path.join(baseDir, 'sub'), {
+          recursive: true,
+        });
+        await fs.writeFile(path.join(baseDir, 'sub/ok.ts'), 'tmp ok');
+
+        const { state } = await runFileRefPipeline({
+          executionId: 'exec-tmpbase',
+          baseDir,
+          message: 'Check #sub/ok.ts',
+        });
+
+        const tracked = state?.files.get('sub/ok.ts');
+        expect(tracked?.error).toBeUndefined();
+        expect(tracked?.content).toBe('tmp ok');
+      } finally {
+        await fs.rm(baseDir, {
+          recursive: true,
+          force: true,
+        });
+      }
+    });
+  });
+
   describe('pattern matching', () => {
     it('ignores hashtags without file extensions', async () => {
       const store = createLayerStateStore();
@@ -1008,6 +1231,93 @@ describe('fileReference', () => {
       expect(state?.files.size).toBe(2);
       expect(state?.files.has('real.ts')).toBe(true);
       expect(state?.files.has('also/nested.js')).toBe(true);
+    });
+  });
+
+  describe('append-pipeline timeout headroom + parallel scoring (M8)', () => {
+    it('factory pins onItemAppend timeout at 30s (fs + LLM work cannot fit the 5s default)', () => {
+      const layer = fileReference();
+      expect(layer.timeouts?.onItemAppend).toBe(30_000);
+    });
+
+    it('scores multiple new references in parallel (wall time ≪ sequential), all tracked', async () => {
+      const DELAY_MS = 200;
+      await createTestFile('p1.ts', 'one');
+      await createTestFile('p2.ts', 'two');
+      await createTestFile('p3.ts', 'three');
+
+      const layer = fileReference({
+        baseDir: tempDir,
+      });
+      const store = createLayerStateStore();
+      const ctx = makeCtx({
+        executionId: 'exec-parallel',
+        callModel: async () => {
+          await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+          return {
+            items: [
+              {
+                id: crypto.randomUUID(),
+                status: 'completed',
+                type: 'message',
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'output_text',
+                    text: '75',
+                  },
+                ],
+              },
+            ],
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+            },
+          };
+        },
+      });
+      await initLayers({
+        layers: [
+          layer,
+        ],
+        ctx,
+        storage: makeStorage(),
+        store,
+      });
+
+      const started = performance.now();
+      await runAppendPipeline({
+        layers: [
+          layer,
+        ],
+        items: [
+          makeUserMessage('Look at #p1.ts #p2.ts #p3.ts'),
+        ],
+        ctx,
+        log: makeItemLog(),
+        store,
+      });
+      const elapsed = performance.now() - started;
+
+      const state = store.get<{
+        files: Map<
+          string,
+          {
+            priority: number;
+          }
+        >;
+      }>('exec-parallel', 'file-reference');
+      expect(state?.files.size).toBe(3);
+      for (const ref of [
+        'p1.ts',
+        'p2.ts',
+        'p3.ts',
+      ]) {
+        expect(state?.files.get(ref)?.priority).toBe(75);
+      }
+      // Three sequential 200ms scoring calls would take ≥ 600ms; parallel
+      // execution stays well under 2× a single call.
+      expect(elapsed).toBeLessThan(DELAY_MS * 2);
     });
   });
 });

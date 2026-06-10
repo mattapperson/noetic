@@ -51,6 +51,24 @@ function deepMerge(
   return out;
 }
 
+/**
+ * Validate a MERGED working-memory state against the configured schema (a
+ * pure gate — the original value is returned, transforms are not applied).
+ * Validating the merged state (not the raw update) keeps partial updates
+ * legal under schemas with required fields. Throws on failure so the update
+ * is rejected and the prior state stays untouched.
+ */
+function applySchema(schema: ZodType | undefined, merged: WorkingMemoryState): WorkingMemoryState {
+  if (!schema) {
+    return merged;
+  }
+  const result = schema.safeParse(merged);
+  if (!result.success) {
+    throw new Error(`working-memory update rejected by schema: ${result.error.message}`);
+  }
+  return merged;
+}
+
 function safeMerge(state: WorkingMemoryState, args: Record<string, unknown>): WorkingMemoryState {
   if (typeof state === 'object' && state !== null) {
     return deepMerge(state, args);
@@ -95,15 +113,24 @@ export function workingMemory(config?: WorkingMemoryConfig) {
         description: 'Update the agent working memory with new key-value pairs.',
         input: z.record(z.string(), z.unknown()),
         output: z.void(),
+        // Validation failure throws → surfaces as a tool error the model can
+        // see; the prior state is untouched.
         execute: async (args, state) => ({
           result: undefined,
-          state: safeMerge(state, args),
+          state: applySchema(config?.schema, safeMerge(state, args)),
         }),
       }),
     },
     hooks: {
       async init({ storage }) {
         const saved = await storage.get<WorkingMemoryState>('state');
+        // Corrupt persisted state (fails the configured schema) falls back to
+        // the default rather than aborting the execution.
+        if (saved !== null && config?.schema && !config.schema.safeParse(saved).success) {
+          return {
+            state: {},
+          };
+        }
         const state: WorkingMemoryState = saved ?? (config?.schema ? {} : '');
         return {
           state,
@@ -128,13 +155,15 @@ export function workingMemory(config?: WorkingMemoryConfig) {
         if (config?.readOnly) {
           return;
         }
-        // Backward compat: detect implicit updateWorkingMemory calls from LLMs
+        // Backward compat: detect implicit updateWorkingMemory calls from LLMs.
+        // Schema-violating merges throw — storeLayers catches, reports a
+        // diagnostic, and drops the update (prior state preserved).
         const args = findFunctionCall(newItems, 'updateWorkingMemory');
         if (!args) {
           return;
         }
         return {
-          state: safeMerge(state, args),
+          state: applySchema(config?.schema, safeMerge(state, args)),
         };
       },
 

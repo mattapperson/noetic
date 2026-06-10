@@ -222,4 +222,183 @@ describe('durableTaskState', () => {
     expect(result.state.data.__outcome).toBe('failure');
     expect(result.state.checkpoints).toHaveLength(2);
   });
+
+  describe('checkpoint cap + budget-aware recall (M5)', () => {
+    function makeCheckpoints(count: number, startTs = 0): DurableTaskState['checkpoints'] {
+      return Array.from(
+        {
+          length: count,
+        },
+        (_, i) => ({
+          timestamp: startTs + i,
+          depth: 0,
+        }),
+      );
+    }
+
+    async function storeOnce(state: DurableTaskState): Promise<DurableTaskState> {
+      const layer = durableTaskState();
+      const result = await layer.hooks.store!({
+        newItems: [],
+        log: makeItemLog(),
+        response: {
+          items: [],
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+        },
+        ctx: makeCtx(),
+        state,
+      });
+      assert(result !== undefined);
+      return result.state;
+    }
+
+    it('60 stores cap at 50 checkpoints, newest survive', async () => {
+      let state: DurableTaskState = {
+        checkpoints: [],
+        files: [],
+        data: {},
+      };
+      for (let i = 0; i < 60; i++) {
+        state = await storeOnce(state);
+      }
+      expect(state.checkpoints).toHaveLength(50);
+      // Newest survive: the last checkpoint is the most recent one appended.
+      const timestamps = state.checkpoints.map((c) => c.timestamp);
+      expect(timestamps).toEqual(
+        [
+          ...timestamps,
+        ].sort((a, b) => a - b),
+      );
+    });
+
+    it('onReturn 40 + 40 checkpoints merges to 50 (newest kept)', async () => {
+      const layer = durableTaskState();
+      const result = await layer.hooks.onReturn!({
+        childState: {
+          checkpoints: makeCheckpoints(40, 1_000),
+          files: [],
+          data: {},
+        },
+        childLog: makeItemLog(),
+        parentState: {
+          checkpoints: makeCheckpoints(40, 0),
+          files: [],
+          data: {},
+        },
+        result: 'done',
+      });
+      assert(result !== undefined);
+      expect(result.parentState.checkpoints).toHaveLength(50);
+      // The 30 oldest parent checkpoints were dropped; all 40 child ones kept.
+      expect(result.parentState.checkpoints[0].timestamp).toBe(30);
+      expect(result.parentState.checkpoints[49].timestamp).toBe(1_039);
+    });
+
+    it('onComplete caps at 50 too', async () => {
+      const layer = durableTaskState();
+      const result = await layer.hooks.onComplete!({
+        log: makeItemLog(),
+        ctx: makeCtx(),
+        state: {
+          checkpoints: makeCheckpoints(50),
+          files: [],
+          data: {},
+        },
+        outcome: 'success',
+      });
+      assert(result !== undefined);
+      expect(result.state.checkpoints).toHaveLength(50);
+    });
+
+    async function recallText(state: DurableTaskState, budget: number): Promise<string> {
+      const layer = durableTaskState();
+      const recalled = await layer.hooks.recall!({
+        log: makeItemLog(),
+        query: '',
+        ctx: makeCtx(),
+        state,
+        budget,
+      });
+      assert(recalled !== null && typeof recalled !== 'string');
+      expect(recalled.tokenCount).toBeGreaterThan(0);
+      const msg = recalled.items[0];
+      assert(msg.type === 'message');
+      const part = msg.content[0];
+      assert(part.type === 'input_text');
+      return part.text;
+    }
+
+    it('recall respects the budget by halving oldest checkpoints (N / N+1 boundary)', async () => {
+      const state: DurableTaskState = {
+        checkpoints: makeCheckpoints(50),
+        files: [
+          'a.ts',
+        ],
+        data: {},
+      };
+      const fullText = `<task_state>\n${JSON.stringify(state, null, 2)}\n</task_state>`;
+      const fullTokens = Math.ceil(fullText.length / 4);
+
+      // Budget == full render (N): untouched.
+      const atBudget = await recallText(state, fullTokens);
+      expect(atBudget).toBe(fullText);
+
+      // Budget == full render − 1 (N−1 / over-budget): oldest half dropped.
+      const overBudget = await recallText(state, fullTokens - 1);
+      expect(overBudget).not.toBe(fullText);
+      expect(Math.ceil(overBudget.length / 4)).toBeLessThanOrEqual(fullTokens - 1);
+      expect(overBudget.endsWith('</task_state>')).toBe(true);
+      // Newest checkpoint still present, oldest gone.
+      expect(overBudget).toContain('"timestamp": 49');
+      expect(overBudget).not.toContain('"timestamp": 0,');
+      // files/data survive trimming.
+      expect(overBudget).toContain('a.ts');
+    });
+
+    it('recall char-slices with closing tag when even zero checkpoints overflow', async () => {
+      const state: DurableTaskState = {
+        checkpoints: [],
+        files: Array.from(
+          {
+            length: 100,
+          },
+          (_, i) => `file-${i}.ts`,
+        ),
+        data: {},
+      };
+      const text = await recallText(state, 20);
+      expect(text.length).toBeLessThanOrEqual(20 * 4);
+      expect(text.endsWith('\n</task_state>')).toBe(true);
+    });
+
+    it('budget 0 returns the full render untrimmed (fail-open, pinned)', async () => {
+      const state: DurableTaskState = {
+        checkpoints: makeCheckpoints(50),
+        files: [],
+        data: {},
+      };
+      const text = await recallText(state, 0);
+      expect(text).toBe(`<task_state>\n${JSON.stringify(state, null, 2)}\n</task_state>`);
+    });
+
+    it('cap holds across rehydration (cross-execution)', async () => {
+      const layer = durableTaskState();
+      const storage = makeScopedStorage();
+      await storage.set('state', {
+        checkpoints: makeCheckpoints(50),
+        files: [],
+        data: {},
+      });
+      const initResult = await layer.hooks.init!({
+        storage,
+        scopeKey: 'thread-1',
+        ctx: makeCtx(),
+      });
+      const next = await storeOnce(initResult.state);
+      expect(next.checkpoints).toHaveLength(50);
+    });
+  });
 });

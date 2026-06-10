@@ -1,6 +1,7 @@
 import type {
   ExecutionContext,
   FsAdapter,
+  FsStats,
   InputMessageItem,
   InputTextPart,
   Item,
@@ -238,6 +239,63 @@ interface ReadFileResult {
   error?: string;
 }
 
+type SymlinkWalkResult =
+  | {
+      leafStats: FsStats;
+      error?: undefined;
+    }
+  | {
+      leafStats?: undefined;
+      error: string;
+    };
+
+/**
+ * lstat every path component of `target` strictly BELOW `base`; any symlink
+ * component (directory or leaf) is rejected. Lexical containment alone is not
+ * enough — `base/link → /etc` keeps the unresolved string inside `base` while
+ * the OS resolves the intermediate symlink, escaping the sandbox. `base`
+ * itself and its ancestors are deliberately never lstat'ed (macOS `/tmp` is a
+ * symlink). Uses the existing `FsAdapter.lstat` (no realpath — adding it
+ * would fan out to every adapter). The leaf's stats are returned so the
+ * caller can reuse them for the size check.
+ */
+async function walkRejectingSymlinks(
+  base: string,
+  target: string,
+  fsAdapter: FsAdapter,
+): Promise<SymlinkWalkResult> {
+  const relative = target === base ? '' : target.slice(base.length + 1);
+  const segments = relative.length > 0 ? relative.split('/') : [];
+  if (segments.length === 0) {
+    // Degenerate case (target === base): the base is trusted and never
+    // symlink-checked, so resolve through it with stat for the size check.
+    return {
+      leafStats: await fsAdapter.stat(target),
+    };
+  }
+  let current = base;
+  let leafStats: FsStats | undefined;
+  for (const segment of segments) {
+    current = `${current}/${segment}`;
+    const stats = await fsAdapter.lstat(current);
+    if (stats.isSymbolicLink()) {
+      return {
+        error: 'SYMLINK: Symlinks not allowed',
+      };
+    }
+    leafStats = stats;
+  }
+  // `segments.length > 0` guarantees the loop assigned leafStats.
+  if (!leafStats) {
+    return {
+      error: 'SYMLINK: Symlinks not allowed',
+    };
+  }
+  return {
+    leafStats,
+  };
+}
+
 async function readFileContent(
   absolutePath: string,
   opts: ReadFileOptions,
@@ -269,18 +327,28 @@ async function readFileContent(
       };
     }
 
-    // Security: Check for symlinks if not allowed
-    const stats = await fsAdapter.lstat(absolutePath);
-    if (stats.isSymbolicLink() && !opts.followSymlinks) {
-      return {
-        content: null,
-        deleted: false,
-        error: 'SYMLINK: Symlinks not allowed',
-      };
+    // Security: Reject symlinked path components (directory or leaf) unless
+    // the followSymlinks opt-out is enabled. The lexical containment check
+    // above is not enough on its own — `baseDir/link → /etc` keeps the
+    // unresolved string inside baseDir while the OS resolves the intermediate
+    // symlink, escaping the sandbox. The walk's leaf stats double as the
+    // size-check stats.
+    let fileStats: FsStats;
+    if (opts.followSymlinks) {
+      fileStats = await fsAdapter.stat(absolutePath);
+    } else {
+      const walk = await walkRejectingSymlinks(normalizedBase, normalizedPath, fsAdapter);
+      if (walk.error !== undefined) {
+        return {
+          content: null,
+          deleted: false,
+          error: walk.error,
+        };
+      }
+      fileStats = walk.leafStats;
     }
 
     // Security: Check file size
-    const fileStats = opts.followSymlinks ? await fsAdapter.stat(absolutePath) : stats;
     if (fileStats.size > opts.maxFileSize) {
       return {
         content: null,
@@ -488,13 +556,13 @@ async function addNewReferences(args: {
   userQuery: string;
   scoringModel: string;
 }): Promise<boolean> {
-  let hasChanges = false;
   // Dedupe by RESOLVED absolute path so `#config.json` and `#./config.json`
   // (which point at the same file) only get tracked once.
   const seenPaths = new Set<string>();
   for (const tracked of args.files.values()) {
     seenPaths.add(tracked.absolutePath);
   }
+  const newRefs: string[] = [];
   for (const ref of args.refs) {
     if (args.files.has(ref)) {
       continue;
@@ -503,17 +571,27 @@ async function addNewReferences(args: {
     if (seenPaths.has(absolutePath)) {
       continue;
     }
-    args.files.set(
-      ref,
-      await trackNewReference({
+    seenPaths.add(absolutePath);
+    newRefs.push(ref);
+  }
+  if (newRefs.length === 0) {
+    return false;
+  }
+  // Read + score every new reference in PARALLEL — k sequential LLM scoring
+  // calls would multiply wall time and blow the onItemAppend timeout. Results
+  // are inserted in deterministic ref order.
+  const tracked = await Promise.all(
+    newRefs.map((ref) =>
+      trackNewReference({
         ...args,
         ref,
       }),
-    );
-    seenPaths.add(absolutePath);
-    hasChanges = true;
+    ),
+  );
+  for (let i = 0; i < newRefs.length; i++) {
+    args.files.set(newRefs[i], tracked[i]);
   }
-  return hasChanges;
+  return true;
 }
 
 function transformItemReferences(item: Item, refs: ReadonlyArray<string>): Item {
@@ -633,17 +711,27 @@ async function refreshTrackedFiles(args: {
   userQuery: string;
   scoringModel: string;
 }): Promise<boolean> {
+  // Re-read (and possibly re-score) every tracked file in PARALLEL — see
+  // addNewReferences. Applied in deterministic map-iteration order.
+  const entries = [
+    ...args.files.entries(),
+  ];
+  const refreshed = await Promise.all(
+    entries.map(([ref, tracked]) =>
+      refreshTrackedFile({
+        ...args,
+        ref,
+        tracked,
+      }),
+    ),
+  );
   let hasChanges = false;
-  for (const [ref, tracked] of args.files) {
-    const next = await refreshTrackedFile({
-      ...args,
-      ref,
-      tracked,
-    });
+  for (let i = 0; i < entries.length; i++) {
+    const next = refreshed[i];
     if (next === null) {
       continue;
     }
-    args.files.set(ref, next);
+    args.files.set(entries[i][0], next);
     hasChanges = true;
   }
   return hasChanges;
@@ -849,6 +937,12 @@ export function fileReference(opts?: FileReferenceOptions): MemoryLayer<FileRefe
     scope: 'thread',
     budget: 'auto',
     rerenderTiming: 'immediate',
+    timeouts: {
+      // onItemAppend reads files AND runs an LLM scoring call per new
+      // reference (parallelized) — the 5s pipeline default silently drops the
+      // transform + state update on timeout, killing the layer's feature.
+      onItemAppend: 30_000,
+    },
     hooks: {
       init: () => initFileReferenceState(runtime.baseDir),
       onItemAppend: (args) => onFileReferenceItemAppend(args, runtime),

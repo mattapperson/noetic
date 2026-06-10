@@ -314,7 +314,7 @@ describe('Steering: DENY response parsing', () => {
 //#region Steering Async Race Condition
 
 describe('Steering: async pendingAsync race condition', () => {
-  it('[BUG] recall replaces pendingAsync ref — late async push goes to orphaned array', async () => {
+  it('recall drains pendingAsync in place — late async verdicts surface on the next recall', async () => {
     const layer = steering({
       rules: [
         {
@@ -362,7 +362,8 @@ describe('Steering: async pendingAsync race condition', () => {
     // Capture reference to the array before recall drains it
     const oldArray = state.pendingAsync;
 
-    // Recall drains pendingAsync — sets state.pendingAsync = [] (new ref)
+    // Recall drains pendingAsync IN PLACE (splice) — the reference held by the
+    // in-flight async rule stays live.
     const recallResult = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
@@ -373,8 +374,8 @@ describe('Steering: async pendingAsync race condition', () => {
 
     // Recall should have returned the seeded feedback
     expect(recallResult).not.toBeNull();
-    // state.pendingAsync is now a NEW empty array
-    expect(state.pendingAsync).not.toBe(oldArray);
+    // state.pendingAsync is the SAME array, drained.
+    expect(state.pendingAsync).toBe(oldArray);
     expect(state.pendingAsync.length).toBe(0);
 
     // Now the async rule resolves with DENY — pushes to the OLD array ref
@@ -406,12 +407,11 @@ describe('Steering: async pendingAsync race condition', () => {
       await Promise.resolve();
     }
 
-    // BUG: The async push went to oldArray (orphaned ref), not state.pendingAsync
-    // The DENY feedback is lost forever
-    expect(oldArray.length).toBe(2); // seed + async push went here
-    expect(state.pendingAsync.length).toBe(0); // new array is still empty
+    // The late verdict landed in the LIVE array (same reference recall drained).
+    expect(state.pendingAsync.length).toBe(1);
+    expect(state.pendingAsync[0].guidance).toContain('unsafe');
 
-    // Second recall sees nothing — the DENY was lost
+    // Second recall delivers the late DENY feedback.
     const recallAfter = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
@@ -419,7 +419,133 @@ describe('Steering: async pendingAsync race condition', () => {
       state,
       budget: 500,
     });
-    expect(recallAfter).toBeNull();
+    expect(recallAfter).not.toBeNull();
+    assert(recallAfter !== null && typeof recallAfter !== 'string');
+    const msg = recallAfter.items[0];
+    assert(msg.type === 'message');
+    const part = msg.content[0];
+    assert('text' in part && typeof part.text === 'string');
+    expect(part.text).toContain('[async-rule]');
+    expect(part.text).toContain('unsafe');
+
+    // Drained exactly once: a third recall sees nothing.
+    const recallThird = await layer.hooks.recall!({
+      log: makeItemLog(),
+      query: '',
+      ctx,
+      state,
+      budget: 500,
+    });
+    expect(recallThird).toBeNull();
+  });
+
+  it('two async rules across two recalls — each verdict delivered exactly once', async () => {
+    const layer = steering({
+      rules: [
+        {
+          id: 'rule-a',
+          appliesTo: [
+            'beforeToolCall',
+          ],
+          llmEval: {
+            mode: 'async',
+            prompt: 'Check A.',
+          },
+        },
+      ],
+    });
+
+    const { ctx, resolveAsync } = makeCtxWithSlowCallModel();
+    const store = createLayerStateStore();
+    await initLayers({
+      layers: [
+        layer,
+      ],
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
+    const state = store.get<SteeringState>(ctx.executionId, layer.id)!;
+
+    const denyResponse = (text: string): LLMResponse => ({
+      items: [
+        {
+          id: `resp-${text}`,
+          status: 'completed',
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text,
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+      },
+    });
+
+    // Fire async rule #1, resolve AFTER a recall has drained.
+    await layer.hooks.beforeToolCall!({
+      toolName: 't1',
+      toolArgs: {},
+      ctx,
+      state,
+    });
+    assert(resolveAsync.current !== null);
+    resolveAsync.current(denyResponse('DENY first'));
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+
+    const first = await layer.hooks.recall!({
+      log: makeItemLog(),
+      query: '',
+      ctx,
+      state,
+      budget: 500,
+    });
+    assert(first !== null && typeof first !== 'string');
+
+    // Fire async rule #2 and resolve it.
+    await layer.hooks.beforeToolCall!({
+      toolName: 't2',
+      toolArgs: {},
+      ctx,
+      state,
+    });
+    assert(resolveAsync.current !== null);
+    resolveAsync.current(denyResponse('DENY second'));
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+
+    const second = await layer.hooks.recall!({
+      log: makeItemLog(),
+      query: '',
+      ctx,
+      state,
+      budget: 500,
+    });
+    assert(second !== null && typeof second !== 'string');
+    const msg = second.items[0];
+    assert(msg.type === 'message');
+    const part = msg.content[0];
+    assert('text' in part && typeof part.text === 'string');
+    expect(part.text).toContain('second');
+    expect(part.text).not.toContain('first'); // first was already delivered
+
+    const third = await layer.hooks.recall!({
+      log: makeItemLog(),
+      query: '',
+      ctx,
+      state,
+      budget: 500,
+    });
+    expect(third).toBeNull();
   });
 });
 
@@ -1063,7 +1189,7 @@ describe('Layer lifecycle: disabled layer detection', () => {
     expect(results.length).toBe(0);
   });
 
-  it('[BUG] layer that intentionally sets state to undefined is treated as disabled', async () => {
+  it('layer that intentionally sets state to undefined is NOT treated as disabled', async () => {
     const store = createLayerStateStore();
     const ctx = makeCtx();
 
@@ -1110,8 +1236,9 @@ describe('Layer lifecycle: disabled layer detection', () => {
       store,
     });
 
-    // BUG: recall skips this layer because state === undefined && hooks.init
-    expect(results.length).toBe(0);
+    // Explicit disabled tracking: an undefined state set on purpose is NOT a
+    // disabled layer — recall still runs (with undefined state).
+    expect(results.length).toBe(1);
   });
 
   it('layer WITHOUT init hook and undefined state is NOT skipped', async () => {

@@ -116,7 +116,6 @@ export { execute } from './interpreter/execute';
 /** @public */
 export type {
   DurableTaskState,
-  DurableTaskStateConfig,
   FactExtractor,
   FactSearcher,
   HistoryWindowConfig,

@@ -50,6 +50,8 @@ type BudgetConfig =
   | 'auto';
 ```
 
+An **omitted** `budget` behaves like `'auto'`: the layer has infinite headroom and splits the proportional pool with the other auto layers after finite layers take their share.
+
 ## Slot Constants
 
 ```ts
@@ -270,6 +272,36 @@ interface ScopedStorage {
   list(prefix?: string): Promise<string[]>;
 }
 ```
+
+## LayerStateStore
+
+In-memory layer-state store with centralized durable write-through. Every `set()` for a registered (execution, layer) pair is asynchronously mirrored to the layer's `ScopedStorage` — state written by `provides` functions, lifecycle hooks, or `store()` all persists the same way. Available from `@noetic-tools/core/unstable`.
+
+```ts validate=none
+interface LayerStateStore {
+  get<T>(executionId: string, layerId: string): T | undefined;
+  set<T>(executionId: string, layerId: string, state: T): void;
+  cleanup(executionId: string): void;
+  diagnostic: (layerId: string, hook: string, error: unknown) => void;
+  // Optional — implemented by createLayerStateStore(); custom stores may omit them.
+  registerDurable?(executionId: string, layerId: string, target: ScopedStorage): void;
+  flush?(executionId: string): Promise<void>;
+  disable?(executionId: string, layerId: string): void;
+  isDisabled?(executionId: string, layerId: string): boolean;
+}
+```
+
+| Method | Description |
+|---|---|
+| `get(executionId, layerId)` | Read a layer's current in-memory state |
+| `set(executionId, layerId, state)` | Write state; mirrored durably when a target is registered (`undefined` deletes the durable key) |
+| `cleanup(executionId)` | Drop all state and registrations for an execution |
+| `diagnostic(layerId, hook, error)` | Sink for non-fatal layer errors (mirror failures report hook `'persist'`) |
+| `registerDurable(executionId, layerId, target)` | Register the durable write-through target for a layer (non-`'execution'` scopes; called by `initLayers`/`spawnLayers`) |
+| `flush(executionId)` | Await all in-flight durable mirror writes |
+| `disable(executionId, layerId)` / `isDisabled(...)` | Explicit disabled tracking for layers whose `init` failed with `onInitError: 'disable'` |
+
+Writes are coalesced per key (latest wins, one write in flight) and mirror failures never throw — they surface only through `diagnostic`.
 
 ## MemoryTraceSpan
 

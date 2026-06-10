@@ -2,11 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { BudgetConfig, MemoryLayer } from '@noetic-tools/memory';
 import { allocateBudgets, checkBudget, Slot } from '@noetic-tools/memory';
-import { isNoeticError } from '@noetic-tools/types';
+import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockHarness } from '../_helpers';
 
-function makeLayer(id: string, budget: BudgetConfig): MemoryLayer {
+function makeLayer(id: string, budget?: BudgetConfig): MemoryLayer {
   return {
     id,
     name: id,
@@ -155,6 +155,141 @@ describe('allocateBudgets', () => {
     });
     // 60% of 10000 (layerPool ratio) allocated to single auto layer
     expect(allocations[0].allocated).toBe(6_000);
+  });
+
+  it('a layer that omits budget gets an auto share, not 0', () => {
+    const layers = [
+      makeLayer('no-budget'),
+      makeLayer('auto', 'auto'),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 10_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // Omitted budget = infinite headroom: splits the 6000 pool with 'auto'.
+    expect(allocations[0].allocated).toBe(3_000);
+    expect(allocations[1].allocated).toBe(3_000);
+  });
+
+  it('conserves the pool when finite and auto layers mix (verifier repro)', () => {
+    const layers = [
+      makeLayer('finite', {
+        min: 0,
+        max: 4_800,
+      }),
+      makeLayer('auto', 'auto'),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 10_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // layerPool = 6000; finite gets min(4800, half-pool 3000) = 3000;
+    // auto gets the REST of the pool — nothing vanishes.
+    expect(allocations[0].allocated).toBe(3_000);
+    expect(allocations[1].allocated).toBe(3_000);
+    const sum = allocations.reduce((s, a) => s + a.allocated, 0);
+    expect(sum).toBe(6_000);
+  });
+
+  it.each([
+    // [finiteMax, expectedFinite, expectedAuto] — half-pool clamp boundary at 3000
+    [
+      2_999,
+      2_999,
+      3_001,
+    ],
+    [
+      3_000,
+      3_000,
+      3_000,
+    ],
+    [
+      3_001,
+      3_000,
+      3_000,
+    ],
+  ])('clamp switchover boundary: finite max %d → finite %d / auto %d (pool conserved)', (finiteMax, expectedFinite, expectedAuto) => {
+    const layers = [
+      makeLayer('finite', {
+        min: 0,
+        max: finiteMax,
+      }),
+      makeLayer('auto', 'auto'),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 10_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    expect(allocations[0].allocated).toBeCloseTo(expectedFinite, 6);
+    expect(allocations[1].allocated).toBeCloseTo(expectedAuto, 6);
+    const sum = allocations.reduce((s, a) => s + a.allocated, 0);
+    expect(sum).toBeCloseTo(6_000, 6);
+  });
+
+  it.each([
+    'totalBudget',
+    'systemPromptTokens',
+    'responseReserve',
+  ] as const)('NaN %s throws NoeticConfigError INVALID_BUDGET_INPUT', (field) => {
+    const opts = {
+      layers: [
+        makeLayer('a', 'auto'),
+      ],
+      totalBudget: 10_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+      [field]: Number.NaN,
+    };
+    try {
+      allocateBudgets(opts);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('INVALID_BUDGET_INPUT');
+      expect(e.message).toContain(field);
+    }
+  });
+
+  it('Infinity totalBudget is allowed (= uncapped): no NaN anywhere', () => {
+    const layers = [
+      makeLayer('finite', {
+        min: 100,
+        max: 1_000,
+      }),
+      makeLayer('auto', 'auto'),
+    ];
+    const { allocations, historyBudget } = allocateBudgets({
+      layers,
+      totalBudget: Number.POSITIVE_INFINITY,
+      systemPromptTokens: 0,
+      responseReserve: 4_000,
+    });
+    for (const a of allocations) {
+      expect(Number.isNaN(a.allocated)).toBe(false);
+    }
+    expect(allocations[0].allocated).toBe(1_000); // capped at max
+    expect(allocations[1].allocated).toBe(Number.POSITIVE_INFINITY);
+    expect(historyBudget).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('fractional budgets are accepted (pinned)', () => {
+    const layers = [
+      makeLayer('auto', 'auto'),
+    ];
+    const { allocations, historyBudget } = allocateBudgets({
+      layers,
+      totalBudget: 0.5,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    expect(allocations[0].allocated).toBeCloseTo(0.3, 9);
+    expect(historyBudget).toBeCloseTo(0.2, 9);
   });
 });
 

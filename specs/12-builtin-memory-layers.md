@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/memory` (source at `packages/memory/src/memory/layers/**`); re-exported by `@noetic-tools/core`.
 > **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `temporalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `TemporalMemoryConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `EpisodicMemoryConfig`, `DurableTaskStateConfig`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `temporalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `TemporalMemoryConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `EpisodicMemoryConfig`, `DurableTaskState`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
 
 ---
 
@@ -36,9 +36,9 @@ function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryS
 | **hooks** | `init`, `recall`, `store`, `onSpawn` |
 
 **Behavior:**
-- `init`: Loads state from `ScopedStorage`. Defaults to `{}` (schema) or `''` (freeform).
+- `init`: Loads state from `ScopedStorage`. Defaults to `{}` (schema) or `''` (freeform). Persisted state that fails the configured schema falls back to `{}` (corrupt state must not abort the execution).
 - `recall`: Renders state as `<working_memory>` block in a `MessageItem` with `role: developer`. Returns `null` if empty.
-- `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Validates against schema if provided. Deep-merges structured state (object-valued keys merge recursively; arrays and primitives replace).
+- `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Deep-merges structured state (object-valued keys merge recursively; arrays and primitives replace). When a schema is configured, the **merged** state is validated (partial updates stay legal); a violating merge throws — the runtime logs a diagnostic and drops the update, leaving prior state untouched.
 - `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
 
 **Provides:**
@@ -65,7 +65,7 @@ provides: {
 ```
 
 - **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.memory['working-memory'].snapshot`, which returns the full `WorkingMemoryState`.
-- **`update`** — A function declaration. Code steps call it as `await ctx.memory['working-memory'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism.
+- **`update`** — A function declaration. Code steps call it as `await ctx.memory['working-memory'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism. When a `schema` is configured, the merged state is validated; a violating update throws, surfacing as a tool error the model can see, and the state is unchanged.
 - **Deep merge:** Updates merge recursively — nested object keys are deep-merged rather than overwritten; arrays and primitives replace. When the prior state is a freeform **string** and an object update arrives, the prior string is preserved under a `_previous` key instead of being silently discarded.
 - **Prototype poisoning protection:** The merge strips `__proto__` and `constructor` keys from incoming arguments at every depth.
 - **Backward compatibility:** The `store` hook still detects `findFunctionCall(newItems, 'updateWorkingMemory')` for LLMs that emit the legacy function-call convention. Both paths apply the same prototype-stripping and merge logic.
@@ -139,7 +139,7 @@ function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<Ob
 | **slot** | `Slot.OBSERVATIONS` (200) |
 | **scope** | `config.scope ?? 'resource'` |
 | **budget** | `{ min: 500, max: 2500 }` |
-| **timeouts** | `{ store: 60_000 }` |
+| **timeouts** | `{ store: 60_000, onItemAppend: 60_000 }` (both hooks run the LLM-backed distillation path) |
 | **hooks** | `init`, `recall`, `store`, `onItemAppend`, `onSpawn` |
 
 **Behavior:**
@@ -188,7 +188,7 @@ function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<TemporalStat
 | **slot** | `Slot.REMINDER` (80) |
 | **scope** | `config.scope ?? 'resource'` |
 | **budget** | `{ min: 0, max: config.injectLedger ? 800 : 200 }` |
-| **timeouts** | `{ store: 60_000 }` |
+| **timeouts** | `{ store: 60_000, onItemAppend: 60_000 }` (both hooks run the LLM-backed extraction path) |
 | **hooks** | `init`, `recall`, `store`, `onItemAppend`, `onSpawn` |
 
 **State:** `{ facts: Record<isoTs, string[]>, buffer: string[], bufferTokens: number, version: number }`.
@@ -261,20 +261,16 @@ interface Episode {
 
 ## `durableTaskState()`
 
-Persists task-level artifacts (files modified, progress checkpoints, git commits) across spawn boundaries. This replaces a standalone `Persistence` interface — all state that survives across fresh-context iterations is managed uniformly through memory layers.
+Persists task-level artifacts (files modified, progress checkpoints, arbitrary data) across spawn boundaries and across executions within a thread. This replaces a standalone `Persistence` interface — all state that survives across fresh-context iterations is managed uniformly through memory layers.
 
 ```typescript
-interface DurableTaskStateConfig {
-  baseDir?: string;          // default '.noetic/tasks'
-  gitCommit?: boolean;       // default false
-  schema?: ZodType;
-  serializer?: {
-    serialize: (state: unknown) => Promise<Buffer | string>;
-    deserialize: (data: Buffer | string) => Promise<unknown>;
-  };
+interface DurableTaskState {
+  checkpoints: Array<{ timestamp: number; depth: number }>;
+  files: string[];
+  data: Record<string, unknown>;
 }
 
-function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableTaskState>
+function durableTaskState(): MemoryLayer<DurableTaskState>
 ```
 
 | Property | Value |
@@ -287,14 +283,14 @@ function durableTaskState(config?: DurableTaskStateConfig): MemoryLayer<DurableT
 | **hooks** | `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete` |
 
 **Behavior:**
-- `init`: Loads from storage, falls back to disk (crash recovery).
-- `recall`: Renders current state, files modified, recent checkpoints as `<task_state>` block in a `MessageItem` with `role: developer`.
-- `store`: Extracts state updates from response. Writes to disk + storage. Optional git commit.
+- `init`: Loads saved state from `ScopedStorage` (written by the runtime's durable write-through mirror; see spec 11 *Durable Persistence*). Defaults to an empty state.
+- `recall`: Renders the state as a `<task_state>` block in a `MessageItem` with `role: developer`, trimmed to the allocated budget — the oldest checkpoints are halved away while the render exceeds the budget, with a final closing-tag-preserving char-slice guard. A zero budget is fail-open (full render).
+- `store`: Appends a `{ timestamp, depth }` checkpoint per model call, capped at the newest **50** checkpoints.
 - `onSpawn`: **Always** provides child state (unlike other layers that may return `null`).
-- `onReturn`: Merges child files/checkpoints/data back into parent.
-- `onComplete`: Final checkpoint with outcome label. Git commit if enabled.
+- `onReturn`: Merges child files/checkpoints/data back into parent (checkpoints capped at 50 after the merge, newest kept).
+- `onComplete`: Final checkpoint with outcome label (capped).
 
-**Key design:** Scope is `'thread'` so the state persists across executions/iterations within the same thread (an `'execution'` scope would rotate its key every run and defeat durable rehydration). Always crosses spawn boundaries. Dual persistence (disk + storage). Git integration is optional. Recalls into the View so the LLM can see progress.
+**Key design:** Scope is `'thread'` so the state persists across executions/iterations within the same thread (an `'execution'` scope would rotate its key every run and defeat durable rehydration). Always crosses spawn boundaries. Recalls into the View so the LLM can see progress.
 
 ---
 
@@ -342,6 +338,7 @@ function steering(config: SteeringConfig): MemoryLayer<SteeringState>
 - `afterModelCall`: Runs each rule whose `hook` is `'afterModelCall'`. LLM-evaluated rules receive the full model response text. A violation aborts the current turn with the violation message.
 - **Ledger**: Each execution maintains a bounded log of `{ ruleId, hook, toolName?, violation, timestamp }` entries. Capped at `maxLedgerEntries`. Accessible via `getLayerState(executionId, 'steering')`.
 - **LLM evaluation**: When a rule has no programmatic `check`, the layer sends a structured prompt — the rule description, the tool name and serialized args (for `beforeToolCall`) or the model output (for `afterModelCall`) — and asks the model to reply with exactly `ALLOW`, `DENY`, or `GUIDE: <guidance text>`. The verdict is parsed by matching one of those keywords at the start of the response on a **word boundary** (so `DENYALL` is not a `DENY`), **case-insensitively**, while the guidance text after `DENY`/`GUIDE` is preserved verbatim (original casing). Unparseable output is retried up to `maxRetries`; on exhaustion the rule is treated as a pass (`ALLOW`). If no LLM provider is configured (no `callModel` on the execution context), LLM-evaluated rules throw a `NoeticConfigError` with code `MISSING_CALL_MODEL` — a fail-closed design to prevent silent bypass of security rules.
+- **Async rules**: Rules evaluated in async mode do not block the hook; non-Allow verdicts are queued and injected as a `<steering_feedback>` block by `recall` on the **next recall after the verdict resolves** — each verdict is delivered exactly once. The pending-feedback queue is drained in place, so a verdict resolving mid-turn is never lost; it simply surfaces one recall later.
 - **Slot 90**: Runs before all other layers (slot 100+) in `beforeToolCall` and `afterModelCall` to ensure policy enforcement precedes any side effects.
 
 ```typescript
@@ -512,6 +509,14 @@ The CLI package (`packages/cli/src/memory/`) provides several memory layers buil
 | `skillsLayer(definitions, config)` | `@noetic-tools/code-agent` (`packages/code-agent/src/memory/skills-layer.ts`), re-exported via `packages/cli/src/memory/skills-layer.ts` | Progressive skill disclosure with inline command processing |
 
 These layers all use `execution` scope and `Slot.PROCEDURAL` (250) or `Slot.OBSERVATIONS` (200). They are assembled in the harness factory (`src/harness/factory.ts`) and activate when the CLI harness is created. For full documentation of each layer's slot, budget, state shape, and behavior, see `packages/cli/docs/enhanced-prompt-engineering.md`.
+
+---
+
+## Future Considerations
+
+### durableTaskState: disk fallback, git integration, custom serialization (Not Yet Designed)
+
+Potential extensions to `durableTaskState()`: a configurable on-disk fallback (`baseDir`, default `.noetic/tasks`) for crash recovery independent of the `StorageAdapter`, optional git commits of task state (`gitCommit`), a Zod `schema` for state validation, and a custom `serializer`. These would reintroduce a config parameter; the design (dual-persistence consistency, commit cadence, schema-migration interplay) has not been worked out. Not scheduled.
 
 ---
 

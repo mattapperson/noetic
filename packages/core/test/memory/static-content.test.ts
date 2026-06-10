@@ -124,4 +124,69 @@ describe('staticContent', () => {
     });
     expect('name' in layer).toBe(false);
   });
+
+  describe('budget trim (M4)', () => {
+    async function recallWithBudget(content: string, budget: number): Promise<string> {
+      const layer = staticContent({
+        load: async () => content,
+      });
+      const store = createLayerStateStore();
+      const ctx = makeCtx({
+        executionId: `exec-trim-${budget}`,
+      });
+      const layers = asLayers(layer);
+      await initLayers({
+        layers,
+        ctx,
+        storage: makeStorage(),
+        store,
+      });
+      const result = await layer.hooks.recall?.({
+        log: makeItemLog(),
+        query: '',
+        ctx,
+        state: store.get<string>(ctx.executionId, layer.id) ?? '',
+        budget,
+      });
+      if (typeof result !== 'string') {
+        throw new Error('expected string recall result');
+      }
+      return result;
+    }
+
+    const BIG = 'x'.repeat(4_000); // ~1000 tokens; state adds <instructions> wrapper
+
+    it('trimmed output ends with the closing tag and fits the budget', async () => {
+      const out = await recallWithBudget(BIG, 100);
+      expect(out.endsWith('\n</instructions>')).toBe(true);
+      expect(out.length).toBeLessThanOrEqual(100 * 4);
+      expect(out.startsWith('<instructions>')).toBe(true);
+    });
+
+    it.each([
+      99,
+      100,
+      101,
+    ])('budget %d output always stays within budget*4 chars with closing tag', async (budget) => {
+      const out = await recallWithBudget(BIG, budget);
+      expect(out.length).toBeLessThanOrEqual(budget * 4);
+      expect(out.endsWith('</instructions>')).toBe(true);
+    });
+
+    it('tiny budget still emits a well-formed closing tag', async () => {
+      const out = await recallWithBudget(BIG, 5);
+      expect(out.endsWith('</instructions>')).toBe(true);
+      expect(out.length).toBeLessThanOrEqual(5 * 4);
+    });
+
+    it('budget 0 returns the full content untrimmed (deliberate fail-open)', async () => {
+      const out = await recallWithBudget(BIG, 0);
+      expect(out).toBe(`<instructions>\n${BIG}\n</instructions>`);
+    });
+
+    it('content already within budget is returned unchanged', async () => {
+      const out = await recallWithBudget('short rules', 1e3);
+      expect(out).toBe('<instructions>\nshort rules\n</instructions>');
+    });
+  });
 });

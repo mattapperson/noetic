@@ -305,7 +305,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.client = opts._testCallModel ? undefined : createClient(opts.llm);
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
-    this.layerStateStore = opts.layerStateStore ?? createLayerStateStore();
+    this.layerStateStore =
+      opts.layerStateStore ??
+      createLayerStateStore((layerId, hook, error) => {
+        console.warn(`[noetic] memory layer '${layerId}' ${hook} error:`, error);
+      });
     this.recallCache = createRecallCache();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
     this.streamIdleTimeoutMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;

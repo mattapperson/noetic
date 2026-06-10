@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { workingMemory } from '@noetic-tools/memory';
+import {
+  createLayerStateStore,
+  initLayers,
+  storeLayers,
+  workingMemory,
+} from '@noetic-tools/memory';
 import type { FunctionCallItem } from '@noetic-tools/types';
-import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
+import { z } from 'zod';
+import { makeCtx, makeItemLog, makeScopedStorage, makeStorage } from '../_helpers';
 
 describe('workingMemory layer', () => {
   it('has correct id and slot', () => {
@@ -228,5 +234,185 @@ describe('workingMemory layer', () => {
       scope: 'resource',
     });
     expect(layer.scope).toBe('resource');
+  });
+
+  describe('schema validation (M6)', () => {
+    const CountSchema = z.object({
+      count: z.number(),
+    });
+
+    function updateFn(layer: ReturnType<typeof workingMemory>) {
+      const decl = layer.provides.update;
+      assert(decl.kind === 'function');
+      return decl;
+    }
+
+    it('valid update via the tool passes and merges', async () => {
+      const layer = workingMemory({
+        schema: CountSchema,
+      });
+      const outcome = await updateFn(layer).execute(
+        {
+          count: 2,
+        },
+        {
+          count: 1,
+        },
+        makeCtx(),
+      );
+      expect(outcome.state).toEqual({
+        count: 2,
+      });
+    });
+
+    it('invalid update via the tool throws and leaves state untouched', async () => {
+      const layer = workingMemory({
+        schema: CountSchema,
+      });
+      const state = {
+        count: 1,
+      };
+      await expect(
+        updateFn(layer).execute(
+          {
+            count: 'not-a-number',
+          },
+          state,
+          makeCtx(),
+        ),
+      ).rejects.toThrow('working-memory update rejected by schema');
+      // The prior state object is untouched (gate, not mutation).
+      expect(state).toEqual({
+        count: 1,
+      });
+    });
+
+    it('partial update merged over valid state passes (merged state validated)', async () => {
+      const layer = workingMemory({
+        schema: CountSchema,
+      });
+      // The update alone would fail the schema (no count); the MERGED state passes.
+      const outcome = await updateFn(layer).execute(
+        {
+          note: 'extra',
+        },
+        {
+          count: 7,
+        },
+        makeCtx(),
+      );
+      expect(outcome.state).toEqual({
+        count: 7,
+        note: 'extra',
+      });
+    });
+
+    it('legacy store() path rejects schema-violating updates (storeLayers drops + diagnostic)', async () => {
+      const layer = workingMemory({
+        schema: CountSchema,
+      });
+      const funcCall: FunctionCallItem = {
+        id: 'fc1',
+        status: 'completed',
+        type: 'function_call',
+        callId: 'c1',
+        name: 'updateWorkingMemory',
+        arguments: '{"count":"bad"}',
+      };
+      const diagnostics: string[] = [];
+      const store = createLayerStateStore((layerId, hook) => {
+        diagnostics.push(`${layerId}:${hook}`);
+      });
+      const ctx = makeCtx({
+        executionId: 'exec-wm-schema',
+      });
+      await initLayers({
+        layers: [
+          layer,
+        ],
+        ctx,
+        storage: makeStorage(),
+        store,
+      });
+      store.set(ctx.executionId, layer.id, {
+        count: 1,
+      });
+      await storeLayers({
+        layers: [
+          layer,
+        ],
+        response: {
+          items: [
+            funcCall,
+          ],
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+        },
+        ctx,
+        log: makeItemLog(),
+        store,
+      });
+      // Update dropped, prior state preserved, diagnostic reported.
+      expect(store.get<Record<string, unknown>>(ctx.executionId, layer.id)).toEqual({
+        count: 1,
+      });
+      expect(diagnostics).toContain('working-memory:store');
+    });
+
+    it('init falls back to {} when persisted state fails the schema', async () => {
+      const storage = makeScopedStorage();
+      await storage.set('state', {
+        count: 'corrupt',
+      });
+      const layer = workingMemory({
+        schema: CountSchema,
+      });
+      const result = await layer.hooks.init!({
+        storage,
+        scopeKey: 'thread-1',
+        ctx: makeCtx(),
+      });
+      expect(result.state).toEqual({});
+    });
+
+    it('init keeps persisted state that passes the schema', async () => {
+      const storage = makeScopedStorage();
+      await storage.set('state', {
+        count: 3,
+      });
+      const layer = workingMemory({
+        schema: CountSchema,
+      });
+      const result = await layer.hooks.init!({
+        storage,
+        scopeKey: 'thread-1',
+        ctx: makeCtx(),
+      });
+      expect(result.state).toEqual({
+        count: 3,
+      });
+    });
+
+    it('no schema → updates are not validated (regression)', async () => {
+      const layer = workingMemory();
+      const outcome = await updateFn(layer).execute(
+        {
+          anything: [
+            1,
+            2,
+          ],
+        },
+        {},
+        makeCtx(),
+      );
+      expect(outcome.state).toEqual({
+        anything: [
+          1,
+          2,
+        ],
+      });
+    });
   });
 });

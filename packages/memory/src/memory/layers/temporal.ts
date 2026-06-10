@@ -340,6 +340,9 @@ export function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<Tempo
     },
     timeouts: {
       store: 60_000,
+      // onItemAppend runs the same LLM-backed accumulate/extract path as
+      // store — it needs the same headroom, not the 5s pipeline default.
+      onItemAppend: 60_000,
     },
     provides: {
       searchMemory: layerFn<

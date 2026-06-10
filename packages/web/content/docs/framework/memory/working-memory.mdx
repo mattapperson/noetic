@@ -46,7 +46,7 @@ interface WorkingMemoryConfig {
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `scope` | `'thread' \| 'resource'` | `'thread'` | Persistence boundary |
-| `schema` | `ZodType` | -- | Optional Zod schema for structured state (state becomes `Record<string, unknown>`) |
+| `schema` | `ZodType` | -- | Optional Zod schema for structured state (state becomes `Record<string, unknown>`). Updates are validated against it: the merged state must pass, or the update is rejected |
 | `template` | `string` | -- | Initial template content |
 | `readOnly` | `boolean` | `false` | When `true`, the `store` hook skips updates |
 
@@ -62,7 +62,7 @@ When no `schema` is provided, state is a plain string. When a schema is provided
 
 ### init
 
-Loads saved state from `ScopedStorage`. Falls back to an empty string (no schema) or empty object (with schema).
+Loads saved state from `ScopedStorage`. Falls back to an empty string (no schema) or empty object (with schema). Persisted state that fails the configured schema is discarded and replaced with `{}` rather than aborting the execution.
 
 ### recall
 
@@ -70,7 +70,9 @@ If state is non-empty, wraps it in a `<working_memory>` XML block and injects it
 
 ### store
 
-Watches for `updateWorkingMemory` function calls in the LLM response. When found, parses the JSON arguments and shallow-merges them into the current state. Prototype keys (`__proto__`, `constructor`) are stripped for safety.
+Watches for `updateWorkingMemory` function calls in the LLM response. When found, parses the JSON arguments and deep-merges them into the current state. Prototype keys (`__proto__`, `constructor`) are stripped for safety.
+
+When a `schema` is configured, the **merged** state is validated against it (so partial updates remain legal). A schema-violating update is dropped with a diagnostic on the legacy `store` path, and throws as a tool error the model can see on the `working-memory/update` tool path — either way the prior state is untouched.
 
 If `readOnly` is `true`, the store hook is a no-op.
 

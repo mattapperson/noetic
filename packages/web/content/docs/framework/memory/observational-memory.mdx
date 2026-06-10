@@ -10,7 +10,7 @@ Observational Memory accumulates conversation text into a buffer, and when the b
 - **Slot**: `200` (`Slot.OBSERVATIONS`)
 - **Default scope**: `resource`
 - **Default budget**: `{ min: 500, max: 2500 }`
-- **Store timeout**: `60000` ms
+- **Hook timeouts**: `store` and `onItemAppend` both `60000` ms (both hooks run the LLM-backed distillation path)
 
 ## Usage
 
@@ -84,6 +84,10 @@ If observations exist, formats them as a bulleted list inside an `<observations>
 5. The buffer resets to empty.
 
 If no custom `observer` is provided, a simple fallback records `"Processed N items"`.
+
+### onItemAppend
+
+Buffers user input and tool output items the same way `store` buffers assistant output, so observations are distilled from the full conversation rather than only the model's replies.
 
 ### onSpawn
 

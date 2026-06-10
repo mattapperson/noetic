@@ -5,6 +5,7 @@ import type {
   ItemSchemaRegistry,
   LLMResponse,
   MemoryLayer,
+  ScopedStorage,
   SteeringDecision,
   StorageAdapter,
 } from '@noetic-tools/types';
@@ -25,6 +26,28 @@ export interface LayerStateStore {
   set<T>(executionId: string, layerId: string, state: T): void;
   cleanup(executionId: string): void;
   diagnostic: (layerId: string, hook: string, error: unknown) => void;
+  /**
+   * Register a durable write-through target for a layer's state under an
+   * execution. Once registered, EVERY `set()` for that (execution, layer) pair
+   * is asynchronously mirrored to `target` (key `'state'`); `set(…, undefined)`
+   * deletes the durable key. Writes are coalesced per key (latest wins) and
+   * mirror failures are reported via `diagnostic(layerId, 'persist', e)` —
+   * they never throw. Optional so custom stores keep compiling; without it,
+   * no durable mirroring occurs.
+   */
+  registerDurable?(executionId: string, layerId: string, target: ScopedStorage): void;
+  /** Await all in-flight durable mirror writes for an execution. */
+  flush?(executionId: string): Promise<void>;
+  /**
+   * Mark a layer disabled for an execution (its `init` failed with
+   * `onInitError: 'disable'`). Disabled layers are skipped by every later
+   * hook. Optional so custom stores keep compiling; without explicit
+   * tracking, the lifecycle falls back to the legacy sentinel (init-bearing
+   * layer with no state).
+   */
+  disable?(executionId: string, layerId: string): void;
+  /** Whether a layer was disabled for an execution. */
+  isDisabled?(executionId: string, layerId: string): boolean;
 }
 
 interface InitLayersParams {
@@ -50,7 +73,12 @@ interface StoreLayersParams {
   ctx: ExecutionContext;
   log: ItemLog;
   store: LayerStateStore;
-  storage: StorageAdapter;
+  /**
+   * Unused by storeLayers itself — durable persistence is centralized in the
+   * state store's write-through (registered in `initLayers`). Accepted so
+   * existing call sites keep compiling.
+   */
+  storage?: StorageAdapter;
   /** When provided, an eventual layer whose store produces new state is marked stale for the next recall. */
   recallCache?: RecallCache;
 }
@@ -61,6 +89,12 @@ interface SpawnLayersParams {
   childCtx: ExecutionContext;
   store: LayerStateStore;
   itemSchemas?: ItemSchemaRegistry;
+  /**
+   * When provided, durable write-through targets are registered for the child
+   * execution (non-execution scopes only), so state written during the child's
+   * run is mirrored durably just like the parent's.
+   */
+  storage?: StorageAdapter;
 }
 
 interface ReturnLayersParams<T = unknown> {
@@ -153,10 +187,46 @@ const MAX_RERENDER_DEPTH = 3;
 
 //#region Helper Functions
 
+/** Per-(execution, layer) durable write-through bookkeeping. */
+interface DurableEntry {
+  layerId: string;
+  target: ScopedStorage;
+  /** Latest value to persist (latest-wins coalescing). */
+  latest: unknown;
+  /** True when `latest` has not been written yet. */
+  dirty: boolean;
+  /** The single in-flight write loop for this key, if any. */
+  inFlight: Promise<void> | null;
+}
+
 export function createLayerStateStore(
   diagnostic?: (layerId: string, hook: string, error: unknown) => void,
 ): LayerStateStore {
   const states = new Map<string, Map<string, unknown>>();
+  const durables = new Map<string, Map<string, DurableEntry>>();
+  const disabled = new Map<string, Set<string>>();
+  const report = diagnostic ?? ((): void => {});
+
+  // One write loop per key: re-checks `dirty` after each write so a value set
+  // mid-write is persisted by the same loop (coalesced, latest wins). Failures
+  // are diagnostics only — durable mirroring must never break the agent.
+  async function writeThrough(entry: DurableEntry): Promise<void> {
+    while (entry.dirty) {
+      entry.dirty = false;
+      const value = entry.latest;
+      try {
+        if (value === undefined) {
+          await entry.target.delete('state');
+        } else {
+          await entry.target.set('state', value);
+        }
+      } catch (e) {
+        report(entry.layerId, 'persist', e);
+      }
+    }
+    entry.inFlight = null;
+  }
+
   return {
     get<T>(executionId: string, layerId: string): T | undefined {
       return frameworkCast<T | undefined>(states.get(executionId)?.get(layerId));
@@ -168,12 +238,82 @@ export function createLayerStateStore(
         states.set(executionId, execMap);
       }
       execMap.set(layerId, state);
+
+      const entry = durables.get(executionId)?.get(layerId);
+      if (!entry) {
+        return;
+      }
+      entry.latest = state;
+      entry.dirty = true;
+      if (!entry.inFlight) {
+        entry.inFlight = writeThrough(entry);
+      }
+    },
+    registerDurable(executionId: string, layerId: string, target: ScopedStorage): void {
+      let execMap = durables.get(executionId);
+      if (!execMap) {
+        execMap = new Map();
+        durables.set(executionId, execMap);
+      }
+      execMap.set(layerId, {
+        layerId,
+        target,
+        latest: undefined,
+        dirty: false,
+        inFlight: null,
+      });
+    },
+    async flush(executionId: string): Promise<void> {
+      const execMap = durables.get(executionId);
+      if (!execMap) {
+        return;
+      }
+      await Promise.all(
+        [
+          ...execMap.values(),
+        ].map((entry) => entry.inFlight ?? Promise.resolve()),
+      );
+    },
+    disable(executionId: string, layerId: string): void {
+      let set = disabled.get(executionId);
+      if (!set) {
+        set = new Set();
+        disabled.set(executionId, set);
+      }
+      set.add(layerId);
+    },
+    isDisabled(executionId: string, layerId: string): boolean {
+      return disabled.get(executionId)?.has(layerId) ?? false;
     },
     cleanup(executionId: string): void {
       states.delete(executionId);
+      durables.delete(executionId);
+      disabled.delete(executionId);
     },
-    diagnostic: diagnostic ?? (() => {}),
+    diagnostic: report,
   };
+}
+
+interface IsLayerDisabledParams {
+  store: LayerStateStore;
+  executionId: string;
+  layer: MemoryLayer;
+  state: unknown;
+}
+
+/**
+ * Whether a layer is disabled for this execution (its `init` failed with
+ * `onInitError: 'disable'`). Prefers the store's explicit tracking, so a
+ * layer that legitimately cleared its state (`{ state: undefined }`) keeps
+ * running with `undefined` state. Legacy stores without `isDisabled` fall
+ * back to the old sentinel — an init-bearing layer with no state — which
+ * cannot make that distinction.
+ */
+function isLayerDisabled({ store, executionId, layer, state }: IsLayerDisabledParams): boolean {
+  if (store.isDisabled) {
+    return store.isDisabled(executionId, layer.id);
+  }
+  return state === undefined && layer.hooks.init !== undefined;
 }
 
 //#region Recall Cache (eventual recall)
@@ -295,7 +435,52 @@ export async function initLayers({ layers, ctx, storage, store }: InitLayersPara
       if (layer.onInitError !== 'disable') {
         throw e;
       }
+      store.disable?.(ctx.executionId, layer.id);
     }
+  }
+
+  registerDurableTargets({
+    layers,
+    ctx,
+    storage,
+    store,
+  });
+}
+
+/**
+ * Register durable write-through targets for every non-execution-scope layer.
+ * A separate pass, independent of `hooks.init`, run AFTER init's `set()` so
+ * freshly-rehydrated state is not immediately rewritten to storage. From this
+ * point on, ALL state writes through the store — provides functions,
+ * beforeToolCall/afterModelCall, onComplete, onReturn, the append pipeline,
+ * and `store()` hooks — are mirrored durably; `store()` is not special.
+ * 'execution' scope is excluded: its scope key rotates each run, so there is
+ * nothing durable to mirror.
+ */
+function registerDurableTargets({
+  layers,
+  ctx,
+  storage,
+  store,
+}: {
+  layers: MemoryLayer[];
+  ctx: ExecutionContext;
+  storage: StorageAdapter;
+  store: LayerStateStore;
+}): void {
+  if (!store.registerDurable) {
+    return;
+  }
+  for (const layer of layers) {
+    if (layer.scope === 'execution') {
+      continue;
+    }
+    const scopeKey = resolveScopeKey(layer.scope, ctx);
+    store.registerDurable(
+      ctx.executionId,
+      layer.id,
+      createScopedStorage(storage, layer.id, scopeKey),
+    );
   }
 }
 
@@ -328,7 +513,14 @@ export async function recallLayers({
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue; // was disabled
     }
 
@@ -460,7 +652,6 @@ export async function storeLayers({
   ctx,
   log,
   store,
-  storage,
   recallCache,
 }: StoreLayersParams): Promise<void> {
   // Concurrent via Promise.allSettled — each layer gets its own state snapshot
@@ -474,7 +665,14 @@ export async function storeLayers({
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
     snapshots.push({
@@ -499,7 +697,9 @@ export async function storeLayers({
           timeout,
         );
         // `'state' in result` (not `!== undefined`) so a layer can explicitly
-        // clear its state by returning `{ state: undefined }`.
+        // clear its state by returning `{ state: undefined }`. The store's
+        // durable write-through mirrors the write (clearing deletes the
+        // durable key) — no inline mirror needed here.
         if (result && 'state' in result) {
           store.set(ctx.executionId, layer.id, result.state);
           // Invalidate this layer's eventual-recall cache so the next turn
@@ -507,27 +707,14 @@ export async function storeLayers({
           if (recallCache && layer.recallMode === 'eventual') {
             recallCache.stale.add(recallCacheKey(layer, ctx));
           }
-          // Mirror to durable storage so the next execution's init() can
-          // rehydrate. Skip 'execution' scope — its key rotates each run.
-          // Skip when clearing (undefined) — nothing to persist.
-          if (result.state !== undefined && layer.scope !== 'execution') {
-            const scopedStorage = createScopedStorage(
-              storage,
-              layer.id,
-              resolveScopeKey(layer.scope, ctx),
-            );
-            try {
-              await scopedStorage.set('state', result.state);
-            } catch (persistErr) {
-              store.diagnostic(layer.id, 'store', persistErr);
-            }
-          }
         }
       } catch (e) {
         store.diagnostic(layer.id, 'store', e);
       }
     }),
   );
+
+  await store.flush?.(ctx.executionId);
 }
 
 export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams): Promise<void> {
@@ -542,7 +729,14 @@ export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams)
     const state = store.get(ctx.executionId, layer.id);
     // Skip disabled layers (init hook present but no state) — consistent with
     // recall/store; nothing was initialized, so there is nothing to dispose.
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
     try {
@@ -557,6 +751,8 @@ export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams)
       store.diagnostic(layer.id, 'dispose', e);
     }
   }
+  // Settle any in-flight durable mirror writes before dropping registrations.
+  await store.flush?.(ctx.executionId);
   store.cleanup(ctx.executionId);
 }
 
@@ -566,6 +762,7 @@ export async function spawnLayers({
   childCtx,
   store,
   itemSchemas = defaultItemSchemaRegistry,
+  storage,
 }: SpawnLayersParams): Promise<
   {
     layerId: string;
@@ -573,6 +770,14 @@ export async function spawnLayers({
     items: Item[];
   }[]
 > {
+  if (storage) {
+    registerDurableTargets({
+      layers,
+      ctx: childCtx,
+      storage,
+      store,
+    });
+  }
   const results: {
     layerId: string;
     childState: unknown;
@@ -589,7 +794,14 @@ export async function spawnLayers({
     // Skip only disabled layers (init present but no state). An init-less layer
     // has legitimately undefined state and should still spawn — consistent with
     // how recall treats init-less layers.
-    if (parentState === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: parentCtx.executionId,
+        layer,
+        state: parentState,
+      })
+    ) {
       continue;
     }
     try {
@@ -663,6 +875,11 @@ export async function returnLayers<T>({
     }
   }
 
+  // The child execution's store is typically cleaned up right after onReturn —
+  // settle both sides' durable mirror writes before that happens.
+  await store.flush?.(parentCtx.executionId);
+  await store.flush?.(childCtx.executionId);
+
   return frameworkCast<T>(currentResult);
 }
 
@@ -680,7 +897,14 @@ export async function completeLayers({
     const state = store.get(ctx.executionId, layer.id);
     // Skip disabled layers (init present but no state) — consistent with the
     // rest of the lifecycle; avoids invoking onComplete with undefined state.
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
     try {
@@ -701,6 +925,8 @@ export async function completeLayers({
       store.diagnostic(layer.id, 'onComplete', e);
     }
   }
+
+  await store.flush?.(ctx.executionId);
 }
 
 export async function beforeToolCallLayers({
@@ -720,7 +946,14 @@ export async function beforeToolCallLayers({
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
     try {
@@ -768,7 +1001,14 @@ export async function afterModelCallLayers({
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
     try {
@@ -821,7 +1061,14 @@ export async function projectHistoryLayers({
       continue;
     }
     const state = store.get(ctx.executionId, layer.id);
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
     try {
@@ -877,7 +1124,14 @@ export async function runAppendPipeline({
 
     const state = store.get(ctx.executionId, layer.id);
     // Skip if layer was disabled (has init but no state)
-    if (state === undefined && layer.hooks.init) {
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
       continue;
     }
 

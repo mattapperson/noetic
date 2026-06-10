@@ -8,7 +8,7 @@ description: Persistent agent checkpoints that survive crashes and enable long-r
 Durable Task State tracks checkpoints, file artifacts, and arbitrary key-value data across an agent's execution. It is designed for long-running tasks where you need crash recovery and audit trails.
 
 - **Slot**: `110` (`Slot.WORKING_MEMORY + 10`)
-- **Scope**: `execution`
+- **Scope**: `thread` (state persists across executions within the same thread)
 - **Default budget**: `{ min: 100, max: 800 }`
 - **Store timeout**: `30000` ms
 
@@ -17,29 +17,10 @@ Durable Task State tracks checkpoints, file artifacts, and arbitrary key-value d
 ```ts
 import { durableTaskState } from '@noetic-tools/core';
 
-const layer = durableTaskState({
-  baseDir: './task-output',
-  gitCommit: true,
-});
+const layer = durableTaskState();
 ```
 
-## Configuration
-
-```ts validate=none
-interface DurableTaskStateConfig {
-  baseDir?: string;
-  gitCommit?: boolean;
-  schema?: ZodType;
-  serializer?: DurableTaskStateSerializer;
-}
-```
-
-| Field | Type | Default | Purpose |
-|---|---|---|---|
-| `baseDir` | `string` | -- | Directory for file artifacts |
-| `gitCommit` | `boolean` | -- | Whether to auto-commit file changes |
-| `schema` | `ZodType` | -- | Optional Zod schema for validating the `data` field |
-| `serializer` | `DurableTaskStateSerializer` | -- | Custom serialization for state persistence |
+The factory takes no configuration.
 
 ## State Type
 
@@ -68,11 +49,11 @@ Loads saved `DurableTaskState` from scoped storage. Falls back to empty checkpoi
 
 ### recall
 
-Serializes the full state as JSON inside a `<task_state>` XML block and injects it as a `developer` message. This gives the LLM awareness of all checkpoints and artifacts.
+Serializes the state as JSON inside a `<task_state>` XML block and injects it as a `developer` message, trimmed to the allocated token budget: the oldest checkpoints are halved away while the render is over budget, and a final guard char-slices while preserving the closing tag. A zero budget is fail-open (full render).
 
 ### store
 
-Appends a new checkpoint with the current timestamp and execution depth on every store cycle.
+Appends a new checkpoint with the current timestamp and execution depth on every store cycle. Checkpoints are capped at the newest **50** (also enforced in `onReturn` and `onComplete`), so the durably persisted state cannot grow without bound over a long-lived thread.
 
 ### onSpawn
 
@@ -81,7 +62,7 @@ Deep-clones the parent state to the child. Unlike other layers, Durable Task Sta
 ### onReturn
 
 Merges child artifacts back into the parent:
-- Checkpoints are concatenated
+- Checkpoints are concatenated (capped at the newest 50 after the merge)
 - File lists are deduplicated via `Set`
 - Data objects are shallow-merged (child keys overwrite parent keys)
 

@@ -275,8 +275,12 @@ export function steering(config: SteeringConfig) {
         if (state.pendingAsync.length === 0) {
           return null;
         }
-        const feedback = state.pendingAsync.map((p) => `[${p.ruleId}] ${p.guidance}`).join('\n');
-        state.pendingAsync = [];
+        // Drain IN PLACE (splice, not reassignment): in-flight async LLM rules
+        // hold this array by reference (fireLlmRuleAsync) — replacing it would
+        // orphan their late verdicts. Late pushes land in the live array and
+        // surface on the next recall.
+        const drained = state.pendingAsync.splice(0, state.pendingAsync.length);
+        const feedback = drained.map((p) => `[${p.ruleId}] ${p.guidance}`).join('\n');
         const content = `<steering_feedback>\n${feedback}\n</steering_feedback>`;
         return {
           items: [

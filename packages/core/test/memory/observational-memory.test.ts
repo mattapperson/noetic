@@ -143,3 +143,15 @@ describe('observationalMemory', () => {
     expect(result!.childState).not.toBe(parentState);
   });
 });
+
+describe('observationalMemory timeouts (M8)', () => {
+  it('pins LLM-headroom timeouts for store AND onItemAppend', () => {
+    const layer = observationalMemory();
+    // Both hooks run the same LLM-backed accumulate path; onItemAppend must
+    // not be limited by the 5s pipeline default.
+    expect(layer.timeouts).toEqual({
+      store: 60_000,
+      onItemAppend: 60_000,
+    });
+  });
+});

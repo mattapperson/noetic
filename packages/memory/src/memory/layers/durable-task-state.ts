@@ -1,6 +1,5 @@
 import type { MemoryLayer } from '@noetic-tools/types';
 import { createMessage, estimateTokens, Slot } from '@noetic-tools/types';
-import type { ZodType } from 'zod';
 
 export interface DurableTaskState {
   checkpoints: Array<{
@@ -11,26 +10,38 @@ export interface DurableTaskState {
   data: Record<string, unknown>;
 }
 
-export interface DurableTaskStateSerializer {
-  serialize(state: DurableTaskState): string;
-  deserialize(data: string): DurableTaskState;
+/**
+ * Hard cap on retained checkpoints. store() appends one per model call and
+ * onReturn concatenates the child's list, so without a cap the thread-scoped
+ * (durably persisted) array grows linearly with total model calls forever.
+ * Newest checkpoints are kept.
+ */
+const MAX_CHECKPOINTS = 50;
+
+function trimCheckpoints(
+  checkpoints: DurableTaskState['checkpoints'],
+): DurableTaskState['checkpoints'] {
+  if (checkpoints.length <= MAX_CHECKPOINTS) {
+    return checkpoints;
+  }
+  return checkpoints.slice(checkpoints.length - MAX_CHECKPOINTS);
 }
 
-export interface DurableTaskStateConfig {
-  baseDir?: string;
-  gitCommit?: boolean;
-  schema?: ZodType;
-  serializer?: DurableTaskStateSerializer;
+function renderTaskState(state: DurableTaskState): string {
+  return `<task_state>\n${JSON.stringify(state, null, 2)}\n</task_state>`;
 }
 
 /**
  * Creates a memory layer that persists task checkpoints, files, and arbitrary data across iterations.
  *
+ * State is rehydrated from `ScopedStorage` on init and persisted via the
+ * runtime's durable write-through; `store` appends capped checkpoints
+ * (newest 50 kept) and `recall` trims its render to the allocated budget.
+ *
  * @public
- * @param _config - Optional configuration for base directory, git commit behavior, schema, and serializer.
- * @returns A `MemoryLayer` scoped to the execution with durable task state.
+ * @returns A `MemoryLayer` scoped to the thread with durable task state.
  */
-export function durableTaskState(_config?: DurableTaskStateConfig) {
+export function durableTaskState() {
   return {
     id: 'durable-task-state' as const,
     name: 'Durable Task State',
@@ -59,11 +70,32 @@ export function durableTaskState(_config?: DurableTaskStateConfig) {
         };
       },
 
-      async recall({ state }) {
+      async recall({ state, budget }) {
         if (!state) {
           return null;
         }
-        const text = `<task_state>\n${JSON.stringify(state, null, 2)}\n</task_state>`;
+        let view = state;
+        let text = renderTaskState(view);
+        // `budget > 0` is the fail-open convention (see staticContent): a zero
+        // allocation must not delete the task state from the view.
+        if (budget > 0) {
+          // Halve the OLDEST checkpoints while the render exceeds the budget —
+          // files/data stay, recent checkpoints stay.
+          while (estimateTokens(text) > budget && view.checkpoints.length > 0) {
+            view = {
+              ...view,
+              checkpoints: view.checkpoints.slice(Math.ceil(view.checkpoints.length / 2)),
+            };
+            text = renderTaskState(view);
+          }
+          // Final guard: still over budget with no checkpoints left — char-slice
+          // and keep the closing tag so the block stays well-formed.
+          if (estimateTokens(text) > budget) {
+            const closing = '\n</task_state>';
+            const maxChars = Math.max(0, budget * 4 - closing.length);
+            text = `${text.slice(0, maxChars)}${closing}`;
+          }
+        }
         return {
           items: [
             createMessage(text, 'developer'),
@@ -78,16 +110,16 @@ export function durableTaskState(_config?: DurableTaskStateConfig) {
           files: [],
           data: {},
         };
-        // Add a checkpoint for each store call
+        // Add a checkpoint for each store call (capped, newest kept)
         const newState: DurableTaskState = {
           ...currentState,
-          checkpoints: [
+          checkpoints: trimCheckpoints([
             ...currentState.checkpoints,
             {
               timestamp: Date.now(),
               depth: ctx.depth,
             },
-          ],
+          ]),
         };
         return {
           state: newState,
@@ -113,10 +145,10 @@ export function durableTaskState(_config?: DurableTaskStateConfig) {
         };
         return {
           parentState: {
-            checkpoints: [
+            checkpoints: trimCheckpoints([
               ...parent.checkpoints,
               ...childState.checkpoints,
-            ],
+            ]),
             files: [
               ...new Set([
                 ...parent.files,
@@ -142,13 +174,13 @@ export function durableTaskState(_config?: DurableTaskStateConfig) {
               ...state.data,
               __outcome: outcome,
             },
-            checkpoints: [
+            checkpoints: trimCheckpoints([
               ...state.checkpoints,
               {
                 timestamp: Date.now(),
                 depth: 0,
               },
-            ],
+            ]),
           },
         };
       },

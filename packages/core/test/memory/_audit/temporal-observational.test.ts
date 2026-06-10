@@ -224,3 +224,13 @@ describe('AUDIT temporalMemory', () => {
     expect(tmpHooks['onItemAppend']).toBeDefined();
   });
 });
+
+describe('temporalMemory timeouts (M8)', () => {
+  it('pins LLM-headroom timeouts for store AND onItemAppend', () => {
+    const layer = temporalMemory();
+    expect(layer.timeouts).toEqual({
+      store: 60_000,
+      onItemAppend: 60_000,
+    });
+  });
+});
