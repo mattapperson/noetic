@@ -1,3 +1,7 @@
+## @noetic-tools/memory-v1.0.1 (2026-06-10)
+
+* fix: skip uninitialized layers, strip bun exports ([3c83c57](https://github.com/mattapperson/noetic/commit/3c83c57))
+
 ## @noetic-tools/memory-v1.0.0 (2026-06-10)
 
 * feat(memory)!: harden layers, budget, lifecycle ([39cc778](https://github.com/mattapperson/noetic/commit/39cc778))

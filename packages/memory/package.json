@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/memory",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Memory layer system for Noetic agents: the MemoryLayer contract, lifecycle, budget/projection machinery, and built-in layer implementations.",
   "license": "Apache-2.0",
