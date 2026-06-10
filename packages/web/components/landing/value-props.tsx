@@ -23,7 +23,7 @@ const VALUE_PROPS: ReadonlyArray<ValueProp> = [
     index: '02',
     pillar: 'REMEMBER',
     headline: "Context that doesn't blow up.",
-    support: 'Nine memory layers keep token costs flat.',
+    support: 'Ten memory layers keep token costs flat.',
     href: '#remember',
     color: 'var(--color-tui-cyan)',
   },

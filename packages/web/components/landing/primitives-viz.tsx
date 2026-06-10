@@ -55,7 +55,7 @@ const PRIMITIVES: Primitive[] = [
   {
     name: 'fork',
     description: 'Parallel step execution',
-    signature: '(steps[], strategy) => Step',
+    signature: '({ mode, paths }) => Step',
     color: 'cyan',
     colSpan: 1,
     href: '/docs/framework/operators/fork',
@@ -63,7 +63,7 @@ const PRIMITIVES: Primitive[] = [
   {
     name: 'branch',
     description: 'Conditional step selection',
-    signature: '(condition, then, else) => Step',
+    signature: '(route: (input) => Step) => Step',
     color: 'cyan',
     colSpan: 1,
     href: '/docs/framework/operators/branch',

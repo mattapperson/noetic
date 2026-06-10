@@ -114,7 +114,8 @@ export function Differentiation(): ReactNode {
           background: 'var(--color-tui-surface)',
         }}
       >
-        OpenAI, Anthropic, local models, or a custom adapter. Bring your own provider.
+        Any model on OpenRouter — OpenAI, Anthropic, open-weights. Swap models with one line of
+        config.
       </p>
     </section>
   );

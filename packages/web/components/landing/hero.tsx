@@ -12,7 +12,7 @@ import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 const HERO_CODE = `import { AgentHarness, react } from '@noetic-tools/core';
 
 const agent = react({
-  model: 'gpt-4o',
+  model: 'openai/gpt-4o',
   tools: [searchTool, calcTool],
   maxSteps: 10,
 });

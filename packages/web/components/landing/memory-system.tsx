@@ -42,6 +42,11 @@ const LAYERS = [
     color: 'var(--color-tui-green)',
   },
   {
+    name: 'Temporal Memory',
+    description: 'Time-stamped fact extraction and recall',
+    color: 'var(--color-tui-green)',
+  },
+  {
     name: 'Plan Memory',
     description: 'Task tree and execution state',
     color: 'var(--color-tui-amber)',

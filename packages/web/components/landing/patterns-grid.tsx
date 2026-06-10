@@ -39,10 +39,11 @@ const PATTERNS: PatternCard[] = [
   },
   {
     name: 'Ralph Wiggum',
-    subtitle: 'Simple single-shot LLM calls',
+    subtitle: 'Retry with feedback until a verifier passes',
     lines: '~10 lines',
     primitives: [
       'loop',
+      'spawn',
       'llm',
       'tool',
     ],
@@ -86,9 +87,9 @@ const PATTERNS: PatternCard[] = [
     subtitle: 'Critic + generator collaboration',
     lines: '~20 lines',
     primitives: [
-      'spawn',
-      'llm',
-      'branch',
+      'fork',
+      'channel',
+      'run',
     ],
     href: '/docs/framework/patterns/dual-agent',
   },

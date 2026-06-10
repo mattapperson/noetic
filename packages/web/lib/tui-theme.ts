@@ -48,6 +48,7 @@ export const PRIMITIVE_COLORS = {
   fork: 'tui-cyan',
   branch: 'tui-cyan',
   loop: 'tui-cyan',
+  channel: 'tui-cyan',
 } as const satisfies Record<string, string>;
 
 export type PrimitiveName = keyof typeof PRIMITIVE_COLORS;

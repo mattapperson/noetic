@@ -31,7 +31,7 @@ const reasonAndAct = loop({
   steps: [
     step.llm({
       id: 'think',
-      model: 'gpt-4o',
+      model: 'openai/gpt-4o',
       tools: [searchTool, calcTool],
     }),
   ],
@@ -44,6 +44,7 @@ const reasonAndAct = loop({
   durableTaskState,
   observationalMemory,
   planMemory,
+  temporalMemory,
   workingMemory,
 } from '@noetic-tools/core';
 
@@ -55,8 +56,8 @@ const harness = new AgentHarness({
     workingMemory({ scope: 'thread' }),
     observationalMemory({ bufferThreshold: 4_000, observer }),
     planMemory({ maxTreeDepth: 3 }),
-    durableTaskState({ baseDir: '.noetic/tasks' }),
-    semanticRecall,
+    durableTaskState(),
+    temporalMemory(),
   ],
 });`,
 

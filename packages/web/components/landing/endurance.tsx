@@ -28,7 +28,7 @@ const CARDS: EnduranceCard[] = [
     tag: 'portable',
     color: 'cyan',
     description:
-      'Node, the browser, or a sandbox. Swap the fs, shell, and llm adapters; Mirage gives you a virtual filesystem.',
+      'Node, the browser, or a sandbox. Swap the fs and shell adapters for in-memory, remote, or sandboxed backends.',
   },
   {
     name: 'JSON workflow runtime',
