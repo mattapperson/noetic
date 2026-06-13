@@ -30,6 +30,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.2 Initial platform plan (v0)](#12-initial-platform-plan-v0)
    - [1.3 Adversarial panel review](#13-adversarial-panel-review)
    - [1.4 OpenRouter pragmatism debate](#14-openrouter-pragmatism-debate)
+   - [1.5 Postgres minimization directive](#15-postgres-minimization-directive)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -214,6 +215,35 @@ Engineer-weeks better spent on the moat:
 
 This decision drives most of [§2.2 Strategic posture](#22-strategic-posture).
 
+## 1.5 Postgres minimization directive
+
+**User directive:** "Avoid using Postgres for anything that isn't strictly necessary for relational data. It has a strong tendency to be the biggest infra bottleneck that's also the biggest headache to relieve."
+
+**Why this matters:** Postgres is the easiest tool to reach for and the hardest to scale off of. Once a table has 100M rows, foreign keys to it, and prod queries depending on it, the migration cost is brutal — connection-pool exhaustion, lock contention on hot rows, vacuum storms, replica lag, and "the one query that needs a new index but the index build takes 4 hours" become permanent operational tax. Better to put non-relational workloads on purpose-built stores from day 1.
+
+**Decision rule:** Postgres is the answer **only when** the workload requires *all of*: (a) joins across multiple entities, (b) ACID transactions, (c) foreign-key integrity, and (d) bounded row growth (≤ low millions over the product lifetime). Anything else goes to a purpose-built store.
+
+**Application to this plan:**
+
+| Workload | v0 location | v1 location | Reasoning |
+|---|---|---|---|
+| Accounts, members, api_keys, buckets (config), billing_period_summary | Postgres | **Postgres (kept)** | Joins, FK integrity, transactional updates, low-cardinality |
+| `outbox` table | Postgres | **Postgres (kept)** | Must be in same tx as the mutation it backs; small, bounded |
+| `UsageEvent` ingest | (panel moved to Tinybird) | **Tinybird** | High write volume, append-only, analytical queries |
+| `bucket_state` (authoritative counter) | Postgres `UPDATE...RETURNING` *or* Redis | **Redis (Upstash) authoritative** | Hot-path atomic INCRBY/DECRBY; per-account row contention is the textbook Postgres scaling cliff. Periodic reconciliation against Tinybird UsageEvent sum is the durability story. |
+| `audit_log` | Append-only Postgres with `REVOKE UPDATE/DELETE` | **Axiom (or BetterStack) tagged by account_id** | Append-only, never-joined, immutability is structural in a log store. Outbox stays in Postgres; worker ships from outbox to Axiom. Customer-facing audit read/export queries Axiom directly. |
+| `Idempotency-Key` request fingerprint cache | (unspecified) | **Redis with TTL** | Pure KV with expiration; Postgres for this is malpractice |
+| WorkOS membership 60s cache | (unspecified) | **Redis** | Same reasoning; high read rate, short TTL |
+| `bucket_periods` archive | Postgres archive table | **Tinybird (or S3 parquet)** | Historical aggregates, time-series — purpose-built for analytical workloads |
+| Trial credits balance ledger | (was Tinybird read model) | **Tinybird read model (kept)** | Already correctly placed |
+| Rate limit counters | Upstash Redis | **Upstash Redis (kept)** | Already correctly placed |
+
+**Net result:** Postgres holds the relational core (~6 tables) and the transactional outbox. Everything else lives on Redis (hot-path atomic ops + caches) or Tinybird/log store (high-volume append-only / time-series). The Postgres instance stays small enough that a Neon free-tier or Supabase free-tier instance covers v1 paid beta. No vacuum storms. No "we need to migrate off Postgres" project in year 2.
+
+**Trade-off accepted:** Slightly more vendor surface area (Upstash + Axiom in addition to Tinybird, Stripe, WorkOS, Neon). The panel's "buy boring stuff" principle already pushed us in this direction; this directive completes it.
+
+**One concern this raises:** The original panel engineer wanted the audit row written in the **same Postgres transaction** as the mutation, for atomicity. Moving audit to Axiom breaks that guarantee. **Resolution:** the outbox table stays in Postgres. Audit-relevant mutations write an `outbox` row in the same tx as the mutation; a worker ships outbox → Axiom at-least-once. We lose synchronous "audit committed iff mutation committed" but gain operational simplicity. The outbox row in Postgres is itself the durable record of intent; Axiom is the queryable form. SOC2 evidence collection can use either.
+
 ---
 
 # Current plan
@@ -233,7 +263,8 @@ The load-bearing decisions. Change these → re-litigate the whole plan.
 3. **Managed inference** ships as a feature flag for explicit design partners only — gated behind CC + manual review + hard caps. Not a v1 monetization path.
 4. **OR as upstream is fine.** Model catalog, normalized streaming, one-vendor billing on our side. Vendor choice, not business model.
 5. **Event-sourced usage** for everything billable. Buckets, invoices, dashboards are all read models computed from immutable `UsageEvent` rows.
-6. **Buy the boring stuff.** WorkOS (auth), Stripe Billing Meters (billing), Tinybird (usage analytics), Unkey (keys — TBD), Svix (webhooks when needed), Upstash (rate limiting). Custom code budget = UsageEvent ingestion + bucket check + the Noetic value layer.
+6. **Buy the boring stuff.** WorkOS (auth), Stripe Billing Meters (billing), Tinybird (usage analytics), Upstash Redis (hot-path counters + caches), Axiom (audit log shipping), Unkey (keys — TBD), Svix (webhooks when needed). Custom code budget = UsageEvent ingestion + bucket check + the Noetic value layer.
+7. **Postgres only when strictly relational.** Postgres holds accounts/members/api_keys/buckets-config/billing_period_summary/outbox — the small, joined, transactional core. Everything else (counters, caches, audit log, time-series, ingest) lives on a purpose-built store. See [§1.5](#15-postgres-minimization-directive) for the decision rule.
 
 ## 2.3 P-1 — Pre-build (week 0, no code)
 
@@ -256,33 +287,37 @@ The shapes that are expensive to rip out later.
 - **Role** — named scope bundle. Built-ins: `owner` / `admin` / `member`. Custom deferred.
 - **Scope** — atomic permissions. `hasScope(member, scope, account)` is the only auth check. V1 implementation: hardcoded role→scope map (no scope table). Signature preserved so custom roles ship as data later.
 - **ApiKey** — Account-owned with `created_by` audit field. Member-owned only for the `noetic login` CLI flow with rotate-on-offboarding. Stored as prefix + HMAC-SHA256(secret, KMS-pepper). Env-prefixed: `noetic_live_*` / `noetic_test_*`.
-- **Bucket** — metered allowance for a metric over a period: `{metric, period, included_quantity, overage_price, hard_cap}`. V1 ships hardcoded buckets per account; config UI when ≥3 customers ask.
-- **UsageEvent** — append-only, immutable: `{account_id, member_id?, api_key_id?, metric, quantity, unit, ts, idempotency_key, dims jsonb}`. PII-forbidden in `dims` (schema-validated at producer).
-- **AuditLog** — append-only Postgres table with `REVOKE UPDATE/DELETE` from app role. Written via outbox pattern for any mutation that calls Stripe/WorkOS.
+- **Bucket** — metered allowance for a metric over a period: `{metric, period, included_quantity, overage_price, hard_cap}` (config in Postgres). V1 ships hardcoded buckets per account; config UI when ≥3 customers ask.
+- **BucketState** — authoritative live counter `{account_id, metric, period_start, used, reserved}` stored in **Redis** (Upstash), accessed via atomic Lua script for reserve/settle/release. Periodic reconciliation against Tinybird UsageEvent sum (every 5min) is the durability/correctness backstop.
+- **UsageEvent** — append-only, immutable: `{account_id, member_id?, api_key_id?, metric, quantity, unit, ts, idempotency_key, dims jsonb}`. Stored in **Tinybird** (not Postgres). PII-forbidden in `dims` (schema-validated at producer).
+- **AuditLog** — append-only event stream shipped to **Axiom**, tagged by `account_id`. Written via outbox pattern: the audit-bearing mutation writes an `outbox` row in the same Postgres tx; a worker ships outbox → Axiom at-least-once. Customer-facing audit read/export queries Axiom directly.
+- **Outbox** — small bounded Postgres table; transactionally linked to mutations that emit audit events or call external systems (Stripe/WorkOS/Axiom). Worker drains and marks rows complete.
 
 ### Two design decisions
 1. **Usage as event-sourced metrics, not counters.** New metric = one producer change, zero schema changes. Reconciliation is free.
 2. **Scopes in the hot path, roles only in UI.** Authorization is always `hasScope`. Adding "admin can do X but not Y" later is data.
 
 ### Authoritative bucket check (the non-negotiable)
-- Pre-call: **reserve worst-case cost** (`max_tokens × model_price`) via atomic `UPDATE...RETURNING` on Postgres `bucket_state` row (or Redis `INCRBY`).
+- Pre-call: **reserve worst-case cost** (`max_tokens × model_price`) via an atomic Redis Lua script on `bucket_state:{account_id}:{metric}:{period_start}`. The script checks `used + reserved + worst_case ≤ included + overage_allowance` and atomically increments `reserved`. Single round-trip, no read-then-write race.
 - For hard-cap accounts: **clamp `max_tokens` to remaining budget** — never trust the client.
-- Post-call: settle actual usage, release unused reservation.
+- Post-call: settle actual usage (`reserved -= worst_case; used += actual`), release unused reservation. Settle in same Lua script call.
 - Per-account in-flight concurrency cap (separate from rate limit).
 - In-memory rollup is OK only as a soft pre-filter ahead of the authoritative check.
+- **Durability/reconciliation:** Upstash Redis persistence covers single-node crashes. Every 5 minutes, a reconciler diffs Redis `used` against Tinybird `SUM(quantity) WHERE ts ≥ period_start`. Discrepancy > threshold → alert + automatic Redis correction. UsageEvent (Tinybird) is the source of truth for billing; Redis is the fast access path.
 
 ## 2.5 Stack
 
 | Layer | Choice | Rationale |
 |---|---|---|
 | Backend API | `packages/api` — Bun + Hono | Matches monorepo, fast HTTP, simple deploy |
-| DB (OLTP) | Postgres (Neon or Supabase) + Drizzle | Boring, transactional, easy migrations |
-| Usage analytics | Tinybird (or ClickHouse Cloud) | Day-1 decision — kills the future migration |
+| Relational core (OLTP) | Postgres (Neon or Supabase) + Drizzle — **only** accounts, members, api_keys, buckets-config, billing_period_summary, outbox | Joins, FK integrity, transactional. See [§1.5](#15-postgres-minimization-directive) for what does *not* go here. |
+| Usage analytics + time-series | Tinybird (or ClickHouse Cloud) | High write volume, append-only, analytical queries — wrong fit for Postgres |
+| Hot-path counters + caches | **Upstash Redis** — bucket_state, idempotency-key fingerprint, WorkOS membership cache, rate limit | Atomic INCRBY/Lua, per-key TTLs. Per-account row contention is the Postgres scaling cliff |
+| Audit log | **Axiom** (or BetterStack) tagged by `account_id`, shipped from Postgres outbox | Append-only, immutable structurally, customer-facing read/export queries the log store directly |
 | Auth | WorkOS AuthKit | 1M MAU free, M2M, SSO/SCIM when enterprise asks |
 | Billing | Stripe Billing Meters API | Current API (legacy metered is deprecated) |
 | API keys | Evaluate Unkey first; HMAC+KMS-pepper custom only if rejected | Don't build what's free |
 | Webhooks (out) | Svix (when first customer asks) | Reliable delivery is a 2-week project we don't need now |
-| Rate limiting | Upstash Redis or Cloudflare | Not Postgres |
 | Inference upstream | OpenRouter (default) + direct Anthropic/OAI | One API, normalized streaming |
 | Dashboard | Extend `packages/web` (or split `packages/dashboard`) | Reuse existing shell |
 | SDK | `@noetic-tools/sdk` thin wrapper | Surfaces trace IDs, ties to `@noetic-tools/core` |
@@ -293,12 +328,14 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 
 ### P0 — Foundation (wk 1)
 - `packages/api` skeleton (Hono, Drizzle, migrations)
-- Schema: `users`, `accounts`, `members`, `api_keys`, `buckets`, `bucket_state`, `billing_period_summary`, `outbox`, append-only `audit_log` with `REVOKE UPDATE/DELETE`
-- WorkOS AuthKit integration. **WorkOS is source of truth on read path**: 60s TTL membership cache, webhooks for cache invalidation only, daily reconciliation cron
+- Postgres schema (relational core only): `users`, `accounts`, `members`, `api_keys`, `buckets` (config), `billing_period_summary`, `outbox`
+- Upstash Redis provisioned. `bucket_state` Lua scripts (reserve/settle/release) written and tested
+- Axiom workspace provisioned. Outbox-shipper worker scaffold (Postgres outbox → Axiom)
+- Tinybird workspace + `UsageEvent` ingest endpoint
+- WorkOS AuthKit integration. **WorkOS is source of truth on read path**: 60s TTL membership cache (Redis), webhooks for cache invalidation only, daily reconciliation cron
 - `hasScope()` middleware, default-deny. V1: hardcoded role→scope map
 - Account ID in every URL **plus** Postgres RLS or typed `AccountScope` repo guard
 - CI cross-tenant pen-test suite (try-to-read-another-tenant)
-- Tinybird ingest endpoint for `UsageEvent`
 
 ### P0.5 — Time-to-first-token (wk 1, parallel)
 - Signup auto-provisions personal Account + default `noetic_test_*` key + trial bucket
@@ -326,13 +363,13 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 - Read usage from final SSE chunk (no tee infrastructure in v1)
 
 ### P4 — Metering + buckets (wk 4–5)
-- Authoritative bucket check (Postgres `UPDATE...RETURNING` or Redis `INCRBY`) with worst-case-cost reservation
-- Settle actual on response; release unused reservation
-- `UNIQUE(account_id, idempotency_key)` partial-indexed by `ts` (or monthly partitions)
+- Authoritative bucket check in Redis (atomic Lua: reserve → settle → release)
+- 5-minute reconciler diffs Redis `used` against Tinybird `SUM(quantity) WHERE ts ≥ period_start`; alerts + corrects on drift
+- Tinybird `UsageEvent` dedup on `(account_id, idempotency_key)` with TTL by ts (Tinybird materialized view, not a Postgres unique index)
 - `dims jsonb` producer-side schema validation (no prompts/tool args/secrets)
 - Near-real-time current-hour usage view from Tinybird (10–30s lag)
 - Spend alerts + graceful hard-cap UX (429 with `X-Remaining-Budget` header)
-- Daily Postgres rollover → `bucket_periods` archive
+- Period rollover writes a `billing_period_summary` row in Postgres (one row per account per period — bounded, joinable); historical detail stays in Tinybird
 
 ### P5 — Billing + prepaid credits (wk 5–6)
 - **Stripe Billing Meters API** (not legacy metered)
@@ -360,19 +397,19 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 Cheap now, expensive later.
 
 ### Correctness
-- Authoritative bucket check via shared store (in-memory rollup is soft pre-filter only)
+- Authoritative bucket check via **Redis Lua** (in-memory rollup is soft pre-filter only)
 - Worst-case cost reservation pre-call; settle on response; clamp `max_tokens` for hard-cap accounts
-- Per-account in-flight concurrency cap
-- `UNIQUE(account_id, idempotency_key)` time-bounded
-- Honor `Idempotency-Key` header on the gateway
-- Outbox pattern for Stripe/WorkOS mutations
+- Per-account in-flight concurrency cap (Redis-backed)
+- UsageEvent dedup on `(account_id, idempotency_key)` time-bounded (Tinybird materialized view)
+- Honor `Idempotency-Key` header on the gateway (Redis cache, 24h TTL)
+- Outbox pattern (Postgres) for Stripe/WorkOS/Axiom side-effects
 - Stripe Billing Meters (not legacy metered) with deterministic idempotency keys
-- Reporter lag SLO + reconciliation job + manual replay tool
+- Reporter lag SLO + reconciliation job (Tinybird vs Stripe vs Redis) + manual replay tool
 
 ### Security
 - HMAC-SHA256 + KMS-stored pepper for API key hash (not raw sha256)
 - Postgres RLS or typed `AccountScope` repo + CI cross-tenant pen-test suite
-- Append-only `audit_log` with `REVOKE UPDATE/DELETE`
+- Audit log shipped to Axiom via Postgres outbox (immutability is structural in the log store)
 - Schema validator on `UsageEvent.dims` (no prompts/tool args/secrets)
 - WorkOS as source of truth on read path; webhooks for cache invalidation only
 
@@ -417,10 +454,10 @@ Cheap now, expensive later.
 |---|---|---|
 | Authz | Hardcoded role→scope map behind `hasScope()` | Scope table + custom roles + policy engine |
 | Usage analytics | Tinybird (or ClickHouse Cloud) | Same — designed to scale |
-| Bucket check | Postgres row-level UPDATE...RETURNING | Redis with Postgres reconciler |
+| Bucket check | Redis Lua atomic reserve/settle + 5min Tinybird reconciler | Same — purpose-built from day 1 |
 | Billing | Stripe Billing Meters + 60s micro-batches | Real-time meter events, prepaid balances, multi-currency |
 | Inference | BYOK + small trial pool + opt-in managed | Same; managed scales with fraud/compliance maturity |
-| Audit log | Append-only Postgres + outbox | S3 + Athena + hash-chained |
+| Audit log | Axiom shipped from Postgres outbox | S3 + Athena + hash-chained (only if compliance forces it) |
 | Webhooks (out) | Polling endpoints + Svix when asked | Same; Svix scales |
 | Rate limiting | Upstash Redis | Same |
 
@@ -475,3 +512,4 @@ Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 cus
 | 2026-06-12 | Adversarial panel review (PM + Engineer + CEO) raised 9 fatal/cross-cutting issues; recommended BYOK pivot, authoritative bucket reservation, Stripe Billing Meters, build-vs-buy pass, P-1 GTM gate | Panel synthesis |
 | 2026-06-12 | OR-pragmatism debate: separated "OR as upstream" (keep) from "OR as billing model" (drop). Resolved with BYOK-default + trial credits pool + opt-in managed mode | User pushback on panel |
 | 2026-06-12 | Plan v1 documented with decision history | Living doc requirement |
+| 2026-06-12 | Postgres minimization directive: Postgres holds only the relational core (6 tables + outbox). bucket_state → Redis Lua; audit_log → Axiom via outbox; Idempotency cache + membership cache → Redis; bucket_periods archive → Tinybird | User directive on infra bottleneck risk |
