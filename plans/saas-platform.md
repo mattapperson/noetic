@@ -44,8 +44,14 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [2.10 Compliance & risk](#210-compliance--risk)
    - [2.11 Open questions](#211-open-questions-to-resolve)
    - [2.12 What's NOT in this plan](#212-whats-not-in-this-plan)
-3. [Next concrete step](#next-concrete-step)
-4. [Changelog](#changelog)
+3. [Proposal: implementation specs](#proposal-implementation-specs)
+   - [3.1 Why split](#31-why-split)
+   - [3.2 Proposed specs (grouped, prioritized)](#32-proposed-specs-grouped-prioritized)
+   - [3.3 Dependency graph](#33-dependency-graph)
+   - [3.4 Conventions](#34-conventions)
+   - [3.5 Location and naming](#35-location-and-naming)
+4. [Next concrete step](#next-concrete-step)
+5. [Changelog](#changelog)
 
 ---
 
@@ -498,6 +504,122 @@ These need answers before the relevant phase starts.
 
 ---
 
+# Proposal: implementation specs
+
+**Status:** Proposal — not yet approved. Adopt after P-1 completes (so customer discovery can refine scope before specs are written).
+
+This plan doc is intentionally high-level — strategy, posture, primitives, phased outline. Once P-1 unlocks the build, the implementation needs concrete per-area specs that engineers can work from independently. This section proposes how to slice them.
+
+## 3.1 Why split
+
+The plan covers ~7 distinct concerns that touch different code, different vendors, and different parts of the stack. Holding them in one document is correct *now* (decision-making phase) but wrong once we're building — review cycles get slow, ownership blurs, and unrelated changes collide in the same diff.
+
+Splitting into per-purpose specs gives us:
+
+- **Independent ownership.** One engineer can own "Metering Spine" without blocking work on "Billing & Credits."
+- **Reviewable scope.** A 20-page omnibus spec gets rubber-stamped; a 4-page focused spec gets actually read.
+- **Parallel work.** Specs with no dependency edges can be drafted and implemented concurrently.
+- **Stable interfaces.** The spec is the contract between areas. Changing `UsageEvent` shape becomes a spec amendment with notified owners, not a silent code change.
+- **Matches existing convention.** The repo already uses `specs/NN-*.md` for the framework (`specs/01-step-type.md` through `22-cli-architecture.md`). SaaS specs should follow the same shape.
+
+## 3.2 Proposed specs (grouped, prioritized)
+
+Seven specs, in four priority tiers. Each spec describes the **ideal end state** of its area (per `.claude/rules/spec-guidelines.md` — no phased rollout language inside the spec itself; that's what this plan doc is for).
+
+### Tier 1 — Foundation (nothing else ships without these)
+
+**S1. Identity & Access Control**
+Accounts, members, roles/scopes (hardcoded role→scope map behind `hasScope()`), WorkOS AuthKit as source-of-truth-on-read with 60s Redis cache + daily reconciliation, multi-tenancy enforcement (Postgres RLS *or* typed `AccountScope` repo + CI cross-tenant pen-test), audit log via Postgres outbox shipped to Axiom. Defines the auth contract every other spec depends on.
+
+**S2. Metering Spine**
+`UsageEvent` shape and ingest (Tinybird), `BucketState` in Redis with atomic Lua reserve/settle/release, worst-case-cost reservation semantics, max-tokens clamping for hard-cap accounts, idempotency rules, 5-minute reconciler diffing Redis vs Tinybird, `dims jsonb` PII schema validator. This is the metering contract every billable surface depends on.
+
+### Tier 2 — Wedge (delivers customer value)
+
+**S3. API Keys**
+Generation (`noetic_<env>_<24B-base62>`), storage (HMAC-SHA256 with KMS-stored pepper, or Unkey adoption decision — Tier-1 spike), prefix-indexed lookup, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, `Idempotency-Key` header handling. Depends on S1 (auth) + S2 (idempotency primitives).
+
+**S4. Inference Gateway & SDK**
+BYOK forwarding to OR/Anthropic/OAI, trial-credits-pool path, opt-in managed-inference feature flag, trace tie-in to `@noetic-tools/core` runs, `@noetic-tools/sdk` thin wrapper, response usage emission to `UsageEvent`, SSE handling (no tee in v1). Depends on S3 (auth) + S2 (metering).
+
+### Tier 3 — Monetization
+
+**S5. Billing & Credits**
+Stripe Billing Meters integration with deterministic per-event idempotency, 60s micro-batch reporter, `billing_period_summary` in Postgres, reconciliation jobs (Tinybird vs Stripe vs Redis), reporter-lag SLO + manual replay tool, prepaid credits ledger as Tinybird read model (default for new accounts), Stripe Customer Portal integration, subscription-lifecycle handling (`past_due` → degrade). Depends on S2 (metering) + S1 (accounts).
+
+### Tier 4 — Activation & Trust (cross-cutting; touch many areas)
+
+**S6. Activation & Pricing**
+Signup auto-provision flow (personal account + test key + trial bucket + copy-paste curl on success screen), TTF-200 instrumentation, public `/pricing` page + calculator, migration-from-OR/OAI landing, near-real-time current-hour usage view (Tinybird-backed). Depends on S1 + S3 + S4 + S5. Lightweight spec — mostly UX flows and product copy.
+
+**S7. Trust & Compliance**
+Status page (Instatus, 99.9% target) wired to gateway health, customer-facing audit-log read+export API (Axiom-backed), DPA + sub-processor list publication, prompt/response storage opt-out, deletion state machine (`soft_deleted → final_invoice_issued → pii_anonymized → hard_deleted-after-7y`), SOC2 evidence baseline if ICP demands it, upstream-outage refund policy, ToS/AUP. Depends on S1 (audit) + S5 (billing for refund flows). Lightweight spec — mostly policy + integrations.
+
+## 3.3 Dependency graph
+
+```
+S1 Identity & Access ──┬──→ S3 API Keys ──→ S4 Inference Gateway ──┐
+                       │                                            ├──→ S6 Activation
+S2 Metering Spine  ────┼──→ S4 (metering) ──────────────────────────┤
+                       └──→ S5 Billing & Credits ───────────────────┤
+                                                                    │
+S1 + S5 ──→ S7 Trust & Compliance ──────────────────────────────────┘
+```
+
+**Implications for sequencing:**
+
+- **S1 + S2 must be drafted and approved first.** They are the contract surface for everything else. Plan: lock these two specs before any other spec is written.
+- **S3 and S4 can be drafted in parallel** once S1 + S2 are stable (S3 depends only on auth/idempotency primitives; S4 depends on those plus S3's key-validation hook, which is a stable interface even if S3 implementation isn't done).
+- **S5 can be drafted in parallel with S3/S4** once S2 is stable (it depends on metering shape, not key/gateway internals).
+- **S6 and S7 should be drafted last** — they ratify decisions made in S1–S5 rather than dictating them.
+
+**Implementation order:** S1 → S2 → (S3 || S5) → S4 → S6 → S7. One engineer can sequence; two can collapse S3/S5 into parallel weeks.
+
+## 3.4 Conventions
+
+Follow the existing `.claude/rules/spec-guidelines.md` and `.claude/rules/sync-spec-code-docs.md` conventions:
+
+- **Ideal state only.** Specs describe the final design. No "Current State" / "Target Architecture" sections, no `*(planned)*` annotations. Future ideas go in a `## Future Considerations` trailing section.
+- **One spec, one responsibility.** If a spec grows past ~6 printed pages, it's covering two things — split it.
+- **Cross-spec contracts are explicit.** When S3 (API Keys) says "the `Idempotency-Key` header is honored," link to the section of S2 (Metering) that defines the semantics. Specs reference each other; they do not silently assume.
+- **Code ↔ Spec sync.** Per `sync-spec-code-docs.md`, runtime code must stay consistent with its spec. SaaS specs should be added to that doc's reference-mapping table when they land.
+- **No phased language inside specs.** Phases live in this plan doc (§2.6). The spec describes what the system *is*, not what stages it shipped through.
+
+## 3.5 Location and naming
+
+The existing `specs/` directory holds framework specs (`01-step-type` through `22-cli-architecture`). SaaS platform specs are a different concern — same convention, separate namespace.
+
+**Proposed location:** `specs/saas/NN-<name>.md`
+
+```
+specs/
+├── 00-overview.md                  (existing — framework)
+├── 01-step-type.md                 (existing — framework)
+│   ...
+├── 22-cli-architecture.md          (existing — framework)
+└── saas/
+    ├── 00-overview.md              (links to this plan doc + spec index)
+    ├── 01-identity-access.md       (S1)
+    ├── 02-metering-spine.md        (S2)
+    ├── 03-api-keys.md              (S3)
+    ├── 04-inference-gateway.md     (S4)
+    ├── 05-billing-credits.md       (S5)
+    ├── 06-activation-pricing.md    (S6)
+    └── 07-trust-compliance.md      (S7)
+```
+
+**Rationale for the `saas/` subdirectory:** keeps framework-spec numbering stable (no renumber-on-conflict), makes it obvious at a glance which specs apply to which surface, and matches the existing project structure where SaaS is a new top-level concern alongside the framework rather than a continuation of it.
+
+**Reference mapping update:** when these specs are created, add rows to `.claude/rules/sync-spec-code-docs.md` mapping each SaaS spec to its source directory (`packages/api/src/<area>/`) and any related docs.
+
+## Open question
+
+- **`specs/saas/` vs extending top-level numbering (26+).** The subdirectory keeps things visually grouped; flat numbering matches the established pattern more strictly. Lean subdirectory unless a maintainer has a strong preference.
+- **Who owns each spec.** Once we know who's on the team, assign one DRI per spec. Specs without an owner rot.
+- **Spec freeze policy.** Do we lock S1+S2 before writing S3–S7, or allow concurrent drafting with explicit "subject to change" tags? Recommend lock-before-draft for S1+S2 only; S3–S7 can iterate concurrently against frozen S1+S2 contracts.
+
+---
+
 # Next concrete step
 
 Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 customer calls this week. The schema and `hasScope` signature are stable enough to start P0 in parallel if a second person is available, but a single engineer should sequence GTM → P0.
@@ -513,3 +635,4 @@ Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 cus
 | 2026-06-12 | OR-pragmatism debate: separated "OR as upstream" (keep) from "OR as billing model" (drop). Resolved with BYOK-default + trial credits pool + opt-in managed mode | User pushback on panel |
 | 2026-06-12 | Plan v1 documented with decision history | Living doc requirement |
 | 2026-06-12 | Postgres minimization directive: Postgres holds only the relational core (6 tables + outbox). bucket_state → Redis Lua; audit_log → Axiom via outbox; Idempotency cache + membership cache → Redis; bucket_periods archive → Tinybird | User directive on infra bottleneck risk |
+| 2026-06-12 | Added §3 proposal for splitting implementation into 7 per-purpose specs (S1–S7) under `specs/saas/`, in 4 priority tiers, with explicit dependency graph and conventions | User request — needed before P-1 completes so implementation can ramp without omnibus-spec review bottleneck |
