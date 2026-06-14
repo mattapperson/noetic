@@ -133,7 +133,9 @@ function validateParsedState(state: ParseState): void {
     process.exit(1);
   }
   if (!state.apiKey) {
-    process.stderr.write('Error: OPENROUTER_API_KEY not set. Use --api-key or set the env var.\n');
+    process.stderr.write(
+      'Error: OpenRouter API key not found. Pass --api-key, set OPENROUTER_API_KEY, or add `machine openrouter.ai login api password <key>` to ~/.netrc.\n',
+    );
     process.exit(1);
   }
 }
@@ -168,7 +170,8 @@ Usage: noetic [options]
 Options:
   --model <model>               Model to use (default: ${DEFAULT_MODEL})
   --cwd <dir>                   Working directory (default: current directory)
-  --api-key <key>               OpenRouter API key (or set OPENROUTER_API_KEY)
+  --api-key <key>               OpenRouter API key (also reads OPENROUTER_API_KEY,
+                                or 'machine openrouter.ai' from ~/.netrc)
   --max-turns <n>               Maximum conversation turns (default: ${DEFAULT_MAX_TURNS})
 
 Session management:
