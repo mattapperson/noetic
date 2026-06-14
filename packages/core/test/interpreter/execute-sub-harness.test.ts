@@ -336,8 +336,18 @@ describe('executeSubHarness', () => {
       async doStart(start: SubHarnessStartOptions): Promise<SubHarnessSession> {
         seenHistory = start.history ?? [];
         const transcript = seenHistory
-          .flatMap((i) => (i.type === 'message' ? i.content : []))
-          .map((c) => ('text' in c ? c.text : ''))
+          .flatMap((i): string[] => {
+            if (i.type !== 'message') {
+              return [];
+            }
+            return i.content.flatMap((c) =>
+              'text' in c
+                ? [
+                    c.text,
+                  ]
+                : [],
+            );
+          })
           .join(' ');
         return {
           sessionId: 's',

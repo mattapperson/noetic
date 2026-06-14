@@ -13,8 +13,18 @@
     "paths": {
       "@noetic-tools/core": ["../core/src/index.ts"],
       "@noetic-tools/core/*": ["../core/src/*"],
+      "@noetic-tools/types": ["../types/src/index.ts"],
+      "@noetic-tools/types/contract": ["../types/src/types/memory.ts"],
+      "@noetic-tools/types/*": ["../types/src/*"],
+      "@noetic-tools/memory": ["../memory/src/index.ts"],
+      "@noetic-tools/memory/*": ["../memory/src/*"],
       "@noetic-tools/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
       "@noetic-tools/platform-node": ["../platform-node/src/index.ts"],
+      "@noetic-tools/sub-harness": ["../sub-harness/src/index.ts"],
+      "@noetic-tools/sub-harness-claude-code": ["../sub-harness-claude-code/src/index.ts"],
+      "@noetic-tools/sub-harness-codex": ["../sub-harness-codex/src/index.ts"],
+      "@noetic-tools/sub-harness-opencode": ["../sub-harness-opencode/src/index.ts"],
+      "@noetic-tools/sub-harness-pi": ["../sub-harness-pi/src/index.ts"],
       "@noetic/eval": ["../eval/src/index.ts"],
       "@noetic/plugin-powerline": ["../plugin-powerline/src/index.tsx"],
       "@noetic/plugin-design-deck": ["../plugin-design-deck/src/index.tsx"]

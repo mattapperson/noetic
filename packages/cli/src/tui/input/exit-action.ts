@@ -59,9 +59,6 @@ function decideEscape(input: ExitActionInput): ExitAction {
 }
 
 function decideExit(input: ExitActionInput): ExitAction {
-  if (input.status === 'modal') {
-    return NOOP;
-  }
   if (isTurnInFlight(input.status)) {
     return ABORT;
   }
