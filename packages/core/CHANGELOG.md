@@ -1,3 +1,7 @@
+## @noetic-tools/core-v1.1.0 (2026-06-14)
+
+* feat(core): publish JSON Schema for dynamic workflows + multi-model judge example ([d7add74](https://github.com/mattapperson/noetic/commit/d7add74))
+
 ## @noetic-tools/core-v1.0.0 (2026-06-10)
 
 * fix: skip uninitialized layers, strip bun exports ([3c83c57](https://github.com/mattapperson/noetic/commit/3c83c57))
