@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/sub-harness-opencode",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "opencode sub-harness for Noetic — run the opencode agent as a Noetic step via step.opencode(...) or an opencode JSON workflow node.",
   "license": "Apache-2.0",
