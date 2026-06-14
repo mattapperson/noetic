@@ -81,7 +81,7 @@ describe('BINARY_MANIFEST.installOptionsFor — agent-browser', () => {
 describe('BINARY_MANIFEST.manualInstructionsFor', () => {
   it('returns OS-specific instructions for rtk on macOS', () => {
     const text = descriptorFor('rtk').manualInstructionsFor('macos');
-    expect(text).toContain('brew install rtk-ai/rtk/rtk');
+    expect(text).toContain('brew install rtk-ai/tap/rtk');
   });
 
   it('returns OS-specific instructions for rtk on Linux', () => {

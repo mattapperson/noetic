@@ -71,7 +71,7 @@ export default {
 | `worktree` | `WorktreeConfig` | — | Sub-agent isolation config — see [Hooks](/docs/code-agent-cli/hooks). |
 | `ui.doublePressWindowMs` | `int` 100–5000 | `800` | Window in ms within which a second `Ctrl+C` / `Ctrl+D` press triggers a graceful exit. |
 | `history.maxItems` | `int` 2–10000 | — | Cap on trailing items projected to the LLM each turn. Storage is untouched — this is a read-side projection only. When unset, history is uncapped. |
-| `shell.useRtk` | `boolean` | `true` | Wrap every command run by the bash tool through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. When `true` (the default) `rtk` is required on `PATH` — startup fails fast with install instructions if it is missing. Set `false` to opt out and run raw `sh -c` instead. Install rtk via `brew install rtk`, `cargo install --git https://github.com/rtk-ai/rtk`, or the upstream `install.sh`. |
+| `shell.useRtk` | `boolean` | `true` | Wrap every command run by the bash tool through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. When `true` (the default) `rtk` is required on `PATH` — startup fails fast with install instructions if it is missing. Set `false` to opt out and run raw `sh -c` instead. Install rtk via `brew install rtk-ai/tap/rtk`, `cargo install --git https://github.com/rtk-ai/rtk`, or the upstream `install.sh`. |
 | `agents` | `Record<string, AgentOverride>` | — | Per-sub-agent overrides keyed by `agent-type` (e.g. `explore`, `plan`, `verification`). Each override beats the matching SKILL.md frontmatter. Surfaced via the `/config` TUI editor. |
 
 ### `AgentOverride`
