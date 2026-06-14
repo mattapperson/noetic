@@ -78,6 +78,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
 | `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
 | `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
+| `28-context-split-view` | Docked `/context` panel, `Ctrl+W` focus swap, wide/narrow adaptive layout | TUI feature |
 
 ## Dependency Graph
 
