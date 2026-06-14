@@ -34,6 +34,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.6 Unkey rejected; in-house keys + verification cache](#16-unkey-rejected-in-house-keys--verification-cache)
    - [1.7 Cloudflare-first cloud strategy](#17-cloudflare-first-cloud-strategy)
    - [1.8 Observability graduated by paying-customer tier](#18-observability-graduated-by-paying-customer-tier)
+   - [1.9 Round 2 panel overrides (six decisions + Workers footguns + product additions)](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -50,6 +51,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [2.13 Cost-coverage invariants](#213-cost-coverage-invariants)
    - [2.14 Cloud architecture](#214-cloud-architecture)
    - [2.15 Observability & monitoring](#215-observability--monitoring)
+   - [2.16 Competitive positioning](#216-competitive-positioning)
 3. [Proposal: implementation specs](#proposal-implementation-specs)
    - [3.1 Why split](#31-why-split)
    - [3.2 Proposed specs (grouped, prioritized)](#32-proposed-specs-grouped-prioritized)
@@ -437,6 +439,113 @@ These are unique to a billing+inference platform and don't appear on a generic o
 - No "wire Sentry when something breaks" — it's free; wire day 1.
 - No PagerDuty before there's a real on-call rotation — Sentry → Slack → eyeball is fine until ~10 paying customers.
 
+## 1.9 Round 2 panel overrides (six decisions + Workers footguns + product additions)
+
+**Trigger:** Second-round adversarial panel review (PM + Principal Engineer + CEO advisor), explicitly empowered to challenge prior §1 decisions.
+
+**Headline:** the infra plan is sound, but six prior decisions warrant override, ~10 Workers-specific footguns need correction, and three product gaps (eval surface, competitive frame, BYOK trust model) need to ship in v1, not v2.
+
+### Six decision overrides
+
+**1. Authoritative bucket counter: Upstash Redis → Cloudflare Durable Objects** *(Engineer, high conviction; no counter-position)*
+
+Scalar `reserved` in Upstash leaks under Worker timeouts, client disconnects, and upstream 5xx because there is no per-reservation TTL. The 5-min reconciler diffs `used` (Tinybird), not `reserved` (Redis), so leaks never surface until hard caps trip seemingly at random. Upstash REST on the synchronous critical path is also an availability cliff with no fallback (their outage = our outage, violating the 99.9% commitment).
+
+**Switch authoritative `bucket_state` to a Durable Object per `(account_id, metric, period)`.** Reservations become per-id records with TTL alarms; settle deletes the record and applies actuals to `used`; alarms sweep expired reservations. Reconciler computes `reserved = SUM(active reservations)`. Strongly-consistent atomic ops co-located with the Worker, no REST hop, no separate-vendor outage. Upstash retained for eventually-consistent caches only (membership, key-verification cache hint, idempotency fingerprint, RPS buckets). The §1.7 dismissal ("different programming model") was wrong — it's one afternoon of reading.
+
+**2. P-1 gate: 1-week checklist → 3-week hard gate with kill criteria** *(PM + CEO, both high conviction)*
+
+§2.3 was 6 unowned bullets with §4 explicitly permitting parallel P0. Two senior reviewers independently called this fatal *after* the plan had a full round to fix it. New shape:
+
+- **Pre-call artifacts** (built before any P-1 call): written pricing hypothesis with 3 concrete tier-shape variants; live static `/pricing` page reflecting them; "Switching from LangSmith" landing page; competitive teardown table.
+- **Dual cohort, 8 calls each**: developer/BYOK vs non-developer/managed.
+- **Pass criteria**: ≥3 *written* LOIs at a stated price + ≥8/15 calls answer "I would paste my key IF [X]" with [X] captured verbatim. Verbal LOIs do not count.
+- **No parallel P0 build.** P0 starts when P-1 passes.
+- **Fail → reposition or pause.** The likely reposition is managed inference for non-developer ICP (i.e., the §1.4 hedge becomes the real product).
+
+**3. §1.4 BYOK-vs-managed hedge → commit to ONE path after P-1** *(CEO, high conviction)*
+
+The hedge is "operationally fictional." BYOK and managed are different stacks, fraud surfaces, brand positions. You cannot pivot mid-build. The dual-cohort P-1 picks the ICP; the loser becomes a separate plan if it wins later. After P-1, one path, one plan.
+
+**4. Trial pool: $5 any-model → $20 cheap-cached models, gated identity** *(PM + CEO)*
+
+PM: $5 ≈ one mid-size Sonnet conversation, not enough to evaluate the framework. CEO: $5 × 1000 throwaway emails = $5K loss + viral "free Claude tokens" HN post. Fix solves both:
+
+- $20/account lifetime trial pool
+- Default to cheap-cached models (Haiku / 4o-mini); premium models require BYOK
+- Eligibility gate: verified business email **or** phone **or** GitHub ≥30 days old
+
+**5. SOC2 evidence collection: conditional → unconditional in P0** *(CEO, significant conviction)*
+
+Asymmetric cost. Vanta/Drata = single-digit thousands to start. SOC2 Type II is 6–12 months — starting in month 3 forfeits Q1 2027 enterprise pipeline. The audit log, access reviews, and change management we're already building *are* the evidence. Start unconditionally in P0.
+
+**6. HMAC pepper: unversioned → `{pepper_version, hmac}` from day 1** *(Engineer)*
+
+First pepper rotation (employee departure, suspected leak, SOC2 control evidence) under the unversioned spec = forced re-HMAC of every key. Day-1 hedge is one extra Workers Secret. Cost at 50K keys is a migration project. Store `pepper_v1`, `pepper_v2` as separate Workers Secrets; verifier tries the key's tagged version; rotation re-HMACs lazily on next use or in batch.
+
+### Workers-specific correctness corrections (Engineer, all adopted)
+
+| Footgun | Fix |
+|---|---|
+| Hyperdrive caches queries by default; a cached `SELECT FROM api_keys WHERE prefix = ?` honors a revoked key for the cache TTL | Disable Hyperdrive query caching for `api_keys`, `members`, and any authz-sensitive table. Pooling stays on; caching is per-statement. |
+| UsageEvent fire-and-forget POST to Tinybird contradicts "event-sourced billing source of truth" — Workers + public internet drops events; idempotency only dedupes retries that don't happen | Route UsageEvent emission through **Cloudflare Queues**. Worker enqueues at settle time; Queue consumer ships to Tinybird with retries + DLQ. ~50ms added latency; billing source of truth is now durable. |
+| Silent `max_tokens` clamp produces non-deterministic eval outputs | **Refuse with 402/429 + `X-Remaining-Budget` header.** Silent clamp forbidden. |
+| Idempotency-Key spec only handles "we saw this key," not in-flight replays | State machine: `(account_id, idempotency_key) → {state: in_flight | succeeded | failed, response_ref?}`. In-flight = block-and-wait, not race. Streaming responses stored in R2. |
+| WorkOS 60s membership cache → fired admin can revoke production keys during eviction window | Define `SENSITIVE_SCOPES` (`keys:revoke`, `members:remove`, `billing:*`). Bypass cache for these; read from WorkOS or the strictly-consistent Postgres mirror. |
+| Tinybird PII validation at producer is insufficient — a future sub-harness path could smuggle prompts into `dims.error_message` | Tinybird-side defense-in-depth: materialized view with regex/length checks; reject or quarantine writes exceeding thresholds. |
+| Audit log via Postgres outbox + Cron = 60s+ lag under burst | Direct enqueue to Cloudflare Queue at commit time; consumer ships to Axiom. Drop Postgres outbox in v1. |
+| `/v1/health` self-ping is not credible SLA evidence in a customer dispute | Add **UptimeRobot free tier** external probe at Tier 0 — independent attestation. |
+| Postgres RLS + Hyperdrive prepared-statement cache is a documented footgun (RLS only works in explicit txs; cached prepared statements bypass) | Pick **typed `AccountScope` repo** only. Drop "RLS or AccountScope" ambiguity. |
+| Free-tier daily cap folded into bucket Lua → hot-key behavior at 00:00 UTC across all accounts | Either shard `period_start` into the key (`account:metric:YYYY-MM-DD`) or use Workers Analytics request count for the daily cap. |
+| Stripe Meter period-boundary misallocation (60s micro-batch + Stripe eventual consistency + `ts` near rollover) | 5-min grace window around rollover; stamp `period_anchor`; reconciler runs +10min after every rollover; manual replay tool built **before first paid customer**. |
+
+### Product additions (PM, all strongly supported)
+
+- **Add P3.5 "Eval surface" parallel with P3.** The moat (eval/GEPA) gets zero engineer-weeks in the current §2.6 — exact same flag CEO raised in round 1. P3.5 ships: in-product scorer definition, eval scores per trace, one GEPA optimization run visible end-to-end. Without this v1 has no answer to "why not LangSmith?"
+- **Eval/GEPA compute plane separate from Workers.** Won't fit 30s CPU cap. Cloudflare Containers (GA) or small Fly.io worker pool.
+- **BYOK key-handling spec including async/SDK-side mode.** §2.2 strategic posture #1 says "we forward your key" — that's the activation moment with zero product detail. Add: encrypted at rest with per-tenant DEK; write-only via dashboard; scope-restriction UI; rotation flow; **and a second mode where Noetic never sees the upstream key — the SDK calls upstream directly and POSTs the trace to Noetic async**. Helicone has this; removes the largest trust objection.
+- **Onboarding success-screen artifact**: 5-line `@noetic-tools/sdk` snippet running a typed agent → trace tree visible in dashboard within seconds + one eval score. Not a `curl`.
+- **Migration page**: "Switching from LangSmith" replaces "Migrating from OpenRouter/OpenAI" as primary. The switching customer is on LangSmith paying $39/mo, not on OR/OAI.
+- **Competitive positioning section** (new §2.16): name the 3–4 direct comps (LangSmith, Braintrust, Helicone, Langfuse), the 1–2 wedge claims, and the metric we're undeniably better on.
+- **Free-tier shape locked**: 1,000 agent-runs/mo + 500 eval scores/mo + 30-day trace retention. (Replaces the inconsistent §2.13 invariant 3 "10K agent-runs/day".)
+
+### CEO additions
+
+- **EU AI Act specialist call** before P0 ($500–800). Noetic's harness/memory/evaluator likely classifies as "provider of a general-purpose AI system" under Articles 53/55 — documentation/log-retention/transparency obligations independent of BYOK. If GPAI provider documentation is required, it's a 6–12 week project, not P6 polish.
+- **Customer support + on-call as a P0 line item.** Plain or email-only initially; ~20% of one engineer once first 5 paying customers exist; Resend onboarding-email lifecycle (day 1 / 7 / 30) — Resend is in stack but unused for lifecycle.
+- **AI Gateway abstraction with exit trigger.** AI Gateway is free *today* (likely monetizing 2026–27). Abstract behind `forwardToUpstream(provider, request)`. Documented exit: if pricing changes or managed inference needs to own caching/fallback as features, rip + replace with direct provider SDK + own cache (~1 week).
+- **Audit log retention SLA: 7 years.** Axiom hot 90 days; nightly parquet → R2 archive job built in P0 (~1 day, ~$5/mo). Without this, first GDPR/SOC2 ask is a fire drill.
+- **Cloudflare exit playbook** (2 pages in §2.14): cost/timeline to move API tier to Fly.io / Railway. Acquirer and Series A investor diligence will ask about 11-product Cloudflare concentration.
+- **Schedule rebaseline: 12 weeks 1-engineer OR 8 weeks 2-engineer.** Move P6 (status page polish, Svix, DPA, deletion state machine) out of paid-beta into "first paying customer + 30 days." The "8 weeks/1 engineer" headline is no longer honest after the round-2 additions.
+
+### Decisions explicitly held (panel preserved these)
+
+- §1.4 BYOK-default as the *primary* path (the commitment-to-one-ICP after P-1 is the change; not BYOK itself)
+- §1.5 Postgres minimization rule
+- §1.6 in-house API keys (but rebaseline to ~2 weeks including dashboard UX, not 3–4 days)
+- §1.7 Cloudflare-first (with exit playbook + AI Gateway abstraction added)
+- §1.8 observability tiered approach (but cut Tier 2/3 detail from this plan; move to separate roadmap note)
+- Event-sourced UsageEvent, Stripe Billing Meters with deterministic idempotency, cost-coverage invariants — "founder-grade thinking"
+
+### Items killed
+
+- §4 "P0 can start in parallel" — no parallel P0 before P-1 gate passes
+- In-memory soft pre-filter on bucket checks (DO atomic op is fast enough)
+- Three reconciler loops with separate thresholds from day 1 (start with one; tune in spec)
+- Postgres outbox + Cron audit shipper (replaced by direct Queue enqueue at commit)
+- Honeycomb at Tier 2 (Workers Analytics + Sentry breadcrumbs suffice through ~50 customers)
+- S3–S7 spec scaffolding before P-1 closes (write S1 + S2 only; collapse S6+S7; defer S5 if pricing comes back per-seat)
+- Postgres RLS (typed `AccountScope` only)
+- Silent `max_tokens` clamp
+- "Migrating from OpenRouter/OpenAI" as primary migration landing (replace with "Switching from LangSmith")
+- §1.4 hedge framing (split decisively after P-1 dual-cohort)
+
+### Open questions resolved by this entry
+
+- **Free-tier shape** (§2.11): locked at 1,000 agent-runs/mo + 500 eval scores/mo + 30-day trace retention
+- **Trial credits funding** (§2.11): $20/account cheap-cached + gating (above)
+- **Pricing units**: still open, but constrained — P-1 tests three written hypotheses on a live `/pricing` page (per-seat, per-agent-run, hybrid), and customers react to numbers rather than generating them.
+
 ---
 
 # Current plan
@@ -451,24 +560,46 @@ Noetic's product is the **typed agent framework + memory layers + eval/GEPA opti
 
 The load-bearing decisions. Change these → re-litigate the whole plan.
 
-1. **BYOK-default for inference.** Customers paste their own OR/Anthropic/OAI key. We forward, we trace, we don't bill for tokens. This removes the margin trap, fraud/chargeback exposure, GDPR-processor risk, and merchant-of-record problem.
-2. **Trial credits pool** (operational, not a billing tier) for the "30-second curl" demo case. Capped at $5/account, no overage, no Stripe involvement. Hits cap → "add your key to continue."
+1. **BYOK-default for inference (primary v1 path).** Customers paste their own OR/Anthropic/OAI key. We forward, we trace, we don't bill for tokens. Removes the margin trap, fraud/chargeback exposure, GDPR-processor risk, and merchant-of-record problem. After P-1 dual-cohort (see §2.3), this commitment becomes singular — managed inference, if it wins, gets a separate plan. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+2. **Trial credits pool**: $20/account lifetime, defaulted to cheap-cached models (Haiku / 4o-mini), gated on verified business email **or** phone **or** GitHub ≥30 days old. Premium models require BYOK. Hits cap → "add your key to continue."
 3. **Managed inference** ships as a feature flag for explicit design partners only — gated behind CC + manual review + hard caps. Not a v1 monetization path.
 4. **OR as upstream is fine.** Model catalog, normalized streaming, one-vendor billing on our side. Vendor choice, not business model.
 5. **Event-sourced usage** for everything billable. Buckets, invoices, dashboards are all read models computed from immutable `UsageEvent` rows.
-6. **Buy the boring stuff.** WorkOS (auth), Stripe Billing Meters (billing), Tinybird (usage analytics), Upstash Redis (hot-path counters + caches), Axiom (audit log shipping), Unkey (keys — TBD), Svix (webhooks when needed). Custom code budget = UsageEvent ingestion + bucket check + the Noetic value layer.
-7. **Postgres only when strictly relational.** Postgres holds accounts/members/api_keys/buckets-config/billing_period_summary/outbox — the small, joined, transactional core. Everything else (counters, caches, audit log, time-series, ingest) lives on a purpose-built store. See [§1.5](#15-postgres-minimization-directive) for the decision rule.
+6. **Buy the boring stuff.** WorkOS (auth), Stripe Billing Meters (billing), Tinybird (usage analytics), Upstash Redis (eventually-consistent caches only), Axiom (audit log shipping), Svix (webhooks when needed), UptimeRobot (external probe), Vanta/Drata (SOC2 evidence). Custom code budget = the Noetic value layer.
+7. **Postgres only when strictly relational.** Postgres holds accounts/members/api_keys/buckets-config/billing_period_summary — the small, joined, transactional core. Authoritative counters live in Durable Objects; caches in Upstash; analytics in Tinybird; audit in Axiom (shipped via Queue). See [§1.5](#15-postgres-minimization-directive) and [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 
-## 2.3 P-1 — Pre-build (week 0, no code)
+## 2.3 P-1 — Pre-build (3-week hard gate, no code)
 
-Gates the build. Skip this and we ship the wrong product.
+**Gates the build. No parallel P0.** See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions) for rationale.
 
+### Pre-call artifacts (built before any P-1 call)
+
+- [ ] Written pricing hypothesis with **3 concrete tier-shape variants** (per-seat / per-agent-run / hybrid)
+- [ ] Live static `/pricing` page reflecting the 3 variants — the discovery instrument
+- [ ] "Switching from LangSmith" landing page — side-by-side trace UI screenshots, pricing comparison at typical volumes, one-line `@noetic-tools/sdk` shim that ingests LangSmith-format traces during transition
+- [ ] Competitive teardown table (LangSmith / Braintrust / Helicone / Langfuse — pricing, free-tier shape, eval workflow) on `/pricing` and in [§2.16](#216-competitive-positioning)
 - [ ] 1-page GTM: named ICP, wedge, conversion event, channel
-- [ ] 15 prospective-user calls; validate "BYOK + traces + eval" is the pull
-- [ ] 3+ design partner LOIs (verbal is fine) before P0 starts
-- [ ] Decide ICP → SOC2 path (teams = start week 1; indie devs = defer)
-- [ ] Decide tier shape: Free / Pro / Team / Enterprise. Free-tier limits in agent-runs (or seats), not tokens
-- [ ] Draft public `/pricing` page copy + calculator inputs
+- [ ] 1-hour EU AI Act specialist call ($500–800) — classify Noetic under GPAI provider obligations for both BYOK and managed paths
+
+### Dual cohort discovery (16 calls)
+
+- [ ] **8 developer/BYOK calls** — validate "BYOK + traces + eval" is the pull
+- [ ] **8 non-developer/managed calls** — validate the managed-inference hedge if it has demand
+
+### Pass criteria (hard gate)
+
+- [ ] ≥3 **written** LOIs at a stated price (verbal LOIs do not count)
+- [ ] ≥8 of 15 calls answer "I would paste my key IF [X]" with [X] captured verbatim (the [X] is the onboarding spec)
+- [ ] **One ICP committed.** No hedge into P0. If managed inference wins, that becomes a separate plan.
+
+### Fail → reposition or pause
+
+If <3 LOIs or <8/15 trust validation: reposition (likely managed inference for non-developer ICP) or pause until pain materializes. Do not "build anyway."
+
+### Independent of P-1 outcome, kicked off in parallel (not gating)
+
+- [ ] Vanta or Drata workspace provisioned (SOC2 evidence collection from day 1; see [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions) override 5)
+- [ ] EU AI Act classification documented based on specialist call
 
 ## 2.4 Architectural primitives
 
@@ -478,25 +609,36 @@ The shapes that are expensive to rip out later.
 - **Account** ≈ WorkOS Organization. Billable tenant.
 - **Member** — user-in-account relationship. Users can belong to many accounts.
 - **Role** — named scope bundle. Built-ins: `owner` / `admin` / `member`. Custom deferred.
-- **Scope** — atomic permissions. `hasScope(member, scope, account)` is the only auth check. V1 implementation: hardcoded role→scope map (no scope table). Signature preserved so custom roles ship as data later.
-- **ApiKey** — Account-owned with `created_by` audit field. Member-owned only for the `noetic login` CLI flow with rotate-on-offboarding. Stored as prefix + HMAC-SHA256(secret, KMS-pepper). Env-prefixed: `noetic_live_*` / `noetic_test_*`.
+- **Scope** — atomic permissions. `hasScope(member, scope, account)` is the only auth check. V1 implementation: hardcoded role→scope map (no scope table). Signature preserved so custom roles ship as data later. **`SENSITIVE_SCOPES` set** (`keys:revoke`, `members:remove`, `billing:*`) bypasses the 60s membership cache and reads from WorkOS or the strict Postgres mirror.
+- **ApiKey** — Account-owned with `created_by` audit field. Member-owned only for the `noetic login` CLI flow with rotate-on-offboarding. Stored as `{prefix, pepper_version, hmac}` where `hmac = HMAC-SHA256(secret, pepper_v<N>)`. **Versioned pepper** (`pepper_v1`, `pepper_v2`, ... as separate Workers Secrets) allows lazy rotation. Env-prefixed: `noetic_live_*` / `noetic_test_*`.
+- **BYOK UpstreamKey** — encrypted at rest with per-tenant DEK, write-only via dashboard (never displayed after creation), revocable independent of upstream provider. Two modes: (a) **proxied** — Noetic forwards via AI Gateway; (b) **async/SDK-side** — the SDK calls upstream directly and POSTs the trace to Noetic afterward, Noetic never sees the key. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 - **Bucket** — metered allowance for a metric over a period: `{metric, period, included_quantity, overage_price, hard_cap}` (config in Postgres). V1 ships hardcoded buckets per account; config UI when ≥3 customers ask.
-- **BucketState** — authoritative live counter `{account_id, metric, period_start, used, reserved}` stored in **Redis** (Upstash), accessed via atomic Lua script for reserve/settle/release. Periodic reconciliation against Tinybird UsageEvent sum (every 5min) is the durability/correctness backstop.
-- **UsageEvent** — append-only, immutable: `{account_id, member_id?, api_key_id?, metric, quantity, unit, ts, idempotency_key, dims jsonb}`. Stored in **Tinybird** (not Postgres). PII-forbidden in `dims` (schema-validated at producer).
-- **AuditLog** — append-only event stream shipped to **Axiom**, tagged by `account_id`. Written via outbox pattern: the audit-bearing mutation writes an `outbox` row in the same Postgres tx; a worker ships outbox → Axiom at-least-once. Customer-facing audit read/export queries Axiom directly.
-- **Outbox** — small bounded Postgres table; transactionally linked to mutations that emit audit events or call external systems (Stripe/WorkOS/Axiom). Worker drains and marks rows complete.
+- **BucketState** — authoritative live counter in a **Durable Object per `(account_id, metric, period_start)`**. Holds `{used, reservations: {id → {worst_case, expires_at}}}`. Reservations have TTL; DO alarms sweep expired reservations. Reconciler diffs `used` against Tinybird every 5 minutes; `reserved = SUM(reservations.values.worst_case)` is computed live. Replaces the v1 Upstash design; see [§1.9 override 1](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- **UsageEvent** — append-only, immutable: `{account_id, member_id?, api_key_id?, metric, quantity, unit, ts, period_anchor, idempotency_key, dims jsonb}`. **Emitted via Cloudflare Queue, not fire-and-forget** — Queue consumer ships to Tinybird with retries + DLQ. `period_anchor` is a clamped period identifier for Stripe Meter rollover safety. PII-forbidden in `dims` enforced at producer **and** Tinybird-side (materialized view with regex/length checks; quarantine + alert on overflow).
+- **AuditLog** — append-only event stream shipped to **Axiom** tagged by `account_id`. Written via **direct Cloudflare Queue enqueue** from the mutation handler (not Postgres outbox in v1). Consumer ships to Axiom with retries + DLQ. **Retention SLA = 7 years**: Axiom hot 90 days; nightly parquet → R2 archive job. Customer-facing audit read/export queries Axiom directly; deep-history queries hit R2.
 
 ### Two design decisions
 1. **Usage as event-sourced metrics, not counters.** New metric = one producer change, zero schema changes. Reconciliation is free.
 2. **Scopes in the hot path, roles only in UI.** Authorization is always `hasScope`. Adding "admin can do X but not Y" later is data.
 
 ### Authoritative bucket check (the non-negotiable)
-- Pre-call: **reserve worst-case cost** (`max_tokens × model_price`) via an atomic Redis Lua script on `bucket_state:{account_id}:{metric}:{period_start}`. The script checks `used + reserved + worst_case ≤ included + overage_allowance` and atomically increments `reserved`. Single round-trip, no read-then-write race.
-- For hard-cap accounts: **clamp `max_tokens` to remaining budget** — never trust the client.
-- Post-call: settle actual usage (`reserved -= worst_case; used += actual`), release unused reservation. Settle in same Lua script call.
-- Per-account in-flight concurrency cap (separate from rate limit).
-- In-memory rollup is OK only as a soft pre-filter ahead of the authoritative check.
-- **Durability/reconciliation:** Upstash Redis persistence covers single-node crashes. Every 5 minutes, a reconciler diffs Redis `used` against Tinybird `SUM(quantity) WHERE ts ≥ period_start`. Discrepancy > threshold → alert + automatic Redis correction. UsageEvent (Tinybird) is the source of truth for billing; Redis is the fast access path.
+- Pre-call: **reserve worst-case cost** (`max_tokens × model_price`) via an RPC to the DO for `(account, metric, period)`. Atomic check `used + sum(reservations.worst_case) + worst_case ≤ included + overage_allowance`; on success, store `{reservation_id, worst_case, expires_at = now() + upstream_timeout}` and return `reservation_id`. Single round-trip, strongly consistent, no separate-vendor outage.
+- For hard-cap accounts: **refuse the request with 402/429 + `X-Remaining-Budget` header** — silent server-side clamp is forbidden (produces non-deterministic eval outputs).
+- Post-call: settle actual usage by `reservation_id` — DO deletes the reservation and increments `used` by `actual`. Idempotent on the `reservation_id`.
+- Expired reservations swept by DO alarm — leaks are bounded by the upstream timeout, not unbounded as the v1 scalar design allowed.
+- Per-account in-flight concurrency cap enforced inside the same DO.
+- **Durability/reconciliation:** DOs are strongly consistent and durably stored. Every 5 minutes, a reconciler diffs DO `used` against Tinybird `SUM(quantity) WHERE ts ≥ period_start AND period_anchor = current`. Discrepancy > 0.1% → alert + automatic DO correction. UsageEvent (Tinybird) is the source of truth for billing; DO is the fast access path.
+
+### BYOK key-handling spec
+
+The trust contract for the activation moment. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+
+- **Storage:** encrypted at rest with per-tenant DEK. DEK wrapped by KMS (Workers Secrets v1; AWS KMS at SOC2 trigger). Key material never logged, never echoed, never displayed after creation.
+- **UI contract:** write-only. Customer pastes key once; dashboard shows last-4 + creation timestamp + last-used. Edit = paste new key (revoke old).
+- **Scope-restriction:** customer can scope the *forwarded* key to specific models or specific provider endpoints — Noetic only sends what's allowed.
+- **Revocation:** revoking the BYOK record in Noetic invalidates it in seconds (no Hyperdrive cache; see §2.14). Upstream provider revocation is independent.
+- **Mode A — proxied (default):** Worker → AI Gateway → upstream. Standard path; usage emitted from response.
+- **Mode B — async/SDK-side:** `@noetic-tools/sdk` calls upstream directly with the customer's key. SDK POSTs trace + usage to Noetic asynchronously. **Noetic never sees the upstream key.** Removes the largest trust objection for security-conscious customers. ~few hundred LoC in the SDK; required for Mode A's existence to be a *choice*, not a requirement.
 
 ## 2.5 Stack
 
@@ -507,9 +649,12 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 | Layer | Choice | Rationale |
 |---|---|---|
 | API + inference gateway | **Cloudflare Workers** running `packages/api` (Hono) | Edge-deployed, Hono runs natively, SSE works (30s CPU is CPU-bound, inference is idle-waiting), free DDoS + WAF baked in |
+| Authoritative bucket counter | **Cloudflare Durable Objects** per `(account, metric, period)` with TTL'd reservations + alarms | Strongly consistent, co-located with Worker, no separate-vendor outage on the synchronous critical path. See [§1.9 override 1](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). |
+| Eval/GEPA compute plane | **Cloudflare Containers** (when GA) or **Fly.io worker pool** | Does not fit Workers 30s CPU cap; provisioned separately. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions) product additions. |
 | Local dev runtime | Bun | Fast, matches monorepo; same Hono code runs on Workers |
-| Inference upstream wrapper | **Cloudflare AI Gateway** (free) | Caching + provider fallback + real-time logs in front of OR/Anthropic/OAI at no cost |
-| Background workers (outbox shipper, billing reporter, reconciler) | **Cloudflare Cron Triggers + Queues** | Cron free with Workers Paid; Queues $0.40/1M ops |
+| Inference upstream wrapper | **Cloudflare AI Gateway** (free) **behind a `forwardToUpstream(provider, request)` abstraction** | Caching + provider fallback + real-time logs at no cost; abstraction preserves optionality if AI Gateway pricing changes or managed inference needs to own caching as a product feature |
+| Background workers (billing reporter, reconciler, archive shipper) | **Cloudflare Cron Triggers + Queues** | Cron free with Workers Paid; Queues $0.40/1M ops |
+| Audit / UsageEvent shipping | **Cloudflare Queues → Tinybird + Axiom** with retries + DLQ | Replaces Postgres outbox + Cron audit shipper (which had 60s+ lag under burst) and fire-and-forget UsageEvent POST (which dropped events). See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). |
 | Dashboard hosting | **Cloudflare Pages** — extend `packages/web` (or split `packages/dashboard`) | Free at our scale; same-domain integration with Workers |
 | Object storage (exports, generated reports, eventual audit dumps) | **Cloudflare R2** | Zero egress fees, S3-compatible |
 | Postgres connection pooling | **Cloudflare Hyperdrive** | Workers can't hold long-lived Postgres connections; Hyperdrive pools + caches + TLS-terminates |
@@ -521,7 +666,7 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 | Layer | Choice | Rationale |
 |---|---|---|
 | Relational core (OLTP) | **Neon** + Drizzle — **only** accounts, members, api_keys, buckets-config, billing_period_summary, outbox | Serverless Postgres for Workers; scales to zero; free tier covers v1. See [§1.5](#15-postgres-minimization-directive) for what does *not* go here. |
-| Hot-path counters + caches | **Upstash Redis** — bucket_state, key-verification cache, idempotency-key fingerprint, WorkOS membership cache, rate limit, per-key RPS bucket | REST API + pay-per-request fits Workers; atomic Lua/INCRBY (Cloudflare KV can't do this) |
+| Eventually-consistent caches | **Upstash Redis** — key-verification cache (60s), WorkOS membership cache (60s, excluding `SENSITIVE_SCOPES`), idempotency-key fingerprint, per-key RPS bucket | REST + pay-per-request fits Workers. **Not authoritative for bucket_state** (that moved to DOs in [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)). |
 | Usage analytics + time-series | **Tinybird** (or ClickHouse Cloud) | High write volume, append-only, analytical queries |
 | Audit log | **Axiom** tagged by `account_id`, shipped from Postgres outbox via Cloudflare Logpush + worker | Append-only, immutable structurally, customer-facing read/export queries Axiom directly |
 
@@ -533,93 +678,120 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 | Billing | **Stripe Billing Meters API** | Current API (legacy metered deprecated) |
 | Email | **Resend** | Free 3K/mo, $20/mo for 50K |
 | Webhooks (out) | **Svix** when first customer asks | Reliable delivery is a 2-week project we don't need now |
-| Inference upstream | **OpenRouter** (default) + direct Anthropic/OAI | One API, normalized streaming; fronted by Cloudflare AI Gateway |
+| Inference upstream | **OpenRouter** (default) + direct Anthropic/OAI | One API, normalized streaming; fronted by Cloudflare AI Gateway (abstracted for optionality) |
+| External uptime probe | **UptimeRobot free tier** (50 monitors, 5-min interval) | Independent attestation source for `/v1/health` — a self-ping from a Cloudflare Worker is not credible SLA evidence to a customer's lawyer. Tier 0. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). |
+| SOC2 evidence collection | **Vanta or Drata** from P0 unconditionally | Asymmetric cost: single-digit thousands to start, vs ~1 year of enterprise pipeline lost by deferring. See [§1.9 override 5](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). |
 
 ### Application-layer (in-house)
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| API keys | In-house: HMAC-SHA256 + Workers Secrets pepper + Upstash 60s verification cache | 3–4 day build; no vendor in auth hot path; marginal cost per free user ≈ 0 with cache. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache) |
+| API keys | In-house: `{prefix, pepper_version, hmac}` with versioned Workers Secrets pepper + Upstash 60s verification cache | ~2 weeks total (engineering + dashboard UX); no vendor in auth hot path. Versioned pepper allows lazy rotation. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache) and [§1.9 override 6](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). |
 | SDK | `@noetic-tools/sdk` thin wrapper | Surfaces trace IDs, ties to `@noetic-tools/core` |
 
 ## 2.6 Phased build
 
-Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
+**Target: 12 weeks one engineer OR 8 weeks two engineers.** The original "6–8 weeks/1 engineer" headline was no longer honest after the round-2 additions (eval surface, BYOK key spec, AI Act analysis, Vanta kickoff, observability Tier 0). P6 (Svix, DPA, deletion state machine, status-page polish) moves out of paid-beta into "first paying customer + 30 days." See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 
-### P0 — Foundation (wk 1)
+### P0 — Foundation (wk 1–2)
 - `packages/api` skeleton (Hono on Workers; Bun for local dev/tests)
-- **CI gate from day 1:** every PR runs `wrangler deploy --dry-run` to catch Workers-incompatible imports. Library selection rule: Workers-compatible variants only (`@neondatabase/serverless`, `@upstash/redis` REST, etc.). See [§1.7](#17-cloudflare-first-cloud-strategy).
-- Cloudflare account + Workers + Pages + R2 + Hyperdrive provisioned
-- Postgres schema on **Neon** (relational core only): `users`, `accounts`, `members`, `api_keys`, `buckets` (config), `billing_period_summary`, `outbox`. Hyperdrive in front.
-- Upstash Redis provisioned. `bucket_state` Lua scripts (reserve/settle/release) written and tested
-- Axiom workspace provisioned. Logpush → Axiom configured. Outbox-shipper worker scaffold (Postgres outbox → Axiom)
-- Tinybird workspace + `UsageEvent` ingest endpoint
-- WorkOS AuthKit integration. **WorkOS is source of truth on read path**: 60s TTL membership cache (Upstash), webhooks for cache invalidation only, daily reconciliation cron (Cloudflare Cron Trigger)
-- `hasScope()` middleware, default-deny. V1: hardcoded role→scope map
-- Account ID in every URL **plus** Postgres RLS or typed `AccountScope` repo guard
-- CI cross-tenant pen-test suite (try-to-read-another-tenant)
-- **Sentry wired (free tier)** — every Worker exception captured with stack + `account_id` + `request_id` + `trace_id` context
-- **Structured-logging discipline** — logger wrapper enforces `account_id` / `request_id` / `trace_id` on every line; Cloudflare Logpush → Axiom configured for request logs (same pipe as audit)
-- **`/v1/health` Cron Worker** (1-minute interval) exercising auth + bucket check + Tinybird ingest + AI Gateway round-trip; Sentry alert on N consecutive failures. See [§1.8](#18-observability-graduated-by-paying-customer-tier).
+- **CI gate:** every PR runs `wrangler deploy --dry-run`. Library selection rule: Workers-compatible variants only.
+- Cloudflare account + Workers + Pages + R2 + Hyperdrive + **Durable Objects** + Queues provisioned
+- **Hyperdrive query caching DISABLED for `api_keys`, `members`, and any authz-sensitive table.** Pooling stays on; caching is per-statement. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- Postgres schema on **Neon** (relational core only): `users`, `accounts`, `members`, `api_keys`, `buckets` (config), `billing_period_summary`. No `outbox` in v1 — audit/UsageEvent go via Queues directly. Hyperdrive in front.
+- **`BucketStateDO`** scaffolded — reserve/settle/release/sweep methods, alarm-driven TTL on reservations
+- Upstash Redis provisioned for **eventually-consistent caches only** (membership 60s, key-verification 60s, idempotency fingerprint, RPS buckets). Not authoritative.
+- Axiom workspace provisioned. **Audit Queue → Axiom consumer** (replaces Postgres outbox + Cron audit shipper from v0). **Nightly parquet → R2 archive job** for 7-year retention SLA.
+- Tinybird workspace + `UsageEvent` ingest endpoint. **UsageEvent Queue → Tinybird consumer** with retries + DLQ (replaces fire-and-forget POST).
+- Tinybird-side **PII defense-in-depth**: materialized view with regex/length checks; reject or quarantine writes that exceed thresholds.
+- WorkOS AuthKit integration. **WorkOS is source of truth on read path**: 60s membership cache in Upstash, webhooks for cache invalidation, daily reconciliation cron. **`SENSITIVE_SCOPES` bypass cache** and read strict.
+- `hasScope()` middleware, default-deny. V1: hardcoded role→scope map.
+- **Typed `AccountScope` repo** for compile-time tenant isolation (chosen over Postgres RLS — Hyperdrive's prepared-statement cache bypasses RLS).
+- Account ID in every URL + CI cross-tenant pen-test suite
+- **Sentry wired (free tier)** with `account_id` / `request_id` / `trace_id` context
+- **Structured-logging discipline** — logger wrapper enforces tags; Logpush → Axiom for request logs
+- **`/v1/health` Cron Worker** (1-minute) exercising auth + DO bucket reserve + Tinybird Queue ingest + AI Gateway round-trip
+- **UptimeRobot external probe** against `/v1/health` (Tier 0 — independent attestation)
+- **Vanta or Drata workspace** provisioned (SOC2 evidence collection from day 1; see [§1.9 override 5](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions))
+- **Customer-support surface decision** (Plain or email-only) + on-call rotation document
+- EU AI Act classification document (output of P-1 specialist call) lands here
 
-### P0.5 — Time-to-first-token (wk 1, parallel)
-- Signup auto-provisions personal Account + default `noetic_test_*` key + trial bucket
-- Success screen shows copy-paste `curl` (or BYOK setup + curl)
-- Instrument **time-to-first-200** as north-star activation metric
-- "Migrating from OpenRouter/OpenAI" landing snippet
+### P0.5 — Time-to-first-value (wk 2, parallel)
+- Signup auto-provisions personal Account + default `noetic_test_*` key + trial bucket ($20, cheap-cached models, identity-gated per [§1.9 override 4](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions))
+- **Success screen artifact: 5-line `@noetic-tools/sdk` snippet** running a typed agent → trace tree visible in dashboard within seconds + one eval score. (Not a `curl`.)
+- Instrument **time-to-first-200** and **time-to-first-eval-score** as north-star activation metrics
+- "Switching from LangSmith" landing as primary migration page (`/migrate/langsmith`)
+- "Migrating from OpenRouter/OpenAI" as secondary
+- Resend onboarding email lifecycle (day 1 / 7 / 30)
 
-### P1 — Account self-serve (wk 2)
+### P1 — Account self-serve (wk 3)
 - Members list, invite flow, role assignment UI
-- **Customer-facing audit log** read + export API
-- Outbox-pattern audit on Stripe/WorkOS mutations (no cross-network Postgres tx)
+- **Customer-facing audit log** read + export API (Axiom-backed for 90 days; R2 archive for deeper history)
+- Mutations enqueue audit events to Queue at commit (no Postgres outbox in v1)
 
-### P2 — API keys (wk 2, ~3–4 days)
-- In-house: `noetic_<env>_<24B-base62>`, stored as prefix + HMAC-SHA256 with KMS-pepper, constant-time compare on the HMAC
-- **Redis verification cache, 60s TTL** on `(api_key_hash) → {account_id, scopes, status}` — the non-negotiable cost-coverage primitive ([§1.6](#16-unkey-rejected-in-house-keys--verification-cache), [§2.13](#213-cost-coverage-invariants))
-- Cache invalidation on revoke + on scope/membership change
+### P2 — API keys (~1 week including UX, not 3–4 days)
+- In-house: `noetic_<env>_<24B-base62>`. Stored as `{prefix, pepper_version, hmac}` with **versioned pepper** (`pepper_v1`, `pepper_v2`, ... as Workers Secrets)
+- Verifier tries the key's tagged version; lazy re-HMAC on next use during rotation
+- **Redis verification cache, 60s TTL** on `(prefix) → {account_id, scopes, status}`. Cache invalidated on revoke + scope change.
 - Account-owned by default, `created_by` audit field, rotate-on-offboarding
-- Per-key Redis token-bucket RPS limit (free-tier default, paid-tier override)
-- **Honor `Idempotency-Key` header** on the inference gateway (24h TTL fingerprint cache, same Redis instance)
-- Dashboard UI: create / list / revoke / last-used / RPS-stats
+- Per-key RPS token bucket (Upstash) — free-tier default, paid override
+- **`Idempotency-Key` state machine**: `(account_id, key) → {state: in_flight | succeeded | failed, response_ref?}`. In-flight replays block-and-wait; streaming responses stored in R2.
+- Dashboard UI: create / list / revoke / last-used / RPS-stats. Service-account model documented (debt for v1.1: rotation + scope-restriction UI).
 
-### P3 — BYOK + observability gateway (wk 3–4)
+### P3 — BYOK + observability gateway (wk 4–5)
 - `@noetic-tools/sdk` wraps the gateway, surfaces trace IDs, integrates with `@noetic-tools/core`
-- **Worker → Cloudflare AI Gateway → upstream provider** — AI Gateway adds caching, provider fallback, and real-time logs for free; Worker owns auth + bucket + UsageEvent emission
-- **BYOK default**: customer key → forward via AI Gateway to OR/Anthropic/OAI, capture usage from response, emit `UsageEvent` (token counts, model, tool calls, trace ID)
-- **Trial credits** path: forward via Noetic's OR account through AI Gateway, cap at $5 lifetime/account, no overage
-- **Managed inference** path: feature flag for design partners only (CC + manual review + hard caps)
-- Pass-through model IDs with `noetic/` prefix at most — **no model aliasing in v1**
-- Read usage from final SSE chunk (no tee infrastructure in v1)
+- **`forwardToUpstream(provider, request)` abstraction** wrapping Cloudflare AI Gateway — preserves optionality if AI Gateway pricing changes (see [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions))
+- **BYOK Mode A (proxied)**: customer key → AI Gateway → upstream. Standard path; usage emitted from response to Tinybird via Queue.
+- **BYOK Mode B (async/SDK-side)**: SDK calls upstream directly with customer key; SDK POSTs trace + usage to Noetic asynchronously. **Noetic never sees the upstream key.** Removes the largest trust objection.
+- **BYOK key storage spec implemented** (encrypted at rest with per-tenant DEK; write-only UI; revocation; scope-restriction). See §2.4.
+- **Trial credits** ($20 cheap-cached, identity-gated): forward via Noetic's OR account through AI Gateway
+- **Managed inference** path: feature flag for design partners only (CC + manual review + hard caps + signed ToS chargeback waiver)
+- Pass-through model IDs with `noetic/` prefix at most — no model aliasing in v1
+- Read usage from final SSE chunk (no tee in v1)
 
-### P4 — Metering + buckets (wk 4–5)
-- Authoritative bucket check in Redis (atomic Lua: reserve → settle → release)
-- 5-minute reconciler diffs Redis `used` against Tinybird `SUM(quantity) WHERE ts ≥ period_start`; alerts + corrects on drift
-- Tinybird `UsageEvent` dedup on `(account_id, idempotency_key)` with TTL by ts (Tinybird materialized view, not a Postgres unique index)
-- `dims jsonb` producer-side schema validation (no prompts/tool args/secrets)
-- Near-real-time current-hour usage view from Tinybird (10–30s lag)
-- Spend alerts + graceful hard-cap UX (429 with `X-Remaining-Budget` header)
-- Period rollover writes a `billing_period_summary` row in Postgres (one row per account per period — bounded, joinable); historical detail stays in Tinybird
+### P3.5 — Eval surface (wk 5–6, parallel with P3 tail)
 
-### P5 — Billing + prepaid credits (wk 5–6)
+**The moat. Without this, v1 has no answer to "why not LangSmith?" See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions) product additions.**
+
+- In-product scorer definition (declarative or code), persisted per account
+- Eval scores visible per trace in the dashboard
+- One **GEPA optimization run** end-to-end visible in UI (input → variants → scored runs → winner)
+- Eval/GEPA compute provisioned on **Cloudflare Containers (when GA) or Fly.io worker pool** — does not fit Workers 30s CPU cap
+- Time-to-first-eval-score instrumented alongside TTF-200
+
+### P4 — Metering + buckets (wk 6–7)
+- **Authoritative bucket check via `BucketStateDO.reserve(account, metric, period, worst_case)`** — atomic, strongly consistent, TTL on reservations swept by DO alarms
+- **Refuse hard-cap accounts with 402/429 + `X-Remaining-Budget` header.** No silent `max_tokens` clamp.
+- Settle by `reservation_id` (idempotent)
+- Per-account in-flight concurrency cap enforced inside the DO
+- **One reconciler loop in v1** (Tinybird `UsageEvent` sum vs DO `used`) — tune in spec; expand later if needed
+- Tinybird `UsageEvent` dedup on `(account_id, idempotency_key)` via materialized view, time-bounded
+- `dims jsonb` PII validation at producer **and** Tinybird-side defense-in-depth
+- Near-real-time current-hour usage view from Tinybird
+- **Free-tier daily cap**: shard `period_start` into the key (`account:metric:YYYY-MM-DD`) to avoid hot-key behavior at 00:00 UTC. Alternative: Workers Analytics request count for the cap.
+- Period rollover writes a `billing_period_summary` row in Postgres; historical detail stays in Tinybird
+
+### P5 — Billing + prepaid credits (wk 7–9)
 - **Stripe Billing Meters API** (not legacy metered)
 - Per-event idempotency key `{account_id}:{metric}:{usage_event_id}`
-- 60s micro-batch reporter (not nightly)
+- 60s micro-batch reporter
+- **Stripe Meter period-boundary handling**: 5-minute grace window around rollover — do not ship UsageEvents within 5min of rollover; stamp `period_anchor` to clamp events to their belonging period; reconciler runs +10 min after every period rollover, not just nightly. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- **Manual replay tool built BEFORE first paid customer**, not as polish
 - Self-computed `billing_period_summary`; nightly reconciliation diffs reported-to-Stripe vs UsageEvent sum
-- Reporter lag SLO + alert + manual replay tool
-- **Billing-correctness reconciler alerts routed to Sentry + Slack** (see [§1.8](#18-observability-graduated-by-paying-customer-tier)) — three loops: (1) Tinybird `UsageEvent` sum vs Redis `bucket_state` drift > 1%; (2) Tinybird sum vs Stripe Meters reported > 0.5%; (3) outbox rows older than 5min unshipped
-- **`model_cost_usd` emitted as a `UsageEvent` dimension** (from upstream usage block) — per-account token economics tracked even on BYOK; the trial-credits pool and managed-inference path depend on it
+- Reporter lag SLO + alert
+- Billing-correctness reconciler alerts to Sentry + Slack — **start with one loop**, add the others if drift surfaces
+- **`model_cost_usd` emitted as `UsageEvent` dimension** — per-account token economics tracked even on BYOK
 - **Shadow-billing period** before going live
-- **Prepaid credits** as a Tinybird-backed balance ledger — default for new accounts. Postpaid invoicing is enterprise opt-in behind credit check
-- Stripe Customer Portal for self-serve subscription management
-- Public `/pricing` page + calculator
+- **Prepaid credits** as a Tinybird-backed balance ledger — default for new accounts. Postpaid is enterprise opt-in behind credit check
+- Stripe Customer Portal for self-serve
+- Public `/pricing` page + calculator (locked tiers per P-1 outcome)
 - Subscription lifecycle: `past_due` → degrade (read-only), not lockout
 
-### P6 — Polish / trust (wk 6+)
-- Status page (Instatus, 99.9% target) wired to `/v1/health` Cron Worker output
-- **PostHog free tier** wired for TTF-200 activation funnel + signup events
-- Resend for transactional email
+### P6 — First-paying-customer-plus-30-days (moved out of paid-beta gate)
+- Status page (Instatus, 99.9% target) wired to UptimeRobot + `/v1/health` output
+- PostHog wired for TTF-200 / TTF-first-eval-score funnels
 - Svix for customer webhooks when first customer asks
-- Upstash/Cloudflare rate limiting
+- Upstash/Cloudflare rate limiting at the edge
 - DPA + sub-processor list + prompt/response storage opt-out
 - Deletion state machine: `soft_deleted → final_invoice_issued → pii_anonymized → hard_deleted-after-7y`
 - ToS + AUP + upstream-outage refund policy
@@ -629,44 +801,62 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 Cheap now, expensive later.
 
 ### Correctness
-- Authoritative bucket check via **Redis Lua** (in-memory rollup is soft pre-filter only)
-- Worst-case cost reservation pre-call; settle on response; clamp `max_tokens` for hard-cap accounts
-- Per-account in-flight concurrency cap (Redis-backed)
+- Authoritative bucket check via **Durable Object** (`BucketStateDO.reserve/settle/release`) with TTL'd reservations swept by alarms
+- Worst-case cost reservation pre-call; settle by `reservation_id`; **refuse with 402/429 for hard-cap accounts** (no silent `max_tokens` clamp)
+- Per-account in-flight concurrency cap enforced inside the DO
 - UsageEvent dedup on `(account_id, idempotency_key)` time-bounded (Tinybird materialized view)
-- Honor `Idempotency-Key` header on the gateway (Redis cache, 24h TTL)
-- Outbox pattern (Postgres) for Stripe/WorkOS/Axiom side-effects
-- Stripe Billing Meters (not legacy metered) with deterministic idempotency keys
-- Reporter lag SLO + reconciliation job (Tinybird vs Stripe vs Redis) + manual replay tool
+- **`Idempotency-Key` state machine** on the gateway: `in_flight | succeeded | failed` with block-and-wait on in-flight; streaming responses in R2
+- **UsageEvent and AuditLog emitted via Cloudflare Queues** (not fire-and-forget; not Postgres outbox + Cron) with retries + DLQ
+- Stripe Billing Meters with deterministic idempotency keys + **5-min period-boundary grace window** + `period_anchor` field + +10-min post-rollover reconciler + manual replay tool **before first paid customer**
 
 ### Security
-- HMAC-SHA256 + KMS-stored pepper for API key hash (not raw sha256)
-- Postgres RLS or typed `AccountScope` repo + CI cross-tenant pen-test suite
-- Audit log shipped to Axiom via Postgres outbox (immutability is structural in the log store)
-- Schema validator on `UsageEvent.dims` (no prompts/tool args/secrets)
+- API keys as `{prefix, pepper_version, hmac}` with **versioned Workers Secrets pepper** from day 1
+- **Hyperdrive query caching disabled for `api_keys`, `members`, and any authz-sensitive table**
+- **Typed `AccountScope` repo** for tenant isolation (chosen over Postgres RLS — RLS bypassed by Hyperdrive prepared-statement cache) + CI cross-tenant pen-test suite
+- **`SENSITIVE_SCOPES`** (`keys:revoke`, `members:remove`, `billing:*`) bypass the 60s membership cache
+- Audit log via Queue → Axiom (immutability is structural in the log store) + **nightly parquet → R2 archive for 7-year SLA**
+- Schema validator on `UsageEvent.dims` at producer **and** Tinybird-side defense-in-depth (regex/length checks; quarantine + alert)
 - WorkOS as source of truth on read path; webhooks for cache invalidation only
+
+### BYOK key handling
+- Encrypted at rest with per-tenant DEK (Workers Secrets v1; AWS KMS at SOC2 trigger)
+- Write-only via dashboard (never displayed after creation)
+- Customer-revocable independent of upstream
+- Scope-restriction UI (model / endpoint)
+- **Mode B (async/SDK-side)** ships in P3 alongside proxied Mode A — Noetic never sees the upstream key in Mode B
 
 ### Data shape
 - Env-prefixed API keys (`noetic_live_*` / `noetic_test_*`)
 - Account ID in every URL (`/v1/accounts/{id}/...`)
 - All money as integer cents/microcents
-- `UsageEvent.dims jsonb` for free-form dimensions
+- `UsageEvent.dims jsonb` for free-form dimensions + `period_anchor` field
 
 ### Product
-- Signup auto-provisions personal Account + test key + trial bucket + curl on success screen
-- Time-to-first-200 instrumented as north-star metric
-- Customer-facing audit log read + export
+- Signup auto-provisions personal Account + test key + **$20 trial bucket** (cheap-cached models, identity-gated)
+- **Success screen = 5-line `@noetic-tools/sdk` snippet** running a typed agent → trace tree + eval score (not `curl`)
+- TTF-200 **and TTF-first-eval-score** instrumented as activation metrics
+- Customer-facing audit log read + export (Axiom 90d hot; R2 archive deep)
 - Near-real-time current-hour usage view
-- Public `/pricing` page before paid beta
+- Public `/pricing` page **with 3 tier-shape variants tested in P-1** before paid beta
 - Status page + stated 99.9% before paid beta
+- **"Switching from LangSmith" landing as primary migration page**
+- Resend onboarding email lifecycle (day 1 / 7 / 30)
 
 ### Observability (Tier 0 — see [§1.8](#18-observability-graduated-by-paying-customer-tier))
-- Sentry wired (free tier) — every Worker exception with `account_id` / `request_id` / `trace_id` context
-- Structured-logging discipline enforced by a logger wrapper; Logpush → Axiom for request logs
-- `/v1/health` Cron Worker exercising auth + bucket + Tinybird + AI Gateway every minute
-- `model_cost_usd` emitted as `UsageEvent` dimension (tracks economics on BYOK too)
+- Sentry wired (free tier)
+- Structured-logging discipline enforced by a logger wrapper; Logpush → Axiom
+- `/v1/health` Cron Worker exercising auth + DO bucket reserve + Tinybird Queue + AI Gateway every minute
+- **UptimeRobot external probe** against `/v1/health` (independent attestation source)
+- `model_cost_usd` emitted as `UsageEvent` dimension (tracks economics on BYOK)
+
+### Compliance / trust
+- **Vanta or Drata kicked off in P0 unconditionally** (SOC2 evidence collection)
+- **EU AI Act specialist call before P0** ($500–800); classification document landed in P0
+- Audit log retention SLA = 7 years (Axiom 90d + R2 archive)
+- **Customer-support surface decision** + on-call rotation document
 
 ### Process
-- 1-page GTM with named ICP and 3+ design partner LOIs gating the build
+- **3-week P-1 hard gate with ≥3 written LOIs + dual-cohort discovery** before any P0 code
 - Build-vs-buy decisions logged (Stripe Portal, Svix, Tinybird, observability vendors)
 
 ## 2.8 Deferred with confidence
@@ -692,34 +882,42 @@ Cheap now, expensive later.
 |---|---|---|
 | Authz | Hardcoded role→scope map behind `hasScope()` | Scope table + custom roles + policy engine |
 | Usage analytics | Tinybird (or ClickHouse Cloud) | Same — designed to scale |
-| Bucket check | Redis Lua atomic reserve/settle + 5min Tinybird reconciler | Same — purpose-built from day 1 |
-| Billing | Stripe Billing Meters + 60s micro-batches | Real-time meter events, prepaid balances, multi-currency |
-| Inference | BYOK + small trial pool + opt-in managed | Same; managed scales with fraud/compliance maturity |
-| Audit log | Axiom shipped from Postgres outbox | S3 + Athena + hash-chained (only if compliance forces it) |
+| Bucket check | **Durable Object** atomic reserve/settle with TTL'd reservations + 5min Tinybird reconciler | Same — purpose-built from day 1 |
+| Billing | Stripe Billing Meters + 60s micro-batches + 5-min boundary grace | Real-time meter events, prepaid balances, multi-currency |
+| Inference | BYOK (Mode A + Mode B) + trial pool + opt-in managed | Same; managed scales with fraud/compliance maturity |
+| Audit log | Queue → Axiom + nightly parquet → R2 (7yr SLA) | S3 + Athena + hash-chained (only if compliance forces it) |
 | Webhooks (out) | Polling endpoints + Svix when asked | Same; Svix scales |
 | Rate limiting | Upstash Redis | Same |
 
 ## 2.10 Compliance & risk
 
-Decide ICP first; the answer drives the level.
+ICP-independent baseline starts in P0; ICP-specific deltas layer on top.
 
-- **GDPR:** publish DPA + sub-processor list + prompt/response storage opt-out by P5. Deletion state machine policy documented in P0.
-- **SOC2:** if ICP is teams/enterprise, start evidence collection week 1 (Vanta/Drata). Audit log + access reviews + change management baseline.
-- **Data residency:** EU customers will ask in the first call. Decide: US-only-with-disclosure for v1, EU region added when first €€€ contract requires it.
-- **EU AI Act Article 50:** transparency obligations if we ship managed inference. Trivial if BYOK (customer is the deployer).
+### P0 baseline (every ICP)
+- **SOC2 evidence collection: Vanta or Drata kicked off unconditionally.** Asymmetric cost — see [§1.9 override 5](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). Audit log + access reviews + change management baseline.
+- **EU AI Act specialist call before P0** ($500–800). Noetic likely classifies as "provider of a general-purpose AI system" under Articles 53/55 — documentation/log-retention/transparency obligations independent of BYOK. Classification document lands in P0.
+- **Audit log retention SLA: 7 years.** Axiom 90d hot + R2 nightly parquet archive (built in P0).
+- Deletion state machine documented in P0.
+
+### Ships by P5
+- GDPR DPA + sub-processor list + prompt/response storage opt-out.
+
+### Layered when triggered
+- **Teams/enterprise ICP** (P-1 outcome): SOC2 Type II audit timeline accelerated; access-anomaly alerts; monitoring-coverage attestation via Vanta integration.
+- **Data residency:** US-only with disclosure for v1; EU region added when first €€€ contract requires it.
 - **Fraud / chargebacks (managed inference only):** CC + small auth charge before any managed call. Hard caps for first 30 days. Manual review over `$X/day`. Signed ToS chargeback waiver.
 
 ## 2.11 Open questions to resolve
 
 These need answers before the relevant phase starts.
 
-- **Pricing units.** Per-seat? Per-agent-run? Per-eval? Combination? Tied to P-1 customer discovery.
-- **Free-tier shape.** Agent-runs/month? Trial credit dollars? Days-of-access?
+- **Pricing units.** Per-seat? Per-agent-run? Per-eval? Combination? **Constrained**: P-1 tests three written hypotheses on a live `/pricing` page; customers react to numbers rather than generating them.
+- ~~**Free-tier shape.**~~ Resolved 2026-06-15: **1,000 agent-runs/mo + 500 eval scores/mo + 30-day trace retention.** See [§1.9 override 4](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 - ~~**Unkey vs custom keys.**~~ Resolved 2026-06-14: in-house. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache).
 - **Tinybird vs ClickHouse Cloud.** Tinybird is faster to ship; ClickHouse is more control. Lean Tinybird unless cost projection at 100K MAU rules it out.
 - **Dashboard split.** Extend `packages/web` or split `packages/dashboard`? Defer until P1 starts.
-- **Trial credits funding.** Start with $5/account out of our OR account. Re-evaluate when 100 accounts have hit the cap.
-- **Managed inference opt-in mechanic.** Application form? Sales call? Auto-enable above $X paid plan? Tied to first design partner ask.
+- ~~**Trial credits funding.**~~ Resolved 2026-06-15: **$20/account lifetime, cheap-cached models, identity-gated.** See [§1.9 override 4](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- **Managed inference opt-in mechanic.** Determined by P-1 cohort outcome. If managed wins, it becomes a separate plan.
 
 ## 2.12 What's NOT in this plan
 
@@ -733,17 +931,26 @@ These need answers before the relevant phase starts.
 - Whitelabel model ID aliasing
 - Multi-region inference proxy
 - Legacy Stripe metered billing
+- **In-memory soft pre-filter on bucket checks** (DO atomic op is fast enough; pre-filter optimizes a hot path that has no users)
+- **Postgres outbox + Cron audit shipper in v1** (replaced by direct Queue enqueue at commit time; outbox returns only if Stripe-side transactional audit is needed)
+- **Postgres RLS** (typed `AccountScope` repo only)
+- **Silent `max_tokens` clamp** (refuse with 402/429 explicitly)
+- **Three reconciler loops from day 1** (start with one; tune in spec)
+- **Honeycomb at Tier 2** (Workers Analytics + Sentry breadcrumbs suffice through ~50 customers)
+- **"Migrating from OpenRouter/OpenAI" as the primary migration page** (replaced by "Switching from LangSmith")
+- **§1.4 BYOK-vs-managed hedge framing** (commit to one ICP after P-1 dual-cohort)
+- **Parallel P0 before P-1 passes**
 
 ## 2.13 Cost-coverage invariants
 
 Architectural constraints, not implementation details. Together they bound the marginal cost of a free user to fractions of a cent per active month, regardless of how heavily they use the platform. Violating any of these requires an explicit decision-history entry.
 
-1. **Redis verification cache (60s TTL) sits in front of every auth check.** API-key lookups, scope resolution, and WorkOS membership all hit cache first. Cold-path Postgres / WorkOS calls scale with *unique active keys per minute*, not request rate. A user hammering at 1000 RPS produces ~1 cold lookup/minute, not 60K.
-2. **Per-key Redis token-bucket RPS limit.** Free tier: 5 RPS default. Paid tiers override upward. Hard ceiling — no overage path. Bounds worst-case auth-check load per key and protects against runaway agents independently of the bucket check.
-3. **Free-tier daily request cap, hard-limited.** E.g. 10K agent-runs/account/day, enforced at the gateway. Also serves as runaway-agent protection (PM's concern in panel review). A free account cannot generate unbounded billable activity.
+1. **Redis verification cache (60s TTL) sits in front of every auth check** (except `SENSITIVE_SCOPES` which read strict). API-key lookups, scope resolution, and WorkOS membership all hit cache first. Cold-path Postgres / WorkOS calls scale with *unique active keys per minute*, not request rate. A user hammering at 1000 RPS produces ~1 cold lookup/minute, not 60K.
+2. **Per-key Upstash token-bucket RPS limit.** Free tier: 5 RPS default. Paid tiers override upward. Hard ceiling — no overage path. Bounds worst-case auth-check load per key.
+3. **Free-tier monthly caps**: 1,000 agent-runs/mo + 500 eval scores/mo + 30-day trace retention. Enforced at the gateway via DO or Workers Analytics. Replaces the inconsistent v1 "10K/day" cap. Daily-cap key shards `period_start` (`account:metric:YYYY-MM-DD`) to avoid hot-key behavior at 00:00 UTC.
 4. **BYOK by default eliminates inference cost.** Customer pays OR/Anthropic/OAI directly. The biggest variable cost in the system is not on our P&L for the majority of users.
-5. **Trial credits pool hard-capped at $5/account lifetime.** The only $$ we spend per free user, bounded by design. Funded out of Noetic's OR account; hits cap → "add your key to continue." No overage path.
-6. **All hot-path counters and caches share one Upstash Redis instance.** Bucket state, idempotency cache, membership cache, key verification cache, rate limit buckets, RPS limits. Fixed monthly cost (~$10–30/mo) independent of user count. Per-user marginal cost is Redis-ops × Upstash-per-op pricing, which at the cache hit rates above is sub-penny.
+5. **Trial credits pool**: $20/account lifetime, **defaulted to cheap-cached models** (Haiku / 4o-mini); premium models require BYOK. Eligibility gated on verified business email **or** phone **or** GitHub ≥30d. Hits cap → "add your key." No overage. Funded out of Noetic's OR account.
+6. **Hot-path state is split by consistency requirement.** Authoritative counters (`bucket_state`) live in Durable Objects; eventually-consistent caches (membership, key-verification, idempotency fingerprint, RPS) live in one Upstash instance. Fixed monthly cost (~$10–30/mo Upstash + DO time pennies) independent of user count.
 
 **Net result:** for a 10K-signup, 1K-active free cohort with the invariants in place, all-in cost-to-serve free users is **single-digit dollars/month** (Upstash + a few thousand Tinybird events + the $5 trial credit pool drawn down by a small fraction of accounts).
 
@@ -834,8 +1041,27 @@ Each has a clean trigger condition; **don't pre-pay**:
 
 - **Library selection rule:** every dependency that talks to Postgres, Redis, or makes outbound HTTP must work in Workers (V8 + partial Node compat). CI enforces with `wrangler deploy --dry-run` on every PR.
 - **No long-held connections.** Postgres → Hyperdrive. Redis → REST (Upstash). External APIs → fetch().
-- **No `fs`, no `child_process`, no Node-only globals.** If a tool needs those, it doesn't run in the Worker — it runs as a Queue consumer in a separate Worker, or as a Cloudflare Container (if/when needed).
-- **CPU time discipline.** Per-request CPU budget on Workers Paid is 30s. Compute-heavy work (e.g. cost reconciliation over a day's events) runs in a Cron-triggered Worker or as a Queue consumer that fan-outs.
+- **Hyperdrive query caching policy:** disabled for `api_keys`, `members`, and any authz-sensitive table (cached SELECTs honor revoked keys for the TTL). Pooling stays on; caching is per-statement. Enforced at the repo layer. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- **No `fs`, no `child_process`, no Node-only globals.** If a tool needs those, it runs as a Queue consumer in a separate Worker or as a Cloudflare Container.
+- **CPU time discipline.** Per-request CPU budget on Workers Paid is 30s. Compute-heavy work runs in Cron-triggered Workers or Queue consumers. **Eval/GEPA explicitly does NOT fit Workers** — runs on Cloudflare Containers (when GA) or Fly.io worker pool.
+- **AI Gateway abstraction:** all upstream calls go through `forwardToUpstream(provider, request)`. If AI Gateway monetizes or managed inference needs to own caching/fallback, swap to direct provider SDK + own cache (~1 week).
+
+### Cloudflare exit playbook (2-page sketch for diligence)
+
+Vendor concentration on Cloudflare (11 products) will be a Series A / acquirer diligence question. The plan is not to leave; the plan is to be *able* to leave.
+
+| Component | Replacement | Estimated cost to move |
+|---|---|---|
+| Workers + Pages (API + dashboard) | Fly.io + Cloudflare Pages (or Vercel) for the API; Vercel/Netlify for the dashboard | ~1–2 weeks. Hono runs on both; the `forwardToUpstream` and `AccountScope` abstractions are already framework-agnostic. |
+| Hyperdrive | Direct Neon serverless connection pooler (Neon provides its own) | ~1 day. Swap connection string. |
+| Durable Objects (`BucketStateDO`) | Redis + Postgres (per-account row with `SELECT ... FOR UPDATE`) | ~1–2 weeks. The DO interface (reserve/settle/release) is already a clean abstraction. |
+| AI Gateway | Direct provider SDK + own cache (KV/Redis) | ~1 week. Covered by the `forwardToUpstream` abstraction. |
+| R2 | S3 / GCS / Backblaze B2 | ~few days. S3-compatible API; rsync or batch copy. |
+| Queues | AWS SQS / GCP Pub/Sub / Upstash QStash | ~few days per consumer. |
+| Cron Triggers | Any scheduler (k8s CronJob, Fly Machines schedule, GitHub Actions) | ~1 day. |
+| Logpush | Vector or direct application-level shipping | ~1 day. |
+
+**Total estimated exit cost: 3–5 engineer-weeks if it ever became necessary.** The abstraction points (`forwardToUpstream`, `AccountScope` repo, the DO interface, the Queue producer/consumer pairs) are already in place because they're good design independent of the exit question.
 
 ## 2.15 Observability & monitoring
 
@@ -847,11 +1073,12 @@ Wired in P0 before any paid observability tool:
 
 | Capability | Implementation |
 |---|---|
-| Error tracking | **Sentry free tier** — captures every Worker exception with `account_id` / `request_id` / `trace_id` context, source-mapped stack |
-| Request logs | **Cloudflare Logpush → Axiom** (same pipe as audit) — structured-logging discipline enforced by a logger wrapper |
-| RED metrics per route | **Cloudflare Workers Analytics** (built-in) — request count, error rate, CPU time, p50/p95/p99 latency |
-| Synthetic uptime | **`/v1/health` Cron Worker** — every minute exercises auth → bucket check → Tinybird ingest → AI Gateway round-trip; Sentry alert on N consecutive failures |
-| Cost-economics tracking | `model_cost_usd` emitted as `UsageEvent` dimension from upstream usage block — per-account token economics tracked even on BYOK |
+| Error tracking | **Sentry free tier** with `account_id` / `request_id` / `trace_id` context |
+| Request logs | **Cloudflare Logpush → Axiom** (same pipe as audit) |
+| RED metrics per route | **Cloudflare Workers Analytics** (built-in) |
+| Synthetic uptime (internal) | **`/v1/health` Cron Worker** every minute |
+| Synthetic uptime (external) | **UptimeRobot free tier** (50 monitors, 5-min interval) — independent attestation source for SLA evidence in customer disputes. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). |
+| Cost-economics tracking | `model_cost_usd` emitted as `UsageEvent` dimension from upstream usage block |
 
 ### Tier 1 — Paid-beta launch (~$20/mo)
 
@@ -859,32 +1086,18 @@ Triggered by: first $1 of revenue.
 
 | Capability | Implementation |
 |---|---|
-| Public status page | **Instatus** ($20/mo) wired to `/v1/health` Cron output |
-| Billing-correctness alerts | *Custom code, no vendor*: three reconciler loops route to Sentry + Slack — (1) Tinybird sum vs Redis `bucket_state` drift > 1%; (2) Tinybird sum vs Stripe Meters reported > 0.5%; (3) outbox rows older than 5min unshipped |
-| Activation analytics | **PostHog free tier** (1M events/mo) — TTF-200 funnel + signup events queryable |
-| Incident channel | `#noetic-alerts` Slack — Sentry + reconciler alerts → human eyeball |
+| Public status page | **Instatus** ($20/mo) wired to UptimeRobot + `/v1/health` |
+| Billing-correctness alerts | **Start with ONE reconciler loop** (Tinybird vs DO `used`); add others if drift surfaces. Routes to Sentry + Slack. |
+| Activation analytics | **PostHog free tier** — TTF-200 + TTF-first-eval-score + signup events |
+| Incident channel | `#noetic-alerts` Slack |
 
-### Tier 2 — ~10+ paying customers ($1K+ MRR) (~$25–75/mo)
+### Tier 2 + Tier 3 — Moved to separate observability roadmap
 
-Triggered by: actual on-call rotation forming, or the first "your API is slow" support ticket hard to diagnose.
+Detail removed from this plan per [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions). Trigger conditions:
+- **~10 paying customers / $1K+ MRR**: evaluate Better Stack ($24/mo bundling uptime + status + on-call) — possibly drop Instatus. Workers Analytics + Sentry breadcrumbs sufficient through ~50 customers; defer Honeycomb.
+- **First enterprise SLA / SOC2 Type II**: evaluate Datadog/Grafana Cloud + PagerDuty + Vanta monitoring integration.
 
-| Capability | Implementation |
-|---|---|
-| External uptime + on-call | **Better Stack** ($24/mo) — uptime + status page + on-call rotations bundled; can replace Instatus. Probes from outside Cloudflare so CF-side outages surface |
-| Distributed tracing | **Honeycomb free tier** — Worker → Hyperdrive → Neon, Worker → Upstash, Worker → AI Gateway → upstream |
-| SLO dashboards | Built on Axiom + Cloudflare Analytics, no new vendor. SLOs codified: gateway availability 99.9%, p95 latency <500ms, TTF-200 <60s, bucket-check p99 <10ms, key-verification p99 <5ms |
-| Error volume | **Sentry Team** ($26/mo) only if free tier exhausted at ~50K errors/mo |
-
-### Tier 3 — Enterprise / SLA commitments ($500–2K/mo)
-
-Triggered by: first enterprise contract with SLA penalty clauses, or SOC2 Type II audit prep.
-
-| Capability | Implementation |
-|---|---|
-| Unified observability + APM | **Datadog** or **Grafana Cloud** ($200–500/mo) — single-pane-of-glass for support + on-call |
-| Paging | **PagerDuty** ($21/user/mo) — multiple rotations, complex escalation when Better Stack on-call isn't enough |
-| SOC2 monitoring evidence | **Vanta integration** (bundled with SOC2 work) — access-anomaly alerts + monitoring-coverage attestation |
-| APM / profiling | Sentry Performance or Datadog APM — slow-query rooting at customer-perceived latency |
+A separate observability roadmap doc tracks these when the trigger fires.
 
 ### Three platform-specific monitoring concerns (codified)
 
@@ -900,6 +1113,45 @@ These are unique to a billing+inference platform; don't appear on generic-vendor
 - No custom Prometheus + Grafana on a VPS — more hours maintaining than using.
 - No "wire Sentry when something breaks" — it's free; wire day 1.
 - No PagerDuty before there's a real on-call rotation — Sentry → Slack → eyeball is fine until ~10 paying customers.
+
+## 2.16 Competitive positioning
+
+Round 2 PM flagged that the plan's stated moat ("framework + memory + eval/GEPA") is internal language — the customer-facing SaaS surface is "BYOK + traces + eval scoring + prompt versioning," which is **LangSmith's exact pitch**. Without an articulated competitive frame, the `/pricing` page in P5 has nothing to anchor against.
+
+### Direct competitors
+
+| Vendor | Pricing | What they ship | Where they're strong | Where they're weak |
+|---|---|---|---|---|
+| **LangSmith** | $39/mo Developer, $79/mo Plus, custom Enterprise | Traces + datasets + evals + prompt versioning | LangChain integration, market awareness | Eval workflow is a separate flow from tracing; tied to LangChain idioms |
+| **Braintrust** | Free tier + paid usage-based | Eval-first platform, traces, prompt playground | Strong eval primitives; experiment-style UX | Less framework-aware; weak agent-loop support |
+| **Helicone** | Free up to 100K req/mo, $25+/mo | Proxy + trace logging, async (no-proxy) mode | OSS available; fast onboarding; async mode = lower trust ask | Lighter on eval; not a typed agent framework |
+| **Langfuse** | OSS self-host or $59+/mo cloud | Traces + evals + datasets | OSS escape hatch; self-host = data sovereignty | Operational burden if self-hosting; cloud UX trails LangSmith |
+
+### Noetic wedge claims (test in P-1, refine in `/pricing`)
+
+1. **GEPA optimization runs inline with traces.** LangSmith requires a separate eval workflow; Braintrust requires defining an experiment. Noetic ships GEPA as a button on a trace.
+2. **Typed step contracts surface failure modes before runtime.** Generic tracing platforms can show you a failure happened; the `@noetic-tools/core` step type can prove it cannot. Defensible because it's framework-rooted, not telemetry-rooted.
+3. **Memory layers as a first-class concept.** Competitors trace memory as a tool call; Noetic models it as a budgeted, projectable layer with its own observability.
+4. **BYOK Mode B (async/SDK-side)** removes the "you'll see my Anthropic key" objection that proxy-mode platforms can't answer. Helicone is the only comp that ships this.
+
+### Activation metrics where we commit to being undeniably better
+
+- **TTF-200** (auth + key + first inference call) — target < 60s
+- **TTF-first-eval-score** (signup → first scored run visible in dashboard) — target < 5 min, single tier 1 wedge metric
+
+### Pricing-page comparison frame
+
+The `/pricing` page must include a side-by-side comparison cell at typical volumes. Recommended:
+
+| | LangSmith Developer | Braintrust paid | Noetic (hypothesis) |
+|---|---|---|---|
+| Traces/mo | 10K | varies | **1K runs/mo free, 100K paid** |
+| Eval scores/mo | unlimited (tied to traces) | varies | **500/mo free, 50K paid** |
+| Trace retention | 14d | 30d | **30d free, 90d paid** |
+| Optimization runs (GEPA) | n/a | n/a | **5/mo free, unlimited paid** |
+| Pricing | $39/mo | usage-based | TBD by P-1 ($/seat / $/run / hybrid) |
+
+This is a hypothesis tested in P-1, not a commitment.
 
 ---
 
@@ -923,36 +1175,38 @@ Splitting into per-purpose specs gives us:
 
 ## 3.2 Proposed specs (grouped, prioritized)
 
-Seven specs, in four priority tiers. Each spec describes the **ideal end state** of its area (per `.claude/rules/spec-guidelines.md` — no phased rollout language inside the spec itself; that's what this plan doc is for).
+Seven candidate specs, but **only S1 + S2 are drafted before P-1 closes** ([§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions): write only what P-1 has validated). S3–S7 sketched here so the dependency shape is visible; full drafts wait for P-1 outcome. Each spec describes the **ideal end state** of its area (per `.claude/rules/spec-guidelines.md` — no phased rollout language inside specs).
 
-### Tier 1 — Foundation (nothing else ships without these)
+### Tier 1 — Foundation (drafted in P0)
 
 **S1. Identity & Access Control**
-Accounts, members, roles/scopes (hardcoded role→scope map behind `hasScope()`), WorkOS AuthKit as source-of-truth-on-read with 60s Redis cache + daily reconciliation, multi-tenancy enforcement (Postgres RLS *or* typed `AccountScope` repo + CI cross-tenant pen-test), audit log via Postgres outbox shipped to Axiom. Defines the auth contract every other spec depends on.
+Accounts, members, roles/scopes (hardcoded role→scope map behind `hasScope()`), `SENSITIVE_SCOPES` cache-bypass set, WorkOS AuthKit as source-of-truth-on-read with 60s Upstash cache + daily reconciliation, **typed `AccountScope` repo for multi-tenancy** (RLS rejected — Hyperdrive prepared-statement cache bypasses), CI cross-tenant pen-test, audit log via Cloudflare Queue → Axiom (no Postgres outbox in v1), 7-year retention SLA via R2 archive. Defines the auth contract every other spec depends on.
 
 **S2. Metering Spine**
-`UsageEvent` shape and ingest (Tinybird), `BucketState` in Redis with atomic Lua reserve/settle/release, worst-case-cost reservation semantics, max-tokens clamping for hard-cap accounts, idempotency rules, 5-minute reconciler diffing Redis vs Tinybird, `dims jsonb` PII schema validator. This is the metering contract every billable surface depends on.
+`UsageEvent` shape with `period_anchor` field; emission via Cloudflare Queue (not fire-and-forget); Tinybird ingest with materialized-view PII defense-in-depth; **`BucketStateDO` (Durable Object) per `(account, metric, period)`** with TTL'd reservations + alarm sweepers; worst-case-cost reservation semantics; **refuse with 402/429 for hard-cap accounts** (no silent clamp); `Idempotency-Key` state machine (`in_flight | succeeded | failed` with block-and-wait); one reconciler loop in v1; Stripe Meter period-boundary handling (5-min grace, `period_anchor`, +10-min reconciler). The metering contract every billable surface depends on.
 
-### Tier 2 — Wedge (delivers customer value)
+### Tier 2 — Wedge (drafted after P-1 passes, before P3)
 
-**S3. API Keys**
-Generation (`noetic_<env>_<24B-base62>`), storage (HMAC-SHA256 with KMS-stored pepper, or Unkey adoption decision — Tier-1 spike), prefix-indexed lookup, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, `Idempotency-Key` header handling. Depends on S1 (auth) + S2 (idempotency primitives).
+**S3. API Keys** — sketch only until P-1
+`noetic_<env>_<24B-base62>`, **versioned pepper** (`{prefix, pepper_version, hmac}`), HMAC-SHA256 with KMS-stored pepper, prefix-indexed lookup with **Hyperdrive caching disabled** for the table, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, `Idempotency-Key` state machine consumer. Depends on S1 + S2.
 
-**S4. Inference Gateway & SDK**
-BYOK forwarding to OR/Anthropic/OAI, trial-credits-pool path, opt-in managed-inference feature flag, trace tie-in to `@noetic-tools/core` runs, `@noetic-tools/sdk` thin wrapper, response usage emission to `UsageEvent`, SSE handling (no tee in v1). Depends on S3 (auth) + S2 (metering).
+**S4. Inference Gateway & SDK** — sketch only until P-1
+BYOK Mode A (proxied via AI Gateway abstraction) and **Mode B (async/SDK-side)**; trial-credits-pool path; opt-in managed-inference feature flag; trace tie-in to `@noetic-tools/core` runs; `@noetic-tools/sdk` wrapper; response usage emission to UsageEvent Queue; SSE handling. Depends on S3 + S2.
 
-### Tier 3 — Monetization
+### Tier 3 — Eval surface (the moat — drafted in parallel with S4)
 
-**S5. Billing & Credits**
-Stripe Billing Meters integration with deterministic per-event idempotency, 60s micro-batch reporter, `billing_period_summary` in Postgres, reconciliation jobs (Tinybird vs Stripe vs Redis), reporter-lag SLO + manual replay tool, prepaid credits ledger as Tinybird read model (default for new accounts), Stripe Customer Portal integration, subscription-lifecycle handling (`past_due` → degrade). Depends on S2 (metering) + S1 (accounts).
+**S4.5. Eval & GEPA Surface** — NEW per [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)
+In-product scorer definition; eval scores per trace in dashboard; GEPA optimization run end-to-end visible; compute plane on Cloudflare Containers (when GA) or Fly.io worker pool; TTF-first-eval-score instrumentation. Depends on S4 (gateway emits traces) + S2 (UsageEvent dimensions for eval scores).
 
-### Tier 4 — Activation & Trust (cross-cutting; touch many areas)
+### Tier 4 — Monetization (drafted only if P-1 returns usage-based pricing)
 
-**S6. Activation & Pricing**
-Signup auto-provision flow (personal account + test key + trial bucket + copy-paste curl on success screen), TTF-200 instrumentation, public `/pricing` page + calculator, migration-from-OR/OAI landing, near-real-time current-hour usage view (Tinybird-backed). Depends on S1 + S3 + S4 + S5. Lightweight spec — mostly UX flows and product copy.
+**S5. Billing & Credits** — defer if P-1 returns per-seat pricing
+Stripe Billing Meters integration with deterministic per-event idempotency, period-boundary safety, 60s micro-batch reporter, `billing_period_summary` in Postgres, one reconciliation loop initially, reporter-lag SLO + manual replay tool **before first paid customer**, prepaid credits ledger as Tinybird read model, Stripe Customer Portal, subscription-lifecycle handling. Depends on S2 + S1. If P-1 returns per-seat pricing, S5 collapses to seat-counting + daily soft caps.
 
-**S7. Trust & Compliance**
-Status page (Instatus, 99.9% target) wired to gateway health, customer-facing audit-log read+export API (Axiom-backed), DPA + sub-processor list publication, prompt/response storage opt-out, deletion state machine (`soft_deleted → final_invoice_issued → pii_anonymized → hard_deleted-after-7y`), SOC2 evidence baseline if ICP demands it, upstream-outage refund policy, ToS/AUP. Depends on S1 (audit) + S5 (billing for refund flows). Lightweight spec — mostly policy + integrations.
+### Tier 5 — Activation, Trust & Compliance (one combined spec, drafted last)
+
+**S6. Activation, Pricing & Trust** — combined per [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions) cuts
+Signup auto-provision flow (account + key + $20 identity-gated trial bucket + `@noetic-tools/sdk` snippet success screen); TTF-200 + TTF-first-eval-score instrumentation; `/pricing` page locked per P-1 outcome; "Switching from LangSmith" migration page; status page wired to UptimeRobot + `/v1/health`; customer-facing audit log API; DPA + sub-processor list; prompt/response storage opt-out; deletion state machine; SOC2 evidence baseline (Vanta from P0); EU AI Act classification; upstream-outage refund policy; ToS/AUP; customer support surface. Depends on all prior specs.
 
 ## 3.3 Dependency graph
 
@@ -1021,7 +1275,16 @@ specs/
 
 # Next concrete step
 
-Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 customer calls this week. The schema and `hasScope` signature are stable enough to start P0 in parallel if a second person is available, but a single engineer should sequence GTM → P0.
+Run **P-1** before any code. **No parallel P0 build** (per [§1.9 override 2](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)) — the 8 engineer-weeks of plumbing is the wrong forcing function for discovery, and the wedge is structurally weak in BYOK world without validated pull.
+
+Specifically:
+
+1. **Week 0 — pre-call artifacts** (built in parallel by anyone, not gated on engineer): pricing hypothesis with 3 variants → live static `/pricing` page; "Switching from LangSmith" landing page; competitive teardown ([§2.16](#216-competitive-positioning)); EU AI Act specialist call.
+2. **Weeks 1–2 — dual-cohort discovery**: 8 developer/BYOK calls + 8 non-developer/managed calls.
+3. **Week 3 — gate evaluation**: ≥3 written LOIs at a stated price + ≥8/15 trust validations. If pass → commit to ONE ICP, start P0. If fail → reposition or pause.
+4. **In parallel (not gating)**: Vanta or Drata workspace provisioned; EU AI Act classification documented.
+
+P0 starts only after the gate passes.
 
 ---
 
@@ -1038,3 +1301,4 @@ Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 cus
 | 2026-06-14 | Unkey rejected: in-house API keys (3–4 days) + Redis 60s verification cache. Added §2.13 Cost-coverage invariants (Redis cache + per-key RPS + daily caps + BYOK + bounded trial pool + single Upstash). Resolved §2.11 Unkey-vs-custom open question. | User question on Unkey necessity + free-tier cost coverage |
 | 2026-06-14 | Cloudflare-first cloud strategy (§1.7, §2.14): Workers + Pages + R2 + AI Gateway + Hyperdrive + Cron + Queues + Secrets. External vendors for the 3 gaps: Neon (Postgres), Upstash (Redis), Axiom (audit). No AWS or GCP at v1; explicit trigger conditions documented. Bun↔Workers CI gate added to P0 must-gets. | User request: optimize for Cloudflare, fall back to AWS/GCP only on demonstrated need |
 | 2026-06-14 | Observability graduated by paying-customer tier (§1.8, §2.15). Tier 0 (day 1, $0): Sentry + structured logs + /v1/health Cron + model_cost_usd dimension. Tier 1 (~$20/mo): Instatus + billing-correctness reconciler alerts + PostHog. Tier 2 (~$25–75): Better Stack + Honeycomb + SLO dashboards. Tier 3 ($500–2K): Datadog/Grafana + PagerDuty + Vanta. Three platform-specific concerns codified (billing-correctness as #1 incident class; BYOK cost tracking; /v1/health as SLA evidence). | User request: evaluate observability needs, gated by paying-customer milestones |
+| 2026-06-15 | **Round 2 panel overrides (§1.9)**: six prior decisions overridden (bucket_state to Durable Objects with TTL'd reservations; P-1 to 3-week hard gate with kill criteria + dual cohort; §1.4 hedge → commit to one ICP after P-1; trial pool to $20 cheap-cached identity-gated; SOC2 evidence unconditional in P0; HMAC pepper versioned from day 1). Workers footgun corrections (Hyperdrive cache disabled for authz tables; UsageEvent via Queue not fire-and-forget; refuse not silent-clamp; Idempotency-Key state machine; SENSITIVE_SCOPES bypass; Tinybird PII defense-in-depth; audit via Queue not Postgres outbox; UptimeRobot external probe; typed AccountScope not RLS; free-tier daily-cap key sharding; Stripe Meter period-boundary handling). Product additions (P3.5 eval surface; eval compute on Containers/Fly.io; BYOK key spec including Mode B async/SDK-side; success-screen sdk snippet not curl; Switching-from-LangSmith primary migration; §2.16 competitive positioning). CEO additions (EU AI Act specialist call; customer support line item; AI Gateway abstraction; 7-year audit retention with R2 archive; Cloudflare exit playbook; schedule rebaseline to 12wk/1eng or 8wk/2eng). Free-tier shape and trial pool open questions resolved. §3 specs deferred: only S1+S2 in P0; S3-S7 wait for P-1 outcome. | Second adversarial panel review explicitly empowered to challenge §1 |
