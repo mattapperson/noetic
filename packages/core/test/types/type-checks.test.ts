@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ExtendedItem } from '@noetic-tools/types';
 import { z } from 'zod';
-import type { SettleResult } from '../../src/index';
+import type { SettleResult, Step, StepSpawn } from '../../src/index';
 import { Slot } from '../../src/index';
 
 describe('Type definitions', () => {
