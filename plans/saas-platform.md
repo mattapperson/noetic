@@ -32,6 +32,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.4 OpenRouter pragmatism debate](#14-openrouter-pragmatism-debate)
    - [1.5 Postgres minimization directive](#15-postgres-minimization-directive)
    - [1.6 Unkey rejected; in-house keys + verification cache](#16-unkey-rejected-in-house-keys--verification-cache)
+   - [1.7 Cloudflare-first cloud strategy](#17-cloudflare-first-cloud-strategy)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -46,6 +47,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [2.11 Open questions](#211-open-questions-to-resolve)
    - [2.12 What's NOT in this plan](#212-whats-not-in-this-plan)
    - [2.13 Cost-coverage invariants](#213-cost-coverage-invariants)
+   - [2.14 Cloud architecture](#214-cloud-architecture)
 3. [Proposal: implementation specs](#proposal-implementation-specs)
    - [3.1 Why split](#31-why-split)
    - [3.2 Proposed specs (grouped, prioritized)](#32-proposed-specs-grouped-prioritized)
@@ -315,6 +317,64 @@ The original CEO-panel "use Unkey" rec came from a "don't build commodity stuff"
 
 **Open question resolved:** §2.11 "Unkey vs custom keys — 1-day spike" is closed. No spike needed.
 
+## 1.7 Cloudflare-first cloud strategy
+
+**Trigger:** User asked to evaluate cloud infrastructure, optimizing for Cloudflare and only reaching for AWS/GCP where Cloudflare lacks or overcharges.
+
+**Decision: ~95% Cloudflare for v1, with three external vendors for things Cloudflare doesn't offer.** No AWS or GCP at v1.
+
+### What goes on Cloudflare
+
+| Need | Cloudflare service | Rationale |
+|---|---|---|
+| API + inference gateway | Workers (Paid: $5/mo, 10M req + 30M CPU-ms included) | Hono runs natively; edge-deployed; SSE works (the 30s CPU limit is CPU-bound, inference proxying is idle-waiting). Free DDoS + WAF baked in. |
+| Inference upstream wrapper | **AI Gateway** (free) | Sits between our Worker and OR/Anthropic/OAI — adds caching, real-time logs, cost tracking, provider fallback for free. Our Worker still owns auth + bucket + UsageEvent emission. |
+| Background workers | Cron Triggers + Queues | Outbox shipper, 60s billing reporter, 5min reconciler. Cron is free with Workers Paid; Queues are $0.40/1M ops. |
+| Dashboard hosting | Pages | Free at our scale; same-domain integration with Workers |
+| Object storage | R2 | **Zero egress fees** — critical for usage exports, audit dumps, generated reports |
+| DNS / CDN / WAF / Bot management | Cloudflare (already) | Free baseline |
+| Secrets (HMAC pepper, vendor tokens) | Workers Secrets / Secrets Store | Sufficient for v1 — see KMS trigger below |
+| Connection pooling to Postgres | **Hyperdrive** | Critical — Workers can't hold long-lived Postgres connections. Hyperdrive pools + caches + TLS-terminates. Free with Workers Paid. |
+
+### External vendors (Cloudflare doesn't offer; not AWS/GCP either)
+
+| Need | Vendor | Why not AWS/GCP |
+|---|---|---|
+| Postgres | **Neon** | Cloudflare has no managed Postgres. Neon is serverless Postgres designed for Workers + Hyperdrive — scales to zero, free tier covers v1. Aurora Serverless v2 minimum: ~$43/mo even idle. Cloud SQL smallest tier: ~$15–25/mo always-on. |
+| Redis | **Upstash** | Cloudflare KV is eventually-consistent (~60s) — NOT a Redis substitute for atomic INCRBY or for the 60s verification cache which needs instant revoke. Durable Objects need a different programming model. Upstash REST API + pay-per-request fits Workers perfectly. ElastiCache Serverless minimum: ~$70–100/mo. Memorystore minimum: ~$50/mo. |
+| Audit log shipping | **Axiom** | Standard Cloudflare Logpush target; free 500GB tier. |
+
+### Where AWS or GCP would win — but don't yet, with explicit trigger conditions
+
+| Service | What it provides | Trigger to add |
+|---|---|---|
+| AWS KMS / Cloud KMS | HSM-backed envelope encryption with key versioning, FIPS 140-2 | First enterprise contract that asks for HSM-backed key storage (likely co-incident with SOC2 Type II). Cost when added: $1/key/mo + $0.03/10K ops. |
+| Aurora Serverless v2 / Cloud Spanner | Massive Postgres scale | Only if Neon becomes a bottleneck. §1.5 Postgres minimization makes this unlikely. |
+| AWS SES | Cheapest transactional email at scale | When monthly email volume passes ~250K (Resend math wins below that). |
+| GCP BigQuery / Athena | Huge analytical workloads | When Tinybird bill exceeds ~$1K/mo. |
+| AWS Fargate / GCP Cloud Run | Long-running containers | Only if Cloudflare Containers explicitly doesn't fit a real use case. |
+| AWS HSM / FedRAMP-grade services | Heavy compliance (HIPAA strict, PCI Level 1, FedRAMP) | If P-1 customer discovery reveals an ICP in healthcare/finance/government, this changes the cloud decision wholesale. Re-evaluate then. |
+
+**Each trigger is a clean signal, not a guess.** We don't pre-pay for AWS/GCP "in case." We add the specific service when the specific condition fires.
+
+### The Bun ↔ Workers constraint
+
+Workers run on V8 with a partial Node compat shim, not Bun. The plan's "Bun + Hono" choice must be parsed as:
+- **Local dev + tests: Bun** (fast, matches monorepo)
+- **Prod: Cloudflare Workers**
+- **Library selection rule from day 1: Workers-compatible variants** — `drizzle-orm` ✓, `@neondatabase/serverless` (not `pg`) ✓, `@upstash/redis` REST (not `ioredis`) ✓, `stripe` ✓, `@workos-inc/node` ✓
+- **CI gate:** every PR runs `wrangler deploy --dry-run` to catch Workers-incompatible imports before they land
+
+This is a constraint, not a problem — every package we already need has a Workers-compatible variant.
+
+### V1 cost projection at ~1K MAU paid beta
+
+Fixed monthly: **~$15–60** (Workers $5 + Upstash $10–30 + Tinybird $0–25 + everything else free-tier). Plus Stripe % of revenue. The §2.13 cost-coverage invariants hold at this stack — per-free-user marginal cost stays sub-penny.
+
+### What the original CEO panel review got right, refined
+
+The CEO reviewer pushed "buy boring stuff" and listed AWS/GCP services among the "boring stuff." That framing was directionally correct but assumed a one-cloud answer. The actual answer is **Cloudflare for everything Cloudflare does well, three best-of-breed vendors for the gaps**, and AWS/GCP only on explicit triggers. This is *more* aggressive about not-building-undifferentiated-infrastructure than the original "use AWS" framing would have been, because Workers + Pages + Hyperdrive eliminate even more glue code than EC2 + RDS + ElastiCache would have.
+
 ---
 
 # Current plan
@@ -378,19 +438,46 @@ The shapes that are expensive to rip out later.
 
 ## 2.5 Stack
 
+Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflare doesn't cover. See [§1.7](#17-cloudflare-first-cloud-strategy) for the cloud strategy and [§2.14](#214-cloud-architecture) for the layered architecture picture.
+
+### Compute / edge (Cloudflare)
+
 | Layer | Choice | Rationale |
 |---|---|---|
-| Backend API | `packages/api` — Bun + Hono | Matches monorepo, fast HTTP, simple deploy |
-| Relational core (OLTP) | Postgres (Neon or Supabase) + Drizzle — **only** accounts, members, api_keys, buckets-config, billing_period_summary, outbox | Joins, FK integrity, transactional. See [§1.5](#15-postgres-minimization-directive) for what does *not* go here. |
-| Usage analytics + time-series | Tinybird (or ClickHouse Cloud) | High write volume, append-only, analytical queries — wrong fit for Postgres |
-| Hot-path counters + caches | **Upstash Redis** — bucket_state, idempotency-key fingerprint, WorkOS membership cache, rate limit | Atomic INCRBY/Lua, per-key TTLs. Per-account row contention is the Postgres scaling cliff |
-| Audit log | **Axiom** (or BetterStack) tagged by `account_id`, shipped from Postgres outbox | Append-only, immutable structurally, customer-facing read/export queries the log store directly |
-| Auth | WorkOS AuthKit | 1M MAU free, M2M, SSO/SCIM when enterprise asks |
-| Billing | Stripe Billing Meters API | Current API (legacy metered is deprecated) |
-| API keys | In-house: HMAC-SHA256 + KMS pepper + Redis 60s verification cache | 3–4 day build; removes vendor from auth hot path; marginal cost per free user ≈ 0 with cache. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache) |
-| Webhooks (out) | Svix (when first customer asks) | Reliable delivery is a 2-week project we don't need now |
-| Inference upstream | OpenRouter (default) + direct Anthropic/OAI | One API, normalized streaming |
-| Dashboard | Extend `packages/web` (or split `packages/dashboard`) | Reuse existing shell |
+| API + inference gateway | **Cloudflare Workers** running `packages/api` (Hono) | Edge-deployed, Hono runs natively, SSE works (30s CPU is CPU-bound, inference is idle-waiting), free DDoS + WAF baked in |
+| Local dev runtime | Bun | Fast, matches monorepo; same Hono code runs on Workers |
+| Inference upstream wrapper | **Cloudflare AI Gateway** (free) | Caching + provider fallback + real-time logs in front of OR/Anthropic/OAI at no cost |
+| Background workers (outbox shipper, billing reporter, reconciler) | **Cloudflare Cron Triggers + Queues** | Cron free with Workers Paid; Queues $0.40/1M ops |
+| Dashboard hosting | **Cloudflare Pages** — extend `packages/web` (or split `packages/dashboard`) | Free at our scale; same-domain integration with Workers |
+| Object storage (exports, generated reports, eventual audit dumps) | **Cloudflare R2** | Zero egress fees, S3-compatible |
+| Postgres connection pooling | **Cloudflare Hyperdrive** | Workers can't hold long-lived Postgres connections; Hyperdrive pools + caches + TLS-terminates |
+| DNS / CDN / WAF / Bot management | Cloudflare (already) | Free baseline |
+| Secrets storage | **Cloudflare Workers Secrets / Secrets Store** | Sufficient for v1 (one HMAC pepper + handful of vendor tokens); KMS trigger condition documented in §1.7 |
+
+### Data plane (external vendors — Cloudflare doesn't offer)
+
+| Layer | Choice | Rationale |
+|---|---|---|
+| Relational core (OLTP) | **Neon** + Drizzle — **only** accounts, members, api_keys, buckets-config, billing_period_summary, outbox | Serverless Postgres for Workers; scales to zero; free tier covers v1. See [§1.5](#15-postgres-minimization-directive) for what does *not* go here. |
+| Hot-path counters + caches | **Upstash Redis** — bucket_state, key-verification cache, idempotency-key fingerprint, WorkOS membership cache, rate limit, per-key RPS bucket | REST API + pay-per-request fits Workers; atomic Lua/INCRBY (Cloudflare KV can't do this) |
+| Usage analytics + time-series | **Tinybird** (or ClickHouse Cloud) | High write volume, append-only, analytical queries |
+| Audit log | **Axiom** tagged by `account_id`, shipped from Postgres outbox via Cloudflare Logpush + worker | Append-only, immutable structurally, customer-facing read/export queries Axiom directly |
+
+### Vendor services (managed product, not infrastructure)
+
+| Layer | Choice | Rationale |
+|---|---|---|
+| Auth | **WorkOS AuthKit** | 1M MAU free; SSO/SCIM on enterprise trigger |
+| Billing | **Stripe Billing Meters API** | Current API (legacy metered deprecated) |
+| Email | **Resend** | Free 3K/mo, $20/mo for 50K |
+| Webhooks (out) | **Svix** when first customer asks | Reliable delivery is a 2-week project we don't need now |
+| Inference upstream | **OpenRouter** (default) + direct Anthropic/OAI | One API, normalized streaming; fronted by Cloudflare AI Gateway |
+
+### Application-layer (in-house)
+
+| Layer | Choice | Rationale |
+|---|---|---|
+| API keys | In-house: HMAC-SHA256 + Workers Secrets pepper + Upstash 60s verification cache | 3–4 day build; no vendor in auth hot path; marginal cost per free user ≈ 0 with cache. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache) |
 | SDK | `@noetic-tools/sdk` thin wrapper | Surfaces trace IDs, ties to `@noetic-tools/core` |
 
 ## 2.6 Phased build
@@ -398,12 +485,14 @@ The shapes that are expensive to rip out later.
 Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 
 ### P0 — Foundation (wk 1)
-- `packages/api` skeleton (Hono, Drizzle, migrations)
-- Postgres schema (relational core only): `users`, `accounts`, `members`, `api_keys`, `buckets` (config), `billing_period_summary`, `outbox`
+- `packages/api` skeleton (Hono on Workers; Bun for local dev/tests)
+- **CI gate from day 1:** every PR runs `wrangler deploy --dry-run` to catch Workers-incompatible imports. Library selection rule: Workers-compatible variants only (`@neondatabase/serverless`, `@upstash/redis` REST, etc.). See [§1.7](#17-cloudflare-first-cloud-strategy).
+- Cloudflare account + Workers + Pages + R2 + Hyperdrive provisioned
+- Postgres schema on **Neon** (relational core only): `users`, `accounts`, `members`, `api_keys`, `buckets` (config), `billing_period_summary`, `outbox`. Hyperdrive in front.
 - Upstash Redis provisioned. `bucket_state` Lua scripts (reserve/settle/release) written and tested
-- Axiom workspace provisioned. Outbox-shipper worker scaffold (Postgres outbox → Axiom)
+- Axiom workspace provisioned. Logpush → Axiom configured. Outbox-shipper worker scaffold (Postgres outbox → Axiom)
 - Tinybird workspace + `UsageEvent` ingest endpoint
-- WorkOS AuthKit integration. **WorkOS is source of truth on read path**: 60s TTL membership cache (Redis), webhooks for cache invalidation only, daily reconciliation cron
+- WorkOS AuthKit integration. **WorkOS is source of truth on read path**: 60s TTL membership cache (Upstash), webhooks for cache invalidation only, daily reconciliation cron (Cloudflare Cron Trigger)
 - `hasScope()` middleware, default-deny. V1: hardcoded role→scope map
 - Account ID in every URL **plus** Postgres RLS or typed `AccountScope` repo guard
 - CI cross-tenant pen-test suite (try-to-read-another-tenant)
@@ -430,8 +519,9 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 
 ### P3 — BYOK + observability gateway (wk 3–4)
 - `@noetic-tools/sdk` wraps the gateway, surfaces trace IDs, integrates with `@noetic-tools/core`
-- **BYOK default**: customer key → forward to OR/Anthropic/OAI, capture usage from response, emit `UsageEvent` (token counts, model, tool calls, trace ID)
-- **Trial credits** path: forward via Noetic's OR account, cap at $5 lifetime/account, no overage
+- **Worker → Cloudflare AI Gateway → upstream provider** — AI Gateway adds caching, provider fallback, and real-time logs for free; Worker owns auth + bucket + UsageEvent emission
+- **BYOK default**: customer key → forward via AI Gateway to OR/Anthropic/OAI, capture usage from response, emit `UsageEvent` (token counts, model, tool calls, trace ID)
+- **Trial credits** path: forward via Noetic's OR account through AI Gateway, cap at $5 lifetime/account, no overage
 - **Managed inference** path: feature flag for design partners only (CC + manual review + hard caps)
 - Pass-through model IDs with `noetic/` prefix at most — **no model aliasing in v1**
 - Read usage from final SSE chunk (no tee infrastructure in v1)
@@ -585,6 +675,94 @@ Architectural constraints, not implementation details. Together they bound the m
 
 **These invariants survive vendor swaps.** Whether keys are in-house or Unkey, whether analytics is Tinybird or ClickHouse, whether OLTP is Neon or Supabase — the cost-coverage shape is the same as long as the cache layer + RPS limits + daily caps + BYOK default + bounded trial pool are intact.
 
+## 2.14 Cloud architecture
+
+Cloudflare-first; three external vendors fill data-plane gaps Cloudflare doesn't offer. See [§1.7](#17-cloudflare-first-cloud-strategy) for the decision rationale and AWS/GCP trigger conditions.
+
+### Layered picture
+
+```
+                          ┌──────────────────────────────────────┐
+                          │  Cloudflare DNS / CDN / WAF / Bot    │
+                          └──────────────────────────────────────┘
+                                            │
+        ┌───────────────────────────────────┼────────────────────────────────┐
+        │                                   │                                │
+        ▼                                   ▼                                ▼
+  ┌──────────┐                  ┌──────────────────────┐         ┌──────────────────┐
+  │  Pages   │                  │  Workers (Hono API)  │         │  AI Gateway      │
+  │ packages │                  │  - hasScope          │         │  cache/fallback  │
+  │  /web    │                  │  - bucket reserve    │ ───┐    │  ───────────────│
+  └──────────┘                  │  - UsageEvent emit   │    │    │  to OR / Anth /  │
+                                │  - SSE proxy         │    │    │  OAI upstream    │
+                                └──────────────────────┘    │    └──────────────────┘
+                                            │               │
+       ┌────────────────────┬───────────────┼──────────────┬┴────────────────┐
+       ▼                    ▼               ▼              ▼                 ▼
+ ┌──────────┐        ┌──────────┐    ┌──────────┐   ┌──────────────┐  ┌──────────┐
+ │Hyperdrive│        │ Upstash  │    │ Tinybird │   │ Logpush →    │  │ Cron     │
+ │   pool   │        │  Redis   │    │ UsageEvt │   │ Axiom        │  │ Triggers │
+ └────┬─────┘        │ bucket_  │    │ ingest   │   │ audit shipper│  │ + Queues │
+      │              │ state,   │    └──────────┘   └──────────────┘  └──────────┘
+      ▼              │ caches,  │
+ ┌──────────┐        │ RPS,     │
+ │  Neon    │        │ idemp.   │
+ │ Postgres │        └──────────┘
+ │  OLTP    │
+ │  core    │
+ └──────────┘                                        ┌──────────────┐
+                                                     │      R2      │
+                                                     │ exports/blobs│
+                                                     └──────────────┘
+
+  External SaaS APIs called from Workers:
+  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
+  │WorkOS  │  │Stripe  │  │Resend  │  │OpenRtr │  │Anthropic│  │OpenAI  │
+  │(auth)  │  │(billing│  │(email) │  │(infer) │  │(infer)  │  │(infer) │
+  └────────┘  └────────┘  └────────┘  └────────┘  └────────┘  └────────┘
+```
+
+### Read path (typical inference request)
+
+1. Client → Cloudflare edge (TLS, WAF, DDoS)
+2. → Worker: parse `Authorization: Bearer noetic_live_*`
+3. → Upstash: `GET key:<prefix>` (cache hit ~99% after warm-up; cold → Neon via Hyperdrive)
+4. → Upstash Lua: `reserve(account, metric, worst_case_cost)` — atomic, single round-trip
+5. → AI Gateway → upstream provider (BYOK customer's key or trial pool); SSE streamed back to client
+6. On stream completion → Upstash Lua: `settle(account, metric, actual)` (release reservation, increment used)
+7. → Tinybird: emit `UsageEvent` (fire-and-forget POST; idempotency key dedupes retries)
+8. (No Postgres hit on the inference hot path. None.)
+
+### Write path (typical mutation, e.g. revoke key)
+
+1. Worker: `hasScope(member, 'keys:revoke', account)` — Upstash cache hit
+2. Begin Postgres tx (via Hyperdrive): update `api_keys.status = 'revoked'`, insert into `outbox`
+3. Commit tx
+4. Worker: invalidate Upstash key-verification cache for that key prefix
+5. Cron-triggered outbox shipper picks up the outbox row, ships audit event to Axiom, marks row done
+
+### When to add AWS or GCP
+
+Each has a clean trigger condition; **don't pre-pay**:
+
+| Trigger | Add |
+|---|---|
+| First enterprise contract requiring HSM-backed key storage | AWS KMS (or GCP Cloud KMS) for envelope encryption of the HMAC pepper + future per-tenant keys |
+| Healthcare / finance / FedRAMP ICP discovered in P-1 | Reconsider cloud wholesale — AWS likely wins for compliance surface |
+| Tinybird monthly bill exceeds ~$1K | GCP BigQuery or AWS Athena evaluation |
+| Email volume passes ~250K/mo | AWS SES |
+| Cloudflare Containers explicitly cannot fit a long-running workload | AWS Fargate or GCP Cloud Run for that one workload |
+| Neon hits its scaling ceiling | Aurora Serverless v2 or Cloud Spanner — but §1.5 Postgres minimization makes this years out |
+
+**No speculative AWS account, no speculative GCP project.** Add the specific service when its trigger fires.
+
+### Constraints this architecture imposes
+
+- **Library selection rule:** every dependency that talks to Postgres, Redis, or makes outbound HTTP must work in Workers (V8 + partial Node compat). CI enforces with `wrangler deploy --dry-run` on every PR.
+- **No long-held connections.** Postgres → Hyperdrive. Redis → REST (Upstash). External APIs → fetch().
+- **No `fs`, no `child_process`, no Node-only globals.** If a tool needs those, it doesn't run in the Worker — it runs as a Queue consumer in a separate Worker, or as a Cloudflare Container (if/when needed).
+- **CPU time discipline.** Per-request CPU budget on Workers Paid is 30s. Compute-heavy work (e.g. cost reconciliation over a day's events) runs in a Cron-triggered Worker or as a Queue consumer that fan-outs.
+
 ---
 
 # Proposal: implementation specs
@@ -720,3 +898,4 @@ Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 cus
 | 2026-06-12 | Postgres minimization directive: Postgres holds only the relational core (6 tables + outbox). bucket_state → Redis Lua; audit_log → Axiom via outbox; Idempotency cache + membership cache → Redis; bucket_periods archive → Tinybird | User directive on infra bottleneck risk |
 | 2026-06-12 | Added §3 proposal for splitting implementation into 7 per-purpose specs (S1–S7) under `specs/saas/`, in 4 priority tiers, with explicit dependency graph and conventions | User request — needed before P-1 completes so implementation can ramp without omnibus-spec review bottleneck |
 | 2026-06-14 | Unkey rejected: in-house API keys (3–4 days) + Redis 60s verification cache. Added §2.13 Cost-coverage invariants (Redis cache + per-key RPS + daily caps + BYOK + bounded trial pool + single Upstash). Resolved §2.11 Unkey-vs-custom open question. | User question on Unkey necessity + free-tier cost coverage |
+| 2026-06-14 | Cloudflare-first cloud strategy (§1.7, §2.14): Workers + Pages + R2 + AI Gateway + Hyperdrive + Cron + Queues + Secrets. External vendors for the 3 gaps: Neon (Postgres), Upstash (Redis), Axiom (audit). No AWS or GCP at v1; explicit trigger conditions documented. Bun↔Workers CI gate added to P0 must-gets. | User request: optimize for Cloudflare, fall back to AWS/GCP only on demonstrated need |
