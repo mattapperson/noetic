@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: Noetic is a TypeScript agent framework built on seven composable primitives.
+description: Noetic is a TypeScript agent framework built on eight composable primitives.
 ---
 
 ## Philosophy
@@ -9,14 +9,15 @@ Most frameworks give you a pre-built agent to tweak. Noetic gives you the primit
 
 Every agent is a composition of small, typed building blocks. There is no hidden control flow, no magic base class, and no runtime surprises. You describe _what_ your agent does; the interpreter figures out _how_ to run it.
 
-## The Seven Primitives
+## The Eight Primitives
 
-Noetic's entire execution model is built from seven primitives. Each one is a `Step` -- a typed, serializable unit of work.
+Noetic's entire execution model is built from eight primitives. Each one is a `Step` -- a typed, serializable unit of work.
 
 | Primitive | Kind | Purpose |
 | --- | --- | --- |
 | [`step.run`](/docs/framework/steps/run) | `run` | Execute arbitrary async code |
 | [`step.llm`](/docs/framework/steps/llm) | `llm` | Call a language model |
+| [`step.claudeCode`](/docs/framework/sub-harnesses) | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
 | [`step.tool`](/docs/framework/steps/tool) | `tool` | Invoke a single tool directly |
 | [`branch`](/docs/framework/operators/branch) | `branch` | Conditional routing -- pick one step or skip |
 | [`fork`](/docs/framework/operators/fork) | `fork` | Parallel execution -- race, all, or settle |
@@ -66,6 +67,7 @@ The `AgentHarness` orchestrates execution, manages context, and wires up observa
 
 - [Getting Started](/docs) -- install and run your first agent.
 - [Steps](/docs/framework/steps) -- deep dive into `run`, `llm`, and `tool`.
+- [Sub-Harness Steps](/docs/framework/sub-harnesses) -- run a coding agent (Claude Code, Codex, opencode, pi) as a step.
 - [Control Flow](/docs/framework/operators) -- branching and forking.
 - [Spawn](/docs/framework/operators/spawn) -- isolated child agents.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- iteration and termination.

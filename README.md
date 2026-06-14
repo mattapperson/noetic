@@ -1,6 +1,6 @@
 # Noetic
 
-A TypeScript agent framework that decomposes AI agent patterns into seven composable step primitives. Noetic treats context boundary management as a first-class concern and provides a pluggable memory system with well-defined lifecycle hooks.
+A TypeScript agent framework that decomposes AI agent patterns into eight composable step primitives. Noetic treats context boundary management as a first-class concern and provides a pluggable memory system with well-defined lifecycle hooks.
 
 ## Philosophy
 
@@ -17,12 +17,13 @@ A TypeScript agent framework that decomposes AI agent patterns into seven compos
 | [`@noetic/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
 | [`@noetic/web`](packages/web) | Documentation site (Next.js + Fumadocs) |
 
-## The Seven Primitives
+## The Eight Primitives
 
 | Primitive | Kind | Purpose |
 |-----------|------|---------|
 | `step.run` | `run` | Pure async computation with retry support |
 | `step.llm` | `llm` | LLM call with tools, structured output, and memory context |
+| `step.claudeCode` | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
 | `step.tool` | `tool` | Direct tool execution with Zod-validated I/O |
 | `branch` | `branch` | Conditional routing — returns a step or null |
 | `fork` | `fork` | Parallel execution — race, all, or settle modes |
