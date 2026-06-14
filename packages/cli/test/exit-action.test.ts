@@ -114,7 +114,7 @@ describe('decideExitAction', () => {
       });
     });
 
-    test('modal status → noop (modal owns its own escape)', () => {
+    test('modal status, first press → show-exit-hint (ctrl-c always available)', () => {
       expect(
         decideExitAction(
           input({
@@ -123,7 +123,21 @@ describe('decideExitAction', () => {
           }),
         ),
       ).toEqual({
-        kind: 'noop',
+        kind: 'show-exit-hint',
+      });
+    });
+
+    test('modal status, second press within window → exit-now', () => {
+      expect(
+        decideExitAction(
+          input({
+            key: 'ctrl-c',
+            status: 'modal',
+            pendingExitArmedAt: NOW - 100,
+          }),
+        ),
+      ).toEqual({
+        kind: 'exit-now',
       });
     });
 

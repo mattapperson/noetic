@@ -182,29 +182,24 @@ export function ResponsesChat({
     onSubmit(msg);
   }
 
-  useInput(
-    (_input, key) => {
-      if (key.escape && modalContent && onModalClose) {
-        onModalClose();
-        return;
-      }
-      if (key.escape && overlayOpen) {
-        setOverlay('none');
-        return;
-      }
-      if (key.ctrl && _input === 'o') {
-        setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
-        return;
-      }
-      if (key.ctrl && _input === 'r') {
-        setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
-        return;
-      }
-    },
-    {
-      isActive: !modalContent || overlayOpen,
-    },
-  );
+  useInput((_input, key) => {
+    if (key.escape && modalContent && onModalClose) {
+      onModalClose();
+      return;
+    }
+    if (key.escape && overlayOpen) {
+      setOverlay('none');
+      return;
+    }
+    if (key.ctrl && _input === 'o') {
+      setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
+      return;
+    }
+    if (key.ctrl && _input === 'r') {
+      setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
+      return;
+    }
+  });
 
   const collapsedEntries = useMemo<DisplayEntry[]>(
     () => collapseReads(entries),
