@@ -7,6 +7,7 @@
  * validated document back into live `Step` objects via the existing builders.
  */
 
+import type { SubHarnessKind } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Until Predicate Types
@@ -104,17 +105,22 @@ const AllPredicateSchema = z.object({
 });
 
 /** @public Zod schema validating a named `until` predicate (including `any`/`all` combinators). */
-export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.union([
-  MaxStepsPredicateSchema,
-  MaxCostPredicateSchema,
-  MaxDurationPredicateSchema,
-  NoToolCallsPredicateSchema,
-  OutputContainsPredicateSchema,
-  OutputEqualsPredicateSchema,
-  ConvergedPredicateSchema,
-  AnyPredicateSchema,
-  AllPredicateSchema,
-]);
+export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
+  .union([
+    MaxStepsPredicateSchema,
+    MaxCostPredicateSchema,
+    MaxDurationPredicateSchema,
+    NoToolCallsPredicateSchema,
+    OutputContainsPredicateSchema,
+    OutputEqualsPredicateSchema,
+    ConvergedPredicateSchema,
+    AnyPredicateSchema,
+    AllPredicateSchema,
+  ])
+  .meta({
+    id: 'UntilPredicate',
+    title: 'UntilPredicate',
+  });
 
 //#endregion
 
@@ -146,6 +152,36 @@ const ModelParamsSchema = z.object({
   topP: z.number().min(0).max(1).optional(),
   maxTokens: z.number().int().positive().optional(),
   stopSequences: z.array(z.string()).optional(),
+});
+
+//#endregion
+
+//#region SubHarness Settings
+
+const HarnessSettingsSchema = z.object({
+  model: z.string().optional(),
+  permissionMode: z
+    .enum([
+      'default',
+      'plan',
+      'acceptEdits',
+      'bypassPermissions',
+    ])
+    .optional(),
+  maxTurns: z.number().int().positive().optional(),
+  allowedTools: z.array(z.string()).optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+
+const HarnessSessionPolicySchema = z.object({
+  reuse: z.string().min(1).optional(),
+  onComplete: z
+    .enum([
+      'stop',
+      'detach',
+      'destroy',
+    ])
+    .optional(),
 });
 
 //#endregion
@@ -220,6 +256,19 @@ export interface EveryWorkflowNode extends WorkflowNodeBase {
   onError?: 'continue' | 'fail';
 }
 
+/**
+ * A node that delegates a turn to a coding-agent harness. `kind` is the harness
+ * id (e.g. `claude-code`); the hydrator resolves the matching adapter from the
+ * workflow's harness registry.
+ */
+export interface SubHarnessWorkflowNode extends WorkflowNodeBase {
+  kind: SubHarnessKind;
+  prompt: string;
+  instructions?: string;
+  settings?: z.infer<typeof HarnessSettingsSchema>;
+  session?: z.infer<typeof HarnessSessionPolicySchema>;
+}
+
 /** @public Discriminated union of all JSON-serialisable workflow node kinds. */
 export type WorkflowNode =
   | LlmWorkflowNode
@@ -230,7 +279,8 @@ export type WorkflowNode =
   | ProvideWorkflowNode
   | LoopWorkflowNode
   | SequenceWorkflowNode
-  | EveryWorkflowNode;
+  | EveryWorkflowNode
+  | SubHarnessWorkflowNode;
 
 //#endregion
 
@@ -324,18 +374,44 @@ const EveryNodeSchema = z.object({
     .optional(),
 });
 
-/** @public Zod schema validating a single `WorkflowNode` (any of the 9 JSON-safe kinds). */
-export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.discriminatedUnion('kind', [
-  LlmNodeSchema,
-  ToolNodeSchema,
-  BranchNodeSchema,
-  ForkNodeSchema,
-  SpawnNodeSchema,
-  ProvideNodeSchema,
-  LoopNodeSchema,
-  SequenceNodeSchema,
-  EveryNodeSchema,
-]);
+/** Builds the schema for a single harness node kind (`claude-code`, `codex`, …). */
+function subHarnessNodeSchema<K extends SubHarnessKind>(kind: K) {
+  return z.object({
+    kind: z.literal(kind),
+    ...SHARED_FIELDS,
+    prompt: z.string().min(1),
+    instructions: z.string().optional(),
+    settings: HarnessSettingsSchema.optional(),
+    session: HarnessSessionPolicySchema.optional(),
+  });
+}
+
+const ClaudeCodeNodeSchema = subHarnessNodeSchema('claude-code');
+const CodexNodeSchema = subHarnessNodeSchema('codex');
+const OpencodeNodeSchema = subHarnessNodeSchema('opencode');
+const PiNodeSchema = subHarnessNodeSchema('pi');
+
+/** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
+export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
+  .discriminatedUnion('kind', [
+    LlmNodeSchema,
+    ToolNodeSchema,
+    BranchNodeSchema,
+    ForkNodeSchema,
+    SpawnNodeSchema,
+    ProvideNodeSchema,
+    LoopNodeSchema,
+    SequenceNodeSchema,
+    EveryNodeSchema,
+    ClaudeCodeNodeSchema,
+    CodexNodeSchema,
+    OpencodeNodeSchema,
+    PiNodeSchema,
+  ])
+  .meta({
+    id: 'WorkflowNode',
+    title: 'WorkflowNode',
+  });
 
 //#endregion
 
@@ -348,10 +424,16 @@ export interface WorkflowDocument {
 }
 
 /** @public Zod schema validating a complete `WorkflowDocument`. */
-export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z.object({
-  version: z.literal(1),
-  root: WorkflowNodeSchema,
-});
+export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
+  .object({
+    version: z.literal(1),
+    root: WorkflowNodeSchema,
+  })
+  .meta({
+    id: 'WorkflowDocument',
+    title: 'WorkflowDocument',
+    description: 'A portable, JSON-safe representation of a Noetic step tree.',
+  });
 
 //#endregion
 

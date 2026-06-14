@@ -10,6 +10,7 @@ They are mandatory, not optional.
 3. **Spec → Docs**: When a spec is added or revised, ensure the docs reflect the new specification.
 4. **Code → Skill (agent-builder)**: When public API surface changes (new builders, patterns, memory layers, tool APIs, or runtime methods), update the `noetic-agent-builder` skill at `.claude/skills/noetic-agent-builder/`. Update `references/api-reference.md` for API changes and `references/composition-patterns.md` for new patterns or usage examples.
 5. **Code → Skill (eval)**: When `@noetic-tools/core` or `@noetic/eval` changes affect the eval framework (scorers, runner, optimization, CLI, adapters, regression), update the `noetic-eval` skill at `.claude/skills/noetic-eval/`. Update `SKILL.md` for workflow/concept changes and `references/api-reference.md` for API signature changes.
+6. **Code → JSON Schema**: When changing the JSON-workflow Zod schema in `packages/core/src/schemas/workflow.ts` (the `WorkflowDocumentSchema`, any `WorkflowNode` variant, the `UntilPredicate` union, merge strategies, or model params), you MUST run `bun run gen:schema` (from `packages/core`) and commit the regenerated artifacts **in the same commit**. That one command rewrites both published copies from the Zod source — the package artifact `packages/core/schema/noetic-workflow.schema.json` and the hosted copy `packages/web/public/schema/noetic-workflow.schema.json` (served at the schema's `$id`, `https://noetic.tools/schema/noetic-workflow.schema.json`). Never hand-edit the generated `*.schema.json` files — change the Zod schema and regenerate. The drift-gate test (`packages/core/test/schemas/workflow-json-schema.test.ts`) fails CI if either copy is stale.
 
 ## Reference Mapping
 
@@ -31,6 +32,8 @@ They are mandatory, not optional.
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
 | `22-cli-architecture.md` | `packages/cli/src/` | (cli docs TBD) |
 | `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
+| `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `patterns/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
+| `27-sub-harness-steps.md` | `packages/types/src/types/sub-harness.ts`, `interpreter/execute-sub-harness`, `builders/step-builders` (harness builders), `packages/sub-harness/src/`, `packages/sub-harness-*/src/` | `framework/sub-harnesses.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 

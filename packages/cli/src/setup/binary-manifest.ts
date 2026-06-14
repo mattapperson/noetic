@@ -27,7 +27,7 @@ function rtkInstallOptions(
       command: 'brew',
       args: [
         'install',
-        'rtk-ai/rtk/rtk',
+        'rtk-ai/tap/rtk',
       ],
       requiresPackageManager: 'brew',
     });
@@ -65,7 +65,7 @@ function rtkManualInstructions(os: OsKind): string {
   if (os === 'macos') {
     return [
       'Install rtk with one of:',
-      '  brew install rtk-ai/rtk/rtk',
+      '  brew install rtk-ai/tap/rtk',
       `  ${RTK_CURL_SCRIPT}`,
       '  cargo install --git https://github.com/rtk-ai/rtk',
     ].join('\n');
@@ -75,7 +75,7 @@ function rtkManualInstructions(os: OsKind): string {
       'Install rtk with one of:',
       `  ${RTK_CURL_SCRIPT}`,
       '  cargo install --git https://github.com/rtk-ai/rtk',
-      '  brew install rtk-ai/rtk/rtk   (if you have Homebrew on Linux)',
+      '  brew install rtk-ai/tap/rtk   (if you have Homebrew on Linux)',
     ].join('\n');
   }
   if (os === 'windows') {

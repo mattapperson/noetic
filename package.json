@@ -7,18 +7,24 @@
     "evals"
   ],
   "devDependencies": {
-    "@biomejs/biome": "^2.3.11"
+    "@biomejs/biome": "^2.3.11",
+    "@noetic-tools/core": "workspace:*",
+    "@noetic-tools/sub-harness": "workspace:*",
+    "@noetic-tools/sub-harness-claude-code": "workspace:*",
+    "@noetic-tools/sub-harness-codex": "workspace:*",
+    "zod": "^4.0.0"
   },
   "scripts": {
     "postinstall": "node scripts/patch-sdk.js",
-    "test": "bun --cwd=packages/types run test && bun --cwd=packages/memory run test && bun --cwd=packages/core run test && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test",
-    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/memory run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test:coverage",
-    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/memory run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test:ci",
+    "test": "bun --cwd=packages/types run test && bun --cwd=packages/memory run test && bun --cwd=packages/sub-harness run test && bun --cwd=packages/sub-harness-claude-code run test && bun --cwd=packages/sub-harness-codex run test && bun --cwd=packages/sub-harness-opencode run test && bun --cwd=packages/sub-harness-pi run test && bun --cwd=packages/core run test && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test",
+    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/memory run test:coverage && bun --cwd=packages/sub-harness run test:coverage && bun --cwd=packages/sub-harness-claude-code run test:coverage && bun --cwd=packages/sub-harness-codex run test:coverage && bun --cwd=packages/sub-harness-opencode run test:coverage && bun --cwd=packages/sub-harness-pi run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test:coverage",
+    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/memory run test:ci && bun --cwd=packages/sub-harness run test:ci && bun --cwd=packages/sub-harness-claude-code run test:ci && bun --cwd=packages/sub-harness-codex run test:ci && bun --cwd=packages/sub-harness-opencode run test:ci && bun --cwd=packages/sub-harness-pi run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/code-agent run test && bun --cwd=packages/eval run test:ci",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
-    "check:exports": "bun scripts/check-export-tags.ts"
+    "check:exports": "bun scripts/check-export-tags.ts",
+    "example:sub-harness": "bun examples/sub-harness-e2e.ts"
   },
   "dependencies": {
     "@openrouter/agent": "^0.6.0",

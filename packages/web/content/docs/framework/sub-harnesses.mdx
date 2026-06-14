@@ -1,0 +1,239 @@
+---
+title: Sub-Harness Steps
+description: Run a coding agent — Claude Code, Codex, opencode, pi — as a Noetic step.
+---
+
+## Quick Example
+
+A sub-harness step delegates a turn to an external coding-agent runtime, exactly the way [`step.llm`](/docs/framework/steps) delegates a turn to a language model. You pick the agent with a builder (`step.claudeCode`, `step.codex`, `step.opencode`, `step.pi`) and hand it an adapter from the matching package:
+
+```ts
+import { AgentHarness, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
+
+const review = step.claudeCode({
+  id: 'review',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  prompt: 'Review the staged diff and summarize the riskiest change.',
+  settings: { permissionMode: 'plan' },
+});
+
+const harness = new AgentHarness({ name: 'reviewer', initialStep: review, params: {} });
+const ctx = harness.createContext();
+const result = await harness.run(review, '', ctx);
+```
+
+The step runs Claude Code for one turn against the current workspace: it seeds the agent with the [conversation so far](#conversation-history), streams the agent's output through the [harness event surface](#observing-the-agents-output), appends the turn's items to the conversation, charges `ctx.tokens`/`ctx.cost`, and returns the agent's final text.
+
+## What is a sub-harness?
+
+A *sub-harness* is a pluggable backend that drives an agentic coding tool as a step. It is the direct analogue of a [memory layer](/docs/framework/memory): a contract defined in the dependency-free `@noetic-tools/types` foundation, implemented once per tool in its own package, and consumed by `@noetic-tools/core` without ever forming an import cycle.
+
+Four agents ship today, each a distinct `Step.kind`:
+
+| Builder | JSON `kind` | Adapter factory | Package |
+|---|---|---|---|
+| `step.claudeCode` | `claude-code` | `claudeCode()` | `@noetic-tools/sub-harness-claude-code` |
+| `step.codex` | `codex` | `codex()` | `@noetic-tools/sub-harness-codex` |
+| `step.opencode` | `opencode` | `opencode()` | `@noetic-tools/sub-harness-opencode` |
+| `step.pi` | `pi` | `pi()` | `@noetic-tools/sub-harness-pi` |
+
+Each builder is its own individually-typed step variant, but all share the `StepSubHarness` shape and one interpreter handler. The factory wraps the agent's vendor SDK (loaded as an optional peer dependency), so installing `@noetic-tools/sub-harness-claude-code` lets you use Claude Code; the other three packages are independent installs.
+
+## Builder options
+
+Every `step.<agent>(...)` builder takes the same options:
+
+```ts
+step.claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>({
+  id: string;
+  harness: SubHarness | ((ctx: Context<TMemory>) => SubHarness); // the adapter
+  prompt: string | ((ctx: Context<TMemory>) => string);         // the turn prompt
+  settings?: SubHarnessSettings;
+  instructions?: string | ((ctx: Context<TMemory>) => string | undefined);
+  output?: ZodType<O>;
+  session?: SubHarnessSessionPolicy;
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}): StepSubHarness<TMemory, I, O>
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique step identifier (used in traces and errors). Required, non-empty. |
+| `harness` | `SubHarness` adapter, eager or `(ctx) => SubHarness` | The adapter from the matching factory. Its `harnessId` must equal the builder's kind. |
+| `prompt` | `string` or `(ctx) => string` | The fresh turn input. The prior conversation is passed separately as history (see [Conversation history](#conversation-history)), so this is only the new user turn. |
+| `settings` | `SubHarnessSettings` | Shared harness knobs — see below. |
+| `instructions` | `string` or `(ctx) => string \| undefined` | System instructions applied once on the first message of a fresh session. Never re-applied on resume. |
+| `output` | `ZodType<O>` | Optional Zod schema. When set, the agent's final text is JSON-parsed and validated, exactly like `step.llm`'s `output`. |
+| `session` | `SubHarnessSessionPolicy` | Session reuse + teardown policy — see below. |
+| `emit` | `boolean` or filter fn | Framework-event emission (default `true`). |
+
+Passing a `codex()` adapter to `step.claudeCode` throws `NoeticConfigError` with code `SUB_HARNESS_KIND_MISMATCH` — use the builder that matches the adapter. An empty `id` throws `EMPTY_STEP_ID`; a missing `harness` throws `MISSING_SUB_HARNESS`.
+
+### Settings
+
+`SubHarnessSettings` are the cross-agent knobs. Anything an individual agent supports that has no shared concept goes through `extra`, which the adapter interprets (and may reject with `SubHarnessCapabilityError`):
+
+```ts
+interface SubHarnessSettings {
+  model?: string;                                                   // e.g. 'claude-opus-4-8'
+  permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions';
+  maxTurns?: number;                                                // cap internal agent turns
+  allowedTools?: ReadonlyArray<string>;                             // restrict built-in tools
+  extra?: Record<string, unknown>;                                  // adapter-specific passthrough
+}
+```
+
+The adapter factory also accepts these settings as its own defaults — `claudeCode({ model: 'claude-opus-4-8' })` — and a step's `settings` is merged *over* those defaults. So you can set a model once on the adapter and override per step.
+
+### Session policy
+
+By default each step starts a fresh session that is stopped when the step completes. `SubHarnessSessionPolicy` changes that:
+
+```ts
+interface SubHarnessSessionPolicy {
+  reuse?: string;                              // share a live session across steps by key
+  onComplete?: 'stop' | 'detach' | 'destroy'; // teardown action when the step finishes
+}
+```
+
+- `reuse` keys a live session (workspace + conversation history + running runtime) that survives across steps. Two steps with the same `reuse` key share one session, so the second turn sees the first turn's history. A reused session is kept alive by default.
+- `onComplete` chooses teardown: `'stop'` (default for a fresh session) persists state and stops the runtime, `'detach'` parks it for later resume, `'destroy'` discards it with no resume state.
+
+## Conversation history
+
+A sub-harness sees the conversation so far, not just its own prompt — so a coding agent run *after* `step.llm` steps (or on a later turn of a consecutive [`harness.execute()`](/docs/framework/runtime) conversation) has full context and doesn't act confused.
+
+Before appending the turn's prompt, the interpreter captures everything earlier steps put in the conversation (`ctx.itemLog`) and seeds it into a fresh session. You don't pass anything — it's automatic:
+
+```ts
+// An earlier llm step established a fact in the conversation…
+const plan = step.llm({ id: 'plan', model, instructions: 'Note the deploy policy.' });
+// …and a later sub-harness step can act on it.
+const apply = step.claudeCode({
+  id: 'apply',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  prompt: 'Apply the deploy policy we just discussed.',
+});
+// Run plan, then apply, on the same context — `apply` is seeded with `plan`'s output.
+```
+
+History seeds the **first** turn of a fresh session only; after that the underlying agent owns its own history, and a `reuse`d session is never re-seeded. The default adapters fold the history into the agent's prompt; if you author your own runner, read it from `SubHarnessTurnInput.history` (or call the `withHistoryPrompt` / `formatConversation` helpers from `@noetic-tools/sub-harness`).
+
+## Observing the agent's output
+
+A sub-harness's output is mapped onto the *same* event surface as an LLM step's, so you observe a coding agent exactly like you observe a model — its text, reasoning, and tool calls flow through the runtime streams:
+
+```ts
+const harness = new AgentHarness({ name: 'reviewer', initialStep: review, params: {} });
+await harness.execute('Review the diff');
+
+for await (const chunk of harness.getTextStream()) {
+  process.stdout.write(chunk); // the agent's text, token by token
+}
+// getItemStream()      → assistant message + tool-call items as they build
+// getReasoningStream() → the agent's thinking
+// getFullStream()      → every event, including a `sub_harness_event` per raw stream part
+```
+
+Two guarantees back this:
+
+- **All output is mapped.** Every part an adapter emits — `text-delta`, `reasoning-delta`, `tool-call`, `file-change`, `finish`, … — becomes the corresponding stream event. Adapters never drop vendor output: anything unrecognized is surfaced as a `raw` part rather than discarded.
+- **A turn always emits.** Even an adapter that streams nothing still brackets the turn with a completion event, and a result returned without streaming is synthesized into events. Set `emit: false` on the step to suppress all of it.
+
+## JSON workflow node
+
+The same four agents are available in the [JSON Workflow Runtime](/docs/framework/json-runtime) as four node kinds. A node names the agent by `kind`; the hydrator resolves the adapter from a registry you pass in:
+
+```json
+{
+  "kind": "claude-code",
+  "id": "review",
+  "prompt": "Review the diff and summarize risks",
+  "instructions": "You are a careful senior reviewer.",
+  "settings": { "model": "claude-opus-4-8", "permissionMode": "plan" },
+  "session": { "reuse": "review-session", "onComplete": "detach" }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `'claude-code' \| 'codex' \| 'opencode' \| 'pi'` | required | Selects the agent; resolved against the harness registry. |
+| `id` | `string` | required | Unique step identifier. |
+| `prompt` | `string` | required | The turn prompt. |
+| `instructions` | `string` | `undefined` | First-message system instructions. |
+| `settings` | `SubHarnessSettings` | `undefined` | Shared harness settings. |
+| `session` | `SubHarnessSessionPolicy` | `undefined` | Session reuse + teardown policy. |
+
+Because adapters carry vendor SDKs, they are never embedded in the JSON. Instead you supply them at hydration time through `HydrationContext.subHarnesses`, a `Map<SubHarnessKind, SubHarness>`. Build one with `createSubHarnessRegistry`:
+
+```ts
+import { hydrateWorkflow, type HydrationContext } from '@noetic-tools/core';
+import { createSubHarnessRegistry } from '@noetic-tools/sub-harness';
+import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
+import { codex } from '@noetic-tools/sub-harness-codex';
+
+const hydrationCtx: HydrationContext = {
+  tools: new Map(),
+  executeStep: harness.run.bind(harness),
+  subHarnesses: createSubHarnessRegistry(claudeCode(), codex()),
+};
+
+const rootStep = hydrateWorkflow(workflowDoc, hydrationCtx);
+```
+
+A node whose `kind` has no registered adapter fails hydration with `NoeticConfigError` code `UNKNOWN_SUB_HARNESS_REFERENCE`. The JSON node kinds are part of the published [JSON Schema](/docs/framework/json-runtime#published-json-schema), regenerated from the Zod source via `bun run gen:schema`.
+
+## Authoring a custom sub-harness
+
+To wrap a new coding agent, create a package that depends on `@noetic-tools/sub-harness` and call `defineSubHarness`. You provide a *runner*: an async generator that yields normalized `SubHarnessStreamPart`s for one turn. `defineSubHarness` builds the full `SubHarness` + session lifecycle around it.
+
+```ts
+import {
+  defineSubHarness,
+  commonTool,
+  type SubHarness,
+  type SubHarnessRunner,
+  type SubHarnessSettings,
+} from '@noetic-tools/sub-harness';
+
+const myRunner: SubHarnessRunner = async function* (input) {
+  // input: { prompt, ctx, settings, instructions, signal }
+  // ctx exposes cwd, fs, shell, subprocess, threadId.
+  yield { type: 'text-delta', delta: 'Working on it…' };
+  yield {
+    type: 'tool-call',
+    toolCallId: 'call-1',
+    toolName: 'bash',
+    input: { command: 'ls' },
+    providerExecuted: true,
+  };
+  yield { type: 'finish', finishReason: 'stop', usage: { input: 100, output: 40 } };
+};
+
+export function myAgent(options: SubHarnessSettings = {}): SubHarness {
+  return defineSubHarness({
+    harnessId: 'codex', // one of the SubHarnessKind values
+    runner: myRunner,
+    builtinTools: [commonTool('bash', 'shell', 'Run a shell command')],
+    defaultSettings: options,
+  });
+}
+```
+
+The stream-part union covers `stream-start`, `text-delta`, `reasoning-delta`, `tool-call`, `tool-result`, `file-change`, `finish`, `error`, and a `raw` passthrough for events with no canonical mapping. Each part has a paired Zod schema (`SubHarnessStreamPartSchema`), so adapters that move events across a process or transport boundary can validate them before forwarding. The `finish` part carries the turn's `usage` and `cost`, which the interpreter charges to the context.
+
+`commonTool(nativeName, commonName?, description?)` maps an agent's native tool name (Claude's `Bash`, Codex's `shell`, pi's `bash`) to a shared cross-harness name (`shell`), so consumers can recognize "the same kind of tool" across agents.
+
+The base package also exports the building blocks the lifecycle uses internally: `SubHarnessTurnAccumulator` (collects stream parts into a `SubHarnessTurnResult`), the `asItems` / `assistantMessageItem` / `functionCallItem` item builders, and the `SubHarnessCapabilityError` / `SubHarnessStartError` error types (with `isSubHarnessCapabilityError` / `isSubHarnessStartError` guards). A `SubHarnessSession` requires only `doPromptTurn` and `doStop`; the rest of the lifecycle (`doContinueTurn`, `doSuspendTurn`, `doDetach`, `doDestroy`, `doCompact`) is optional and signalled by presence. An adapter that cannot satisfy an optional capability throws `SubHarnessCapabilityError` from the relevant method rather than advertising a static capabilities object.
+
+## Core decoupling guarantee
+
+`@noetic-tools/core` imports only the *contract types* from `@noetic-tools/types` and resolves *adapter instances* from the step (`step.harness`) or the hydration registry. It never imports `@noetic-tools/sub-harness` or any `@noetic-tools/sub-harness-*` adapter package, so no agent SDK enters core's dependency graph. The boundary is machine-enforced by `.sentrux/rules.toml` (a `core → sub-harness*` import is a violation). Adding a new agent is a new package — it never touches core.
+
+## Related Pages
+
+- [Steps](/docs/framework/steps) — the step primitives sub-harness steps sit alongside.
+- [JSON Workflow Runtime](/docs/framework/json-runtime) — how the JSON node kinds hydrate and execute.
+- [Memory](/docs/framework/memory) — the contract this design mirrors.
+- [Runtime](/docs/framework/runtime) — the AgentHarness that executes sub-harness steps.
