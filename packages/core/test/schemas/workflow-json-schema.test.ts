@@ -6,6 +6,7 @@ import {
   SCHEMA_ID,
   SCHEMA_OUTPUT_PATH,
   serializeWorkflowJsonSchema,
+  WEB_SCHEMA_OUTPUT_PATH,
 } from '../../scripts/generate-workflow-schema';
 import { validateWorkflow } from '../../src/schemas/workflow';
 
@@ -69,6 +70,11 @@ describe('published workflow JSON Schema', () => {
   test('committed artifact is up to date with the Zod source', () => {
     const committed = readFileSync(SCHEMA_OUTPUT_PATH, 'utf8');
     expect(committed).toBe(serializeWorkflowJsonSchema());
+  });
+
+  test('hosted web copy is byte-identical to the published artifact', () => {
+    const hosted = readFileSync(WEB_SCHEMA_OUTPUT_PATH, 'utf8');
+    expect(hosted).toBe(serializeWorkflowJsonSchema());
   });
 
   test('declares draft-2020-12 and the canonical $id', () => {
