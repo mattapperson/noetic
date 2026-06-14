@@ -31,6 +31,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.3 Adversarial panel review](#13-adversarial-panel-review)
    - [1.4 OpenRouter pragmatism debate](#14-openrouter-pragmatism-debate)
    - [1.5 Postgres minimization directive](#15-postgres-minimization-directive)
+   - [1.6 Unkey rejected; in-house keys + verification cache](#16-unkey-rejected-in-house-keys--verification-cache)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -44,6 +45,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [2.10 Compliance & risk](#210-compliance--risk)
    - [2.11 Open questions](#211-open-questions-to-resolve)
    - [2.12 What's NOT in this plan](#212-whats-not-in-this-plan)
+   - [2.13 Cost-coverage invariants](#213-cost-coverage-invariants)
 3. [Proposal: implementation specs](#proposal-implementation-specs)
    - [3.1 Why split](#31-why-split)
    - [3.2 Proposed specs (grouped, prioritized)](#32-proposed-specs-grouped-prioritized)
@@ -250,6 +252,69 @@ This decision drives most of [§2.2 Strategic posture](#22-strategic-posture).
 
 **One concern this raises:** The original panel engineer wanted the audit row written in the **same Postgres transaction** as the mutation, for atomicity. Moving audit to Axiom breaks that guarantee. **Resolution:** the outbox table stays in Postgres. Audit-relevant mutations write an `outbox` row in the same tx as the mutation; a worker ships outbox → Axiom at-least-once. We lose synchronous "audit committed iff mutation committed" but gain operational simplicity. The outbox row in Postgres is itself the durable record of intent; Axiom is the queryable form. SOC2 evidence collection can use either.
 
+## 1.6 Unkey rejected; in-house keys + verification cache
+
+**Trigger:** User asked to evaluate whether Unkey is necessary and how to ensure free-tier cost-coverage doesn't break unit economics.
+
+**Unkey pricing as of mid-2026** (updated since v0 plan was drafted):
+- **Free:** 150K requests/month (up from 2.5K). "Request" = key verification *or* rate-limit check, no longer billed separately.
+- **Pro:** $25/mo, tiered up to ~1M requests, **no overage charges** — exceeding the tier triggers an email, not a bill.
+- **Scale:** ~$250/mo for 10M requests (down from $1,010/mo on the old model).
+
+**The cost-coverage problem with any vendor on the auth hot path.** For a dev-tools product on BYOK inference, every CLI/SDK call hits the API-key verifier *before* it reaches OpenRouter. Free users have no incentive to be efficient. Realistic shape:
+- ~10% of signups become weekly-active
+- Active users on agent workflows generate 100–500 inference calls/day each
+- 1K active free users × 200 calls/day × 30 = **6M verifications/month**
+
+That blows through Unkey's 150K free tier at ~750 active users. Then we pay $25–250/mo on $0 of revenue. Not catastrophic, but a leak that scales with success.
+
+**The structural fix is verification caching, not vendor choice.** Redis with a 60s TTL on `(api_key_hash) → {account_id, scopes}` cuts vendor/DB calls by 50–100× for any user making more than one call/minute. With caching, 6M verifications → ~60K — comfortably inside Unkey's free tier. **But once we have the cache, the marginal cost gap between Unkey and in-house collapses to near zero, and in-house becomes structurally cheaper.**
+
+**In-house effort, honestly estimated:**
+
+| Component | LoC | Time |
+|---|---|---|
+| Generate (env prefix + 24B base62) | ~10 | 30 min |
+| Store (HMAC-SHA256 + KMS pepper, Postgres) | ~30 | 1 hr |
+| Lookup (prefix index + constant-time HMAC compare) | ~40 | 2 hr |
+| Redis verification cache (60s TTL) | ~30 | 1 hr |
+| Revoke + invalidate cache | ~20 | 30 min |
+| Per-key RPS limit (Redis token bucket on existing Upstash) | ~40 | 2 hr |
+| Dashboard UI (create/list/revoke/last-used) | ~150 | 1 day |
+| Tests | ~200 | 1 day |
+
+**Total: ~3–4 days of one engineer.** The cryptographic primitives are stdlib; the surrounding infra (audit log, rate-limit, scope check) is already being built for other reasons. The v0 plan over-estimated this at ~1 week.
+
+**Trade-offs analyzed:**
+
+| Unkey gives | We already have / don't need |
+|---|---|
+| Pre-built rate-limit primitives | Upstash Redis token bucket (same thing, already in plan) |
+| Analytics dashboard | Tinybird + our own metering dashboards |
+| Per-key permissions UI | `hasScope()` system |
+| Hosted verification endpoint | Local Postgres + Redis lookup is *faster* (no network) |
+| Abuse detection | Noetic-policy specific; we build it either way |
+
+| Unkey costs | Severity |
+|---|---|
+| 5–20ms added latency per call (network to Unkey) | Real — compounds on streaming inference |
+| Vendor in auth hot path (their outage = our outage) | Real — undermines our 99.9% status-page claim |
+| Key material custody outside our control | Real — adds DPA scope for enterprise customers |
+| Migration cost if we ever leave | Real — every customer key would need rotation |
+| Scaling cost as free-tier population grows | Tractable with caching but unnecessary friction |
+
+**Decision: build in-house.** Three reasons:
+
+1. The work is **3–4 days**, not a week, because the surrounding infra is already being built.
+2. The structural cost-coverage answer is **verification caching**, which we need regardless of vendor — and once we have it, Unkey's free tier is unnecessary and its paid tiers are pure overhead with no offsetting feature win.
+3. **Removing a vendor from the auth hot path** is a latency, reliability, and compliance win that compounds.
+
+The original CEO-panel "use Unkey" rec came from a "don't build commodity stuff" instinct that's correct in general but wrong here: we're already paying the cost of the surrounding system. Unkey makes sense for a startup whose *only* infra need is keys. We're building 6 other things on Postgres + Redis + Axiom; keys are a 3-day extension, not a separate project.
+
+**Cost-coverage invariants codified as architectural constraints** (see [§2.13](#213-cost-coverage-invariants)). The deeper question — "many users will hold keys without paying, how do costs stay covered?" — is answered by six locked-in invariants that hold regardless of vendor choice and ensure marginal cost per free user approaches fractions of a cent per month.
+
+**Open question resolved:** §2.11 "Unkey vs custom keys — 1-day spike" is closed. No spike needed.
+
 ---
 
 # Current plan
@@ -322,7 +387,7 @@ The shapes that are expensive to rip out later.
 | Audit log | **Axiom** (or BetterStack) tagged by `account_id`, shipped from Postgres outbox | Append-only, immutable structurally, customer-facing read/export queries the log store directly |
 | Auth | WorkOS AuthKit | 1M MAU free, M2M, SSO/SCIM when enterprise asks |
 | Billing | Stripe Billing Meters API | Current API (legacy metered is deprecated) |
-| API keys | Evaluate Unkey first; HMAC+KMS-pepper custom only if rejected | Don't build what's free |
+| API keys | In-house: HMAC-SHA256 + KMS pepper + Redis 60s verification cache | 3–4 day build; removes vendor from auth hot path; marginal cost per free user ≈ 0 with cache. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache) |
 | Webhooks (out) | Svix (when first customer asks) | Reliable delivery is a 2-week project we don't need now |
 | Inference upstream | OpenRouter (default) + direct Anthropic/OAI | One API, normalized streaming |
 | Dashboard | Extend `packages/web` (or split `packages/dashboard`) | Reuse existing shell |
@@ -354,11 +419,14 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 - **Customer-facing audit log** read + export API
 - Outbox-pattern audit on Stripe/WorkOS mutations (no cross-network Postgres tx)
 
-### P2 — API keys (wk 2–3)
-- **Evaluate Unkey first.** Adopt unless env-prefix + per-key pepper requirements force custom
-- If custom: `noetic_<env>_<24B-base62>`, stored as prefix + HMAC-SHA256 with KMS-pepper, constant-time compare on the HMAC
+### P2 — API keys (wk 2, ~3–4 days)
+- In-house: `noetic_<env>_<24B-base62>`, stored as prefix + HMAC-SHA256 with KMS-pepper, constant-time compare on the HMAC
+- **Redis verification cache, 60s TTL** on `(api_key_hash) → {account_id, scopes, status}` — the non-negotiable cost-coverage primitive ([§1.6](#16-unkey-rejected-in-house-keys--verification-cache), [§2.13](#213-cost-coverage-invariants))
+- Cache invalidation on revoke + on scope/membership change
 - Account-owned by default, `created_by` audit field, rotate-on-offboarding
-- **Honor `Idempotency-Key` header** on the inference gateway (24h TTL fingerprint cache)
+- Per-key Redis token-bucket RPS limit (free-tier default, paid-tier override)
+- **Honor `Idempotency-Key` header** on the inference gateway (24h TTL fingerprint cache, same Redis instance)
+- Dashboard UI: create / list / revoke / last-used / RPS-stats
 
 ### P3 — BYOK + observability gateway (wk 3–4)
 - `@noetic-tools/sdk` wraps the gateway, surfaces trace IDs, integrates with `@noetic-tools/core`
@@ -483,7 +551,7 @@ These need answers before the relevant phase starts.
 
 - **Pricing units.** Per-seat? Per-agent-run? Per-eval? Combination? Tied to P-1 customer discovery.
 - **Free-tier shape.** Agent-runs/month? Trial credit dollars? Days-of-access?
-- **Unkey vs custom keys.** Need a 1-day spike to validate env-prefix + per-key pepper requirements against their API.
+- ~~**Unkey vs custom keys.**~~ Resolved 2026-06-14: in-house. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache).
 - **Tinybird vs ClickHouse Cloud.** Tinybird is faster to ship; ClickHouse is more control. Lean Tinybird unless cost projection at 100K MAU rules it out.
 - **Dashboard split.** Extend `packages/web` or split `packages/dashboard`? Defer until P1 starts.
 - **Trial credits funding.** Start with $5/account out of our OR account. Re-evaluate when 100 accounts have hit the cap.
@@ -501,6 +569,21 @@ These need answers before the relevant phase starts.
 - Whitelabel model ID aliasing
 - Multi-region inference proxy
 - Legacy Stripe metered billing
+
+## 2.13 Cost-coverage invariants
+
+Architectural constraints, not implementation details. Together they bound the marginal cost of a free user to fractions of a cent per active month, regardless of how heavily they use the platform. Violating any of these requires an explicit decision-history entry.
+
+1. **Redis verification cache (60s TTL) sits in front of every auth check.** API-key lookups, scope resolution, and WorkOS membership all hit cache first. Cold-path Postgres / WorkOS calls scale with *unique active keys per minute*, not request rate. A user hammering at 1000 RPS produces ~1 cold lookup/minute, not 60K.
+2. **Per-key Redis token-bucket RPS limit.** Free tier: 5 RPS default. Paid tiers override upward. Hard ceiling — no overage path. Bounds worst-case auth-check load per key and protects against runaway agents independently of the bucket check.
+3. **Free-tier daily request cap, hard-limited.** E.g. 10K agent-runs/account/day, enforced at the gateway. Also serves as runaway-agent protection (PM's concern in panel review). A free account cannot generate unbounded billable activity.
+4. **BYOK by default eliminates inference cost.** Customer pays OR/Anthropic/OAI directly. The biggest variable cost in the system is not on our P&L for the majority of users.
+5. **Trial credits pool hard-capped at $5/account lifetime.** The only $$ we spend per free user, bounded by design. Funded out of Noetic's OR account; hits cap → "add your key to continue." No overage path.
+6. **All hot-path counters and caches share one Upstash Redis instance.** Bucket state, idempotency cache, membership cache, key verification cache, rate limit buckets, RPS limits. Fixed monthly cost (~$10–30/mo) independent of user count. Per-user marginal cost is Redis-ops × Upstash-per-op pricing, which at the cache hit rates above is sub-penny.
+
+**Net result:** for a 10K-signup, 1K-active free cohort with the invariants in place, all-in cost-to-serve free users is **single-digit dollars/month** (Upstash + a few thousand Tinybird events + the $5 trial credit pool drawn down by a small fraction of accounts).
+
+**These invariants survive vendor swaps.** Whether keys are in-house or Unkey, whether analytics is Tinybird or ClickHouse, whether OLTP is Neon or Supabase — the cost-coverage shape is the same as long as the cache layer + RPS limits + daily caps + BYOK default + bounded trial pool are intact.
 
 ---
 
@@ -636,3 +719,4 @@ Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 cus
 | 2026-06-12 | Plan v1 documented with decision history | Living doc requirement |
 | 2026-06-12 | Postgres minimization directive: Postgres holds only the relational core (6 tables + outbox). bucket_state → Redis Lua; audit_log → Axiom via outbox; Idempotency cache + membership cache → Redis; bucket_periods archive → Tinybird | User directive on infra bottleneck risk |
 | 2026-06-12 | Added §3 proposal for splitting implementation into 7 per-purpose specs (S1–S7) under `specs/saas/`, in 4 priority tiers, with explicit dependency graph and conventions | User request — needed before P-1 completes so implementation can ramp without omnibus-spec review bottleneck |
+| 2026-06-14 | Unkey rejected: in-house API keys (3–4 days) + Redis 60s verification cache. Added §2.13 Cost-coverage invariants (Redis cache + per-key RPS + daily caps + BYOK + bounded trial pool + single Upstash). Resolved §2.11 Unkey-vs-custom open question. | User question on Unkey necessity + free-tier cost coverage |
