@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/sub-harness-pi",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Pi sub-harness for Noetic — run the Pi coding agent as a Noetic step via step.pi(...) or a pi JSON workflow node.",
   "license": "Apache-2.0",
