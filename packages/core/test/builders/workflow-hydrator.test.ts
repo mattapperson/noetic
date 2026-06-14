@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { MemoryLayer } from '@noetic-tools/memory';
-import type { Tool } from '@noetic-tools/types';
+import type { SubHarness, SubHarnessKind, Tool } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
@@ -624,5 +624,93 @@ describe('hydrateNode — predicate boundary N+1', () => {
       depth: 0,
     });
     expect(verdict.stop).toBe(true);
+  });
+});
+
+describe('hydrateNode — harness', () => {
+  function fakeHarness(harnessId: SubHarnessKind): SubHarness {
+    return {
+      specificationVersion: 'harness-v1',
+      harnessId,
+      async doStart() {
+        return {
+          sessionId: 's',
+          isResume: false,
+          async doPromptTurn() {
+            return {
+              items: [],
+              text: '',
+            };
+          },
+          async doStop() {
+            return {
+              harnessId,
+              sessionId: 's',
+              state: null,
+            };
+          },
+        };
+      },
+    };
+  }
+
+  function ctxWithHarness(harnessId: SubHarnessKind): HydrationContext {
+    return {
+      tools: new Map(),
+      executeStep: async (_step, input) => frameworkCast(input),
+      subHarnesses: new Map([
+        [
+          harnessId,
+          fakeHarness(harnessId),
+        ],
+      ]),
+    };
+  }
+
+  test('hydrates a claude-code node into a StepSubHarness with the resolved adapter', () => {
+    const node: WorkflowNode = {
+      kind: 'claude-code',
+      id: 'review',
+      prompt: 'review the diff',
+      settings: {
+        model: 'claude-opus-4-8',
+      },
+    };
+    const result = hydrateNode(node, ctxWithHarness('claude-code'));
+    expect(result.kind).toBe('claude-code');
+    expect(result.id).toBe('review');
+  });
+
+  test('hydrates each harness kind from the registry', () => {
+    const kinds: SubHarnessKind[] = [
+      'claude-code',
+      'codex',
+      'opencode',
+      'pi',
+    ];
+    for (const kind of kinds) {
+      const node: WorkflowNode = {
+        kind,
+        id: `n-${kind}`,
+        prompt: 'go',
+      };
+      const result = hydrateNode(node, ctxWithHarness(kind));
+      expect(result.kind).toBe(kind);
+    }
+  });
+
+  test('throws UNKNOWN_HARNESS_REFERENCE when no adapter is registered', () => {
+    const node: WorkflowNode = {
+      kind: 'codex',
+      id: 'x',
+      prompt: 'go',
+    };
+    try {
+      hydrateNode(node, makeHydrationContext());
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_SUB_HARNESS_REFERENCE');
+    }
   });
 });

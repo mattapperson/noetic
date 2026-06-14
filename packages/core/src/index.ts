@@ -260,6 +260,7 @@ export type {
   ProvideWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
+  SubHarnessWorkflowNode,
   ToolWorkflowNode,
   UntilPredicate,
   WorkflowDocument,
@@ -517,10 +518,35 @@ export type {
   StepProvide,
   StepRun,
   StepSpawn,
+  StepSubHarness,
   StepTool,
   Until,
   Verdict,
 } from '@noetic-tools/types';
+
+//#endregion
+
+//#region Types — SubHarness adapters
+
+/** @public */
+export type {
+  SubHarness,
+  SubHarnessBuiltinTool,
+  SubHarnessContinueState,
+  SubHarnessContinueTurnOptions,
+  SubHarnessFinishReason,
+  SubHarnessPromptTurnOptions,
+  SubHarnessResumeState,
+  SubHarnessRunContext,
+  SubHarnessSession,
+  SubHarnessSessionPolicy,
+  SubHarnessSettings,
+  SubHarnessStartOptions,
+  SubHarnessStreamPart,
+  SubHarnessTurnResult,
+} from '@noetic-tools/types';
+/** @public */
+export { SUB_HARNESS_KINDS, SubHarnessKind, SubHarnessStreamPartSchema } from '@noetic-tools/types';
 
 //#endregion
 

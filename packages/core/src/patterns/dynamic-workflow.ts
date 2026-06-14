@@ -47,6 +47,9 @@ A WorkflowNode is one of:
 - { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": { "kind": "maxSteps", "n": <number> } }
 - { "kind": "branch", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> }
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode> }
+- { "kind": "claude-code"|"codex"|"opencode"|"pi", "id": "<unique>", "prompt": "<turn prompt>", "settings": { "model": "<optional>", "permissionMode": "<optional>" } }
+
+SubHarness nodes (claude-code, codex, opencode, pi) delegate a turn to an external coding agent; only emit one if a matching harness adapter is registered for the workflow.
 
 Until predicates: maxSteps, maxCost, maxDuration, noToolCalls, outputContains, outputEquals, converged, any, all.
 

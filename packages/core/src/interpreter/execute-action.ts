@@ -169,7 +169,7 @@ interface ResolvedTools {
  * or memory layer state to produce per-execution values (model, instructions,
  * tools) without baking them in at build time.
  */
-async function resolveLazy<T, TMemory>(
+export async function resolveLazy<T, TMemory>(
   value: T | ((ctx: Context<TMemory>) => T | Promise<T>),
   ctx: Context<TMemory>,
 ): Promise<T> {

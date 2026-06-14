@@ -1,0 +1,69 @@
+{
+  "name": "@noetic-tools/sub-harness-pi",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Pi sub-harness for Noetic — run the Pi coding agent as a Noetic step via step.pi(...) or a pi JSON workflow node.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/sub-harness-pi"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "keywords": [
+    "noetic",
+    "agents",
+    "sub-harness",
+    "pi"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "@pi-agent/sdk": ">=0.1.0",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@pi-agent/sdk": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@noetic-tools/sub-harness": "workspace:*",
+    "@noetic-tools/types": "workspace:*"
+  },
+  "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
+    "verify:esm": "bun scripts/verify-node-esm.ts",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts && bun scripts/strip-dev-conditions.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --coverage --coverage-reporter=lcov",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  }
+}

@@ -7,7 +7,17 @@
  */
 
 import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
-import type { Context, ExecuteStepFn, Step, Tool, Until } from '@noetic-tools/types';
+import type {
+  Context,
+  ExecuteStepFn,
+  Step,
+  SubHarness,
+  SubHarnessKind,
+  SubHarnessSessionPolicy,
+  SubHarnessSettings,
+  Tool,
+  Until,
+} from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type { UntilPredicate, WorkflowDocument, WorkflowNode } from '../schemas/workflow';
 import { all, any } from '../until/combinators';
@@ -27,7 +37,20 @@ export interface HydrationContext {
   tools: ReadonlyMap<string, Tool>;
   executeStep: ExecuteStepFn;
   layers?: ReadonlyMap<string, MemoryLayer>;
+  /** SubHarness adapters keyed by harness id, resolving `claude-code`/`codex`/… nodes. */
+  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
 }
+
+interface SubHarnessBuilderOpts {
+  id: string;
+  harness: SubHarness;
+  prompt: string;
+  instructions?: string;
+  settings?: SubHarnessSettings;
+  session?: SubHarnessSessionPolicy;
+}
+
+type SubHarnessStepBuilder = (opts: SubHarnessBuilderOpts) => Step<ContextMemory, string, string>;
 
 type NodeHydrator = (
   node: WorkflowNode,
@@ -329,6 +352,43 @@ function hydrateEveryNode(
   });
 }
 
+const SUB_HARNESS_BUILDERS: Record<SubHarnessKind, SubHarnessStepBuilder> = {
+  'claude-code': (opts) => step.claudeCode(opts),
+  codex: (opts) => step.codex(opts),
+  opencode: (opts) => step.opencode(opts),
+  pi: (opts) => step.pi(opts),
+};
+
+function hydrateSubHarnessNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextMemory, string, string> {
+  if (
+    node.kind !== 'claude-code' &&
+    node.kind !== 'codex' &&
+    node.kind !== 'opencode' &&
+    node.kind !== 'pi'
+  ) {
+    return frameworkCast(undefined);
+  }
+  const harness = ctx.subHarnesses?.get(node.kind);
+  if (!harness) {
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_SUB_HARNESS_REFERENCE',
+      message: `SubHarness '${node.kind}' referenced in workflow node '${node.id}' is not registered.`,
+      hint: `Pass harness adapters via HydrationContext.subHarnesses, e.g. new Map([['${node.kind}', ${node.kind.replace(/-([a-z])/g, (_, c) => c.toUpperCase())}({ model })]]).`,
+    });
+  }
+  return SUB_HARNESS_BUILDERS[node.kind]({
+    id: node.id,
+    harness,
+    prompt: node.prompt,
+    instructions: node.instructions,
+    settings: node.settings,
+    session: node.session,
+  });
+}
+
 //#endregion
 
 //#region Handler Registry
@@ -343,6 +403,10 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   loop: hydrateLoopNode,
   sequence: hydrateSequenceNode,
   every: hydrateEveryNode,
+  'claude-code': hydrateSubHarnessNode,
+  codex: hydrateSubHarnessNode,
+  opencode: hydrateSubHarnessNode,
+  pi: hydrateSubHarnessNode,
 };
 
 //#endregion

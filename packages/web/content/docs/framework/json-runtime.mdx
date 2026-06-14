@@ -64,6 +64,21 @@ Every workflow document is an envelope with a `version` field and a `root` node:
 
 The `root` node and all descendant nodes are `WorkflowNode` objects, each identified by a `kind` discriminant and a unique `id` string. The document is validated at runtime by `WorkflowDocumentSchema` (a Zod schema exported from `@noetic-tools/core`).
 
+## Published JSON Schema
+
+A standard [JSON Schema (draft 2020-12)](https://json-schema.org/) is generated from `WorkflowDocumentSchema` and published with the package, so editors, CI, and LLM planners can validate documents without importing the runtime. It is available at the `./schema` subpath and on disk at `@noetic-tools/core/schema`:
+
+```jsonc
+{
+  // your-workflow.json
+  "$schema": "https://noetic.tools/schema/noetic-workflow.schema.json",
+  "version": 1,
+  "root": { "kind": "llm", "id": "answer", "instructions": "..." }
+}
+```
+
+Point your editor or validator at the bundled file (resolve it from the package, e.g. `require.resolve('@noetic-tools/core/schema')`) to get autocompletion and inline errors while authoring workflows by hand or reviewing LLM-generated ones. The schema is regenerated from the Zod source via `bun run gen:schema`; a drift-gate test fails CI if the committed artifact falls out of sync.
+
 ## Node Kinds
 
 Nine node kinds are available. Leaf nodes (`llm`, `tool`) perform work; structural nodes (`sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`) compose them into trees.
@@ -373,6 +388,49 @@ const result = await parseAndRunWorkflow({
 Returns `Promise<string>` -- the string output of the executed workflow.
 
 Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
+
+## Worked example: a model panel with an Opus judge
+
+A complete, runnable example lives at [`packages/core/examples/dynamic-judge-workflow.ts`](https://github.com/mattapperson/noetic/blob/main/packages/core/examples/dynamic-judge-workflow.ts). An Opus planner *generates* a workflow as JSON, the document is validated, and then it is executed: the question fans out to four different models in parallel (`fork` with `mode: "settle"`), and their concatenated answers are piped to an Opus judge that synthesises a single ideal response — the "mixture-of-agents" pattern, expressed entirely as data.
+
+```bash
+OPENROUTER_API_KEY=sk-... bun examples/dynamic-judge-workflow.ts "Your question here"
+```
+
+The canonical, hand-checked version of the generated document is committed at [`packages/core/examples/multi-model-judge.workflow.json`](https://github.com/mattapperson/noetic/blob/main/packages/core/examples/multi-model-judge.workflow.json):
+
+```json
+{
+  "$schema": "https://noetic.tools/schema/noetic-workflow.schema.json",
+  "version": 1,
+  "root": {
+    "kind": "sequence",
+    "id": "multi-model-judge",
+    "steps": [
+      {
+        "kind": "fork",
+        "id": "panel",
+        "mode": "settle",
+        "merge": "concat",
+        "paths": [
+          { "kind": "llm", "id": "answer-gpt", "model": "openai/gpt-4.1", "instructions": "Answer the question. Prefix with '## Candidate (openai/gpt-4.1)'." },
+          { "kind": "llm", "id": "answer-gemini", "model": "google/gemini-2.5-pro", "instructions": "Answer the question. Prefix with '## Candidate (google/gemini-2.5-pro)'." },
+          { "kind": "llm", "id": "answer-llama", "model": "meta-llama/llama-3.3-70b-instruct", "instructions": "Answer the question. Prefix with '## Candidate (meta-llama/llama-3.3-70b-instruct)'." },
+          { "kind": "llm", "id": "answer-deepseek", "model": "deepseek/deepseek-chat", "instructions": "Answer the question. Prefix with '## Candidate (deepseek/deepseek-chat)'." }
+        ]
+      },
+      {
+        "kind": "llm",
+        "id": "judge",
+        "model": "anthropic/claude-opus-4.5",
+        "instructions": "Compare the candidate answers, correct any errors, and output one synthesised best answer."
+      }
+    ]
+  }
+}
+```
+
+`mode: "settle"` is deliberate: a single flaky provider cannot abort the whole panel, and the judge synthesises from whichever candidates responded.
 
 ## Hydration API
 

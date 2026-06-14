@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ExtendedItem } from '@noetic-tools/types';
 import { z } from 'zod';
-import type { SettleResult } from '../../src/index';
+import type { SettleResult, Step, StepSpawn } from '../../src/index';
 import { Slot } from '../../src/index';
 
 describe('Type definitions', () => {
@@ -58,6 +58,22 @@ describe('Type definitions', () => {
       };
 
       expect(item.payload).toBe(1);
+    });
+  });
+
+  // Regression: `StepSpawn` was accidentally dropped from `@noetic-tools/core`'s
+  // public re-export block during the sub-harness merge (only `StepSubHarness`
+  // was added next to it). Doc snippets that import it via `@noetic-tools/core`
+  // — and any downstream consumer that does the same — broke. This is a
+  // typecheck-level assertion: if the re-export disappears again, tsc fails on
+  // the `Step` narrowing below.
+  describe('Public step-type re-exports', () => {
+    it('exposes StepSpawn from @noetic-tools/core', () => {
+      function isSpawn<TMemory, I, O>(s: Step<TMemory, I, O>): s is StepSpawn<TMemory, I, O> {
+        return s.kind === 'spawn';
+      }
+      // Use the predicate so the import is not elided as type-only.
+      expect(typeof isSpawn).toBe('function');
     });
   });
 });

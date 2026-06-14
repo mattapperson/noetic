@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/core",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "type": "module",
   "description": "Step primitives, interpreter, runtime, and memory layer contract for Noetic agents.",
   "license": "Apache-2.0",
@@ -44,10 +44,12 @@
       "types": "./dist/internal-test.d.ts",
       "default": "./dist/internal-test.js"
     },
+    "./schema": "./schema/noetic-workflow.schema.json",
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "schema",
     "README.md",
     "LICENSE"
   ],
@@ -75,8 +77,9 @@
   },
   "scripts": {
     "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
+    "gen:schema": "bun scripts/generate-workflow-schema.ts",
     "verify:esm": "bun scripts/verify-node-esm.ts",
-    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts && bun scripts/strip-dev-conditions.ts",
+    "prepublishOnly": "rm -rf dist && bun run gen:schema && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts && bun scripts/strip-dev-conditions.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "test:ci": "bun test --coverage --coverage-reporter=lcov",

@@ -22,6 +22,7 @@ export * from './types/runtime';
 export * from './types/shell-adapter';
 export * from './types/steering';
 export * from './types/step';
+export * from './types/sub-harness';
 export * from './types/subprocess-adapter';
 export * from './types/tool';
 export * from './types/tool-context';

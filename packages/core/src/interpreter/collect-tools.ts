@@ -45,6 +45,12 @@ function walkStep(step: Step, out: Tool[]): void {
 
     case 'run':
     case 'tool':
+    // SubHarness steps run their own built-in tools inside the external agent;
+    // they contribute nothing to the host unified tool set.
+    case 'claude-code':
+    case 'codex':
+    case 'opencode':
+    case 'pi':
       return;
 
     case 'branch':
