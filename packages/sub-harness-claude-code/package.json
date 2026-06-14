@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/sub-harness-claude-code",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Claude Code sub-harness for Noetic — run Anthropic's Claude Code agent as a Noetic step via step.claudeCode(...) or a claude-code JSON workflow node.",
   "license": "Apache-2.0",
