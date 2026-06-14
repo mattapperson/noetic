@@ -830,6 +830,9 @@ Key points:
 - `maxDepth` caps workflow tree depth to prevent runaway nesting.
 - No `step.run` in JSON — closures aren't serialisable. JSON workflows compose from `llm`, `tool`, and structural operators (`sequence`, `fork`, `loop`, `branch`, `spawn`, `provide`, `every`).
 - Tools are referenced by name in JSON and resolved from the `HydrationContext.tools` registry at hydration time.
+- A published JSON Schema (draft 2020-12) is generated from `WorkflowDocumentSchema` and shipped at the `@noetic-tools/core/schema` export subpath (`$id`: `https://noetic.tools/schema/noetic-workflow.schema.json`). Reference it via a `$schema` key in hand-written or LLM-generated documents for editor autocompletion and validation. Regenerate with `bun run gen:schema` after changing the Zod schema.
+
+A complete runnable example — an Opus planner generating a "mixture-of-agents" workflow (four models in parallel → an Opus judge that synthesises the answer) and executing it — lives at `packages/core/examples/dynamic-judge-workflow.ts`, with the canonical document committed at `packages/core/examples/multi-model-judge.workflow.json`.
 
 For running pre-built JSON workflows without an LLM planner step:
 

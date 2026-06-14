@@ -1,0 +1,48 @@
+{
+  "$schema": "https://noetic.tools/schema/noetic-workflow.schema.json",
+  "version": 1,
+  "root": {
+    "kind": "sequence",
+    "id": "multi-model-judge",
+    "steps": [
+      {
+        "kind": "fork",
+        "id": "panel",
+        "mode": "settle",
+        "merge": "concat",
+        "paths": [
+          {
+            "kind": "llm",
+            "id": "answer-gpt",
+            "model": "openai/gpt-4.1",
+            "instructions": "You are an expert analyst. Answer the user's question as accurately, completely, and concisely as you can. Begin your reply with the single line '## Candidate (openai/gpt-4.1)' and then give your answer."
+          },
+          {
+            "kind": "llm",
+            "id": "answer-gemini",
+            "model": "google/gemini-2.5-pro",
+            "instructions": "You are an expert analyst. Answer the user's question as accurately, completely, and concisely as you can. Begin your reply with the single line '## Candidate (google/gemini-2.5-pro)' and then give your answer."
+          },
+          {
+            "kind": "llm",
+            "id": "answer-llama",
+            "model": "meta-llama/llama-3.3-70b-instruct",
+            "instructions": "You are an expert analyst. Answer the user's question as accurately, completely, and concisely as you can. Begin your reply with the single line '## Candidate (meta-llama/llama-3.3-70b-instruct)' and then give your answer."
+          },
+          {
+            "kind": "llm",
+            "id": "answer-deepseek",
+            "model": "deepseek/deepseek-chat",
+            "instructions": "You are an expert analyst. Answer the user's question as accurately, completely, and concisely as you can. Begin your reply with the single line '## Candidate (deepseek/deepseek-chat)' and then give your answer."
+          }
+        ]
+      },
+      {
+        "kind": "llm",
+        "id": "judge",
+        "model": "anthropic/claude-opus-4.5",
+        "instructions": "You are a meticulous judge and synthesiser. The text below contains several candidate answers from different AI models to the same user question. Each candidate begins with a '## Candidate (model)' header. Critically compare them: identify the strongest reasoning, reconcile disagreements, and correct any factual errors. Then write a single, synthesised answer that is more accurate and complete than any individual candidate. Output ONLY the final answer — do not mention the candidates, the comparison, or that you are a judge."
+      }
+    ]
+  }
+}
