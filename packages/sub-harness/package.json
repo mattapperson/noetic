@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/sub-harness",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Base contract and helpers for Noetic coding-agent harnesses (Claude Code, Codex, opencode, pi). Re-exports the Harness contract and provides the registry, turn accumulator, item builders, and shared error types each @noetic-tools/sub-harness-* package builds on.",
   "license": "Apache-2.0",
