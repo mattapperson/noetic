@@ -1,7 +1,33 @@
 import { describe, expect, test } from 'bun:test';
-import type { Step } from '@noetic-tools/core';
+import type { Step, SubHarness, SubHarnessKind, SubHarnessSession } from '@noetic-tools/core';
 import { spawn, step } from '@noetic-tools/core';
 import { applyCandidate } from '../../src/optimization/mutator';
+
+function mockSubHarness(kind: SubHarnessKind): SubHarness {
+  return {
+    specificationVersion: 'harness-v1',
+    harnessId: kind,
+    async doStart(): Promise<SubHarnessSession> {
+      return {
+        sessionId: 's',
+        isResume: false,
+        async doPromptTurn() {
+          return {
+            items: [],
+            text: '',
+          };
+        },
+        async doStop() {
+          return {
+            harnessId: kind,
+            sessionId: 's',
+            state: null,
+          };
+        },
+      };
+    },
+  };
+}
 
 function getLlmInstructions(s: Step): string | undefined {
   if (s.kind !== 'llm') {
@@ -110,5 +136,62 @@ describe('applyCandidate', () => {
     expect(result.kind).toBe('run');
     expect(result.id).toBe('my-run');
     expect(result).not.toBe(runStep);
+  });
+
+  // Regression: when `main` added sub-harness steps (`claude-code`, `codex`,
+  // `opencode`, `pi`) to the `Step` union, `cloneAndReplace` stopped being
+  // exhaustive and tsc failed with TS2366. At runtime the missing cases also
+  // returned `undefined` for any sub-harness step the optimizer touched.
+  // Lock in the pass-through behavior for all four kinds.
+  describe('sub-harness step kinds (regression)', () => {
+    const SUB_HARNESS_BUILDERS = [
+      {
+        kind: 'claude-code' as const,
+        build: () =>
+          step.claudeCode({
+            id: 'cc',
+            harness: mockSubHarness('claude-code'),
+            prompt: 'do a thing',
+          }),
+      },
+      {
+        kind: 'codex' as const,
+        build: () =>
+          step.codex({
+            id: 'cx',
+            harness: mockSubHarness('codex'),
+            prompt: 'do a thing',
+          }),
+      },
+      {
+        kind: 'opencode' as const,
+        build: () =>
+          step.opencode({
+            id: 'oc',
+            harness: mockSubHarness('opencode'),
+            prompt: 'do a thing',
+          }),
+      },
+      {
+        kind: 'pi' as const,
+        build: () =>
+          step.pi({
+            id: 'pi',
+            harness: mockSubHarness('pi'),
+            prompt: 'do a thing',
+          }),
+      },
+    ];
+
+    for (const { kind, build } of SUB_HARNESS_BUILDERS) {
+      test(`clones ${kind} step without throwing or returning undefined`, () => {
+        const original = build();
+        const result: Step | undefined = applyCandidate(original, {});
+
+        expect(result).toBeDefined();
+        expect(result.kind).toBe(kind);
+        expect(result.id).toBe(original.id);
+      });
+    }
   });
 });
