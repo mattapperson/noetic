@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/sub-harness-codex",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Codex sub-harness for Noetic — run OpenAI's Codex agent as a Noetic step via step.codex(...) or a codex JSON workflow node.",
   "license": "Apache-2.0",
