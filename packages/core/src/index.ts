@@ -517,6 +517,7 @@ export type {
   StepLoop,
   StepProvide,
   StepRun,
+  StepSpawn,
   StepSubHarness,
   StepTool,
   Until,

@@ -8,10 +8,10 @@ description: Run a coding agent — Claude Code, Codex, opencode, pi — as a No
 A sub-harness step delegates a turn to an external coding-agent runtime, exactly the way [`step.llm`](/docs/framework/steps) delegates a turn to a language model. You pick the agent with a builder (`step.claudeCode`, `step.codex`, `step.opencode`, `step.pi`) and hand it an adapter from the matching package:
 
 ```ts
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, type ContextMemory, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
 
-const review = step.claudeCode({
+const review = step.claudeCode<ContextMemory, string, string>({
   id: 'review',
   harness: claudeCode({ model: 'claude-opus-4-8' }),
   prompt: 'Review the staged diff and summarize the riskiest change.',
@@ -44,7 +44,7 @@ Each builder is its own individually-typed step variant, but all share the `Step
 
 Every `step.<agent>(...)` builder takes the same options:
 
-```ts
+```ts validate=none
 step.claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>({
   id: string;
   harness: SubHarness | ((ctx: Context<TMemory>) => SubHarness); // the adapter
@@ -74,7 +74,7 @@ Passing a `codex()` adapter to `step.claudeCode` throws `NoeticConfigError` with
 
 `SubHarnessSettings` are the cross-agent knobs. Anything an individual agent supports that has no shared concept goes through `extra`, which the adapter interprets (and may reject with `SubHarnessCapabilityError`):
 
-```ts
+```ts validate=none
 interface SubHarnessSettings {
   model?: string;                                                   // e.g. 'claude-opus-4-8'
   permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions';
@@ -90,7 +90,7 @@ The adapter factory also accepts these settings as its own defaults — `claudeC
 
 By default each step starts a fresh session that is stopped when the step completes. `SubHarnessSessionPolicy` changes that:
 
-```ts
+```ts validate=none
 interface SubHarnessSessionPolicy {
   reuse?: string;                              // share a live session across steps by key
   onComplete?: 'stop' | 'detach' | 'destroy'; // teardown action when the step finishes
@@ -106,7 +106,7 @@ A sub-harness sees the conversation so far, not just its own prompt — so a cod
 
 Before appending the turn's prompt, the interpreter captures everything earlier steps put in the conversation (`ctx.itemLog`) and seeds it into a fresh session. You don't pass anything — it's automatic:
 
-```ts
+```ts validate=none
 // An earlier llm step established a fact in the conversation…
 const plan = step.llm({ id: 'plan', model, instructions: 'Note the deploy policy.' });
 // …and a later sub-harness step can act on it.
@@ -124,7 +124,7 @@ History seeds the **first** turn of a fresh session only; after that the underly
 
 A sub-harness's output is mapped onto the *same* event surface as an LLM step's, so you observe a coding agent exactly like you observe a model — its text, reasoning, and tool calls flow through the runtime streams:
 
-```ts
+```ts validate=none
 const harness = new AgentHarness({ name: 'reviewer', initialStep: review, params: {} });
 await harness.execute('Review the diff');
 
@@ -167,7 +167,7 @@ The same four agents are available in the [JSON Workflow Runtime](/docs/framewor
 
 Because adapters carry vendor SDKs, they are never embedded in the JSON. Instead you supply them at hydration time through `HydrationContext.subHarnesses`, a `Map<SubHarnessKind, SubHarness>`. Build one with `createSubHarnessRegistry`:
 
-```ts
+```ts validate=none
 import { hydrateWorkflow, type HydrationContext } from '@noetic-tools/core';
 import { createSubHarnessRegistry } from '@noetic-tools/sub-harness';
 import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
