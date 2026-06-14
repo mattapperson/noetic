@@ -23,7 +23,7 @@ const ctx = harness.createContext();
 const result = await harness.run(review, '', ctx);
 ```
 
-The step runs Claude Code for one turn against the current workspace, forwards each event as a framework event, appends the turn's items to the conversation, charges `ctx.tokens`/`ctx.cost`, and returns the agent's final text.
+The step runs Claude Code for one turn against the current workspace: it seeds the agent with the [conversation so far](#conversation-history), streams the agent's output through the [harness event surface](#observing-the-agents-output), appends the turn's items to the conversation, charges `ctx.tokens`/`ctx.cost`, and returns the agent's final text.
 
 ## What is a sub-harness?
 
@@ -61,7 +61,7 @@ step.claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>({
 |---|---|---|
 | `id` | `string` | Unique step identifier (used in traces and errors). Required, non-empty. |
 | `harness` | `SubHarness` adapter, eager or `(ctx) => SubHarness` | The adapter from the matching factory. Its `harnessId` must equal the builder's kind. |
-| `prompt` | `string` or `(ctx) => string` | The turn input. The session owns conversation history; this is the fresh user turn only. |
+| `prompt` | `string` or `(ctx) => string` | The fresh turn input. The prior conversation is passed separately as history (see [Conversation history](#conversation-history)), so this is only the new user turn. |
 | `settings` | `SubHarnessSettings` | Shared harness knobs — see below. |
 | `instructions` | `string` or `(ctx) => string \| undefined` | System instructions applied once on the first message of a fresh session. Never re-applied on resume. |
 | `output` | `ZodType<O>` | Optional Zod schema. When set, the agent's final text is JSON-parsed and validated, exactly like `step.llm`'s `output`. |
@@ -99,6 +99,47 @@ interface SubHarnessSessionPolicy {
 
 - `reuse` keys a live session (workspace + conversation history + running runtime) that survives across steps. Two steps with the same `reuse` key share one session, so the second turn sees the first turn's history. A reused session is kept alive by default.
 - `onComplete` chooses teardown: `'stop'` (default for a fresh session) persists state and stops the runtime, `'detach'` parks it for later resume, `'destroy'` discards it with no resume state.
+
+## Conversation history
+
+A sub-harness sees the conversation so far, not just its own prompt — so a coding agent run *after* `step.llm` steps (or on a later turn of a consecutive [`harness.execute()`](/docs/framework/runtime) conversation) has full context and doesn't act confused.
+
+Before appending the turn's prompt, the interpreter captures everything earlier steps put in the conversation (`ctx.itemLog`) and seeds it into a fresh session. You don't pass anything — it's automatic:
+
+```ts
+// An earlier llm step established a fact in the conversation…
+const plan = step.llm({ id: 'plan', model, instructions: 'Note the deploy policy.' });
+// …and a later sub-harness step can act on it.
+const apply = step.claudeCode({
+  id: 'apply',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  prompt: 'Apply the deploy policy we just discussed.',
+});
+// Run plan, then apply, on the same context — `apply` is seeded with `plan`'s output.
+```
+
+History seeds the **first** turn of a fresh session only; after that the underlying agent owns its own history, and a `reuse`d session is never re-seeded. The default adapters fold the history into the agent's prompt; if you author your own runner, read it from `SubHarnessTurnInput.history` (or call the `withHistoryPrompt` / `formatConversation` helpers from `@noetic-tools/sub-harness`).
+
+## Observing the agent's output
+
+A sub-harness's output is mapped onto the *same* event surface as an LLM step's, so you observe a coding agent exactly like you observe a model — its text, reasoning, and tool calls flow through the runtime streams:
+
+```ts
+const harness = new AgentHarness({ name: 'reviewer', initialStep: review, params: {} });
+await harness.execute('Review the diff');
+
+for await (const chunk of harness.getTextStream()) {
+  process.stdout.write(chunk); // the agent's text, token by token
+}
+// getItemStream()      → assistant message + tool-call items as they build
+// getReasoningStream() → the agent's thinking
+// getFullStream()      → every event, including a `sub_harness_event` per raw stream part
+```
+
+Two guarantees back this:
+
+- **All output is mapped.** Every part an adapter emits — `text-delta`, `reasoning-delta`, `tool-call`, `file-change`, `finish`, … — becomes the corresponding stream event. Adapters never drop vendor output: anything unrecognized is surfaced as a `raw` part rather than discarded.
+- **A turn always emits.** Even an adapter that streams nothing still brackets the turn with a completion event, and a result returned without streaming is synthesized into events. Set `emit: false` on the step to suppress all of it.
 
 ## JSON workflow node
 
