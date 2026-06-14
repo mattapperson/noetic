@@ -846,3 +846,123 @@ const result = await parseAndRunWorkflow({
   tools: [searchTool, calcTool],
 });
 ```
+
+## Pattern: Plan with an LLM, Execute with a Coding Agent
+
+A sub-harness step (`step.claudeCode` / `step.codex` / `step.opencode` / `step.pi`) runs a real coding agent as a step. Compose it after a planning `llm` step in a sequence: the model decides *what* to do, the coding agent does it against the workspace.
+
+```typescript
+import { AgentHarness, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
+
+const plan = step.llm({
+  id: 'plan',
+  model: 'anthropic/claude-sonnet-4-20250514',
+  instructions: 'Turn the request into a concrete, ordered implementation plan.',
+});
+
+const pipeline = step.run({
+  id: 'plan-then-build',
+  execute: async (input: string, ctx) => {
+    const planned = await ctx.harness.run(plan, input, ctx);
+    // The plan flows in as the coding agent's prompt for this turn.
+    const execute = step.claudeCode({
+      id: 'execute',
+      harness: claudeCode({ model: 'claude-opus-4-8' }),
+      prompt: `Implement this plan in the current repo:\n\n${planned}`,
+      settings: { permissionMode: 'acceptEdits' },
+    });
+    return ctx.harness.run(execute, planned, ctx);
+  },
+});
+
+const harness = new AgentHarness({ name: 'builder', initialStep: pipeline, params: {} });
+await harness.execute('Add input validation to the signup endpoint.');
+```
+
+Key points:
+
+- The coding agent runs one turn against `ctx`'s workspace (cwd/fs/shell), forwards its events as `sub_harness_event` framework events, and charges `ctx.tokens`/`ctx.cost` like any LLM step.
+- `permissionMode` controls how freely the agent mutates files: `'plan'` (read-only planning), `'acceptEdits'`, `'bypassPermissions'`, or `'default'`.
+- Add `output: SomeSchema` to parse the agent's final text into a typed object, exactly like `step.llm`.
+
+## Pattern: Reuse a Coding-Agent Session Across Steps
+
+By default each sub-harness step starts a fresh session and stops it on completion. Give two steps the same `session.reuse` key to keep one live session (workspace + conversation history + running runtime) across them — the second turn sees the first turn's history.
+
+```typescript
+const investigate = step.claudeCode({
+  id: 'investigate',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  prompt: 'Find the root cause of the failing auth test. Do not change code yet.',
+  settings: { permissionMode: 'plan' },
+  session: { reuse: 'bugfix', onComplete: 'detach' }, // keep the session alive
+});
+
+const fix = step.claudeCode({
+  id: 'fix',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  // Same `reuse` key → same session, so the agent already has its findings in context.
+  prompt: 'Now apply the minimal fix for the root cause you found.',
+  settings: { permissionMode: 'acceptEdits' },
+  session: { reuse: 'bugfix', onComplete: 'stop' }, // last step tears it down
+});
+```
+
+- `reuse` keys a session stored on the `AgentHarness`; the same key resolves to the same live session across steps.
+- `onComplete`: `'detach'` parks the session for the next step, `'stop'` (default) persists and stops it, `'destroy'` discards it with no resume state. Use `'detach'` on every step but the last, `'stop'` (or `'destroy'`) on the last.
+
+## Pattern: Coding Agent as a JSON Workflow Node
+
+The same four agents are JSON node kinds (`claude-code` / `codex` / `opencode` / `pi`), so a plan-then-build sequence can be expressed entirely as data. The node names the agent by `kind`; the adapter instance (which carries a vendor SDK) is injected at hydration time via `HydrationContext.subHarnesses`, since adapters aren't JSON-serialisable.
+
+```json
+{
+  "version": 1,
+  "root": {
+    "kind": "sequence",
+    "id": "plan-then-build",
+    "steps": [
+      {
+        "kind": "llm",
+        "id": "plan",
+        "model": "anthropic/claude-sonnet-4-20250514",
+        "instructions": "Turn the request into a concrete, ordered implementation plan."
+      },
+      {
+        "kind": "claude-code",
+        "id": "execute",
+        "prompt": "Implement the plan above in the current repo.",
+        "settings": { "model": "claude-opus-4-8", "permissionMode": "acceptEdits" },
+        "session": { "reuse": "build", "onComplete": "stop" }
+      }
+    ]
+  }
+}
+```
+
+Hydrate it with a registry built from the adapter factories:
+
+```typescript
+import { hydrateWorkflow, AgentHarness, type HydrationContext } from '@noetic-tools/core';
+import { createSubHarnessRegistry } from '@noetic-tools/sub-harness';
+import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
+
+const harness = new AgentHarness({ name: 'json-builder', params: {} });
+const ctx = harness.createContext();
+
+const hydrationCtx: HydrationContext = {
+  tools: new Map(),
+  executeStep: harness.run.bind(harness),
+  subHarnesses: createSubHarnessRegistry(claudeCode()),
+};
+
+const root = hydrateWorkflow(workflowJson, hydrationCtx);
+const result = await harness.run(root, 'Add input validation to the signup endpoint.', ctx);
+```
+
+Key points:
+
+- Harness nodes carry `prompt`, `instructions?`, `settings?` (`SubHarnessSettings`), and `session?` (`SubHarnessSessionPolicy`) — the JSON mirror of the `step.claudeCode` options.
+- `createSubHarnessRegistry(claudeCode(), codex(), …)` (from `@noetic-tools/sub-harness`) builds the `Map<SubHarnessKind, SubHarness>` the hydrator resolves nodes against. A node whose `kind` has no registered adapter fails hydration with `UNKNOWN_SUB_HARNESS_REFERENCE`.
+- `parseAndRunWorkflow` does **not** take a sub-harness registry, so use `hydrateWorkflow` + `harness.run` (as above) when a document contains harness nodes.

@@ -1,6 +1,6 @@
 ---
 name: noetic-agent-builder
-description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, memory layers, tools, and agent harness. Triggers include mentions of "agent", "react pattern", "memory layer", "spawn", "tool", "loop", or any Noetic-specific API usage in the packages/core directory.
+description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, memory layers, tools, sub-harness (coding-agent) steps, and agent harness. Triggers include mentions of "agent", "react pattern", "memory layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", or any Noetic-specific API usage in the packages/core directory.
 ---
 
 # Building Agents with Noetic
@@ -20,6 +20,7 @@ All agent patterns compose through a single `Step<TMemory, I, O>` type. Steps ar
 - **`fork`** -- parallel execution (race, all, or settle)
 - **`spawn`** -- new context boundary with optional memory layers
 - **`loop`** -- iteration with termination predicates
+- **`claude-code` / `codex` / `opencode` / `pi`** -- sub-harness steps: delegate one turn to an external coding agent via `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` (adapter from `@noetic-tools/sub-harness-*`); see `references/api-reference.md`
 
 ### Typed Memory Access
 
@@ -94,6 +95,7 @@ Recall can return a `RecallResult` object or a plain `string` (shorthand -- the 
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
 | Sequential pipeline | Phase Router | `branch` + `loop` + `prepareNext` |
 | Multi-agent task tree | Plan Execution | `compilePlan()` / `adaptivePlan()` |
+| Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
 
 For pattern-specific code examples, read `references/composition-patterns.md`.
 

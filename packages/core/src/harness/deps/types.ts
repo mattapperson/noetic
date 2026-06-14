@@ -34,6 +34,7 @@ export type {
   Step,
   StreamEvent,
   StreamingItem,
+  SubHarnessSession,
   SubprocessAdapter,
   Tool,
   TraceExporter,

@@ -4,6 +4,12 @@ import type { ModelParams, RetryPolicy, StepMeta } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { ContextMemory, MemoryConfig, MemoryLayer, ProjectionPolicy } from './memory';
+import type {
+  SubHarness,
+  SubHarnessKind,
+  SubHarnessSessionPolicy,
+  SubHarnessSettings,
+} from './sub-harness';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -79,6 +85,7 @@ export interface SettleResult<O> {
 export type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
   | StepRun<TMemory, I, O>
   | StepLLM<TMemory, I, O>
+  | StepSubHarness<TMemory, I, O>
   | StepTool<TMemory, I, O>
   | StepBranch<TMemory, I, O>
   | StepFork<TMemory, I, O>
@@ -118,6 +125,37 @@ export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /** Projection policy for this step's context window. Overrides the harness-level default. */
   projection?: ProjectionPolicy;
+}
+
+/**
+ * A step that delegates a turn to an external coding-agent harness
+ * (Claude Code, Codex, opencode, pi). Each harness kind is a distinct
+ * `Step.kind`, but every variant shares this shape and is executed by one
+ * interpreter handler.
+ * @public
+ */
+export interface StepSubHarness<TMemory = ContextMemory, _I = unknown, O = unknown> {
+  /** The harness kind, equal to the backing adapter's `harnessId`. */
+  kind: SubHarnessKind;
+  id: string;
+  /**
+   * The harness adapter that runs the turn. Eager or `(ctx) => SubHarness`.
+   * Programmatic builders take it inline; the JSON hydrator resolves it from
+   * the workflow's harness registry and inlines it here.
+   */
+  harness: Lazy<SubHarness, TMemory>;
+  /** Turn prompt. Eager string or `(ctx) => string` getter. */
+  prompt: Lazy<string, TMemory>;
+  /** Shared harness settings (model, permission mode, …). */
+  settings?: SubHarnessSettings;
+  /** System instructions applied on the first message of a fresh session. */
+  instructions?: Lazy<string | undefined, TMemory>;
+  /** When set, the assistant text is JSON-parsed and validated against this schema. */
+  output?: ZodType<O>;
+  /** Session reuse + teardown policy across steps. */
+  session?: SubHarnessSessionPolicy;
+  /** Controls framework event emission for this step. Defaults to `true`. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 /** @public A step that invokes a single tool directly, bypassing the LLM. */

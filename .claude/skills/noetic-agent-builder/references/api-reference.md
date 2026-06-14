@@ -174,6 +174,89 @@ tool<I, O>({
 - `decorateResultItem` output must satisfy the tool's own `toolResults` schemas — including for error outputs (e.g. malformed-arguments results), so declare error-shaped results or make decorated fields tolerant.
 - Harness-level `itemSchemas` (on `AgentHarness` opts) stay global and apply to every item at trust boundaries.
 
+### step.claudeCode / step.codex / step.opencode / step.pi
+
+Sub-harness steps. Delegate one turn to an external coding-agent runtime (Claude Code, Codex, opencode, pi) the way `step.llm` delegates a turn to a model. Each builder is its own `Step.kind` (`'claude-code'`, `'codex'`, `'opencode'`, `'pi'`) but all share the `StepSubHarness` shape and one interpreter handler.
+
+```typescript
+step.claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>({
+  id: string;
+  harness: Lazy<SubHarness, TMemory>;                 // adapter from the matching factory
+  prompt: Lazy<string, TMemory>;                      // the fresh turn input
+  settings?: SubHarnessSettings;
+  instructions?: Lazy<string | undefined, TMemory>;   // first-message system prompt
+  output?: ZodType<O>;                                // structured output, like step.llm
+  session?: SubHarnessSessionPolicy;
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}): StepSubHarness<TMemory, I, O>
+// step.codex / step.opencode / step.pi take the identical opts.
+```
+
+The adapter comes from the matching package's factory, and its `harnessId` must equal the builder kind:
+
+```typescript
+import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
+import { codex } from '@noetic-tools/sub-harness-codex';
+import { opencode } from '@noetic-tools/sub-harness-opencode';
+import { pi } from '@noetic-tools/sub-harness-pi';
+
+const review = step.claudeCode({
+  id: 'review',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  prompt: 'Review the staged diff and summarize the riskiest change.',
+  settings: { permissionMode: 'plan' },
+});
+```
+
+The interpreter mirrors `executeLLM`: it appends the prompt as a user item, starts (or reuses) a session, drives one turn, forwards each stream part as a `sub_harness_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the session down per policy, and returns the assistant text (or the parsed `output`).
+
+**Settings** (`SubHarnessSettings`, shared across agents; the adapter factory takes the same shape as its defaults, merged under each step's `settings`):
+
+```typescript
+interface SubHarnessSettings {
+  model?: string;
+  permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions';
+  maxTurns?: number;
+  allowedTools?: ReadonlyArray<string>;
+  extra?: Record<string, unknown>;   // adapter-specific passthrough
+}
+```
+
+**Session policy** (`SubHarnessSessionPolicy`):
+
+```typescript
+interface SubHarnessSessionPolicy {
+  reuse?: string;                              // share one live session across steps by key
+  onComplete?: 'stop' | 'detach' | 'destroy'; // 'stop' (default) persists+stops; 'detach' parks; 'destroy' discards
+}
+```
+
+**Errors:** `EMPTY_STEP_ID` (empty `id`), `MISSING_SUB_HARNESS` (no `harness`), `SUB_HARNESS_KIND_MISMATCH` (adapter's `harnessId` ≠ builder kind — e.g. a `codex()` adapter passed to `step.claudeCode`).
+
+**JSON workflow:** the same four agents are JSON node kinds (`claude-code` / `codex` / `opencode` / `pi`) with fields `prompt`, `instructions?`, `settings?`, `session?`. Adapters are resolved at hydration from `HydrationContext.subHarnesses` (a `Map<SubHarnessKind, SubHarness>`); build it with `createSubHarnessRegistry(claudeCode(), codex())` from `@noetic-tools/sub-harness`. An unregistered kind fails with `UNKNOWN_SUB_HARNESS_REFERENCE`.
+
+**The `SubHarness` contract + `defineSubHarness`.** The contract lives in `@noetic-tools/types` (next to `MemoryLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports an adapter package (enforced by `.sentrux/rules.toml`). To author a new adapter, depend on `@noetic-tools/sub-harness` and call `defineSubHarness`, supplying a *runner* (an async generator yielding `SubHarnessStreamPart`s for one turn):
+
+```typescript
+import { defineSubHarness, commonTool, type SubHarnessRunner } from '@noetic-tools/sub-harness';
+
+const runner: SubHarnessRunner = async function* (input) {
+  // input: { prompt, ctx (cwd/fs/shell/subprocess/threadId), settings, instructions, signal }
+  yield { type: 'text-delta', delta: '…' };
+  yield { type: 'finish', finishReason: 'stop', usage: { input: 10, output: 5 } };
+};
+
+export const myAgent = (settings = {}) =>
+  defineSubHarness({
+    harnessId: 'codex',                                  // a SubHarnessKind
+    runner,
+    builtinTools: [commonTool('bash', 'shell', 'Run a shell command')],
+    defaultSettings: settings,
+  });
+```
+
+Stream-part kinds: `stream-start`, `text-delta`, `reasoning-delta`, `tool-call`, `tool-result`, `file-change`, `finish` (carries `usage`/`cost`), `error`, `raw`. The union has a paired Zod schema `SubHarnessStreamPartSchema`. A `SubHarnessSession` requires only `doPromptTurn` + `doStop`; `doContinueTurn` / `doSuspendTurn` / `doDetach` / `doDestroy` / `doCompact` are optional and signalled by presence (absent → throw `SubHarnessCapabilityError`). Base package also exports `SubHarnessTurnAccumulator`, the `asItems` / `assistantMessageItem` / `functionCallItem` item builders, and `SubHarnessStartError`.
+
 ### channel
 
 Typed inter-step communication.

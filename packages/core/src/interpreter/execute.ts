@@ -19,6 +19,7 @@ import {
   executeTool,
 } from './execute-action';
 import { executeBranch, executeEvery, executeFork, executeLoop } from './execute-control';
+import { executeSubHarness } from './execute-sub-harness';
 import { isMutableContext } from './typeguards';
 
 //#region Constants
@@ -68,6 +69,25 @@ function buildSpawnOpts<TMemory>(ctx: Context<TMemory>): {
     parentLayers: baseCtx.layers,
     layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
   };
+}
+
+/**
+ * Resolve the per-step framework-event emit option. Both `llm` and the harness
+ * step kinds carry an `emit` field; every other kind defaults to enabled.
+ */
+function resolveStepEmit<TMemory, I, O>(
+  step: Step<TMemory, I, O>,
+): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
+  if (
+    step.kind === 'llm' ||
+    step.kind === 'claude-code' ||
+    step.kind === 'codex' ||
+    step.kind === 'opencode' ||
+    step.kind === 'pi'
+  ) {
+    return step.emit;
+  }
+  return undefined;
 }
 
 /**
@@ -202,7 +222,7 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
     stepId: step.id,
     kind: step.kind,
   };
-  const emit = step.kind === 'llm' ? step.emit : undefined;
+  const emit = resolveStepEmit(step);
   if (shouldEmit(emit, 'step_started', startedData)) {
     emitFrameworkEvent({
       broadcaster,
@@ -231,6 +251,12 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
         break;
       case 'llm':
         result = await executeLLM(step, input, ctx, baseCtx.layers);
+        break;
+      case 'claude-code':
+      case 'codex':
+      case 'opencode':
+      case 'pi':
+        result = await executeSubHarness(step, input, ctx);
         break;
       case 'tool':
         result = await executeTool(step, input, ctx, baseCtx.harness);

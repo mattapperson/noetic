@@ -16,6 +16,11 @@ on:
       - 'packages/types/**'
       - 'packages/memory/**'
       - 'packages/core/**'
+      - 'packages/sub-harness/**'
+      - 'packages/sub-harness-claude-code/**'
+      - 'packages/sub-harness-codex/**'
+      - 'packages/sub-harness-opencode/**'
+      - 'packages/sub-harness-pi/**'
       - '.github/workflows/release-packages.yml'
       # Root build config that can affect the published output.
       - 'biome.json'
@@ -131,11 +136,294 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
+  sub-harness:
+    name: Release @noetic-tools/sub-harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: memory
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/sub-harness
+
+      - name: Typecheck
+        run: bun --cwd=packages/sub-harness run typecheck
+
+      # @noetic-tools/sub-harness depends on @noetic-tools/types. Build the
+      # dependency's dist first so sub-harness's own build (run by
+      # `prepublishOnly`) and the Node ESM smoke test can resolve
+      # `@noetic-tools/types` via node_modules.
+      - name: Build dependency (@noetic-tools/types)
+        run: bun --cwd=packages/types run build
+
+      - name: Build
+        run: bun --cwd=packages/sub-harness run build
+
+      # See the types job. sub-harness's own `workspace:*` deps are pinned to
+      # concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/sub-harness
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  sub-harness-claude-code:
+    name: Release @noetic-tools/sub-harness-claude-code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: sub-harness
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/sub-harness-claude-code
+
+      - name: Typecheck
+        run: bun --cwd=packages/sub-harness-claude-code run typecheck
+
+      # @noetic-tools/sub-harness-claude-code depends on @noetic-tools/types and
+      # @noetic-tools/sub-harness. Build those dists first so the adapter's own
+      # build (run by `prepublishOnly`) and the Node ESM smoke test can resolve
+      # them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/sub-harness)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/sub-harness run build
+
+      - name: Build
+        run: bun --cwd=packages/sub-harness-claude-code run build
+
+      # See the types job. The adapter's own `workspace:*` deps are pinned to
+      # concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/sub-harness-claude-code
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  sub-harness-codex:
+    name: Release @noetic-tools/sub-harness-codex
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: sub-harness-claude-code
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/sub-harness-codex
+
+      - name: Typecheck
+        run: bun --cwd=packages/sub-harness-codex run typecheck
+
+      # @noetic-tools/sub-harness-codex depends on @noetic-tools/types and
+      # @noetic-tools/sub-harness. Build those dists first so the adapter's own
+      # build (run by `prepublishOnly`) and the Node ESM smoke test can resolve
+      # them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/sub-harness)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/sub-harness run build
+
+      - name: Build
+        run: bun --cwd=packages/sub-harness-codex run build
+
+      # See the types job. The adapter's own `workspace:*` deps are pinned to
+      # concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/sub-harness-codex
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  sub-harness-opencode:
+    name: Release @noetic-tools/sub-harness-opencode
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: sub-harness-codex
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/sub-harness-opencode
+
+      - name: Typecheck
+        run: bun --cwd=packages/sub-harness-opencode run typecheck
+
+      # @noetic-tools/sub-harness-opencode depends on @noetic-tools/types and
+      # @noetic-tools/sub-harness. Build those dists first so the adapter's own
+      # build (run by `prepublishOnly`) and the Node ESM smoke test can resolve
+      # them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/sub-harness)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/sub-harness run build
+
+      - name: Build
+        run: bun --cwd=packages/sub-harness-opencode run build
+
+      # See the types job. The adapter's own `workspace:*` deps are pinned to
+      # concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/sub-harness-opencode
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  sub-harness-pi:
+    name: Release @noetic-tools/sub-harness-pi
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: sub-harness-opencode
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/sub-harness-pi
+
+      - name: Typecheck
+        run: bun --cwd=packages/sub-harness-pi run typecheck
+
+      # @noetic-tools/sub-harness-pi depends on @noetic-tools/types and
+      # @noetic-tools/sub-harness. Build those dists first so the adapter's own
+      # build (run by `prepublishOnly`) and the Node ESM smoke test can resolve
+      # them via node_modules.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/sub-harness)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/sub-harness run build
+
+      - name: Build
+        run: bun --cwd=packages/sub-harness-pi run build
+
+      # See the types job. The adapter's own `workspace:*` deps are pinned to
+      # concrete versions at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/sub-harness-pi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
   core:
     name: Release @noetic-tools/core
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: memory
+    needs: sub-harness-pi
     permissions:
       contents: write
       issues: write

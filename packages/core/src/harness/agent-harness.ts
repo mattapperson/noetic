@@ -82,6 +82,7 @@ import type {
   StorageAdapter,
   StreamEvent,
   StreamingItem,
+  SubHarnessSession,
   SubprocessAdapter,
   Tool,
   TraceExporter,
@@ -266,6 +267,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly streamIdleTimeoutMs: number;
   private readonly sessions = new Map<string, Session>();
+  /**
+   * @internal Cross-step harness sessions keyed by `step.session.reuse`, kept
+   * alive for the life of this harness so reused coding-agent sessions span
+   * multiple steps. Reached by the interpreter's harness handler via
+   * `frameworkCast`; do not access from outside core.
+   */
+  readonly subHarnessSessions = new Map<string, SubHarnessSession>();
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;

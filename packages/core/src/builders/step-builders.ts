@@ -6,7 +6,12 @@ import type {
   RetryPolicy,
   StepLLM,
   StepRun,
+  StepSubHarness,
   StepTool,
+  SubHarness,
+  SubHarnessKind,
+  SubHarnessSessionPolicy,
+  SubHarnessSettings,
   SubprocessAdapter,
   Tool,
 } from '@noetic-tools/types';
@@ -45,6 +50,69 @@ interface StepToolOpts<I, O> {
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
+}
+
+interface StepSubHarnessOpts<TMemory, O> {
+  id: string;
+  /** The harness adapter created by a `@noetic-tools/sub-harness-*` factory. Eager or `(ctx) => SubHarness`. */
+  harness: Lazy<SubHarness, TMemory>;
+  /** Turn prompt. Eager string or `(ctx) => string` getter. */
+  prompt: Lazy<string, TMemory>;
+  /** Shared harness settings (model, permission mode, …). */
+  settings?: SubHarnessSettings;
+  /** System instructions applied on the first message of a fresh session. */
+  instructions?: Lazy<string | undefined, TMemory>;
+  /** Optional Zod schema; when set the assistant text is JSON-parsed and validated. */
+  output?: ZodType<O>;
+  /** Session reuse + teardown policy across steps. */
+  session?: SubHarnessSessionPolicy;
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}
+
+//#endregion
+
+//#region SubHarness builder helper
+
+/**
+ * Shared construction for every harness step kind. Each `step.<kind>()` is a
+ * thin wrapper so the kinds stay individually typed while the validation and
+ * registration live in one place.
+ */
+function buildSubHarnessStep<TMemory, I, O>(
+  kind: SubHarnessKind,
+  builderName: string,
+  opts: StepSubHarnessOpts<TMemory, O>,
+): StepSubHarness<TMemory, I, O> {
+  if (!opts.id || opts.id.trim() === '') {
+    throw new NoeticConfigError({
+      code: 'EMPTY_STEP_ID',
+      message: `${builderName}() requires a non-empty id.`,
+      hint: `Pass a unique string as the id field, e.g. ${builderName}({ id: "review", ... }).`,
+    });
+  }
+  if (!opts.harness) {
+    throw new NoeticConfigError({
+      code: 'MISSING_SUB_HARNESS',
+      message: `${builderName}() requires a harness adapter.`,
+      hint: `Pass a harness factory result, e.g. harness: ${builderName.replace('step.', '')}({ model }).`,
+    });
+  }
+  // Eager adapters are validated now; function-form adapters are validated
+  // post-resolution in executeSubHarness so the same SUB_HARNESS_KIND_MISMATCH
+  // error surfaces whether the caller passes an adapter or a getter.
+  if (typeof opts.harness !== 'function' && opts.harness.harnessId !== kind) {
+    throw new NoeticConfigError({
+      code: 'SUB_HARNESS_KIND_MISMATCH',
+      message: `${builderName}() was given a '${opts.harness.harnessId}' harness.`,
+      hint: `Use the matching builder, e.g. step.${opts.harness.harnessId}({ ... }).`,
+    });
+  }
+  const built: StepSubHarness<TMemory, I, O> = {
+    kind,
+    ...opts,
+  };
+  getDefaultRegistrar().register(built);
+  return built;
 }
 
 //#endregion
@@ -170,6 +238,60 @@ export const step = {
     };
     getDefaultRegistrar().register(built);
     return built;
+  },
+
+  /**
+   * Creates a step that delegates a turn to the Claude Code harness.
+   *
+   * @public
+   * @param opts.id - Unique step identifier.
+   * @param opts.harness - A `claudeCode(...)` adapter from `@noetic-tools/sub-harness-claude-code`.
+   * @param opts.prompt - The turn prompt; eager string or `(ctx) => string` getter.
+   * @param opts.settings - Shared harness settings (model, permission mode, …).
+   * @param opts.output - Optional Zod schema enabling structured output parsing.
+   * @returns A `StepSubHarness` of kind `claude-code`, auto-registered in the step registry.
+   * @throws `NoeticConfigError` `EMPTY_STEP_ID` / `MISSING_SUB_HARNESS` / `SUB_HARNESS_KIND_MISMATCH`.
+   */
+  claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TMemory, O>,
+  ): StepSubHarness<TMemory, I, O> {
+    return buildSubHarnessStep('claude-code', 'step.claudeCode', opts);
+  },
+
+  /**
+   * Creates a step that delegates a turn to the Codex harness.
+   * @public
+   * @param opts - See {@link step.claudeCode}; `opts.harness` is a `codex(...)` adapter.
+   * @returns A `StepSubHarness` of kind `codex`.
+   */
+  codex<TMemory = ContextMemory, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TMemory, O>,
+  ): StepSubHarness<TMemory, I, O> {
+    return buildSubHarnessStep('codex', 'step.codex', opts);
+  },
+
+  /**
+   * Creates a step that delegates a turn to the opencode harness.
+   * @public
+   * @param opts - See {@link step.claudeCode}; `opts.harness` is an `opencode(...)` adapter.
+   * @returns A `StepSubHarness` of kind `opencode`.
+   */
+  opencode<TMemory = ContextMemory, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TMemory, O>,
+  ): StepSubHarness<TMemory, I, O> {
+    return buildSubHarnessStep('opencode', 'step.opencode', opts);
+  },
+
+  /**
+   * Creates a step that delegates a turn to the pi harness.
+   * @public
+   * @param opts - See {@link step.claudeCode}; `opts.harness` is a `pi(...)` adapter.
+   * @returns A `StepSubHarness` of kind `pi`.
+   */
+  pi<TMemory = ContextMemory, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TMemory, O>,
+  ): StepSubHarness<TMemory, I, O> {
+    return buildSubHarnessStep('pi', 'step.pi', opts);
   },
 };
 

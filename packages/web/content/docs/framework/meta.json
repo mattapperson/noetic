@@ -12,6 +12,7 @@
     "context",
     "runtime",
     "json-runtime",
+    "sub-harnesses",
     "durability",
     "errors",
     "observability",

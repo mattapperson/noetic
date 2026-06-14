@@ -1,0 +1,65 @@
+{
+  "name": "@noetic-tools/sub-harness",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Base contract and helpers for Noetic coding-agent harnesses (Claude Code, Codex, opencode, pi). Re-exports the Harness contract and provides the registry, turn accumulator, item builders, and shared error types each @noetic-tools/sub-harness-* package builds on.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/sub-harness"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "keywords": [
+    "noetic",
+    "agents",
+    "harness",
+    "claude-code",
+    "codex",
+    "coding-agent"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "dependencies": {
+    "@noetic-tools/types": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
+    "verify:esm": "bun scripts/verify-node-esm.ts",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts && bun scripts/strip-dev-conditions.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --coverage --coverage-reporter=lcov",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  }
+}

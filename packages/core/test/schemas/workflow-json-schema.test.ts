@@ -21,6 +21,10 @@ const NODE_KINDS = [
   'loop',
   'sequence',
   'every',
+  'claude-code',
+  'codex',
+  'opencode',
+  'pi',
 ] as const;
 
 /** Every named until predicate kind the runtime accepts. */

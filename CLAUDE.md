@@ -28,12 +28,12 @@ Architecture gates:
 
 ## Architecture big picture
 
-Eleven workspace packages under `packages/*`. Dependency direction (arrows = "depends on"):
+Workspace packages under `packages/*`. Dependency direction (arrows = "depends on"):
 
 ```
 plugins ──→ cli ──→ code-agent ──→ core ←── eval
                                        │
-                                       └──→ memory ──→ types
+                                       └──→ memory ──→ types ←── sub-harness ←── sub-harness-{claude-code,codex,opencode,pi}
                                                  └───────────↗
 web (standalone — no workspace deps)
 ```
@@ -41,6 +41,8 @@ web (standalone — no workspace deps)
 - **`@noetic-tools/types`** — the dependency-free foundation: the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`), execution context + steering contracts, the `MemoryLayer` contract (also exported at the `./contract` subpath), platform adapter interfaces, the error model, and the `Item` schema. Imported by `memory` and `core`; depends on nothing in the workspace.
 - **`@noetic-tools/memory`** — the memory layer system: lifecycle, budget/projection machinery (`assembleView`, `allocateBudgets`, layer state stores, scoping), and the built-in layers (working/history/observational/plan/temporal/steering/file-reference/static-content/durable-task-state/tool). Depends only on `@noetic-tools/types`; re-exports the `MemoryLayer` contract so it is the one-stop import for memory-layer authoring. Must stay free of imports from `core` (acyclic + tree-shakable).
 - **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, error model, observability. Re-exports the public surface of `@noetic-tools/memory` and `@noetic-tools/types`, so its `.`, `/portable`, `/unstable`, and `/internal/test` entry points are unchanged for consumers. Internal order (foundational → consumer): `types/schemas/errors` → `observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `patterns`.
+- **`@noetic-tools/sub-harness`** — base contract + helpers for coding-agent sub-harnesses (Claude Code, Codex, opencode, pi). Re-exports the `SubHarness` contract from `@noetic-tools/types` and adds `defineSubHarness`, the turn accumulator, registry, item builders, and error types. Depends only on `@noetic-tools/types`. **`@noetic-tools/core` must never import this package or any `sub-harness-*` adapter** — it resolves adapters from the types contract + a runtime registry, so no agent SDK enters core's dependency graph (enforced by `.sentrux/rules.toml`). See `specs/27-sub-harness-steps.md`.
+- **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — one adapter per coding agent; each exports a factory (`claudeCode()` etc.) returning a `SubHarness`, backed by the vendor SDK as an optional peer dependency. Used via `step.claudeCode(...)` or a `claude-code` JSON workflow node.
 - **`@noetic-tools/code-agent`** — tool implementations, plugin registry, skills, tasks, LSP, git worktree integration.
 - **`@noetic-tools/cli`** — Ink-based TUI harness. Six internal layers per `specs/22-cli-architecture.md`: `foundations → infra → domain → orchestration → presentation → entry`.
 - **`@noetic/eval`** — eval framework, scorers, GEPA optimization, regression.

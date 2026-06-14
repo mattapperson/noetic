@@ -348,3 +348,204 @@ reason = "eval is runtime-agnostic via adapter injection; a direct browser-platf
 # a legitimate type-only import of @noetic-tools/core for MDX snippet typechecking
 # that any file-path-level boundary would flag as a false positive.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier F — sub-harness packages. @noetic-tools/sub-harness is the base contract
+# + helpers for coding-agent harnesses (Claude Code, Codex, opencode, pi) and
+# depends only on @noetic-tools/types. Each @noetic-tools/sub-harness-<tool>
+# adapter depends only on the base. core resolves sub-harnesses through the
+# @noetic-tools/types contract + a runtime registry, so it must NEVER import the
+# base or any adapter — agent SDKs never enter core's dependency graph.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "sub-harness-claude-code"
+paths = ["packages/sub-harness-claude-code/src/**"]
+order = 49
+
+[[layers]]
+name = "sub-harness-codex"
+paths = ["packages/sub-harness-codex/src/**"]
+order = 49
+
+[[layers]]
+name = "sub-harness-opencode"
+paths = ["packages/sub-harness-opencode/src/**"]
+order = 49
+
+[[layers]]
+name = "sub-harness-pi"
+paths = ["packages/sub-harness-pi/src/**"]
+order = 49
+
+[[layers]]
+name = "sub-harness"
+paths = ["packages/sub-harness/src/**"]
+order = 87
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness/src/**"
+reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a runtime registry; it must never import the sub-harness package or pull an agent SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness-claude-code/src/**"
+reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a runtime registry; it must never import the sub-harness-claude-code package or pull an agent SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness-codex/src/**"
+reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a runtime registry; it must never import the sub-harness-codex package or pull an agent SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness-opencode/src/**"
+reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a runtime registry; it must never import the sub-harness-opencode package or pull an agent SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness-pi/src/**"
+reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a runtime registry; it must never import the sub-harness-pi package or pull an agent SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/sub-harness/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/sub-harness depends only on @noetic-tools/types; it must never import core (acyclic, keeps the adapter layer core-free)"
+
+[[boundaries]]
+from = "packages/sub-harness-claude-code/src/**"
+to = "packages/core/src/**"
+reason = "sub-harness-claude-code depends only on @noetic-tools/sub-harness; it must not pull in core"
+
+[[boundaries]]
+from = "packages/sub-harness-codex/src/**"
+to = "packages/core/src/**"
+reason = "sub-harness-codex depends only on @noetic-tools/sub-harness; it must not pull in core"
+
+[[boundaries]]
+from = "packages/sub-harness-opencode/src/**"
+to = "packages/core/src/**"
+reason = "sub-harness-opencode depends only on @noetic-tools/sub-harness; it must not pull in core"
+
+[[boundaries]]
+from = "packages/sub-harness-pi/src/**"
+to = "packages/core/src/**"
+reason = "sub-harness-pi depends only on @noetic-tools/sub-harness; it must not pull in core"
+
+[[boundaries]]
+from = "packages/sub-harness-claude-code/src/**"
+to = "packages/sub-harness-codex/src/**"
+reason = "sub-harness-claude-code and sub-harness-codex are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-claude-code/src/**"
+to = "packages/sub-harness-opencode/src/**"
+reason = "sub-harness-claude-code and sub-harness-opencode are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-claude-code/src/**"
+to = "packages/sub-harness-pi/src/**"
+reason = "sub-harness-claude-code and sub-harness-pi are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-codex/src/**"
+to = "packages/sub-harness-claude-code/src/**"
+reason = "sub-harness-codex and sub-harness-claude-code are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-codex/src/**"
+to = "packages/sub-harness-opencode/src/**"
+reason = "sub-harness-codex and sub-harness-opencode are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-codex/src/**"
+to = "packages/sub-harness-pi/src/**"
+reason = "sub-harness-codex and sub-harness-pi are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-opencode/src/**"
+to = "packages/sub-harness-claude-code/src/**"
+reason = "sub-harness-opencode and sub-harness-claude-code are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-opencode/src/**"
+to = "packages/sub-harness-codex/src/**"
+reason = "sub-harness-opencode and sub-harness-codex are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-opencode/src/**"
+to = "packages/sub-harness-pi/src/**"
+reason = "sub-harness-opencode and sub-harness-pi are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-pi/src/**"
+to = "packages/sub-harness-claude-code/src/**"
+reason = "sub-harness-pi and sub-harness-claude-code are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-pi/src/**"
+to = "packages/sub-harness-codex/src/**"
+reason = "sub-harness-pi and sub-harness-codex are sibling sub-harness adapters; neither may import the other"
+
+[[boundaries]]
+from = "packages/sub-harness-pi/src/**"
+to = "packages/sub-harness-opencode/src/**"
+reason = "sub-harness-pi and sub-harness-opencode are sibling sub-harness adapters; neither may import the other"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sub-harness packages. The SubHarness contract lives in @noetic-tools/types;
+# the base @noetic-tools/sub-harness package adds the registry / turn
+# accumulator / item builders and depends only on types. Each per-tool adapter
+# (@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}) depends on the
+# base + types and is a pure adapter — it must NOT import core. Critically,
+# @noetic-tools/core must never import a sub-harness adapter (or the base): core
+# resolves SubHarness *instances* from a runtime registry / the step field and
+# depends only on the SubHarness *type* in @noetic-tools/types. These boundaries
+# machine-enforce that decoupling.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "sub-harness-adapters"
+paths = ["packages/sub-harness-*/src/**"]
+order = 50
+
+[[layers]]
+name = "noetic-sub-harness"
+paths = ["packages/sub-harness/src/**"]
+order = 88
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness/src/**"
+reason = "core must never depend on a sub-harness package; it resolves SubHarness instances from a runtime registry and depends only on the SubHarness type in @noetic-tools/types"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/sub-harness-*/src/**"
+reason = "core must never depend on a sub-harness adapter; adapter instances are injected by the consumer, never imported by core"
+
+[[boundaries]]
+from = "packages/sub-harness/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/sub-harness is a foundational package on @noetic-tools/types; it must never import back into core (acyclic)"
+
+[[boundaries]]
+from = "packages/sub-harness/src/**"
+to = "packages/memory/src/**"
+reason = "@noetic-tools/sub-harness depends only on @noetic-tools/types; it must not reach into the memory package"
+
+[[boundaries]]
+from = "packages/sub-harness/src/**"
+to = "packages/sub-harness-*/src/**"
+reason = "the base sub-harness package must not import its own consumer adapter packages"
+
+[[boundaries]]
+from = "packages/sub-harness-*/src/**"
+to = "packages/core/src/**"
+reason = "a sub-harness adapter is a pure adapter on the SubHarness contract; it must not depend on core"
+
+[[boundaries]]
+from = "packages/sub-harness-*/src/**"
+to = "packages/memory/src/**"
+reason = "a sub-harness adapter depends only on @noetic-tools/sub-harness + @noetic-tools/types; it must not reach into the memory package"

@@ -19,13 +19,15 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Packages
 
 ```
-@noetic-tools/memory  →  @noetic-tools/types
-        ↑                        ↑
-@noetic-tools/core  ←  @noetic/eval
+@noetic-tools/memory  →  @noetic-tools/types  ←  @noetic-tools/sub-harness
+        ↑                        ↑                          ↑
+@noetic-tools/core  ←  @noetic/eval        @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
       ↑
       ├── @noetic-tools/platform-node
       └── @noetic/platform-browser
 ```
+
+`@noetic-tools/core` depends only on the `SubHarness` *type* in `@noetic-tools/types`; it never imports a sub-harness adapter package (the dependency edge above runs adapters → contract, never core → adapter).
 
 - **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `MemoryLayer` contract (`types/memory.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
 
@@ -36,6 +38,10 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 - **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
+
+- **`@noetic-tools/sub-harness`** — The base contract and helpers for coding-agent sub-harnesses (Claude Code, Codex, opencode, pi run as Noetic steps). Re-exports the `SubHarness` contract from `@noetic-tools/types` and adds `defineSubHarness`, the turn accumulator, item builders, the registry, the common-tool vocabulary, and shared error types. Depends only on `@noetic-tools/types`. See `27-sub-harness-steps`.
+
+- **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — Per-tool sub-harness adapters. Each implements the `SubHarness` contract via `defineSubHarness` (vendor SDK behind an injectable runner) and exports a factory (`claudeCode()`, `codex()`, …). Depends on `@noetic-tools/sub-harness` + `@noetic-tools/types` — never on `@noetic-tools/core`.
 
 - **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
 

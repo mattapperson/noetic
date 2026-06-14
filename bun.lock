@@ -10,6 +10,11 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.3.11",
+        "@noetic-tools/core": "workspace:*",
+        "@noetic-tools/sub-harness": "workspace:*",
+        "@noetic-tools/sub-harness-claude-code": "workspace:*",
+        "@noetic-tools/sub-harness-codex": "workspace:*",
+        "zod": "^4.0.0",
       },
     },
     "evals": {
@@ -86,7 +91,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "0.3.0",
+      "version": "1.1.1",
       "dependencies": {
         "@noetic-tools/memory": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -131,7 +136,7 @@
     },
     "packages/memory": {
       "name": "@noetic-tools/memory",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -207,9 +212,95 @@
         "react": "^19.2.0",
       },
     },
+    "packages/sub-harness": {
+      "name": "@noetic-tools/sub-harness",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/sub-harness-claude-code": {
+      "name": "@noetic-tools/sub-harness-claude-code",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/sub-harness": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@anthropic-ai/claude-agent-sdk": ">=0.1.0",
+        "zod": "^4.0.0",
+      },
+      "optionalPeers": [
+        "@anthropic-ai/claude-agent-sdk",
+      ],
+    },
+    "packages/sub-harness-codex": {
+      "name": "@noetic-tools/sub-harness-codex",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/sub-harness": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@openai/codex-sdk": ">=0.1.0",
+        "zod": "^4.0.0",
+      },
+      "optionalPeers": [
+        "@openai/codex-sdk",
+      ],
+    },
+    "packages/sub-harness-opencode": {
+      "name": "@noetic-tools/sub-harness-opencode",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/sub-harness": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@opencode-ai/sdk": ">=0.1.0",
+        "zod": "^4.0.0",
+      },
+      "optionalPeers": [
+        "@opencode-ai/sdk",
+      ],
+    },
+    "packages/sub-harness-pi": {
+      "name": "@noetic-tools/sub-harness-pi",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/sub-harness": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "@pi-agent/sdk": ">=0.1.0",
+        "zod": "^4.0.0",
+      },
+      "optionalPeers": [
+        "@pi-agent/sdk",
+      ],
+    },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "0.2.0",
+      "version": "1.0.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -470,6 +561,16 @@
     "@noetic-tools/memory": ["@noetic-tools/memory@workspace:packages/memory"],
 
     "@noetic-tools/platform-node": ["@noetic-tools/platform-node@workspace:packages/platform-node"],
+
+    "@noetic-tools/sub-harness": ["@noetic-tools/sub-harness@workspace:packages/sub-harness"],
+
+    "@noetic-tools/sub-harness-claude-code": ["@noetic-tools/sub-harness-claude-code@workspace:packages/sub-harness-claude-code"],
+
+    "@noetic-tools/sub-harness-codex": ["@noetic-tools/sub-harness-codex@workspace:packages/sub-harness-codex"],
+
+    "@noetic-tools/sub-harness-opencode": ["@noetic-tools/sub-harness-opencode@workspace:packages/sub-harness-opencode"],
+
+    "@noetic-tools/sub-harness-pi": ["@noetic-tools/sub-harness-pi@workspace:packages/sub-harness-pi"],
 
     "@noetic-tools/types": ["@noetic-tools/types@workspace:packages/types"],
 

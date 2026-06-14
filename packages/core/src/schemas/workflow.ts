@@ -7,6 +7,7 @@
  * validated document back into live `Step` objects via the existing builders.
  */
 
+import type { SubHarnessKind } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Until Predicate Types
@@ -155,6 +156,36 @@ const ModelParamsSchema = z.object({
 
 //#endregion
 
+//#region SubHarness Settings
+
+const HarnessSettingsSchema = z.object({
+  model: z.string().optional(),
+  permissionMode: z
+    .enum([
+      'default',
+      'plan',
+      'acceptEdits',
+      'bypassPermissions',
+    ])
+    .optional(),
+  maxTurns: z.number().int().positive().optional(),
+  allowedTools: z.array(z.string()).optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+
+const HarnessSessionPolicySchema = z.object({
+  reuse: z.string().min(1).optional(),
+  onComplete: z
+    .enum([
+      'stop',
+      'detach',
+      'destroy',
+    ])
+    .optional(),
+});
+
+//#endregion
+
 //#region Workflow Node Types
 
 interface WorkflowNodeBase {
@@ -225,6 +256,19 @@ export interface EveryWorkflowNode extends WorkflowNodeBase {
   onError?: 'continue' | 'fail';
 }
 
+/**
+ * A node that delegates a turn to a coding-agent harness. `kind` is the harness
+ * id (e.g. `claude-code`); the hydrator resolves the matching adapter from the
+ * workflow's harness registry.
+ */
+export interface SubHarnessWorkflowNode extends WorkflowNodeBase {
+  kind: SubHarnessKind;
+  prompt: string;
+  instructions?: string;
+  settings?: z.infer<typeof HarnessSettingsSchema>;
+  session?: z.infer<typeof HarnessSessionPolicySchema>;
+}
+
 /** @public Discriminated union of all JSON-serialisable workflow node kinds. */
 export type WorkflowNode =
   | LlmWorkflowNode
@@ -235,7 +279,8 @@ export type WorkflowNode =
   | ProvideWorkflowNode
   | LoopWorkflowNode
   | SequenceWorkflowNode
-  | EveryWorkflowNode;
+  | EveryWorkflowNode
+  | SubHarnessWorkflowNode;
 
 //#endregion
 
@@ -329,7 +374,24 @@ const EveryNodeSchema = z.object({
     .optional(),
 });
 
-/** @public Zod schema validating a single `WorkflowNode` (any of the 9 JSON-safe kinds). */
+/** Builds the schema for a single harness node kind (`claude-code`, `codex`, …). */
+function subHarnessNodeSchema<K extends SubHarnessKind>(kind: K) {
+  return z.object({
+    kind: z.literal(kind),
+    ...SHARED_FIELDS,
+    prompt: z.string().min(1),
+    instructions: z.string().optional(),
+    settings: HarnessSettingsSchema.optional(),
+    session: HarnessSessionPolicySchema.optional(),
+  });
+}
+
+const ClaudeCodeNodeSchema = subHarnessNodeSchema('claude-code');
+const CodexNodeSchema = subHarnessNodeSchema('codex');
+const OpencodeNodeSchema = subHarnessNodeSchema('opencode');
+const PiNodeSchema = subHarnessNodeSchema('pi');
+
+/** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
 export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
   .discriminatedUnion('kind', [
     LlmNodeSchema,
@@ -341,6 +403,10 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     LoopNodeSchema,
     SequenceNodeSchema,
     EveryNodeSchema,
+    ClaudeCodeNodeSchema,
+    CodexNodeSchema,
+    OpencodeNodeSchema,
+    PiNodeSchema,
   ])
   .meta({
     id: 'WorkflowNode',
