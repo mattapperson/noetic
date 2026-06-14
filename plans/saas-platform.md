@@ -33,6 +33,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.5 Postgres minimization directive](#15-postgres-minimization-directive)
    - [1.6 Unkey rejected; in-house keys + verification cache](#16-unkey-rejected-in-house-keys--verification-cache)
    - [1.7 Cloudflare-first cloud strategy](#17-cloudflare-first-cloud-strategy)
+   - [1.8 Observability graduated by paying-customer tier](#18-observability-graduated-by-paying-customer-tier)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -48,6 +49,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [2.12 What's NOT in this plan](#212-whats-not-in-this-plan)
    - [2.13 Cost-coverage invariants](#213-cost-coverage-invariants)
    - [2.14 Cloud architecture](#214-cloud-architecture)
+   - [2.15 Observability & monitoring](#215-observability--monitoring)
 3. [Proposal: implementation specs](#proposal-implementation-specs)
    - [3.1 Why split](#31-why-split)
    - [3.2 Proposed specs (grouped, prioritized)](#32-proposed-specs-grouped-prioritized)
@@ -375,6 +377,66 @@ Fixed monthly: **~$15–60** (Workers $5 + Upstash $10–30 + Tinybird $0–25 +
 
 The CEO reviewer pushed "buy boring stuff" and listed AWS/GCP services among the "boring stuff." That framing was directionally correct but assumed a one-cloud answer. The actual answer is **Cloudflare for everything Cloudflare does well, three best-of-breed vendors for the gaps**, and AWS/GCP only on explicit triggers. This is *more* aggressive about not-building-undifferentiated-infrastructure than the original "use AWS" framing would have been, because Workers + Pages + Hyperdrive eliminate even more glue code than EC2 + RDS + ElastiCache would have.
 
+## 1.8 Observability graduated by paying-customer tier
+
+**Trigger:** User: "Evaluate observability and monitoring needs. We don't need them when we have no users, but will need them as soon as there are paying customers."
+
+**Core principle:** don't pay for observability before there's anything to observe — but two things must be wired from day 1 because retrofitting them is painful: **error tracking** and **structured-logging discipline with `account_id` / `request_id` / `trace_id` on every log line**.
+
+**Decision: four tiers, each with a clean trigger.**
+
+### Tier 0 — Day 1 ($0)
+
+Wire these in P0 before any other observability tooling. Cost is zero; the value is making the *next* tier's investment effective.
+
+- **Sentry free tier** (5K errors/mo) — Workers integration is mature; source maps work; PII redaction; PagerDuty/Slack integration when needed. Catches every production exception with stack + context.
+- **Cloudflare Logpush → Axiom** — already in stack for audit log. Add request logs to the same pipe.
+- **Structured-logging discipline** — every log line carries `account_id`, `request_id`, `trace_id`. Enforced by a logger wrapper, not policy.
+- **Cloudflare Workers Analytics** (free, built-in) — RED metrics per route (request count, error rate, p50/p95/p99 latency, CPU time) with no instrumentation.
+- **`/v1/health` synthetic Cron Worker** — every minute, exercises auth + bucket check + Tinybird ingest + AI Gateway round-trip. Emits structured log; Sentry alerts on N consecutive failures. This single artifact is the highest-leverage monitoring you'll ever build because it exercises every layer in production.
+
+### Tier 1 — First paying customer / paid beta launch (~$20/mo)
+
+Triggered by: first $1 of revenue + the §2.6 P6 status-page commitment.
+
+- **Instatus public status page** ($20/mo) — already in plan
+- **Billing-correctness reconciler alerts** — *custom code*, not a vendor purchase. Three loops (already in plan §2.6 P4/P5) get alert routing to Sentry/Slack: (1) Tinybird `UsageEvent` sum vs Redis `bucket_state` drift > 1%; (2) Tinybird sum vs Stripe Meters reported > 0.5%; (3) outbox rows older than 5 minutes unshipped.
+- **PostHog free tier** (1M events/mo) — start tracking the §2.6 P0.5 TTF-200 activation metric in a queryable place.
+- **Slack incident channel** — Sentry + reconciler alerts → `#noetic-alerts`. Human-eyeball paging until on-call exists.
+
+### Tier 2 — Multiple paying customers, ~10+ ($1K+ MRR) (~$25–75/mo)
+
+Triggered by: an actual on-call rotation forming, or the first "your API is slow" support ticket that's hard to diagnose.
+
+- **Better Stack** ($24/mo, bundles uptime + status + on-call rotations) — can replace Instatus. External probes (a Cloudflare-side outage actually shows up because Better Stack pings from outside CF).
+- **Honeycomb free tier** for distributed tracing across Worker → Hyperdrive → Neon, Worker → Upstash, Worker → AI Gateway → upstream. Workers don't have native OpenTelemetry yet, but the integration libs exist.
+- **SLO dashboards** — built on Axiom + Cloudflare Analytics, no new vendor. Codify what matters: gateway availability 99.9%, p95 latency <500ms, TTF-200 <60s, bucket-check p99 <10ms, key-verification p99 <5ms.
+- **Sentry Team** ($26/mo at ~50K errors/mo) if free tier runs out — only if.
+
+### Tier 3 — Enterprise / SLA commitments ($500–2K/mo)
+
+Triggered by: first enterprise contract with SLA penalty clauses, or SOC2 Type II audit prep.
+
+- **Datadog or Grafana Cloud** ($200–500/mo) — unified observability + APM. Single-pane-of-glass for support + on-call.
+- **PagerDuty proper** ($21/user/mo) — when Better Stack on-call isn't enough (multiple rotations, complex escalation).
+- **Vanta integration with monitoring** — SOC2 Type II requires alerts on access anomalies and monitoring-coverage attestation.
+- **Sentry Performance / APM** — slow-query and trace-rooting at customer-perceived latency.
+
+### Three platform-specific monitoring concerns (codified)
+
+These are unique to a billing+inference platform and don't appear on a generic observability vendor's "what you need" list:
+
+1. **Billing-correctness reconciliation is the #1 incident class.** A silent drift between Redis, Tinybird, and Stripe is a customer-billing dispute waiting to happen. The three reconciler alerts above must fire to a human channel from day 1 of paid beta — cheaper to instrument now than investigate after the fact.
+2. **Inference cost tracking even on BYOK.** Customer pays the upstream provider, but we still want per-account token economics for product/eval insight. Emit `model_cost_usd` (from OR/Anthropic usage block) as a `UsageEvent` dimension — costs nothing extra, valuable forever. For the trial-credits pool and managed-inference path, this is real money we must track.
+3. **The `/v1/health` synthetic is the SLA evidence record.** It's the artifact pointed at during a customer dispute ("our metrics show 99.94% availability for that period"). Run it from outside Cloudflare in Tier 2+ so a Cloudflare-side outage actually surfaces in our metrics.
+
+### What NOT to do
+
+- No Datadog at v1 — easily $500/mo for one engineer's worth of usage; real value kicks in at Tier 3.
+- No custom Prometheus + Grafana on a VPS — more hours maintaining than using.
+- No "wire Sentry when something breaks" — it's free; wire day 1.
+- No PagerDuty before there's a real on-call rotation — Sentry → Slack → eyeball is fine until ~10 paying customers.
+
 ---
 
 # Current plan
@@ -496,6 +558,9 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 - `hasScope()` middleware, default-deny. V1: hardcoded role→scope map
 - Account ID in every URL **plus** Postgres RLS or typed `AccountScope` repo guard
 - CI cross-tenant pen-test suite (try-to-read-another-tenant)
+- **Sentry wired (free tier)** — every Worker exception captured with stack + `account_id` + `request_id` + `trace_id` context
+- **Structured-logging discipline** — logger wrapper enforces `account_id` / `request_id` / `trace_id` on every line; Cloudflare Logpush → Axiom configured for request logs (same pipe as audit)
+- **`/v1/health` Cron Worker** (1-minute interval) exercising auth + bucket check + Tinybird ingest + AI Gateway round-trip; Sentry alert on N consecutive failures. See [§1.8](#18-observability-graduated-by-paying-customer-tier).
 
 ### P0.5 — Time-to-first-token (wk 1, parallel)
 - Signup auto-provisions personal Account + default `noetic_test_*` key + trial bucket
@@ -541,6 +606,8 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 - 60s micro-batch reporter (not nightly)
 - Self-computed `billing_period_summary`; nightly reconciliation diffs reported-to-Stripe vs UsageEvent sum
 - Reporter lag SLO + alert + manual replay tool
+- **Billing-correctness reconciler alerts routed to Sentry + Slack** (see [§1.8](#18-observability-graduated-by-paying-customer-tier)) — three loops: (1) Tinybird `UsageEvent` sum vs Redis `bucket_state` drift > 1%; (2) Tinybird sum vs Stripe Meters reported > 0.5%; (3) outbox rows older than 5min unshipped
+- **`model_cost_usd` emitted as a `UsageEvent` dimension** (from upstream usage block) — per-account token economics tracked even on BYOK; the trial-credits pool and managed-inference path depend on it
 - **Shadow-billing period** before going live
 - **Prepaid credits** as a Tinybird-backed balance ledger — default for new accounts. Postpaid invoicing is enterprise opt-in behind credit check
 - Stripe Customer Portal for self-serve subscription management
@@ -548,7 +615,8 @@ Target: paid beta in 6 weeks, one engineer. Realistic: 8 weeks.
 - Subscription lifecycle: `past_due` → degrade (read-only), not lockout
 
 ### P6 — Polish / trust (wk 6+)
-- Status page (Instatus, 99.9% target) wired to gateway health
+- Status page (Instatus, 99.9% target) wired to `/v1/health` Cron Worker output
+- **PostHog free tier** wired for TTF-200 activation funnel + signup events
 - Resend for transactional email
 - Svix for customer webhooks when first customer asks
 - Upstash/Cloudflare rate limiting
@@ -591,9 +659,15 @@ Cheap now, expensive later.
 - Public `/pricing` page before paid beta
 - Status page + stated 99.9% before paid beta
 
+### Observability (Tier 0 — see [§1.8](#18-observability-graduated-by-paying-customer-tier))
+- Sentry wired (free tier) — every Worker exception with `account_id` / `request_id` / `trace_id` context
+- Structured-logging discipline enforced by a logger wrapper; Logpush → Axiom for request logs
+- `/v1/health` Cron Worker exercising auth + bucket + Tinybird + AI Gateway every minute
+- `model_cost_usd` emitted as `UsageEvent` dimension (tracks economics on BYOK too)
+
 ### Process
 - 1-page GTM with named ICP and 3+ design partner LOIs gating the build
-- Build-vs-buy decisions logged (Unkey, Stripe Portal, Svix, Tinybird, Clerk)
+- Build-vs-buy decisions logged (Stripe Portal, Svix, Tinybird, observability vendors)
 
 ## 2.8 Deferred with confidence
 
@@ -763,6 +837,70 @@ Each has a clean trigger condition; **don't pre-pay**:
 - **No `fs`, no `child_process`, no Node-only globals.** If a tool needs those, it doesn't run in the Worker — it runs as a Queue consumer in a separate Worker, or as a Cloudflare Container (if/when needed).
 - **CPU time discipline.** Per-request CPU budget on Workers Paid is 30s. Compute-heavy work (e.g. cost reconciliation over a day's events) runs in a Cron-triggered Worker or as a Queue consumer that fan-outs.
 
+## 2.15 Observability & monitoring
+
+Graduated by paying-customer tier. Decision rationale in [§1.8](#18-observability-graduated-by-paying-customer-tier); this section is the operational state.
+
+### Tier 0 — Day 1 (always-on, $0)
+
+Wired in P0 before any paid observability tool:
+
+| Capability | Implementation |
+|---|---|
+| Error tracking | **Sentry free tier** — captures every Worker exception with `account_id` / `request_id` / `trace_id` context, source-mapped stack |
+| Request logs | **Cloudflare Logpush → Axiom** (same pipe as audit) — structured-logging discipline enforced by a logger wrapper |
+| RED metrics per route | **Cloudflare Workers Analytics** (built-in) — request count, error rate, CPU time, p50/p95/p99 latency |
+| Synthetic uptime | **`/v1/health` Cron Worker** — every minute exercises auth → bucket check → Tinybird ingest → AI Gateway round-trip; Sentry alert on N consecutive failures |
+| Cost-economics tracking | `model_cost_usd` emitted as `UsageEvent` dimension from upstream usage block — per-account token economics tracked even on BYOK |
+
+### Tier 1 — Paid-beta launch (~$20/mo)
+
+Triggered by: first $1 of revenue.
+
+| Capability | Implementation |
+|---|---|
+| Public status page | **Instatus** ($20/mo) wired to `/v1/health` Cron output |
+| Billing-correctness alerts | *Custom code, no vendor*: three reconciler loops route to Sentry + Slack — (1) Tinybird sum vs Redis `bucket_state` drift > 1%; (2) Tinybird sum vs Stripe Meters reported > 0.5%; (3) outbox rows older than 5min unshipped |
+| Activation analytics | **PostHog free tier** (1M events/mo) — TTF-200 funnel + signup events queryable |
+| Incident channel | `#noetic-alerts` Slack — Sentry + reconciler alerts → human eyeball |
+
+### Tier 2 — ~10+ paying customers ($1K+ MRR) (~$25–75/mo)
+
+Triggered by: actual on-call rotation forming, or the first "your API is slow" support ticket hard to diagnose.
+
+| Capability | Implementation |
+|---|---|
+| External uptime + on-call | **Better Stack** ($24/mo) — uptime + status page + on-call rotations bundled; can replace Instatus. Probes from outside Cloudflare so CF-side outages surface |
+| Distributed tracing | **Honeycomb free tier** — Worker → Hyperdrive → Neon, Worker → Upstash, Worker → AI Gateway → upstream |
+| SLO dashboards | Built on Axiom + Cloudflare Analytics, no new vendor. SLOs codified: gateway availability 99.9%, p95 latency <500ms, TTF-200 <60s, bucket-check p99 <10ms, key-verification p99 <5ms |
+| Error volume | **Sentry Team** ($26/mo) only if free tier exhausted at ~50K errors/mo |
+
+### Tier 3 — Enterprise / SLA commitments ($500–2K/mo)
+
+Triggered by: first enterprise contract with SLA penalty clauses, or SOC2 Type II audit prep.
+
+| Capability | Implementation |
+|---|---|
+| Unified observability + APM | **Datadog** or **Grafana Cloud** ($200–500/mo) — single-pane-of-glass for support + on-call |
+| Paging | **PagerDuty** ($21/user/mo) — multiple rotations, complex escalation when Better Stack on-call isn't enough |
+| SOC2 monitoring evidence | **Vanta integration** (bundled with SOC2 work) — access-anomaly alerts + monitoring-coverage attestation |
+| APM / profiling | Sentry Performance or Datadog APM — slow-query rooting at customer-perceived latency |
+
+### Three platform-specific monitoring concerns (codified)
+
+These are unique to a billing+inference platform; don't appear on generic-vendor checklists:
+
+1. **Billing-correctness reconciliation is the #1 incident class.** Silent drift between Redis, Tinybird, and Stripe → customer-billing dispute waiting to happen. The three reconciler alerts above must fire to a human channel from day 1 of paid beta.
+2. **Inference cost tracking even on BYOK.** Customer pays upstream, but per-account token economics tracked anyway (trial pool + managed inference need it; product insight always needs it).
+3. **`/v1/health` synthetic is SLA evidence.** Pointed at during customer disputes ("our metrics show 99.94% availability for that period"). At Tier 2+, must run from outside Cloudflare.
+
+### What NOT to do (explicit cuts)
+
+- No Datadog at v1 — easily $500/mo for one engineer; real value at Tier 3.
+- No custom Prometheus + Grafana on a VPS — more hours maintaining than using.
+- No "wire Sentry when something breaks" — it's free; wire day 1.
+- No PagerDuty before there's a real on-call rotation — Sentry → Slack → eyeball is fine until ~10 paying customers.
+
 ---
 
 # Proposal: implementation specs
@@ -899,3 +1037,4 @@ Run **P-1** before any code. Specifically: write the 1-page GTM and get on 5 cus
 | 2026-06-12 | Added §3 proposal for splitting implementation into 7 per-purpose specs (S1–S7) under `specs/saas/`, in 4 priority tiers, with explicit dependency graph and conventions | User request — needed before P-1 completes so implementation can ramp without omnibus-spec review bottleneck |
 | 2026-06-14 | Unkey rejected: in-house API keys (3–4 days) + Redis 60s verification cache. Added §2.13 Cost-coverage invariants (Redis cache + per-key RPS + daily caps + BYOK + bounded trial pool + single Upstash). Resolved §2.11 Unkey-vs-custom open question. | User question on Unkey necessity + free-tier cost coverage |
 | 2026-06-14 | Cloudflare-first cloud strategy (§1.7, §2.14): Workers + Pages + R2 + AI Gateway + Hyperdrive + Cron + Queues + Secrets. External vendors for the 3 gaps: Neon (Postgres), Upstash (Redis), Axiom (audit). No AWS or GCP at v1; explicit trigger conditions documented. Bun↔Workers CI gate added to P0 must-gets. | User request: optimize for Cloudflare, fall back to AWS/GCP only on demonstrated need |
+| 2026-06-14 | Observability graduated by paying-customer tier (§1.8, §2.15). Tier 0 (day 1, $0): Sentry + structured logs + /v1/health Cron + model_cost_usd dimension. Tier 1 (~$20/mo): Instatus + billing-correctness reconciler alerts + PostHog. Tier 2 (~$25–75): Better Stack + Honeycomb + SLO dashboards. Tier 3 ($500–2K): Datadog/Grafana + PagerDuty + Vanta. Three platform-specific concerns codified (billing-correctness as #1 incident class; BYOK cost tracking; /v1/health as SLA evidence). | User request: evaluate observability needs, gated by paying-customer milestones |
