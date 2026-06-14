@@ -11,6 +11,7 @@ All scripts run from the repo root unless noted.
 - `bun test:ci` — same plus coverage enforcement (diff gate from baseline)
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun scripts/check-export-tags.ts` — validates `@public` JSDoc tags on core's entry points
+- `cd packages/core && bun run gen:schema` — regenerate the published JSON Schema for dynamic workflows from `WorkflowDocumentSchema`. **MUST run (same commit) whenever you change the JSON-workflow Zod schema in `packages/core/src/schemas/workflow.ts`** — it rewrites both the package artifact (`packages/core/schema/noetic-workflow.schema.json`) and the hosted copy (`packages/web/public/schema/noetic-workflow.schema.json`, served at the schema's `$id`). A drift-gate test fails CI if either is stale. Never hand-edit the generated `*.schema.json` files. See `.claude/rules/sync-spec-code-docs.md` Requirement 6.
 
 In-workspace consumers resolve `@noetic-tools/types`, `@noetic-tools/memory`, and `@noetic-tools/core` straight to `src/*.ts` via the `bun` export condition (tsc matches it through `customConditions`), so no build step is needed for tests, typecheck, or the CLI — a stale `dist/` cannot break the workspace. Only `packages/web` (webpack) still consumes `dist/`; run `bun run build` in those three packages before building web. Published tarballs strip the `bun` conditions via `scripts/strip-dev-conditions.ts` in `prepublishOnly`.
 
