@@ -1,3 +1,7 @@
+## @noetic-tools/core-v1.1.1 (2026-06-14)
+
+* fix(core): host workflow JSON schema so its $id URL resolves ([bc87e76](https://github.com/mattapperson/noetic/commit/bc87e76))
+
 ## @noetic-tools/core-v1.1.0 (2026-06-14)
 
 * feat(core): publish JSON Schema for dynamic workflows + multi-model judge example ([d7add74](https://github.com/mattapperson/noetic/commit/d7add74))
