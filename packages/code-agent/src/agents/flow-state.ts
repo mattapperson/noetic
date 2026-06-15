@@ -157,6 +157,15 @@ export function setFlowMemoryDefaultMode(mode: CodeAgentMode): void {
 }
 
 /**
+ * @public Read the host-configured default starting mode. Used by `doneStep`
+ * to reset `mode` after a workflow completes so the NEXT user turn re-enters
+ * the act/plan loop rather than short-circuiting to `doneStep` again.
+ */
+export function getFlowMemoryDefaultMode(): CodeAgentMode {
+  return DEFAULT_INITIAL_MODE;
+}
+
+/**
  * Memory layer tracking the top-level workflow mode, outstanding approval
  * requests, and fix-loop bookkeeping. `provides.state` exposes a typed read
  * projection on `ctx.memory['code-agent-flow'].state`.
