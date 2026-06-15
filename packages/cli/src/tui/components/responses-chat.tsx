@@ -6,17 +6,17 @@
  */
 
 import type { Item } from '@noetic-tools/core';
-import { Box, Static, Text, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
-import { splitStaticEntries } from '../grouping/split-static-entries.js';
 import type { DisplayEntry } from '../grouping/types.js';
-import { staticKeyFor, toStaticEntryItems } from '../grouping/types.js';
+import { staticKeyFor } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
 import { isErrorEntry, isSystemEntry, isUserEntry } from '../item-utils.js';
+import { ChatScroll } from './chat-scroll.js';
 import type { SpinnerMode } from './items/loading-spinner.js';
 import { LoadingSpinner } from './items/loading-spinner.js';
 import type { RenderEntryCtx } from './items/render-entry.js';
@@ -43,7 +43,7 @@ export interface ResponsesChatProps {
   onModalClose?: () => void;
   plugins?: ReadonlyArray<NoeticPlugin>;
   /**
-   * When true, a "Press Ctrl+C again to exit" hint is rendered above the
+   * When true, a "Press Ctrl+C again to exit" hint is rendered below the
    * prompt for the duration of the double-press window.
    */
   exitHintArmed?: boolean;
@@ -52,6 +52,18 @@ export interface ResponsesChatProps {
    * fetched on demand when the request-items overlay (Ctrl+R) opens.
    */
   getRequestItems?: () => Promise<ReadonlyArray<Item>>;
+  /**
+   * When false, the chat pane is not the focused side of the Context Split
+   * View. Overlays and the prompt stop consuming keystrokes, but the chat
+   * tree continues to render live updates. Defaults to true.
+   */
+  isActive?: boolean;
+  /**
+   * Transient one-line status notice rendered directly below the prompt.
+   * Used for ephemeral UI confirmations ("dock opened", "mode switched")
+   * that don't belong in the chat scroll. `null` hides the line.
+   */
+  statusNotice?: string | null;
 }
 
 //#endregion
@@ -72,6 +84,8 @@ export function ResponsesChat({
   plugins,
   exitHintArmed,
   getRequestItems,
+  isActive = true,
+  statusNotice,
 }: ResponsesChatProps): ReactNode {
   const pluginsList = plugins ?? [];
   const footerPlugin = useMemo(
@@ -182,40 +196,34 @@ export function ResponsesChat({
     onSubmit(msg);
   }
 
-  useInput((_input, key) => {
-    if (key.escape && modalContent && onModalClose) {
-      onModalClose();
-      return;
-    }
-    if (key.escape && overlayOpen) {
-      setOverlay('none');
-      return;
-    }
-    if (key.ctrl && _input === 'o') {
-      setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
-      return;
-    }
-    if (key.ctrl && _input === 'r') {
-      setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
-      return;
-    }
-  });
+  useInput(
+    (_input, key) => {
+      if (key.escape && modalContent && onModalClose) {
+        onModalClose();
+        return;
+      }
+      if (key.escape && overlayOpen) {
+        setOverlay('none');
+        return;
+      }
+      if (key.ctrl && _input === 'o') {
+        setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
+        return;
+      }
+      if (key.ctrl && _input === 'r') {
+        setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
+        return;
+      }
+    },
+    {
+      isActive,
+    },
+  );
 
   const collapsedEntries = useMemo<DisplayEntry[]>(
     () => collapseReads(entries),
     [
       entries,
-    ],
-  );
-
-  // Frozen prefix goes into <Static> (rendered once, flushed to scrollback);
-  // the still-mutable suffix re-renders live. See split-static-entries.ts
-  // for what counts as still-mutable.
-  const { staticEntries, liveEntries } = useMemo(
-    () => splitStaticEntries(collapsedEntries, status),
-    [
-      collapsedEntries,
-      status,
     ],
   );
 
@@ -274,13 +282,6 @@ export function ResponsesChat({
     showLoadingSpinner,
   ]);
 
-  const staticItems = useMemo(
-    () => toStaticEntryItems(staticEntries),
-    [
-      staticEntries,
-    ],
-  );
-
   if (modalContent) {
     return (
       <Box flexDirection="column" height="100%">
@@ -314,11 +315,6 @@ export function ResponsesChat({
             />
           )}
         </Box>
-        {exitHintArmed ? (
-          <Box>
-            <Text dimColor>Press Ctrl+C again to exit</Text>
-          </Box>
-        ) : null}
         {/* Keyed by overlay so swapping between transcript and request remounts
             ink-text-input — otherwise the toggling keystroke leaks into the field. */}
         <PromptInput
@@ -332,32 +328,29 @@ export function ResponsesChat({
           agentMode={agentMode}
           onToggleMode={onToggleMode}
           commands={commands}
+          isActive={isActive}
         />
+        {exitHintArmed ? (
+          <Box flexShrink={0}>
+            <Text dimColor>Press Ctrl+C again to exit</Text>
+          </Box>
+        ) : null}
       </Box>
     );
   }
 
   return (
     <Box flexDirection="column" height="100%">
-      <Box flexDirection="column" flexGrow={1}>
-        <Static items={staticItems}>
-          {(item: { key: string; entry: DisplayEntry; index: number }) => (
-            <Box key={item.key}>{renderEntry(item.entry, item.index, ctx)}</Box>
-          )}
-        </Static>
-        {liveEntries.map((entry, i) => (
-          <Box key={staticKeyFor(entry, staticEntries.length + i)}>
-            {renderEntry(entry, staticEntries.length + i, ctx)}
-          </Box>
-        ))}
-        {showLoadingSpinner && <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />}
-      </Box>
+      <ChatScroll<DisplayEntry>
+        entries={collapsedEntries}
+        keyFor={(entry, i) => staticKeyFor(entry, i)}
+        renderEntry={(entry, i) => renderEntry(entry, i, ctx)}
+        trailing={
+          showLoadingSpinner ? <LoadingSpinner mode={spinnerMode} message={spinnerMessage} /> : null
+        }
+        isActive={isActive}
+      />
       {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
-      {exitHintArmed ? (
-        <Box>
-          <Text dimColor>Press Ctrl+C again to exit</Text>
-        </Box>
-      ) : null}
       <PromptInput
         status={status}
         onSubmit={handleSubmit}
@@ -368,7 +361,18 @@ export function ResponsesChat({
         agentMode={agentMode}
         onToggleMode={onToggleMode}
         commands={commands}
+        isActive={isActive}
       />
+      {exitHintArmed ? (
+        <Box flexShrink={0}>
+          <Text dimColor>Press Ctrl+C again to exit</Text>
+        </Box>
+      ) : null}
+      {statusNotice ? (
+        <Box flexShrink={0}>
+          <Text dimColor>{statusNotice}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
