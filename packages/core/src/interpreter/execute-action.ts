@@ -603,6 +603,20 @@ async function collectSpawnItems({
   return spawnResults.flatMap((r) => r.items);
 }
 
+/** Adds a spawned child's accumulated token/cost usage to its parent. */
+function rollUpSpawnUsage(parent: Context<ContextMemory>, child: Context<ContextMemory>): void {
+  if (!isMutableContext(parent)) {
+    return;
+  }
+  parent.tokens.input += child.tokens.input;
+  parent.tokens.output += child.tokens.output;
+  parent.tokens.total += child.tokens.total;
+  if (child.tokens.cached !== undefined) {
+    parent.tokens.cached = (parent.tokens.cached ?? 0) + child.tokens.cached;
+  }
+  parent.cost += child.cost;
+}
+
 export async function executeSpawn<TMemory, I, O>(
   step: StepSpawn<TMemory, I, O>,
   input: I,
@@ -641,13 +655,21 @@ export async function executeSpawn<TMemory, I, O>(
     });
   }
 
-  // Build unified tool set for child from its step tree + layers
+  // Build unified tool set for child from its step tree + layers, plus the
+  // parent's unified tools. Sub-agents that read tools dynamically (via
+  // `ctx.unifiedTools`) otherwise lose the harness tool pool at the spawn
+  // boundary — a child whose `step.llm` resolves `tools` from context would
+  // see nothing. Inheriting the parent's tools keeps the harness toolset
+  // available across spawns; the child's own step/layer tools take precedence
+  // on name collision (dedup keeps the first occurrence), and children that
+  // need a restricted set filter explicitly.
   const childStepTools = collectAllTools(step.child);
   const childLayerTools =
     layers.length > 0 ? resolveLayerTools(layers, baseCtx.harness, baseCtx) : [];
   const childUnifiedTools = deduplicateTools([
     ...childStepTools,
     ...childLayerTools,
+    ...(baseCtx.unifiedTools ?? []),
   ]);
 
   // Create child context — empty by default, layers provide items via onSpawn.
@@ -675,6 +697,13 @@ export async function executeSpawn<TMemory, I, O>(
       input,
       frameworkCast<Context<TMemory>>(childCtx),
     );
+
+    // Roll the child's token/cost usage up into the parent. A sub-agent's
+    // spend is the parent's spend; without this it would be stranded on the
+    // child context and invisible to `ctx.tokens` / `ctx.cost` / until.maxCost.
+    // Because every spawn boundary rolls up, nested sub-agents propagate to the
+    // root recursively.
+    rollUpSpawnUsage(baseCtx, childCtx);
 
     // Pipeline result through layer onReturn hooks
     if (!hasLayers || !parentExecutionCtx) {

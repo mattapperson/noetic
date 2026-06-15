@@ -548,6 +548,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   //#endregion
 
   async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+    // Populate the unified tool pool when an embedder drives a step directly on
+    // a bare `createContext()` context (the turn pipeline does this per turn).
+    // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
+    // — and any sub-agents spawned from them — would see no tools.
+    if (!ctx.unifiedTools && (s !== undefined || this.harnessTools.length > 0)) {
+      this.setUnifiedTools(ctx, [
+        ...collectAllTools(s),
+        ...this.harnessTools,
+      ]);
+    }
     return execute(s, input, ctx);
   }
 

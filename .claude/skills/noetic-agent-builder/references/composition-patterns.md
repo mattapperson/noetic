@@ -797,6 +797,18 @@ Key points:
 
 Reference implementation: `packages/code-agent/src/agents/{plan,act,verify,fix,flow-state}.ts` + the `codeAgentWorkflow` export in `packages/code-agent/src/index.ts`.
 
+Driving `codeAgentWorkflow` headlessly (no interactive turn loop): create a context, force the starting mode, and run the workflow directly with the task as input. `@noetic-tools/code-agent` exports `writeFlowState` / `persistFlowState` / `readFlowState` for this. Passing the task as the `run` input is what delivers it to the spawned act sub-agent; `run` populates `ctx.unifiedTools` (and spawned sub-agents inherit it) so the act loop has the harness tools, and sub-agent usage rolls up onto `ctx`.
+
+```typescript
+const ctx = agent.createContext();
+writeFlowState(ctx, { mode: 'act' }); // skip the plan-approval gate (auto-approved)
+await persistFlowState(ctx);
+const result = await agent.run(codeAgentWorkflow, task, ctx);
+// ctx.tokens / ctx.cost include the spawned act/verify/fix sub-agents
+```
+
+When no `AskUserQuestion` tool is registered, the plan path also auto-approves on its own (`autoApproveStep`), so starting in `plan` mode is the alternative; forcing `act` skips planning entirely.
+
 ## Pattern: Dynamic Workflow (LLM-Generated JSON)
 
 An LLM generates a complete workflow as JSON, which the harness hydrates and executes in the same session.

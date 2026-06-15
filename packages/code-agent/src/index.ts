@@ -1169,13 +1169,24 @@ export {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
 } from '@noetic-tools/core/portable';
+/**
+ * Flow-state helpers for driving {@link codeAgentWorkflow} headlessly. An
+ * embedder that runs the workflow via `agent.run(codeAgentWorkflow, task, ctx)`
+ * (rather than the turn-based `agent.execute`) can call `writeFlowState(ctx,
+ * { mode: 'act' })` + `persistFlowState(ctx)` before the first run to skip the
+ * plan-approval gate and drive the act/verify/fix loop autonomously.
+ */
+export {
+  persistFlowState,
+  readFlowState,
+  writeFlowState,
+} from './agents/flow-state.js';
 export {
   type ChannelTransportAdapter,
   type ChannelTransportController,
   type ChannelTransportFrame,
   createInMemoryChannelTransportAdapter,
 } from './channels.js';
-
 export { createTaskToolsPlugin } from './tasks/plugin.js';
 
 //#endregion

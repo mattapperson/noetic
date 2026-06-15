@@ -416,7 +416,7 @@ interface DetachedHandle<O> {
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
 - an `itemLog` snapshot that carries conversation history from turn to turn.
 
-Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter.
+Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset.
 
 A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
 

@@ -6,9 +6,10 @@
  * benchmark that hands a coding agent an evolving spec and grades the resulting
  * program with pytest. Its agents are CLIs invoked non-interactively against a
  * workspace directory. This script is exactly that: it spins up the real
- * `createCodeAgent()` harness (full Noetic memory stack + plan/act/verify/fix
- * workflow) in autonomous **act** mode, points it at a real on-disk workspace,
- * runs one task to completion, and prints a single machine-readable usage line.
+ * `createCodeAgent()` harness and drives its product `codeAgentWorkflow`
+ * (plan/act/verify/fix) in forced **act** mode — the headless equivalent of an
+ * auto-approved plan — against a real on-disk workspace, runs one task to
+ * completion, and prints a single machine-readable usage line.
  *
  * The Python adapter (`adapter.py`) shells out to this and reads that line.
  *
@@ -26,8 +27,13 @@
 
 import * as fs from 'node:fs';
 
-import { createCodeAgent, createCodingToolsPlugin } from '@noetic-tools/code-agent';
-import { react } from '@noetic-tools/core';
+import {
+  codeAgentWorkflow,
+  createCodeAgent,
+  createCodingToolsPlugin,
+  persistFlowState,
+  writeFlowState,
+} from '@noetic-tools/code-agent';
 import {
   createLocalFsAdapter,
   createLocalShellAdapter,
@@ -117,9 +123,11 @@ async function solve(args: SolveArgs): Promise<void> {
     name: 'scbench-noetic',
     model: args.model,
     cwd: args.cwd,
-    // Act autonomously: no human approval gate.
-    initialMode: 'act',
     instructions: args.instructions ?? DEFAULT_INSTRUCTIONS,
+    // Curated stack: the coding tools only. The SDK default stack adds plan/
+    // task/temporal layers and tools that derail an autonomous, non-interactive
+    // act run (and break provider request validation).
+    defaultMemory: false,
     llm: {
       provider: 'openrouter',
       apiKey,
@@ -132,32 +140,27 @@ async function solve(args: SolveArgs): Promise<void> {
       shell: createLocalShellAdapter(),
       subprocess: createLocalSubprocessAdapter(),
     },
-    // File + shell tools the agent edits the workspace with.
+    // File + shell tools the act/verify/fix loop edits the workspace with.
     plugins: [
       createCodingToolsPlugin(),
     ],
   });
 
   try {
-    // Drive an autonomous ReAct loop over the code agent's tools: an LLM turn
-    // with the Read/Write/List/Shell tools, iterated until it stops calling
-    // tools (task done) or hits the step cap. Running it on the agent's own
-    // context (no spawn) means the model sees the task as the user turn and
-    // token/cost usage accrues on `ctx`. This is the autonomous-coding surface
-    // of `createCodeAgent` (the product's plan/act/verify/fix workflow gates on
-    // human plan approval, which a headless benchmark can't provide).
-    const solveStep = react({
-      model: args.model,
-      instructions: args.instructions ?? DEFAULT_INSTRUCTIONS,
-      tools: [
-        ...agent.tools.list(),
-      ],
-      maxSteps: args.maxSteps ?? 60,
-    });
-
+    // Drive the real code-agent product workflow (plan/act/verify/fix). We
+    // force `act` mode on the context so the workflow skips the interactive
+    // plan-approval gate and implements + verifies autonomously — the headless
+    // equivalent of an auto-approved plan. The task is passed as the workflow
+    // input so it reaches the (spawned) act sub-agent; token/cost usage rolls
+    // up onto `ctx`.
     const ctx = agent.createContext();
+    writeFlowState(ctx, {
+      mode: 'act',
+    });
+    await persistFlowState(ctx);
+
     const start = performance.now();
-    const output = await agent.run(solveStep, task, ctx);
+    const output = await agent.run(codeAgentWorkflow, task, ctx);
     const elapsedMs = performance.now() - start;
 
     const result = {

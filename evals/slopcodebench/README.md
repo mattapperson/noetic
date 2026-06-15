@@ -36,8 +36,12 @@ run.ts ──uv run──▶ launch.py ──registers──▶ NoeticAgent (ada
   shells out to the headless solver, then records token/cost usage.
 - **`noetic-solve.ts`** is the headless Noetic code agent: it spins up
   `createCodeAgent()` with Node filesystem/shell adapters pointed at the
-  workspace, drives an autonomous ReAct loop over the Read/Write/List/Shell
-  tools until the task is done, and prints a one-line usage result.
+  workspace and drives the real product workflow, `codeAgentWorkflow`
+  (plan/act/verify/fix), in forced **act** mode — the headless equivalent of an
+  auto-approved plan — until the task is done, then prints a one-line usage
+  result. The task is passed as the workflow input so it reaches the spawned
+  act sub-agent. (Forcing act mode uses the `writeFlowState`/`persistFlowState`
+  helpers `@noetic-tools/code-agent` exports for headless drivers.)
 
 We target SCBench's **local** execution environment (`local-py`): there the
 workspace is a host temp directory, so the host's `bun` and the in-repo
@@ -84,7 +88,10 @@ End-to-end run of the `greeter` smoke problem:
 
 | Date | Agent model | Problem | Checkpoints solved | Tests | Cost |
 |------|-------------|---------|--------------------|-------|------|
-| 2026-06-15 | `openrouter/claude-3.5-haiku` | `greeter` | 1/1 (100%) | 2/2 | $0.02 |
+| 2026-06-15 | `openrouter/claude-3.5-haiku` | `greeter` | 1/1 (100%) | 2/2 | $0.01 |
+
+The agent is driven through the real `codeAgentWorkflow` (plan/act/verify/fix) in
+forced act mode — see the solver header and the architecture notes above.
 
 ## Running the real benchmark problems
 

@@ -81,6 +81,14 @@ This unified approach means there is one system to learn, one set of hooks to im
 
 ---
 
+## Tool Inheritance and Usage Roll-up
+
+A child's **unified tool set** is the union of the tools collected from its own step tree, its layer-provided tools, and the **parent's unified tools** (deduplicated by name, with the child's own tools winning on collision). Sub-agents that resolve their tools dynamically from `ctx.unifiedTools` therefore keep the harness toolset across the spawn boundary instead of seeing an empty set; a child that needs a restricted toolset filters explicitly.
+
+A child's token and cost usage **rolls up into its parent** when the child completes: a sub-agent's spend is the parent's spend. Because every spawn boundary rolls up, nested sub-agents propagate their usage to the root recursively, so `ctx.tokens` / `ctx.cost` and `until.maxCost` account for the full sub-agent tree.
+
+---
+
 ## Detached Spawn
 
 In addition to synchronous spawning, the agent harness supports **detached spawns** — background sub-agents that run concurrently while the parent continues working.
