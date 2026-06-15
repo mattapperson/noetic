@@ -35,6 +35,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.7 Cloudflare-first cloud strategy](#17-cloudflare-first-cloud-strategy)
    - [1.8 Observability graduated by paying-customer tier](#18-observability-graduated-by-paying-customer-tier)
    - [1.9 Round 2 panel overrides (six decisions + Workers footguns + product additions)](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)
+   - [1.10 Monetization commitment: API + CLI, three commercial models](#110-monetization-commitment-api--cli-three-commercial-models)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -52,6 +53,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [2.14 Cloud architecture](#214-cloud-architecture)
    - [2.15 Observability & monitoring](#215-observability--monitoring)
    - [2.16 Competitive positioning](#216-competitive-positioning)
+   - [2.17 Monetization model & tiers](#217-monetization-model--tiers)
 3. [Proposal: implementation specs](#proposal-implementation-specs)
    - [3.1 Why split](#31-why-split)
    - [3.2 Proposed specs (grouped, prioritized)](#32-proposed-specs-grouped-prioritized)
@@ -546,6 +548,91 @@ First pepper rotation (employee departure, suspected leak, SOC2 control evidence
 - **Trial credits funding** (§2.11): $20/account cheap-cached + gating (above)
 - **Pricing units**: still open, but constrained — P-1 tests three written hypotheses on a live `/pricing` page (per-seat, per-agent-run, hybrid), and customers react to numbers rather than generating them.
 
+## 1.10 Monetization commitment: API + CLI, three commercial models
+
+**Trigger:** User commitment: "Initial monetization routes will be general API access and then paid CLI features. Options for subscription/seat tiers, non-subscription pay-for-usage, plus enterprise."
+
+**This resolves the §2.11 "pricing units" open question** that the round-2 panel left constrained-but-open: all three pricing models coexist from day 1, customers pick.
+
+### Two product surfaces, monetized in sequence
+
+1. **General API access** (primary): gateway + traces + memory + eval/GEPA. Monetized at launch.
+2. **Paid CLI features** (secondary): GEPA optimization, remote eval datasets, sub-harness commands, multi-account workspace switching, plugin system. Brings `@noetic-tools/cli` into the paid surface; OSS framework remains free.
+
+### Three commercial models coexisting
+
+- **Subscription / seat tiers** (Developer single-seat, Team per-seat) — bundled quotas + CLI Pro unlock
+- **Pay-as-you-go** — pure usage metering, no commitment, no CLI Pro (or as a $9/mo add-on per user, accepted arbitrage with Team tier)
+- **Enterprise** — custom contract: SSO/SCIM, SOC2 evidence, custom quotas, support SLA, optional managed inference, optional single-tenant
+
+**Hybrid is real**: subscription tiers can have overage that bills through the same Stripe Meters as PAYG. Customer on Team plan exceeds bundled quota → metered overage. Same primitives serve both.
+
+### Locked tier shape (introductory + steady-state)
+
+| Tier | Model | Introductory | **Steady-state** | Includes |
+|---|---|---|---|---|
+| **Free** | n/a | $0 | $0 | 1K agent-runs/mo, 500 eval scores, 30d trace retention, 1 seat, OSS CLI only, $20 BYOK trial pool |
+| **Developer** | Subscription, 1 seat | $10/mo | **$19/mo** | Bundled quotas (10–20K runs, 5K evals, 90d retention), CLI Pro, BYOK |
+| **Team** | Subscription, base + per-seat | $30/mo + $10/seat | **$49/mo + $15/seat** | Shared org quotas, CLI Pro per seat, role-based access, audit log export, SOC2 evidence access |
+| **Pay-as-you-go** | Pure usage | TBD by P-1 | **$0.008/agent-run + $0.03/eval-score** | No CLI Pro by default; $19/mo per-user CLI Pro add-on optional |
+| **Enterprise** | Custom contract | Quote | Quote (typically $500+/mo) | SSO/SCIM, SOC2 evidence, custom quotas, support SLA, optional managed inference, optional single-tenant |
+
+**Introductory pricing applies for the first 6 months of paid beta** (or first 100 paying customers, whichever comes later). Existing customers grandfather in at intro pricing for 12 months from signup; after that, migrate to steady-state on next billing cycle with 60-day notice.
+
+### Unit-economics check (why steady-state is "operating in the black")
+
+BYOK means we don't carry inference cost — the most expensive variable in the comp set. Our variable costs are tiny:
+
+| Cost | Per active Developer customer/mo |
+|---|---|
+| Stripe fees (2.9% + $0.30 per charge) | $0.85 on $19 |
+| Tinybird ingest (≈40K UsageEvents) | <$0.10 |
+| Upstash ops + DO time + R2 storage | <$0.10 |
+| Workers compute | <$0.05 |
+| Fixed-cost amortization (Workers $5/mo + Tinybird $25/mo + Instatus $20/mo + Vanta annualized) | ~$1/customer at 50 customers, ~$0.20 at 250 |
+| **Total variable + amortized fixed** | **~$2/mo at scale** |
+| **Gross margin on Developer** | **~89%** ($17/$19) |
+
+Even at introductory $10/mo, gross margin is ~80% — already in the black at unit level. Steady-state simply captures more of the value we're already delivering, rather than fixing a loss-leading anchor.
+
+### Steady-state competitive frame
+
+| Comparison | LangSmith | **Noetic steady-state** | Delta |
+|---|---|---|---|
+| Single-developer pricing | Developer $39/mo | **Developer $19/mo** | **$20/mo cheaper** |
+| 5-seat team pricing | Plus $79/mo (5 seats) | **Team $49 + 5×$15 = $124/mo** | $45/mo more BUT includes SOC2 evidence + audit export (LangSmith Enterprise-only) |
+| 10-seat team pricing | Plus capped, push to Enterprise | **Team $49 + 10×$15 = $199/mo** | Predictable; LangSmith Enterprise typically $500–2K |
+| Per-event PAYG | not offered | **$0.008/run + $0.03/eval** | Cheaper than Helicone Growth at hobby-scale; LangSmith has no equivalent |
+
+**Developer-tier wedge holds at steady-state**: $20/mo cheaper than LangSmith with strictly more features (GEPA, sub-harness CLI, 90d retention vs 14d). Team tier no longer price-matches LangSmith Plus but justifies the gap with SOC2 features Plus doesn't offer; price-positions vs LangSmith Enterprise where Noetic Team is dramatically cheaper.
+
+### Metering anchors (what gets billed)
+
+- **`agent-runs`** — pay-per-thing-the-agent-did. Customer-value-aligned.
+- **`eval-scores`** — pay-per-scored-run. Tracks the moat.
+- **Tokens are NOT a billable unit** — keeps the [§1.4](#14-openrouter-pragmatism-debate) BYOK posture intact (we don't bill for upstream cost; customer pays provider directly).
+- **Trace storage beyond retention window** — possible third meter later, deferred.
+
+### CLI Pro feature cut (initial, will adjust)
+
+**OSS (free, always)** — `noetic run`, basic step primitives, local eval, project init, all framework imports
+**CLI Pro (paid)** — `noetic optimize` (GEPA), `noetic eval --remote` (cloud datasets), sub-harness commands (`noetic claude-code`, `noetic codex`, `noetic opencode`, `noetic pi`), multi-account workspace switching, plugin system installs, project sync to cloud
+
+**Entitlement mechanism**: API key carries an `entitlements` claim cached in Upstash alongside scopes. CLI checks entitlement on protected commands. **Offline grace period: 7 days** — CLI keeps last-known entitlements signed locally so airplane mode works.
+
+### Implementation impact on the plan
+
+- **§2.11 "Pricing units" open question: resolved by this entry.**
+- **§3 S5 Billing** can no longer collapse to seat-counting if P-1 returned that. Stripe schema supports all three day 1. Adds ~1 week to P5.
+- **§3 S3 API Keys** gain an `entitlements` dimension alongside scopes. Already designed scope-bearing; one more field.
+- **`packages/cli`** gains: license-check middleware on protected commands, offline grace with signed cache, entitlement-aware error messages ("upgrade to Developer to use `noetic optimize`").
+- **§2.3 P-1** shifts from "should we tier?" to "which tier do you fit?" with actual numbers on a live `/pricing` page.
+- **§2.16 competitive positioning** table is now anchored to real numbers, not hypothesis ranges.
+
+### Accepted arbitrage
+
+PAYG without seat fee + $9/mo CLI Pro add-on per user creates an arbitrage vs Team. A team could give every dev a free PAYG account + the add-on instead of paying $30 + $10/seat. **Accepted for v1.** The meters still bill for usage, and teams that need centralized admin/audit will pay for Team regardless. Sharper instrument than locking it down.
+
 ---
 
 # Current plan
@@ -574,8 +661,7 @@ The load-bearing decisions. Change these → re-litigate the whole plan.
 
 ### Pre-call artifacts (built before any P-1 call)
 
-- [ ] Written pricing hypothesis with **3 concrete tier-shape variants** (per-seat / per-agent-run / hybrid)
-- [ ] Live static `/pricing` page reflecting the 3 variants — the discovery instrument
+- [ ] Live static `/pricing` page reflecting the **locked tier shape** from [§2.17](#217-monetization-model--tiers) — Developer $10/mo, Team $30 + $10/seat, PAYG metered, Enterprise quote. PAYG $/run + $/eval-score numbers tested as variants.
 - [ ] "Switching from LangSmith" landing page — side-by-side trace UI screenshots, pricing comparison at typical volumes, one-line `@noetic-tools/sdk` shim that ingests LangSmith-format traces during transition
 - [ ] Competitive teardown table (LangSmith / Braintrust / Helicone / Langfuse — pricing, free-tier shape, eval workflow) on `/pricing` and in [§2.16](#216-competitive-positioning)
 - [ ] 1-page GTM: named ICP, wedge, conversion event, channel
@@ -717,10 +803,10 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - EU AI Act classification document (output of P-1 specialist call) lands here
 
 ### P0.5 — Time-to-first-value (wk 2, parallel)
-- Signup auto-provisions personal Account + default `noetic_test_*` key + trial bucket ($20, cheap-cached models, identity-gated per [§1.9 override 4](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions))
-- **Success screen artifact: 5-line `@noetic-tools/sdk` snippet** running a typed agent → trace tree visible in dashboard within seconds + one eval score. (Not a `curl`.)
+- Signup auto-provisions personal Account on **Free tier** ([§2.17](#217-monetization-model--tiers)) + default `noetic_test_*` key + $20 BYOK trial bucket (cheap-cached models, identity-gated)
+- **Success screen artifact: 5-line `@noetic-tools/sdk` snippet** running a typed agent → trace tree visible in dashboard within seconds + one eval score. (Not a `curl`.) Includes "Upgrade to Developer for $10/mo to unlock GEPA + sub-harness CLI" CTA.
 - Instrument **time-to-first-200** and **time-to-first-eval-score** as north-star activation metrics
-- "Switching from LangSmith" landing as primary migration page (`/migrate/langsmith`)
+- "Switching from LangSmith" landing as primary migration page (`/migrate/langsmith`) — anchored on Developer-tier $29/mo savings
 - "Migrating from OpenRouter/OpenAI" as secondary
 - Resend onboarding email lifecycle (day 1 / 7 / 30)
 
@@ -729,13 +815,16 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - **Customer-facing audit log** read + export API (Axiom-backed for 90 days; R2 archive for deeper history)
 - Mutations enqueue audit events to Queue at commit (no Postgres outbox in v1)
 
-### P2 — API keys (~1 week including UX, not 3–4 days)
+### P2 — API keys + CLI auth (~1 week including UX, not 3–4 days)
 - In-house: `noetic_<env>_<24B-base62>`. Stored as `{prefix, pepper_version, hmac}` with **versioned pepper** (`pepper_v1`, `pepper_v2`, ... as Workers Secrets)
 - Verifier tries the key's tagged version; lazy re-HMAC on next use during rotation
-- **Redis verification cache, 60s TTL** on `(prefix) → {account_id, scopes, status}`. Cache invalidated on revoke + scope change.
+- **Redis verification cache, 60s TTL** on `(prefix) → {account_id, scopes, status, entitlements, tier}`. Cache invalidated on revoke + scope change + tier change.
 - Account-owned by default, `created_by` audit field, rotate-on-offboarding
 - Per-key RPS token bucket (Upstash) — free-tier default, paid override
 - **`Idempotency-Key` state machine**: `(account_id, key) → {state: in_flight | succeeded | failed, response_ref?}`. In-flight replays block-and-wait; streaming responses stored in R2.
+- **CLI auth flow**: `noetic login` opens browser → WorkOS device-code flow → CLI receives + stores API key locally
+- **CLI entitlement check**: protected commands (`noetic optimize`, sub-harness commands, etc.) verify the key's `entitlements` claim; entitlement-aware error messages with upgrade link
+- **CLI offline grace**: last-known entitlements signed and cached locally for 7 days; check after 7 days requires network re-auth
 - Dashboard UI: create / list / revoke / last-used / RPS-stats. Service-account model documented (debt for v1.1: rotation + scope-restriction UI).
 
 ### P3 — BYOK + observability gateway (wk 4–5)
@@ -771,21 +860,30 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - **Free-tier daily cap**: shard `period_start` into the key (`account:metric:YYYY-MM-DD`) to avoid hot-key behavior at 00:00 UTC. Alternative: Workers Analytics request count for the cap.
 - Period rollover writes a `billing_period_summary` row in Postgres; historical detail stays in Tinybird
 
-### P5 — Billing + prepaid credits (wk 7–9)
-- **Stripe Billing Meters API** (not legacy metered)
+### P5 — Billing: all three commercial models (wk 7–10)
+**All three pricing models ship together** ([§1.10](#110-monetization-commitment-api--cli-three-commercial-models)). +1 week vs the old P5 estimate.
+
+- **Stripe Billing Meters API** (not legacy metered) for `agent-runs` and `eval-scores` meters
+- **Four Stripe Products**:
+  - `subscription_developer`: $10/mo flat + bundled allowances + overage on shared meters
+  - `subscription_team`: $30/mo base + `subscription_item.quantity = seat_count` × $10/seat + shared allowances + overage
+  - `payg`: pure metered, optional `cli_pro_addon` $9/mo per user
+  - `enterprise`: custom subscription + custom meter prices + contract terms
 - Per-event idempotency key `{account_id}:{metric}:{usage_event_id}`
 - 60s micro-batch reporter
-- **Stripe Meter period-boundary handling**: 5-minute grace window around rollover — do not ship UsageEvents within 5min of rollover; stamp `period_anchor` to clamp events to their belonging period; reconciler runs +10 min after every period rollover, not just nightly. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- **Stripe Meter period-boundary handling**: 5-minute grace window around rollover; stamp `period_anchor`; reconciler runs +10 min after every period rollover. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 - **Manual replay tool built BEFORE first paid customer**, not as polish
 - Self-computed `billing_period_summary`; nightly reconciliation diffs reported-to-Stripe vs UsageEvent sum
 - Reporter lag SLO + alert
-- Billing-correctness reconciler alerts to Sentry + Slack — **start with one loop**, add the others if drift surfaces
+- Billing-correctness reconciler alerts to Sentry + Slack — **start with one loop**
 - **`model_cost_usd` emitted as `UsageEvent` dimension** — per-account token economics tracked even on BYOK
-- **Shadow-billing period** before going live
-- **Prepaid credits** as a Tinybird-backed balance ledger — default for new accounts. Postpaid is enterprise opt-in behind credit check
-- Stripe Customer Portal for self-serve
-- Public `/pricing` page + calculator (locked tiers per P-1 outcome)
+- **Shadow-billing period** before going live (all three models exercised)
+- **Tier-switching UX**: pre-confirmation preview ("based on current period's usage, on PAYG you'd pay $X; on Team you'd pay $Y"); instant entitlement transition on upgrade, end-of-period revert on downgrade
+- **Entitlement propagation**: tier change → invalidate Upstash key-verification cache → CLI re-fetches entitlements on next call
+- Stripe Customer Portal for self-serve subscription management
+- Public `/pricing` page reflecting the locked tier shape ([§2.17](#217-monetization-model--tiers))
 - Subscription lifecycle: `past_due` → degrade (read-only), not lockout
+- **Prepaid credits** as a Tinybird-backed balance ledger — kept as an option for non-card payment paths; not the default (paid-beta cohort uses card subscriptions)
 
 ### P6 — First-paying-customer-plus-30-days (moved out of paid-beta gate)
 - Status page (Instatus, 99.9% target) wired to UptimeRobot + `/v1/health` output
@@ -911,7 +1009,7 @@ ICP-independent baseline starts in P0; ICP-specific deltas layer on top.
 
 These need answers before the relevant phase starts.
 
-- **Pricing units.** Per-seat? Per-agent-run? Per-eval? Combination? **Constrained**: P-1 tests three written hypotheses on a live `/pricing` page; customers react to numbers rather than generating them.
+- ~~**Pricing units.**~~ Resolved 2026-06-15: **all three coexist** (subscription/seat tiers + PAYG + enterprise). Introductory pricing: Developer $10/mo, Team $30 + $10/seat, PAYG metered, Enterprise custom. See [§1.10](#110-monetization-commitment-api--cli-three-commercial-models) and [§2.17](#217-monetization-model--tiers).
 - ~~**Free-tier shape.**~~ Resolved 2026-06-15: **1,000 agent-runs/mo + 500 eval scores/mo + 30-day trace retention.** See [§1.9 override 4](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 - ~~**Unkey vs custom keys.**~~ Resolved 2026-06-14: in-house. See [§1.6](#16-unkey-rejected-in-house-keys--verification-cache).
 - **Tinybird vs ClickHouse Cloud.** Tinybird is faster to ship; ClickHouse is more control. Lean Tinybird unless cost projection at 100K MAU rules it out.
@@ -1143,15 +1241,104 @@ Round 2 PM flagged that the plan's stated moat ("framework + memory + eval/GEPA"
 
 The `/pricing` page must include a side-by-side comparison cell at typical volumes. Recommended:
 
-| | LangSmith Developer | Braintrust paid | Noetic (hypothesis) |
+| | LangSmith Developer | Braintrust paid | **Noetic Developer (introductory)** |
 |---|---|---|---|
-| Traces/mo | 10K | varies | **1K runs/mo free, 100K paid** |
-| Eval scores/mo | unlimited (tied to traces) | varies | **500/mo free, 50K paid** |
-| Trace retention | 14d | 30d | **30d free, 90d paid** |
-| Optimization runs (GEPA) | n/a | n/a | **5/mo free, unlimited paid** |
-| Pricing | $39/mo | usage-based | TBD by P-1 ($/seat / $/run / hybrid) |
+| Agent-runs/mo | 10K (traces) | varies | 10–20K bundled |
+| Eval scores/mo | unlimited (tied to traces) | varies | 5K bundled |
+| Trace retention | 14d | 30d | 90d |
+| GEPA optimization | n/a | n/a | included |
+| CLI Pro (sub-harness, multi-account, plugins) | n/a | n/a | included |
+| **Price** | **$39/mo** | usage-based | **$10/mo** |
 
-This is a hypothesis tested in P-1, not a commitment.
+**The Developer-tier wedge is $29/mo less than LangSmith with strictly more features.** Team tier at 5 seats matches LangSmith Plus pricing ($80 vs $79). Above 5 seats Noetic costs slightly more (offset by SOC2 / audit export at Team tier vs only at LangSmith Enterprise). PAYG and Enterprise comparisons added once steady-state pricing is set. See [§1.10](#110-monetization-commitment-api--cli-three-commercial-models) and [§2.17](#217-monetization-model--tiers).
+
+## 2.17 Monetization model & tiers
+
+Operational state. Decision rationale in [§1.10](#110-monetization-commitment-api--cli-three-commercial-models). Introductory pricing applies for **the first 6 months of paid beta or first 100 paying customers (whichever comes later)**. Existing customers grandfather at intro pricing for 12 months from signup; after that, migrate to steady-state on next billing cycle with 60-day notice.
+
+### Product surfaces
+
+1. **General API access** (primary route): gateway + traces + memory + eval/GEPA. Monetized at launch.
+2. **Paid CLI features** (secondary route): brings `@noetic-tools/cli` into the paid surface. OSS framework remains free.
+
+### Tiers
+
+| Tier | Model | Introductory | **Steady-state** | Seats | Bundled quotas | CLI Pro | BYOK |
+|---|---|---|---|---|---|---|---|
+| Free | n/a | $0 | $0 | 1 | 1K runs, 500 evals, 30d | ❌ | $20 trial pool, then required |
+| Developer | Subscription | $10/mo | **$19/mo** | 1 | 10–20K runs, 5K evals, 90d | ✅ | required after trial |
+| Team | Subscription (base + per-seat) | $30 + $10/seat | **$49 + $15/seat** | 2+ | Shared org quotas (scaled with seats) | ✅ per seat | required |
+| Pay-as-you-go | Pure usage | TBD by P-1 | **$0.008/run + $0.03/eval** | 1 | None | ❌ default; $19/mo per-user add-on | required |
+| Enterprise | Custom contract | Quote | Quote (typically $500+/mo) | Custom | Custom | ✅ all seats | required (or managed inference) |
+
+### Unit economics (steady-state)
+
+BYOK eliminates inference cost — the most expensive variable in the comp set. Our variable costs per active Developer customer/mo are tiny:
+
+| Cost | Amount on $19 Developer |
+|---|---|
+| Stripe fees (2.9% + $0.30) | $0.85 |
+| Tinybird ingest (≈40K UsageEvents) | <$0.10 |
+| Upstash ops + DO time + R2 | <$0.10 |
+| Workers compute | <$0.05 |
+| Fixed-cost amortization | ~$0.20–1.00 depending on scale |
+| **Total** | **~$2/mo** |
+| **Gross margin** | **~89%** |
+
+Even introductory $10/mo holds ~80% gross margin. Steady-state captures more of the value already being delivered, not a price needed for the bottom line.
+
+### Metering anchors
+
+- **`agent-runs`** — primary billable unit; pay-per-thing-the-agent-did
+- **`eval-scores`** — secondary billable unit; tracks the moat
+- **Tokens are NOT billable** — preserves [§1.4](#14-openrouter-pragmatism-debate) BYOK posture
+- Trace storage beyond retention window — deferred meter
+
+### CLI Pro feature cut (initial)
+
+| Surface | OSS (free) | CLI Pro (paid) |
+|---|---|---|
+| `noetic run`, `noetic init`, basic step primitives, local eval | ✅ | ✅ |
+| `noetic optimize` (GEPA) | ❌ | ✅ |
+| `noetic eval --remote` (cloud datasets) | ❌ | ✅ |
+| Sub-harness commands (`noetic claude-code`, `noetic codex`, `noetic opencode`, `noetic pi`) | ❌ | ✅ |
+| Multi-account workspace switching | ❌ | ✅ |
+| Plugin system installs | ❌ | ✅ |
+| Project sync to cloud | ❌ | ✅ |
+
+The cut will adjust based on customer signal — flagged as initial.
+
+### Entitlement mechanism
+
+- API key carries an `entitlements` claim alongside `scopes`, cached in Upstash with the 60s verification cache
+- CLI checks entitlement on protected commands (`noetic optimize`, sub-harness commands, etc.)
+- **Offline grace period: 7 days** — CLI keeps last-known entitlements signed locally so airplane mode works; failing the check after 7 days requires re-auth
+- Entitlement-aware error messages: "`noetic optimize` requires Developer tier or above. Upgrade at https://noetic.tools/billing"
+
+### Stripe schema (all three models share infrastructure)
+
+| Stripe Product | Configuration |
+|---|---|
+| `subscription_developer` | Flat $10/mo subscription + bundled meter allowances + overage prices on the same Stripe Meters as PAYG |
+| `subscription_team` | $30/mo base subscription + `subscription_item.quantity = seat_count` × $10/seat + shared org meter allowances + overage |
+| `payg` | Pure metered, no flat fee. Optional `cli_pro_addon` subscription item ($9/mo per user). |
+| `enterprise` | Manual quote; custom subscription + custom meter prices + contract terms |
+
+Same `UsageEvent` stream feeds all of them via Stripe Meters. Same `BucketStateDO` enforces bundled allowances. The differences live in Stripe config, not in our metering code.
+
+### Tier-switching UX requirements
+
+- Customers can switch between any two tiers (Free ↔ Developer ↔ Team ↔ PAYG ↔ Enterprise)
+- **Pre-confirmation preview**: "based on your current period's usage, on PAYG you'd pay $X; on Team you'd pay $Y"
+- Stripe handles cancel + new subscription transitions; we handle the preview math and the entitlement transition (instant on subscription start; end-of-period on downgrade)
+- No price-lock pause-and-resume in v1; cancellation = subscription ends end-of-period, entitlements revert to Free
+
+### Open implementation questions
+
+- Exact $X per agent-run + $Y per eval-score for PAYG — set by P-1
+- "Bundled quotas (10–20K runs, 5K evals)" for Developer — final numbers set by free-tier-bleed math during shadow-billing
+- Whether to allow Free → PAYG upgrade without credit card (probably no; tied to cost-coverage invariants)
+- Whether enterprise managed-inference adds a multiplier on metered usage — likely yes, tied to upstream cost
 
 ---
 
@@ -1187,8 +1374,8 @@ Accounts, members, roles/scopes (hardcoded role→scope map behind `hasScope()`)
 
 ### Tier 2 — Wedge (drafted after P-1 passes, before P3)
 
-**S3. API Keys** — sketch only until P-1
-`noetic_<env>_<24B-base62>`, **versioned pepper** (`{prefix, pepper_version, hmac}`), HMAC-SHA256 with KMS-stored pepper, prefix-indexed lookup with **Hyperdrive caching disabled** for the table, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, `Idempotency-Key` state machine consumer. Depends on S1 + S2.
+**S3. API Keys + CLI Auth** — sketch only until P-1
+`noetic_<env>_<24B-base62>`, **versioned pepper** (`{prefix, pepper_version, hmac}`), HMAC-SHA256 with KMS-stored pepper, prefix-indexed lookup with **Hyperdrive caching disabled** for the table, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, **`entitlements` claim alongside scopes** for CLI Pro feature gating ([§1.10](#110-monetization-commitment-api--cli-three-commercial-models)), `Idempotency-Key` state machine consumer. CLI `noetic login` device-code flow; offline grace with signed local entitlement cache (7 days). Depends on S1 + S2.
 
 **S4. Inference Gateway & SDK** — sketch only until P-1
 BYOK Mode A (proxied via AI Gateway abstraction) and **Mode B (async/SDK-side)**; trial-credits-pool path; opt-in managed-inference feature flag; trace tie-in to `@noetic-tools/core` runs; `@noetic-tools/sdk` wrapper; response usage emission to UsageEvent Queue; SSE handling. Depends on S3 + S2.
@@ -1200,8 +1387,8 @@ In-product scorer definition; eval scores per trace in dashboard; GEPA optimizat
 
 ### Tier 4 — Monetization (drafted only if P-1 returns usage-based pricing)
 
-**S5. Billing & Credits** — defer if P-1 returns per-seat pricing
-Stripe Billing Meters integration with deterministic per-event idempotency, period-boundary safety, 60s micro-batch reporter, `billing_period_summary` in Postgres, one reconciliation loop initially, reporter-lag SLO + manual replay tool **before first paid customer**, prepaid credits ledger as Tinybird read model, Stripe Customer Portal, subscription-lifecycle handling. Depends on S2 + S1. If P-1 returns per-seat pricing, S5 collapses to seat-counting + daily soft caps.
+**S5. Billing — all three commercial models**
+Per [§1.10](#110-monetization-commitment-api--cli-three-commercial-models), S5 ships subscription/seat tiers + PAYG + enterprise day 1; cannot collapse to seat-counting. Four Stripe Products (`subscription_developer`, `subscription_team`, `payg`, `enterprise`) sharing Stripe Billing Meters for `agent-runs` + `eval-scores`. Per-event idempotency, period-boundary safety, 60s micro-batch reporter, `billing_period_summary` in Postgres, one reconciliation loop initially, reporter-lag SLO + manual replay tool **before first paid customer**, prepaid credits ledger as Tinybird read model (option for non-card paths), Stripe Customer Portal, subscription-lifecycle handling (past_due → degrade). Tier-switching UX with pre-confirmation preview; entitlement-propagation invalidates Upstash key cache on tier change. Depends on S2 + S1.
 
 ### Tier 5 — Activation, Trust & Compliance (one combined spec, drafted last)
 
@@ -1302,3 +1489,4 @@ P0 starts only after the gate passes.
 | 2026-06-14 | Cloudflare-first cloud strategy (§1.7, §2.14): Workers + Pages + R2 + AI Gateway + Hyperdrive + Cron + Queues + Secrets. External vendors for the 3 gaps: Neon (Postgres), Upstash (Redis), Axiom (audit). No AWS or GCP at v1; explicit trigger conditions documented. Bun↔Workers CI gate added to P0 must-gets. | User request: optimize for Cloudflare, fall back to AWS/GCP only on demonstrated need |
 | 2026-06-14 | Observability graduated by paying-customer tier (§1.8, §2.15). Tier 0 (day 1, $0): Sentry + structured logs + /v1/health Cron + model_cost_usd dimension. Tier 1 (~$20/mo): Instatus + billing-correctness reconciler alerts + PostHog. Tier 2 (~$25–75): Better Stack + Honeycomb + SLO dashboards. Tier 3 ($500–2K): Datadog/Grafana + PagerDuty + Vanta. Three platform-specific concerns codified (billing-correctness as #1 incident class; BYOK cost tracking; /v1/health as SLA evidence). | User request: evaluate observability needs, gated by paying-customer milestones |
 | 2026-06-15 | **Round 2 panel overrides (§1.9)**: six prior decisions overridden (bucket_state to Durable Objects with TTL'd reservations; P-1 to 3-week hard gate with kill criteria + dual cohort; §1.4 hedge → commit to one ICP after P-1; trial pool to $20 cheap-cached identity-gated; SOC2 evidence unconditional in P0; HMAC pepper versioned from day 1). Workers footgun corrections (Hyperdrive cache disabled for authz tables; UsageEvent via Queue not fire-and-forget; refuse not silent-clamp; Idempotency-Key state machine; SENSITIVE_SCOPES bypass; Tinybird PII defense-in-depth; audit via Queue not Postgres outbox; UptimeRobot external probe; typed AccountScope not RLS; free-tier daily-cap key sharding; Stripe Meter period-boundary handling). Product additions (P3.5 eval surface; eval compute on Containers/Fly.io; BYOK key spec including Mode B async/SDK-side; success-screen sdk snippet not curl; Switching-from-LangSmith primary migration; §2.16 competitive positioning). CEO additions (EU AI Act specialist call; customer support line item; AI Gateway abstraction; 7-year audit retention with R2 archive; Cloudflare exit playbook; schedule rebaseline to 12wk/1eng or 8wk/2eng). Free-tier shape and trial pool open questions resolved. §3 specs deferred: only S1+S2 in P0; S3-S7 wait for P-1 outcome. | Second adversarial panel review explicitly empowered to challenge §1 |
+| 2026-06-15 | **Monetization commitment (§1.10, §2.17)**: two product surfaces (API primary, paid CLI secondary), three commercial models coexisting day 1 (subscription/seat tiers + PAYG + enterprise). **Introductory** (first 6 months / 100 customers): Developer $10/mo, Team $30 + $10/seat. **Steady-state**: Developer $19/mo, Team $49 + $15/seat, PAYG $0.008/agent-run + $0.03/eval-score. 12-month grandfather for early customers with 60-day notice. Unit-economics check: ~89% gross margin at steady-state, ~80% at introductory — BYOK eliminates inference cost so the most expensive comp-set variable is off-P&L. Metering anchors: `agent-runs` + `eval-scores` (tokens NOT billable). CLI Pro feature cut: GEPA, remote evals, sub-harness commands, multi-account, plugins all behind paid tier; OSS framework remains free. API keys gain `entitlements` claim cached in Upstash; CLI offline-grace 7 days with signed local cache. §2.11 Pricing-units open question resolved. P5 +1 week for all-three-models. S5 spec no longer collapses to seat-counting. | User commitments on monetization model + steady-state pricing in the black |
