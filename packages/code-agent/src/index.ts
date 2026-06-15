@@ -568,31 +568,24 @@ function createSubagentController(): SubagentController {
 export const doneStep: Step<ContextMemory, string, string> = step.run({
   id: 'code-agent/done',
   async execute(_input, ctx) {
+    // `doneStep` is only routed to via `INNER_MODE_ROUTES.done`, which is
+    // reached only when `mode === 'done'`. The host default is never
+    // `'done'` (the CLI uses `'act'`, plan-first embedders use `'plan'`),
+    // so the mode reset is always real work — there is no useful
+    // short-circuit to gate it behind.
     const state = readFlowState(ctx);
-    const defaultMode = getFlowMemoryDefaultMode();
-    const needsReset =
-      state.mode !== defaultMode ||
-      state.fixAttempts !== undefined ||
-      state.lastFindingsHash !== undefined ||
-      state.verifyFindings !== undefined ||
-      state.actBaselineLines !== undefined ||
-      state.actDidMutateTools !== undefined ||
-      state.fixBaselineLines !== undefined ||
-      state.fixDidMutateTools !== undefined;
-    if (needsReset) {
-      writeFlowState(ctx, {
-        ...state,
-        mode: defaultMode,
-        fixAttempts: undefined,
-        lastFindingsHash: undefined,
-        verifyFindings: undefined,
-        actBaselineLines: undefined,
-        actDidMutateTools: undefined,
-        fixBaselineLines: undefined,
-        fixDidMutateTools: undefined,
-      });
-      await persistFlowState(ctx);
-    }
+    writeFlowState(ctx, {
+      ...state,
+      mode: getFlowMemoryDefaultMode(),
+      fixAttempts: undefined,
+      lastFindingsHash: undefined,
+      verifyFindings: undefined,
+      actBaselineLines: undefined,
+      actDidMutateTools: undefined,
+      fixBaselineLines: undefined,
+      fixDidMutateTools: undefined,
+    });
+    await persistFlowState(ctx);
     return CODE_AGENT_DONE_SENTINEL;
   },
 });

@@ -101,11 +101,16 @@ export const postActCheckStep: Step<ContextMemory, string, string> = step.run({
  * user-facing assistant IS the conversation; wrapping it in spawn would
  * give it a fresh `itemLog`, severing the user's message and all prior
  * turn history from the LLM call. `spawn()` is reserved for true
- * sub-agents (planAgent, teammates, sub-harnesses) that intentionally
- * don't see the parent transcript.
+ * sub-agents (planAgent, verify, fix, teammates, sub-harnesses) that
+ * intentionally don't see the parent transcript.
+ *
+ * The step id is `code-agent/act-loop` — preserving the previous inner
+ * loop's id so observability spans / eval baselines keyed on it stay
+ * matched. The outer `code-agent/act-agent` spawn span is structurally
+ * gone, which is intrinsic to the fix.
  */
 export const actAgent: Step<ContextMemory, string, string> = loop({
-  id: 'code-agent/act-agent',
+  id: 'code-agent/act-loop',
   steps: [
     preActCaptureStep,
     step.llm<ContextMemory, string, string>({

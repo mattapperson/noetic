@@ -89,17 +89,21 @@ describe('doneStep', () => {
     expect(state.verifyFindings).toBeUndefined();
   });
 
-  it('is a no-op when state already matches the default (no persist)', async () => {
+  it('always persists — there is no short-circuit because doneStep is only reached with mode=done', async () => {
+    // doneStep is only routed to via INNER_MODE_ROUTES.done (i.e. when
+    // mode === 'done'). The host default is never 'done', so the reset
+    // is always real work and the prior "no-op when state matches default"
+    // optimization was illusory. This test pins the documented behavior.
     setFlowMemoryDefaultMode('act');
     const { ctx, getStoreCallCount } = createMockCheckContext({
       diffShortstat: buildShortstat(0),
       flowState: {
-        mode: 'act',
+        mode: 'done',
         lastUserText: 'summary',
       },
     });
     await runDone('ignored', ctx);
-    expect(getStoreCallCount()).toBe(0);
+    expect(getStoreCallCount()).toBe(1);
   });
 
   it('persists when mode needs resetting even if baselines are clear', async () => {

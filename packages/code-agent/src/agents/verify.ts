@@ -16,7 +16,7 @@
  */
 
 import type { Context, ContextMemory, Step } from '@noetic-tools/core';
-import { loop, step, until } from '@noetic-tools/core/portable';
+import { loop, spawn, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   DEFAULT_MAX_FIX_ATTEMPTS,
@@ -138,21 +138,28 @@ export const verifyCheckStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Verify agent
 
-// Verify runs in the parent context — see actAgent's comment for the
-// rationale. Sub-agent isolation belongs to planAgent and teammates; the
-// verify phase is part of the user-facing conversation.
-const verifyAgentInner: Step<ContextMemory, string, string> = loop({
+// Verify intentionally STAYS spawned. Unlike actAgent, the verifier never
+// reads the user message from the conversation itemLog — its instructions
+// are static (VERIFY_SYSTEM_INSTRUCTIONS) and it discovers repo state via
+// read-only tools. A spawned (empty) itemLog is exactly what we want: it
+// keeps the adversarial reviewer's PASS/FAIL output and its Read/Grep/Bash
+// tool-call noise OUT of the user-facing transcript and out of the next
+// act turn's LLM context.
+const verifyAgentInner: Step<ContextMemory, string, string> = spawn({
   id: 'code-agent/verify-agent',
-  steps: [
-    step.llm<ContextMemory, string, string>({
-      id: 'code-agent/verify-chat',
-      model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
-      instructions: () => VERIFY_SYSTEM_INSTRUCTIONS,
-      tools: (ctx: Context<ContextMemory>) =>
-        filterToolsByNames(readUnifiedTools(ctx), VERIFY_MODE_TOOL_NAMES),
-    }),
-  ],
-  until: until.noToolCalls(),
+  child: loop({
+    id: 'code-agent/verify-loop',
+    steps: [
+      step.llm<ContextMemory, string, string>({
+        id: 'code-agent/verify-chat',
+        model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
+        instructions: () => VERIFY_SYSTEM_INSTRUCTIONS,
+        tools: (ctx: Context<ContextMemory>) =>
+          filterToolsByNames(readUnifiedTools(ctx), VERIFY_MODE_TOOL_NAMES),
+      }),
+    ],
+    until: until.noToolCalls(),
+  }),
 });
 
 /**

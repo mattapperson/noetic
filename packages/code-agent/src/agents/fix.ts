@@ -11,7 +11,7 @@
  */
 
 import type { Context, ContextMemory, Step } from '@noetic-tools/core';
-import { loop, step, until } from '@noetic-tools/core/portable';
+import { loop, spawn, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   countDiffLines,
@@ -93,32 +93,38 @@ export const fixCompleteStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Fix agent
 
-// Fix runs in the parent context — see actAgent's comment for the
-// rationale. The fix phase continues the same user-facing conversation.
-export const fixAgent: Step<ContextMemory, string, string> = loop({
+// Fix intentionally STAYS spawned. Unlike actAgent, the fixer doesn't read
+// the user turn from the conversation itemLog — its instructions come from
+// the `instructions` param + flow-state `verifyFindings`. Keeping it
+// spawned holds its tool-call noise and its assistant output out of the
+// user-facing transcript and out of the next act turn's LLM context.
+export const fixAgent: Step<ContextMemory, string, string> = spawn({
   id: 'code-agent/fix-agent',
-  steps: [
-    preFixCaptureStep,
-    step.llm<ContextMemory, string, string>({
-      id: 'code-agent/fix-chat',
-      model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
-      instructions: (ctx: Context<ContextMemory>) => {
-        const user = readParam(ctx, 'instructions', '', isString);
-        const state = readFlowState(ctx);
-        const findings = state.verifyFindings ?? '';
-        return [
-          user,
-          FIX_SYSTEM_INSTRUCTIONS,
-          `Verify findings:\n${findings}`,
-        ]
-          .filter(Boolean)
-          .join('\n\n');
-      },
-      tools: readUnifiedTools,
-    }),
-    fixCompleteStep,
-  ],
-  until: until.noToolCalls(),
+  child: loop({
+    id: 'code-agent/fix-loop',
+    steps: [
+      preFixCaptureStep,
+      step.llm<ContextMemory, string, string>({
+        id: 'code-agent/fix-chat',
+        model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
+        instructions: (ctx: Context<ContextMemory>) => {
+          const user = readParam(ctx, 'instructions', '', isString);
+          const state = readFlowState(ctx);
+          const findings = state.verifyFindings ?? '';
+          return [
+            user,
+            FIX_SYSTEM_INSTRUCTIONS,
+            `Verify findings:\n${findings}`,
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+        },
+        tools: readUnifiedTools,
+      }),
+      fixCompleteStep,
+    ],
+    until: until.noToolCalls(),
+  }),
 });
 
 //#endregion
