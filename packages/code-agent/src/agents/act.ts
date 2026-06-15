@@ -12,7 +12,7 @@
  */
 
 import type { Context, ContextMemory, Step } from '@noetic-tools/core';
-import { loop, spawn, step, until } from '@noetic-tools/core/portable';
+import { loop, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   countDiffLines,
@@ -96,30 +96,35 @@ export const postActCheckStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Act agent
 
-export const actAgent: Step<ContextMemory, string, string> = spawn({
+/**
+ * Act agent runs in the parent context — NOT inside a `spawn()`. The
+ * user-facing assistant IS the conversation; wrapping it in spawn would
+ * give it a fresh `itemLog`, severing the user's message and all prior
+ * turn history from the LLM call. `spawn()` is reserved for true
+ * sub-agents (planAgent, teammates, sub-harnesses) that intentionally
+ * don't see the parent transcript.
+ */
+export const actAgent: Step<ContextMemory, string, string> = loop({
   id: 'code-agent/act-agent',
-  child: loop({
-    id: 'code-agent/act-loop',
-    steps: [
-      preActCaptureStep,
-      step.llm<ContextMemory, string, string>({
-        id: 'code-agent/act-chat',
-        model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
-        instructions: (ctx: Context<ContextMemory>) => {
-          const user = readParam(ctx, 'instructions', '', isString);
-          return [
-            user,
-            ACT_SYSTEM_INSTRUCTIONS,
-          ]
-            .filter(Boolean)
-            .join('\n\n');
-        },
-        tools: readUnifiedTools,
-      }),
-      postActCheckStep,
-    ],
-    until: until.noToolCalls(),
-  }),
+  steps: [
+    preActCaptureStep,
+    step.llm<ContextMemory, string, string>({
+      id: 'code-agent/act-chat',
+      model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
+      instructions: (ctx: Context<ContextMemory>) => {
+        const user = readParam(ctx, 'instructions', '', isString);
+        return [
+          user,
+          ACT_SYSTEM_INSTRUCTIONS,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+      },
+      tools: readUnifiedTools,
+    }),
+    postActCheckStep,
+  ],
+  until: until.noToolCalls(),
 });
 
 //#endregion

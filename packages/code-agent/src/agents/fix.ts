@@ -11,7 +11,7 @@
  */
 
 import type { Context, ContextMemory, Step } from '@noetic-tools/core';
-import { loop, spawn, step, until } from '@noetic-tools/core/portable';
+import { loop, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   countDiffLines,
@@ -93,33 +93,32 @@ export const fixCompleteStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Fix agent
 
-export const fixAgent: Step<ContextMemory, string, string> = spawn({
+// Fix runs in the parent context — see actAgent's comment for the
+// rationale. The fix phase continues the same user-facing conversation.
+export const fixAgent: Step<ContextMemory, string, string> = loop({
   id: 'code-agent/fix-agent',
-  child: loop({
-    id: 'code-agent/fix-loop',
-    steps: [
-      preFixCaptureStep,
-      step.llm<ContextMemory, string, string>({
-        id: 'code-agent/fix-chat',
-        model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
-        instructions: (ctx: Context<ContextMemory>) => {
-          const user = readParam(ctx, 'instructions', '', isString);
-          const state = readFlowState(ctx);
-          const findings = state.verifyFindings ?? '';
-          return [
-            user,
-            FIX_SYSTEM_INSTRUCTIONS,
-            `Verify findings:\n${findings}`,
-          ]
-            .filter(Boolean)
-            .join('\n\n');
-        },
-        tools: readUnifiedTools,
-      }),
-      fixCompleteStep,
-    ],
-    until: until.noToolCalls(),
-  }),
+  steps: [
+    preFixCaptureStep,
+    step.llm<ContextMemory, string, string>({
+      id: 'code-agent/fix-chat',
+      model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
+      instructions: (ctx: Context<ContextMemory>) => {
+        const user = readParam(ctx, 'instructions', '', isString);
+        const state = readFlowState(ctx);
+        const findings = state.verifyFindings ?? '';
+        return [
+          user,
+          FIX_SYSTEM_INSTRUCTIONS,
+          `Verify findings:\n${findings}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+      },
+      tools: readUnifiedTools,
+    }),
+    fixCompleteStep,
+  ],
+  until: until.noToolCalls(),
 });
 
 //#endregion
