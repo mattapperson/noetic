@@ -36,7 +36,7 @@ export const UiConfigSchema = z.object({
   contextPanelWidth: z
     .union([
       z.literal('responsive'),
-      z.number().int().min(28).max(80),
+      z.number().int().min(49).max(80),
     ])
     .optional(),
 });

@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentOverride, WorktreeConfig } from '../../../types/config.js';
+import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../../layout/constants.js';
 import type { AgentOverrideFieldName, ConfigFieldPath } from './types.js';
 import { parseAgentOverrideFieldPath } from './types.js';
 
@@ -335,7 +336,7 @@ const staticFieldSetters: Record<string, StaticFieldSetter> = {
     if (!Number.isFinite(parsed)) {
       return;
     }
-    const clamped = Math.max(28, Math.min(80, Math.trunc(parsed)));
+    const clamped = Math.max(PANEL_CONFIG_MIN, Math.min(PANEL_CONFIG_MAX, Math.trunc(parsed)));
     config.ui = {
       ...config.ui,
       contextPanelWidth: clamped,

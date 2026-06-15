@@ -143,7 +143,7 @@ const STATIC_CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
     kind: FieldKind.Text,
     tab: ConfigTab.Runtime,
     placeholder: 'responsive',
-    description: '"responsive" (default) or a column count 28-80 for the /context dock.',
+    description: '"responsive" (default) or a column count 49-80 for the /context dock.',
   },
 ];
 

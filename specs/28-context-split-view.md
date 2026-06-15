@@ -34,7 +34,7 @@ type LayoutMode = 'wide' | 'narrow';
 type Pane = 'chat' | 'context';
 
 const CHAT_MIN_WIDTH = 60;
-const PANEL_MIN_WIDTH = 32;
+const PANEL_MIN_WIDTH = 49;
 
 function decideLayoutMode(cols: number, panelWidth: number): LayoutMode {
   return cols >= panelWidth + CHAT_MIN_WIDTH ? 'wide' : 'narrow';
@@ -44,7 +44,7 @@ function decideLayoutMode(cols: number, panelWidth: number): LayoutMode {
 ### Wide
 
 ```
-┌─ chat ───────────────┬─ ► ctx ─────┐
+┌─ chat ───────────────┬─ ► Context ─┐
 │ [streamed output]    │ Model       │
 │                      │  anthropic/…│
 │                      │ Context     │
@@ -67,7 +67,7 @@ function decideLayoutMode(cols: number, panelWidth: number): LayoutMode {
 │                                 │
 │ > _____________                 │
 ├─────────────────────────────────┤
-│ ctx · 21.8k / 200k (10.9%)      │
+│ Context · 21.8k / 200k (10.9%)  │
 └─────────────────────────────────┘
 ```
 
@@ -86,9 +86,9 @@ ui: {
 ```
 
 - `'responsive'` (default): `clamp(PANEL_MIN_WIDTH, floor(0.40 * cols), 56)`.
-- `number` (28–80): fixed columns, clamped down at runtime if the terminal cannot fit `value + CHAT_MIN_WIDTH` chat columns.
+- `number` (49–80): fixed columns, clamped down at runtime if the terminal cannot fit `value + CHAT_MIN_WIDTH` chat columns. The 49-col floor is sized so the per-layer row (14 label + 7 tokens + 24 bar = 45 cols) fits on a single line inside the bordered box.
 
-Validated by Zod (`z.union([z.literal('responsive'), z.number().int().min(28).max(80)])`). Surfaced in the `/config` editor.
+Validated by Zod (`z.union([z.literal('responsive'), z.number().int().min(49).max(80)])`). Surfaced in the `/config` editor.
 
 ## Live update strategy
 

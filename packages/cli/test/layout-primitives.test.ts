@@ -35,13 +35,13 @@ describe('decideLayoutMode', () => {
 
 describe('resolvePanelWidth — responsive', () => {
   test('floors 40 percent of cols within clamp range', () => {
-    // 40% of 120 = 48 — between MIN (32) and MAX (56).
-    expect(resolvePanelWidth(120, 'responsive')).toBe(48);
+    // 40% of 140 = 56 — between MIN (49) and MAX (56).
+    expect(resolvePanelWidth(140, 'responsive')).toBe(56);
   });
 
   test('clamps to PANEL_MIN_WIDTH when the terminal is narrow', () => {
-    // 40% of 50 = 20 → clamped up to PANEL_MIN_WIDTH (32).
-    expect(resolvePanelWidth(50, 'responsive')).toBe(PANEL_MIN_WIDTH);
+    // 40% of 100 = 40 → clamped up to PANEL_MIN_WIDTH (49).
+    expect(resolvePanelWidth(100, 'responsive')).toBe(PANEL_MIN_WIDTH);
   });
 
   test('clamps to PANEL_MAX_WIDTH when the terminal is huge', () => {
@@ -56,7 +56,7 @@ describe('resolvePanelWidth — responsive', () => {
 
 describe('resolvePanelWidth — fixed numeric', () => {
   test('honors the requested fixed width when room allows', () => {
-    expect(resolvePanelWidth(200, 40)).toBe(40);
+    expect(resolvePanelWidth(200, 60)).toBe(60);
   });
 
   test('clamps the requested width down so chat can keep CHAT_MIN_WIDTH', () => {

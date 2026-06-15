@@ -160,8 +160,8 @@ export function ContextPanel(props: ContextPanelProps): ReactNode {
     return (
       <Box>
         <Text dimColor={!focused}>
-          {focused ? '► ' : '  '}ctx · {formatTokens(header.used)} / {formatTokens(header.limit)} (
-          {pct.toFixed(1)}%)
+          {focused ? '► ' : '  '}Context · {formatTokens(header.used)} /{' '}
+          {formatTokens(header.limit)} ({pct.toFixed(1)}%)
         </Text>
       </Box>
     );
@@ -186,7 +186,7 @@ export function ContextPanel(props: ContextPanelProps): ReactNode {
         paddingLeft={1}
         paddingRight={1}
       >
-        <Text bold>{titlePrefix}ctx</Text>
+        <Text bold>{titlePrefix}Context</Text>
         <Box height={1} />
         <PanelHeader used={header.used} limit={header.limit} model={model} />
         <FullModeBody usage={usage} />
@@ -205,7 +205,7 @@ export function ContextPanel(props: ContextPanelProps): ReactNode {
       borderColor={focused ? undefined : 'gray'}
       paddingX={1}
     >
-      <Text bold>{titlePrefix}ctx</Text>
+      <Text bold>{titlePrefix}Context</Text>
       <Box height={1} />
       <PanelHeader used={header.used} limit={header.limit} model={model} />
       <FullModeBody usage={usage} />
