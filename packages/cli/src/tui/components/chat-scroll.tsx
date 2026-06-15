@@ -17,19 +17,20 @@
  *
  * Rendering uses a `marginBottom={-linesFromBottom}` translation on the
  * inner content column. With `overflow="hidden"` on the outer viewport and
- * `justifyContent="flex-end"` on the inner column, the negative margin
- * pushes the content stack down so its bottom edge sits `linesFromBottom`
- * rows below the viewport's bottom. Those rows are clipped; earlier rows
- * slide into view at the top. No entry gets dropped wholesale — long
- * messages walk by one row at a time instead of disappearing.
+ * `justifyContent="flex-end"` on the viewport, the negative margin pushes
+ * the content stack down so its bottom edge sits `linesFromBottom` rows
+ * below the viewport's bottom. Those rows are clipped; earlier rows slide
+ * into view at the top. No entry is dropped wholesale — long messages
+ * walk by one row at a time instead of disappearing.
  *
  * Per-entry height estimation
  * ---------------------------
- * The caller supplies `heightFor(entry, index)` so we can compute the
- * total content height (= sum of heights) and clamp the offset. A sensible
- * default (`1`) ships for callers that don't care, but real chat surfaces
- * should estimate via newline count of the rendered text — otherwise
- * Home / End won't line up with the actual content top.
+ * The caller supplies `heightFor(entry, index, cols)` so we can compute
+ * the total content height (= sum of heights) and clamp the offset. The
+ * `cols` argument lets the estimator account for wrap (a long no-newline
+ * response wraps to dozens of lines at 80 columns — without that input
+ * the estimate severely undercounts, the offset clamps to 0, and the
+ * scroll keys silently no-op).
  *
  * Keybindings (active only when `isActive` is true)
  * -------------------------------------------------
@@ -39,9 +40,8 @@
  *   End / Esc          — jump to the bottom (latest, re-stick)
  *
  * Mouse-wheel scrolling is wired in via `useMouseScroll` (three lines per
- * notch — see the dispatch hook). The arrow keys without Shift are
- * deliberately not bound here; the prompt uses them for cursor movement
- * and history navigation.
+ * notch). The arrow keys without Shift are deliberately not bound here;
+ * the prompt uses them for cursor movement and history navigation.
  */
 
 import { Box, Text, useInput, useStdout } from 'ink';
@@ -61,11 +61,12 @@ export interface ChatScrollProps<TEntry> {
   /** Stable key per entry — used for React reconciliation. */
   keyFor: (entry: TEntry, index: number) => string;
   /**
-   * Estimated rendered height of an entry, in terminal lines. Used to clamp
-   * the scroll offset so Home lands at the actual content top. Default 1
-   * (works but makes Home land wherever the cumulative estimate puts it).
+   * Estimated rendered height of an entry, in terminal lines. Default 1
+   * (works but defeats Home / End because the cumulative estimate is too
+   * small). Real chat surfaces should compute this from rendered text +
+   * wrap at `cols` columns.
    */
-  heightFor?: (entry: TEntry, index: number) => number;
+  heightFor?: (entry: TEntry, index: number, cols: number) => number;
   /**
    * Optional element appended after the entry stream (e.g. a streaming
    * spinner). Always rendered with the latest content; counted into total
@@ -85,15 +86,26 @@ export interface ChatScrollProps<TEntry> {
 
 //#region Hooks
 
-function useViewportRows(): number {
+interface ViewportSize {
+  rows: number;
+  cols: number;
+}
+
+function useViewportSize(): ViewportSize {
   const { stdout } = useStdout();
-  const [rows, setRows] = useState<number>(stdout?.rows ?? 24);
+  const [size, setSize] = useState<ViewportSize>({
+    rows: stdout?.rows ?? 24,
+    cols: stdout?.columns ?? 80,
+  });
   useEffect(() => {
     if (!stdout) {
       return;
     }
     const handler = (): void => {
-      setRows(stdout.rows);
+      setSize({
+        rows: stdout.rows,
+        cols: stdout.columns,
+      });
     };
     stdout.on('resize', handler);
     return (): void => {
@@ -102,7 +114,7 @@ function useViewportRows(): number {
   }, [
     stdout,
   ]);
-  return rows;
+  return size;
 }
 
 //#endregion
@@ -121,20 +133,20 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     trailingHeight = 0,
     isActive = true,
   } = props;
-  const rows = useViewportRows();
+  const { rows, cols } = useViewportSize();
   // `linesFromBottom` counts terminal lines hidden below the visible
   // window. 0 = stuck to bottom (latest content visible).
   const [linesFromBottom, setLinesFromBottom] = useState(0);
 
-  // Sum of per-entry heights + trailing height. The estimate doesn't need
-  // to be perfect (overflow clipping handles small errors), but Home / End
-  // accuracy depends on it.
+  // Sum of per-entry heights + trailing height. Width-aware so a long
+  // assistant reply with no `\n`s doesn't report as 1 line and clamp the
+  // scroll offset back to 0 on every keystroke.
   const totalLines = useMemo(() => {
     let sum = trailingHeight;
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
       if (e !== undefined) {
-        sum += heightFor(e, i);
+        sum += heightFor(e, i, cols);
       }
     }
     return sum;
@@ -142,6 +154,7 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     entries,
     heightFor,
     trailingHeight,
+    cols,
   ]);
 
   const viewportLines = rows;
@@ -275,13 +288,8 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   const canScrollUp = linesFromBottom < detachedMax;
 
   return (
-    <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      <Box
-        flexDirection="column"
-        flexGrow={1}
-        justifyContent="flex-end"
-        marginBottom={-linesFromBottom}
-      >
+    <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
+      <Box flexDirection="column" flexShrink={0} marginBottom={-linesFromBottom}>
         {entries.map((entry, i) => (
           <Box key={keyFor(entry, i)} flexShrink={0}>
             {renderEntry(entry, i)}
@@ -290,7 +298,7 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
         {trailing ? <Box flexShrink={0}>{trailing}</Box> : null}
       </Box>
       {detached ? (
-        <Box>
+        <Box flexShrink={0}>
           <Text dimColor>
             ↓ {linesFromBottom} {linesFromBottom === 1 ? 'line' : 'lines'} below
             {canScrollUp ? '' : ' (top)'} — End / Esc to jump to latest
