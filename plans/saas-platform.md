@@ -36,6 +36,7 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [1.8 Observability graduated by paying-customer tier](#18-observability-graduated-by-paying-customer-tier)
    - [1.9 Round 2 panel overrides (six decisions + Workers footguns + product additions)](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)
    - [1.10 Monetization commitment: API + CLI, three commercial models](#110-monetization-commitment-api--cli-three-commercial-models)
+   - [1.11 Round 3 conditions (twelve interaction-surface codifications)](#111-round-3-conditions-twelve-interaction-surface-codifications)
 2. [Current plan](#current-plan)
    - [2.1 North star](#21-north-star)
    - [2.2 Strategic posture](#22-strategic-posture)
@@ -629,9 +630,86 @@ Even at introductory $10/mo, gross margin is ~80% — already in the black at un
 - **§2.3 P-1** shifts from "should we tier?" to "which tier do you fit?" with actual numbers on a live `/pricing` page.
 - **§2.16 competitive positioning** table is now anchored to real numbers, not hypothesis ranges.
 
-### Accepted arbitrage
+### PAYG vs Team — anti-arbitrage construction
 
-PAYG without seat fee + $9/mo CLI Pro add-on per user creates an arbitrage vs Team. A team could give every dev a free PAYG account + the add-on instead of paying $30 + $10/seat. **Accepted for v1.** The meters still bill for usage, and teams that need centralized admin/audit will pay for Team regardless. Sharper instrument than locking it down.
+Earlier draft of this section accepted PAYG + $9 CLI Pro add-on arbitrage vs Team as "sharper than locking it down." Round 3 review reversed this — the framing doesn't survive diligence and undermines Team-tier validation. See [§1.11 condition 2](#111-round-3-conditions-twelve-interaction-surface-codifications).
+
+**Resolution: move Team-distinguishing features out of Enterprise-only.** Team gains org-level GEPA budget pool, shared eval datasets, and SSO at Team tier (not Enterprise). Above 3 seats, coordinated PAYG cannot replicate Team value because the team-shared features require Team's billing primitive. CLI Pro add-on remains on PAYG but is structurally a single-user feature against single-user value. Removes the leak; aligns Team value to the eval-metering moat.
+
+## 1.11 Round 3 conditions (twelve interaction-surface codifications)
+
+**Trigger:** Third (likely final) adversarial panel review. Headline: **no residual fatal flaws**; all three reviewers independently confirmed. Recommendation: ship-with-named-conditions — 12 mechanical fixes in spec edits + decisions before P-1 closes. None require architectural rethinks.
+
+**Convergence assessment from synthesis:** "The plan has moved from 'might be wrong about big things' to 'right about big things but the interaction surface needs explicit codification.' That is founder-grade thinking." All round-3 residuals live in the *seams between* round-1 and round-2 fixes.
+
+### The twelve conditions
+
+**Convergent (multi-reviewer):**
+
+1. **Entitlement asymmetry — two-tier offline grace** *(all 3 reviewers)*. Tier-change is currently NOT in `SENSITIVE_SCOPES`, so a revoked Team member retains CLI Pro for up to 7 days via offline grace. SOC2 access-review control gap.
+   - **Fix:** Two-tier grace: 7 days for "no network," **24-hour hard cap when tier change is server-pending**. Server pushes "revocation-pending" flag during 60s Upstash invalidation so next CLI ping fast-rotates. Add tier-change to `SENSITIVE_SCOPES` OR document the asymmetry explicitly. Propagated to §2.4, §2.6 P2, §3 S3.
+
+2. **PAYG + CLI Pro arbitrage vs Team** *(PM + CEO)*. "Accepted arbitrage" framing doesn't survive diligence and undermines Team validation in P-1.
+   - **Fix:** Move org-level GEPA budget pool + shared eval datasets + SSO to **Team tier** (not Enterprise). Team-distinguishing features now align to the eval-metering moat. CLI Pro add-on remains PAYG-available as single-user. Propagated to §1.10 (above), §2.17.
+
+3. **Cross-model transition semantics** *(PM + Engineer)*. Mid-period upgrade Mon → run GEPA Tue → downgrade Wed = 7 days free Pro (Stripe prorates one day; entitlements last to end-of-period).
+   - **Fix:** New §2.17 "Cross-model transitions" subsection with explicit dollars-and-cents rules per direction. **7-day upgrade-then-downgrade cooldown** (within window, downgrade becomes immediate, upgrade prorated as 1-day charge). No-arbitrage invariant codified. Propagated to §2.17, §2.6 P5.
+
+**Strategic (CEO):**
+
+4. **Steady-state migration cliff — first-100 loyalty lock**. Developer $10→$19 = +90%; Team 5-seat $80→$124 = +55% overnight. SaaS benchmarks: >20% increase churns 15–30% of cohort. **First paying customers hit the cliff first** — the same ones whose LOIs convinced the build.
+   - **Fix:** Customers signed during paid beta (first 100 or first 6 months) grandfather at intro for **24 months** (not 12) AND receive 25% off steady-state at migration as "founding customer" rate. Cheap, measurably reduces churn, real P-1 LOI sweetener. Propagated to §1.10, §2.17.
+
+5. **Schedule honest rebaseline.** After §1.9 + §1.10 additions, 1-engineer math is honestly ~16 weeks, not 12. Diligence reconstructs engineer-weeks from git; underestimate is more harmful than the honest number.
+   - **Fix:** Rebaseline to **16-week target with 12-week ambition** (1 engineer) OR **10–12 weeks with 2 engineers** with explicit P0 parallelization. Propagated to §2.6 header.
+
+6. **GEPA compute cost missing from unit economics.** If GEPA-on-a-button is the wedge, frequent use compresses margin from 89% to 50–70%.
+   - **Fix:** Add GEPA-run cost estimate (Fly.io compute + R2 + Queue) to §2.17 unit economics. **If >$0.10/run expected, meter GEPA-runs with bundled allowance** (e.g. Developer 50/mo, $0.50/run overage). Also tests willingness-to-pay on the moat feature. Propagated to §2.17.
+
+7. **`agent-run` billable unit not tightly defined.** What counts under retries, sub-harness spawns, fork branches? Ambiguity blocks /pricing trust and creates a meter customers can game.
+   - **Fix:** Define in S2 metering spine before P-1 closes. Propagated to §3 S2.
+
+8. **Enterprise tier ships day 1 with no founding-sales motion.**
+   - **Fix:** Add to P-1: design-partner agreement template, Vanta-driven security questionnaire pre-fill, "enterprise ready" definition (SSO + SOC2 package + DPA + named support contact). Founder owns enterprise sales until ARR justifies hire. Propagated to §2.3.
+
+**Engineer-specialty:**
+
+9. **Durable Object sharding + reconciler drift-direction matrix.** DO is single-instance per `(account, metric, period)` — Team/Enterprise high-volume accounts hit throughput ceiling. Reconciler currently spec'd to "automatically correct" DO when `used > Tinybird.sum` — wrong: drift might be Tinybird lag, decrementing DO loses real reservations.
+   - **Fix:** Tier-keyed DO sharding (Free=1, Developer=1, **Team=4, Enterprise=16**). Reconciler drift-direction matrix: on `DO.used > Tinybird.sum`, **replay from DO settle journal** — never decrement. **DO retains per-reservation settle journal**. DO settle + Queue enqueue made atomic via co-located DO method. Propagated to §2.4, §2.13, §3 S2.
+
+10. **Queue dedup window vs Stripe Meter period-boundary.** Tinybird dedup window must exceed max Queue retry window + 5min grace + reconciler cadence, or messages retried across period rollover double-bill.
+    - **Fix:** Encode Tinybird dedup window **≥7 days as a constraint** (not tunable). Reconciler groups by `period_anchor`, not `ts`. Propagated to §2.4, §2.6 P4, §3 S2.
+
+11. **Mode B SDK retries → multiple trace POSTs.** Mode B (async/SDK-side) bypasses the gateway Idempotency-Key state machine. SDK retries upstream successfully twice → two trace POSTs to Noetic → potential double-billing.
+    - **Fix:** SDK owns its own trace-POST idempotency separately. Add Mode B metering-integrity contract to S4: signed JWT with upstream request/response hash + SDK-side trace-POST idempotency + sampled upstream re-query verification. **Decide explicitly whether Mode B + PAYG combination is allowed or gated.** Propagated to §2.4, §2.6 P3, §3 S4.
+
+**Product (PM):**
+
+12. **/pricing-page honesty in P-1.** Week-0 /pricing page advertises CLI Pro, GEPA, 90d retention, eval scores — none of which exist until P3.5/P5. LOIs against vaporware features tell you nothing.
+    - **Fix:** Label Week-0 page **"preview pricing"** with **"reserve early-access seat" CTA** (not purchase). Capture LOIs as "I will pay $X when these specific features ship" with feature-checklist signature. Propagated to §2.3, §2.6 P5 (which transitions marketing page to live Stripe-integrated at same URL with no SEO break).
+
+### Second-order interactions to codify (not separate conditions, but plan-level)
+
+- **Member-removal in `SENSITIVE_SCOPES` (instant) vs tier-change (60s + offline grace)** — admin model is inconsistent (condition 1 fixes this)
+- **Free → PAYG is cheaper than Free → Developer at ~2,400 runs/mo** — conversion funnel defaults to PAYG. /pricing must address proactively
+- **Late-settle-after-period-rollover handler** (DO idle-evicted, settle from prior period arrives) — explicit policy: emit UsageEvent with original `period_anchor`, never crash, never silently drop
+- **Upstash-degraded fallback contract** (timeouts but not full outage) — short-circuit to Neon; do NOT extend cache TTL on Upstash errors (revoke path silently degrades otherwise)
+- **Archived audit log retrieval surface** (R2 parquet, 7-year) needs a P6 work item — building it during the audit is the fire-drill we promised to avoid
+- **Sentry quota blowout from DO alarm sweeps + Queue DLQ** — sample/batch alarm errors at 1-in-N before Tier 1 trigger
+- **P3.5 has zero slack** and is on critical path for the LangSmith wedge — slip is a positioning slip, not just a feature slip
+- **PAYG reconciliation tolerances** calibrated for subscription drift (~$0.50) but on heavy PAYG, <1% drift = $50+ invoice dispute. Recalibrate tolerances per model.
+
+### Reaffirmed (panel preserved)
+
+- **No fatal flaws** — three independent reviewers confirmed; this is the strongest convergence signal so far
+- DO + Stripe Meter + `period_anchor` + 60s micro-batch + 5-min grace + +10-min reconciler is correct in isolation
+- SOC2/Vanta unconditional in P0 uncontested
+- Idempotency-Key state machine, `SENSITIVE_SCOPES` bypass, Hyperdrive caching policy all accepted
+- LangSmith-switching wedge is the right GTM frame
+
+### Verdict
+
+> Ship with twelve named conditions — three reviewers from three lenses independently converged on the same five-issue residual cluster (Mode B metering integrity, steady-state pricing cliff, entitlement asymmetry, PAYG/Team arbitrage, cross-model transition semantics) plus specialty-shaped additions, all mechanical and fixable in spec edits before P-1 closes; no residual fatal flaws and explicit reaffirmation that the round-1 and round-2 overrides solved what they addressed.
 
 ---
 
@@ -661,11 +739,13 @@ The load-bearing decisions. Change these → re-litigate the whole plan.
 
 ### Pre-call artifacts (built before any P-1 call)
 
-- [ ] Live static `/pricing` page reflecting the **locked tier shape** from [§2.17](#217-monetization-model--tiers) — Developer $10/mo, Team $30 + $10/seat, PAYG metered, Enterprise quote. PAYG $/run + $/eval-score numbers tested as variants.
-- [ ] "Switching from LangSmith" landing page — side-by-side trace UI screenshots, pricing comparison at typical volumes, one-line `@noetic-tools/sdk` shim that ingests LangSmith-format traces during transition
-- [ ] Competitive teardown table (LangSmith / Braintrust / Helicone / Langfuse — pricing, free-tier shape, eval workflow) on `/pricing` and in [§2.16](#216-competitive-positioning)
+- [ ] **`/pricing-preview` page** ([§1.11 condition 12](#111-round-3-conditions-twelve-interaction-surface-codifications)) reflecting the locked tier shape from [§2.17](#217-monetization-model--tiers) — Developer $10/mo, Team $30 + $10/seat, PAYG metered, Enterprise quote. **Labelled "preview pricing — features launching Q3 2026"** with **"reserve early-access seat" CTA** (not purchase). PAYG $/run + $/eval-score numbers tested as variants. **Same URL as the eventual live page** (P5 swaps marketing → Stripe-integrated; no SEO break).
+- [ ] "Switching from LangSmith" landing page — side-by-side trace UI screenshots, pricing comparison at typical volumes, one-line `@noetic-tools/sdk` shim that ingests LangSmith-format traces during transition. **Anchored on Developer-tier $29/mo savings + first-100 loyalty lock** (intro pricing for 24 months — see [§2.17](#217-monetization-model--tiers))
+- [ ] Competitive teardown table (LangSmith / Braintrust / Helicone / Langfuse — pricing, free-tier shape, eval workflow) on `/pricing-preview` and in [§2.16](#216-competitive-positioning)
 - [ ] 1-page GTM: named ICP, wedge, conversion event, channel
 - [ ] 1-hour EU AI Act specialist call ($500–800) — classify Noetic under GPAI provider obligations for both BYOK and managed paths
+- [ ] **Enterprise founding-sales motion artifacts** ([§1.11 condition 8](#111-round-3-conditions-twelve-interaction-surface-codifications)): 1-page design-partner agreement template, Vanta-driven security questionnaire pre-fill, "enterprise ready" definition (SSO + SOC2 package + DPA + named support contact). Founder owns enterprise sales motion.
+- [ ] **`agent-run` definition signed off** before P-1 calls — captured in S2 spec ([§1.11 condition 7](#111-round-3-conditions-twelve-interaction-surface-codifications)). Without a tight definition, /pricing-preview is not trustable and customers can game the meter via batching.
 
 ### Dual cohort discovery (16 calls)
 
@@ -674,7 +754,7 @@ The load-bearing decisions. Change these → re-litigate the whole plan.
 
 ### Pass criteria (hard gate)
 
-- [ ] ≥3 **written** LOIs at a stated price (verbal LOIs do not count)
+- [ ] ≥3 **written** LOIs at a stated price (verbal LOIs do not count). **LOIs captured as feature-checklist commitments**: "I will pay $X when these specific features ship: [GEPA, sub-harness CLI, eval-per-trace, 90d retention]" with prospect signature against the checklist ([§1.11 condition 12](#111-round-3-conditions-twelve-interaction-surface-codifications)). Protects LOI signal value vs vaporware risk.
 - [ ] ≥8 of 15 calls answer "I would paste my key IF [X]" with [X] captured verbatim (the [X] is the onboarding spec)
 - [ ] **One ICP committed.** No hedge into P0. If managed inference wins, that becomes a separate plan.
 
@@ -695,12 +775,13 @@ The shapes that are expensive to rip out later.
 - **Account** ≈ WorkOS Organization. Billable tenant.
 - **Member** — user-in-account relationship. Users can belong to many accounts.
 - **Role** — named scope bundle. Built-ins: `owner` / `admin` / `member`. Custom deferred.
-- **Scope** — atomic permissions. `hasScope(member, scope, account)` is the only auth check. V1 implementation: hardcoded role→scope map (no scope table). Signature preserved so custom roles ship as data later. **`SENSITIVE_SCOPES` set** (`keys:revoke`, `members:remove`, `billing:*`) bypasses the 60s membership cache and reads from WorkOS or the strict Postgres mirror.
+- **Scope** — atomic permissions. `hasScope(member, scope, account)` is the only auth check. V1 implementation: hardcoded role→scope map (no scope table). Signature preserved so custom roles ship as data later. **`SENSITIVE_SCOPES` set** (`keys:revoke`, `members:remove`, `billing:*`, **`billing:tier_change`**) bypasses the 60s membership cache and reads from WorkOS or the strict Postgres mirror. Tier-change is sensitive per [§1.11 condition 1](#111-round-3-conditions-twelve-interaction-surface-codifications) so revocations propagate at server level immediately.
 - **ApiKey** — Account-owned with `created_by` audit field. Member-owned only for the `noetic login` CLI flow with rotate-on-offboarding. Stored as `{prefix, pepper_version, hmac}` where `hmac = HMAC-SHA256(secret, pepper_v<N>)`. **Versioned pepper** (`pepper_v1`, `pepper_v2`, ... as separate Workers Secrets) allows lazy rotation. Env-prefixed: `noetic_live_*` / `noetic_test_*`.
 - **BYOK UpstreamKey** — encrypted at rest with per-tenant DEK, write-only via dashboard (never displayed after creation), revocable independent of upstream provider. Two modes: (a) **proxied** — Noetic forwards via AI Gateway; (b) **async/SDK-side** — the SDK calls upstream directly and POSTs the trace to Noetic afterward, Noetic never sees the key. See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 - **Bucket** — metered allowance for a metric over a period: `{metric, period, included_quantity, overage_price, hard_cap}` (config in Postgres). V1 ships hardcoded buckets per account; config UI when ≥3 customers ask.
-- **BucketState** — authoritative live counter in a **Durable Object per `(account_id, metric, period_start)`**. Holds `{used, reservations: {id → {worst_case, expires_at}}}`. Reservations have TTL; DO alarms sweep expired reservations. Reconciler diffs `used` against Tinybird every 5 minutes; `reserved = SUM(reservations.values.worst_case)` is computed live. Replaces the v1 Upstash design; see [§1.9 override 1](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
-- **UsageEvent** — append-only, immutable: `{account_id, member_id?, api_key_id?, metric, quantity, unit, ts, period_anchor, idempotency_key, dims jsonb}`. **Emitted via Cloudflare Queue, not fire-and-forget** — Queue consumer ships to Tinybird with retries + DLQ. `period_anchor` is a clamped period identifier for Stripe Meter rollover safety. PII-forbidden in `dims` enforced at producer **and** Tinybird-side (materialized view with regex/length checks; quarantine + alert on overflow).
+- **BucketState** — authoritative live counter in **Durable Objects per `(account_id, metric, period_start, shard?)`**. **Tier-keyed sharding** ([§1.11 condition 9](#111-round-3-conditions-twelve-interaction-surface-codifications)): Free/Developer = 1 DO; Team = 4 shards; Enterprise = 16 shards. Holds `{used, reservations: {id → {worst_case, expires_at, started_at}}, settle_journal: [{reservation_id, actual, settled_at, ...}]}`. **`settle_journal` is retained per reservation** so the reconciler can replay (never blind-decrement). Reservations have TTL; DO alarms sweep expired reservations. `reserved = SUM(reservations.values.worst_case)` is computed live. DO `settle(reservation_id, actual)` is atomic with Queue enqueue of the resulting UsageEvent (single DO method, no cross-system race). Replaces the v1 Upstash design; see [§1.9 override 1](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+- **UsageEvent** — append-only, immutable: `{account_id, member_id?, api_key_id?, metric, quantity, unit, ts, period_anchor, idempotency_key, dims jsonb}`. **Emitted via Cloudflare Queue, not fire-and-forget** — Queue consumer ships to Tinybird with retries + DLQ. `period_anchor` is a clamped period identifier for Stripe Meter rollover safety. **Tinybird dedup window is ≥7 days as a hard constraint** ([§1.11 condition 10](#111-round-3-conditions-twelve-interaction-surface-codifications)) — must exceed max Queue retry window + 5min grace + reconciler cadence. PII-forbidden in `dims` enforced at producer **and** Tinybird-side (materialized view with regex/length checks; quarantine + alert on overflow).
+- **`agent-run`** — the primary billable unit. Definition: **one top-level invocation of `harness.run()`** ([§1.11 condition 7](#111-round-3-conditions-twelve-interaction-surface-codifications)). Sub-harness spawns, retries within a run, and fork branches all roll up into the same agent-run — they do NOT generate independent agent-run events. Retries from the *client* of a failed `harness.run()` emit a new agent-run (network/client failures vs in-run failures). Coalescing protections enforced by S2.
 - **AuditLog** — append-only event stream shipped to **Axiom** tagged by `account_id`. Written via **direct Cloudflare Queue enqueue** from the mutation handler (not Postgres outbox in v1). Consumer ships to Axiom with retries + DLQ. **Retention SLA = 7 years**: Axiom hot 90 days; nightly parquet → R2 archive job. Customer-facing audit read/export queries Axiom directly; deep-history queries hit R2.
 
 ### Two design decisions
@@ -710,10 +791,17 @@ The shapes that are expensive to rip out later.
 ### Authoritative bucket check (the non-negotiable)
 - Pre-call: **reserve worst-case cost** (`max_tokens × model_price`) via an RPC to the DO for `(account, metric, period)`. Atomic check `used + sum(reservations.worst_case) + worst_case ≤ included + overage_allowance`; on success, store `{reservation_id, worst_case, expires_at = now() + upstream_timeout}` and return `reservation_id`. Single round-trip, strongly consistent, no separate-vendor outage.
 - For hard-cap accounts: **refuse the request with 402/429 + `X-Remaining-Budget` header** — silent server-side clamp is forbidden (produces non-deterministic eval outputs).
-- Post-call: settle actual usage by `reservation_id` — DO deletes the reservation and increments `used` by `actual`. Idempotent on the `reservation_id`.
+- Post-call: settle actual usage by `reservation_id` — DO **appends to settle_journal, deletes the reservation, increments `used` by `actual`, and enqueues the UsageEvent to Cloudflare Queues — all in one atomic DO method.** No cross-system race between settle and Tinybird emit.
 - Expired reservations swept by DO alarm — leaks are bounded by the upstream timeout, not unbounded as the v1 scalar design allowed.
-- Per-account in-flight concurrency cap enforced inside the same DO.
-- **Durability/reconciliation:** DOs are strongly consistent and durably stored. Every 5 minutes, a reconciler diffs DO `used` against Tinybird `SUM(quantity) WHERE ts ≥ period_start AND period_anchor = current`. Discrepancy > 0.1% → alert + automatic DO correction. UsageEvent (Tinybird) is the source of truth for billing; DO is the fast access path.
+- **Late-settle handler**: if a settle arrives after period rollover (DO idle-evicted, prior period), emit UsageEvent with the original `period_anchor`. Never crash. Never silently drop. ([§1.11 second-order codifications](#111-round-3-conditions-twelve-interaction-surface-codifications))
+- Per-account in-flight concurrency cap enforced inside the same DO (per-shard for tier-sharded accounts).
+- **Tier-sharded DOs**: Team accounts use 4 shards keyed by `hash(reservation_request) mod 4`; Enterprise 16 shards. Reconciler aggregates across shards.
+- **Reconciliation drift-direction matrix** ([§1.11 condition 9](#111-round-3-conditions-twelve-interaction-surface-codifications)):
+  - `Tinybird.sum > DO.used` → Tinybird is ahead of DO (settle journal not yet committed to Tinybird). Wait until next reconciler cycle; if persistent, alert.
+  - `DO.used > Tinybird.sum` → DO is ahead of Tinybird (Queue lag or dropped event). **Replay from `settle_journal` — never decrement DO.used.** If Queue DLQ contains the missing UsageEvents, retry; otherwise alert with replay tool.
+  - Within tolerance (per-model thresholds): pass.
+- **Reconciliation tolerance per model**: subscription drift tolerance ~$0.50; **PAYG drift tolerance recalibrated** because <1% drift on heavy PAYG = $50+ invoice dispute. See [§1.11 second-order codifications](#111-round-3-conditions-twelve-interaction-surface-codifications).
+- **Upstash-degraded fallback contract** ([§1.11 second-order codifications](#111-round-3-conditions-twelve-interaction-surface-codifications)): on Upstash timeouts (not full outage), short-circuit cache reads to Neon; do NOT extend cache TTL on errors. Otherwise the revoke path silently degrades.
 
 ### BYOK key-handling spec
 
@@ -724,7 +812,8 @@ The trust contract for the activation moment. See [§1.9](#19-round-2-panel-over
 - **Scope-restriction:** customer can scope the *forwarded* key to specific models or specific provider endpoints — Noetic only sends what's allowed.
 - **Revocation:** revoking the BYOK record in Noetic invalidates it in seconds (no Hyperdrive cache; see §2.14). Upstream provider revocation is independent.
 - **Mode A — proxied (default):** Worker → AI Gateway → upstream. Standard path; usage emitted from response.
-- **Mode B — async/SDK-side:** `@noetic-tools/sdk` calls upstream directly with the customer's key. SDK POSTs trace + usage to Noetic asynchronously. **Noetic never sees the upstream key.** Removes the largest trust objection for security-conscious customers. ~few hundred LoC in the SDK; required for Mode A's existence to be a *choice*, not a requirement.
+- **Mode B — async/SDK-side:** `@noetic-tools/sdk` calls upstream directly with the customer's key. SDK POSTs trace + usage to Noetic asynchronously. **Noetic never sees the upstream key.** Removes the largest trust objection for security-conscious customers.
+- **Mode B metering-integrity contract** ([§1.11 condition 11](#111-round-3-conditions-twelve-interaction-surface-codifications)): SDK owns its own trace-POST idempotency separately from the gateway state machine (Mode B bypasses the gateway). Each SDK trace POST carries: (a) a **signed JWT** containing the upstream request/response hash; (b) an SDK-generated `idempotency_key` that survives client retries; (c) the `agent-run` identifier so duplicates collapse server-side. Server-side: **sampled re-query verification** against upstream (every Nth event) catches a malicious or buggy SDK reporting fake usage. **Open decision before P3**: whether Mode B is allowed on PAYG (where the SDK-reported number directly bills the customer) — likely gated to subscription tiers only, with PAYG required to use Mode A. Documented in S4.
 
 ## 2.5 Stack
 
@@ -777,7 +866,7 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 
 ## 2.6 Phased build
 
-**Target: 12 weeks one engineer OR 8 weeks two engineers.** The original "6–8 weeks/1 engineer" headline was no longer honest after the round-2 additions (eval surface, BYOK key spec, AI Act analysis, Vanta kickoff, observability Tier 0). P6 (Svix, DPA, deletion state machine, status-page polish) moves out of paid-beta into "first paying customer + 30 days." See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
+**Target: 16 weeks one engineer (ambition: 12) OR 10–12 weeks two engineers.** Round 3 honest rebaseline ([§1.11 condition 5](#111-round-3-conditions-twelve-interaction-surface-codifications)) — after all §1.9 + §1.10 + §1.11 additions, the 1-engineer arithmetic is honestly ~16 weeks; the "12 weeks" headline at round 2 was already an underestimate. Diligence reconstructs engineer-weeks from git history; honest > optimistic. P6 (Svix, DPA, deletion state machine, status-page polish) moves out of paid-beta into "first paying customer + 30 days."
 
 ### P0 — Foundation (wk 1–2)
 - `packages/api` skeleton (Hono on Workers; Bun for local dev/tests)
@@ -824,7 +913,7 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - **`Idempotency-Key` state machine**: `(account_id, key) → {state: in_flight | succeeded | failed, response_ref?}`. In-flight replays block-and-wait; streaming responses stored in R2.
 - **CLI auth flow**: `noetic login` opens browser → WorkOS device-code flow → CLI receives + stores API key locally
 - **CLI entitlement check**: protected commands (`noetic optimize`, sub-harness commands, etc.) verify the key's `entitlements` claim; entitlement-aware error messages with upgrade link
-- **CLI offline grace**: last-known entitlements signed and cached locally for 7 days; check after 7 days requires network re-auth
+- **CLI offline grace — two-tier** ([§1.11 condition 1](#111-round-3-conditions-twelve-interaction-surface-codifications)): 7 days for "no network" (laptop offline); **24-hour hard cap when a tier change is server-pending**. Server pushes a `revocation_pending` flag during the 60s Upstash invalidation window; CLI's next ping fast-rotates. Local signed cache encodes both last-confirmed timestamp and tier-change-pending bit so CLI knows which grace applies. Closes the 7-day license-leak window on tier-change/removal.
 - Dashboard UI: create / list / revoke / last-used / RPS-stats. Service-account model documented (debt for v1.1: rotation + scope-restriction UI).
 
 ### P3 — BYOK + observability gateway (wk 4–5)
@@ -832,6 +921,7 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - **`forwardToUpstream(provider, request)` abstraction** wrapping Cloudflare AI Gateway — preserves optionality if AI Gateway pricing changes (see [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions))
 - **BYOK Mode A (proxied)**: customer key → AI Gateway → upstream. Standard path; usage emitted from response to Tinybird via Queue.
 - **BYOK Mode B (async/SDK-side)**: SDK calls upstream directly with customer key; SDK POSTs trace + usage to Noetic asynchronously. **Noetic never sees the upstream key.** Removes the largest trust objection.
+- **Mode B metering-integrity contract** ([§1.11 condition 11](#111-round-3-conditions-twelve-interaction-surface-codifications)): SDK-generated `idempotency_key` survives retries; signed JWT carries upstream request/response hash; `agent-run` identifier for server-side dedup. Sampled re-query verification against upstream (every Nth event) detects malicious or buggy SDKs reporting fake usage. **Mode B gated to subscription tiers only**; PAYG requires Mode A (SDK-reported usage cannot directly bill PAYG customers — the abuse window is too sharp). Documented in S4.
 - **BYOK key storage spec implemented** (encrypted at rest with per-tenant DEK; write-only UI; revocation; scope-restriction). See §2.4.
 - **Trial credits** ($20 cheap-cached, identity-gated): forward via Noetic's OR account through AI Gateway
 - **Managed inference** path: feature flag for design partners only (CC + manual review + hard caps + signed ToS chargeback waiver)
@@ -878,10 +968,14 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - Billing-correctness reconciler alerts to Sentry + Slack — **start with one loop**
 - **`model_cost_usd` emitted as `UsageEvent` dimension** — per-account token economics tracked even on BYOK
 - **Shadow-billing period** before going live (all three models exercised)
-- **Tier-switching UX**: pre-confirmation preview ("based on current period's usage, on PAYG you'd pay $X; on Team you'd pay $Y"); instant entitlement transition on upgrade, end-of-period revert on downgrade
-- **Entitlement propagation**: tier change → invalidate Upstash key-verification cache → CLI re-fetches entitlements on next call
+- **Tier-switching UX with usage-projection** ([§1.11 condition 3](#111-round-3-conditions-twelve-interaction-surface-codifications)):
+  - **Usage-projection Tinybird query + dashboard component** (~3 days) — live agent-run + eval-score counts for current period
+  - **Tier-comparison live API** (~2 days) — recomputes cost against alternative tier formulas including overage rates
+  - **Pre-confirmation preview** before any tier change: "based on current period's usage, on PAYG you'd pay $X; on Team you'd pay $Y"
+  - **7-day upgrade-then-downgrade cooldown** ([§2.17 Cross-model transitions](#217-monetization-model--tiers)): if a customer upgrades and downgrades within 7 days, the downgrade becomes immediate (not end-of-period) and the upgrade is prorated as a 1-day charge. Closes the free-trial-of-Pro exploit.
+- **Entitlement propagation**: tier change is in `SENSITIVE_SCOPES` ([§2.4](#24-architectural-primitives)) → instant Upstash invalidation → `revocation_pending` flag pushed to CLI → next CLI ping fast-rotates (24-hour hard cap regardless of offline grace)
 - Stripe Customer Portal for self-serve subscription management
-- Public `/pricing` page reflecting the locked tier shape ([§2.17](#217-monetization-model--tiers))
+- **Public `/pricing` page transition** ([§1.11 condition 12](#111-round-3-conditions-twelve-interaction-surface-codifications)): replace Week-0 marketing `/pricing-preview` with live Stripe-integrated flow **at the same URL** (no SEO break, no broken inbound links from LOI emails)
 - Subscription lifecycle: `past_due` → degrade (read-only), not lockout
 - **Prepaid credits** as a Tinybird-backed balance ledger — kept as an option for non-card payment paths; not the default (paid-beta cohort uses card subscriptions)
 
@@ -893,6 +987,8 @@ Organized by plane. Cloudflare-first; three external vendors fill gaps Cloudflar
 - DPA + sub-processor list + prompt/response storage opt-out
 - Deletion state machine: `soft_deleted → final_invoice_issued → pii_anonymized → hard_deleted-after-7y`
 - ToS + AUP + upstream-outage refund policy
+- **Archived audit log retrieval surface** ([§1.11 second-order codifications](#111-round-3-conditions-twelve-interaction-surface-codifications)) — query path against R2 parquet archive for >90-day audit history (Axiom hot retention is 90d; the 7-year SLA needs an actual retrieval mechanism, not just a write path). Build before first audit/security review request.
+- **Sentry quota sampling** ([§1.11 second-order codifications](#111-round-3-conditions-twelve-interaction-surface-codifications)) — DO alarm sweeps and Queue DLQ can blow Sentry's free 5K errors/mo. Sample alarm/DLQ errors at 1-in-N before Tier 1 observability trigger; keep direct-customer errors unsampled.
 
 ## 2.7 Day-1 must-gets
 
@@ -950,11 +1046,26 @@ Cheap now, expensive later.
 ### Compliance / trust
 - **Vanta or Drata kicked off in P0 unconditionally** (SOC2 evidence collection)
 - **EU AI Act specialist call before P0** ($500–800); classification document landed in P0
-- Audit log retention SLA = 7 years (Axiom 90d + R2 archive)
+- Audit log retention SLA = 7 years (Axiom 90d + R2 archive); **archive retrieval surface built in P6** ([§1.11](#111-round-3-conditions-twelve-interaction-surface-codifications))
 - **Customer-support surface decision** + on-call rotation document
+
+### Round 3 codifications (added per [§1.11](#111-round-3-conditions-twelve-interaction-surface-codifications))
+- `agent-run` definition pinned in S2 before any P-1 call
+- Tier-keyed DO sharding (Free/Developer=1, Team=4, Enterprise=16) with per-reservation `settle_journal`
+- Reconciler drift-direction matrix (replay-from-journal, never decrement)
+- Tinybird dedup window ≥7 days as hard constraint
+- Mode B metering-integrity contract; **Mode B gated to subscription tiers only**
+- Tier-change in `SENSITIVE_SCOPES`; two-tier CLI offline grace (7d "no network" / 24h "tier change pending")
+- 7-day upgrade-then-downgrade cooldown
+- First-100 loyalty lock (24mo at intro + 25% off steady-state at migration)
+- `gepa-runs` as a third meter with per-tier bundled allowance
+- Schedule honestly rebaselined to 16wk-1eng or 10–12wk-2eng
 
 ### Process
 - **3-week P-1 hard gate with ≥3 written LOIs + dual-cohort discovery** before any P0 code
+- LOIs captured as **feature-checklist commitments** with prospect signature
+- `/pricing-preview` page (not "buy now") in P-1 with "reserve early-access seat" CTA
+- Enterprise founding-sales motion artifacts (design-partner template, security questionnaire, "enterprise ready" definition)
 - Build-vs-buy decisions logged (Stripe Portal, Svix, Tinybird, observability vendors)
 
 ## 2.8 Deferred with confidence
@@ -1038,6 +1149,13 @@ These need answers before the relevant phase starts.
 - **"Migrating from OpenRouter/OpenAI" as the primary migration page** (replaced by "Switching from LangSmith")
 - **§1.4 BYOK-vs-managed hedge framing** (commit to one ICP after P-1 dual-cohort)
 - **Parallel P0 before P-1 passes**
+- **"Accepted arbitrage" framing for PAYG + CLI Pro vs Team** — replaced by moving org GEPA budget / shared eval datasets / SSO to Team tier ([§1.11 condition 2](#111-round-3-conditions-twelve-interaction-surface-codifications))
+- **Silent "automatic DO correction" on `DO.used > Tinybird.sum`** — replaced by replay-from-`settle_journal` ([§1.11 condition 9](#111-round-3-conditions-twelve-interaction-surface-codifications))
+- **Single-DO-instance bucket counter for Team/Enterprise** — replaced by tier-keyed sharding (Free/Developer=1, Team=4, Enterprise=16)
+- **Single 7-day CLI offline grace** — replaced by two-tier grace (7d "no network" / 24h "tier-change pending")
+- **End-of-period downgrade with no upgrade-cooldown** — replaced by 7-day upgrade-then-downgrade cooldown
+- **Mode B allowed on PAYG** — Mode B gated to subscription tiers only (SDK-reported usage cannot directly bill PAYG)
+- **12-month grandfather flat for all early customers** — replaced by 24-month first-100 loyalty lock + 25% steady-state discount for founding cohort
 
 ## 2.13 Cost-coverage invariants
 
@@ -1048,7 +1166,7 @@ Architectural constraints, not implementation details. Together they bound the m
 3. **Free-tier monthly caps**: 1,000 agent-runs/mo + 500 eval scores/mo + 30-day trace retention. Enforced at the gateway via DO or Workers Analytics. Replaces the inconsistent v1 "10K/day" cap. Daily-cap key shards `period_start` (`account:metric:YYYY-MM-DD`) to avoid hot-key behavior at 00:00 UTC.
 4. **BYOK by default eliminates inference cost.** Customer pays OR/Anthropic/OAI directly. The biggest variable cost in the system is not on our P&L for the majority of users.
 5. **Trial credits pool**: $20/account lifetime, **defaulted to cheap-cached models** (Haiku / 4o-mini); premium models require BYOK. Eligibility gated on verified business email **or** phone **or** GitHub ≥30d. Hits cap → "add your key." No overage. Funded out of Noetic's OR account.
-6. **Hot-path state is split by consistency requirement.** Authoritative counters (`bucket_state`) live in Durable Objects; eventually-consistent caches (membership, key-verification, idempotency fingerprint, RPS) live in one Upstash instance. Fixed monthly cost (~$10–30/mo Upstash + DO time pennies) independent of user count.
+6. **Hot-path state is split by consistency requirement.** Authoritative counters (`bucket_state`) live in **Durable Objects, tier-keyed sharded** (Free/Developer = 1, Team = 4, Enterprise = 16 — see [§1.11 condition 9](#111-round-3-conditions-twelve-interaction-surface-codifications)); eventually-consistent caches (membership, key-verification, idempotency fingerprint, RPS) live in one Upstash instance. Fixed monthly cost (~$10–30/mo Upstash + DO time pennies) independent of user count.
 
 **Net result:** for a 10K-signup, 1K-active free cohort with the invariants in place, all-in cost-to-serve free users is **single-digit dollars/month** (Upstash + a few thousand Tinybird events + the $5 trial credit pool drawn down by a small fraction of accounts).
 
@@ -1254,7 +1372,11 @@ The `/pricing` page must include a side-by-side comparison cell at typical volum
 
 ## 2.17 Monetization model & tiers
 
-Operational state. Decision rationale in [§1.10](#110-monetization-commitment-api--cli-three-commercial-models). Introductory pricing applies for **the first 6 months of paid beta or first 100 paying customers (whichever comes later)**. Existing customers grandfather at intro pricing for 12 months from signup; after that, migrate to steady-state on next billing cycle with 60-day notice.
+Operational state. Decision rationale in [§1.10](#110-monetization-commitment-api--cli-three-commercial-models). Introductory pricing applies for **the first 6 months of paid beta or first 100 paying customers (whichever comes later)**.
+
+**First-100 loyalty lock** ([§1.11 condition 4](#111-round-3-conditions-twelve-interaction-surface-codifications)): customers signed during paid beta (first 100 or first 6 months) grandfather at introductory pricing for **24 months** from signup AND receive **25% off steady-state at migration** as the "founding customer" rate, applied for an additional 12 months post-migration. All other early customers grandfather at intro pricing for 12 months, then migrate to full steady-state with 60-day notice.
+
+This serves three purposes simultaneously: (a) defends against the natural churn cliff at the intro → steady-state boundary (90% price jump on Developer would otherwise churn 15–30% of cohort per SaaS benchmarks), (b) acts as a real P-1 LOI sweetener ("lock in $10/mo for 24 months if you sign in beta"), and (c) creates a founding-customer cohort with case-study + referral value.
 
 ### Product surfaces
 
@@ -1267,7 +1389,7 @@ Operational state. Decision rationale in [§1.10](#110-monetization-commitment-a
 |---|---|---|---|---|---|---|---|
 | Free | n/a | $0 | $0 | 1 | 1K runs, 500 evals, 30d | ❌ | $20 trial pool, then required |
 | Developer | Subscription | $10/mo | **$19/mo** | 1 | 10–20K runs, 5K evals, 90d | ✅ | required after trial |
-| Team | Subscription (base + per-seat) | $30 + $10/seat | **$49 + $15/seat** | 2+ | Shared org quotas (scaled with seats) | ✅ per seat | required |
+| Team | Subscription (base + per-seat) | $30 + $10/seat | **$49 + $15/seat** | 2+ | Shared org quotas (scaled with seats) + **org-level GEPA budget pool + shared eval datasets + SSO** ([§1.11 condition 2](#111-round-3-conditions-twelve-interaction-surface-codifications)) | ✅ per seat | required |
 | Pay-as-you-go | Pure usage | TBD by P-1 | **$0.008/run + $0.03/eval** | 1 | None | ❌ default; $19/mo per-user add-on | required |
 | Enterprise | Custom contract | Quote | Quote (typically $500+/mo) | Custom | Custom | ✅ all seats | required (or managed inference) |
 
@@ -1281,16 +1403,20 @@ BYOK eliminates inference cost — the most expensive variable in the comp set. 
 | Tinybird ingest (≈40K UsageEvents) | <$0.10 |
 | Upstash ops + DO time + R2 | <$0.10 |
 | Workers compute | <$0.05 |
+| **GEPA compute** (Fly.io + R2 artifacts + Queue) | **~$0.05–0.50 per run; ~$0.50–5.00 at Developer typical usage** |
 | Fixed-cost amortization | ~$0.20–1.00 depending on scale |
-| **Total** | **~$2/mo** |
-| **Gross margin** | **~89%** |
+| **Total at light GEPA use** | **~$2–3/mo** (~85% margin) |
+| **Total at heavy GEPA use** | **~$7/mo** (~63% margin) |
 
-Even introductory $10/mo holds ~80% gross margin. Steady-state captures more of the value already being delivered, not a price needed for the bottom line.
+**GEPA cost is the load-bearing variable** ([§1.11 condition 6](#111-round-3-conditions-twelve-interaction-surface-codifications)) — at light use the 89% margin number holds; at heavy use it compresses to mid-60s. **Resolution: bundled GEPA-run allowance per tier with overage metering** — Developer 50 runs/mo bundled, $0.50/run overage; Team scales proportionally. Also tests willingness-to-pay on the moat feature in P-1.
+
+Even introductory $10/mo holds healthy margin under bundled GEPA. Steady-state captures more value while keeping moat economics intact.
 
 ### Metering anchors
 
-- **`agent-runs`** — primary billable unit; pay-per-thing-the-agent-did
+- **`agent-runs`** — primary billable unit; pay-per-thing-the-agent-did. Definition pinned in [§2.4](#24-architectural-primitives): one top-level `harness.run()` invocation; sub-harness spawns, retries within a run, fork branches all roll up.
 - **`eval-scores`** — secondary billable unit; tracks the moat
+- **`gepa-runs`** — third metered unit ([§1.11 condition 6](#111-round-3-conditions-twelve-interaction-surface-codifications)); per-tier bundled allowance + overage, because GEPA is compute-heavy and is the moat feature
 - **Tokens are NOT billable** — preserves [§1.4](#14-openrouter-pragmatism-debate) BYOK posture
 - Trace storage beyond retention window — deferred meter
 
@@ -1311,8 +1437,9 @@ The cut will adjust based on customer signal — flagged as initial.
 ### Entitlement mechanism
 
 - API key carries an `entitlements` claim alongside `scopes`, cached in Upstash with the 60s verification cache
+- **Tier-change is in `SENSITIVE_SCOPES`** ([§1.11 condition 1](#111-round-3-conditions-twelve-interaction-surface-codifications)) — cache invalidated immediately, not in 60s. Server pushes a `revocation_pending` flag during invalidation so the next CLI ping fast-rotates.
 - CLI checks entitlement on protected commands (`noetic optimize`, sub-harness commands, etc.)
-- **Offline grace period: 7 days** — CLI keeps last-known entitlements signed locally so airplane mode works; failing the check after 7 days requires re-auth
+- **Two-tier offline grace**: 7 days for "no network" (laptop offline) — keeps last-known entitlements signed locally so airplane mode works. **24-hour hard cap when a tier change is server-pending** — local cache encodes both last-confirmed timestamp and `revocation_pending` bit, so CLI knows which grace applies.
 - Entitlement-aware error messages: "`noetic optimize` requires Developer tier or above. Upgrade at https://noetic.tools/billing"
 
 ### Stripe schema (all three models share infrastructure)
@@ -1326,12 +1453,32 @@ The cut will adjust based on customer signal — flagged as initial.
 
 Same `UsageEvent` stream feeds all of them via Stripe Meters. Same `BucketStateDO` enforces bundled allowances. The differences live in Stripe config, not in our metering code.
 
-### Tier-switching UX requirements
+### Cross-model transitions ([§1.11 condition 3](#111-round-3-conditions-twelve-interaction-surface-codifications))
 
-- Customers can switch between any two tiers (Free ↔ Developer ↔ Team ↔ PAYG ↔ Enterprise)
-- **Pre-confirmation preview**: "based on your current period's usage, on PAYG you'd pay $X; on Team you'd pay $Y"
-- Stripe handles cancel + new subscription transitions; we handle the preview math and the entitlement transition (instant on subscription start; end-of-period on downgrade)
-- No price-lock pause-and-resume in v1; cancellation = subscription ends end-of-period, entitlements revert to Free
+Explicit rules per direction. The **no-arbitrage invariant**: no transition path produces an outcome where the customer pays less for the same usage than the cheapest single-tier price path would charge.
+
+| From → To | Effective when | Pro-rate / charge | Entitlements |
+|---|---|---|---|
+| Free → any paid | Immediate | First period charged pro-rated | Instant grant |
+| Developer → Team | Next billing cycle | Team base + seats from next cycle | Instant grant (Team-only features unlocked immediately; usage continues on Developer quota until cycle ends) |
+| Team → Developer | End-of-period | No pro-rate; Team continues until period end | Entitlements revert at period end |
+| Subscription → PAYG | End-of-period | No pro-rate; subscription continues until period end | Entitlements revert at period end |
+| PAYG → Subscription | Immediate | Subscription pro-rated from today; today's PAYG usage so far billed as PAYG, future under new subscription bundled allowance | Instant grant |
+| Any → Enterprise | Per contract | Per contract | Per contract |
+
+**7-day upgrade-then-downgrade cooldown** ([§1.11 condition 3](#111-round-3-conditions-twelve-interaction-surface-codifications)): if a customer upgrades to a higher tier and downgrades within 7 days:
+- The downgrade is **immediate** (not end-of-period)
+- The upgrade is **prorated as a 1-day charge** (Stripe supports this)
+- Closes the free-trial-of-Pro exploit (upgrade Mon, run GEPA Tue, downgrade Wed)
+
+**Pre-confirmation preview** before any tier change shows projected cost on the new tier based on current-period usage to date. Built from usage-projection Tinybird query + tier-comparison API (P5 sub-tasks; ~5 days).
+
+### Entitlement transition semantics
+
+- **Upgrade**: instant. New scopes/entitlements active on next request (Upstash invalidation triggered immediately by tier-change in `SENSITIVE_SCOPES`).
+- **Downgrade outside cooldown**: end-of-period. Entitlements revert at midnight UTC on cycle boundary.
+- **Downgrade inside 7-day cooldown**: immediate. Entitlements revert on next request after the downgrade is submitted.
+- **CLI offline grace**: 7 days for "no network"; **24-hour hard cap when a tier change is server-pending** ([§1.11 condition 1](#111-round-3-conditions-twelve-interaction-surface-codifications)).
 
 ### Open implementation questions
 
@@ -1370,15 +1517,15 @@ Seven candidate specs, but **only S1 + S2 are drafted before P-1 closes** ([§1.
 Accounts, members, roles/scopes (hardcoded role→scope map behind `hasScope()`), `SENSITIVE_SCOPES` cache-bypass set, WorkOS AuthKit as source-of-truth-on-read with 60s Upstash cache + daily reconciliation, **typed `AccountScope` repo for multi-tenancy** (RLS rejected — Hyperdrive prepared-statement cache bypasses), CI cross-tenant pen-test, audit log via Cloudflare Queue → Axiom (no Postgres outbox in v1), 7-year retention SLA via R2 archive. Defines the auth contract every other spec depends on.
 
 **S2. Metering Spine**
-`UsageEvent` shape with `period_anchor` field; emission via Cloudflare Queue (not fire-and-forget); Tinybird ingest with materialized-view PII defense-in-depth; **`BucketStateDO` (Durable Object) per `(account, metric, period)`** with TTL'd reservations + alarm sweepers; worst-case-cost reservation semantics; **refuse with 402/429 for hard-cap accounts** (no silent clamp); `Idempotency-Key` state machine (`in_flight | succeeded | failed` with block-and-wait); one reconciler loop in v1; Stripe Meter period-boundary handling (5-min grace, `period_anchor`, +10-min reconciler). The metering contract every billable surface depends on.
+`UsageEvent` shape with `period_anchor` field; emission via Cloudflare Queue (not fire-and-forget); Tinybird ingest with materialized-view PII defense-in-depth; **Tinybird dedup window ≥7 days as a constraint** ([§1.11 condition 10](#111-round-3-conditions-twelve-interaction-surface-codifications)); **`BucketStateDO` (Durable Object) per `(account, metric, period, shard?)` with tier-keyed sharding** (Free/Developer=1, Team=4, Enterprise=16) ([§1.11 condition 9](#111-round-3-conditions-twelve-interaction-surface-codifications)); TTL'd reservations + alarm sweepers; **per-reservation `settle_journal` retained for reconciler replay**; **`settle()` atomic with Queue enqueue** in a single DO method; worst-case-cost reservation semantics; **refuse with 402/429 for hard-cap accounts** (no silent clamp); `Idempotency-Key` state machine (`in_flight | succeeded | failed` with block-and-wait); **reconciler drift-direction matrix**: on `DO.used > Tinybird.sum` replay from journal, NEVER decrement DO; one reconciler loop in v1, **PAYG drift tolerance recalibrated** vs subscription; **late-settle-after-rollover** emits with original `period_anchor`; Stripe Meter period-boundary handling (5-min grace, `period_anchor`, +10-min reconciler grouped by `period_anchor` not `ts`); **`agent-run` definition pinned** (one top-level `harness.run()`; sub-harness/retries/forks roll up; client-side retries emit new run); **`gepa-run` definition** for the third meter. The metering contract every billable surface depends on.
 
 ### Tier 2 — Wedge (drafted after P-1 passes, before P3)
 
 **S3. API Keys + CLI Auth** — sketch only until P-1
-`noetic_<env>_<24B-base62>`, **versioned pepper** (`{prefix, pepper_version, hmac}`), HMAC-SHA256 with KMS-stored pepper, prefix-indexed lookup with **Hyperdrive caching disabled** for the table, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, **`entitlements` claim alongside scopes** for CLI Pro feature gating ([§1.10](#110-monetization-commitment-api--cli-three-commercial-models)), `Idempotency-Key` state machine consumer. CLI `noetic login` device-code flow; offline grace with signed local entitlement cache (7 days). Depends on S1 + S2.
+`noetic_<env>_<24B-base62>`, **versioned pepper** (`{prefix, pepper_version, hmac}`), HMAC-SHA256 with KMS-stored pepper, prefix-indexed lookup with **Hyperdrive caching disabled** for the table, constant-time HMAC compare, account-owned vs member-CLI-login model, rotate-on-offboarding, scope inheritance, **`entitlements` claim alongside scopes** for CLI Pro feature gating ([§1.10](#110-monetization-commitment-api--cli-three-commercial-models)), `Idempotency-Key` state machine consumer. CLI `noetic login` device-code flow; **two-tier offline grace** ([§1.11 condition 1](#111-round-3-conditions-twelve-interaction-surface-codifications)): 7 days for "no network", 24-hour hard cap when `revocation_pending` flag set; tier-change is `SENSITIVE_SCOPES`. Depends on S1 + S2.
 
 **S4. Inference Gateway & SDK** — sketch only until P-1
-BYOK Mode A (proxied via AI Gateway abstraction) and **Mode B (async/SDK-side)**; trial-credits-pool path; opt-in managed-inference feature flag; trace tie-in to `@noetic-tools/core` runs; `@noetic-tools/sdk` wrapper; response usage emission to UsageEvent Queue; SSE handling. Depends on S3 + S2.
+BYOK Mode A (proxied via AI Gateway abstraction) and **Mode B (async/SDK-side) with metering-integrity contract** ([§1.11 condition 11](#111-round-3-conditions-twelve-interaction-surface-codifications)): SDK-owned idempotency key + signed JWT with upstream request/response hash + `agent-run` id + server-side sampled re-query verification; **Mode B gated to subscription tiers only** (PAYG requires Mode A). Trial-credits-pool path; opt-in managed-inference feature flag; trace tie-in to `@noetic-tools/core` runs; `@noetic-tools/sdk` wrapper; response usage emission to UsageEvent Queue; SSE handling. Depends on S3 + S2.
 
 ### Tier 3 — Eval surface (the moat — drafted in parallel with S4)
 
@@ -1490,3 +1637,4 @@ P0 starts only after the gate passes.
 | 2026-06-14 | Observability graduated by paying-customer tier (§1.8, §2.15). Tier 0 (day 1, $0): Sentry + structured logs + /v1/health Cron + model_cost_usd dimension. Tier 1 (~$20/mo): Instatus + billing-correctness reconciler alerts + PostHog. Tier 2 (~$25–75): Better Stack + Honeycomb + SLO dashboards. Tier 3 ($500–2K): Datadog/Grafana + PagerDuty + Vanta. Three platform-specific concerns codified (billing-correctness as #1 incident class; BYOK cost tracking; /v1/health as SLA evidence). | User request: evaluate observability needs, gated by paying-customer milestones |
 | 2026-06-15 | **Round 2 panel overrides (§1.9)**: six prior decisions overridden (bucket_state to Durable Objects with TTL'd reservations; P-1 to 3-week hard gate with kill criteria + dual cohort; §1.4 hedge → commit to one ICP after P-1; trial pool to $20 cheap-cached identity-gated; SOC2 evidence unconditional in P0; HMAC pepper versioned from day 1). Workers footgun corrections (Hyperdrive cache disabled for authz tables; UsageEvent via Queue not fire-and-forget; refuse not silent-clamp; Idempotency-Key state machine; SENSITIVE_SCOPES bypass; Tinybird PII defense-in-depth; audit via Queue not Postgres outbox; UptimeRobot external probe; typed AccountScope not RLS; free-tier daily-cap key sharding; Stripe Meter period-boundary handling). Product additions (P3.5 eval surface; eval compute on Containers/Fly.io; BYOK key spec including Mode B async/SDK-side; success-screen sdk snippet not curl; Switching-from-LangSmith primary migration; §2.16 competitive positioning). CEO additions (EU AI Act specialist call; customer support line item; AI Gateway abstraction; 7-year audit retention with R2 archive; Cloudflare exit playbook; schedule rebaseline to 12wk/1eng or 8wk/2eng). Free-tier shape and trial pool open questions resolved. §3 specs deferred: only S1+S2 in P0; S3-S7 wait for P-1 outcome. | Second adversarial panel review explicitly empowered to challenge §1 |
 | 2026-06-15 | **Monetization commitment (§1.10, §2.17)**: two product surfaces (API primary, paid CLI secondary), three commercial models coexisting day 1 (subscription/seat tiers + PAYG + enterprise). **Introductory** (first 6 months / 100 customers): Developer $10/mo, Team $30 + $10/seat. **Steady-state**: Developer $19/mo, Team $49 + $15/seat, PAYG $0.008/agent-run + $0.03/eval-score. 12-month grandfather for early customers with 60-day notice. Unit-economics check: ~89% gross margin at steady-state, ~80% at introductory — BYOK eliminates inference cost so the most expensive comp-set variable is off-P&L. Metering anchors: `agent-runs` + `eval-scores` (tokens NOT billable). CLI Pro feature cut: GEPA, remote evals, sub-harness commands, multi-account, plugins all behind paid tier; OSS framework remains free. API keys gain `entitlements` claim cached in Upstash; CLI offline-grace 7 days with signed local cache. §2.11 Pricing-units open question resolved. P5 +1 week for all-three-models. S5 spec no longer collapses to seat-counting. | User commitments on monetization model + steady-state pricing in the black |
+| 2026-06-15 | **Round 3 panel conditions (§1.11)**: no residual fatal flaws — all three reviewers confirmed. Twelve mechanical codifications incorporated: (1) tier-change in `SENSITIVE_SCOPES` + two-tier CLI offline grace (7d "no network" / 24h "tier-change pending"); (2) Team tier gains org-GEPA-budget + shared eval datasets + SSO (closes PAYG vs Team arbitrage; replaces "accepted arbitrage" framing); (3) §2.17 cross-model transitions subsection with per-direction rules + no-arbitrage invariant + 7-day upgrade-then-downgrade cooldown; (4) first-100 loyalty lock (24mo at intro + 25% off steady-state) — defends churn cliff + acts as P-1 LOI sweetener; (5) schedule honestly rebaselined to 16wk-1eng or 10–12wk-2eng; (6) `gepa-runs` added as a third meter with per-tier bundled allowance — GEPA compute cost added to unit economics; (7) `agent-run` definition pinned in S2 (one top-level `harness.run()`); (8) Enterprise founding-sales motion in P-1 (design-partner template, security questionnaire, "enterprise ready" definition); (9) tier-keyed DO sharding (Free/Developer=1, Team=4, Enterprise=16) + per-reservation `settle_journal` + reconciler drift-direction matrix (replay-from-journal, never decrement) + DO settle/Queue-enqueue atomic; (10) Tinybird dedup window ≥7 days as hard constraint; reconciler groups by `period_anchor`; (11) Mode B metering-integrity contract (SDK-owned idempotency + signed JWT + sampled re-query) + **Mode B gated to subscription tiers only**; (12) `/pricing-preview` page in P-1 (preview pricing, "reserve early-access" CTA, feature-checklist LOI signatures, same URL transitions to live Stripe-integrated in P5). Plus second-order codifications: late-settle-after-rollover, Upstash-degraded fallback, archived audit retrieval surface in P6, Sentry quota sampling for DO alarms, recalibrated PAYG reconciliation tolerance. | Round 3 final panel review — empowered to challenge but found only seams between round-1/round-2 fixes |
