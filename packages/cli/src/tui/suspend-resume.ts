@@ -24,7 +24,10 @@
  * raw mode untouched and only triggers the repaint.
  */
 
-import { buildTerminalRestoreSequence } from './terminal/interrupt-safety-net.js';
+import {
+  buildTerminalEnterSequence,
+  buildTerminalRestoreSequence,
+} from './terminal/interrupt-safety-net.js';
 
 export type SuspendSignal = 'SIGTSTP' | 'SIGCONT';
 
@@ -130,6 +133,17 @@ function runResume(deps: SuspendResumeDeps, wasSuspended: boolean): void {
       deps.setRawMode(true);
     } catch {
       // not a TTY or already torn down
+    }
+  }
+  // Re-enter the alternate screen buffer that runSuspend's terminal-restore
+  // sequence left when it dropped back to the main buffer for the shell.
+  // Without this, `fg` returns to a blank main buffer until something
+  // triggers a full repaint cycle.
+  if (wasSuspended) {
+    try {
+      deps.stdout.write(buildTerminalEnterSequence());
+    } catch {
+      // pipe closed — onResume will surface the failure
     }
   }
   try {

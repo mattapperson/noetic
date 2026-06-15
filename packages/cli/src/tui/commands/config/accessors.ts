@@ -181,6 +181,13 @@ const staticFieldGetters: Record<string, StaticFieldGetter> = {
   'tools.exclude': (config) => config.tools?.exclude ?? [],
   memory: (config) => config.memory ?? [],
   'history.maxItems': (config) => config.history?.maxItems,
+  'ui.contextPanelWidth': (config) => {
+    const value = config.ui?.contextPanelWidth;
+    if (value === undefined) {
+      return 'responsive';
+    }
+    return typeof value === 'number' ? value.toString() : value;
+  },
 };
 
 //#endregion
@@ -313,6 +320,25 @@ const staticFieldSetters: Record<string, StaticFieldSetter> = {
     }
     config.history = {
       maxItems: parsed,
+    };
+  },
+  'ui.contextPanelWidth': (config, rawValue) => {
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0 || trimmed === 'responsive') {
+      config.ui = {
+        ...config.ui,
+        contextPanelWidth: 'responsive',
+      };
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    const clamped = Math.max(28, Math.min(80, Math.trunc(parsed)));
+    config.ui = {
+      ...config.ui,
+      contextPanelWidth: clamped,
     };
   },
 };

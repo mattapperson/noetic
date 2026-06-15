@@ -137,6 +137,14 @@ const STATIC_CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
     description:
       'Cap on items projected to the LLM. Storage is unaffected. Leave blank to disable.',
   },
+  {
+    path: 'ui.contextPanelWidth',
+    label: 'Context Panel Width',
+    kind: FieldKind.Text,
+    tab: ConfigTab.Runtime,
+    placeholder: 'responsive',
+    description: '"responsive" (default) or a column count 28-80 for the /context dock.',
+  },
 ];
 
 //#endregion

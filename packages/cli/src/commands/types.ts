@@ -90,6 +90,13 @@ interface CommandContext {
    * the chat. Undefined in headless contexts (tests, picker, etc.).
    */
   setViewMode?: (mode: ViewMode) => void;
+  /**
+   * Toggle the Context Split View dock open/closed. Undefined in headless
+   * contexts. See specs/28-context-split-view.md.
+   */
+  toggleContextPanel?: () => void;
+  /** Whether the Context Split View dock is currently open. */
+  contextPanelOpen?: boolean;
 }
 
 /** Top-level views the TUI can render. */
@@ -161,6 +168,16 @@ type LocalCommandResult =
     }
   | {
       type: 'prompt';
+      value: string;
+    }
+  | {
+      /**
+       * Transient one-line notice rendered below the prompt — for ephemeral
+       * confirmations of UI actions ("dock opened", "mode switched") that
+       * don't belong in the chat scroll. Auto-dismisses after a few seconds
+       * or on the next keystroke / submitted turn.
+       */
+      type: 'notice';
       value: string;
     };
 

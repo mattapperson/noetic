@@ -28,6 +28,17 @@ export type WorktreeHook = z.infer<typeof WorktreeHookSchema>;
  */
 export const UiConfigSchema = z.object({
   doublePressWindowMs: z.number().int().min(100).max(5000).optional(),
+  /**
+   * Context Split View panel width. `'responsive'` (default) lets the layout
+   * choose a column count based on terminal width; a number pins the panel
+   * to that count. See specs/28-context-split-view.md.
+   */
+  contextPanelWidth: z
+    .union([
+      z.literal('responsive'),
+      z.number().int().min(28).max(80),
+    ])
+    .optional(),
 });
 
 export type UiConfig = z.infer<typeof UiConfigSchema>;

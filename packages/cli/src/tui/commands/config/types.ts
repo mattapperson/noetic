@@ -55,7 +55,8 @@ export type StaticConfigFieldPath =
   | 'tools.include'
   | 'tools.exclude'
   | 'memory'
-  | 'history.maxItems';
+  | 'history.maxItems'
+  | 'ui.contextPanelWidth';
 
 export type ConfigFieldPath = StaticConfigFieldPath | AgentOverrideFieldPath;
 

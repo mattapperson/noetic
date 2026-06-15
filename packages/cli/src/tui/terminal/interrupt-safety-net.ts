@@ -22,6 +22,9 @@ const DISABLE_MOUSE_NORMAL = '\x1b[?1000l';
 const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
 const POP_KITTY_KEYBOARD = '\x1b[<u';
 const RESET_MODIFY_OTHER_KEYS = '\x1b[>4;0m';
+const EXIT_ALT_SCREEN = '\x1b[?1049l';
+const ENTER_ALT_SCREEN = '\x1b[?1049h';
+const HIDE_CURSOR = '\x1b[?25l';
 
 export type Signal = 'SIGINT' | 'SIGTERM';
 
@@ -35,8 +38,22 @@ export type SignalDeps = {
   onBeforeExit?: () => void;
 };
 
+/**
+ * Sequence emitted before mounting Ink — switches the terminal into the
+ * alternate screen buffer so the TUI gets a full-viewport canvas with no
+ * scrollback bleed. Always paired with `buildTerminalRestoreSequence()` on
+ * exit, which includes the matching EXIT_ALT_SCREEN.
+ */
+export function buildTerminalEnterSequence(): string {
+  return [
+    ENTER_ALT_SCREEN,
+    HIDE_CURSOR,
+  ].join('');
+}
+
 export function buildTerminalRestoreSequence(): string {
   return [
+    EXIT_ALT_SCREEN,
     SHOW_CURSOR,
     DISABLE_BRACKETED_PASTE,
     DISABLE_MOUSE_ANY_EVENT,

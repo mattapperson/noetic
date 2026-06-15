@@ -138,7 +138,6 @@ export interface PromptInputContextValue {
   agentMode?: AgentMode;
   onToggleMode?: () => void;
   dividerColor?: string;
-  dividerDashed?: boolean;
   theme: ReturnType<typeof useTheme>;
   handleInput: (value: string) => void;
   handleInputSubmit: (value: string) => void;
@@ -221,12 +220,17 @@ export interface PromptInputProps {
   onToggleMode?: () => void;
   /** Whether the input is focused and accepting keystrokes */
   focus?: boolean;
+  /**
+   * When false, the prompt continues to render (history + cursor visible)
+   * but its internal `useInput` stops consuming keystrokes. Used by the
+   * Context Split View so the context pane can receive keys while focused.
+   * Defaults to true.
+   */
+  isActive?: boolean;
   /** Show horizontal dividers above and below the input */
   showDividers?: boolean;
   /** Override divider line color (e.g. for focus indicators) */
   dividerColor?: string;
-  /** Use dashed divider lines instead of solid */
-  dividerDashed?: boolean;
   /** Compound mode: provide subcomponents as children */
   children?: ReactNode;
 }
@@ -549,21 +553,31 @@ function usePromptKeyboardHandler(args: {
 // Subcomponents
 // ============================================================================
 
-/** Horizontal divider line fills the full terminal width. */
+/**
+ * Horizontal divider line spanning the prompt's available width.
+ *
+ * Uses Ink's `borderBottom` on an empty Box so the line is drawn by the
+ * layout engine itself \u2014 it auto-fits the Box's flex-resolved width and
+ * reflows on terminal resize. A previous implementation rendered
+ * `'\u2500'.repeat(stdout.columns)` inside a `<Text>`, which overflowed when
+ * the prompt lived inside a narrower container (Context Split View dock
+ * open) and left a gap when the terminal was widened \u2014 the divider has to
+ * follow its container, not the raw terminal column count.
+ */
 function PromptInputDivider() {
-  const { dividerColor, dividerDashed, theme } = usePromptInput();
-  const { stdout } = useStdout();
-  // Ink's useStdout provides the terminal dimensions
-  const width = stdout?.columns ?? 80;
+  const { dividerColor, theme } = usePromptInput();
   const color = dividerColor ?? theme.muted;
-  const char = dividerDashed ? '\u254C' : '\u2500';
-  const line = char.repeat(width);
   return (
-    <Box width="100%">
-      <Text color={color} dimColor={!dividerColor}>
-        {line}
-      </Text>
-    </Box>
+    <Box
+      width="100%"
+      flexShrink={0}
+      borderStyle="single"
+      borderTop={false}
+      borderLeft={false}
+      borderRight={false}
+      borderColor={color}
+      borderDimColor={!dividerColor}
+    />
   );
 }
 
@@ -623,7 +637,7 @@ function PromptInputTextarea() {
   } = usePromptInput();
   return (
     <Box flexDirection="row">
-      <Text color={promptColor}>{prompt}</Text>
+      <Text color={promptColor}>{prompt} </Text>
       {isFocused ? (
         <TextInput
           value={value}
@@ -745,9 +759,9 @@ export function PromptInput({
   agentMode,
   onToggleMode,
   focus = true,
+  isActive = true,
   showDividers = true,
   dividerColor,
-  dividerDashed,
   children,
 }: PromptInputProps) {
   const theme = useTheme();
@@ -933,7 +947,7 @@ export function PromptInput({
   const { handleInputSubmit } = usePromptSubmitHandlers(submitArgs);
 
   usePromptKeyboardHandler({
-    focus,
+    focus: focus && isActive,
     disabled,
     status,
     isModalOpen,
@@ -974,7 +988,6 @@ export function PromptInput({
       agentMode,
       onToggleMode,
       dividerColor,
-      dividerDashed,
       theme,
       handleInput: updateValue,
       handleInputSubmit,
@@ -997,7 +1010,6 @@ export function PromptInput({
       agentMode,
       onToggleMode,
       dividerColor,
-      dividerDashed,
       theme,
       updateValue,
       handleInputSubmit,

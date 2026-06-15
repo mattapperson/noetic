@@ -110,6 +110,10 @@ import {
   StreamMetricsProvider,
   useExitOnInterrupt,
 } from './app-parts/ui.js';
+import { ChatLayout } from './components/chat-layout.js';
+import { RootCanvas } from './components/root-canvas.js';
+import { nextFocus } from './layout/next-focus.js';
+import type { ContextPanelWidthConfig, Pane } from './layout/types.js';
 import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
 import { TaskBoard } from './tasks/runtime-ui/task-board.js';
 
@@ -186,6 +190,25 @@ function App({
   const [viewMode, setViewMode] = useState<ViewMode>({
     kind: 'chat',
   });
+  // Context Split View dock state — session-local. See specs/28-context-split-view.md.
+  const [contextPanelOpen, setContextPanelOpen] = useState<boolean>(false);
+  const [focusedPane, setFocusedPane] = useState<Pane>('chat');
+  // Transient one-line notice rendered below the prompt. Cleared by a
+  // timeout (~4s) or by the next user submission. Notices are ephemeral UI
+  // confirmations ("dock opened", "mode switched") that don't belong in
+  // the chat scroll.
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (statusNotice === null) {
+      return;
+    }
+    const id = setTimeout(() => setStatusNotice(null), 4000);
+    return (): void => {
+      clearTimeout(id);
+    };
+  }, [
+    statusNotice,
+  ]);
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
   const [effectiveCwd, setEffectiveCwd] = useState<string>(
@@ -1056,8 +1079,41 @@ function App({
     ],
   );
 
+  // Context Split View — `/context` toggles the dock. When opening fresh,
+  // start with focus on chat so the user can keep typing. See spec 28.
+  const toggleContextPanel = useCallback((): void => {
+    setContextPanelOpen((prev) => {
+      if (prev) {
+        return false;
+      }
+      setFocusedPane('chat');
+      return true;
+    });
+  }, []);
+
+  const swapContextFocus = useCallback((): void => {
+    setFocusedPane((prev) => nextFocus(prev));
+  }, []);
+
+  // When AskUserModal opens while the dock is open, snap focus back to
+  // chat so the user can answer. The dock stays mounted.
+  useEffect(() => {
+    if (askUserRequest && contextPanelOpen) {
+      setFocusedPane('chat');
+    }
+  }, [
+    askUserRequest,
+    contextPanelOpen,
+  ]);
+
+  // Resolve the configured panel width (or default 'responsive').
+  const panelWidthConfig: ContextPanelWidthConfig = config.ui?.contextPanelWidth ?? 'responsive';
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage): Promise<void> => {
+      // Ephemeral notices clear on the next user submission so they don't
+      // linger across turns.
+      setStatusNotice(null);
       const text = message.text;
       const sendUserMessage = async (
         messageText: string,
@@ -1204,6 +1260,8 @@ function App({
         clearSession,
         restartWithSession,
         setViewMode,
+        toggleContextPanel,
+        contextPanelOpen,
       };
 
       try {
@@ -1245,6 +1303,10 @@ function App({
               content: result.value,
             } satisfies SystemEntry,
           ]);
+          return;
+        }
+        if (result.type === 'notice') {
+          setStatusNotice(result.value);
           return;
         }
         if (result.type === 'modal') {
@@ -1291,6 +1353,8 @@ function App({
       askUserService,
       restartWithSession,
       clearSession,
+      toggleContextPanel,
+      contextPanelOpen,
     ],
   );
 
@@ -1419,39 +1483,54 @@ function App({
     <InkProvider>
       <FooterContextProvider value={footerValue}>
         <StreamMetricsProvider value={streamMetrics}>
-          {viewMode.kind === 'taskBoard' ? (
-            <TaskBoard
-              fs={config.fs}
-              projectRoot={config.cwd}
-              onExit={exitToChat}
-              onOpenChat={handleOpenChat}
-            />
-          ) : viewMode.kind === 'taskChat' ? (
-            <TaskChatView
-              socketPath={viewMode.socketPath}
-              taskId={viewMode.taskId}
-              roleLabel={viewMode.roleLabel}
-              onExit={exitToChat}
-            />
-          ) : viewMode.kind === 'taskChatSpawning' ? (
-            <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitSpawningView} />
-          ) : (
-            <ResponsesChat
-              entries={entries}
-              status={status}
-              onSubmit={handleSubmit}
-              onStop={handleStop}
-              model={model}
-              agentMode={agentMode}
-              onToggleMode={handleToggleAgentMode}
-              commands={commandSuggestions}
-              modalContent={modal?.content}
-              onModalClose={handleModalClose}
-              plugins={plugins}
-              exitHintArmed={exitHintArmed}
-              getRequestItems={getRequestItems}
-            />
-          )}
+          <RootCanvas>
+            {viewMode.kind === 'taskBoard' ? (
+              <TaskBoard
+                fs={config.fs}
+                projectRoot={config.cwd}
+                onExit={exitToChat}
+                onOpenChat={handleOpenChat}
+              />
+            ) : viewMode.kind === 'taskChat' ? (
+              <TaskChatView
+                socketPath={viewMode.socketPath}
+                taskId={viewMode.taskId}
+                roleLabel={viewMode.roleLabel}
+                onExit={exitToChat}
+              />
+            ) : viewMode.kind === 'taskChatSpawning' ? (
+              <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitSpawningView} />
+            ) : (
+              <ChatLayout
+                panelOpen={contextPanelOpen}
+                focusedPane={focusedPane}
+                onFocusSwap={swapContextFocus}
+                panelWidthConfig={panelWidthConfig}
+                modalActive={modal !== null || askUserRequest !== null}
+                model={model}
+                lastLayerUsage={lastLayerUsage}
+                registeredLayers={memoryLayersRef.current}
+              >
+                <ResponsesChat
+                  entries={entries}
+                  status={status}
+                  onSubmit={handleSubmit}
+                  onStop={handleStop}
+                  model={model}
+                  agentMode={agentMode}
+                  onToggleMode={handleToggleAgentMode}
+                  commands={commandSuggestions}
+                  modalContent={modal?.content}
+                  onModalClose={handleModalClose}
+                  plugins={plugins}
+                  exitHintArmed={exitHintArmed}
+                  getRequestItems={getRequestItems}
+                  isActive={!contextPanelOpen || focusedPane === 'chat'}
+                  statusNotice={statusNotice}
+                />
+              </ChatLayout>
+            )}
+          </RootCanvas>
         </StreamMetricsProvider>
       </FooterContextProvider>
     </InkProvider>
