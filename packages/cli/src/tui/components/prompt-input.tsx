@@ -1,5 +1,4 @@
 import { Box, Text, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
@@ -13,6 +12,7 @@ import {
   recordPromptHistoryEntry,
   resetPromptHistoryNavigation,
 } from '../utils/prompt-history.js';
+import { ChordSafeTextInput } from './chord-safe-text-input.js';
 import { useTheme } from './theme';
 
 export type { ChatStatus } from '../chat-status.js';
@@ -639,7 +639,7 @@ function PromptInputTextarea() {
     <Box flexDirection="row">
       <Text color={promptColor}>{prompt} </Text>
       {isFocused ? (
-        <TextInput
+        <ChordSafeTextInput
           value={value}
           placeholder={placeholder}
           onChange={handleInput}
