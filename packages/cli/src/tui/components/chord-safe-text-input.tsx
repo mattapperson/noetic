@@ -37,6 +37,129 @@ export interface ChordSafeTextInputProps {
 
 //#endregion
 
+//#region Helpers
+
+interface KeyState {
+  ctrl?: boolean;
+  shift?: boolean;
+  return?: boolean;
+  tab?: boolean;
+  upArrow?: boolean;
+  downArrow?: boolean;
+  leftArrow?: boolean;
+  rightArrow?: boolean;
+  backspace?: boolean;
+  delete?: boolean;
+}
+
+/**
+ * Returns `true` for every keystroke the chord-safe input ignores entirely.
+ * Anything that returns `true` must not advance the cursor or mutate the
+ * value. Upstream ink-text-input ignores arrows/Tab/Ctrl+C; we add the whole
+ * Ctrl+<single char> family — none of those are typed text, and at least one
+ * (Ctrl+W) is bound as an app-level chord.
+ */
+function isIgnoredKey(key: KeyState): boolean {
+  if (key.upArrow || key.downArrow || key.tab) {
+    return true;
+  }
+  if (key.shift && key.tab) {
+    return true;
+  }
+  if (key.ctrl) {
+    return true;
+  }
+  return false;
+}
+
+interface NextStateArgs {
+  input: string;
+  key: KeyState;
+  originalValue: string;
+  cursorOffset: number;
+  showCursor: boolean;
+}
+
+interface NextStateResult {
+  nextValue: string;
+  nextCursorOffset: number;
+  nextCursorWidth: number;
+}
+
+/**
+ * Pure cursor / buffer reducer. Returns the next value, cursor offset, and
+ * paste-highlight width given a non-ignored key. The result is clamped to
+ * `[0, originalValue.length]` so the caller doesn't have to.
+ */
+function computeNextState(args: NextStateArgs): NextStateResult {
+  const { input, key, originalValue, cursorOffset, showCursor } = args;
+  let nextValue = originalValue;
+  let nextCursorOffset = cursorOffset;
+  let nextCursorWidth = 0;
+
+  if (key.leftArrow) {
+    if (showCursor) {
+      nextCursorOffset--;
+    }
+  } else if (key.rightArrow) {
+    if (showCursor) {
+      nextCursorOffset++;
+    }
+  } else if (key.backspace || key.delete) {
+    if (cursorOffset > 0) {
+      nextValue =
+        originalValue.slice(0, cursorOffset - 1) +
+        originalValue.slice(cursorOffset, originalValue.length);
+      nextCursorOffset--;
+    }
+  } else {
+    nextValue =
+      originalValue.slice(0, cursorOffset) +
+      input +
+      originalValue.slice(cursorOffset, originalValue.length);
+    nextCursorOffset += input.length;
+    if (input.length > 1) {
+      nextCursorWidth = input.length;
+    }
+  }
+
+  if (nextCursorOffset < 0) {
+    nextCursorOffset = 0;
+  }
+  if (nextCursorOffset > nextValue.length) {
+    nextCursorOffset = nextValue.length;
+  }
+
+  return {
+    nextValue,
+    nextCursorOffset,
+    nextCursorWidth,
+  };
+}
+
+/**
+ * Renders a single line of text with the cursor (and any paste-highlight
+ * range) inverted. Returns the rendered string; the caller wraps it in
+ * `<Text>`.
+ */
+function renderWithCursor(value: string, cursorOffset: number, cursorActualWidth: number): string {
+  if (value.length === 0) {
+    return chalk.inverse(' ');
+  }
+  let out = '';
+  let i = 0;
+  for (const char of value) {
+    out += i >= cursorOffset - cursorActualWidth && i <= cursorOffset ? chalk.inverse(char) : char;
+    i++;
+  }
+  if (cursorOffset === value.length) {
+    out += chalk.inverse(' ');
+  }
+  return out;
+}
+
+//#endregion
+
 //#region Component
 
 export function ChordSafeTextInput(props: ChordSafeTextInputProps): ReactNode {
@@ -87,82 +210,33 @@ export function ChordSafeTextInput(props: ChordSafeTextInputProps): ReactNode {
       placeholder.length > 0
         ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
         : chalk.inverse(' ');
-    renderedValue = value.length > 0 ? '' : chalk.inverse(' ');
-    let i = 0;
-    for (const char of value) {
-      renderedValue +=
-        i >= cursorOffset - cursorActualWidth && i <= cursorOffset ? chalk.inverse(char) : char;
-      i++;
-    }
-    if (value.length > 0 && cursorOffset === value.length) {
-      renderedValue += chalk.inverse(' ');
-    }
+    renderedValue = renderWithCursor(value, cursorOffset, cursorActualWidth);
   }
 
   useInput(
     (input, key) => {
-      // Upstream ignores arrows, Tab, and Ctrl+C. We add the entire
-      // Ctrl+<single char> family — none of those are ever typed text in a
-      // chat prompt, and at least one (Ctrl+W) is bound as an app-level chord
-      // we must not double-handle.
-      if (key.upArrow || key.downArrow || key.tab || (key.shift && key.tab)) {
+      if (isIgnoredKey(key)) {
         return;
       }
-      if (key.ctrl) {
-        return;
-      }
-
       if (key.return) {
         if (onSubmit) {
           onSubmit(originalValue);
         }
         return;
       }
-
-      let nextCursorOffset = cursorOffset;
-      let nextValue = originalValue;
-      let nextCursorWidth = 0;
-
-      if (key.leftArrow) {
-        if (showCursor) {
-          nextCursorOffset--;
-        }
-      } else if (key.rightArrow) {
-        if (showCursor) {
-          nextCursorOffset++;
-        }
-      } else if (key.backspace || key.delete) {
-        if (cursorOffset > 0) {
-          nextValue =
-            originalValue.slice(0, cursorOffset - 1) +
-            originalValue.slice(cursorOffset, originalValue.length);
-          nextCursorOffset--;
-        }
-      } else {
-        nextValue =
-          originalValue.slice(0, cursorOffset) +
-          input +
-          originalValue.slice(cursorOffset, originalValue.length);
-        nextCursorOffset += input.length;
-        if (input.length > 1) {
-          nextCursorWidth = input.length;
-        }
-      }
-
-      if (cursorOffset < 0) {
-        nextCursorOffset = 0;
-      }
-      if (cursorOffset > originalValue.length) {
-        nextCursorOffset = originalValue.length;
-      }
-
-      setState({
-        cursorOffset: nextCursorOffset,
-        cursorWidth: nextCursorWidth,
+      const result = computeNextState({
+        input,
+        key,
+        originalValue,
+        cursorOffset,
+        showCursor,
       });
-
-      if (nextValue !== originalValue) {
-        onChange(nextValue);
+      setState({
+        cursorOffset: result.nextCursorOffset,
+        cursorWidth: result.nextCursorWidth,
+      });
+      if (result.nextValue !== originalValue) {
+        onChange(result.nextValue);
       }
     },
     {

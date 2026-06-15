@@ -37,6 +37,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import type { ScrollAction } from './chat-scroll-state.js';
 import { applyScrollAction, pageSizeFor } from './chat-scroll-state.js';
+import { useMouseScroll } from './use-mouse-scroll.js';
 
 //#region Types
 
@@ -180,6 +181,42 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
       isActive,
     },
   );
+
+  // Mouse-wheel scrolling. Three notches per wheel tick is the conventional
+  // "feels right" multiplier — single-entry granularity is too sticky on a
+  // standard mouse wheel and a full page per notch overshoots. Trackpad
+  // users get one event per "click" of inertial scroll, which matches.
+  const handleWheelUp = useCallback(() => {
+    if (!isActive) {
+      return;
+    }
+    for (let i = 0; i < 3; i++) {
+      dispatch({
+        kind: 'line-up',
+      });
+    }
+  }, [
+    isActive,
+    dispatch,
+  ]);
+  const handleWheelDown = useCallback(() => {
+    if (!isActive) {
+      return;
+    }
+    for (let i = 0; i < 3; i++) {
+      dispatch({
+        kind: 'line-down',
+      });
+    }
+  }, [
+    isActive,
+    dispatch,
+  ]);
+  useMouseScroll({
+    onScrollUp: handleWheelUp,
+    onScrollDown: handleWheelDown,
+    isActive,
+  });
 
   const visibleCount = Math.max(0, entriesLen - scrollFromBottom);
   const visible = entries.slice(0, visibleCount);
