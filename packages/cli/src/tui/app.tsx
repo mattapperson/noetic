@@ -1518,24 +1518,31 @@ function App({
                 model={model}
                 lastLayerUsage={lastLayerUsage}
                 registeredLayers={memoryLayersRef.current}
+                getRequestItems={getRequestItems}
+                entries={entries}
+                status={status}
               >
-                <ResponsesChat
-                  entries={entries}
-                  status={status}
-                  onSubmit={handleSubmit}
-                  onStop={handleStop}
-                  model={model}
-                  agentMode={agentMode}
-                  onToggleMode={handleToggleAgentMode}
-                  commands={commandSuggestions}
-                  modalContent={modal?.content}
-                  onModalClose={handleModalClose}
-                  plugins={plugins}
-                  exitHintArmed={exitHintArmed}
-                  getRequestItems={getRequestItems}
-                  isActive={!contextPanelOpen || focusedPane === 'chat'}
-                  statusNotice={statusNotice}
-                />
+                {(overlayState) => (
+                  <ResponsesChat
+                    entries={entries}
+                    status={status}
+                    onSubmit={handleSubmit}
+                    onStop={handleStop}
+                    model={model}
+                    agentMode={agentMode}
+                    onToggleMode={handleToggleAgentMode}
+                    commands={commandSuggestions}
+                    modalContent={modal?.content}
+                    onModalClose={handleModalClose}
+                    plugins={plugins}
+                    exitHintArmed={exitHintArmed}
+                    overlay={overlayState.overlay}
+                    requestItems={overlayState.requestItems}
+                    requestItemsLoading={overlayState.requestItemsLoading}
+                    isActive={!contextPanelOpen || focusedPane === 'chat'}
+                    statusNotice={statusNotice}
+                  />
+                )}
               </ChatLayout>
             )}
           </RootCanvas>

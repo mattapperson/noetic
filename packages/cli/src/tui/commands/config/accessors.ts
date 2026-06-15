@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentOverride, WorktreeConfig } from '../../../types/config.js';
-import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../../layout/constants.js';
+import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../../../types/config.js';
 import type { AgentOverrideFieldName, ConfigFieldPath } from './types.js';
 import { parseAgentOverrideFieldPath } from './types.js';
 

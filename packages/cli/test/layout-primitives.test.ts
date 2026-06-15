@@ -8,6 +8,7 @@ import { CHAT_MIN_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from '../src/tui/lay
 import { decideLayoutMode } from '../src/tui/layout/decide-layout-mode.js';
 import { nextFocus } from '../src/tui/layout/next-focus.js';
 import { resolvePanelWidth } from '../src/tui/layout/resolve-panel-width.js';
+import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../src/types/config.js';
 
 describe('decideLayoutMode', () => {
   // Thresholds below are intentionally hard-coded (not derived from
@@ -37,10 +38,27 @@ describe('decideLayoutMode', () => {
   });
 });
 
+describe('width-bound invariants', () => {
+  // The user-facing fixed-config floor must never fall below the layout
+  // render floor — otherwise a pinned value would silently clamp up at
+  // render time. Bounds live in two files (types/config.ts owns the Zod
+  // schema; layout/constants.ts owns the layout floor) because of sentrux
+  // layering; this test guards the alignment.
+  test('PANEL_CONFIG_MIN ≥ PANEL_MIN_WIDTH', () => {
+    expect(PANEL_CONFIG_MIN).toBeGreaterThanOrEqual(PANEL_MIN_WIDTH);
+  });
+
+  test('PANEL_CONFIG_MAX is wider than the responsive ceiling', () => {
+    // Users on extreme-width terminals should be able to pin a panel
+    // wider than the responsive formula would ever pick.
+    expect(PANEL_CONFIG_MAX).toBeGreaterThan(PANEL_MAX_WIDTH);
+  });
+});
+
 describe('resolvePanelWidth — responsive', () => {
   test('floors 40 percent of cols within clamp range', () => {
-    // 40% of 140 = 56 — between MIN (49) and MAX (56).
-    expect(resolvePanelWidth(140, 'responsive')).toBe(56);
+    // 40% of 160 = 64 — between MIN (49) and MAX (72).
+    expect(resolvePanelWidth(160, 'responsive')).toBe(64);
   });
 
   test('clamps to PANEL_MIN_WIDTH when the terminal is narrow', () => {
@@ -49,7 +67,7 @@ describe('resolvePanelWidth — responsive', () => {
   });
 
   test('clamps to PANEL_MAX_WIDTH when the terminal is huge', () => {
-    // 40% of 300 = 120 → clamped down to PANEL_MAX_WIDTH (56).
+    // 40% of 300 = 120 → clamped down to PANEL_MAX_WIDTH (72).
     expect(resolvePanelWidth(300, 'responsive')).toBe(PANEL_MAX_WIDTH);
   });
 
@@ -59,10 +77,10 @@ describe('resolvePanelWidth — responsive', () => {
     expect(resolvePanelWidth(10, 'responsive')).toBe(10);
   });
 
-  test('responsive transitions at the 140-col threshold (40% × 140 = 56 = PANEL_MAX_WIDTH)', () => {
-    expect(resolvePanelWidth(139, 'responsive')).toBe(55);
-    expect(resolvePanelWidth(140, 'responsive')).toBe(PANEL_MAX_WIDTH);
-    expect(resolvePanelWidth(141, 'responsive')).toBe(PANEL_MAX_WIDTH);
+  test('responsive transitions at the 180-col threshold (40% × 180 = 72 = PANEL_MAX_WIDTH)', () => {
+    expect(resolvePanelWidth(179, 'responsive')).toBe(71);
+    expect(resolvePanelWidth(180, 'responsive')).toBe(PANEL_MAX_WIDTH);
+    expect(resolvePanelWidth(181, 'responsive')).toBe(PANEL_MAX_WIDTH);
   });
 });
 

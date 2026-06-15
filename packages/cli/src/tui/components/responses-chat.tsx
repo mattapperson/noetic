@@ -48,14 +48,20 @@ export interface ResponsesChatProps {
    */
   exitHintArmed?: boolean;
   /**
-   * Returns the items array that would be sent to the model on the next turn —
-   * fetched on demand when the request-items overlay (Ctrl+R) opens.
+   * Overlay state owned by `ChatLayout`. `ResponsesChat` is purely controlled
+   * here: it renders the transcript / request overlay when `overlay !==
+   * 'none'`, but does not own the toggle keys, the open/close transitions, or
+   * the request-items fetch.
    */
-  getRequestItems?: () => Promise<ReadonlyArray<Item>>;
+  overlay?: 'none' | 'transcript' | 'request';
+  /** Items sent to the model on the next turn, fetched by ChatLayout. */
+  requestItems?: ReadonlyArray<Item> | null;
+  /** True while the request overlay is open and items have not yet arrived. */
+  requestItemsLoading?: boolean;
   /**
    * When false, the chat pane is not the focused side of the Context Split
-   * View. Overlays and the prompt stop consuming keystrokes, but the chat
-   * tree continues to render live updates. Defaults to true.
+   * View. The prompt stops consuming keystrokes, but the chat tree continues
+   * to render live updates. Defaults to true.
    */
   isActive?: boolean;
   /**
@@ -83,7 +89,9 @@ export function ResponsesChat({
   onModalClose,
   plugins,
   exitHintArmed,
-  getRequestItems,
+  overlay = 'none',
+  requestItems = null,
+  requestItemsLoading = false,
   isActive = true,
   statusNotice,
 }: ResponsesChatProps): ReactNode {
@@ -155,42 +163,11 @@ export function ResponsesChat({
     ],
   );
 
-  const [overlay, setOverlay] = useState<'none' | 'transcript' | 'request'>('none');
+  // Overlay state is owned by `ChatLayout` and arrives via props. The toggle
+  // keys (Ctrl+O / Ctrl+R) and Esc-closes-overlay live there too — the only
+  // useInput we still need locally is the modal Esc, which has higher
+  // precedence than any of ChatLayout's chords (it's gated on `modalActive`).
   const overlayOpen = overlay !== 'none';
-  const [requestItems, setRequestItems] = useState<ReadonlyArray<Item> | null>(null);
-  // null means "not yet fetched for this open"; derived loading state avoids a
-  // separate flag that would otherwise always move in lockstep with setRequestItems.
-  const requestItemsLoading = overlay === 'request' && requestItems === null;
-
-  // Fetch request items each time the request overlay opens so the user sees
-  // the live state (memory layers + history that would feed the next callModel)
-  // rather than a stale snapshot from an earlier open.
-  useEffect(() => {
-    if (overlay !== 'request' || !getRequestItems) {
-      return;
-    }
-    let cancelled = false;
-    setRequestItems(null);
-    getRequestItems()
-      .then((items) => {
-        if (cancelled) {
-          return;
-        }
-        setRequestItems(items);
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        setRequestItems([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    overlay,
-    getRequestItems,
-  ]);
 
   function handleSubmit(msg: PromptInputMessage): void {
     onSubmit(msg);
@@ -200,19 +177,6 @@ export function ResponsesChat({
     (_input, key) => {
       if (key.escape && modalContent && onModalClose) {
         onModalClose();
-        return;
-      }
-      if (key.escape && overlayOpen) {
-        setOverlay('none');
-        return;
-      }
-      if (key.ctrl && _input === 'o') {
-        setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
-        return;
-      }
-      if (key.ctrl && _input === 'r') {
-        setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
-        return;
       }
     },
     {

@@ -14,11 +14,17 @@ export const CHAT_MIN_WIDTH = 60;
  */
 export const PANEL_MIN_WIDTH = 49;
 
-/** Maximum number of columns the context panel will occupy under 'responsive'. */
-export const PANEL_MAX_WIDTH = 56;
+/**
+ * Maximum number of columns the context panel will occupy under 'responsive'.
+ * Sized so the 0.40 fraction continues to scale on wide terminals (≥180
+ * cols) instead of pinning at the bar width; users on extreme widths can
+ * still pin a larger fixed value up to PANEL_CONFIG_MAX.
+ */
+export const PANEL_MAX_WIDTH = 72;
 
-/** Lower bound of the user-facing fixed-width config range. */
-export const PANEL_CONFIG_MIN = 49;
-
-/** Upper bound of the user-facing fixed-width config range. */
-export const PANEL_CONFIG_MAX = 80;
+// PANEL_CONFIG_MIN / PANEL_CONFIG_MAX (the user-facing fixed-width range)
+// live in `packages/cli/src/types/config.ts` so the Zod schema can derive
+// its bounds from the same constants. The accessors + field description
+// import them directly from there. `PANEL_CONFIG_MIN` must stay ≥
+// `PANEL_MIN_WIDTH`; the invariant is asserted in
+// `test/layout-primitives.test.ts`.

@@ -44,34 +44,32 @@ function decideLayoutMode(cols: number, panelWidth: number): LayoutMode {
 ### Wide
 
 ```
-┌─ chat ───────────────┬─ ► Context ─┐
-│ [streamed output]    │ Model       │
-│                      │  anthropic/…│
-│                      │ Context     │
-│                      │  21.8k/200k │
-│                      │ ▓▓▓░░░░░    │
-│                      │             │
-│ > _____________      │ System  2.8k│
-└──────────────────────┴─────────────┘
+─ ► chat ─────────────── ─   Context ──────
+ [streamed output]      │  Model
+                        │   anthropic/…
+                        │  Context
+                        │   21.8k/200k
+                        │  ▓▓▓░░░░░
+ > _____________        │  System  2.8k
 ```
 
-- `<Box flexDirection="row">` with `ResponsesChat` (flexGrow=1) and `ContextPanel` (width=`panelWidth`, `mode='full'`).
+- `<Box flexDirection="row">` with the chat column (flexGrow=1) and `ContextPanel` (width=`panelWidth`, `mode='full'`).
+- Each column has a **top horizontal rule with an inline title** (`─ ► chat ─` / `─ ► Context ─`). No full borders — no right or bottom borders anywhere.
+- The vertical divider between the columns is the context panel's `borderLeft`.
 - `Ctrl+W` swaps focus.
-- The focused pane is marked by **border style** (`round`) plus a **`►` glyph** prefixing the pane title. The unfocused pane has `borderStyle="single"` with a dimmed border color. Both signals are present so focus state remains legible without color.
+- The focused pane is marked by a **`►` glyph** prefix and a **bold** title; the unfocused title is dimmed. The rule character itself does not change on focus, so swapping focus never redraws the chrome — the signal is purely textual (legible on monochrome / NO_COLOR terminals).
 
 ### Narrow
 
 ```
-┌─ chat (focused) ────────────────┐
-│ [streamed output]               │
-│                                 │
-│ > _____________                 │
-├─────────────────────────────────┤
-│ Context · 21.8k / 200k (10.9%)  │
-└─────────────────────────────────┘
+─ ► chat ─────────────────────────
+ [streamed output]
+
+ > _____________
+   Context · 21.8k / 200k (10.9%)
 ```
 
-- Vertical stack. Focused pane fills available height; the other shows as a one-line strip below the prompt.
+- Vertical stack. Focused pane fills available height; the other shows as a one-line strip below the prompt. The focused pane's top rule carries its `► <name>` title; the strip has no rule (it is itself the summary line).
 - `Ctrl+W` swaps focus, which also swaps which pane is full-height.
 - When `focusedPane === 'context'` and a turn is streaming, the minimized chat strip live-previews the last 1–3 lines of the streaming delta in place of the idle-state `chat · N msgs · waiting…`. This preserves the always-visible chat invariant when the user has chosen to focus on context.
 
@@ -85,44 +83,36 @@ ui: {
 }
 ```
 
-- `'responsive'` (default): `clamp(PANEL_MIN_WIDTH, floor(0.40 * cols), 56)`.
+- `'responsive'` (default): `clamp(PANEL_MIN_WIDTH, floor(0.40 * cols), 72)`.
 - `number` (49–80): fixed columns, clamped down at runtime if the terminal cannot fit `value + CHAT_MIN_WIDTH` chat columns. The 49-col floor is sized so the per-layer row (14 label + 7 tokens + 24 bar = 45 cols) fits on a single line inside the bordered box.
 
 Validated by Zod (`z.union([z.literal('responsive'), z.number().int().min(49).max(80)])`). Surfaced in the `/config` editor.
 
-## Live update strategy
+## Update strategy
 
 | Surface | Source | Cadence |
 |---|---|---|
 | Per-layer rows + bars + percentages | `lastLayerUsageRef` (turn boundary) | Turn end |
-| Header `21.8k / 200k tokens (10.9%)` | `liveTokensRef`, throttled | 10 Hz |
+| Header `21.8k / 200k tokens (10.9%)` | `lastLayerUsageRef.totalUsedTokens` | Turn end |
 
-A `useThrottledLiveTokens(intervalMs)` hook subscribes to the existing `liveTokensRef` (a ref, not state) and produces a `useState`-backed snapshot every `intervalMs`. At 10 Hz the numeric counter refresh is below the human-perceivable threshold for value tracking and avoids 30–80 re-renders per second during streaming. `ResponsesChat`'s `<Static>` boundary continues to protect scrollback; only the panel (or its strip variant) re-renders.
+The header total and the per-layer bars share a single authoritative source — `LastLayerUsage`, committed at turn boundaries by the stream consumer. There is no mid-turn ticking: a streamed delta does not update the header.
 
-```ts
-function useThrottledLiveTokens(intervalMs = 100): LiveTokens | null {
-  const [snapshot, setSnapshot] = useState<LiveTokens | null>(null);
-  const { liveTokens } = useContext(StreamMetricsContext);
-  useEffect(() => {
-    const id = setInterval(() => setSnapshot(liveTokens.current), intervalMs);
-    return () => clearInterval(id);
-  }, [liveTokens, intervalMs]);
-  return snapshot;
-}
-```
+This is a deliberate trim of an earlier design that ran a throttled 10Hz subscription against a `liveTokensRef`. In practice the ref is only ever written at turn-settle (not on each streamed delta), so the throttled hook fired uselessly between turns and would have shown numbers that disagreed with the bars beneath them — input+output only, with no system prompt, tool, or memory-layer overhead. Pinning both surfaces to the same source keeps them consistent at the cost of a per-turn refresh cadence on the header. If mid-turn ticking becomes user-visibly important later, it should plumb the delta into `LastLayerUsage` itself (so header and bars still agree) rather than reintroduce a second source of truth.
 
 ## Input handling and precedence
 
-`Ctrl+W` is mounted in a single `useInput` at `ChatLayout`, gated by `isActive: !modalContent && panelOpen`.
+`ChatLayout` owns a single `useInput` that handles `Ctrl+W` (focus swap, gated on `panelOpen`), `Ctrl+O` (transcript overlay toggle), `Ctrl+R` (request overlay toggle), and `Esc` (overlay close → dock close, in that precedence order). The listener is gated on `isActive: !modalActive` so it stays live regardless of which pane has focus — the overlay shortcuts therefore work the same way whether the user is in chat or context.
 
-`prompt-input.tsx` accepts an `isActive` prop; its internal `useInput` is gated on `focusedPane === 'chat'`. The prompt continues to render (history and cursor visible) but does not consume keystrokes when the context pane has focus.
+`ResponsesChat` is purely controlled with respect to overlays: `ChatLayout` passes down `overlay`, `requestItems`, and `requestItemsLoading` via the children render-prop, and the request-items fetch effect lives in `ChatLayout`. ResponsesChat keeps a single `useInput` for the modal Esc only — it has higher precedence than ChatLayout's chord handler because ChatLayout's listener is disabled when a modal is up.
 
-| State | `Ctrl+W` | `Ctrl+O` | `Ctrl+R` | `AskUserModal` |
-|---|---|---|---|---|
-| No modal/overlay | swap focus | open transcript overlay | open request overlay | n/a |
-| Transcript or request overlay open | no-op | close overlay | close overlay | n/a |
-| `AskUserModal` pending | no-op | no-op | no-op | active |
-| Dock closed | no-op | open transcript | open request | n/a |
+`prompt-input.tsx` accepts an `isActive` prop; its internal `useInput` is gated on `focusedPane === 'chat'` so the prompt continues to render but stops consuming keystrokes when the context pane has focus.
+
+| State | `Ctrl+W` | `Ctrl+O` | `Ctrl+R` | `Esc` | `AskUserModal` |
+|---|---|---|---|---|---|
+| No modal/overlay, dock open | swap focus | open transcript | open request | close dock | n/a |
+| Transcript or request overlay open | no-op | close overlay | close overlay | close overlay | n/a |
+| Dock closed, no overlay | no-op | open transcript | open request | no-op | n/a |
+| `AskUserModal` pending | inactive | inactive | inactive | close modal | active |
 
 When `AskUserModal` opens while the dock is open, `focusedPane` snaps back to `chat` so the user can answer. The dock stays mounted and continues to refresh its header.
 

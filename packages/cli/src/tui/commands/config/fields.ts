@@ -1,5 +1,6 @@
 import { BUILT_IN_SKILLS } from '../../../skills/built-in/index.js';
 import type { SkillDefinition } from '../../../skills/types.js';
+import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../../../types/config.js';
 import type { ConfigFieldDefinition, ConfigFieldPath } from './types.js';
 import { ConfigTab, FieldKind } from './types.js';
 
@@ -143,7 +144,7 @@ const STATIC_CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
     kind: FieldKind.Text,
     tab: ConfigTab.Runtime,
     placeholder: 'responsive',
-    description: '"responsive" (default) or a column count 49-80 for the /context dock.',
+    description: `"responsive" (default) or a column count ${PANEL_CONFIG_MIN}-${PANEL_CONFIG_MAX} for the /context dock.`,
   },
 ];
 

@@ -1,15 +1,17 @@
 /**
  * Context Split View panel.
  *
- * Renders the live memory-layer / token-usage breakdown alongside the chat.
- * Two render modes:
+ * Renders the per-turn memory-layer / token-usage breakdown alongside the
+ * chat. Two render modes:
  *   - 'full'  — bordered box, header + per-layer rows + bars.
  *   - 'strip' — one-line summary used when this pane is the unfocused side
  *               of the narrow stacked layout.
  *
- * The header token count is fed by `useThrottledLiveTokens` (~10 Hz) so it
- * stays responsive without re-rendering on every streamed delta. The per-layer
- * rows update only at turn boundaries from `lastLayerUsage`.
+ * Header total and per-layer rows both read from `lastLayerUsage` — a single
+ * authoritative source committed at turn boundaries by the stream consumer.
+ * No mid-turn ticking: a streamed delta does NOT update the header. Keeping
+ * the header and the bars in lockstep beats a flickering counter that
+ * disagrees with the rows beneath it.
  *
  * See specs/28-context-split-view.md.
  */
@@ -19,8 +21,8 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { formatTokens, getModelContextLimit } from '../../types/model-context.js';
 import { buildBar, buildRows } from '../commands/context.js';
+import { buildTitleBar } from '../layout/title-bar.js';
 import type { LayoutMode } from '../layout/types.js';
-import { useThrottledLiveTokens } from '../use-throttled-live-tokens.js';
 
 //#region Types
 
@@ -44,19 +46,7 @@ interface HeaderTokens {
   limit: number;
 }
 
-function pickHeaderTokens(
-  liveTokens: ReturnType<typeof useThrottledLiveTokens>,
-  usage: LastLayerUsage | undefined,
-  model: string,
-): HeaderTokens {
-  if (liveTokens) {
-    const used = liveTokens.input + liveTokens.output;
-    const limit = getModelContextLimit(model);
-    return {
-      used,
-      limit,
-    };
-  }
+function pickHeaderTokens(usage: LastLayerUsage | undefined, model: string): HeaderTokens {
   if (usage) {
     return {
       used: usage.totalUsedTokens,
@@ -158,8 +148,7 @@ function FullModeBody({ usage }: FullModeBodyProps): ReactNode {
 
 export function ContextPanel(props: ContextPanelProps): ReactNode {
   const { mode, focused, width, layoutMode, model, usage } = props;
-  const liveTokens = useThrottledLiveTokens();
-  const header = pickHeaderTokens(liveTokens, usage, model);
+  const header = pickHeaderTokens(usage, model);
 
   if (mode === 'strip') {
     const pct = percent(header.used, header.limit);
@@ -173,50 +162,50 @@ export function ContextPanel(props: ContextPanelProps): ReactNode {
     );
   }
 
-  const titlePrefix = focused ? '► ' : '  ';
+  // Chrome model: single top horizontal rule with inline title; in wide mode
+  // the column is separated from chat by a left `│` divider. No right /
+  // bottom borders, no full box. Focus is signalled by the `►` glyph + bold
+  // title (the rule itself stays the same character either way, so swapping
+  // focus never visibly redraws the chrome).
+  const titleBarWidth = width ?? 0;
+  const titleBar = buildTitleBar(titleBarWidth, focused, 'Context');
 
-  // Wide layout — full-height column separated from chat by a single left
-  // border; no top/right/bottom border so the panel reads as a column, not a
-  // boxed-in widget. Focused state flips both borderStyle (round) and
-  // borderColor — the dual signal stays legible on monochrome / NO_COLOR
-  // terminals.
   if (layoutMode === 'wide') {
     return (
-      <Box
-        flexDirection="column"
-        width={width}
-        height="100%"
-        borderStyle={focused ? 'round' : 'single'}
-        borderColor={focused ? undefined : 'gray'}
-        borderTop={false}
-        borderRight={false}
-        borderBottom={false}
-        paddingLeft={1}
-        paddingRight={1}
-      >
-        <Text bold>{titlePrefix}Context</Text>
-        <Box height={1} />
-        <PanelHeader used={header.used} limit={header.limit} model={model} />
-        <FullModeBody usage={usage} />
+      <Box flexDirection="column" width={width} height="100%">
+        <Text bold={focused} dimColor={!focused}>
+          {titleBar}
+        </Text>
+        <Box
+          flexDirection="row"
+          flexGrow={1}
+          borderStyle="single"
+          borderColor={focused ? undefined : 'gray'}
+          borderTop={false}
+          borderRight={false}
+          borderBottom={false}
+        >
+          <Box flexDirection="column" paddingLeft={1} paddingRight={1} flexGrow={1}>
+            <PanelHeader used={header.used} limit={header.limit} model={model} />
+            <FullModeBody usage={usage} />
+          </Box>
+        </Box>
       </Box>
     );
   }
 
-  // Narrow layout — keep the full bordered box so the focused pane reads as
-  // its own region above the collapsed chat strip.
-  const borderStyle = focused ? 'round' : 'single';
+  // Narrow layout — top rule only, no side dividers. Below the rule we keep
+  // a light horizontal padding so the content doesn't sit flush against the
+  // terminal edge.
   return (
-    <Box
-      flexDirection="column"
-      width={width}
-      borderStyle={borderStyle}
-      borderColor={focused ? undefined : 'gray'}
-      paddingX={1}
-    >
-      <Text bold>{titlePrefix}Context</Text>
-      <Box height={1} />
-      <PanelHeader used={header.used} limit={header.limit} model={model} />
-      <FullModeBody usage={usage} />
+    <Box flexDirection="column" width={width}>
+      <Text bold={focused} dimColor={!focused}>
+        {titleBar}
+      </Text>
+      <Box flexDirection="column" paddingX={1}>
+        <PanelHeader used={header.used} limit={header.limit} model={model} />
+        <FullModeBody usage={usage} />
+      </Box>
     </Box>
   );
 }

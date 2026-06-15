@@ -24,6 +24,24 @@ export type WorktreeConfig = z.infer<typeof WorktreeConfigSchema>;
 export type WorktreeHook = z.infer<typeof WorktreeHookSchema>;
 
 /**
+ * Bounds of the user-facing `ui.contextPanelWidth` fixed-config range.
+ *
+ * - `PANEL_CONFIG_MIN` is the smallest column count a user may pin. It must
+ *   stay ≥ `PANEL_MIN_WIDTH` (the layout-side render floor) so a pinned
+ *   value never produces a panel that wraps the % bars; a sentinel test in
+ *   `test/layout-primitives.test.ts` asserts the two stay aligned.
+ * - `PANEL_CONFIG_MAX` is the largest column count a user may pin. It is
+ *   intentionally wider than the responsive ceiling so users on extreme
+ *   widths can force a bigger dock than the responsive formula would pick.
+ *
+ * Lives here (not in `tui/layout/constants.ts`) because the Zod schema and
+ * the `/config` field description both need to read these values, and
+ * `types/` cannot import from `tui/` (sentrux layer rule).
+ */
+export const PANEL_CONFIG_MIN = 49;
+export const PANEL_CONFIG_MAX = 80;
+
+/**
  * CLI/TUI-only tuning. Agent SDK hosts should not depend on this namespace.
  */
 export const UiConfigSchema = z.object({
@@ -36,7 +54,7 @@ export const UiConfigSchema = z.object({
   contextPanelWidth: z
     .union([
       z.literal('responsive'),
-      z.number().int().min(49).max(80),
+      z.number().int().min(PANEL_CONFIG_MIN).max(PANEL_CONFIG_MAX),
     ])
     .optional(),
 });
