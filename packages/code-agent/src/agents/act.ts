@@ -12,7 +12,7 @@
  */
 
 import type { Context, ContextMemory, Step } from '@noetic-tools/core';
-import { loop, spawn, step, until } from '@noetic-tools/core/portable';
+import { loop, step, until } from '@noetic-tools/core/portable';
 import { persistFlowState, readFlowState, writeFlowState } from './flow-state.js';
 import {
   countDiffLines,
@@ -96,30 +96,40 @@ export const postActCheckStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Act agent
 
-export const actAgent: Step<ContextMemory, string, string> = spawn({
-  id: 'code-agent/act-agent',
-  child: loop({
-    id: 'code-agent/act-loop',
-    steps: [
-      preActCaptureStep,
-      step.llm<ContextMemory, string, string>({
-        id: 'code-agent/act-chat',
-        model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
-        instructions: (ctx: Context<ContextMemory>) => {
-          const user = readParam(ctx, 'instructions', '', isString);
-          return [
-            user,
-            ACT_SYSTEM_INSTRUCTIONS,
-          ]
-            .filter(Boolean)
-            .join('\n\n');
-        },
-        tools: readUnifiedTools,
-      }),
-      postActCheckStep,
-    ],
-    until: until.noToolCalls(),
-  }),
+/**
+ * Act agent runs in the parent context — NOT inside a `spawn()`. The
+ * user-facing assistant IS the conversation; wrapping it in spawn would
+ * give it a fresh `itemLog`, severing the user's message and all prior
+ * turn history from the LLM call. `spawn()` is reserved for true
+ * sub-agents (planAgent, verify, fix, teammates, sub-harnesses) that
+ * intentionally don't see the parent transcript.
+ *
+ * The step id is `code-agent/act-loop` — preserving the previous inner
+ * loop's id so observability spans / eval baselines keyed on it stay
+ * matched. The outer `code-agent/act-agent` spawn span is structurally
+ * gone, which is intrinsic to the fix.
+ */
+export const actAgent: Step<ContextMemory, string, string> = loop({
+  id: 'code-agent/act-loop',
+  steps: [
+    preActCaptureStep,
+    step.llm<ContextMemory, string, string>({
+      id: 'code-agent/act-chat',
+      model: (ctx: Context<ContextMemory>) => readParam(ctx, 'model', '', isString),
+      instructions: (ctx: Context<ContextMemory>) => {
+        const user = readParam(ctx, 'instructions', '', isString);
+        return [
+          user,
+          ACT_SYSTEM_INSTRUCTIONS,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+      },
+      tools: readUnifiedTools,
+    }),
+    postActCheckStep,
+  ],
+  until: until.noToolCalls(),
 });
 
 //#endregion

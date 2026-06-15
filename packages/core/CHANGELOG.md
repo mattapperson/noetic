@@ -1,3 +1,8 @@
+## @noetic-tools/core-v1.1.2 (2026-06-14)
+
+* fix: small TUI bugs, dev-loop ergonomics, and post-merge type/docs gaps (#45) ([2757902](https://github.com/mattapperson/noetic/commit/2757902)), closes [#45](https://github.com/mattapperson/noetic/issues/45)
+* Combine sub-harness steps for external coding agents ([314cb54](https://github.com/mattapperson/noetic/commit/314cb54))
+
 ## @noetic-tools/core-v1.1.1 (2026-06-14)
 
 * fix(core): host workflow JSON schema so its $id URL resolves ([bc87e76](https://github.com/mattapperson/noetic/commit/bc87e76))

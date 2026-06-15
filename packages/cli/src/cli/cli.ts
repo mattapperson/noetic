@@ -9,7 +9,19 @@
  * - anything else            → bootstrap-interactive (default TUI path)
  */
 
+import { readNetrcPassword } from './netrc.js';
 import { installWorkspaceProxy } from './workspace-proxy.js';
+
+// Backfill OPENROUTER_API_KEY from ~/.netrc (machine: openrouter.ai) when the
+// env var is unset. Runs before any bootstrap so every entry path (interactive
+// TUI, tasks, daemon) sees the resolved key. An explicit --api-key flag still
+// wins because args parsing reads it after this point.
+if (!process.env.OPENROUTER_API_KEY) {
+  const fromNetrc = readNetrcPassword('openrouter.ai');
+  if (fromNetrc !== undefined && fromNetrc.length > 0) {
+    process.env.OPENROUTER_API_KEY = fromNetrc;
+  }
+}
 
 const subcommand = process.argv[2];
 

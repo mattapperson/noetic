@@ -420,6 +420,52 @@ describe('consumeFullStream', () => {
     expect(setup.settled).toEqual([]);
   });
 
+  test('multi-turn: a single long-lived consumer sees turn_started for every turn', async () => {
+    // This guards the CLI's actual wiring pattern: `wireStreams` attaches
+    // ONE consumer per harness instance, and the consumer is expected to
+    // flip `status` to 'streaming' on EVERY turn's `turn_started`, not just
+    // the first. A regression here looks like "second submit produces no
+    // spinner and the UI feels frozen".
+    const setup = setupEventConsumer();
+    const run = consumeFullStream(setup.opts);
+
+    // Turn 1
+    setup.controls.events.push(
+      frameworkEvent('turn_started', {
+        messageIds: [
+          'm-1',
+        ],
+      }),
+    );
+    setup.controls.events.push(frameworkEvent('turn_completed'));
+    await tick();
+
+    // Turn 2 — exact same broadcaster, no rewiring.
+    setup.controls.events.push(
+      frameworkEvent('turn_started', {
+        messageIds: [
+          'm-2',
+        ],
+      }),
+    );
+    setup.controls.events.push(frameworkEvent('turn_completed'));
+    await tick();
+
+    setup.controls.events.end();
+    await run;
+
+    // Each turn must flip status to 'streaming' on turn_started and back to
+    // 'ready' on turn_completed (the harness is idle between turns in this
+    // fixture, so handleTurnSettled always lands on 'ready').
+    expect(setup.statuses).toEqual([
+      'streaming',
+      'ready',
+      'streaming',
+      'ready',
+    ]);
+    expect(setup.settled).toHaveLength(2);
+  });
+
   test('stale flip before an event suppresses all effects', async () => {
     const setup = setupEventConsumer();
     const run = consumeFullStream(setup.opts);
