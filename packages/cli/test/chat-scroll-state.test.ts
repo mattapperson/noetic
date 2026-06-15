@@ -1,9 +1,10 @@
 /**
  * Tests for the pure ChatScroll scroll-state reducer.
  *
- * Boundaries that matter: never go negative, never exceed `entriesLen - 1`,
- * empty transcript clamps to 0, and `pageSizeFor` produces a sane minimum
- * (1) even for tiny terminals.
+ * State is `linesFromBottom` — terminal lines, not entries. Boundaries that
+ * matter: never go negative; never exceed `max(0, totalLines - viewportLines)`;
+ * empty / fits-in-viewport transcripts clamp to 0; and `pageSizeFor` produces
+ * a sane minimum (1) even for tiny terminals.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -14,8 +15,9 @@ import {
   pageSizeFor,
 } from '../src/tui/components/chat-scroll-state.js';
 
-const ctx = (entriesLen: number, pageSize = 5): ScrollContext => ({
-  entriesLen,
+const ctx = (totalLines: number, viewportLines = 20, pageSize = 10): ScrollContext => ({
+  totalLines,
+  viewportLines,
   pageSize,
 });
 
@@ -38,13 +40,22 @@ describe('pageSizeFor', () => {
 });
 
 describe('maxOffset', () => {
-  test('is entriesLen - 1 for non-empty transcripts', () => {
-    expect(maxOffset(10)).toBe(9);
-    expect(maxOffset(1)).toBe(0);
+  test('is `totalLines - viewportLines` when content exceeds the viewport', () => {
+    expect(maxOffset(100, 20)).toBe(80);
+    expect(maxOffset(21, 20)).toBe(1);
   });
 
-  test('is 0 for an empty transcript (no negative)', () => {
-    expect(maxOffset(0)).toBe(0);
+  test('is 0 when content fits in the viewport', () => {
+    expect(maxOffset(20, 20)).toBe(0);
+    expect(maxOffset(5, 20)).toBe(0);
+  });
+
+  test('is 0 for an empty transcript', () => {
+    expect(maxOffset(0, 20)).toBe(0);
+  });
+
+  test('never goes negative even for absurd viewports', () => {
+    expect(maxOffset(10, 1000)).toBe(0);
   });
 });
 
@@ -57,34 +68,46 @@ describe('applyScrollAction', () => {
           {
             kind: 'page-up',
           },
-          ctx(100, 10),
+          ctx(200, 20, 10),
         ),
       ).toBe(10);
     });
 
-    test('clamps to maxOffset (entriesLen - 1)', () => {
-      // 95 + 10 = 105, but max is 99.
+    test('clamps to maxOffset (totalLines - viewportLines)', () => {
+      // current 175 + 10 = 185, but max is 200 - 20 = 180.
       expect(
         applyScrollAction(
-          95,
+          175,
           {
             kind: 'page-up',
           },
-          ctx(100, 10),
+          ctx(200, 20, 10),
         ),
-      ).toBe(99);
+      ).toBe(180);
     });
 
     test('no-op when already at the top', () => {
       expect(
         applyScrollAction(
-          9,
+          80,
           {
             kind: 'page-up',
           },
-          ctx(10, 10),
+          ctx(100, 20, 10),
         ),
-      ).toBe(9);
+      ).toBe(80);
+    });
+
+    test('no-op when content fits in the viewport', () => {
+      expect(
+        applyScrollAction(
+          0,
+          {
+            kind: 'page-up',
+          },
+          ctx(15, 20, 10),
+        ),
+      ).toBe(0);
     });
 
     test('no-op on empty transcript', () => {
@@ -94,7 +117,7 @@ describe('applyScrollAction', () => {
           {
             kind: 'page-up',
           },
-          ctx(0, 10),
+          ctx(0, 20, 10),
         ),
       ).toBe(0);
     });
@@ -108,7 +131,7 @@ describe('applyScrollAction', () => {
           {
             kind: 'page-down',
           },
-          ctx(100, 10),
+          ctx(100, 20, 10),
         ),
       ).toBe(10);
     });
@@ -120,7 +143,7 @@ describe('applyScrollAction', () => {
           {
             kind: 'page-down',
           },
-          ctx(100, 10),
+          ctx(100, 20, 10),
         ),
       ).toBe(0);
     });
@@ -132,21 +155,21 @@ describe('applyScrollAction', () => {
           {
             kind: 'page-down',
           },
-          ctx(100, 10),
+          ctx(100, 20, 10),
         ),
       ).toBe(0);
     });
   });
 
   describe('line-up / line-down', () => {
-    test('move by exactly one entry', () => {
+    test('move by exactly one line', () => {
       expect(
         applyScrollAction(
           0,
           {
             kind: 'line-up',
           },
-          ctx(10),
+          ctx(100, 20, 10),
         ),
       ).toBe(1);
       expect(
@@ -155,7 +178,7 @@ describe('applyScrollAction', () => {
           {
             kind: 'line-up',
           },
-          ctx(10),
+          ctx(100, 20, 10),
         ),
       ).toBe(6);
       expect(
@@ -164,21 +187,22 @@ describe('applyScrollAction', () => {
           {
             kind: 'line-down',
           },
-          ctx(10),
+          ctx(100, 20, 10),
         ),
       ).toBe(4);
     });
 
-    test('boundary at the top: cannot exceed entriesLen - 1', () => {
+    test('boundary at the top: cannot exceed maxOffset', () => {
+      // totalLines=30, viewportLines=20 → maxOffset=10.
       expect(
         applyScrollAction(
-          9,
+          10,
           {
             kind: 'line-up',
           },
-          ctx(10),
+          ctx(30, 20, 10),
         ),
-      ).toBe(9);
+      ).toBe(10);
     });
 
     test('boundary at the bottom: cannot go negative', () => {
@@ -188,64 +212,65 @@ describe('applyScrollAction', () => {
           {
             kind: 'line-down',
           },
-          ctx(10),
+          ctx(100, 20, 10),
         ),
       ).toBe(0);
     });
 
     test('boundary at maxOffset N-1, N, N+1 (line-up)', () => {
-      // entriesLen=5 → maxOffset=4.
-      expect(
-        applyScrollAction(
-          3,
-          {
-            kind: 'line-up',
-          },
-          ctx(5),
-        ),
-      ).toBe(4);
+      // totalLines=25, viewportLines=20 → maxOffset=5.
       expect(
         applyScrollAction(
           4,
           {
             kind: 'line-up',
           },
-          ctx(5),
+          ctx(25, 20, 10),
         ),
-      ).toBe(4);
-      // Pre-clamped offset of 5 (over max) should clamp on the way through.
+      ).toBe(5);
       expect(
         applyScrollAction(
           5,
           {
             kind: 'line-up',
           },
-          ctx(5),
+          ctx(25, 20, 10),
         ),
-      ).toBe(4);
+      ).toBe(5);
+      // Pre-clamped offset past max clamps on the way through.
+      expect(
+        applyScrollAction(
+          6,
+          {
+            kind: 'line-up',
+          },
+          ctx(25, 20, 10),
+        ),
+      ).toBe(5);
     });
   });
 
   describe('home', () => {
-    test('jumps to the top (maxOffset = entriesLen - 1)', () => {
+    test('jumps to maxOffset (top of content)', () => {
+      // totalLines=200, viewportLines=20 → maxOffset=180.
       expect(
         applyScrollAction(
           0,
           {
             kind: 'home',
           },
-          ctx(50),
+          ctx(200, 20, 10),
         ),
-      ).toBe(49);
+      ).toBe(180);
       expect(
         applyScrollAction(
-          20,
+          50,
           {
             kind: 'home',
           },
-          ctx(50),
+          ctx(200, 20, 10),
         ),
-      ).toBe(49);
+      ).toBe(180);
     });
 
     test('stays at 0 for an empty transcript', () => {
@@ -255,19 +280,19 @@ describe('applyScrollAction', () => {
           {
             kind: 'home',
           },
-          ctx(0),
+          ctx(0, 20, 10),
         ),
       ).toBe(0);
     });
 
-    test('stays at 0 for a single-entry transcript (cannot scroll past the only entry)', () => {
+    test('stays at 0 when content fits in the viewport', () => {
       expect(
         applyScrollAction(
           0,
           {
             kind: 'home',
           },
-          ctx(1),
+          ctx(10, 20, 10),
         ),
       ).toBe(0);
     });
@@ -277,11 +302,11 @@ describe('applyScrollAction', () => {
     test('jumps to the bottom (offset 0)', () => {
       expect(
         applyScrollAction(
-          20,
+          120,
           {
             kind: 'end',
           },
-          ctx(50),
+          ctx(200, 20, 10),
         ),
       ).toBe(0);
       expect(
@@ -290,20 +315,20 @@ describe('applyScrollAction', () => {
           {
             kind: 'end',
           },
-          ctx(50),
+          ctx(200, 20, 10),
         ),
       ).toBe(0);
     });
 
-    test('jumps to 0 even if the current offset was over-max', () => {
+    test('jumps to 0 even if the current offset was over-max (stale)', () => {
       // A stale offset from a longer transcript still resolves to 0.
       expect(
         applyScrollAction(
-          99,
+          500,
           {
             kind: 'end',
           },
-          ctx(10),
+          ctx(50, 20, 10),
         ),
       ).toBe(0);
     });
@@ -317,22 +342,23 @@ describe('applyScrollAction', () => {
           {
             kind: 'clamp',
           },
-          ctx(20),
+          ctx(100, 20, 10),
         ),
       ).toBe(5);
     });
 
     test('pulls an over-max offset down to the new ceiling', () => {
-      // Transcript shrank from 50 entries to 10; offset 30 must become 9.
+      // Transcript shrank → totalLines=30, viewportLines=20 → maxOffset=10.
+      // Stale offset 30 must clamp to 10.
       expect(
         applyScrollAction(
           30,
           {
             kind: 'clamp',
           },
-          ctx(10),
+          ctx(30, 20, 10),
         ),
-      ).toBe(9);
+      ).toBe(10);
     });
 
     test('pulls a negative offset (defensive) up to 0', () => {
@@ -342,7 +368,7 @@ describe('applyScrollAction', () => {
           {
             kind: 'clamp',
           },
-          ctx(10),
+          ctx(100, 20, 10),
         ),
       ).toBe(0);
     });
@@ -354,7 +380,20 @@ describe('applyScrollAction', () => {
           {
             kind: 'clamp',
           },
-          ctx(0),
+          ctx(0, 20, 10),
+        ),
+      ).toBe(0);
+    });
+
+    test('collapses to 0 when the viewport now contains all content', () => {
+      // User resized terminal larger; content now fits without scroll.
+      expect(
+        applyScrollAction(
+          7,
+          {
+            kind: 'clamp',
+          },
+          ctx(10, 20, 10),
         ),
       ).toBe(0);
     });

@@ -2,14 +2,18 @@
  * Pure scroll-state machine for ChatScroll.
  *
  * Extracted from the component so the math is unit-testable without spinning
- * up Ink. `scrollFromBottom` counts entries hidden below the bottom of the
- * viewport. `0` means "stuck to bottom" — new entries arriving at offset 0
- * keep the user looking at the latest message. Anything `> 0` means the view
- * is detached.
+ * up Ink. `linesFromBottom` counts *terminal lines* (not entries) hidden
+ * below the bottom of the viewport. `0` means "stuck to bottom" — new
+ * content arriving at offset 0 keeps the user looking at the latest output.
+ *
+ * Per-line granularity is the right unit here: entry-granularity scroll
+ * blanks the viewport when the only entries are taller than the screen
+ * (e.g. a 200-line bash output or a long assistant message). Lines let the
+ * user walk through a tall entry one row at a time.
  *
  * The reducer never returns a negative offset and clamps the maximum to
- * `max(0, entriesLen - 1)` so a jump-to-top is well-defined for both empty
- * and single-entry transcripts.
+ * `max(0, totalLines - viewportLines)` so a Home jump lands exactly at the
+ * point where the first content line touches the top of the viewport.
  */
 
 export type ScrollAction =
@@ -32,16 +36,24 @@ export type ScrollAction =
       kind: 'end';
     }
   /**
-   * Re-clamp the current offset against a new `entriesLen` — used when the
-   * transcript shrinks (session restart, history truncation) so a detached
-   * view doesn't sit "below" the available content.
+   * Re-clamp the current offset against a new content/viewport size — used
+   * when the transcript or terminal changes so a detached view doesn't sit
+   * past the new ceiling or below 0.
    */
   | {
       kind: 'clamp';
     };
 
 export interface ScrollContext {
-  entriesLen: number;
+  /**
+   * Total rendered height of the content stack, in terminal lines. The
+   * caller measures this from rendered entries; the reducer doesn't try to
+   * inspect entry shapes.
+   */
+  totalLines: number;
+  /** Height of the visible viewport in terminal lines. */
+  viewportLines: number;
+  /** Lines moved per page-up / page-down. Typically ~viewport/2. */
   pageSize: number;
 }
 
@@ -49,8 +61,8 @@ export function pageSizeFor(viewportRows: number): number {
   return Math.max(1, Math.floor(viewportRows / 2));
 }
 
-export function maxOffset(entriesLen: number): number {
-  return Math.max(0, entriesLen - 1);
+export function maxOffset(totalLines: number, viewportLines: number): number {
+  return Math.max(0, totalLines - viewportLines);
 }
 
 function clamp(value: number, lo: number, hi: number): number {
@@ -68,7 +80,7 @@ export function applyScrollAction(
   action: ScrollAction,
   ctx: ScrollContext,
 ): number {
-  const hi = maxOffset(ctx.entriesLen);
+  const hi = maxOffset(ctx.totalLines, ctx.viewportLines);
   switch (action.kind) {
     case 'page-up':
       return clamp(current + ctx.pageSize, 0, hi);

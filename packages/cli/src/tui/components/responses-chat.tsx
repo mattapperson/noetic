@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
+import { estimateEntryHeight } from '../grouping/estimate-entry-height.js';
 import type { DisplayEntry } from '../grouping/types.js';
 import { staticKeyFor } from '../grouping/types.js';
 import type { ConversationEntry } from '../item-utils.js';
@@ -309,9 +310,11 @@ export function ResponsesChat({
         entries={collapsedEntries}
         keyFor={(entry, i) => staticKeyFor(entry, i)}
         renderEntry={(entry, i) => renderEntry(entry, i, ctx)}
+        heightFor={estimateEntryHeight}
         trailing={
           showLoadingSpinner ? <LoadingSpinner mode={spinnerMode} message={spinnerMessage} /> : null
         }
+        trailingHeight={showLoadingSpinner ? 1 : 0}
         isActive={isActive}
       />
       {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}

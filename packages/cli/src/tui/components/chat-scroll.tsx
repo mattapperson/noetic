@@ -8,35 +8,47 @@
  *
  * Scroll model
  * ------------
- * State is a single integer `scrollFromBottom`, counted in *entries* (not
- * lines). `0` means "stuck to bottom" — new entries arriving while the view
- * is anchored at the bottom keep the most recent entry visible. Any value
- * `> 0` means the view is detached; new entries do NOT pull the view down,
- * and an indicator at the bottom announces how many entries are below the
+ * State is a single integer `linesFromBottom`, counted in *terminal lines*.
+ * `0` means "stuck to bottom" — new content arriving while the view is
+ * anchored there keeps the most recent output visible. Any value `> 0`
+ * means the view is detached; new content does NOT pull the view down,
+ * and an indicator at the bottom announces how many lines are below the
  * fold.
  *
- * Entry-granularity scrolling is coarse for very tall entries (e.g. a 50-
- * line bash output), but it has two virtues: it works without measuring
- * Ink's variable-height rendered content, and the boundary between two
- * entries is always a clean place to land. A future iteration could add
- * line-granularity within the focused entry.
+ * Rendering uses a `marginBottom={-linesFromBottom}` translation on the
+ * inner content column. With `overflow="hidden"` on the outer viewport and
+ * `justifyContent="flex-end"` on the inner column, the negative margin
+ * pushes the content stack down so its bottom edge sits `linesFromBottom`
+ * rows below the viewport's bottom. Those rows are clipped; earlier rows
+ * slide into view at the top. No entry gets dropped wholesale — long
+ * messages walk by one row at a time instead of disappearing.
+ *
+ * Per-entry height estimation
+ * ---------------------------
+ * The caller supplies `heightFor(entry, index)` so we can compute the
+ * total content height (= sum of heights) and clamp the offset. A sensible
+ * default (`1`) ships for callers that don't care, but real chat surfaces
+ * should estimate via newline count of the rendered text — otherwise
+ * Home / End won't line up with the actual content top.
  *
  * Keybindings (active only when `isActive` is true)
  * -------------------------------------------------
- *   PgUp / PgDn        — scroll one viewport at a time (~ rows-3 entries)
- *   Shift+Up / Shift+Down — scroll a single entry
+ *   PgUp / PgDn        — scroll one viewport at a time (~ rows/2 lines)
+ *   Shift+Up / Shift+Down — scroll a single line
  *   Home               — jump to the top (oldest)
  *   End / Esc          — jump to the bottom (latest, re-stick)
  *
- * The arrow keys without Shift are deliberately not bound here — the prompt
- * uses them for cursor movement and history navigation.
+ * Mouse-wheel scrolling is wired in via `useMouseScroll` (three lines per
+ * notch — see the dispatch hook). The arrow keys without Shift are
+ * deliberately not bound here; the prompt uses them for cursor movement
+ * and history navigation.
  */
 
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ScrollAction } from './chat-scroll-state.js';
-import { applyScrollAction, pageSizeFor } from './chat-scroll-state.js';
+import { applyScrollAction, maxOffset, pageSizeFor } from './chat-scroll-state.js';
 import { useMouseScroll } from './use-mouse-scroll.js';
 
 //#region Types
@@ -46,16 +58,25 @@ export interface ChatScrollProps<TEntry> {
   entries: ReadonlyArray<TEntry>;
   /** Renders a single entry. The wrapper Box (with key) is provided by ChatScroll. */
   renderEntry: (entry: TEntry, index: number) => ReactNode;
-  /** Stable key per entry — used for React reconciliation and indicator math. */
+  /** Stable key per entry — used for React reconciliation. */
   keyFor: (entry: TEntry, index: number) => string;
   /**
+   * Estimated rendered height of an entry, in terminal lines. Used to clamp
+   * the scroll offset so Home lands at the actual content top. Default 1
+   * (works but makes Home land wherever the cumulative estimate puts it).
+   */
+  heightFor?: (entry: TEntry, index: number) => number;
+  /**
    * Optional element appended after the entry stream (e.g. a streaming
-   * spinner). Always rendered with the latest content; never scrolled past.
+   * spinner). Always rendered with the latest content; counted into total
+   * height via `trailingHeight`.
    */
   trailing?: ReactNode;
+  /** Height of `trailing`, used to keep the total-line estimate accurate. */
+  trailingHeight?: number;
   /**
-   * When false, scroll keys are not consumed (e.g. when an overlay or modal
-   * is open). The viewport still renders.
+   * When false, scroll keys (and mouse wheel) are not consumed (e.g. when
+   * an overlay or modal is open). The viewport still renders.
    */
   isActive?: boolean;
 }
@@ -88,49 +109,81 @@ function useViewportRows(): number {
 
 //#region Component
 
+const DEFAULT_HEIGHT_FOR = (): number => 1;
+
 export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
-  const { entries, renderEntry, keyFor, trailing, isActive = true } = props;
+  const {
+    entries,
+    renderEntry,
+    keyFor,
+    heightFor = DEFAULT_HEIGHT_FOR,
+    trailing,
+    trailingHeight = 0,
+    isActive = true,
+  } = props;
   const rows = useViewportRows();
-  // `scrollFromBottom` counts entries hidden below the visible window. 0 =
-  // stuck to bottom (most recent visible). Clamped to `entries.length` so a
-  // jump-to-top is well-defined even on growing logs.
-  const [scrollFromBottom, setScrollFromBottom] = useState(0);
+  // `linesFromBottom` counts terminal lines hidden below the visible
+  // window. 0 = stuck to bottom (latest content visible).
+  const [linesFromBottom, setLinesFromBottom] = useState(0);
 
-  const entriesLen = entries.length;
+  // Sum of per-entry heights + trailing height. The estimate doesn't need
+  // to be perfect (overflow clipping handles small errors), but Home / End
+  // accuracy depends on it.
+  const totalLines = useMemo(() => {
+    let sum = trailingHeight;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      if (e !== undefined) {
+        sum += heightFor(e, i);
+      }
+    }
+    return sum;
+  }, [
+    entries,
+    heightFor,
+    trailingHeight,
+  ]);
 
+  const viewportLines = rows;
   const pageSize = pageSizeFor(rows);
+  const detachedMax = maxOffset(totalLines, viewportLines);
 
-  // Re-clamp the current offset when the transcript shrinks (session
-  // restart, history truncation) so a detached view doesn't sit "below" the
-  // available content.
+  // Re-clamp the current offset when the transcript or viewport changes
+  // (resize, new content arriving while detached, etc.) so a detached view
+  // never sits past the new ceiling or below zero.
   useEffect(() => {
-    setScrollFromBottom((prev) =>
+    setLinesFromBottom((prev) =>
       applyScrollAction(
         prev,
         {
           kind: 'clamp',
         },
         {
-          entriesLen,
-          pageSize: 1,
+          totalLines,
+          viewportLines,
+          pageSize,
         },
       ),
     );
   }, [
-    entriesLen,
+    totalLines,
+    viewportLines,
+    pageSize,
   ]);
 
   const dispatch = useCallback(
     (action: ScrollAction) => {
-      setScrollFromBottom((prev) =>
+      setLinesFromBottom((prev) =>
         applyScrollAction(prev, action, {
-          entriesLen,
+          totalLines,
+          viewportLines,
           pageSize,
         }),
       );
     },
     [
-      entriesLen,
+      totalLines,
+      viewportLines,
       pageSize,
     ],
   );
@@ -182,10 +235,10 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     },
   );
 
-  // Mouse-wheel scrolling. Three notches per wheel tick is the conventional
-  // "feels right" multiplier — single-entry granularity is too sticky on a
-  // standard mouse wheel and a full page per notch overshoots. Trackpad
-  // users get one event per "click" of inertial scroll, which matches.
+  // Mouse-wheel scrolling. Three lines per wheel notch is the conventional
+  // "feels right" multiplier — single-line is too sticky on a real mouse
+  // wheel and a full page overshoots. Trackpad users get one event per
+  // inertial click which matches.
   const handleWheelUp = useCallback(() => {
     if (!isActive) {
       return;
@@ -218,25 +271,29 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     isActive,
   });
 
-  const visibleCount = Math.max(0, entriesLen - scrollFromBottom);
-  const visible = entries.slice(0, visibleCount);
-  const detached = scrollFromBottom > 0;
+  const detached = linesFromBottom > 0;
+  const canScrollUp = linesFromBottom < detachedMax;
 
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
-        {visible.map((entry, i) => (
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        justifyContent="flex-end"
+        marginBottom={-linesFromBottom}
+      >
+        {entries.map((entry, i) => (
           <Box key={keyFor(entry, i)} flexShrink={0}>
             {renderEntry(entry, i)}
           </Box>
         ))}
-        {!detached && trailing ? <Box flexShrink={0}>{trailing}</Box> : null}
+        {trailing ? <Box flexShrink={0}>{trailing}</Box> : null}
       </Box>
       {detached ? (
         <Box>
           <Text dimColor>
-            ↓ {scrollFromBottom} {scrollFromBottom === 1 ? 'entry' : 'entries'} below — End / Esc to
-            jump to latest
+            ↓ {linesFromBottom} {linesFromBottom === 1 ? 'line' : 'lines'} below
+            {canScrollUp ? '' : ' (top)'} — End / Esc to jump to latest
           </Text>
         </Box>
       ) : null}
