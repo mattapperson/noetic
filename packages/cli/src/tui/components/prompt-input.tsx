@@ -525,7 +525,10 @@ function usePromptKeyboardHandler(args: {
         completeSuggestion(args.refs, args.actions);
         return;
       }
-      if (key.upArrow) {
+      // Shift + arrows are claimed by ChatScroll for line-by-line scrollback.
+      // The prompt's history nav must NOT intercept them, or scroll will
+      // silently no-op while the prompt cycles through past messages.
+      if (key.upArrow && !key.shift) {
         handlePromptArrow({
           direction: 'up',
           refs: args.refs,
@@ -534,7 +537,7 @@ function usePromptKeyboardHandler(args: {
         });
         return;
       }
-      if (key.downArrow) {
+      if (key.downArrow && !key.shift) {
         handlePromptArrow({
           direction: 'down',
           refs: args.refs,
