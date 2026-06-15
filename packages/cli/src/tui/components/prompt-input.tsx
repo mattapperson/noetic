@@ -773,7 +773,11 @@ export function PromptInput({
   // are enqueued on the harness session and delivered as subsequent turns.
   // `disabledProp` still hard-disables (used when a modal is open, etc.).
   const disabled = disabledProp;
-  const isFocused = focus && !disabled;
+  // `isActive` is the pane-level gate (e.g. the context panel has focus, so
+  // chat-side input should be inert). It must factor into `isFocused` so the
+  // wrapped TextInput stops subscribing to keystrokes and stops swallowing
+  // pane-level chords like Ctrl+W as literal characters.
+  const isFocused = focus && !disabled && isActive;
   const statusHintText = resolveStatusHintText({
     status,
     submittedText,

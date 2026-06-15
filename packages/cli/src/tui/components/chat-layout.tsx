@@ -27,6 +27,7 @@ export interface ChatLayoutProps {
   panelOpen: boolean;
   focusedPane: Pane;
   onFocusSwap: () => void;
+  onClosePanel: () => void;
   panelWidthConfig: ContextPanelWidthConfig;
   modalActive: boolean;
   model: string;
@@ -79,6 +80,7 @@ export function ChatLayout(props: ChatLayoutProps): ReactNode {
     panelOpen,
     focusedPane,
     onFocusSwap,
+    onClosePanel,
     panelWidthConfig,
     modalActive,
     model,
@@ -95,6 +97,10 @@ export function ChatLayout(props: ChatLayoutProps): ReactNode {
     (input, key) => {
       if (key.ctrl && input === 'w') {
         onFocusSwap();
+        return;
+      }
+      if (key.escape) {
+        onClosePanel();
       }
     },
     {

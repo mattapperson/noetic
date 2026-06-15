@@ -373,11 +373,11 @@ describe('consumeFullStream', () => {
     ]);
     expect(setup.settled).toHaveLength(1);
     expect(setup.settled[0]?.usage.inputTokens).toBe(10);
-    expect(setup.opts.streamMetrics.liveTokens.current).toEqual({
-      input: 10,
-      output: 5,
-      cached: 2,
-    });
+    // At turn_completed the consumer clears the streaming-tokens ref so
+    // the context panel header falls through to the authoritative
+    // `LastLayerUsage` total (which the bars also use) — keeping the two
+    // surfaces consistent between turns.
+    expect(setup.opts.streamMetrics.liveTokens.current).toBeNull();
   });
 
   test('stale flip during getAgentResponse: no onTurnSettled, no status flip', async () => {

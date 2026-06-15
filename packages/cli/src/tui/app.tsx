@@ -1084,6 +1084,9 @@ function App({
   const toggleContextPanel = useCallback((): void => {
     setContextPanelOpen((prev) => {
       if (prev) {
+        // Closing the dock — restore chat focus so a future re-open (or any
+        // gate using focusedPane) starts from a sensible state.
+        setFocusedPane('chat');
         return false;
       }
       setFocusedPane('chat');
@@ -1399,6 +1402,10 @@ function App({
   );
 
   const exitToChat = useCallback((): void => {
+    // Snap focus back to the chat pane on view re-entry — if the user left
+    // chat with the context pane focused, returning here would silently
+    // leave the prompt un-typeable until they discovered Ctrl+W.
+    setFocusedPane('chat');
     setViewMode({
       kind: 'chat',
     });
@@ -1505,6 +1512,7 @@ function App({
                 panelOpen={contextPanelOpen}
                 focusedPane={focusedPane}
                 onFocusSwap={swapContextFocus}
+                onClosePanel={toggleContextPanel}
                 panelWidthConfig={panelWidthConfig}
                 modalActive={modal !== null || askUserRequest !== null}
                 model={model}

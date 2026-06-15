@@ -30,9 +30,14 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function resolvePanelWidth(cols: number, config: ContextPanelWidthConfig): number {
+  // Final cap: a panel can never exceed the terminal width itself. Used at
+  // the bottom of both branches so a tiny terminal (cols < PANEL_MIN_WIDTH)
+  // still renders something coherent rather than a panel wider than the
+  // screen with broken borders.
+  const colsCap = Math.max(1, cols);
   if (config === 'responsive') {
     const ideal = Math.floor(RESPONSIVE_FRACTION * cols);
-    return clamp(ideal, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH);
+    return Math.min(colsCap, clamp(ideal, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH));
   }
   // Fixed numeric: respect the request, but clamp down so chat can still
   // claim CHAT_MIN_WIDTH if the terminal is roomy enough. If it isn't,
@@ -40,7 +45,7 @@ export function resolvePanelWidth(cols: number, config: ContextPanelWidthConfig)
   // 'narrow' and the panel will stack rather than steal chat columns.
   const fitsBoth = cols - CHAT_MIN_WIDTH;
   if (fitsBoth >= PANEL_MIN_WIDTH && config > fitsBoth) {
-    return clamp(fitsBoth, PANEL_MIN_WIDTH, config);
+    return Math.min(colsCap, clamp(fitsBoth, PANEL_MIN_WIDTH, config));
   }
-  return Math.max(PANEL_MIN_WIDTH, config);
+  return Math.min(colsCap, Math.max(PANEL_MIN_WIDTH, config));
 }

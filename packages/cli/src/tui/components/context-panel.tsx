@@ -94,7 +94,11 @@ function PanelHeader({ used, limit, model }: PanelHeaderProps): ReactNode {
         <Box width={10}>
           <Text dimColor>Model</Text>
         </Box>
-        <Text color="cyan">{model}</Text>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text color="cyan" wrap="truncate-middle">
+            {model}
+          </Text>
+        </Box>
       </Box>
       <Box>
         <Box width={10}>
@@ -133,10 +137,12 @@ function FullModeBody({ usage }: FullModeBodyProps): ReactNode {
         return (
           <Box key={row.label}>
             <Box width={14}>
-              <Text color={row.color}>{row.label}</Text>
+              <Text color={row.color} wrap="truncate-end">
+                {row.label}
+              </Text>
             </Box>
             <Box width={7}>
-              <Text>{formatTokens(row.tokens)}</Text>
+              <Text wrap="truncate">{formatTokens(row.tokens)}</Text>
             </Box>
             <Text color={row.color}>{buildBar(pct)}</Text>
           </Box>
@@ -171,14 +177,16 @@ export function ContextPanel(props: ContextPanelProps): ReactNode {
 
   // Wide layout — full-height column separated from chat by a single left
   // border; no top/right/bottom border so the panel reads as a column, not a
-  // boxed-in widget.
+  // boxed-in widget. Focused state flips both borderStyle (round) and
+  // borderColor — the dual signal stays legible on monochrome / NO_COLOR
+  // terminals.
   if (layoutMode === 'wide') {
     return (
       <Box
         flexDirection="column"
         width={width}
         height="100%"
-        borderStyle="single"
+        borderStyle={focused ? 'round' : 'single'}
         borderColor={focused ? undefined : 'gray'}
         borderTop={false}
         borderRight={false}

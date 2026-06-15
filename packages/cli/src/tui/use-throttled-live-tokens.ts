@@ -12,6 +12,16 @@ import { useStreamMetrics } from './stream-metrics-context.js';
 
 const DEFAULT_INTERVAL_MS = 100;
 
+function shallowEqual(a: LiveTokens | null, b: LiveTokens | null): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a === null || b === null) {
+    return false;
+  }
+  return a.input === b.input && a.output === b.output && a.cached === b.cached;
+}
+
 export function useThrottledLiveTokens(
   intervalMs: number = DEFAULT_INTERVAL_MS,
 ): LiveTokens | null {
@@ -23,7 +33,11 @@ export function useThrottledLiveTokens(
       return;
     }
     const id = setInterval(() => {
-      setSnapshot(metrics.liveTokens.current);
+      const next = metrics.liveTokens.current;
+      // Skip identity-only ticks — the ref often holds the same numbers
+      // across consecutive timer fires (especially between turns), and
+      // setState would otherwise re-render every subscriber at 10 Hz.
+      setSnapshot((prev) => (shallowEqual(prev, next) ? prev : next));
     }, intervalMs);
     return (): void => {
       clearInterval(id);

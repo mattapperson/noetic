@@ -10,26 +10,30 @@ import { nextFocus } from '../src/tui/layout/next-focus.js';
 import { resolvePanelWidth } from '../src/tui/layout/resolve-panel-width.js';
 
 describe('decideLayoutMode', () => {
-  test('returns wide when cols >= panelWidth + CHAT_MIN_WIDTH', () => {
-    expect(decideLayoutMode(PANEL_MIN_WIDTH + CHAT_MIN_WIDTH, PANEL_MIN_WIDTH)).toBe('wide');
+  // Thresholds below are intentionally hard-coded (not derived from
+  // CHAT_MIN_WIDTH / PANEL_MIN_WIDTH) so a future tweak to those constants
+  // can't silently slide these boundary tests along with it.
+  test('109 cols with a 49-col panel is wide (exact threshold, 49+60)', () => {
+    expect(decideLayoutMode(109, 49)).toBe('wide');
+  });
+
+  test('108 cols with a 49-col panel is narrow (one below threshold)', () => {
+    expect(decideLayoutMode(108, 49)).toBe('narrow');
   });
 
   test('returns wide when cols is much larger', () => {
     expect(decideLayoutMode(200, 40)).toBe('wide');
   });
 
-  test('returns narrow when cols < panelWidth + CHAT_MIN_WIDTH', () => {
-    expect(decideLayoutMode(PANEL_MIN_WIDTH + CHAT_MIN_WIDTH - 1, PANEL_MIN_WIDTH)).toBe('narrow');
-  });
-
-  test('boundary: exact threshold is wide (>= not >)', () => {
-    const panel = 32;
-    expect(decideLayoutMode(panel + CHAT_MIN_WIDTH, panel)).toBe('wide');
-    expect(decideLayoutMode(panel + CHAT_MIN_WIDTH - 1, panel)).toBe('narrow');
-  });
-
   test('tiny terminals are narrow', () => {
     expect(decideLayoutMode(40, PANEL_MIN_WIDTH)).toBe('narrow');
+  });
+
+  test('CHAT_MIN_WIDTH constant invariants are still met', () => {
+    // Sanity tie-in so a future bump to CHAT_MIN_WIDTH that *should* break
+    // the hard-coded tests above is at least visible here.
+    expect(CHAT_MIN_WIDTH).toBe(60);
+    expect(PANEL_MIN_WIDTH).toBe(49);
   });
 });
 
@@ -49,8 +53,16 @@ describe('resolvePanelWidth — responsive', () => {
     expect(resolvePanelWidth(300, 'responsive')).toBe(PANEL_MAX_WIDTH);
   });
 
-  test('returns PANEL_MIN_WIDTH on a tiny terminal', () => {
-    expect(resolvePanelWidth(10, 'responsive')).toBe(PANEL_MIN_WIDTH);
+  test('caps at cols so a tiny terminal never gets a panel wider than the screen', () => {
+    // PANEL_MIN_WIDTH is 49, but on a 10-col terminal we cap at the
+    // terminal width itself — anything else would render broken borders.
+    expect(resolvePanelWidth(10, 'responsive')).toBe(10);
+  });
+
+  test('responsive transitions at the 140-col threshold (40% × 140 = 56 = PANEL_MAX_WIDTH)', () => {
+    expect(resolvePanelWidth(139, 'responsive')).toBe(55);
+    expect(resolvePanelWidth(140, 'responsive')).toBe(PANEL_MAX_WIDTH);
+    expect(resolvePanelWidth(141, 'responsive')).toBe(PANEL_MAX_WIDTH);
   });
 });
 
@@ -73,6 +85,13 @@ describe('resolvePanelWidth — fixed numeric', () => {
 
   test('respects PANEL_MIN_WIDTH floor even for small numeric requests', () => {
     expect(resolvePanelWidth(200, 20)).toBe(PANEL_MIN_WIDTH);
+  });
+
+  test('caps fixed config at cols so a tiny terminal never overflows the screen', () => {
+    // Request 60 but terminal is only 50 cols. Must NOT return 60 (would
+    // overflow the screen and break borders). The narrow stack handles the
+    // tight fit at render time.
+    expect(resolvePanelWidth(50, 60)).toBe(50);
   });
 });
 
