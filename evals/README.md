@@ -6,6 +6,29 @@ Unlike the per-package eval suites under `packages/eval/evals/` (which exercise
 the eval framework itself), these run the **shipping agents** — currently the
 `@noetic-tools/code-agent` — against published research benchmarks.
 
+| Eval | Benchmark | What it measures |
+|------|-----------|------------------|
+| `longmem/` | [LongMemEval](https://github.com/xiaowu0162/LongMemEval) | Long-term memory QA over chat history |
+| `slopcodebench/` | [SlopCodeBench](https://github.com/SprocketLab/slop-code-bench) | Iterative coding under evolving specs (pytest-graded) |
+
+## SlopCodeBench (`slopcodebench/`)
+
+[SlopCodeBench](https://github.com/SprocketLab/slop-code-bench) grades coding
+agents under iterative specification refinement — implement a spec, then extend
+the code as the spec changes across checkpoints — and scores the result with
+pytest. This eval drives the real `createCodeAgent()` harness (autonomous act
+mode, full coding toolset) against SlopCodeBench problems via a `noetic` agent
+adapter, then reports the benchmark's own pass rate.
+
+```bash
+bun evals/slopcodebench/setup.ts            # clone + uv sync + wire problems
+export OPENROUTER_API_KEY=sk-or-...
+bun evals/slopcodebench/run.ts              # solve + grade the `greeter` smoke problem
+```
+
+See [`slopcodebench/README.md`](slopcodebench/README.md) for the architecture,
+the full problem catalog, and knobs.
+
 ## LongMemEval (`longmem/`)
 
 [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) benchmarks

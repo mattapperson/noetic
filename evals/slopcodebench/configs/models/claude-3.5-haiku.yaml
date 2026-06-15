@@ -1,0 +1,14 @@
+# Cheap, reliable tool-using default for the Noetic SlopCodeBench smoke test.
+# Copied into vendor/configs/models/ by setup.ts so `--model openrouter/claude-3.5-haiku`
+# resolves. Used by the noetic adapter to derive the OpenRouter slug.
+internal_name: claude-3-5-haiku-20241022
+provider: anthropic
+pricing:
+  input: 0.80
+  output: 4.00
+  cache_read: 0.08
+  cache_write: 1.00
+aliases:
+  - claude-3.5-haiku
+provider_slugs:
+  openrouter: anthropic/claude-3.5-haiku

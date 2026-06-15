@@ -32,7 +32,9 @@
       "!packages/web/.typecheck-snippets",
       "!**/dist",
       "!**/.wrangler",
-      "!compat/vendor"
+      "!compat/vendor",
+      "!evals/slopcodebench/vendor",
+      "!evals/slopcodebench/problems-local"
     ]
   },
   "formatter": {

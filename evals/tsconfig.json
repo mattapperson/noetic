@@ -7,7 +7,15 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["bun-types"]
+    "types": [
+      "bun-types"
+    ],
+    "customConditions": [
+      "bun"
+    ]
   },
-  "include": ["longmem"]
+  "include": [
+    "longmem",
+    "slopcodebench/*.ts"
+  ]
 }

@@ -7,6 +7,8 @@
   "scripts": {
     "longmem": "bun longmem/run.ts",
     "longmem:download": "bun longmem/download.ts",
+    "slopcodebench": "bun slopcodebench/run.ts",
+    "slopcodebench:setup": "bun slopcodebench/setup.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix ."
@@ -14,6 +16,7 @@
   "dependencies": {
     "@noetic-tools/code-agent": "workspace:*",
     "@noetic-tools/core": "workspace:*",
+    "@noetic-tools/platform-node": "workspace:*",
     "@noetic/eval": "workspace:*",
     "zod": "^4.0.0"
   },

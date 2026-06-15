@@ -23,6 +23,7 @@
       "dependencies": {
         "@noetic-tools/code-agent": "workspace:*",
         "@noetic-tools/core": "workspace:*",
+        "@noetic-tools/platform-node": "workspace:*",
         "@noetic/eval": "workspace:*",
         "zod": "^4.0.0",
       },
@@ -214,7 +215,7 @@
     },
     "packages/sub-harness": {
       "name": "@noetic-tools/sub-harness",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -228,7 +229,7 @@
     },
     "packages/sub-harness-claude-code": {
       "name": "@noetic-tools/sub-harness-claude-code",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@noetic-tools/sub-harness": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -246,7 +247,7 @@
     },
     "packages/sub-harness-codex": {
       "name": "@noetic-tools/sub-harness-codex",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@noetic-tools/sub-harness": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -264,7 +265,7 @@
     },
     "packages/sub-harness-opencode": {
       "name": "@noetic-tools/sub-harness-opencode",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@noetic-tools/sub-harness": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -300,7 +301,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -350,7 +351,7 @@
 
     "@ampproject/remapping": ["@ampproject/remapping@2.3.0", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.5", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw=="],
 
-    "@ax-llm/ax": ["@ax-llm/ax@21.0.14", "", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "ax": "cli/index.mjs" } }, "sha512-HgyaXLwJ9ub2x+q1o/VyMCiEzaD/21GmpOMEi5pMtmSsppApjSdle9Kab0kf5CgB/24UAdISHbCSfQ96ovK4wQ=="],
+    "@ax-llm/ax": ["@ax-llm/ax@22.0.3", "", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "ax": "cli/index.mjs" } }, "sha512-zD1l7fsBHfViXAI3QMljs3VCkQrGWsCYfJxZz7NmaGdzz/UusflKomGlyQ9gfRMVAReIZNZ30iHBwIagE7X9dw=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 
