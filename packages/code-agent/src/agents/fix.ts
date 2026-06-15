@@ -93,6 +93,11 @@ export const fixCompleteStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Fix agent
 
+// Fix intentionally STAYS spawned. Unlike actAgent, the fixer doesn't read
+// the user turn from the conversation itemLog — its instructions come from
+// the `instructions` param + flow-state `verifyFindings`. Keeping it
+// spawned holds its tool-call noise and its assistant output out of the
+// user-facing transcript and out of the next act turn's LLM context.
 export const fixAgent: Step<ContextMemory, string, string> = spawn({
   id: 'code-agent/fix-agent',
   child: loop({

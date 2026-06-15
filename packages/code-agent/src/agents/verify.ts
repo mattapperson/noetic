@@ -138,6 +138,13 @@ export const verifyCheckStep: Step<ContextMemory, string, string> = step.run({
 
 //#region Verify agent
 
+// Verify intentionally STAYS spawned. Unlike actAgent, the verifier never
+// reads the user message from the conversation itemLog — its instructions
+// are static (VERIFY_SYSTEM_INSTRUCTIONS) and it discovers repo state via
+// read-only tools. A spawned (empty) itemLog is exactly what we want: it
+// keeps the adversarial reviewer's PASS/FAIL output and its Read/Grep/Bash
+// tool-call noise OUT of the user-facing transcript and out of the next
+// act turn's LLM context.
 const verifyAgentInner: Step<ContextMemory, string, string> = spawn({
   id: 'code-agent/verify-agent',
   child: loop({

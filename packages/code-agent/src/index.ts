@@ -58,6 +58,7 @@ import { fixAgent } from './agents/fix.js';
 import type { CodeAgentMode } from './agents/flow-state.js';
 import {
   flowMemory,
+  getFlowMemoryDefaultMode,
   persistFlowState,
   readFlowState,
   setFlowMemoryDefaultMode,
@@ -537,9 +538,25 @@ function createSubagentController(): SubagentController {
 
 /**
  * Terminal step: clears per-phase ephemeral state (baselines + mutation
- * flags) and returns the sentinel string that the inner loop's
- * `until.outputEquals` recognizes. The sentinel never enters the item log
- * or assistant text — it exists only to transition the loop to its exit.
+ * flags), resets the workflow mode back to the host-configured default, and
+ * returns the sentinel string that the inner loop's `until.outputEquals`
+ * recognizes. The sentinel never enters the item log or assistant text —
+ * it exists only to transition the loop to its exit.
+ *
+ * The mode reset is load-bearing for multi-turn conversations: without it,
+ * the workflow's mode stays at `'done'` after the first user turn settles.
+ * On the NEXT turn the outer dispatch routes to `actVerifyFixWrapper` (any
+ * non-`'plan'` mode), the inner loop dispatch routes to `doneStep` (because
+ * `INNER_MODE_ROUTES['done']` is itself `doneStep`), and the workflow exits
+ * immediately without ever calling the model — producing no assistant
+ * response and no visible TUI activity. Resetting `mode` here returns the
+ * runtime to a clean state so each new user message gets a fresh act-loop.
+ *
+ * Fix-loop bookkeeping (`fixAttempts`, `lastFindingsHash`, `verifyFindings`)
+ * is also cleared so a brand-new act phase doesn't inherit the previous
+ * turn's verify history. `lastUserText` is preserved here because the
+ * outer wrapper reads it AFTER this step returns to surface the response
+ * to the user.
  *
  * Baseline clearing lives here (not in `postActCheckStep` /
  * `fixCompleteStep`) because those check steps run on every inner-loop
@@ -551,22 +568,24 @@ function createSubagentController(): SubagentController {
 export const doneStep: Step<ContextMemory, string, string> = step.run({
   id: 'code-agent/done',
   async execute(_input, ctx) {
+    // `doneStep` is only routed to via `INNER_MODE_ROUTES.done`, which is
+    // reached only when `mode === 'done'`. The host default is never
+    // `'done'` (the CLI uses `'act'`, plan-first embedders use `'plan'`),
+    // so the mode reset is always real work — there is no useful
+    // short-circuit to gate it behind.
     const state = readFlowState(ctx);
-    if (
-      state.actBaselineLines !== undefined ||
-      state.actDidMutateTools !== undefined ||
-      state.fixBaselineLines !== undefined ||
-      state.fixDidMutateTools !== undefined
-    ) {
-      writeFlowState(ctx, {
-        ...state,
-        actBaselineLines: undefined,
-        actDidMutateTools: undefined,
-        fixBaselineLines: undefined,
-        fixDidMutateTools: undefined,
-      });
-      await persistFlowState(ctx);
-    }
+    writeFlowState(ctx, {
+      ...state,
+      mode: getFlowMemoryDefaultMode(),
+      fixAttempts: undefined,
+      lastFindingsHash: undefined,
+      verifyFindings: undefined,
+      actBaselineLines: undefined,
+      actDidMutateTools: undefined,
+      fixBaselineLines: undefined,
+      fixDidMutateTools: undefined,
+    });
+    await persistFlowState(ctx);
     return CODE_AGENT_DONE_SENTINEL;
   },
 });
