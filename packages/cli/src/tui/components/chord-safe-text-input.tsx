@@ -53,6 +53,31 @@ interface KeyState {
 }
 
 /**
+ * Matches the body of a single SGR mouse-event escape (the ESC prefix has
+ * already been stripped by ink's parseKeypress by the time we see this).
+ * Form: `[<Cb;Cx;Cy(M|m)`. Allow the rest of the chunk to contain anything
+ * — repeated mouse events arrive concatenated under fast scrolling.
+ */
+const SGR_MOUSE_REMNANT_RE = /^\[<\d+;\d+;\d+[Mm]/;
+
+/**
+ * Some inputs are not typed text and must never reach the buffer even though
+ * ink's parseKeypress happily passes them through:
+ *
+ *  - Ctrl/Alt-modified single chars (handled by `isIgnoredKey` via `key.ctrl`)
+ *  - SGR mouse-event remnants. Mouse reporting is on for the chat viewport
+ *    (see `interrupt-safety-net.ts`); ink can't parse SGR mouse and falls
+ *    through with `input` set to the bare CSI body. Under a real mouse this
+ *    would flood the prompt with `[<64;…M` strings (see issue thread).
+ *
+ * Kept as a single helper so the predicate is testable and the call site in
+ * the useInput callback stays trivial.
+ */
+function isNonTypedInput(input: string): boolean {
+  return SGR_MOUSE_REMNANT_RE.test(input);
+}
+
+/**
  * Returns `true` for every keystroke the chord-safe input ignores entirely.
  * Anything that returns `true` must not advance the cursor or mutate the
  * value. Upstream ink-text-input ignores arrows/Tab/Ctrl+C; we add the whole
@@ -215,7 +240,7 @@ export function ChordSafeTextInput(props: ChordSafeTextInputProps): ReactNode {
 
   useInput(
     (input, key) => {
-      if (isIgnoredKey(key)) {
+      if (isIgnoredKey(key) || isNonTypedInput(input)) {
         return;
       }
       if (key.return) {
