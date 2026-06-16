@@ -8,7 +8,7 @@
 import type { Item } from '@noetic-tools/core';
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { NoeticPlugin } from '../../plugins/types.js';
 import { collapseReads } from '../grouping/collapse-reads.js';
@@ -199,12 +199,34 @@ export function ResponsesChat({
     ],
   );
 
-  const ctx: RenderEntryCtx = {
-    chatStatus: status,
-    callInfoMap,
-    entryCount: collapsedEntries.length,
-    categories,
-  };
+  // `ctx` and the two ChatScroll callbacks below are memoised so a state
+  // change inside ChatScroll (a scroll tick, for example) doesn't bust the
+  // `entryNodes` memo it keeps over its child list. Without these, every
+  // line of scroll re-builds the whole entry tree.
+  const ctx: RenderEntryCtx = useMemo(
+    () => ({
+      chatStatus: status,
+      callInfoMap,
+      entryCount: collapsedEntries.length,
+      categories,
+    }),
+    [
+      status,
+      callInfoMap,
+      collapsedEntries.length,
+      categories,
+    ],
+  );
+  const chatScrollRenderEntry = useCallback(
+    (entry: DisplayEntry, i: number) => renderEntry(entry, i, ctx),
+    [
+      ctx,
+    ],
+  );
+  const chatScrollKeyFor = useCallback(
+    (entry: DisplayEntry, i: number) => staticKeyFor(entry, i),
+    [],
+  );
 
   // Keep the spinner visible for the full lifetime of a streaming turn — even
   // after assistant text starts appearing — so the user sees live progress
@@ -308,8 +330,8 @@ export function ResponsesChat({
     <Box flexDirection="column" height="100%">
       <ChatScroll<DisplayEntry>
         entries={collapsedEntries}
-        keyFor={(entry, i) => staticKeyFor(entry, i)}
-        renderEntry={(entry, i) => renderEntry(entry, i, ctx)}
+        keyFor={chatScrollKeyFor}
+        renderEntry={chatScrollRenderEntry}
         heightFor={estimateEntryHeight}
         trailing={
           showLoadingSpinner ? <LoadingSpinner mode={spinnerMode} message={spinnerMessage} /> : null

@@ -270,31 +270,36 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   // "feels right" multiplier — single-line is too sticky on a real mouse
   // wheel and a full page overshoots. Trackpad users get one event per
   // inertial click which matches.
+  //
+  // Each wheel notch resolves to a SINGLE setState (not three line-up
+  // dispatches) — fast scrolling otherwise produced one re-render per line
+  // and Yoga relayout cost compounded. Computing the new offset inline
+  // collapses N wheel events into N renders instead of 3N.
+  const WHEEL_LINES = 3;
   const handleWheelUp = useCallback(() => {
     if (!isActive) {
       return;
     }
-    for (let i = 0; i < 3; i++) {
-      dispatch({
-        kind: 'line-up',
-      });
-    }
+    setLinesFromBottom((prev) => {
+      const hi = maxOffset(totalLines, viewportLines);
+      const next = prev + WHEEL_LINES;
+      return next > hi ? hi : next;
+    });
   }, [
     isActive,
-    dispatch,
+    totalLines,
+    viewportLines,
   ]);
   const handleWheelDown = useCallback(() => {
     if (!isActive) {
       return;
     }
-    for (let i = 0; i < 3; i++) {
-      dispatch({
-        kind: 'line-down',
-      });
-    }
+    setLinesFromBottom((prev) => {
+      const next = prev - WHEEL_LINES;
+      return next < 0 ? 0 : next;
+    });
   }, [
     isActive,
-    dispatch,
   ]);
   useMouseScroll({
     onScrollUp: handleWheelUp,
@@ -305,14 +310,28 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   const detached = linesFromBottom > 0;
   const canScrollUp = linesFromBottom < detachedMax;
 
+  // Memoise the entry node list so a scroll-only re-render (linesFromBottom
+  // change, no entries change) doesn't re-walk every wrapper. Without this,
+  // Yoga still has to relayout the column on every margin tick, but at
+  // least React isn't re-building 100+ child trees per line of scroll.
+  const entryNodes = useMemo(
+    () =>
+      entries.map((entry, i) => (
+        <Box key={keyFor(entry, i)} flexShrink={0}>
+          {renderEntry(entry, i)}
+        </Box>
+      )),
+    [
+      entries,
+      keyFor,
+      renderEntry,
+    ],
+  );
+
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
       <Box flexDirection="column" flexShrink={0} marginBottom={-linesFromBottom}>
-        {entries.map((entry, i) => (
-          <Box key={keyFor(entry, i)} flexShrink={0}>
-            {renderEntry(entry, i)}
-          </Box>
-        ))}
+        {entryNodes}
         {trailing ? <Box flexShrink={0}>{trailing}</Box> : null}
       </Box>
       {detached ? (

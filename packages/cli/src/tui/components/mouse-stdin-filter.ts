@@ -79,6 +79,8 @@ interface PatchState {
 
 let state: PatchState | null = null;
 
+const MOUSE_SGR_PREFIX = `${String.fromCharCode(0x1b)}[<`;
+
 function installPatch(): PatchState {
   const originalEmit = process.stdin.emit.bind(process.stdin);
   const listeners = new Set<MouseEventListener>();
@@ -90,6 +92,14 @@ function installPatch(): PatchState {
     const chunk =
       typeof first === 'string' ? first : Buffer.isBuffer(first) ? first.toString('utf8') : null;
     if (chunk === null) {
+      return originalEmit(event, ...args);
+    }
+    // Fast path: SGR mouse events ALWAYS begin with `ESC [ <`. A typical
+    // keystroke chunk doesn't contain that prefix, so a single `includes`
+    // probe lets us skip the per-byte iteration entirely. This matters
+    // because the patch fires on every keystroke and parse cost otherwise
+    // adds up under fast typing.
+    if (!chunk.includes(MOUSE_SGR_PREFIX)) {
       return originalEmit(event, ...args);
     }
     const { events, cleaned } = iterMouseEventsWithReplacement(chunk);
