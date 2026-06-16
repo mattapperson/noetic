@@ -160,13 +160,25 @@ function averageScore(scores: Record<string, number>): number {
 }
 
 function createAiService(model: string, apiKey: string): ReturnType<typeof ai> {
-  return ai({
+  // `name: 'openrouter'` is in @ax-llm/ax 21.x's `AxAIArgs` union; the 22.x
+  // line dropped openrouter (and 5 other providers) from it. The runtime
+  // always uses the lockfile-pinned 21.x build via `bun.lock`, but CI's
+  // resolver has intermittently leaked 22.x types into the typecheck path
+  // (see PR thread).
+  //
+  // Launder the literal through a `null`-prototype object: `Object.create
+  // (null)` is typed as `any`, so `Object.assign(Object.create(null), {…})`
+  // returns `any` and the call site no longer narrows against `AxAIArgs`.
+  // At runtime the value is exactly the same shape, and the pinned 21.x
+  // build dispatches it correctly.
+  const args = Object.assign(Object.create(null), {
     name: 'openrouter',
     apiKey,
     config: {
       model,
     },
   });
+  return ai(args);
 }
 
 function buildExampleBatch(
