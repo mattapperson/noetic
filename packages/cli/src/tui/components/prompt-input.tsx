@@ -19,6 +19,7 @@ import {
   navigatePromptHistoryUp,
   recordPromptHistoryEntry,
   resetPromptHistoryNavigation,
+  shouldNavigateHistory,
 } from '../utils/prompt-history.js';
 import type { SearchModeState } from '../utils/prompt-history-search.js';
 import { createSearchModeState, findReverseMatch } from '../utils/prompt-history-search.js';
@@ -389,12 +390,15 @@ function handlePromptArrow(args: PromptArrowArgs): void {
   if (!enableHistory) {
     return;
   }
-  if (direction === 'up' && refs.historyState.current.entries.length > 0) {
+  if (!shouldNavigateHistory(direction, refs.historyState.current)) {
+    return;
+  }
+  if (direction === 'up') {
     const result = navigatePromptHistoryUp(refs.historyState.current, refs.value.current);
     refs.historyState.current = result.state;
     actions.setHistoryState(result.state);
     actions.updateValue(result.value);
-  } else if (direction === 'down' && refs.historyState.current.index > 0) {
+  } else {
     const result = navigatePromptHistoryDown(refs.historyState.current);
     refs.historyState.current = result.state;
     actions.setHistoryState(result.state);
