@@ -13,7 +13,7 @@
     "zod": "^4.0.0"
   },
   "peerDependencies": {
-    "@ax-llm/ax": "21.0.14",
+    "@ax-llm/ax": ">=0.1.0",
     "@mariozechner/pi-coding-agent": ">=0.1.0"
   },
   "peerDependenciesMeta": {
@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "bun-types": "latest",
-    "@ax-llm/ax": "21.0.14"
+    "@ax-llm/ax": "latest"
   },
   "scripts": {
     "test": "bun test",

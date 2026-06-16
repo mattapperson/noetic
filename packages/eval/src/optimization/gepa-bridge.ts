@@ -159,21 +159,28 @@ function averageScore(scores: Record<string, number>): number {
   return averageNumbers(Object.values(scores));
 }
 
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1';
+
 function createAiService(model: string, apiKey: string): ReturnType<typeof ai> {
-  // `name: 'openrouter'` is in @ax-llm/ax 21.x's `AxAIArgs` union; the 22.x
-  // line dropped openrouter (and 5 other providers) from it. The runtime
-  // always uses the lockfile-pinned 21.x build via `bun.lock`, but CI's
-  // resolver has intermittently leaked 22.x types into the typecheck path
-  // (see PR thread).
+  // Route to OpenRouter via the OpenAI-compatible provider + an apiURL
+  // override. OpenRouter's `/api/v1` endpoint speaks OpenAI Chat Completions
+  // verbatim, so the dispatch is byte-identical on the wire.
   //
-  // Launder the literal through a `null`-prototype object: `Object.create
-  // (null)` is typed as `any`, so `Object.assign(Object.create(null), {…})`
-  // returns `any` and the call site no longer narrows against `AxAIArgs`.
-  // At runtime the value is exactly the same shape, and the pinned 21.x
-  // build dispatches it correctly.
+  // This shape works against both @ax-llm/ax 21.x (which also exposes
+  // `name: 'openrouter'` as a separate literal) and 22.x (which removed
+  // openrouter and 5 other providers from `AxAIArgs` entirely). Using the
+  // `'openai'` provider with an `apiURL` keeps us forward-compatible.
+  //
+  // The Object.assign laundering still applies — but for a different reason
+  // now: `AxAIOpenAIConfig.model` is typed as the `AxAIOpenAIModel` enum
+  // (literal union of OpenAI model ids), and we accept a user-supplied
+  // free-form model string ("anthropic/claude-sonnet-4", etc.) that
+  // OpenRouter routes by name. The null-prototype object is typed as `any`
+  // so the call site doesn't narrow against the OpenAI model enum.
   const args = Object.assign(Object.create(null), {
-    name: 'openrouter',
+    name: 'openai',
     apiKey,
+    apiURL: OPENROUTER_API_URL,
     config: {
       model,
     },
