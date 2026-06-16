@@ -52,64 +52,74 @@ function tokenize(body: string): string[] {
   return tokens;
 }
 
+interface ParseCursor {
+  i: number;
+  current: NetrcEntry | null;
+  entries: NetrcEntry[];
+}
+
+type CredentialToken = 'login' | 'password' | 'account';
+const CREDENTIAL_TOKENS: ReadonlySet<string> = new Set<string>([
+  'login',
+  'password',
+  'account',
+]);
+
+function isCredentialToken(tok: string): tok is CredentialToken {
+  return CREDENTIAL_TOKENS.has(tok);
+}
+
+/** Start a new entry, flushing any in-progress one to `entries`. */
+function pushAndStart(cursor: ParseCursor, machine: string): void {
+  if (cursor.current !== null) {
+    cursor.entries.push(cursor.current);
+  }
+  cursor.current = {
+    machine,
+  };
+}
+
+/** Apply `tokens[i]` to the parse cursor; returns the index increment. */
+function applyToken(tokens: string[], cursor: ParseCursor): number {
+  const tok = tokens[cursor.i];
+  if (tok === 'machine') {
+    pushAndStart(cursor, tokens[cursor.i + 1] ?? '');
+    return 2;
+  }
+  if (tok === 'default') {
+    pushAndStart(cursor, 'default');
+    return 1;
+  }
+  if (tok === 'macdef') {
+    // `macdef <name>` runs until the next blank line — but we already split
+    // on whitespace, so just skip the name token. Best-effort: sufficient
+    // for credential lookup.
+    return 2;
+  }
+  if (cursor.current !== null && tok !== undefined && isCredentialToken(tok)) {
+    const value = tokens[cursor.i + 1];
+    if (value !== undefined) {
+      cursor.current[tok] = value;
+      return 2;
+    }
+  }
+  return 1;
+}
+
 function parse(body: string): NetrcEntry[] {
   const tokens = tokenize(body);
-  const entries: NetrcEntry[] = [];
-  let current: NetrcEntry | null = null;
-
-  for (let i = 0; i < tokens.length; i++) {
-    const tok = tokens[i];
-
-    if (tok === 'machine') {
-      if (current !== null) {
-        entries.push(current);
-      }
-      const name = tokens[i + 1] ?? '';
-      current = {
-        machine: name,
-      };
-      i += 1;
-      continue;
-    }
-
-    if (tok === 'default') {
-      if (current !== null) {
-        entries.push(current);
-      }
-      current = {
-        machine: 'default',
-      };
-      continue;
-    }
-
-    if (tok === 'macdef') {
-      // `macdef <name>` runs until the next blank line — but we already split
-      // on whitespace, so just skip the name token. The macro body's tokens
-      // will be ignored because they are not preceded by `login`/`password`/
-      // `account` while still inside the macdef's machine block; this is a
-      // best-effort skip and is sufficient for credential lookup.
-      i += 1;
-      continue;
-    }
-
-    if (current === null) {
-      continue;
-    }
-
-    if (tok === 'login' || tok === 'password' || tok === 'account') {
-      const value = tokens[i + 1];
-      if (value !== undefined) {
-        current[tok] = value;
-        i += 1;
-      }
-    }
+  const cursor: ParseCursor = {
+    i: 0,
+    current: null,
+    entries: [],
+  };
+  while (cursor.i < tokens.length) {
+    cursor.i += applyToken(tokens, cursor);
   }
-
-  if (current !== null) {
-    entries.push(current);
+  if (cursor.current !== null) {
+    cursor.entries.push(cursor.current);
   }
-
-  return entries;
+  return cursor.entries;
 }
 
 export interface ReadNetrcOptions {

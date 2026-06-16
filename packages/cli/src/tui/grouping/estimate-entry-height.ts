@@ -17,6 +17,7 @@
  * never blank the viewport.
  */
 
+import type { AssistantEntry } from '../item-utils.js';
 import {
   extractReasoning,
   extractTextContent,
@@ -67,33 +68,43 @@ function estimateCollapsedGroup(group: CollapsedReadGroup): number {
   return ops > 1 ? 3 : 2;
 }
 
+/** Body row count + optional margin. Shared by every text-bearing entry. */
+function estimateText(text: string, cols: number, overhead: number): number {
+  return Math.max(MIN_ENTRY_LINES, countWrappedLines(text, cols)) + overhead;
+}
+
+/**
+ * Assistant Item branch. Returns `null` if the item shape isn't recognised
+ * so the caller can fall through to the default. Extracted out of
+ * `estimateEntryHeight` to keep its cyclomatic complexity under the
+ * sentrux complex-function threshold.
+ */
+function estimateAssistantItem(entry: AssistantEntry, cols: number): number | null {
+  if (entry.type === 'message') {
+    return estimateText(extractTextContent(entry), cols, 2);
+  }
+  if (entry.type === 'reasoning') {
+    return estimateText(extractReasoning(entry) ?? '', cols, 1);
+  }
+  if (entry.type === 'function_call') {
+    return 2;
+  }
+  if (entry.type === 'function_call_output') {
+    return estimateText(entry.output, cols, 0);
+  }
+  return null;
+}
+
 export function estimateEntryHeight(entry: DisplayEntry, _index: number, cols: number): number {
   if (isCollapsedReadGroup(entry)) {
     return estimateCollapsedGroup(entry);
   }
   if (isUserEntry(entry)) {
-    // User row + a margin line.
-    return Math.max(MIN_ENTRY_LINES, countWrappedLines(entry.content, cols)) + 1;
+    return estimateText(entry.content, cols, 1);
   }
   if (isErrorEntry(entry) || isSystemEntry(entry)) {
-    return Math.max(MIN_ENTRY_LINES, countWrappedLines(entry.content, cols));
+    return estimateText(entry.content, cols, 0);
   }
-  // AssistantEntry — Item or StreamingItem. Switch on `type`.
-  if (entry.type === 'message') {
-    const text = extractTextContent(entry);
-    // Header (role label) + content + trailing blank.
-    return Math.max(MIN_ENTRY_LINES, countWrappedLines(text, cols)) + 2;
-  }
-  if (entry.type === 'reasoning') {
-    const text = extractReasoning(entry) ?? '';
-    return Math.max(MIN_ENTRY_LINES, countWrappedLines(text, cols)) + 1;
-  }
-  if (entry.type === 'function_call') {
-    // `→ ToolName(args)` row, possibly an args preview line beneath.
-    return 2;
-  }
-  if (entry.type === 'function_call_output') {
-    return Math.max(MIN_ENTRY_LINES, countWrappedLines(entry.output, cols));
-  }
-  return DEFAULT_UNKNOWN_LINES;
+  const assistantHeight = estimateAssistantItem(entry, cols);
+  return assistantHeight ?? DEFAULT_UNKNOWN_LINES;
 }

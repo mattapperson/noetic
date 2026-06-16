@@ -536,6 +536,77 @@ interface SearchModeArgs {
  * here while search mode is active — it returns `true` to indicate the key
  * was consumed and the normal-mode handler should bail.
  */
+/**
+ * True for keystrokes that should EXTEND the search query — printable text,
+ * paste-style bulk input, anything other than chords and recognised special
+ * keys. Pulled out so the search-mode dispatcher stays small.
+ */
+function isSearchExtendInput(input: string, key: KeyShape): boolean {
+  if (input.length === 0) {
+    return false;
+  }
+  if (key.ctrl || key.meta || key.tab) {
+    return false;
+  }
+  if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+    return false;
+  }
+  return true;
+}
+
+/** Cycle the search forward (Ctrl+R while a search is in flight). */
+function applySearchCycle(
+  args: PromptKeyboardArgs & SearchModeArgs,
+  current: SearchModeState,
+): void {
+  const entries = args.refs.historyState.current.entries;
+  const next = findReverseMatch(entries, current.matchIndex + 1, current.query);
+  if (next.index < 0) {
+    return;
+  }
+  args.setSearchMode({
+    query: current.query,
+    matchIndex: next.index,
+    savedBuffer: current.savedBuffer,
+  });
+  args.actions.updateValue(next.value);
+}
+
+/** Shrink the query by one char and re-search from the top. */
+function applySearchBackspace(
+  args: PromptKeyboardArgs & SearchModeArgs,
+  current: SearchModeState,
+): void {
+  const entries = args.refs.historyState.current.entries;
+  const nextQuery = current.query.slice(0, -1);
+  const next = findReverseMatch(entries, 0, nextQuery);
+  args.setSearchMode({
+    query: nextQuery,
+    matchIndex: next.index,
+    savedBuffer: current.savedBuffer,
+  });
+  args.actions.updateValue(next.index >= 0 ? next.value : current.savedBuffer);
+}
+
+/** Extend the query by `input` and re-search from the top. */
+function applySearchExtend(
+  args: PromptKeyboardArgs & SearchModeArgs,
+  current: SearchModeState,
+  input: string,
+): void {
+  const entries = args.refs.historyState.current.entries;
+  const nextQuery = current.query + input;
+  const next = findReverseMatch(entries, 0, nextQuery);
+  args.setSearchMode({
+    query: nextQuery,
+    matchIndex: next.index,
+    savedBuffer: current.savedBuffer,
+  });
+  if (next.index >= 0) {
+    args.actions.updateValue(next.value);
+  }
+}
+
 function handleSearchModeKey(
   input: string,
   key: KeyShape,
@@ -551,68 +622,26 @@ function handleSearchModeKey(
     args.setSearchMode(null);
     return true;
   }
-  // Enter: keep the match in the buffer and exit search mode. The Enter
-  // keystroke is consumed here so the form's onSubmit is NOT triggered —
-  // a second Enter actually submits. This is one step more conservative
-  // than bash (which submits on the first Enter) and matches what the
-  // user expected during product testing: "review then send."
+  // Enter: keep the match in the buffer and exit search mode. One step
+  // more conservative than bash (which submits on the first Enter) — the
+  // user reviews, then a second Enter actually submits.
   if (key.return) {
     args.setSearchMode(null);
     return true;
   }
-  const entries = args.refs.historyState.current.entries;
-  // Ctrl+R: cycle to the next older match.
   if (key.ctrl && input === 'r') {
-    const next = findReverseMatch(entries, current.matchIndex + 1, current.query);
-    if (next.index >= 0) {
-      args.setSearchMode({
-        query: current.query,
-        matchIndex: next.index,
-        savedBuffer: current.savedBuffer,
-      });
-      args.actions.updateValue(next.value);
-    }
+    applySearchCycle(args, current);
     return true;
   }
-  // Backspace: shrink the query and re-search from the top.
   if (key.backspace || key.delete) {
-    const nextQuery = current.query.slice(0, -1);
-    const next = findReverseMatch(entries, 0, nextQuery);
-    args.setSearchMode({
-      query: nextQuery,
-      matchIndex: next.index,
-      savedBuffer: current.savedBuffer,
-    });
-    args.actions.updateValue(next.index >= 0 ? next.value : current.savedBuffer);
+    applySearchBackspace(args, current);
     return true;
   }
-  // Typing extends the query. Accept any-length printable input so a paste
-  // (or pilotty's bulk `type`) lands intact; reject only chords and the
-  // recognised special keys.
-  if (
-    input.length > 0 &&
-    !key.ctrl &&
-    !key.meta &&
-    !key.tab &&
-    !key.upArrow &&
-    !key.downArrow &&
-    !key.leftArrow &&
-    !key.rightArrow
-  ) {
-    const nextQuery = current.query + input;
-    const next = findReverseMatch(entries, 0, nextQuery);
-    args.setSearchMode({
-      query: nextQuery,
-      matchIndex: next.index,
-      savedBuffer: current.savedBuffer,
-    });
-    if (next.index >= 0) {
-      args.actions.updateValue(next.value);
-    }
+  if (isSearchExtendInput(input, key)) {
+    applySearchExtend(args, current, input);
     return true;
   }
-  // Unhandled keys while in search mode are swallowed rather than passed to
-  // the normal handler, mirroring bash readline's behaviour.
+  // Unhandled keys in search mode are swallowed, mirroring bash readline.
   return true;
 }
 
@@ -644,60 +673,103 @@ interface PromptKeyboardArgs {
   actions: PromptKeyboardActions;
 }
 
+function canEnterSearchMode(input: string, key: KeyShape, args: PromptKeyboardArgs): boolean {
+  if (!(key.ctrl && input === 'r')) {
+    return false;
+  }
+  return args.enableHistory && args.refs.historyState.current.entries.length > 0;
+}
+
+function dispatchArrowNavigation(direction: 'up' | 'down', args: PromptKeyboardArgs): void {
+  handlePromptArrow({
+    direction,
+    refs: args.refs,
+    actions: args.actions,
+    enableHistory: args.enableHistory,
+  });
+}
+
+/**
+ * Body of the prompt's normal-mode `useInput` callback, factored out so the
+ * hook itself stays under the sentrux complex-function threshold. The
+ * search-mode branch was already extracted into `handleSearchModeKey`;
+ * what remains here is a small dispatch over the recognised chords.
+ */
+/** Pre-dispatch handlers: search-mode reroute + search-mode entry + Esc.
+ *  Returns `true` if the keystroke was consumed and the rest of
+ *  `dispatchPromptKey` should bail. */
+function handleSearchAndEscape(
+  input: string,
+  key: KeyShape,
+  args: PromptKeyboardArgs & SearchModeArgs,
+): boolean {
+  if (handleSearchModeKey(input, key, args)) {
+    return true;
+  }
+  if (canEnterSearchMode(input, key, args)) {
+    args.setSearchMode(createSearchModeState(args.refs.value.current));
+    return true;
+  }
+  if (key.escape) {
+    handlePromptEscape(args.refs, args.actions, args);
+    return true;
+  }
+  return false;
+}
+
+/** Returns `true` if the keystroke was Tab+Shift (the mode-toggle chord). */
+function handleModeToggle(key: KeyShape, args: PromptKeyboardArgs): boolean {
+  if (!(key.tab && key.shift) || !args.onToggleMode) {
+    return false;
+  }
+  args.onToggleMode();
+  return true;
+}
+
+/** Returns `true` if the keystroke was Tab (suggestion completion). */
+function handleSuggestionCompletion(key: KeyShape, args: PromptKeyboardArgs): boolean {
+  if (!(key.tab && !key.shift) || args.refs.suggestions.current.length === 0) {
+    return false;
+  }
+  completeSuggestion(args.refs, args.actions);
+  return true;
+}
+
+/** History nav: plain Up/Down (Shift+arrows are claimed by ChatScroll). */
+function handleHistoryArrow(key: KeyShape, args: PromptKeyboardArgs): void {
+  if (key.upArrow && !key.shift) {
+    dispatchArrowNavigation('up', args);
+    return;
+  }
+  if (key.downArrow && !key.shift) {
+    dispatchArrowNavigation('down', args);
+  }
+}
+
+function dispatchPromptKey(
+  input: string,
+  key: KeyShape,
+  args: PromptKeyboardArgs & SearchModeArgs,
+): void {
+  if (handleSearchAndEscape(input, key, args)) {
+    return;
+  }
+  if (handleModeToggle(key, args)) {
+    return;
+  }
+  if (args.disabled) {
+    return;
+  }
+  if (handleSuggestionCompletion(key, args)) {
+    return;
+  }
+  handleHistoryArrow(key, args);
+}
+
 function usePromptKeyboardHandler(args: PromptKeyboardArgs & SearchModeArgs): void {
   useInput(
     (input, key) => {
-      // Search mode short-circuits everything else: Ctrl+R/Enter/Esc/typing
-      // all go to handleSearchModeKey while a search is in flight.
-      if (handleSearchModeKey(input, key, args)) {
-        return;
-      }
-      // Ctrl+R enters search mode (when history is enabled and there's
-      // anything to search through).
-      if (
-        key.ctrl &&
-        input === 'r' &&
-        args.enableHistory &&
-        args.refs.historyState.current.entries.length > 0
-      ) {
-        args.setSearchMode(createSearchModeState(args.refs.value.current));
-        return;
-      }
-      if (key.escape) {
-        handlePromptEscape(args.refs, args.actions, args);
-        return;
-      }
-      if (key.tab && key.shift && args.onToggleMode) {
-        args.onToggleMode();
-        return;
-      }
-      if (args.disabled) {
-        return;
-      }
-      if (key.tab && !key.shift && args.refs.suggestions.current.length > 0) {
-        completeSuggestion(args.refs, args.actions);
-        return;
-      }
-      // Shift + arrows are claimed by ChatScroll for line-by-line scrollback.
-      // The prompt's history nav must NOT intercept them, or scroll will
-      // silently no-op while the prompt cycles through past messages.
-      if (key.upArrow && !key.shift) {
-        handlePromptArrow({
-          direction: 'up',
-          refs: args.refs,
-          actions: args.actions,
-          enableHistory: args.enableHistory,
-        });
-        return;
-      }
-      if (key.downArrow && !key.shift) {
-        handlePromptArrow({
-          direction: 'down',
-          refs: args.refs,
-          actions: args.actions,
-          enableHistory: args.enableHistory,
-        });
-      }
+      dispatchPromptKey(input, key, args);
     },
     {
       isActive: args.focus,

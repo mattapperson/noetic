@@ -81,6 +81,30 @@ let state: PatchState | null = null;
 
 const MOUSE_SGR_PREFIX = `${String.fromCharCode(0x1b)}[<`;
 
+/** Coerce a `'data'`-event payload into a string for inspection. */
+function chunkAsString(first: unknown): string | null {
+  if (typeof first === 'string') {
+    return first;
+  }
+  if (Buffer.isBuffer(first)) {
+    return first.toString('utf8');
+  }
+  return null;
+}
+
+/** Dispatch a parsed `MouseEvent` to every active listener, swallowing
+ *  per-listener errors so one misbehaving subscriber can't break dispatch
+ *  for the rest. */
+function broadcastMouseEvent(listeners: Set<MouseEventListener>, ev: MouseEvent): void {
+  for (const listener of listeners) {
+    try {
+      listener(ev);
+    } catch {
+      // A misbehaving subscriber must not break stdin dispatch for others.
+    }
+  }
+}
+
 function installPatch(): PatchState {
   const originalEmit = process.stdin.emit.bind(process.stdin);
   const listeners = new Set<MouseEventListener>();
@@ -88,29 +112,18 @@ function installPatch(): PatchState {
     if (event !== 'data' || args.length === 0) {
       return originalEmit(event, ...args);
     }
-    const first = args[0];
-    const chunk =
-      typeof first === 'string' ? first : Buffer.isBuffer(first) ? first.toString('utf8') : null;
-    if (chunk === null) {
-      return originalEmit(event, ...args);
-    }
+    const chunk = chunkAsString(args[0]);
     // Fast path: SGR mouse events ALWAYS begin with `ESC [ <`. A typical
     // keystroke chunk doesn't contain that prefix, so a single `includes`
     // probe lets us skip the per-byte iteration entirely. This matters
     // because the patch fires on every keystroke and parse cost otherwise
     // adds up under fast typing.
-    if (!chunk.includes(MOUSE_SGR_PREFIX)) {
+    if (chunk === null || !chunk.includes(MOUSE_SGR_PREFIX)) {
       return originalEmit(event, ...args);
     }
     const { events, cleaned } = iterMouseEventsWithReplacement(chunk);
     for (const ev of events) {
-      for (const listener of listeners) {
-        try {
-          listener(ev);
-        } catch {
-          // A misbehaving subscriber must not break stdin dispatch for others.
-        }
-      }
+      broadcastMouseEvent(listeners, ev);
     }
     if (cleaned.length === 0) {
       return false;

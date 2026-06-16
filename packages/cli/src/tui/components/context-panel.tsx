@@ -146,57 +146,54 @@ function FullModeBody({ usage }: FullModeBodyProps): ReactNode {
 
 //#region Component
 
-export function ContextPanel(props: ContextPanelProps): ReactNode {
-  const { mode, focused, width, layoutMode, model, usage } = props;
-  const header = pickHeaderTokens(usage, model);
+interface FullPanelRenderArgs {
+  focused: boolean;
+  width: number | undefined;
+  titleBar: string;
+  header: HeaderTokens;
+  model: string;
+  usage: LastLayerUsage | undefined;
+}
 
-  if (mode === 'strip') {
-    const pct = percent(header.used, header.limit);
-    return (
-      <Box>
-        <Text dimColor={!focused}>
-          {focused ? '► ' : '  '}Context · {formatTokens(header.used)} /{' '}
-          {formatTokens(header.limit)} ({pct.toFixed(1)}%)
-        </Text>
-      </Box>
-    );
-  }
+function renderStripPanel(focused: boolean, header: HeaderTokens): ReactNode {
+  const pct = percent(header.used, header.limit);
+  return (
+    <Box>
+      <Text dimColor={!focused}>
+        {focused ? '► ' : '  '}Context · {formatTokens(header.used)} / {formatTokens(header.limit)}{' '}
+        ({pct.toFixed(1)}%)
+      </Text>
+    </Box>
+  );
+}
 
-  // Chrome model: single top horizontal rule with inline title; in wide mode
-  // the column is separated from chat by a left `│` divider. No right /
-  // bottom borders, no full box. Focus is signalled by the `►` glyph + bold
-  // title (the rule itself stays the same character either way, so swapping
-  // focus never visibly redraws the chrome).
-  const titleBarWidth = width ?? 0;
-  const titleBar = buildTitleBar(titleBarWidth, focused, 'Context');
-
-  if (layoutMode === 'wide') {
-    return (
-      <Box flexDirection="column" width={width} height="100%">
-        <Text bold={focused} dimColor={!focused}>
-          {titleBar}
-        </Text>
-        <Box
-          flexDirection="row"
-          flexGrow={1}
-          borderStyle="single"
-          borderColor={focused ? undefined : 'gray'}
-          borderTop={false}
-          borderRight={false}
-          borderBottom={false}
-        >
-          <Box flexDirection="column" paddingLeft={1} paddingRight={1} flexGrow={1}>
-            <PanelHeader used={header.used} limit={header.limit} model={model} />
-            <FullModeBody usage={usage} />
-          </Box>
+function renderWideFullPanel(args: FullPanelRenderArgs): ReactNode {
+  const { focused, width, titleBar, header, model, usage } = args;
+  return (
+    <Box flexDirection="column" width={width} height="100%">
+      <Text bold={focused} dimColor={!focused}>
+        {titleBar}
+      </Text>
+      <Box
+        flexDirection="row"
+        flexGrow={1}
+        borderStyle="single"
+        borderColor={focused ? undefined : 'gray'}
+        borderTop={false}
+        borderRight={false}
+        borderBottom={false}
+      >
+        <Box flexDirection="column" paddingLeft={1} paddingRight={1} flexGrow={1}>
+          <PanelHeader used={header.used} limit={header.limit} model={model} />
+          <FullModeBody usage={usage} />
         </Box>
       </Box>
-    );
-  }
+    </Box>
+  );
+}
 
-  // Narrow layout — top rule only, no side dividers. Below the rule we keep
-  // a light horizontal padding so the content doesn't sit flush against the
-  // terminal edge.
+function renderNarrowFullPanel(args: FullPanelRenderArgs): ReactNode {
+  const { focused, width, titleBar, header, model, usage } = args;
   return (
     <Box flexDirection="column" width={width}>
       <Text bold={focused} dimColor={!focused}>
@@ -208,6 +205,29 @@ export function ContextPanel(props: ContextPanelProps): ReactNode {
       </Box>
     </Box>
   );
+}
+
+export function ContextPanel(props: ContextPanelProps): ReactNode {
+  const { mode, focused, width, layoutMode, model, usage } = props;
+  const header = pickHeaderTokens(usage, model);
+  if (mode === 'strip') {
+    return renderStripPanel(focused, header);
+  }
+  // Chrome model: single top horizontal rule with inline title; in wide
+  // mode the column is separated from chat by a left `│` divider. Focus
+  // is signalled by the `►` glyph + bold title (the rule itself stays the
+  // same character either way, so swapping focus never visibly redraws
+  // the chrome).
+  const titleBar = buildTitleBar(width ?? 0, focused, 'Context');
+  const fullArgs: FullPanelRenderArgs = {
+    focused,
+    width,
+    titleBar,
+    header,
+    model,
+    usage,
+  };
+  return layoutMode === 'wide' ? renderWideFullPanel(fullArgs) : renderNarrowFullPanel(fullArgs);
 }
 
 //#endregion

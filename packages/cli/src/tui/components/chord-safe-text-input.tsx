@@ -116,6 +116,75 @@ export interface ChordSafeNextStateResult {
   nextCursorWidth: number;
 }
 
+/** Cursor-only mutation: arrow keys move the caret if `showCursor` is on. */
+function applyCursorMove(key: ChordSafeKey, cursorOffset: number, showCursor: boolean): number {
+  if (!showCursor) {
+    return cursorOffset;
+  }
+  if (key.leftArrow) {
+    return cursorOffset - 1;
+  }
+  if (key.rightArrow) {
+    return cursorOffset + 1;
+  }
+  return cursorOffset;
+}
+
+/** Buffer + cursor mutation for backspace / delete (treated identically,
+ *  matching upstream ink-text-input). */
+function applyBackspace(
+  originalValue: string,
+  cursorOffset: number,
+): {
+  nextValue: string;
+  nextCursorOffset: number;
+} {
+  if (cursorOffset <= 0) {
+    return {
+      nextValue: originalValue,
+      nextCursorOffset: cursorOffset,
+    };
+  }
+  return {
+    nextValue:
+      originalValue.slice(0, cursorOffset - 1) +
+      originalValue.slice(cursorOffset, originalValue.length),
+    nextCursorOffset: cursorOffset - 1,
+  };
+}
+
+/** Buffer + cursor mutation for an insert (typed text, paste). Returns the
+ *  paste-highlight width so the caller can flag multi-char inserts. */
+function applyInsert(
+  originalValue: string,
+  input: string,
+  cursorOffset: number,
+): {
+  nextValue: string;
+  nextCursorOffset: number;
+  nextCursorWidth: number;
+} {
+  const nextValue =
+    originalValue.slice(0, cursorOffset) +
+    input +
+    originalValue.slice(cursorOffset, originalValue.length);
+  return {
+    nextValue,
+    nextCursorOffset: cursorOffset + input.length,
+    nextCursorWidth: input.length > 1 ? input.length : 0,
+  };
+}
+
+function clampCursor(offset: number, valueLength: number): number {
+  if (offset < 0) {
+    return 0;
+  }
+  if (offset > valueLength) {
+    return valueLength;
+  }
+  return offset;
+}
+
 /**
  * Pure cursor / buffer reducer. Returns the next value, cursor offset, and
  * paste-highlight width given a non-ignored key. The result is clamped to
@@ -123,47 +192,30 @@ export interface ChordSafeNextStateResult {
  */
 export function computeNextState(args: ChordSafeNextStateArgs): ChordSafeNextStateResult {
   const { input, key, originalValue, cursorOffset, showCursor } = args;
-  let nextValue = originalValue;
-  let nextCursorOffset = cursorOffset;
-  let nextCursorWidth = 0;
-
-  if (key.leftArrow) {
-    if (showCursor) {
-      nextCursorOffset--;
-    }
-  } else if (key.rightArrow) {
-    if (showCursor) {
-      nextCursorOffset++;
-    }
-  } else if (key.backspace || key.delete) {
-    if (cursorOffset > 0) {
-      nextValue =
-        originalValue.slice(0, cursorOffset - 1) +
-        originalValue.slice(cursorOffset, originalValue.length);
-      nextCursorOffset--;
-    }
-  } else {
-    nextValue =
-      originalValue.slice(0, cursorOffset) +
-      input +
-      originalValue.slice(cursorOffset, originalValue.length);
-    nextCursorOffset += input.length;
-    if (input.length > 1) {
-      nextCursorWidth = input.length;
-    }
+  if (key.leftArrow || key.rightArrow) {
+    const nextCursorOffset = clampCursor(
+      applyCursorMove(key, cursorOffset, showCursor),
+      originalValue.length,
+    );
+    return {
+      nextValue: originalValue,
+      nextCursorOffset,
+      nextCursorWidth: 0,
+    };
   }
-
-  if (nextCursorOffset < 0) {
-    nextCursorOffset = 0;
+  if (key.backspace || key.delete) {
+    const { nextValue, nextCursorOffset } = applyBackspace(originalValue, cursorOffset);
+    return {
+      nextValue,
+      nextCursorOffset: clampCursor(nextCursorOffset, nextValue.length),
+      nextCursorWidth: 0,
+    };
   }
-  if (nextCursorOffset > nextValue.length) {
-    nextCursorOffset = nextValue.length;
-  }
-
+  const inserted = applyInsert(originalValue, input, cursorOffset);
   return {
-    nextValue,
-    nextCursorOffset,
-    nextCursorWidth,
+    nextValue: inserted.nextValue,
+    nextCursorOffset: clampCursor(inserted.nextCursorOffset, inserted.nextValue.length),
+    nextCursorWidth: inserted.nextCursorWidth,
   };
 }
 

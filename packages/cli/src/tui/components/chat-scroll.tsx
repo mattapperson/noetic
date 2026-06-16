@@ -223,46 +223,63 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     ],
   );
 
+  // Map each scroll keystroke to a `ScrollAction` (or `null` if it isn't a
+  // scroll key). Kept as a pure helper so the useInput callback collapses
+  // to a single dispatch.
+  const resolveScrollAction = useCallback(
+    (key: {
+      pageUp?: boolean;
+      pageDown?: boolean;
+      shift?: boolean;
+      upArrow?: boolean;
+      downArrow?: boolean;
+      escape?: boolean;
+      end?: boolean;
+      home?: boolean;
+    }): ScrollAction | null => {
+      if (key.pageUp) {
+        return {
+          kind: 'page-up',
+        };
+      }
+      if (key.pageDown) {
+        return {
+          kind: 'page-down',
+        };
+      }
+      if (key.shift && key.upArrow) {
+        return {
+          kind: 'line-up',
+        };
+      }
+      if (key.shift && key.downArrow) {
+        return {
+          kind: 'line-down',
+        };
+      }
+      if (key.escape || key.end) {
+        return {
+          kind: 'end',
+        };
+      }
+      if (key.home) {
+        return {
+          kind: 'home',
+        };
+      }
+      return null;
+    },
+    [],
+  );
+
   useInput(
     (_input, key) => {
       if (!isActive) {
         return;
       }
-      if (key.pageUp) {
-        dispatch({
-          kind: 'page-up',
-        });
-        return;
-      }
-      if (key.pageDown) {
-        dispatch({
-          kind: 'page-down',
-        });
-        return;
-      }
-      if (key.shift && key.upArrow) {
-        dispatch({
-          kind: 'line-up',
-        });
-        return;
-      }
-      if (key.shift && key.downArrow) {
-        dispatch({
-          kind: 'line-down',
-        });
-        return;
-      }
-      if (key.escape || key.end) {
-        dispatch({
-          kind: 'end',
-        });
-        return;
-      }
-      if (key.home) {
-        dispatch({
-          kind: 'home',
-        });
-        return;
+      const action = resolveScrollAction(key);
+      if (action !== null) {
+        dispatch(action);
       }
     },
     {

@@ -170,36 +170,38 @@ export function ChatLayout(props: ChatLayoutProps): ReactNode {
     getRequestItems,
   ]);
 
+  // Esc precedence: an open overlay closes first, then the dock. Modal Esc
+  // is handled inside ResponsesChat (this listener is gated off when a
+  // modal is up).
+  const handleEscape = (): void => {
+    if (overlayOpen) {
+      setOverlay('none');
+      return;
+    }
+    if (panelOpen) {
+      onClosePanel();
+    }
+  };
+
+  // Each Ctrl chord maps to one handler. Kept as a registry so the
+  // useInput body stays at a single dispatch.
+  const ctrlChordHandlers: Record<string, (() => void) | undefined> = {
+    w: panelOpen ? onFocusSwap : undefined,
+    o: () => setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript')),
+    // Ctrl+T (Toggle request-items) opens the next-turn preview. Ctrl+R
+    // is now claimed by prompt-history reverse search (readline / bash
+    // convention).
+    t: () => setOverlay((prev) => (prev === 'request' ? 'none' : 'request')),
+  };
+
   useInput(
     (input, key) => {
-      // Ctrl+W swaps focus, but only when the dock is open (otherwise there
-      // is no second pane to swap to).
-      if (key.ctrl && input === 'w' && panelOpen) {
-        onFocusSwap();
-        return;
-      }
-      if (key.ctrl && input === 'o') {
-        setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
-        return;
-      }
-      // Ctrl+T (Toggle request-items) opens the next-turn preview. Moved off
-      // Ctrl+R because that chord is now claimed by prompt-history reverse
-      // search (matches readline / bash convention).
-      if (key.ctrl && input === 't') {
-        setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
+      if (key.ctrl) {
+        ctrlChordHandlers[input]?.();
         return;
       }
       if (key.escape) {
-        // Precedence: an open overlay closes first, then the dock. Modal
-        // Esc is handled inside ResponsesChat (modalActive gates this
-        // listener off entirely when a modal is up).
-        if (overlayOpen) {
-          setOverlay('none');
-          return;
-        }
-        if (panelOpen) {
-          onClosePanel();
-        }
+        handleEscape();
       }
     },
     {
