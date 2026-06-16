@@ -46,7 +46,7 @@
 
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ScrollAction } from './chat-scroll-state.js';
 import { applyScrollAction, maxOffset, pageSizeFor } from './chat-scroll-state.js';
 import { useMouseScroll } from './use-mouse-scroll.js';
@@ -161,13 +161,31 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   const pageSize = pageSizeFor(rows);
   const detachedMax = maxOffset(totalLines, viewportLines);
 
-  // Re-clamp the current offset when the transcript or viewport changes
-  // (resize, new content arriving while detached, etc.) so a detached view
-  // never sits past the new ceiling or below zero.
+  // Anchor the viewport to the same content row when content grows while the
+  // user is scrolled back. Without this, new entries arriving at the bottom
+  // would silently shift the visible rows toward the latest, dragging the
+  // user away from what they were reading.
+  //
+  // Mechanism: `linesFromBottom` is an offset measured from the bottom of
+  // content. When content grows by Δ at the bottom, both the bottom edge
+  // and the content-row positions slide by Δ — so to keep the same rows
+  // visible, the offset must also grow by Δ. (Stuck-to-bottom users keep
+  // `linesFromBottom = 0` and continue to tail by design.)
+  //
+  // Content shrinking (e.g. /clear, history truncation) doesn't fit the
+  // anchor model — fall through to the standard clamp so the offset can't
+  // sit above the new content top.
+  const prevTotalLinesRef = useRef(totalLines);
   useEffect(() => {
-    setLinesFromBottom((prev) =>
-      applyScrollAction(
-        prev,
+    const delta = totalLines - prevTotalLinesRef.current;
+    prevTotalLinesRef.current = totalLines;
+    setLinesFromBottom((prev) => {
+      if (prev === 0) {
+        return 0;
+      }
+      const next = delta > 0 ? prev + delta : prev;
+      return applyScrollAction(
+        next,
         {
           kind: 'clamp',
         },
@@ -176,8 +194,8 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
           viewportLines,
           pageSize,
         },
-      ),
-    );
+      );
+    });
   }, [
     totalLines,
     viewportLines,
