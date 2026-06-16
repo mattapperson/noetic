@@ -171,21 +171,37 @@ export function computeNextState(args: ChordSafeNextStateArgs): ChordSafeNextSta
  * Renders a single line of text with the cursor (and any paste-highlight
  * range) inverted. Returns the rendered string; the caller wraps it in
  * `<Text>`.
+ *
+ * Implemented as three slices + one `chalk.inverse` call so the cost is
+ * O(1) in `value.length` (string slicing is a memcpy under the hood, not
+ * a per-character walk). The previous loop allocated a new string and
+ * called `chalk.inverse` per character — a measurable per-keystroke
+ * regression once buffers got past a few dozen chars.
+ *
+ * Caveat: this indexes by UTF-16 code units. `cursorOffset` already
+ * counts code units (it's incremented by `input.length`), so for ASCII
+ * and any composed-codepoint text we match the previous behaviour. A
+ * cursor that lands on a surrogate-pair boundary will look mid-grapheme,
+ * which is the same edge case the upstream `ink-text-input` ships with.
  */
 function renderWithCursor(value: string, cursorOffset: number, cursorActualWidth: number): string {
   if (value.length === 0) {
     return chalk.inverse(' ');
   }
-  let out = '';
-  let i = 0;
-  for (const char of value) {
-    out += i >= cursorOffset - cursorActualWidth && i <= cursorOffset ? chalk.inverse(char) : char;
-    i++;
+  // Cursor at end-of-buffer: render the buffer verbatim and tack on an
+  // inverted space.
+  if (cursorOffset >= value.length) {
+    return value + chalk.inverse(' ');
   }
-  if (cursorOffset === value.length) {
-    out += chalk.inverse(' ');
-  }
-  return out;
+  // Mid-buffer cursor: slice into [before][highlight][after] and inverse
+  // just the highlight range. For typed input `cursorActualWidth === 0`
+  // so the range is a single character.
+  const rangeStart = Math.max(0, cursorOffset - cursorActualWidth);
+  const rangeEnd = cursorOffset + 1;
+  const before = value.slice(0, rangeStart);
+  const highlight = value.slice(rangeStart, rangeEnd);
+  const after = value.slice(rangeEnd);
+  return before + chalk.inverse(highlight) + after;
 }
 
 //#endregion

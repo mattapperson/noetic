@@ -326,45 +326,24 @@ export function ResponsesChat({
     );
   }
 
-  // The PromptInput is rendered INSIDE ChatScroll's trailing slot so it
-  // scrolls with the chat content (Claude Code-style). Two consequences:
+  // PromptInput is a SIBLING of ChatScroll, not inside its trailing slot.
+  // Putting it inside ChatScroll's content stack forced Yoga to relayout
+  // every chat entry on every keystroke (the prompt's box was a flex
+  // sibling of the entry list in the same column), which introduced
+  // visible typing lag — especially under key repeat / hold-delete.
   //
-  //   - When stuck-to-bottom the prompt sits at the bottom of the visible
-  //     area, exactly where it sat before.
-  //   - When the user scrolls back, the prompt slides off-screen alongside
-  //     the latest entries. Typing still works (ink's `useInput` is global,
-  //     not bound to position) so this is purely visual.
-  //
-  // `PROMPT_HEIGHT_ESTIMATE` is the static row count of the prompt's
-  // chrome (two dividers + textarea + model label). It only needs to be
-  // in the right ballpark — the scroll anchor's delta-tracking corrects
-  // for any small wobble as suggestions/search bar/status text come and
-  // go.
+  // The math still treats the prompt area as part of the chat viewport:
+  // `chromeBelowRows` subtracts the prompt's row count from
+  // `viewportLines` so `maxOffset` matches the actual chat content area
+  // — the same end-state we wanted from "scrollback includes the prompt"
+  // without the per-keystroke layout cost.
   const PROMPT_HEIGHT_ESTIMATE = 5;
   const SPINNER_HEIGHT = 1;
-  const trailingNode = (
-    <>
-      {showLoadingSpinner ? <LoadingSpinner mode={spinnerMode} message={spinnerMessage} /> : null}
-      {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
-      <PromptInput
-        status={status}
-        onSubmit={handleSubmit}
-        onStop={onStop}
-        onModalClose={onModalClose}
-        isModalOpen={!!modalContent}
-        model={model}
-        agentMode={agentMode}
-        onToggleMode={onToggleMode}
-        commands={commands}
-        isActive={isActive}
-      />
-    </>
-  );
-  // Exit hint + status notice live BELOW ChatScroll and stay fixed.
-  // Their height is subtracted from ChatScroll's effective viewport so
-  // the scroll math matches the actual chat area.
-  const chromeBelowRows = (exitHintArmed ? 1 : 0) + (statusNotice ? 1 : 0);
-  const trailingHeight = (showLoadingSpinner ? SPINNER_HEIGHT : 0) + PROMPT_HEIGHT_ESTIMATE;
+  const trailingNode = showLoadingSpinner ? (
+    <LoadingSpinner mode={spinnerMode} message={spinnerMessage} />
+  ) : null;
+  const trailingHeight = showLoadingSpinner ? SPINNER_HEIGHT : 0;
+  const chromeBelowRows = PROMPT_HEIGHT_ESTIMATE + (exitHintArmed ? 1 : 0) + (statusNotice ? 1 : 0);
 
   return (
     <Box flexDirection="column" height="100%">
@@ -376,6 +355,19 @@ export function ResponsesChat({
         trailing={trailingNode}
         trailingHeight={trailingHeight}
         chromeBelowRows={chromeBelowRows}
+        isActive={isActive}
+      />
+      {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
+      <PromptInput
+        status={status}
+        onSubmit={handleSubmit}
+        onStop={onStop}
+        onModalClose={onModalClose}
+        isModalOpen={!!modalContent}
+        model={model}
+        agentMode={agentMode}
+        onToggleMode={onToggleMode}
+        commands={commands}
         isActive={isActive}
       />
       {exitHintArmed ? (
