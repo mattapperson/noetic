@@ -126,7 +126,7 @@
         "bun-types": "latest",
       },
       "peerDependencies": {
-        "@ax-llm/ax": ">=0.1.0",
+        "@ax-llm/ax": "^21.0.14",
         "@mariozechner/pi-coding-agent": ">=0.1.0",
       },
       "optionalPeers": [
