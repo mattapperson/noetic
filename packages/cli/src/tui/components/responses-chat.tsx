@@ -326,19 +326,25 @@ export function ResponsesChat({
     );
   }
 
-  return (
-    <Box flexDirection="column" height="100%">
-      <ChatScroll<DisplayEntry>
-        entries={collapsedEntries}
-        keyFor={chatScrollKeyFor}
-        renderEntry={chatScrollRenderEntry}
-        heightFor={estimateEntryHeight}
-        trailing={
-          showLoadingSpinner ? <LoadingSpinner mode={spinnerMode} message={spinnerMessage} /> : null
-        }
-        trailingHeight={showLoadingSpinner ? 1 : 0}
-        isActive={isActive}
-      />
+  // The PromptInput is rendered INSIDE ChatScroll's trailing slot so it
+  // scrolls with the chat content (Claude Code-style). Two consequences:
+  //
+  //   - When stuck-to-bottom the prompt sits at the bottom of the visible
+  //     area, exactly where it sat before.
+  //   - When the user scrolls back, the prompt slides off-screen alongside
+  //     the latest entries. Typing still works (ink's `useInput` is global,
+  //     not bound to position) so this is purely visual.
+  //
+  // `PROMPT_HEIGHT_ESTIMATE` is the static row count of the prompt's
+  // chrome (two dividers + textarea + model label). It only needs to be
+  // in the right ballpark — the scroll anchor's delta-tracking corrects
+  // for any small wobble as suggestions/search bar/status text come and
+  // go.
+  const PROMPT_HEIGHT_ESTIMATE = 5;
+  const SPINNER_HEIGHT = 1;
+  const trailingNode = (
+    <>
+      {showLoadingSpinner ? <LoadingSpinner mode={spinnerMode} message={spinnerMessage} /> : null}
       {footerPlugin?.footer ? <Box>{footerPlugin.footer()}</Box> : null}
       <PromptInput
         status={status}
@@ -350,6 +356,26 @@ export function ResponsesChat({
         agentMode={agentMode}
         onToggleMode={onToggleMode}
         commands={commands}
+        isActive={isActive}
+      />
+    </>
+  );
+  // Exit hint + status notice live BELOW ChatScroll and stay fixed.
+  // Their height is subtracted from ChatScroll's effective viewport so
+  // the scroll math matches the actual chat area.
+  const chromeBelowRows = (exitHintArmed ? 1 : 0) + (statusNotice ? 1 : 0);
+  const trailingHeight = (showLoadingSpinner ? SPINNER_HEIGHT : 0) + PROMPT_HEIGHT_ESTIMATE;
+
+  return (
+    <Box flexDirection="column" height="100%">
+      <ChatScroll<DisplayEntry>
+        entries={collapsedEntries}
+        keyFor={chatScrollKeyFor}
+        renderEntry={chatScrollRenderEntry}
+        heightFor={estimateEntryHeight}
+        trailing={trailingNode}
+        trailingHeight={trailingHeight}
+        chromeBelowRows={chromeBelowRows}
         isActive={isActive}
       />
       {exitHintArmed ? (

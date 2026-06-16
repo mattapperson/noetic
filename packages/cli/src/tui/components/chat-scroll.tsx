@@ -77,6 +77,14 @@ export interface ChatScrollProps<TEntry> {
   /** Height of `trailing`, used to keep the total-line estimate accurate. */
   trailingHeight?: number;
   /**
+   * Number of rows of fixed chrome rendered BELOW ChatScroll (exit hint,
+   * status notice, plugin footer). Subtracted from the viewport-row count
+   * so the scroll math matches the area the user actually sees the chat
+   * content in. Without this, `maxOffset` would be too small and the
+   * indicator would jitter as the user scrolls.
+   */
+  chromeBelowRows?: number;
+  /**
    * When false, scroll keys (and mouse wheel) are not consumed (e.g. when
    * an overlay or modal is open). The viewport still renders.
    */
@@ -132,6 +140,7 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     heightFor = DEFAULT_HEIGHT_FOR,
     trailing,
     trailingHeight = 0,
+    chromeBelowRows = 0,
     isActive = true,
   } = props;
   const { rows, cols } = useViewportSize();
@@ -158,7 +167,11 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     cols,
   ]);
 
-  const viewportLines = rows;
+  // Effective scroll viewport excludes chrome that lives below ChatScroll
+  // (exit hint, status notice, plugin footer). Without this subtraction
+  // maxOffset is off by chromeBelowRows and the user sees the indicator
+  // jitter / "(top)" tag flip on and off as new lines arrive.
+  const viewportLines = Math.max(1, rows - chromeBelowRows);
   const pageSize = pageSizeFor(rows);
   const detachedMax = maxOffset(totalLines, viewportLines);
 
@@ -319,13 +332,22 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   );
 
   return (
-    <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
-      <Box flexDirection="column" flexShrink={0} marginBottom={-linesFromBottom}>
-        {entryNodes}
-        {trailing ? <Box flexShrink={0}>{trailing}</Box> : null}
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Scrolling viewport. `overflow="hidden"` clips the inner content's
+          translation past its edges; flex-end aligns the inner column to the
+          bottom of this region. */}
+      <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
+        <Box flexDirection="column" flexShrink={0} marginBottom={-linesFromBottom}>
+          {entryNodes}
+          {trailing ? <Box flexShrink={0}>{trailing}</Box> : null}
+        </Box>
       </Box>
       {detached ? (
-        <Box flexShrink={0}>
+        // Indicator sits OUTSIDE the overflow:hidden box so the marginBottom
+        // translation can't push content into the same row. Right-aligned to
+        // avoid overlapping the live token stats the LoadingSpinner renders
+        // at the start of the same row when streaming is in flight.
+        <Box flexShrink={0} justifyContent="flex-end">
           <Text dimColor>
             ↓ {linesFromBottom} {linesFromBottom === 1 ? 'line' : 'lines'} below
             {canScrollUp ? '' : ' (top)'} — End / Esc to jump to latest
