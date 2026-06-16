@@ -101,18 +101,19 @@ This is a deliberate trim of an earlier design that ran a throttled 10Hz subscri
 
 ## Input handling and precedence
 
-`ChatLayout` owns a single `useInput` that handles `Ctrl+W` (focus swap, gated on `panelOpen`), `Ctrl+O` (transcript overlay toggle), `Ctrl+R` (request overlay toggle), and `Esc` (overlay close → dock close, in that precedence order). The listener is gated on `isActive: !modalActive` so it stays live regardless of which pane has focus — the overlay shortcuts therefore work the same way whether the user is in chat or context.
+`ChatLayout` owns a single `useInput` that handles `Ctrl+W` (focus swap, gated on `panelOpen`), `Ctrl+O` (transcript overlay toggle), `Ctrl+T` (request-items overlay toggle), and `Esc` (overlay close → dock close, in that precedence order). The listener is gated on `isActive: !modalActive` so it stays live regardless of which pane has focus — the overlay shortcuts therefore work the same way whether the user is in chat or context. `Ctrl+R` is reserved for the prompt's reverse-incremental history search (readline / bash convention) and is handled inside `prompt-input.tsx`.
 
 `ResponsesChat` is purely controlled with respect to overlays: `ChatLayout` passes down `overlay`, `requestItems`, and `requestItemsLoading` via the children render-prop, and the request-items fetch effect lives in `ChatLayout`. ResponsesChat keeps a single `useInput` for the modal Esc only — it has higher precedence than ChatLayout's chord handler because ChatLayout's listener is disabled when a modal is up.
 
 `prompt-input.tsx` accepts an `isActive` prop; its internal `useInput` is gated on `focusedPane === 'chat'` so the prompt continues to render but stops consuming keystrokes when the context pane has focus.
 
-| State | `Ctrl+W` | `Ctrl+O` | `Ctrl+R` | `Esc` | `AskUserModal` |
-|---|---|---|---|---|---|
-| No modal/overlay, dock open | swap focus | open transcript | open request | close dock | n/a |
-| Transcript or request overlay open | no-op | close overlay | close overlay | close overlay | n/a |
-| Dock closed, no overlay | no-op | open transcript | open request | no-op | n/a |
-| `AskUserModal` pending | inactive | inactive | inactive | close modal | active |
+| State | `Ctrl+W` | `Ctrl+O` | `Ctrl+T` | `Ctrl+R` | `Esc` | `AskUserModal` |
+|---|---|---|---|---|---|---|
+| No modal/overlay, dock open | swap focus | open transcript | open request | enter history search | close dock | n/a |
+| Transcript or request overlay open | no-op | close overlay | close overlay | (overlay-owned) | close overlay | n/a |
+| Dock closed, no overlay | no-op | open transcript | open request | enter history search | no-op | n/a |
+| History search active | (prompt-owned) | (prompt-owned) | (prompt-owned) | cycle next match | cancel search | n/a |
+| `AskUserModal` pending | inactive | inactive | inactive | inactive | close modal | active |
 
 When `AskUserModal` opens while the dock is open, `focusedPane` snaps back to `chat` so the user can answer. The dock stays mounted and continues to refresh its header.
 

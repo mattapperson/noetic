@@ -182,7 +182,10 @@ export function ChatLayout(props: ChatLayoutProps): ReactNode {
         setOverlay((prev) => (prev === 'transcript' ? 'none' : 'transcript'));
         return;
       }
-      if (key.ctrl && input === 'r') {
+      // Ctrl+T (Toggle request-items) opens the next-turn preview. Moved off
+      // Ctrl+R because that chord is now claimed by prompt-history reverse
+      // search (matches readline / bash convention).
+      if (key.ctrl && input === 't') {
         setOverlay((prev) => (prev === 'request' ? 'none' : 'request'));
         return;
       }

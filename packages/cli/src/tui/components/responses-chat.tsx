@@ -274,7 +274,7 @@ export function ResponsesChat({
               callInfoByCallId={callInfoMap}
               title={isRequest ? 'Request Items' : 'Transcript'}
               closeHint={
-                isRequest ? ' — press ctrl+r or Esc to close' : ' — press ctrl+o or Esc to close'
+                isRequest ? ' — press ctrl+t or Esc to close' : ' — press ctrl+o or Esc to close'
               }
               highlightItems={isRequest}
             />

@@ -1,6 +1,14 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { PropsWithChildren, ReactNode } from 'react';
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { ChatStatus } from '../chat-status.js';
 import type { PromptAttachment } from '../utils/prompt-attachments.js';
@@ -12,6 +20,13 @@ import {
   recordPromptHistoryEntry,
   resetPromptHistoryNavigation,
 } from '../utils/prompt-history.js';
+import type { SearchModeState } from '../utils/prompt-history-search.js';
+import { createSearchModeState, findReverseMatch } from '../utils/prompt-history-search.js';
+import {
+  appendPromptHistory,
+  loadPromptHistory,
+  maybeCompactPromptHistory,
+} from '../utils/prompt-history-storage.js';
 import { ChordSafeTextInput } from './chord-safe-text-input.js';
 import { useTheme } from './theme';
 
@@ -494,9 +509,108 @@ function recordHistoryIfEnabled(args: PromptSubmitHandlersArgs, text: string): v
   const nextHistory = recordPromptHistoryEntry(args.refs.historyState.current, text);
   args.refs.historyState.current = nextHistory;
   args.actions.setHistoryState(nextHistory);
+  // Fire-and-forget on the persistence side — see storage module's jsdoc
+  // for why errors are swallowed (read-only fs, missing dir, etc.).
+  void appendPromptHistory(text);
 }
 
-function usePromptKeyboardHandler(args: {
+interface SearchModeArgs {
+  searchMode: SearchModeState | null;
+  setSearchMode: (next: SearchModeState | null) => void;
+}
+
+/**
+ * Reverse-incremental search keystrokes (Ctrl+R was just pressed or we're
+ * already mid-search). All key handling for the prompt is rerouted through
+ * here while search mode is active — it returns `true` to indicate the key
+ * was consumed and the normal-mode handler should bail.
+ */
+function handleSearchModeKey(
+  input: string,
+  key: KeyShape,
+  args: PromptKeyboardArgs & SearchModeArgs,
+): boolean {
+  const current = args.searchMode;
+  if (current === null) {
+    return false;
+  }
+  // Esc: cancel; restore the buffer that was active when search began.
+  if (key.escape) {
+    args.actions.updateValue(current.savedBuffer);
+    args.setSearchMode(null);
+    return true;
+  }
+  // Enter: keep the match in the buffer and exit search mode. The Enter
+  // keystroke is consumed here so the form's onSubmit is NOT triggered —
+  // a second Enter actually submits. This is one step more conservative
+  // than bash (which submits on the first Enter) and matches what the
+  // user expected during product testing: "review then send."
+  if (key.return) {
+    args.setSearchMode(null);
+    return true;
+  }
+  const entries = args.refs.historyState.current.entries;
+  // Ctrl+R: cycle to the next older match.
+  if (key.ctrl && input === 'r') {
+    const next = findReverseMatch(entries, current.matchIndex + 1, current.query);
+    if (next.index >= 0) {
+      args.setSearchMode({
+        query: current.query,
+        matchIndex: next.index,
+        savedBuffer: current.savedBuffer,
+      });
+      args.actions.updateValue(next.value);
+    }
+    return true;
+  }
+  // Backspace: shrink the query and re-search from the top.
+  if (key.backspace || key.delete) {
+    const nextQuery = current.query.slice(0, -1);
+    const next = findReverseMatch(entries, 0, nextQuery);
+    args.setSearchMode({
+      query: nextQuery,
+      matchIndex: next.index,
+      savedBuffer: current.savedBuffer,
+    });
+    args.actions.updateValue(next.index >= 0 ? next.value : current.savedBuffer);
+    return true;
+  }
+  // Typing extends the query. Single printable chars only — Ctrl/meta chords
+  // are not query characters.
+  if (input.length === 1 && !key.ctrl && !key.meta) {
+    const nextQuery = current.query + input;
+    const next = findReverseMatch(entries, 0, nextQuery);
+    args.setSearchMode({
+      query: nextQuery,
+      matchIndex: next.index,
+      savedBuffer: current.savedBuffer,
+    });
+    if (next.index >= 0) {
+      args.actions.updateValue(next.value);
+    }
+    return true;
+  }
+  // Unhandled keys while in search mode are swallowed rather than passed to
+  // the normal handler, mirroring bash readline's behaviour.
+  return true;
+}
+
+interface KeyShape {
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+  escape?: boolean;
+  return?: boolean;
+  tab?: boolean;
+  upArrow?: boolean;
+  downArrow?: boolean;
+  leftArrow?: boolean;
+  rightArrow?: boolean;
+  backspace?: boolean;
+  delete?: boolean;
+}
+
+interface PromptKeyboardArgs {
   focus: boolean;
   disabled: boolean;
   status?: ChatStatus;
@@ -507,9 +621,27 @@ function usePromptKeyboardHandler(args: {
   enableHistory: boolean;
   refs: PromptKeyboardRefs;
   actions: PromptKeyboardActions;
-}): void {
+}
+
+function usePromptKeyboardHandler(args: PromptKeyboardArgs & SearchModeArgs): void {
   useInput(
-    (_input, key) => {
+    (input, key) => {
+      // Search mode short-circuits everything else: Ctrl+R/Enter/Esc/typing
+      // all go to handleSearchModeKey while a search is in flight.
+      if (handleSearchModeKey(input, key, args)) {
+        return;
+      }
+      // Ctrl+R enters search mode (when history is enabled and there's
+      // anything to search through).
+      if (
+        key.ctrl &&
+        input === 'r' &&
+        args.enableHistory &&
+        args.refs.historyState.current.entries.length > 0
+      ) {
+        args.setSearchMode(createSearchModeState(args.refs.value.current));
+        return;
+      }
       if (key.escape) {
         handlePromptEscape(args.refs, args.actions, args);
         return;
@@ -804,6 +936,32 @@ export function PromptInput({
   const [localSuggestions, setLocalSuggestions] = useState<Suggestion[]>([]);
   const [localSugIdx, setLocalSugIdx] = useState(0);
   const [historyState, setHistoryState] = useState(() => createPromptHistoryState([]));
+  // Hydrate from the on-disk history once on mount. The persisted file
+  // stores oldest→newest (append order); the in-memory state expects
+  // newest at entries[0], so reverse on the way in. Compaction runs the
+  // same slow path. Both are fire-and-forget — a missing file or read
+  // error must NOT crash the prompt; we fall back to session-only history.
+  useEffect(() => {
+    if (!enableHistory) {
+      return;
+    }
+    let cancelled = false;
+    loadPromptHistory().then((entries) => {
+      if (cancelled || entries.length === 0) {
+        return;
+      }
+      const reversed = [
+        ...entries,
+      ].reverse();
+      setHistoryState(createPromptHistoryState(reversed));
+    });
+    void maybeCompactPromptHistory();
+    return (): void => {
+      cancelled = true;
+    };
+  }, [
+    enableHistory,
+  ]);
   const [attachments] = useState<PromptAttachment[]>([]);
 
   // Resolve value from: controlled prop > provider > local
@@ -953,6 +1111,20 @@ export function PromptInput({
   );
   const { handleInputSubmit } = usePromptSubmitHandlers(submitArgs);
 
+  const [searchMode, setSearchMode] = useState<SearchModeState | null>(null);
+  // When the prompt loses focus (e.g. context pane focused, or modal opens),
+  // abandon any in-flight search. Otherwise the search bar would render
+  // for an inactive prompt and confuse the user.
+  useEffect(() => {
+    if (!(focus && isActive) && searchMode !== null) {
+      setSearchMode(null);
+    }
+  }, [
+    focus,
+    isActive,
+    searchMode,
+  ]);
+
   usePromptKeyboardHandler({
     focus: focus && isActive,
     disabled,
@@ -964,6 +1136,8 @@ export function PromptInput({
     enableHistory,
     refs,
     actions,
+    searchMode,
+    setSearchMode,
   });
 
   // ── Build context for subcomponents ────────────────────────────────────
@@ -1040,6 +1214,7 @@ export function PromptInput({
       <Box flexDirection="column" flexShrink={0}>
         {showDividers && <PromptInputDivider />}
         <Box flexDirection="column" paddingX={1}>
+          {searchMode !== null ? <PromptSearchBar state={searchMode} /> : null}
           <PromptInputTextarea />
           <PromptInputStatusText />
           <PromptInputModel />
@@ -1048,6 +1223,36 @@ export function PromptInput({
         <PromptInputSuggestions />
       </Box>
     </PromptInputContext.Provider>
+  );
+}
+
+/**
+ * Single-line status above the prompt while a reverse-incremental search
+ * is active. Mirrors bash's `(reverse-i-search)\`q': match`, with one
+ * difference: in this app the match also lives in the prompt buffer below,
+ * so the search bar focuses on the query itself plus a "no match" hint.
+ */
+function PromptSearchBar({ state }: { state: SearchModeState }): ReactNode {
+  const { theme } = usePromptInput();
+  const hasMatch = state.matchIndex >= 0;
+  return (
+    <Box flexDirection="row">
+      <Text dimColor color={theme.muted}>
+        (reverse-i-search)
+      </Text>
+      <Text color={theme.muted}>{' `'}</Text>
+      <Text>{state.query}</Text>
+      <Text color={theme.muted}>{`': `}</Text>
+      {hasMatch ? null : (
+        <Text color={theme.error} dimColor>
+          no match
+        </Text>
+      )}
+      <Box flexGrow={1} />
+      <Text dimColor color={theme.muted}>
+        Ctrl+R next · Enter accept · Esc cancel
+      </Text>
+    </Box>
   );
 }
 
