@@ -122,11 +122,11 @@
         "zod": "^4.0.0",
       },
       "devDependencies": {
-        "@ax-llm/ax": "^21.0.14",
+        "@ax-llm/ax": "21.0.14",
         "bun-types": "latest",
       },
       "peerDependencies": {
-        "@ax-llm/ax": "^21.0.14",
+        "@ax-llm/ax": "21.0.14",
         "@mariozechner/pi-coding-agent": ">=0.1.0",
       },
       "optionalPeers": [
