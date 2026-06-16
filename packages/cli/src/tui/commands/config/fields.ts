@@ -1,5 +1,6 @@
 import { BUILT_IN_SKILLS } from '../../../skills/built-in/index.js';
 import type { SkillDefinition } from '../../../skills/types.js';
+import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../../../types/config.js';
 import type { ConfigFieldDefinition, ConfigFieldPath } from './types.js';
 import { ConfigTab, FieldKind } from './types.js';
 
@@ -136,6 +137,14 @@ const STATIC_CONFIG_FIELDS: ReadonlyArray<ConfigFieldDefinition> = [
     placeholder: '40',
     description:
       'Cap on items projected to the LLM. Storage is unaffected. Leave blank to disable.',
+  },
+  {
+    path: 'ui.contextPanelWidth',
+    label: 'Context Panel Width',
+    kind: FieldKind.Text,
+    tab: ConfigTab.Runtime,
+    placeholder: 'responsive',
+    description: `"responsive" (default) or a column count ${PANEL_CONFIG_MIN}-${PANEL_CONFIG_MAX} for the /context dock.`,
   },
 ];
 

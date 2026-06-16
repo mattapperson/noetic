@@ -29,13 +29,7 @@ import {
   isFrameworkEvent,
   markUserEntrySent,
 } from './helpers.js';
-import type {
-  AssistantEntry,
-  ChatStatus,
-  ConversationEntry,
-  LiveTokens,
-  StreamMetricsRefs,
-} from './ui.js';
+import type { AssistantEntry, ChatStatus, ConversationEntry, StreamMetricsRefs } from './ui.js';
 import { appendOrUpdateEntry, extractTextContent, getItemId } from './ui.js';
 
 //#region Types
@@ -200,12 +194,10 @@ async function handleTurnSettled(opts: ConsumeEventsOpts): Promise<void> {
     }
     opts.lastLayerUsageRef.current = resp.lastLayerUsage;
     opts.setLastLayerUsage(resp.lastLayerUsage);
-    const exact: LiveTokens = {
-      input: resp.usage.inputTokens,
-      output: resp.usage.outputTokens,
-      cached: resp.usage.cachedTokens,
-    };
-    opts.streamMetrics.liveTokens.current = exact;
+    // Clear the streaming-tokens ref so the context panel header falls through
+    // to the authoritative `LastLayerUsage` total (which includes system prompt,
+    // tools, and memory-layer overhead) instead of the stale input+output tally.
+    opts.streamMetrics.liveTokens.current = null;
     opts.onTurnSettled({
       items: resp.items,
       usage: resp.usage,

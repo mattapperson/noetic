@@ -1,7 +1,14 @@
 import { Box, Text, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
 import type { PropsWithChildren, ReactNode } from 'react';
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { AgentMode } from '../../harness/factory.js';
 import type { ChatStatus } from '../chat-status.js';
 import type { PromptAttachment } from '../utils/prompt-attachments.js';
@@ -12,7 +19,16 @@ import {
   navigatePromptHistoryUp,
   recordPromptHistoryEntry,
   resetPromptHistoryNavigation,
+  shouldNavigateHistory,
 } from '../utils/prompt-history.js';
+import type { SearchModeState } from '../utils/prompt-history-search.js';
+import { createSearchModeState, findReverseMatch } from '../utils/prompt-history-search.js';
+import {
+  appendPromptHistory,
+  loadPromptHistory,
+  maybeCompactPromptHistory,
+} from '../utils/prompt-history-storage.js';
+import { ChordSafeTextInput } from './chord-safe-text-input.js';
 import { useTheme } from './theme';
 
 export type { ChatStatus } from '../chat-status.js';
@@ -138,7 +154,6 @@ export interface PromptInputContextValue {
   agentMode?: AgentMode;
   onToggleMode?: () => void;
   dividerColor?: string;
-  dividerDashed?: boolean;
   theme: ReturnType<typeof useTheme>;
   handleInput: (value: string) => void;
   handleInputSubmit: (value: string) => void;
@@ -221,12 +236,17 @@ export interface PromptInputProps {
   onToggleMode?: () => void;
   /** Whether the input is focused and accepting keystrokes */
   focus?: boolean;
+  /**
+   * When false, the prompt continues to render (history + cursor visible)
+   * but its internal `useInput` stops consuming keystrokes. Used by the
+   * Context Split View so the context pane can receive keys while focused.
+   * Defaults to true.
+   */
+  isActive?: boolean;
   /** Show horizontal dividers above and below the input */
   showDividers?: boolean;
   /** Override divider line color (e.g. for focus indicators) */
   dividerColor?: string;
-  /** Use dashed divider lines instead of solid */
-  dividerDashed?: boolean;
   /** Compound mode: provide subcomponents as children */
   children?: ReactNode;
 }
@@ -370,12 +390,15 @@ function handlePromptArrow(args: PromptArrowArgs): void {
   if (!enableHistory) {
     return;
   }
-  if (direction === 'up' && refs.historyState.current.entries.length > 0) {
+  if (!shouldNavigateHistory(direction, refs.historyState.current)) {
+    return;
+  }
+  if (direction === 'up') {
     const result = navigatePromptHistoryUp(refs.historyState.current, refs.value.current);
     refs.historyState.current = result.state;
     actions.setHistoryState(result.state);
     actions.updateValue(result.value);
-  } else if (direction === 'down' && refs.historyState.current.index > 0) {
+  } else {
     const result = navigatePromptHistoryDown(refs.historyState.current);
     refs.historyState.current = result.state;
     actions.setHistoryState(result.state);
@@ -490,9 +513,154 @@ function recordHistoryIfEnabled(args: PromptSubmitHandlersArgs, text: string): v
   const nextHistory = recordPromptHistoryEntry(args.refs.historyState.current, text);
   args.refs.historyState.current = nextHistory;
   args.actions.setHistoryState(nextHistory);
+  // Fire-and-forget on the persistence side — see storage module's jsdoc
+  // for why errors are swallowed (read-only fs, missing dir, etc.).
+  void appendPromptHistory(text);
 }
 
-function usePromptKeyboardHandler(args: {
+interface SearchModeArgs {
+  /**
+   * Ref + setter pair instead of plain state. The ref is read inside the
+   * useInput callback so a burst of keystrokes immediately after `Ctrl+R`
+   * sees the updated value synchronously (React hasn't re-rendered between
+   * keystrokes yet); the setter still calls `useState` underneath to drive
+   * the search-bar render.
+   */
+  searchModeRef: React.MutableRefObject<SearchModeState | null>;
+  setSearchMode: (next: SearchModeState | null) => void;
+}
+
+/**
+ * Reverse-incremental search keystrokes (Ctrl+R was just pressed or we're
+ * already mid-search). All key handling for the prompt is rerouted through
+ * here while search mode is active — it returns `true` to indicate the key
+ * was consumed and the normal-mode handler should bail.
+ */
+/**
+ * True for keystrokes that should EXTEND the search query — printable text,
+ * paste-style bulk input, anything other than chords and recognised special
+ * keys. Pulled out so the search-mode dispatcher stays small.
+ */
+function isSearchExtendInput(input: string, key: KeyShape): boolean {
+  if (input.length === 0) {
+    return false;
+  }
+  if (key.ctrl || key.meta || key.tab) {
+    return false;
+  }
+  if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+    return false;
+  }
+  return true;
+}
+
+/** Cycle the search forward (Ctrl+R while a search is in flight). */
+function applySearchCycle(
+  args: PromptKeyboardArgs & SearchModeArgs,
+  current: SearchModeState,
+): void {
+  const entries = args.refs.historyState.current.entries;
+  const next = findReverseMatch(entries, current.matchIndex + 1, current.query);
+  if (next.index < 0) {
+    return;
+  }
+  args.setSearchMode({
+    query: current.query,
+    matchIndex: next.index,
+    savedBuffer: current.savedBuffer,
+  });
+  args.actions.updateValue(next.value);
+}
+
+/** Shrink the query by one char and re-search from the top. */
+function applySearchBackspace(
+  args: PromptKeyboardArgs & SearchModeArgs,
+  current: SearchModeState,
+): void {
+  const entries = args.refs.historyState.current.entries;
+  const nextQuery = current.query.slice(0, -1);
+  const next = findReverseMatch(entries, 0, nextQuery);
+  args.setSearchMode({
+    query: nextQuery,
+    matchIndex: next.index,
+    savedBuffer: current.savedBuffer,
+  });
+  args.actions.updateValue(next.index >= 0 ? next.value : current.savedBuffer);
+}
+
+/** Extend the query by `input` and re-search from the top. */
+function applySearchExtend(
+  args: PromptKeyboardArgs & SearchModeArgs,
+  current: SearchModeState,
+  input: string,
+): void {
+  const entries = args.refs.historyState.current.entries;
+  const nextQuery = current.query + input;
+  const next = findReverseMatch(entries, 0, nextQuery);
+  args.setSearchMode({
+    query: nextQuery,
+    matchIndex: next.index,
+    savedBuffer: current.savedBuffer,
+  });
+  if (next.index >= 0) {
+    args.actions.updateValue(next.value);
+  }
+}
+
+function handleSearchModeKey(
+  input: string,
+  key: KeyShape,
+  args: PromptKeyboardArgs & SearchModeArgs,
+): boolean {
+  const current = args.searchModeRef.current;
+  if (current === null) {
+    return false;
+  }
+  // Esc: cancel; restore the buffer that was active when search began.
+  if (key.escape) {
+    args.actions.updateValue(current.savedBuffer);
+    args.setSearchMode(null);
+    return true;
+  }
+  // Enter: keep the match in the buffer and exit search mode. One step
+  // more conservative than bash (which submits on the first Enter) — the
+  // user reviews, then a second Enter actually submits.
+  if (key.return) {
+    args.setSearchMode(null);
+    return true;
+  }
+  if (key.ctrl && input === 'r') {
+    applySearchCycle(args, current);
+    return true;
+  }
+  if (key.backspace || key.delete) {
+    applySearchBackspace(args, current);
+    return true;
+  }
+  if (isSearchExtendInput(input, key)) {
+    applySearchExtend(args, current, input);
+    return true;
+  }
+  // Unhandled keys in search mode are swallowed, mirroring bash readline.
+  return true;
+}
+
+interface KeyShape {
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+  escape?: boolean;
+  return?: boolean;
+  tab?: boolean;
+  upArrow?: boolean;
+  downArrow?: boolean;
+  leftArrow?: boolean;
+  rightArrow?: boolean;
+  backspace?: boolean;
+  delete?: boolean;
+}
+
+interface PromptKeyboardArgs {
   focus: boolean;
   disabled: boolean;
   status?: ChatStatus;
@@ -503,41 +671,105 @@ function usePromptKeyboardHandler(args: {
   enableHistory: boolean;
   refs: PromptKeyboardRefs;
   actions: PromptKeyboardActions;
-}): void {
+}
+
+function canEnterSearchMode(input: string, key: KeyShape, args: PromptKeyboardArgs): boolean {
+  if (!(key.ctrl && input === 'r')) {
+    return false;
+  }
+  return args.enableHistory && args.refs.historyState.current.entries.length > 0;
+}
+
+function dispatchArrowNavigation(direction: 'up' | 'down', args: PromptKeyboardArgs): void {
+  handlePromptArrow({
+    direction,
+    refs: args.refs,
+    actions: args.actions,
+    enableHistory: args.enableHistory,
+  });
+}
+
+/**
+ * Body of the prompt's normal-mode `useInput` callback, factored out so the
+ * hook itself stays under the sentrux complex-function threshold. The
+ * search-mode branch was already extracted into `handleSearchModeKey`;
+ * what remains here is a small dispatch over the recognised chords.
+ */
+/** Pre-dispatch handlers: search-mode reroute + search-mode entry + Esc.
+ *  Returns `true` if the keystroke was consumed and the rest of
+ *  `dispatchPromptKey` should bail. */
+function handleSearchAndEscape(
+  input: string,
+  key: KeyShape,
+  args: PromptKeyboardArgs & SearchModeArgs,
+): boolean {
+  if (handleSearchModeKey(input, key, args)) {
+    return true;
+  }
+  if (canEnterSearchMode(input, key, args)) {
+    args.setSearchMode(createSearchModeState(args.refs.value.current));
+    return true;
+  }
+  if (key.escape) {
+    handlePromptEscape(args.refs, args.actions, args);
+    return true;
+  }
+  return false;
+}
+
+/** Returns `true` if the keystroke was Tab+Shift (the mode-toggle chord). */
+function handleModeToggle(key: KeyShape, args: PromptKeyboardArgs): boolean {
+  if (!(key.tab && key.shift) || !args.onToggleMode) {
+    return false;
+  }
+  args.onToggleMode();
+  return true;
+}
+
+/** Returns `true` if the keystroke was Tab (suggestion completion). */
+function handleSuggestionCompletion(key: KeyShape, args: PromptKeyboardArgs): boolean {
+  if (!(key.tab && !key.shift) || args.refs.suggestions.current.length === 0) {
+    return false;
+  }
+  completeSuggestion(args.refs, args.actions);
+  return true;
+}
+
+/** History nav: plain Up/Down (Shift+arrows are claimed by ChatScroll). */
+function handleHistoryArrow(key: KeyShape, args: PromptKeyboardArgs): void {
+  if (key.upArrow && !key.shift) {
+    dispatchArrowNavigation('up', args);
+    return;
+  }
+  if (key.downArrow && !key.shift) {
+    dispatchArrowNavigation('down', args);
+  }
+}
+
+function dispatchPromptKey(
+  input: string,
+  key: KeyShape,
+  args: PromptKeyboardArgs & SearchModeArgs,
+): void {
+  if (handleSearchAndEscape(input, key, args)) {
+    return;
+  }
+  if (handleModeToggle(key, args)) {
+    return;
+  }
+  if (args.disabled) {
+    return;
+  }
+  if (handleSuggestionCompletion(key, args)) {
+    return;
+  }
+  handleHistoryArrow(key, args);
+}
+
+function usePromptKeyboardHandler(args: PromptKeyboardArgs & SearchModeArgs): void {
   useInput(
-    (_input, key) => {
-      if (key.escape) {
-        handlePromptEscape(args.refs, args.actions, args);
-        return;
-      }
-      if (key.tab && key.shift && args.onToggleMode) {
-        args.onToggleMode();
-        return;
-      }
-      if (args.disabled) {
-        return;
-      }
-      if (key.tab && !key.shift && args.refs.suggestions.current.length > 0) {
-        completeSuggestion(args.refs, args.actions);
-        return;
-      }
-      if (key.upArrow) {
-        handlePromptArrow({
-          direction: 'up',
-          refs: args.refs,
-          actions: args.actions,
-          enableHistory: args.enableHistory,
-        });
-        return;
-      }
-      if (key.downArrow) {
-        handlePromptArrow({
-          direction: 'down',
-          refs: args.refs,
-          actions: args.actions,
-          enableHistory: args.enableHistory,
-        });
-      }
+    (input, key) => {
+      dispatchPromptKey(input, key, args);
     },
     {
       isActive: args.focus,
@@ -549,21 +781,31 @@ function usePromptKeyboardHandler(args: {
 // Subcomponents
 // ============================================================================
 
-/** Horizontal divider line fills the full terminal width. */
+/**
+ * Horizontal divider line spanning the prompt's available width.
+ *
+ * Uses Ink's `borderBottom` on an empty Box so the line is drawn by the
+ * layout engine itself \u2014 it auto-fits the Box's flex-resolved width and
+ * reflows on terminal resize. A previous implementation rendered
+ * `'\u2500'.repeat(stdout.columns)` inside a `<Text>`, which overflowed when
+ * the prompt lived inside a narrower container (Context Split View dock
+ * open) and left a gap when the terminal was widened \u2014 the divider has to
+ * follow its container, not the raw terminal column count.
+ */
 function PromptInputDivider() {
-  const { dividerColor, dividerDashed, theme } = usePromptInput();
-  const { stdout } = useStdout();
-  // Ink's useStdout provides the terminal dimensions
-  const width = stdout?.columns ?? 80;
+  const { dividerColor, theme } = usePromptInput();
   const color = dividerColor ?? theme.muted;
-  const char = dividerDashed ? '\u254C' : '\u2500';
-  const line = char.repeat(width);
   return (
-    <Box width="100%">
-      <Text color={color} dimColor={!dividerColor}>
-        {line}
-      </Text>
-    </Box>
+    <Box
+      width="100%"
+      flexShrink={0}
+      borderStyle="single"
+      borderTop={false}
+      borderLeft={false}
+      borderRight={false}
+      borderColor={color}
+      borderDimColor={!dividerColor}
+    />
   );
 }
 
@@ -623,9 +865,9 @@ function PromptInputTextarea() {
   } = usePromptInput();
   return (
     <Box flexDirection="row">
-      <Text color={promptColor}>{prompt}</Text>
+      <Text color={promptColor}>{prompt} </Text>
       {isFocused ? (
-        <TextInput
+        <ChordSafeTextInput
           value={value}
           placeholder={placeholder}
           onChange={handleInput}
@@ -745,9 +987,9 @@ export function PromptInput({
   agentMode,
   onToggleMode,
   focus = true,
+  isActive = true,
   showDividers = true,
   dividerColor,
-  dividerDashed,
   children,
 }: PromptInputProps) {
   const theme = useTheme();
@@ -759,7 +1001,26 @@ export function PromptInput({
   // are enqueued on the harness session and delivered as subsequent turns.
   // `disabledProp` still hard-disables (used when a modal is open, etc.).
   const disabled = disabledProp;
-  const isFocused = focus && !disabled;
+  // Reverse-incremental search lives in BOTH a ref and useState. The ref is
+  // read synchronously inside the useInput callback so a burst of keystrokes
+  // immediately after Ctrl+R (the React state hasn't re-rendered yet) still
+  // sees `searchMode !== null` and routes into the search-mode branch. The
+  // state drives rendering — the search bar visibility, and the TextInput
+  // unmount that prevents stray characters from leaking into the prompt.
+  const searchModeRef = useRef<SearchModeState | null>(null);
+  const [searchMode, setSearchModeState] = useState<SearchModeState | null>(null);
+  const setSearchMode = useCallback((next: SearchModeState | null): void => {
+    searchModeRef.current = next;
+    setSearchModeState(next);
+  }, []);
+  // `isActive` is the pane-level gate (e.g. the context panel has focus, so
+  // chat-side input should be inert). It must factor into `isFocused` so the
+  // wrapped TextInput stops subscribing to keystrokes and stops swallowing
+  // pane-level chords like Ctrl+W as literal characters. While a reverse-
+  // search is in flight, we also unmount TextInput — the prompt buffer is
+  // updated programmatically as the user cycles matches, raw key presses
+  // would otherwise overlay the match.
+  const isFocused = focus && !disabled && isActive && searchMode === null;
   const statusHintText = resolveStatusHintText({
     status,
     submittedText,
@@ -783,6 +1044,32 @@ export function PromptInput({
   const [localSuggestions, setLocalSuggestions] = useState<Suggestion[]>([]);
   const [localSugIdx, setLocalSugIdx] = useState(0);
   const [historyState, setHistoryState] = useState(() => createPromptHistoryState([]));
+  // Hydrate from the on-disk history once on mount. The persisted file
+  // stores oldest→newest (append order); the in-memory state expects
+  // newest at entries[0], so reverse on the way in. Compaction runs the
+  // same slow path. Both are fire-and-forget — a missing file or read
+  // error must NOT crash the prompt; we fall back to session-only history.
+  useEffect(() => {
+    if (!enableHistory) {
+      return;
+    }
+    let cancelled = false;
+    loadPromptHistory().then((entries) => {
+      if (cancelled || entries.length === 0) {
+        return;
+      }
+      const reversed = [
+        ...entries,
+      ].reverse();
+      setHistoryState(createPromptHistoryState(reversed));
+    });
+    void maybeCompactPromptHistory();
+    return (): void => {
+      cancelled = true;
+    };
+  }, [
+    enableHistory,
+  ]);
   const [attachments] = useState<PromptAttachment[]>([]);
 
   // Resolve value from: controlled prop > provider > local
@@ -932,8 +1219,22 @@ export function PromptInput({
   );
   const { handleInputSubmit } = usePromptSubmitHandlers(submitArgs);
 
-  usePromptKeyboardHandler({
+  // When the prompt loses focus (e.g. context pane focused, or modal opens),
+  // abandon any in-flight search. Otherwise the search bar would render
+  // for an inactive prompt and confuse the user.
+  useEffect(() => {
+    if (!(focus && isActive) && searchMode !== null) {
+      setSearchMode(null);
+    }
+  }, [
     focus,
+    isActive,
+    searchMode,
+    setSearchMode,
+  ]);
+
+  usePromptKeyboardHandler({
+    focus: focus && isActive,
     disabled,
     status,
     isModalOpen,
@@ -943,6 +1244,8 @@ export function PromptInput({
     enableHistory,
     refs,
     actions,
+    searchModeRef,
+    setSearchMode,
   });
 
   // ── Build context for subcomponents ────────────────────────────────────
@@ -974,7 +1277,6 @@ export function PromptInput({
       agentMode,
       onToggleMode,
       dividerColor,
-      dividerDashed,
       theme,
       handleInput: updateValue,
       handleInputSubmit,
@@ -997,7 +1299,6 @@ export function PromptInput({
       agentMode,
       onToggleMode,
       dividerColor,
-      dividerDashed,
       theme,
       updateValue,
       handleInputSubmit,
@@ -1021,6 +1322,7 @@ export function PromptInput({
       <Box flexDirection="column" flexShrink={0}>
         {showDividers && <PromptInputDivider />}
         <Box flexDirection="column" paddingX={1}>
+          {searchMode !== null ? <PromptSearchBar state={searchMode} /> : null}
           <PromptInputTextarea />
           <PromptInputStatusText />
           <PromptInputModel />
@@ -1029,6 +1331,36 @@ export function PromptInput({
         <PromptInputSuggestions />
       </Box>
     </PromptInputContext.Provider>
+  );
+}
+
+/**
+ * Single-line status above the prompt while a reverse-incremental search
+ * is active. Mirrors bash's `(reverse-i-search)\`q': match`, with one
+ * difference: in this app the match also lives in the prompt buffer below,
+ * so the search bar focuses on the query itself plus a "no match" hint.
+ */
+function PromptSearchBar({ state }: { state: SearchModeState }): ReactNode {
+  const { theme } = usePromptInput();
+  const hasMatch = state.matchIndex >= 0;
+  return (
+    <Box flexDirection="row">
+      <Text dimColor color={theme.muted}>
+        (reverse-i-search)
+      </Text>
+      <Text color={theme.muted}>{' `'}</Text>
+      <Text>{state.query}</Text>
+      <Text color={theme.muted}>{`': `}</Text>
+      {hasMatch ? null : (
+        <Text color={theme.error} dimColor>
+          no match
+        </Text>
+      )}
+      <Box flexGrow={1} />
+      <Text dimColor color={theme.muted}>
+        Ctrl+R next · Enter accept · Esc cancel
+      </Text>
+    </Box>
   );
 }
 

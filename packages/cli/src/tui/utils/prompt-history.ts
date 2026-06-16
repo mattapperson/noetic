@@ -15,6 +15,28 @@ export interface PromptHistoryNavigationResult {
 
 //#region Public API
 
+/**
+ * Predicate: should an Up/Down arrow keystroke dispatch a history-navigation
+ * step? Extracted from the keyboard handler so the bash-style "Down at the
+ * newest entry lands on the empty draft" contract is testable without ink.
+ *
+ *   - Up always navigates as long as there are entries to recall.
+ *   - Down navigates when the user is somewhere inside history
+ *     (`index >= 0`). At `index === 0` (newest entry) the next Down lands
+ *     at the saved draft — usually empty — restoring the pre-navigation
+ *     state. Down with `index === -1` is a no-op so a fresh prompt with no
+ *     history navigation in flight ignores Down entirely.
+ */
+export function shouldNavigateHistory(
+  direction: 'up' | 'down',
+  state: PromptHistoryState,
+): boolean {
+  if (direction === 'up') {
+    return state.entries.length > 0;
+  }
+  return state.index >= 0;
+}
+
 export function createPromptHistoryState(entries: ReadonlyArray<string>): PromptHistoryState {
   return {
     entries: [

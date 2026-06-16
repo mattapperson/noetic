@@ -92,7 +92,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "dependencies": {
         "@noetic-tools/memory": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -283,7 +283,7 @@
     },
     "packages/sub-harness-pi": {
       "name": "@noetic-tools/sub-harness-pi",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@noetic-tools/sub-harness": "workspace:*",
         "@noetic-tools/types": "workspace:*",

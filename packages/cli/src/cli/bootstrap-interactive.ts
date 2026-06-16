@@ -14,7 +14,11 @@ import { loadPlugins } from '../plugins/loader.js';
 import { findMostRecentSession, loadSession, loadSessionByIdAnywhere } from '../sessions/store.js';
 import { runAgent } from '../tui/app.js';
 import { runPicker } from '../tui/run-picker.js';
-import { installInterruptSafetyNet } from '../tui/terminal/interrupt-safety-net.js';
+import {
+  buildTerminalEnterSequence,
+  buildTerminalRestoreSequence,
+  installInterruptSafetyNet,
+} from '../tui/terminal/interrupt-safety-net.js';
 import type { AgentRuntimeConfig, CliFlags } from '../types/config.js';
 import type { SessionFile } from '../types/session.js';
 import { parseArgs } from './args.js';
@@ -73,12 +77,27 @@ export async function runInteractiveEntry(argv: string[]): Promise<void> {
         : undefined,
   });
 
-  await runAgent(plugins, runtimeConfig, {
-    initialSession,
-    disablePersistence: flags.noSessionPersistence,
-    name: flags.name,
-    forcedSessionId: flags.sessionId,
-  });
+  // Enter the alternate screen buffer so the TUI gets a full-viewport canvas
+  // with no scrollback bleed. The interrupt safety net's restore sequence
+  // already includes the matching EXIT_ALT_SCREEN, so SIGINT/SIGTERM cleans
+  // up automatically. For a normal exit (Ink unmount → waitUntilExit) we
+  // emit the restore sequence ourselves below.
+  const isTty = process.stdout.isTTY === true;
+  if (isTty) {
+    process.stdout.write(buildTerminalEnterSequence());
+  }
+  try {
+    await runAgent(plugins, runtimeConfig, {
+      initialSession,
+      disablePersistence: flags.noSessionPersistence,
+      name: flags.name,
+      forcedSessionId: flags.sessionId,
+    });
+  } finally {
+    if (isTty) {
+      process.stdout.write(buildTerminalRestoreSequence());
+    }
+  }
 }
 
 async function resolveInitialSession(cwd: string, cliFlags: CliFlags): Promise<SessionFile | null> {

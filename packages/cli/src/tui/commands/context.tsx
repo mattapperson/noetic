@@ -2,7 +2,7 @@ import type { Item, LastLayerUsage, LayerUsageEntry, MemoryLayer } from '@noetic
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 import { useContext } from 'react';
-import type { Command, LocalJsxCommandCall } from '../../commands/types.js';
+import type { Command, LocalCommandCall } from '../../commands/types.js';
 import { formatTokens, getModelContextLimit } from '../../types/model-context.js';
 import type { ScrollableRow } from '../components/tabs/index.js';
 import { ScrollableBox, Tab, Tabs, TabsContext } from '../components/tabs/index.js';
@@ -299,14 +299,27 @@ export function ContextDisplay({ model, usage, registeredLayers }: ContextDispla
 
 //#region Implementation
 
-const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
-  return (
-    <ContextDisplay
-      model={ctx.config.model}
-      usage={ctx.lastLayerUsage}
-      registeredLayers={ctx.memoryLayers}
-    />
-  );
+/**
+ * `/context` toggles the Context Split View dock. In headless contexts where
+ * `toggleContextPanel` is undefined (tasks runner, daemon) the command falls
+ * back to a `text` result explaining that the dock is TUI-only — it never
+ * throws. See specs/28-context-split-view.md.
+ */
+const call: LocalCommandCall = async (_args, ctx) => {
+  if (!ctx.toggleContextPanel) {
+    return {
+      type: 'notice',
+      value: 'The /context dock is only available in the interactive TUI.',
+    };
+  }
+  ctx.toggleContextPanel();
+  const opening = !ctx.contextPanelOpen;
+  return {
+    type: 'notice',
+    value: opening
+      ? 'Context dock opened. Press Ctrl+W to swap focus, /context to close.'
+      : 'Context dock closed.',
+  };
 };
 
 //#endregion
@@ -314,9 +327,9 @@ const call: LocalJsxCommandCall = async (_onDone, ctx, _args) => {
 //#region Command Definition
 
 export const context: Command = {
-  type: 'local-jsx',
+  type: 'local',
   name: 'context',
-  description: 'Show context window breakdown by memory layer (from last run)',
+  description: 'Toggle the Context Split View dock (memory-layer + token usage)',
   load: async () => ({
     call,
   }),

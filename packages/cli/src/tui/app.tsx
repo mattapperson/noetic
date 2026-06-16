@@ -110,6 +110,10 @@ import {
   StreamMetricsProvider,
   useExitOnInterrupt,
 } from './app-parts/ui.js';
+import { ChatLayout } from './components/chat-layout.js';
+import { RootCanvas } from './components/root-canvas.js';
+import { nextFocus } from './layout/next-focus.js';
+import type { ContextPanelWidthConfig, Pane } from './layout/types.js';
 import { TaskChatSpawningView, TaskChatView } from './task-chat/task-chat-view.js';
 import { TaskBoard } from './tasks/runtime-ui/task-board.js';
 
@@ -186,6 +190,31 @@ function App({
   const [viewMode, setViewMode] = useState<ViewMode>({
     kind: 'chat',
   });
+  // Context Split View dock state — session-local. See specs/28-context-split-view.md.
+  const [contextPanelOpen, setContextPanelOpen] = useState<boolean>(false);
+  const [focusedPane, setFocusedPane] = useState<Pane>('chat');
+  // One-shot flag: open the dock automatically the FIRST time the user
+  // submits a real prompt (anything that isn't a slash command). Stored as
+  // a ref so a user who closes the dock later doesn't get it re-opened on
+  // their next submission. Persists for the lifetime of this React tree;
+  // a fresh session/clear resets it via the component remount.
+  const hasAutoOpenedContextPanelRef = useRef(false);
+  // Transient one-line notice rendered below the prompt. Cleared by a
+  // timeout (~4s) or by the next user submission. Notices are ephemeral UI
+  // confirmations ("dock opened", "mode switched") that don't belong in
+  // the chat scroll.
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (statusNotice === null) {
+      return;
+    }
+    const id = setTimeout(() => setStatusNotice(null), 4000);
+    return (): void => {
+      clearTimeout(id);
+    };
+  }, [
+    statusNotice,
+  ]);
   const [model, setModelState] = useState<string>(config.model);
   const harnessModelRef = useRef<string>(config.model);
   const [effectiveCwd, setEffectiveCwd] = useState<string>(
@@ -1056,9 +1085,61 @@ function App({
     ],
   );
 
+  // Context Split View — `/context` toggles the dock. When opening fresh,
+  // start with focus on chat so the user can keep typing. See spec 28.
+  const toggleContextPanel = useCallback((): void => {
+    setContextPanelOpen((prev) => {
+      if (prev) {
+        // Closing the dock — restore chat focus so a future re-open (or any
+        // gate using focusedPane) starts from a sensible state.
+        setFocusedPane('chat');
+        return false;
+      }
+      setFocusedPane('chat');
+      return true;
+    });
+  }, []);
+
+  const swapContextFocus = useCallback((): void => {
+    setFocusedPane((prev) => nextFocus(prev));
+  }, []);
+
+  // When AskUserModal opens while the dock is open, snap focus back to
+  // chat so the user can answer. The dock stays mounted.
+  useEffect(() => {
+    if (askUserRequest && contextPanelOpen) {
+      setFocusedPane('chat');
+    }
+  }, [
+    askUserRequest,
+    contextPanelOpen,
+  ]);
+
+  // Resolve the configured panel width (or default 'responsive').
+  const panelWidthConfig: ContextPanelWidthConfig = config.ui?.contextPanelWidth ?? 'responsive';
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage): Promise<void> => {
+      // Ephemeral notices clear on the next user submission so they don't
+      // linger across turns.
+      setStatusNotice(null);
       const text = message.text;
+      // Auto-open the Context dock on the user's FIRST real prompt — anything
+      // that isn't a slash command. Skipping `/foo` matches user
+      // expectation: the dock is about the LLM context breakdown, so
+      // showing it only kicks in once the user actually engages the model.
+      // One-shot via the ref so a manual close later sticks.
+      if (
+        !hasAutoOpenedContextPanelRef.current &&
+        text.trim().length > 0 &&
+        !text.trim().startsWith('/')
+      ) {
+        hasAutoOpenedContextPanelRef.current = true;
+        setContextPanelOpen(true);
+        // Keep focus on chat so the user can keep typing — the dock just
+        // appears alongside.
+        setFocusedPane('chat');
+      }
       const sendUserMessage = async (
         messageText: string,
         contentParts?: ReadonlyArray<InputContentPart>,
@@ -1204,6 +1285,8 @@ function App({
         clearSession,
         restartWithSession,
         setViewMode,
+        toggleContextPanel,
+        contextPanelOpen,
       };
 
       try {
@@ -1245,6 +1328,10 @@ function App({
               content: result.value,
             } satisfies SystemEntry,
           ]);
+          return;
+        }
+        if (result.type === 'notice') {
+          setStatusNotice(result.value);
           return;
         }
         if (result.type === 'modal') {
@@ -1291,6 +1378,8 @@ function App({
       askUserService,
       restartWithSession,
       clearSession,
+      toggleContextPanel,
+      contextPanelOpen,
     ],
   );
 
@@ -1335,6 +1424,10 @@ function App({
   );
 
   const exitToChat = useCallback((): void => {
+    // Snap focus back to the chat pane on view re-entry — if the user left
+    // chat with the context pane focused, returning here would silently
+    // leave the prompt un-typeable until they discovered Ctrl+W.
+    setFocusedPane('chat');
     setViewMode({
       kind: 'chat',
     });
@@ -1419,39 +1512,62 @@ function App({
     <InkProvider>
       <FooterContextProvider value={footerValue}>
         <StreamMetricsProvider value={streamMetrics}>
-          {viewMode.kind === 'taskBoard' ? (
-            <TaskBoard
-              fs={config.fs}
-              projectRoot={config.cwd}
-              onExit={exitToChat}
-              onOpenChat={handleOpenChat}
-            />
-          ) : viewMode.kind === 'taskChat' ? (
-            <TaskChatView
-              socketPath={viewMode.socketPath}
-              taskId={viewMode.taskId}
-              roleLabel={viewMode.roleLabel}
-              onExit={exitToChat}
-            />
-          ) : viewMode.kind === 'taskChatSpawning' ? (
-            <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitSpawningView} />
-          ) : (
-            <ResponsesChat
-              entries={entries}
-              status={status}
-              onSubmit={handleSubmit}
-              onStop={handleStop}
-              model={model}
-              agentMode={agentMode}
-              onToggleMode={handleToggleAgentMode}
-              commands={commandSuggestions}
-              modalContent={modal?.content}
-              onModalClose={handleModalClose}
-              plugins={plugins}
-              exitHintArmed={exitHintArmed}
-              getRequestItems={getRequestItems}
-            />
-          )}
+          <RootCanvas>
+            {viewMode.kind === 'taskBoard' ? (
+              <TaskBoard
+                fs={config.fs}
+                projectRoot={config.cwd}
+                onExit={exitToChat}
+                onOpenChat={handleOpenChat}
+              />
+            ) : viewMode.kind === 'taskChat' ? (
+              <TaskChatView
+                socketPath={viewMode.socketPath}
+                taskId={viewMode.taskId}
+                roleLabel={viewMode.roleLabel}
+                onExit={exitToChat}
+              />
+            ) : viewMode.kind === 'taskChatSpawning' ? (
+              <TaskChatSpawningView taskId={viewMode.taskId} onExit={exitSpawningView} />
+            ) : (
+              <ChatLayout
+                panelOpen={contextPanelOpen}
+                focusedPane={focusedPane}
+                onFocusSwap={swapContextFocus}
+                onClosePanel={toggleContextPanel}
+                panelWidthConfig={panelWidthConfig}
+                modalActive={modal !== null || askUserRequest !== null}
+                model={model}
+                lastLayerUsage={lastLayerUsage}
+                registeredLayers={memoryLayersRef.current}
+                getRequestItems={getRequestItems}
+                entries={entries}
+                status={status}
+              >
+                {(overlayState) => (
+                  <ResponsesChat
+                    entries={entries}
+                    status={status}
+                    onSubmit={handleSubmit}
+                    onStop={handleStop}
+                    model={model}
+                    agentMode={agentMode}
+                    onToggleMode={handleToggleAgentMode}
+                    commands={commandSuggestions}
+                    modalContent={modal?.content}
+                    onModalClose={handleModalClose}
+                    plugins={plugins}
+                    exitHintArmed={exitHintArmed}
+                    overlay={overlayState.overlay}
+                    requestItems={overlayState.requestItems}
+                    requestItemsLoading={overlayState.requestItemsLoading}
+                    isActive={!contextPanelOpen || focusedPane === 'chat'}
+                    statusNotice={statusNotice}
+                  />
+                )}
+              </ChatLayout>
+            )}
+          </RootCanvas>
         </StreamMetricsProvider>
       </FooterContextProvider>
     </InkProvider>

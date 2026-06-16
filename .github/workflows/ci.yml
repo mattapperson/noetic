@@ -17,7 +17,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install
+        # `--frozen-lockfile` so CI installs exactly what `bun.lock` pins.
+        # Without it bun re-resolves any `"latest"` constraints at install
+        # time, which silently picks up major-version bumps (e.g. the
+        # @ax-llm/ax 21 → 22 jump that dropped openrouter from `AxAIArgs`
+        # and broke eval's typecheck).
+        run: bun install --frozen-lockfile
 
       # Build the foundational dists in dependency order. Consumers (eval,
       # docs, the test suites) resolve `@noetic-tools/core` via its built

@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentOverride, WorktreeConfig } from '../../../types/config.js';
+import { PANEL_CONFIG_MAX, PANEL_CONFIG_MIN } from '../../../types/config.js';
 import type { AgentOverrideFieldName, ConfigFieldPath } from './types.js';
 import { parseAgentOverrideFieldPath } from './types.js';
 
@@ -181,6 +182,13 @@ const staticFieldGetters: Record<string, StaticFieldGetter> = {
   'tools.exclude': (config) => config.tools?.exclude ?? [],
   memory: (config) => config.memory ?? [],
   'history.maxItems': (config) => config.history?.maxItems,
+  'ui.contextPanelWidth': (config) => {
+    const value = config.ui?.contextPanelWidth;
+    if (value === undefined) {
+      return 'responsive';
+    }
+    return typeof value === 'number' ? value.toString() : value;
+  },
 };
 
 //#endregion
@@ -313,6 +321,25 @@ const staticFieldSetters: Record<string, StaticFieldSetter> = {
     }
     config.history = {
       maxItems: parsed,
+    };
+  },
+  'ui.contextPanelWidth': (config, rawValue) => {
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0 || trimmed === 'responsive') {
+      config.ui = {
+        ...config.ui,
+        contextPanelWidth: 'responsive',
+      };
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    const clamped = Math.max(PANEL_CONFIG_MIN, Math.min(PANEL_CONFIG_MAX, Math.trunc(parsed)));
+    config.ui = {
+      ...config.ui,
+      contextPanelWidth: clamped,
     };
   },
 };

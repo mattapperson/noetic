@@ -19,9 +19,26 @@ const DISABLE_BRACKETED_PASTE = '\x1b[?2004l';
 const DISABLE_MOUSE_ANY_EVENT = '\x1b[?1003l';
 const DISABLE_MOUSE_BUTTON = '\x1b[?1002l';
 const DISABLE_MOUSE_NORMAL = '\x1b[?1000l';
+const DISABLE_MOUSE_SGR = '\x1b[?1006l';
 const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
 const POP_KITTY_KEYBOARD = '\x1b[<u';
 const RESET_MODIFY_OTHER_KEYS = '\x1b[>4;0m';
+const EXIT_ALT_SCREEN = '\x1b[?1049l';
+const ENTER_ALT_SCREEN = '\x1b[?1049h';
+const HIDE_CURSOR = '\x1b[?25l';
+
+// Mouse reporting modes — used to capture scroll-wheel events for the
+// in-app chat viewport (alt-screen mode suspends the terminal's native
+// scrollback, so we need our own scroll path).
+//   1000 — normal button-press / release tracking. Includes scroll wheel
+//          (buttons 64/65) on every terminal that supports any mouse mode.
+//   1006 — SGR extended coordinates. Required so the sequence works past
+//          column 223 (otherwise scroll wheel from any wide pane corrupts).
+// User trade-off: with mouse reporting on, native terminal text-selection
+// is intercepted. iTerm2 / Terminal.app / WezTerm all honour `Option/Alt+
+// drag` to bypass and copy normally; this is the conventional TUI cost.
+const ENABLE_MOUSE_NORMAL = '\x1b[?1000h';
+const ENABLE_MOUSE_SGR = '\x1b[?1006h';
 
 export type Signal = 'SIGINT' | 'SIGTERM';
 
@@ -35,13 +52,30 @@ export type SignalDeps = {
   onBeforeExit?: () => void;
 };
 
+/**
+ * Sequence emitted before mounting Ink — switches the terminal into the
+ * alternate screen buffer so the TUI gets a full-viewport canvas with no
+ * scrollback bleed. Always paired with `buildTerminalRestoreSequence()` on
+ * exit, which includes the matching EXIT_ALT_SCREEN.
+ */
+export function buildTerminalEnterSequence(): string {
+  return [
+    ENTER_ALT_SCREEN,
+    HIDE_CURSOR,
+    ENABLE_MOUSE_NORMAL,
+    ENABLE_MOUSE_SGR,
+  ].join('');
+}
+
 export function buildTerminalRestoreSequence(): string {
   return [
+    EXIT_ALT_SCREEN,
     SHOW_CURSOR,
     DISABLE_BRACKETED_PASTE,
     DISABLE_MOUSE_ANY_EVENT,
     DISABLE_MOUSE_BUTTON,
     DISABLE_MOUSE_NORMAL,
+    DISABLE_MOUSE_SGR,
     DISABLE_FOCUS_REPORTING,
     POP_KITTY_KEYBOARD,
     RESET_MODIFY_OTHER_KEYS,
