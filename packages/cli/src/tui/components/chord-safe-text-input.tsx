@@ -39,7 +39,12 @@ export interface ChordSafeTextInputProps {
 
 //#region Helpers
 
-interface KeyState {
+/**
+ * Subset of ink's `Key` shape that the chord-safe input cares about. Exported
+ * so the predicate / reducer pure helpers below are testable in isolation
+ * (the upstream `Key` carries fields we never read).
+ */
+export interface ChordSafeKey {
   ctrl?: boolean;
   shift?: boolean;
   return?: boolean;
@@ -73,7 +78,7 @@ const SGR_MOUSE_REMNANT_RE = /^\[<\d+;\d+;\d+[Mm]/;
  * Kept as a single helper so the predicate is testable and the call site in
  * the useInput callback stays trivial.
  */
-function isNonTypedInput(input: string): boolean {
+export function isNonTypedInput(input: string): boolean {
   return SGR_MOUSE_REMNANT_RE.test(input);
 }
 
@@ -84,7 +89,7 @@ function isNonTypedInput(input: string): boolean {
  * Ctrl+<single char> family — none of those are typed text, and at least one
  * (Ctrl+W) is bound as an app-level chord.
  */
-function isIgnoredKey(key: KeyState): boolean {
+export function isIgnoredKey(key: ChordSafeKey): boolean {
   if (key.upArrow || key.downArrow || key.tab) {
     return true;
   }
@@ -97,15 +102,15 @@ function isIgnoredKey(key: KeyState): boolean {
   return false;
 }
 
-interface NextStateArgs {
+export interface ChordSafeNextStateArgs {
   input: string;
-  key: KeyState;
+  key: ChordSafeKey;
   originalValue: string;
   cursorOffset: number;
   showCursor: boolean;
 }
 
-interface NextStateResult {
+export interface ChordSafeNextStateResult {
   nextValue: string;
   nextCursorOffset: number;
   nextCursorWidth: number;
@@ -116,7 +121,7 @@ interface NextStateResult {
  * paste-highlight width given a non-ignored key. The result is clamped to
  * `[0, originalValue.length]` so the caller doesn't have to.
  */
-function computeNextState(args: NextStateArgs): NextStateResult {
+export function computeNextState(args: ChordSafeNextStateArgs): ChordSafeNextStateResult {
   const { input, key, originalValue, cursorOffset, showCursor } = args;
   let nextValue = originalValue;
   let nextCursorOffset = cursorOffset;

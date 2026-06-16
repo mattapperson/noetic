@@ -47,6 +47,7 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { anchoredOffsetAfterDelta, wheelDownClamp, wheelUpClamp } from './chat-scroll-anchor.js';
 import type { ScrollAction } from './chat-scroll-state.js';
 import { applyScrollAction, maxOffset, pageSizeFor } from './chat-scroll-state.js';
 import { useMouseScroll } from './use-mouse-scroll.js';
@@ -179,27 +180,17 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   useEffect(() => {
     const delta = totalLines - prevTotalLinesRef.current;
     prevTotalLinesRef.current = totalLines;
-    setLinesFromBottom((prev) => {
-      if (prev === 0) {
-        return 0;
-      }
-      const next = delta > 0 ? prev + delta : prev;
-      return applyScrollAction(
-        next,
-        {
-          kind: 'clamp',
-        },
-        {
-          totalLines,
-          viewportLines,
-          pageSize,
-        },
-      );
-    });
+    setLinesFromBottom((prev) =>
+      anchoredOffsetAfterDelta({
+        prev,
+        delta,
+        totalLines,
+        viewportLines,
+      }),
+    );
   }, [
     totalLines,
     viewportLines,
-    pageSize,
   ]);
 
   const dispatch = useCallback(
@@ -275,16 +266,18 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
   // dispatches) — fast scrolling otherwise produced one re-render per line
   // and Yoga relayout cost compounded. Computing the new offset inline
   // collapses N wheel events into N renders instead of 3N.
-  const WHEEL_LINES = 3;
+  const _WHEEL_LINES = 3;
   const handleWheelUp = useCallback(() => {
     if (!isActive) {
       return;
     }
-    setLinesFromBottom((prev) => {
-      const hi = maxOffset(totalLines, viewportLines);
-      const next = prev + WHEEL_LINES;
-      return next > hi ? hi : next;
-    });
+    setLinesFromBottom((prev) =>
+      wheelUpClamp({
+        prev,
+        totalLines,
+        viewportLines,
+      }),
+    );
   }, [
     isActive,
     totalLines,
@@ -294,10 +287,7 @@ export function ChatScroll<TEntry>(props: ChatScrollProps<TEntry>): ReactNode {
     if (!isActive) {
       return;
     }
-    setLinesFromBottom((prev) => {
-      const next = prev - WHEEL_LINES;
-      return next < 0 ? 0 : next;
-    });
+    setLinesFromBottom((prev) => wheelDownClamp(prev));
   }, [
     isActive,
   ]);

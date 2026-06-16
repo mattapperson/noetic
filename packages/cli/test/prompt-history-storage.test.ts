@@ -53,6 +53,25 @@ describe('loadPromptHistory', () => {
     ]);
   });
 
+  test('caps the returned array at MAX_ENTRIES (returns the newest tail)', async () => {
+    // Write 1300 records; MAX_ENTRIES is 1000. Load must return the last
+    // 1000 — defends a long-lived `~/.noetic/prompt-history.jsonl` from
+    // blowing up in-memory state before the slow compaction path runs.
+    const lines: string[] = [];
+    for (let i = 0; i < 1300; i++) {
+      lines.push(
+        JSON.stringify({
+          text: `entry-${i}`,
+        }),
+      );
+    }
+    await writeFile(file, `${lines.join('\n')}\n`, 'utf8');
+    const loaded = await loadPromptHistory(file);
+    expect(loaded).toHaveLength(1000);
+    expect(loaded[0]).toBe('entry-300');
+    expect(loaded[999]).toBe('entry-1299');
+  });
+
   test('skips malformed JSON lines without dropping subsequent valid records', async () => {
     await writeFile(
       file,
