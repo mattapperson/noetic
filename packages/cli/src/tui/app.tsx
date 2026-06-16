@@ -193,6 +193,12 @@ function App({
   // Context Split View dock state — session-local. See specs/28-context-split-view.md.
   const [contextPanelOpen, setContextPanelOpen] = useState<boolean>(false);
   const [focusedPane, setFocusedPane] = useState<Pane>('chat');
+  // One-shot flag: open the dock automatically the FIRST time the user
+  // submits a real prompt (anything that isn't a slash command). Stored as
+  // a ref so a user who closes the dock later doesn't get it re-opened on
+  // their next submission. Persists for the lifetime of this React tree;
+  // a fresh session/clear resets it via the component remount.
+  const hasAutoOpenedContextPanelRef = useRef(false);
   // Transient one-line notice rendered below the prompt. Cleared by a
   // timeout (~4s) or by the next user submission. Notices are ephemeral UI
   // confirmations ("dock opened", "mode switched") that don't belong in
@@ -1118,6 +1124,22 @@ function App({
       // linger across turns.
       setStatusNotice(null);
       const text = message.text;
+      // Auto-open the Context dock on the user's FIRST real prompt — anything
+      // that isn't a slash command. Skipping `/foo` matches user
+      // expectation: the dock is about the LLM context breakdown, so
+      // showing it only kicks in once the user actually engages the model.
+      // One-shot via the ref so a manual close later sticks.
+      if (
+        !hasAutoOpenedContextPanelRef.current &&
+        text.trim().length > 0 &&
+        !text.trim().startsWith('/')
+      ) {
+        hasAutoOpenedContextPanelRef.current = true;
+        setContextPanelOpen(true);
+        // Keep focus on chat so the user can keep typing — the dock just
+        // appears alongside.
+        setFocusedPane('chat');
+      }
       const sendUserMessage = async (
         messageText: string,
         contentParts?: ReadonlyArray<InputContentPart>,
