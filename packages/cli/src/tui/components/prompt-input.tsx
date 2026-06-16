@@ -515,7 +515,14 @@ function recordHistoryIfEnabled(args: PromptSubmitHandlersArgs, text: string): v
 }
 
 interface SearchModeArgs {
-  searchMode: SearchModeState | null;
+  /**
+   * Ref + setter pair instead of plain state. The ref is read inside the
+   * useInput callback so a burst of keystrokes immediately after `Ctrl+R`
+   * sees the updated value synchronously (React hasn't re-rendered between
+   * keystrokes yet); the setter still calls `useState` underneath to drive
+   * the search-bar render.
+   */
+  searchModeRef: React.MutableRefObject<SearchModeState | null>;
   setSearchMode: (next: SearchModeState | null) => void;
 }
 
@@ -530,7 +537,7 @@ function handleSearchModeKey(
   key: KeyShape,
   args: PromptKeyboardArgs & SearchModeArgs,
 ): boolean {
-  const current = args.searchMode;
+  const current = args.searchModeRef.current;
   if (current === null) {
     return false;
   }
@@ -575,9 +582,19 @@ function handleSearchModeKey(
     args.actions.updateValue(next.index >= 0 ? next.value : current.savedBuffer);
     return true;
   }
-  // Typing extends the query. Single printable chars only — Ctrl/meta chords
-  // are not query characters.
-  if (input.length === 1 && !key.ctrl && !key.meta) {
+  // Typing extends the query. Accept any-length printable input so a paste
+  // (or pilotty's bulk `type`) lands intact; reject only chords and the
+  // recognised special keys.
+  if (
+    input.length > 0 &&
+    !key.ctrl &&
+    !key.meta &&
+    !key.tab &&
+    !key.upArrow &&
+    !key.downArrow &&
+    !key.leftArrow &&
+    !key.rightArrow
+  ) {
     const nextQuery = current.query + input;
     const next = findReverseMatch(entries, 0, nextQuery);
     args.setSearchMode({
@@ -908,11 +925,26 @@ export function PromptInput({
   // are enqueued on the harness session and delivered as subsequent turns.
   // `disabledProp` still hard-disables (used when a modal is open, etc.).
   const disabled = disabledProp;
+  // Reverse-incremental search lives in BOTH a ref and useState. The ref is
+  // read synchronously inside the useInput callback so a burst of keystrokes
+  // immediately after Ctrl+R (the React state hasn't re-rendered yet) still
+  // sees `searchMode !== null` and routes into the search-mode branch. The
+  // state drives rendering — the search bar visibility, and the TextInput
+  // unmount that prevents stray characters from leaking into the prompt.
+  const searchModeRef = useRef<SearchModeState | null>(null);
+  const [searchMode, setSearchModeState] = useState<SearchModeState | null>(null);
+  const setSearchMode = useCallback((next: SearchModeState | null): void => {
+    searchModeRef.current = next;
+    setSearchModeState(next);
+  }, []);
   // `isActive` is the pane-level gate (e.g. the context panel has focus, so
   // chat-side input should be inert). It must factor into `isFocused` so the
   // wrapped TextInput stops subscribing to keystrokes and stops swallowing
-  // pane-level chords like Ctrl+W as literal characters.
-  const isFocused = focus && !disabled && isActive;
+  // pane-level chords like Ctrl+W as literal characters. While a reverse-
+  // search is in flight, we also unmount TextInput — the prompt buffer is
+  // updated programmatically as the user cycles matches, raw key presses
+  // would otherwise overlay the match.
+  const isFocused = focus && !disabled && isActive && searchMode === null;
   const statusHintText = resolveStatusHintText({
     status,
     submittedText,
@@ -1111,7 +1143,6 @@ export function PromptInput({
   );
   const { handleInputSubmit } = usePromptSubmitHandlers(submitArgs);
 
-  const [searchMode, setSearchMode] = useState<SearchModeState | null>(null);
   // When the prompt loses focus (e.g. context pane focused, or modal opens),
   // abandon any in-flight search. Otherwise the search bar would render
   // for an inactive prompt and confuse the user.
@@ -1123,6 +1154,7 @@ export function PromptInput({
     focus,
     isActive,
     searchMode,
+    setSearchMode,
   ]);
 
   usePromptKeyboardHandler({
@@ -1136,7 +1168,7 @@ export function PromptInput({
     enableHistory,
     refs,
     actions,
-    searchMode,
+    searchModeRef,
     setSearchMode,
   });
 
