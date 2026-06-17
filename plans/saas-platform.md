@@ -1197,28 +1197,25 @@ Cloudflare-first; three external vendors fill data-plane gaps Cloudflare doesn't
   ┌──────────┐                  ┌──────────────────────┐         ┌──────────────────┐
   │  Pages   │                  │  Workers (Hono API)  │         │  AI Gateway      │
   │ packages │                  │  - hasScope          │         │  cache/fallback  │
-  │  /web    │                  │  - bucket reserve    │ ───┐    │  ───────────────│
-  └──────────┘                  │  - UsageEvent emit   │    │    │  to OR / Anth /  │
+  │  /web    │                  │  - DO reserve/settle │ ───┐    │  ───────────────│
+  └──────────┘                  │  - UsageEvent → Queue│    │    │  to OR / Anth /  │
                                 │  - SSE proxy         │    │    │  OAI upstream    │
                                 └──────────────────────┘    │    └──────────────────┘
                                             │               │
-       ┌────────────────────┬───────────────┼──────────────┬┴────────────────┐
-       ▼                    ▼               ▼              ▼                 ▼
- ┌──────────┐        ┌──────────┐    ┌──────────┐   ┌──────────────┐  ┌──────────┐
- │Hyperdrive│        │ Upstash  │    │ Tinybird │   │ Logpush →    │  │ Cron     │
- │   pool   │        │  Redis   │    │ UsageEvt │   │ Axiom        │  │ Triggers │
- └────┬─────┘        │ bucket_  │    │ ingest   │   │ audit shipper│  │ + Queues │
-      │              │ state,   │    └──────────┘   └──────────────┘  └──────────┘
-      ▼              │ caches,  │
- ┌──────────┐        │ RPS,     │
- │  Neon    │        │ idemp.   │
- │ Postgres │        └──────────┘
- │  OLTP    │
+   ┌──────────────┬─────────────┬───────────┼────────┬──────┴─────┬──────────────┐
+   ▼              ▼             ▼           ▼        ▼            ▼              ▼
+ ┌──────────┐ ┌─────────────┐ ┌─────────┐ ┌────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐
+ │Hyperdrive│ │Durable Obj  │ │ Upstash │ │Tinybird│ │ Axiom   │ │ Cron +  │ │   R2     │
+ │   pool   │ │BucketStateDO│ │  Redis  │ │UsageEvt│ │ audit + │ │ Queues  │ │ exports/ │
+ └────┬─────┘ │ reserve/    │ │ caches, │ │ ingest │ │ logs    │ │(Usage/  │ │ blobs/   │
+      │       │ settle +    │ │ RPS,    │ └────────┘ │(Logpush)│ │ audit/  │ │ archive  │
+      ▼       │ settle_jrnl │ │ idemp.  │            └─────────┘ │ DLQ)    │ └──────────┘
+ ┌──────────┐ │ (tier-shard)│ └─────────┘                        └─────────┘
+ │  Neon    │ └─────────────┘
+ │ Postgres │   UsageEvent + audit events are enqueued to Cloudflare Queues;
+ │  OLTP    │   consumers fan out to Tinybird and Axiom with retries + DLQ.
  │  core    │
- └──────────┘                                        ┌──────────────┐
-                                                     │      R2      │
-                                                     │ exports/blobs│
-                                                     └──────────────┘
+ └──────────┘
 
   External SaaS APIs called from Workers:
   ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
@@ -1231,20 +1228,20 @@ Cloudflare-first; three external vendors fill data-plane gaps Cloudflare doesn't
 
 1. Client → Cloudflare edge (TLS, WAF, DDoS)
 2. → Worker: parse `Authorization: Bearer noetic_live_*`
-3. → Upstash: `GET key:<prefix>` (cache hit ~99% after warm-up; cold → Neon via Hyperdrive)
-4. → Upstash Lua: `reserve(account, metric, worst_case_cost)` — atomic, single round-trip
-5. → AI Gateway → upstream provider (BYOK customer's key or trial pool); SSE streamed back to client
-6. On stream completion → Upstash Lua: `settle(account, metric, actual)` (release reservation, increment used)
-7. → Tinybird: emit `UsageEvent` (fire-and-forget POST; idempotency key dedupes retries)
+3. → Upstash: `GET key:<prefix>` (cache hit ~99% after warm-up; cold → Neon via Hyperdrive). Resolves `{account_id, scopes, status, entitlements, tier}`.
+4. → **`BucketStateDO.reserve(account, metric, period, worst_case_cost)`** — Durable Object keyed on `(account, metric, period, shard?)` with tier-keyed sharding (Free/Developer=1, Team=4, Enterprise=16); strongly consistent, co-located with the Worker, reservation TTL'd and swept by DO alarms. Hard-cap accounts get **402/429 + `X-Remaining-Budget`** here — no silent clamp. See [§1.9 override 1](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions), [§1.11 condition 9](#111-round-3-conditions-twelve-interaction-surface-codifications).
+5. → AI Gateway (via `forwardToUpstream`) → upstream provider (BYOK customer's key or trial pool); SSE streamed back to client
+6. On stream completion → **`BucketStateDO.settle(reservation_id, actual)`** — releases the reservation, increments `used`, appends to the per-reservation `settle_journal`, and **enqueues the `UsageEvent` to the Cloudflare Queue atomically in the same DO method** (so a `used` increment can never exist without a corresponding queued event).
+7. → Queue consumer ships the `UsageEvent` to Tinybird with retries + DLQ; `(account_id, idempotency_key)` dedup over a **≥7-day window** ([§1.11 condition 10](#111-round-3-conditions-twelve-interaction-surface-codifications)). (BYOK Mode B reports usage from the SDK under the [§2.6 P3](#26-phased-build) metering-integrity contract instead of steps 4–7.)
 8. (No Postgres hit on the inference hot path. None.)
 
 ### Write path (typical mutation, e.g. revoke key)
 
-1. Worker: `hasScope(member, 'keys:revoke', account)` — Upstash cache hit
-2. Begin Postgres tx (via Hyperdrive): update `api_keys.status = 'revoked'`, insert into `outbox`
-3. Commit tx
-4. Worker: invalidate Upstash key-verification cache for that key prefix
-5. Cron-triggered outbox shipper picks up the outbox row, ships audit event to Axiom, marks row done
+1. Worker: `hasScope(member, 'keys:revoke', account)`. `keys:revoke` is in `SENSITIVE_SCOPES` ([§2.4](#24-architectural-primitives)) → **bypass the 60s membership cache, read strict** from WorkOS/Neon.
+2. Postgres tx (via Hyperdrive, caching disabled for `api_keys`): update `api_keys.status = 'revoked'`. **No `outbox` table in v1.**
+3. Commit tx.
+4. Worker: invalidate the Upstash key-verification cache for that key prefix (so the revoke takes effect within the 60s TTL at worst, immediately on invalidation).
+5. Worker: enqueue the audit event to the **Cloudflare audit Queue** at commit; the Queue consumer ships it to Axiom (tagged by `account_id`) with retries + DLQ. Replaces the v0 Postgres-outbox + Cron shipper (which had 60s+ lag under burst). See [§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions).
 
 ### When to add AWS or GCP
 
@@ -1751,7 +1748,6 @@ These prove the *seams* between services — the failure class round 1–3 panel
 - **`packages/dashboard` split vs extend `packages/web`.** Lean extend-`web` until the dashboard needs auth-gated routes that complicate the static-marketing build; split then. Resolve before P0.5.
 - **Eval compute target.** Cloudflare Containers GA timing vs committing to a Fly.io pool for P3.5. Decide at S4.5 freeze.
 - **`specs/saas/` vs flat `26+` numbering.** Carried from [§3 Open question](#open-question) — lean subdirectory.
-- **§2.14 read/write-path narratives predate the DO override.** The hot-path walkthroughs in [§2.14](#214-cloud-architecture) still describe the Upstash-Lua bucket and Postgres outbox; the authoritative model is `BucketStateDO` + audit-via-Queue ([§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions), [§1.11](#111-round-3-conditions-twelve-interaction-surface-codifications)). Refresh those two walkthroughs when S1/S2 are drafted so the spec source isn't seeded from stale prose. (Doc-hygiene, not a design change.)
 
 ---
 
@@ -1785,5 +1781,6 @@ P0 starts only after the gate passes.
 | 2026-06-14 | Observability graduated by paying-customer tier (§1.8, §2.15). Tier 0 (day 1, $0): Sentry + structured logs + /v1/health Cron + model_cost_usd dimension. Tier 1 (~$20/mo): Instatus + billing-correctness reconciler alerts + PostHog. Tier 2 (~$25–75): Better Stack + Honeycomb + SLO dashboards. Tier 3 ($500–2K): Datadog/Grafana + PagerDuty + Vanta. Three platform-specific concerns codified (billing-correctness as #1 incident class; BYOK cost tracking; /v1/health as SLA evidence). | User request: evaluate observability needs, gated by paying-customer milestones |
 | 2026-06-15 | **Round 2 panel overrides (§1.9)**: six prior decisions overridden (bucket_state to Durable Objects with TTL'd reservations; P-1 to 3-week hard gate with kill criteria + dual cohort; §1.4 hedge → commit to one ICP after P-1; trial pool to $20 cheap-cached identity-gated; SOC2 evidence unconditional in P0; HMAC pepper versioned from day 1). Workers footgun corrections (Hyperdrive cache disabled for authz tables; UsageEvent via Queue not fire-and-forget; refuse not silent-clamp; Idempotency-Key state machine; SENSITIVE_SCOPES bypass; Tinybird PII defense-in-depth; audit via Queue not Postgres outbox; UptimeRobot external probe; typed AccountScope not RLS; free-tier daily-cap key sharding; Stripe Meter period-boundary handling). Product additions (P3.5 eval surface; eval compute on Containers/Fly.io; BYOK key spec including Mode B async/SDK-side; success-screen sdk snippet not curl; Switching-from-LangSmith primary migration; §2.16 competitive positioning). CEO additions (EU AI Act specialist call; customer support line item; AI Gateway abstraction; 7-year audit retention with R2 archive; Cloudflare exit playbook; schedule rebaseline to 12wk/1eng or 8wk/2eng). Free-tier shape and trial pool open questions resolved. §3 specs deferred: only S1+S2 in P0; S3-S7 wait for P-1 outcome. | Second adversarial panel review explicitly empowered to challenge §1 |
 | 2026-06-15 | **Monetization commitment (§1.10, §2.17)**: two product surfaces (API primary, paid CLI secondary), three commercial models coexisting day 1 (subscription/seat tiers + PAYG + enterprise). **Introductory** (first 6 months / 100 customers): Developer $10/mo, Team $30 + $10/seat. **Steady-state**: Developer $19/mo, Team $49 + $15/seat, PAYG $0.008/agent-run + $0.03/eval-score. 12-month grandfather for early customers with 60-day notice. Unit-economics check: ~89% gross margin at steady-state, ~80% at introductory — BYOK eliminates inference cost so the most expensive comp-set variable is off-P&L. Metering anchors: `agent-runs` + `eval-scores` (tokens NOT billable). CLI Pro feature cut: GEPA, remote evals, sub-harness commands, multi-account, plugins all behind paid tier; OSS framework remains free. API keys gain `entitlements` claim cached in Upstash; CLI offline-grace 7 days with signed local cache. §2.11 Pricing-units open question resolved. P5 +1 week for all-three-models. S5 spec no longer collapses to seat-counting. | User commitments on monetization model + steady-state pricing in the black |
+| 2026-06-17 | **Refreshed §2.14 hot-path narratives + layered diagram to the DO model.** Read path: bucket reserve/settle moved from Upstash Lua to `BucketStateDO` (tier-sharded, TTL'd reservations, hard-cap 402/429, settle atomic with Queue enqueue, ≥7-day Tinybird dedup); UsageEvent ships via Queue consumer not fire-and-forget POST; Mode B noted. Write path: `keys:revoke` reads strict via `SENSITIVE_SCOPES`, no `outbox` table, audit ships via Cloudflare Queue → Axiom. Diagram: added `BucketStateDO` box, dropped `bucket_state` from Upstash, relabeled audit shipping. Resolved the §4.7 doc-hygiene flag from the same day. | Doc-hygiene — §2.14 prose predated the §1.9/§1.11 DO override; refreshed so S1/S2 spec drafts aren't seeded from stale prose |
 | 2026-06-17 | **Added §4 Integration plan** — execution runbook gated on P-1. Repository integration (new `@noetic/api`, `@noetic-tools/sdk`, `packages/dashboard` packages + required `.sentrux/rules.toml` layer/boundary edits + `@noetic/api` six-layer internal structure); spec generation plan (authoritative `specs/saas/NN-*.md` file list — extends §3.5 by giving the eval surface S4.5 its own file — with drafting/freeze order and sync-doc registration); five-tier service provisioning runbook (A providers → B Cloudflare platform → C data vendors → D eval compute → E on-demand, each with what-it-blocks); secrets & configuration matrix (Workers Secrets inventory + consumers + rotation); order-of-operations master table (provision ⊕ spec ⊕ build ⊕ integration milestone per phase, hard serialization = P-1 → S1+S2 lock → P0); cross-cutting integration checkpoints (/v1/health synthetic, wrangler dry-run, cross-tenant pen-test, reconciler drift, shadow-billing). Renumbered Next concrete step → §5, Changelog → §6. Flagged §2.14 read/write-path narratives as stale vs the DO model (doc-hygiene, refresh at S1/S2 draft). | User request — needed a concrete integration/execution plan (specs to generate, order of operations, services to provision) on top of the §3 spec proposal |
 | 2026-06-15 | **Round 3 panel conditions (§1.11)**: no residual fatal flaws — all three reviewers confirmed. Twelve mechanical codifications incorporated: (1) tier-change in `SENSITIVE_SCOPES` + two-tier CLI offline grace (7d "no network" / 24h "tier-change pending"); (2) Team tier gains org-GEPA-budget + shared eval datasets + SSO (closes PAYG vs Team arbitrage; replaces "accepted arbitrage" framing); (3) §2.17 cross-model transitions subsection with per-direction rules + no-arbitrage invariant + 7-day upgrade-then-downgrade cooldown; (4) first-100 loyalty lock (24mo at intro + 25% off steady-state) — defends churn cliff + acts as P-1 LOI sweetener; (5) schedule honestly rebaselined to 16wk-1eng or 10–12wk-2eng; (6) `gepa-runs` added as a third meter with per-tier bundled allowance — GEPA compute cost added to unit economics; (7) `agent-run` definition pinned in S2 (one top-level `harness.run()`); (8) Enterprise founding-sales motion in P-1 (design-partner template, security questionnaire, "enterprise ready" definition); (9) tier-keyed DO sharding (Free/Developer=1, Team=4, Enterprise=16) + per-reservation `settle_journal` + reconciler drift-direction matrix (replay-from-journal, never decrement) + DO settle/Queue-enqueue atomic; (10) Tinybird dedup window ≥7 days as hard constraint; reconciler groups by `period_anchor`; (11) Mode B metering-integrity contract (SDK-owned idempotency + signed JWT + sampled re-query) + **Mode B gated to subscription tiers only**; (12) `/pricing-preview` page in P-1 (preview pricing, "reserve early-access" CTA, feature-checklist LOI signatures, same URL transitions to live Stripe-integrated in P5). Plus second-order codifications: late-settle-after-rollover, Upstash-degraded fallback, archived audit retrieval surface in P6, Sentry quota sampling for DO alarms, recalibrated PAYG reconciliation tolerance. | Round 3 final panel review — empowered to challenge but found only seams between round-1/round-2 fixes |
