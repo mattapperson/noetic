@@ -61,8 +61,16 @@ This doc becomes the spec / RFC source for the implementation work once P-1 comp
    - [3.3 Dependency graph](#33-dependency-graph)
    - [3.4 Conventions](#34-conventions)
    - [3.5 Location and naming](#35-location-and-naming)
-4. [Next concrete step](#next-concrete-step)
-5. [Changelog](#changelog)
+4. [Integration plan](#integration-plan)
+   - [4.1 Repository integration](#41-repository-integration)
+   - [4.2 Spec generation plan](#42-spec-generation-plan)
+   - [4.3 Service provisioning runbook](#43-service-provisioning-runbook)
+   - [4.4 Secrets & configuration matrix](#44-secrets--configuration-matrix)
+   - [4.5 Order of operations](#45-order-of-operations-the-integrated-critical-path)
+   - [4.6 Integration checkpoints](#46-integration-checkpoints-the-cross-cutting-smoke-gates)
+   - [4.7 Open integration questions](#47-open-integration-questions)
+5. [Next concrete step](#next-concrete-step)
+6. [Changelog](#changelog)
 
 ---
 
@@ -1607,6 +1615,146 @@ specs/
 
 ---
 
+# Integration plan
+
+**Status:** Execution runbook — gated on P-1 ([§5 Next concrete step](#next-concrete-step)). This section is the "how to assemble it" companion to the "what to build" of [§2.6 Phased build](#26-phased-build) and the "what to specify" of [§3 Proposal: implementation specs](#proposal-implementation-specs). It does not introduce new architecture; it sequences the work — which packages get created, which specs get written in what order, which external services get provisioned and what each one blocks, the secrets that wire them together, and the integration milestone that proves each phase landed.
+
+Three taxonomies stay distinct and are referenced, not duplicated:
+
+- **Build phases** `P-1 … P6` — defined in [§2.6](#26-phased-build). The integration plan maps onto these; it does not renumber them.
+- **Specs** `S1 … S7` — defined in [§3.2](#32-proposed-specs-grouped-prioritized). The integration plan says *when each is drafted and frozen*.
+- **Provisioning tiers** `A … E` — introduced here. The order external accounts and Cloudflare resources come online.
+
+## 4.1 Repository integration
+
+The SaaS platform adds new workspace packages alongside the existing framework packages. Each addition is a `.sentrux/rules.toml` event per `CLAUDE.md` ("Adding a new package … REQUIRES a corresponding edit to `.sentrux/rules.toml` in the same commit").
+
+| Package | Purpose | Runtime | Workspace deps | Created in |
+|---|---|---|---|---|
+| `@noetic/api` (`packages/api`) | Hono app on Cloudflare Workers — auth, bucket reserve/settle, gateway, UsageEvent emit, billing reporter/reconciler Workers | Workers (V8 + nodejs_compat); Bun for local dev/tests | `@noetic-tools/core` (trace tie-in), `@noetic-tools/types` | P0 |
+| `@noetic-tools/sdk` (`packages/sdk`) | Thin client wrapper; surfaces trace IDs, BYOK Mode A/B, ties to `@noetic-tools/core` | Isomorphic (Node + browser + Workers) | `@noetic-tools/core`, `@noetic-tools/types` | P0.5 / P3 |
+| `packages/dashboard` *(or extend `packages/web`)* | Account/keys/usage/eval UI on Cloudflare Pages | Pages (static + edge) | none (calls `@noetic/api` over HTTP, like `web` today) | P0.5 → P1 |
+
+**sentrux placement (per the lower-order = consumer rule in `CLAUDE.md`):**
+- `@noetic/api` is a consumer of `core` → lower `order` than `core`. Add a `[[layers]]` entry and `[[boundaries]]` forbidding `core`/`memory`/`types` from importing `api` (the framework must never depend on the SaaS app — same isolation invariant that keeps agent SDKs out of `core`).
+- `@noetic-tools/sdk` sits beside `code-agent`/`cli` as a `core` consumer; forbid `core`→`sdk`.
+- `packages/dashboard` is standalone like `web` (no workspace deps) — a `[[layers]]` entry, no inbound edges.
+- Run `sentrux check .` after editing and confirm no *new* violations beyond those already on `main`. Commit `.sentrux/rules.toml` in the same commit as the package (never a follow-up).
+
+**Internal layering of `@noetic/api`** mirrors the CLI's six-layer discipline (`specs/22-cli-architecture.md`): `foundations` (config, env, logger) → `infra` (Hyperdrive/Neon repo, Upstash client, Queue producers, Tinybird/Axiom clients) → `domain` (`AccountScope` repo, `hasScope`, `BucketStateDO`, metering) → `orchestration` (route handlers, gateway pipeline) → `presentation` (Hono router, middleware) → `entry` (Workers fetch/scheduled/queue handlers). Assign the directories to layer tiers in `.sentrux/rules.toml` the same way (`CLAUDE.md` rule 2).
+
+## 4.2 Spec generation plan
+
+Specs live in `specs/saas/NN-<name>.md` ([§3.5](#35-location-and-naming)) and describe ideal end state only (`.claude/rules/spec-guidelines.md`). This is the authoritative file list — it **extends [§3.5](#35-location-and-naming)** by giving the eval surface (S4.5) its own file, which the §3.5 sketch omitted.
+
+| File | Spec | Drafts when | Freeze gate | Source dir (for sync-doc) |
+|---|---|---|---|---|
+| `specs/saas/00-overview.md` | Index → links this plan + spec graph | with S1 | — | — |
+| `specs/saas/01-identity-access.md` | S1 Identity & Access | **before P0** | **locked before any other SaaS spec** | `packages/api/src/domain/identity` |
+| `specs/saas/02-metering-spine.md` | S2 Metering Spine | **before P0** | **locked before S3/S4/S5** | `packages/api/src/domain/metering` |
+| `specs/saas/03-api-keys.md` | S3 API Keys + CLI auth | after P-1, before P2 | frozen against S1+S2 | `packages/api/src/domain/keys`, `packages/cli/src/.../auth` |
+| `specs/saas/04-inference-gateway.md` | S4 Inference Gateway & SDK | after P-1, before P3 | frozen against S2+S3 | `packages/api/src/orchestration/gateway`, `packages/sdk/src` |
+| `specs/saas/04.5-eval-gepa-surface.md` | S4.5 Eval & GEPA surface | parallel with S4 | frozen against S4+S2 | `packages/api/src/domain/eval`, eval compute worker |
+| `specs/saas/05-billing.md` | S5 Billing (all three models) | parallel with S3/S4 | frozen against S2+S1 | `packages/api/src/domain/billing` |
+| `specs/saas/06-activation-pricing.md` | S6 Activation & pricing | last | ratifies S1–S5 | `packages/api`, `packages/dashboard` |
+| `specs/saas/07-trust-compliance.md` | S7 Trust & compliance | last | ratifies S1–S5 | cross-cutting |
+
+**Drafting order:** `S1 → S2` (lock both) → `(S3 ‖ S5)` → `S4 ‖ S4.5` → `S6 ‖ S7`. One engineer sequences; two collapse the `‖` pairs ([§3.3](#33-dependency-graph)).
+
+**Registration (do this as each spec lands):** add a row to the reference-mapping table in `.claude/rules/sync-spec-code-docs.md` mapping the spec to its source dir, per [§3.5](#35-location-and-naming). Assign one DRI per spec (open question, [§3 Open question](#open-question)) — unowned specs rot.
+
+## 4.3 Service provisioning runbook
+
+Ordered by dependency. A tier can't be usefully wired until the tiers it points at exist. Tier A is the only tier that starts in P-1 (no code, but the accounts unblock P0 day one); everything else lands in P0 unless noted.
+
+**Tier A — provider accounts (P-1 / pre-code, no infra dependency)**
+| Service | Provisions | Blocks | Notes |
+|---|---|---|---|
+| Cloudflare account + zone + **Workers Paid plan** | Platform root for Tier B | *everything* edge | Paid plan needed for DOs, Cron, Queues, 30s CPU |
+| WorkOS | AuthKit org, API key, webhook secret | auth, `hasScope`, CLI login | Source of truth on read ([§2.4](#24-architectural-primitives)) |
+| Stripe (test mode first) | Account, Billing Meters, 4 Products | billing (P5); `/pricing-preview` CTA wiring (P-1) | Live keys gated to P5 |
+| Vanta **or** Drata | SOC2 evidence workspace | enterprise pipeline | Unconditional from P0 ([§1.9 override 5](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)) |
+| Sentry | Project + DSN | Tier 0 error tracking | Free tier; wire P0 |
+| Resend | API key, sending domain | onboarding lifecycle | Free 3K/mo |
+| UptimeRobot | External monitor | `/v1/health` attestation | Independent probe ([§2.5](#25-stack)) |
+| PostHog | Project | TTF-200 / TTF-eval funnels | Free; events start P0.5 |
+
+**Tier B — Cloudflare platform resources (P0, after Workers Paid)**
+Workers, Pages, R2 bucket, **Durable Objects** namespace (`BucketStateDO`), Queues (UsageEvent, audit, DLQ), Cron Triggers, Workers Secrets / Secrets Store, AI Gateway, **Hyperdrive** config (created *after* Neon exists — Tier C). Hyperdrive query caching **disabled** for `api_keys`/`members`/authz tables ([§2.14](#214-cloud-architecture)).
+
+**Tier C — data-plane vendors (P0, in parallel with B; Hyperdrive points at Neon last)**
+| Service | Provisions | Wired by |
+|---|---|---|
+| Neon | Serverless Postgres; relational core schema (6 tables, no `outbox`) | Hyperdrive binding |
+| Upstash Redis | Eventually-consistent caches only (key-verify 60s, membership 60s, idempotency fingerprint, RPS) | REST client |
+| Tinybird | `UsageEvent` ingest + materialized-view PII defense + ≥7-day dedup window | Queue consumer |
+| Axiom | Audit dataset (`account_id`-tagged) + request logs via Logpush | Queue consumer + Logpush |
+
+**Tier D — compute plane (P3.5)**
+Eval/GEPA compute: **Cloudflare Containers (when GA) or Fly.io worker pool** — does not fit Workers' 30s CPU cap ([§2.14](#214-cloud-architecture)).
+
+**Tier E — on-demand / late (P5–P6)**
+Stripe **live** keys + live Meters/Products (P5); Svix (P6, when first customer asks for webhooks); Better Stack / Honeycomb / Instatus per the [§2.15](#215-observability--monitoring) observability triggers (not P0).
+
+## 4.4 Secrets & configuration matrix
+
+All secrets live in **Cloudflare Workers Secrets / Secrets Store** for v1 (KMS trigger documented in [§1.7](#17-cloudflare-first-cloud-strategy)). Bindings (Hyperdrive, DO namespace, Queues, R2, AI Gateway) are `wrangler.toml` config, not secrets.
+
+| Secret / binding | Source service | Consumed by | Rotation |
+|---|---|---|---|
+| `HMAC_PEPPER_V1`, `_V2`, … | in-house | key verifier | Versioned; lazy re-HMAC on next use ([§2.6 P2](#26-phased-build)) |
+| `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_WEBHOOK_SECRET` | WorkOS | auth middleware, webhook handler | Provider dashboard |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, meter IDs | Stripe | billing reporter, webhook handler | test→live swap at P5 |
+| `NEON_DATABASE_URL` (via Hyperdrive binding) | Neon | `AccountScope` repo | connection-string swap |
+| `UPSTASH_REDIS_REST_URL` + `_TOKEN` | Upstash | cache + RPS + idempotency | provider dashboard |
+| `TINYBIRD_TOKEN` | Tinybird | UsageEvent Queue consumer | provider dashboard |
+| `AXIOM_TOKEN` + dataset | Axiom | audit Queue consumer, Logpush | provider dashboard |
+| `RESEND_API_KEY` | Resend | onboarding lifecycle | provider dashboard |
+| `SENTRY_DSN` | Sentry | logger wrapper | provider dashboard |
+| `AI_GATEWAY_*` (account + gateway id; binding) | Cloudflare | `forwardToUpstream` | config |
+| `OPENROUTER_API_KEY` (trial pool only) | OpenRouter | trial-credits forward path | provider dashboard |
+| per-tenant DEK strategy (BYOK Mode A) | in-house envelope | BYOK key storage | per-tenant; HSM on enterprise trigger ([§2.14](#214-cloud-architecture)) |
+
+CI carries no real secrets: the `wrangler deploy --dry-run` gate ([§2.6 P0](#26-phased-build)) validates bindings against `wrangler.toml`, not live credentials.
+
+## 4.5 Order of operations (the integrated critical path)
+
+Each row is "provision ⊕ spec ⊕ build ⊕ prove." A phase is not done until its **integration milestone** — a single end-to-end assertion — passes.
+
+| Phase | Provision (tier) | Spec frozen | Build | Integration milestone (verifiable) |
+|---|---|---|---|---|
+| **P-1** | A | S1, S2 *drafted* | none (no code) | ≥3 LOIs + ≥8/15 trust validations; `/pricing-preview` live with CTA ([§5](#next-concrete-step)) |
+| **P0** | B + C | **S1, S2 locked** | `@noetic/api` skeleton; schema; `BucketStateDO`; `hasScope`; auth; Queue consumers; Sentry; `/v1/health` Cron | `/v1/health` synthetic green through auth → DO reserve → Tinybird Queue → AI Gateway round-trip; CI `wrangler deploy --dry-run` passing |
+| **P0.5** | (A: PostHog) | — | signup auto-provision; SDK success-snippet; TTF instrumentation | New signup → typed-agent trace visible + 1 eval score in dashboard within seconds; TTF-200 recorded |
+| **P1** | — | — | members/invite/roles UI; audit read+export | Mutation emits audit event → queryable in Axiom; cross-tenant pen-test suite green |
+| **P2** | — | **S3 locked** | in-house keys; verify cache; `Idempotency-Key` SM; `noetic login`; two-tier offline grace | `noetic login` device-code → key issued → authed request; revoke invalidates within 60s; tier-change `revocation_pending` fast-rotate within 24h |
+| **P3** | — | **S4 locked** | `forwardToUpstream`; BYOK Mode A + Mode B contract; trial pool; SDK | BYOK Mode A request bills correctly; Mode B signed-JWT usage reconciles via sampled re-query; Mode B refused on PAYG |
+| **P3.5** | D | **S4.5 locked** | scorer defs; eval-per-trace; one GEPA run end-to-end | A GEPA run renders input→variants→scored→winner in UI; TTF-first-eval-score recorded |
+| **P4** | — | (S2 governs) | `reserve/settle/release`; 402/429 refuse; reconciler loop; daily-cap sharding | Concurrent fan-out at 95% cap cannot exceed hard cap; reconciler drift < tolerance; no silent clamp |
+| **P5** | E (Stripe live) | **S5 locked** | Billing Meters; 4 Products; reporter; replay tool; tier-switch UX; `/pricing` transition | **Shadow-billing period**: all three models produce correct invoices vs self-computed `billing_period_summary`; reporter-lag SLO met; `/pricing-preview` URL now live Stripe flow |
+| **P6** | E (on-demand) | **S6, S7 locked** | status page; Svix; DPA; deletion SM; R2 audit retrieval; Sentry sampling | Status page reflects `/v1/health`; deletion state machine round-trips; >90-day audit retrievable from R2 |
+
+**Critical-path note:** the only hard serialization is `P-1 gate → S1+S2 lock → P0`. After P0, `S3/S5` specs and the P2/P5 builds parallelize for a two-engineer team; a solo engineer walks the table top-to-bottom (16-week baseline, [§2.6](#26-phased-build)).
+
+## 4.6 Integration checkpoints (the cross-cutting smoke gates)
+
+These prove the *seams* between services — the failure class round 1–3 panels kept surfacing. Each is wired once and runs continuously, not a one-time test.
+
+1. **`/v1/health` synthetic Cron (P0, highest leverage).** Exercises auth + DO reserve + Tinybird Queue ingest + AI Gateway round-trip every minute; Sentry alerts on N consecutive failures; UptimeRobot probes it from outside Cloudflare. This is also the SLA evidence record ([§1.8](#18-observability-graduated-by-paying-customer-tier)).
+2. **`wrangler deploy --dry-run` CI gate (P0).** Every PR; enforces the Workers-compatibility library rule before merge ([§2.14](#214-cloud-architecture)).
+3. **Cross-tenant pen-test suite (P1).** Asserts `AccountScope` repo isolation — every query carries `account_id`; no row leaks across tenants.
+4. **Reconciler drift alerts (P4/P5).** One loop in v1 (Tinybird `UsageEvent` sum vs DO `used`), drift-direction matrix (replay from `settle_journal`, never decrement DO), grouped by `period_anchor`. Alerts to Sentry + Slack.
+5. **Shadow-billing period (P5, before live).** All three commercial models run against real usage with no customer charge; self-computed summary vs Stripe-reported diffed; the manual replay tool is exercised here, not in an incident.
+
+## 4.7 Open integration questions
+
+- **`packages/dashboard` split vs extend `packages/web`.** Lean extend-`web` until the dashboard needs auth-gated routes that complicate the static-marketing build; split then. Resolve before P0.5.
+- **Eval compute target.** Cloudflare Containers GA timing vs committing to a Fly.io pool for P3.5. Decide at S4.5 freeze.
+- **`specs/saas/` vs flat `26+` numbering.** Carried from [§3 Open question](#open-question) — lean subdirectory.
+- **§2.14 read/write-path narratives predate the DO override.** The hot-path walkthroughs in [§2.14](#214-cloud-architecture) still describe the Upstash-Lua bucket and Postgres outbox; the authoritative model is `BucketStateDO` + audit-via-Queue ([§1.9](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions), [§1.11](#111-round-3-conditions-twelve-interaction-surface-codifications)). Refresh those two walkthroughs when S1/S2 are drafted so the spec source isn't seeded from stale prose. (Doc-hygiene, not a design change.)
+
+---
+
 # Next concrete step
 
 Run **P-1** before any code. **No parallel P0 build** (per [§1.9 override 2](#19-round-2-panel-overrides-six-decisions--workers-footguns--product-additions)) — the 8 engineer-weeks of plumbing is the wrong forcing function for discovery, and the wedge is structurally weak in BYOK world without validated pull.
@@ -1637,4 +1785,5 @@ P0 starts only after the gate passes.
 | 2026-06-14 | Observability graduated by paying-customer tier (§1.8, §2.15). Tier 0 (day 1, $0): Sentry + structured logs + /v1/health Cron + model_cost_usd dimension. Tier 1 (~$20/mo): Instatus + billing-correctness reconciler alerts + PostHog. Tier 2 (~$25–75): Better Stack + Honeycomb + SLO dashboards. Tier 3 ($500–2K): Datadog/Grafana + PagerDuty + Vanta. Three platform-specific concerns codified (billing-correctness as #1 incident class; BYOK cost tracking; /v1/health as SLA evidence). | User request: evaluate observability needs, gated by paying-customer milestones |
 | 2026-06-15 | **Round 2 panel overrides (§1.9)**: six prior decisions overridden (bucket_state to Durable Objects with TTL'd reservations; P-1 to 3-week hard gate with kill criteria + dual cohort; §1.4 hedge → commit to one ICP after P-1; trial pool to $20 cheap-cached identity-gated; SOC2 evidence unconditional in P0; HMAC pepper versioned from day 1). Workers footgun corrections (Hyperdrive cache disabled for authz tables; UsageEvent via Queue not fire-and-forget; refuse not silent-clamp; Idempotency-Key state machine; SENSITIVE_SCOPES bypass; Tinybird PII defense-in-depth; audit via Queue not Postgres outbox; UptimeRobot external probe; typed AccountScope not RLS; free-tier daily-cap key sharding; Stripe Meter period-boundary handling). Product additions (P3.5 eval surface; eval compute on Containers/Fly.io; BYOK key spec including Mode B async/SDK-side; success-screen sdk snippet not curl; Switching-from-LangSmith primary migration; §2.16 competitive positioning). CEO additions (EU AI Act specialist call; customer support line item; AI Gateway abstraction; 7-year audit retention with R2 archive; Cloudflare exit playbook; schedule rebaseline to 12wk/1eng or 8wk/2eng). Free-tier shape and trial pool open questions resolved. §3 specs deferred: only S1+S2 in P0; S3-S7 wait for P-1 outcome. | Second adversarial panel review explicitly empowered to challenge §1 |
 | 2026-06-15 | **Monetization commitment (§1.10, §2.17)**: two product surfaces (API primary, paid CLI secondary), three commercial models coexisting day 1 (subscription/seat tiers + PAYG + enterprise). **Introductory** (first 6 months / 100 customers): Developer $10/mo, Team $30 + $10/seat. **Steady-state**: Developer $19/mo, Team $49 + $15/seat, PAYG $0.008/agent-run + $0.03/eval-score. 12-month grandfather for early customers with 60-day notice. Unit-economics check: ~89% gross margin at steady-state, ~80% at introductory — BYOK eliminates inference cost so the most expensive comp-set variable is off-P&L. Metering anchors: `agent-runs` + `eval-scores` (tokens NOT billable). CLI Pro feature cut: GEPA, remote evals, sub-harness commands, multi-account, plugins all behind paid tier; OSS framework remains free. API keys gain `entitlements` claim cached in Upstash; CLI offline-grace 7 days with signed local cache. §2.11 Pricing-units open question resolved. P5 +1 week for all-three-models. S5 spec no longer collapses to seat-counting. | User commitments on monetization model + steady-state pricing in the black |
+| 2026-06-17 | **Added §4 Integration plan** — execution runbook gated on P-1. Repository integration (new `@noetic/api`, `@noetic-tools/sdk`, `packages/dashboard` packages + required `.sentrux/rules.toml` layer/boundary edits + `@noetic/api` six-layer internal structure); spec generation plan (authoritative `specs/saas/NN-*.md` file list — extends §3.5 by giving the eval surface S4.5 its own file — with drafting/freeze order and sync-doc registration); five-tier service provisioning runbook (A providers → B Cloudflare platform → C data vendors → D eval compute → E on-demand, each with what-it-blocks); secrets & configuration matrix (Workers Secrets inventory + consumers + rotation); order-of-operations master table (provision ⊕ spec ⊕ build ⊕ integration milestone per phase, hard serialization = P-1 → S1+S2 lock → P0); cross-cutting integration checkpoints (/v1/health synthetic, wrangler dry-run, cross-tenant pen-test, reconciler drift, shadow-billing). Renumbered Next concrete step → §5, Changelog → §6. Flagged §2.14 read/write-path narratives as stale vs the DO model (doc-hygiene, refresh at S1/S2 draft). | User request — needed a concrete integration/execution plan (specs to generate, order of operations, services to provision) on top of the §3 spec proposal |
 | 2026-06-15 | **Round 3 panel conditions (§1.11)**: no residual fatal flaws — all three reviewers confirmed. Twelve mechanical codifications incorporated: (1) tier-change in `SENSITIVE_SCOPES` + two-tier CLI offline grace (7d "no network" / 24h "tier-change pending"); (2) Team tier gains org-GEPA-budget + shared eval datasets + SSO (closes PAYG vs Team arbitrage; replaces "accepted arbitrage" framing); (3) §2.17 cross-model transitions subsection with per-direction rules + no-arbitrage invariant + 7-day upgrade-then-downgrade cooldown; (4) first-100 loyalty lock (24mo at intro + 25% off steady-state) — defends churn cliff + acts as P-1 LOI sweetener; (5) schedule honestly rebaselined to 16wk-1eng or 10–12wk-2eng; (6) `gepa-runs` added as a third meter with per-tier bundled allowance — GEPA compute cost added to unit economics; (7) `agent-run` definition pinned in S2 (one top-level `harness.run()`); (8) Enterprise founding-sales motion in P-1 (design-partner template, security questionnaire, "enterprise ready" definition); (9) tier-keyed DO sharding (Free/Developer=1, Team=4, Enterprise=16) + per-reservation `settle_journal` + reconciler drift-direction matrix (replay-from-journal, never decrement) + DO settle/Queue-enqueue atomic; (10) Tinybird dedup window ≥7 days as hard constraint; reconciler groups by `period_anchor`; (11) Mode B metering-integrity contract (SDK-owned idempotency + signed JWT + sampled re-query) + **Mode B gated to subscription tiers only**; (12) `/pricing-preview` page in P-1 (preview pricing, "reserve early-access" CTA, feature-checklist LOI signatures, same URL transitions to live Stripe-integrated in P5). Plus second-order codifications: late-settle-after-rollover, Upstash-degraded fallback, archived audit retrieval surface in P6, Sentry quota sampling for DO alarms, recalibrated PAYG reconciliation tolerance. | Round 3 final panel review — empowered to challenge but found only seams between round-1/round-2 fixes |
