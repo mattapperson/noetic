@@ -9,8 +9,7 @@ import type { Runtime, SmokeResult } from './types.js';
 export function formatSuccess(result: SmokeResult): string {
   const lines = [
     `✓ [${result.runtime}] smoke passed in ${result.durationMs}ms (model: ${result.model})`,
-    `  core:       reply="${result.core.reply}" tokens=${result.core.inputTokens}/${result.core.outputTokens}`,
-    `  code-agent: reply="${result.codeAgent.reply}" tools=${result.codeAgent.toolCount} fs="${result.codeAgent.fileRoundTrip}"`,
+    `  core: reply="${result.core.reply}" tokens=${result.core.inputTokens}/${result.core.outputTokens}`,
   ];
   return lines.join('\n');
 }

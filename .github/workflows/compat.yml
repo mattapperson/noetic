@@ -1,9 +1,9 @@
 name: cross-platform-compat
 
-# Proves @noetic-tools/core and @noetic-tools/code-agent build, deploy, and run
-# on every supported runtime: Node, Bun, Deno, the browser, and Cloudflare
-# Workers. Each target makes a live OpenRouter call against the built, packed
-# tarballs (i.e. the published artifacts), not the workspace source.
+# Proves @noetic-tools/core builds, deploys, and runs on every supported
+# runtime: Node, Bun, Deno, the browser, and Cloudflare Workers. Each target
+# makes a live OpenRouter call against the built, packed tarballs (i.e. the
+# published artifacts), not the workspace source.
 
 on:
   pull_request:
@@ -39,7 +39,7 @@ jobs:
       - name: Install workspace deps (builds need them)
         run: bun install
 
-      - name: Build + pack core and code-agent into tarballs
+      - name: Build + pack core into tarballs
         working-directory: compat
         run: bun run pack:packages
 

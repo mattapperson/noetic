@@ -193,6 +193,8 @@ const result = await harness.run(myStep, input, ctx);
 | `input` | `I` | Input value for the step. |
 | `ctx` | `Context` | Execution context. |
 
+When the harness is built with `memory` + `storage`, `run()` runs the layers' `init()` hooks once per context (keyed by `ctx.id`) before executing — so prior layer state rehydrates from storage, recalls into the model context, and updates persist back. The same memory guarantee `execute()` gives, without the session/`seedSessionHistory` ceremony. This also makes `parseAndRunWorkflow` (which dispatches through `run()`) memory-aware. The init is idempotent: nested/repeated `run()` calls never re-init (re-init would clobber accumulated in-memory state).
+
 ## createContext Options
 
 | Option | Type | Description |

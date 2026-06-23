@@ -1,6 +1,7 @@
-import type { AxGEPAAdapter, AxGEPAEvaluationBatch } from '@ax-llm/ax';
+import type { AxAIOpenAIModel, AxGEPAAdapter, AxGEPAEvaluationBatch } from '@ax-llm/ax';
 import { AxGEPA, ai, ax } from '@ax-llm/ax';
 import type { Step } from '@noetic-tools/core';
+import { frameworkCast } from '@noetic-tools/core/unstable';
 
 import type { Candidate, OptimizableField, OptimizationResult } from '../types/optimizer';
 import { averageNumbers } from '../utils/scores';
@@ -160,11 +161,16 @@ function averageScore(scores: Record<string, number>): number {
 }
 
 function createAiService(model: string, apiKey: string): ReturnType<typeof ai> {
+  // ax dropped the dedicated 'openrouter' provider; OpenRouter is OpenAI-wire
+  // compatible, so target the OpenAI provider with OpenRouter's base URL. The
+  // model is an arbitrary OpenRouter slug, which ax types as the OpenAI model
+  // enum — cast at this SDK boundary (ax forwards the string unchanged).
   return ai({
-    name: 'openrouter',
+    name: 'openai',
     apiKey,
+    apiURL: 'https://openrouter.ai/api/v1',
     config: {
-      model,
+      model: frameworkCast<AxAIOpenAIModel>(model),
     },
   });
 }

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cross-platform deployment smoke tests for @noetic-tools/core and @noetic-tools/code-agent (Node, Bun, Deno, browser, Cloudflare Workers).",
+  "description": "Cross-platform deployment smoke tests for @noetic-tools/core (Node, Bun, Deno, browser, Cloudflare Workers).",
   "scripts": {
     "pack:packages": "bun scripts/pack.ts",
     "build:bundles": "bun scripts/build-bundles.ts",
@@ -15,7 +15,6 @@
     "all": "bun --no-install run.ts"
   },
   "dependencies": {
-    "@noetic-tools/code-agent": "file:./vendor/noetic-code-agent.tgz",
     "@noetic-tools/core": "file:./vendor/noetic-core.tgz",
     "@noetic-tools/memory": "file:./vendor/noetic-memory.tgz",
     "@noetic-tools/types": "file:./vendor/noetic-types.tgz",
