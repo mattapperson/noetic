@@ -26,23 +26,12 @@ export interface CoreSmokeResult {
   outputTokens: number;
 }
 
-/** Outcome of the `@noetic-tools/code-agent` portable-surface exercise. */
-export interface CodeAgentSmokeResult {
-  /** Content read back through the in-memory fs tool round-trip. */
-  fileRoundTrip: string;
-  /** The trimmed assistant reply from a live call through the agent harness. */
-  reply: string;
-  /** Number of portable tools the agent registered. */
-  toolCount: number;
-}
-
 /** Full smoke result returned by {@link runSmoke}. */
 export interface SmokeResult {
   ok: true;
   runtime: Runtime;
   model: string;
   core: CoreSmokeResult;
-  codeAgent: CodeAgentSmokeResult;
   /** Wall-clock duration of the whole smoke in milliseconds. */
   durationMs: number;
 }

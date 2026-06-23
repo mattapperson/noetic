@@ -8,12 +8,12 @@
  *   - Deno:    `dist/deno/run.mjs` — a self-contained bundle (the noetic
  *              packages inlined from their installed `dist`, only `node:`
  *              builtins left external, which Deno supports via node-compat).
- *   - Browser: `dist/browser/bundle.js` — the full smoke bundled with esbuild
- *              and `esbuild-plugin-polyfill-node`, the same kind of pipeline a
- *              real Next.js/webpack/esbuild browser app uses. code-agent pulls
- *              in `node:` builtins (path/crypto/os/fs/net/url/module); the
- *              polyfill plugin shims them, plus a tiny custom shim gives
- *              `node:module`/`node:url` working load-time functions.
+ *   - Browser: `dist/browser/bundle.js` — the smoke bundled with esbuild and
+ *              `esbuild-plugin-polyfill-node`, the same kind of pipeline a real
+ *              Next.js/webpack/esbuild browser app uses. core is fully portable,
+ *              but the polyfill plugin (plus a tiny `node:module`/`node:url`
+ *              load-time shim) is kept so a transitively pulled `node:` builtin
+ *              can never break the browser build.
  *
  * Bun runs the TypeScript entry directly, so it needs no bundle.
  *
@@ -31,7 +31,7 @@ import { polyfillNode } from 'esbuild-plugin-polyfill-node';
 
 const COMPAT_DIR = fileURLToPath(new URL('..', import.meta.url));
 
-const NOETIC_PACKAGE = /^@noetic-tools\/(core|code-agent)$/;
+const NOETIC_PACKAGE = /^@noetic-tools\/(core)$/;
 
 /** Redirect `@noetic-tools/*` bare imports to their installed dist entry (Bun). */
 const noeticResolver: BunPlugin = {
@@ -54,7 +54,7 @@ const noeticResolver: BunPlugin = {
 
 /**
  * esbuild shim for `node:module`/`node:url`. `esbuild-plugin-polyfill-node`
- * stubs these out, but code-agent calls `createRequire(...)` and
+ * stubs these out, but a dependency may call `createRequire(...)` or
  * `fileURLToPath(...)` at module load, so they must be real functions (the
  * require they return is only invoked on Node-only paths the smoke never hits).
  */

@@ -1,9 +1,10 @@
 /**
- * Build `@noetic-tools/core` and `@noetic-tools/code-agent` and pack them into
- * publishable tarballs under `compat/vendor/`.
+ * Build `@noetic-tools/core` (with its `@noetic-tools/types` and
+ * `@noetic-tools/memory` dependencies) and pack them into publishable tarballs
+ * under `compat/vendor/`.
  *
- * `npm pack` applies each package's `publishConfig` (notably code-agent's
- * `exports` → `dist/*`), so the resulting tarballs resolve exactly like the
+ * `npm pack` applies each package's `publishConfig` (notably the `exports` →
+ * `dist/*` mapping), so the resulting tarballs resolve exactly like the
  * artifacts published to npm. The compat project installs these tarballs, which
  * is the most faithful way to prove the *built, deployable* packages work on a
  * given runtime — rather than the TypeScript workspace source.
@@ -41,10 +42,6 @@ const TARGETS: ReadonlyArray<PackTarget> = [
   {
     dir: 'packages/core',
     out: 'noetic-core.tgz',
-  },
-  {
-    dir: 'packages/code-agent',
-    out: 'noetic-code-agent.tgz',
   },
 ];
 
