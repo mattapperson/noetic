@@ -1,3 +1,7 @@
+## @noetic-tools/types-v1.0.2 (2026-06-23)
+
+* fix(core): wire traceExporter into model-call and workflow run path ([7af5890](https://github.com/mattapperson/noetic/commit/7af5890)), closes [#50](https://github.com/mattapperson/noetic/issues/50)
+
 ## @noetic-tools/types-v1.0.1 (2026-06-14)
 
 * Combine sub-harness steps for external coding agents ([314cb54](https://github.com/mattapperson/noetic/commit/314cb54))
