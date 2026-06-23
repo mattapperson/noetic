@@ -140,7 +140,7 @@ const exporter = new InMemoryExporter();
 // ... run agent ...
 
 // Query spans
-const llmSpans = exporter.getSpansByName('llm-call');
+const llmSpans = exporter.getSpansByName('llm.call');
 const children = exporter.getChildSpans(rootSpan.spanId);
 const fullTrace = exporter.getTraceTree(rootSpan.traceId);
 
@@ -201,6 +201,29 @@ import { GenAI, ToolAttr } from '@noetic-tools/core';
 // in custom exporters or assertions:
 const model = span.attributes.get(GenAI.REQUEST_MODEL);
 const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
+```
+
+The harness emits one `llm.call` span per model call (one per tool round) and a `tool.call` span per function call, nested under the calling context's span and flushed to the configured exporter when `callModel` settles.
+
+## Workflow Run Span
+
+`parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which branches actually run. Model and tool spans nest under it, so the exported trace mirrors the declared workflow with the executed path overlaid.
+
+### NoeticAttr Constants
+
+| Constant | Value | Description |
+|---|---|---|
+| `NoeticAttr.WORKFLOW_DOCUMENT` | `'noetic.workflow.document'` | Full JSON-serialised `WorkflowDocument`. |
+| `NoeticAttr.WORKFLOW_VERSION` | `'noetic.workflow.version'` | Workflow document schema version. |
+| `NoeticAttr.WORKFLOW_NODE_COUNT` | `'noetic.workflow.node_count'` | Count of declared nodes. |
+| `NoeticAttr.WORKFLOW_NODES` | `'noetic.workflow.nodes'` | JSON array of `{ id, kind }` for every node. |
+| `NoeticAttr.WORKFLOW_EDGES` | `'noetic.workflow.edges'` | JSON array of `{ from, to }` parent→child edges. |
+
+```ts validate=none
+import { NoeticAttr } from '@noetic-tools/core';
+
+const runSpan = exporter.getSpansByName('workflow.run')[0];
+const doc = JSON.parse(String(runSpan.attributes.get(NoeticAttr.WORKFLOW_DOCUMENT)));
 ```
 
 ## Related Pages

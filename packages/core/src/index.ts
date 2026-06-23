@@ -172,7 +172,7 @@ export { createMessage, estimateTokens } from '@noetic-tools/types';
 //#region Observability
 
 /** @public */
-export { GenAI, ToolAttr } from './observability/genai-attributes';
+export { GenAI, NoeticAttr, ToolAttr } from './observability/genai-attributes';
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 /** @public */

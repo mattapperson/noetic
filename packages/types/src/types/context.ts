@@ -9,7 +9,7 @@ import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput } from './items';
 import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
-import type { Span } from './observability';
+import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
 import type { SubprocessAdapter } from './subprocess-adapter';
@@ -213,6 +213,8 @@ export interface ContextHarness {
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
   cancel(ctx: Context, reason?: string): Promise<void>;
+  /** Trace exporter spans are flushed to. Defaults to a no-op exporter. */
+  readonly traceExporter: TraceExporter;
   createSpan(name: string, parent: Span | null): Span;
   abort(scope?: unknown): Promise<void>;
   getStatus(scope?: unknown): ContextHarnessStatus;

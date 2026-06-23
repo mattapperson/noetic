@@ -84,6 +84,22 @@ Tool step spans include:
 | `tool.name` | string | Tool name |
 | `tool.needs_approval` | boolean | Whether the tool required approval |
 
+The harness emits one `llm.call` span per model call (one per tool round) and one `tool.call` span per function call, nested under the calling context's span. Both are flushed to the configured `traceExporter` when the `callModel` invocation settles. A harness constructed without a `traceExporter` uses a `NoopExporter`, so emission is always safe.
+
+---
+
+## Workflow Run Span
+
+`parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which branches actually execute. Model and tool spans for the run nest under it, so the trace tree mirrors the declared workflow with the executed path overlaid. The span is exported when the run settles.
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `noetic.workflow.document` | string | Full JSON-serialised `WorkflowDocument` (lossless) |
+| `noetic.workflow.version` | number | Workflow document schema version |
+| `noetic.workflow.node_count` | number | Count of declared nodes |
+| `noetic.workflow.nodes` | string | JSON array of `{ id, kind }` for every declared node |
+| `noetic.workflow.edges` | string | JSON array of `{ from, to }` parent→child edges |
+
 ---
 
 ## Memory Layer Trace Spans

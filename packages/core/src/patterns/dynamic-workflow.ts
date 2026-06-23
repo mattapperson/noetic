@@ -4,13 +4,21 @@
  */
 
 import type { ContextMemory } from '@noetic-tools/memory';
-import type { AgentHarnessContract, Context, ExecuteStepFn, Step, Tool } from '@noetic-tools/types';
+import type {
+  AgentHarnessContract,
+  Context,
+  ExecuteStepFn,
+  Span,
+  Step,
+  Tool,
+} from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { step } from '../builders/step-builders';
 import type { HydrationContext } from '../builders/workflow-hydrator';
 import { hydrateWorkflow } from '../builders/workflow-hydrator';
+import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
-import { WorkflowDocumentSchema, workflowDepth } from '../schemas/workflow';
+import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
 
 //#region Types
 
@@ -189,8 +197,45 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
   };
 
   const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
-  const result = await executeStep(hydrated, opts.input ?? '', opts.ctx);
-  return coerceToString(result);
+  const runSpan = beginWorkflowRunSpan(opts.harness, opts.ctx, parseResult.doc);
+  try {
+    const result = await executeStep(hydrated, opts.input ?? '', opts.ctx);
+    return coerceToString(result);
+  } finally {
+    runSpan.end();
+    await opts.harness.traceExporter.export([
+      runSpan,
+    ]);
+  }
+}
+
+/**
+ * Open the root `workflow.run` span and stamp the static DAG onto it (document,
+ * version, node/edge graph). The span is installed on `ctx.span` so the LLM
+ * step's model/tool spans nest under it — the trace tree then mirrors the
+ * declared workflow graph, with the executed path overlaid (issue #50 follow-up).
+ */
+function beginWorkflowRunSpan(
+  harness: AgentHarnessContract,
+  ctx: Context,
+  doc: WorkflowDocument,
+): Span {
+  const span = harness.createSpan('workflow.run', null);
+  const graph = workflowGraph(doc.root);
+  span.setAttribute(NoeticAttr.WORKFLOW_DOCUMENT, JSON.stringify(doc));
+  span.setAttribute(NoeticAttr.WORKFLOW_VERSION, doc.version);
+  span.setAttribute(NoeticAttr.WORKFLOW_NODE_COUNT, graph.nodes.length);
+  span.setAttribute(NoeticAttr.WORKFLOW_NODES, JSON.stringify(graph.nodes));
+  span.setAttribute(NoeticAttr.WORKFLOW_EDGES, JSON.stringify(graph.edges));
+  installRunSpan(ctx, span);
+  return span;
+}
+
+/** Install the run span as `ctx.span` so descendant model calls parent under it. */
+function installRunSpan(ctx: Context, span: Span): void {
+  frameworkCast<{
+    span: Span;
+  }>(ctx).span = span;
 }
 
 //#endregion

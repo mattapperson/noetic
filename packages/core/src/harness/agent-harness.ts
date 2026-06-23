@@ -549,6 +549,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       callModelOverride: this.callModelOverride,
       streamIdleTimeoutMs: this.streamIdleTimeoutMs,
       harness: this,
+      traceExporter: this.traceExporter,
     }).callModel(request);
   }
 

@@ -1750,6 +1750,8 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
+Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
+
 ### UntilPredicateSchema
 
 Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `outputContains`, `outputEquals`, `converged`. Combinators: `any`, `all`.

@@ -6,7 +6,9 @@ import type {
   Item,
   ItemSchemaRegistry,
   LLMResponse,
+  Span,
   Tool,
+  TraceExporter,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
@@ -23,6 +25,7 @@ import {
   sanitizeToolNameForWire,
 } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
+import { GenAI, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
@@ -328,25 +331,100 @@ interface AgentHarnessModelCallerOpts {
   callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   streamIdleTimeoutMs: number;
   harness: AgentHarnessContract;
+  traceExporter: TraceExporter;
+}
+
+/**
+ * Per-`callModel` span accumulator. Spans are created lazily from the calling
+ * context's span (so the trace tree mirrors the execution tree) and flushed to
+ * the harness `traceExporter` once the call settles — see issue #50, where the
+ * exporter was stored but never invoked.
+ */
+class CallSpanCollector {
+  private readonly spans: Span[] = [];
+
+  constructor(
+    private readonly harness: AgentHarnessContract,
+    private readonly exporter: TraceExporter,
+    private readonly parent: Span | null,
+  ) {}
+
+  /** Open a model-call span stamped with GenAI semantic-convention attributes. */
+  startModelSpan(model: string): Span {
+    const span = this.harness.createSpan('llm.call', this.parent);
+    span.setAttribute(GenAI.SYSTEM, 'openrouter');
+    span.setAttribute(GenAI.REQUEST_MODEL, model);
+    this.spans.push(span);
+    return span;
+  }
+
+  /** Record usage + cost on a model-call span. */
+  finishModelSpan(
+    span: Span,
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+    },
+    cost: number | undefined,
+  ): void {
+    span.setAttribute(GenAI.USAGE_INPUT_TOKENS, usage.inputTokens);
+    span.setAttribute(GenAI.USAGE_OUTPUT_TOKENS, usage.outputTokens);
+    if (cost !== undefined) {
+      span.setAttribute(GenAI.COST, cost);
+    }
+    span.end();
+  }
+
+  /** Open and immediately close a tool-call span under the given model span. */
+  recordToolSpan(parent: Span, toolName: string, needsApproval: boolean): void {
+    const span = this.harness.createSpan('tool.call', parent);
+    span.setAttribute(ToolAttr.NAME, toolName);
+    span.setAttribute(ToolAttr.NEEDS_APPROVAL, needsApproval);
+    span.end();
+    this.spans.push(span);
+  }
+
+  /** Flush all accumulated spans to the exporter. */
+  async flush(): Promise<void> {
+    if (this.spans.length === 0) {
+      return;
+    }
+    await this.exporter.export(this.spans);
+  }
 }
 
 export class AgentHarnessModelCaller {
   constructor(private readonly opts: AgentHarnessModelCallerOpts) {}
 
+  private newSpanCollector(request: CallModelRequest): CallSpanCollector {
+    return new CallSpanCollector(
+      this.opts.harness,
+      this.opts.traceExporter,
+      request.parentSpan ?? request.ctx?.span ?? null,
+    );
+  }
+
   private async callOverriddenModel(request: CallModelRequest): Promise<LLMResponse> {
     if (!this.opts.callModelOverride) {
       throw new Error('No callModel override configured.');
     }
-    const response = await this.opts.callModelOverride(request);
-    const itemSchemas = buildItemSchemaRegistry({
-      base: this.opts.itemSchemas,
-      layers: request.layers,
-      tools: request.tools,
-    });
-    return {
-      ...response,
-      items: itemSchemas.parseMany(response.items),
-    };
+    const spans = this.newSpanCollector(request);
+    const modelSpan = spans.startModelSpan(request.model);
+    try {
+      const response = await this.opts.callModelOverride(request);
+      const itemSchemas = buildItemSchemaRegistry({
+        base: this.opts.itemSchemas,
+        layers: request.layers,
+        tools: request.tools,
+      });
+      spans.finishModelSpan(modelSpan, response.usage, response.cost);
+      return {
+        ...response,
+        items: itemSchemas.parseMany(response.items),
+      };
+    } finally {
+      await spans.flush();
+    }
   }
 
   private requireModelClient(): OpenRouter {
@@ -365,6 +443,19 @@ export class AgentHarnessModelCaller {
       return this.callOverriddenModel(request);
     }
     const client = this.requireModelClient();
+    const spans = this.newSpanCollector(request);
+    try {
+      return await this.runModelLoop(request, client, spans);
+    } finally {
+      await spans.flush();
+    }
+  }
+
+  private async runModelLoop(
+    request: CallModelRequest,
+    client: OpenRouter,
+    spans: CallSpanCollector,
+  ): Promise<LLMResponse> {
     const prepared = prepareModelRequest(request, this.opts.agentName);
     const allItems: Item[] = [];
     const totalUsage = {
@@ -422,6 +513,8 @@ export class AgentHarnessModelCaller {
         toolCount: prepared.sdkTools?.length ?? 0,
         recoveryContinuation,
       });
+
+      const modelSpan = spans.startModelSpan(request.model);
 
       const callResult = client.callModel(
         {
@@ -487,6 +580,7 @@ export class AgentHarnessModelCaller {
         emitIfAllowed: prepared.emitIfAllowed,
       });
       if (recovery.kind === 'continue') {
+        modelSpan.end();
         invalidRecoveryContinuations = recovery.invalidRecoveryContinuations;
         useEphemeralContinue = true;
         continue;
@@ -506,6 +600,7 @@ export class AgentHarnessModelCaller {
         emitIfAllowed: prepared.emitIfAllowed,
       });
       if (outputRecovery.kind === 'continue') {
+        modelSpan.end();
         invalidRecoveryContinuations = outputRecovery.invalidRecoveryContinuations;
         useEphemeralContinue = true;
         continue;
@@ -516,10 +611,19 @@ export class AgentHarnessModelCaller {
         itemCount: sdkResponse.output?.length ?? 0,
       });
       const roundUsage = extractUsage(sdkResponse.usage);
+      const roundCost = sdkResponse.usage?.cost ?? 0;
+      spans.finishModelSpan(
+        modelSpan,
+        {
+          inputTokens: roundUsage.inputTokens,
+          outputTokens: roundUsage.outputTokens,
+        },
+        roundCost > 0 ? roundCost : undefined,
+      );
       totalUsage.inputTokens += roundUsage.inputTokens;
       totalUsage.outputTokens += roundUsage.outputTokens;
       totalUsage.cachedTokens += roundUsage.cachedTokens ?? 0;
-      totalCost += sdkResponse.usage?.cost ?? 0;
+      totalCost += roundCost;
       allItems.push(...roundItems);
 
       const functionCalls = roundItems.filter(isFunctionCall);
@@ -533,6 +637,8 @@ export class AgentHarnessModelCaller {
         conversationInput,
         round,
         emitIfAllowed: prepared.emitIfAllowed,
+        spans,
+        modelSpan,
       });
 
       round += 1;
@@ -692,8 +798,10 @@ export class AgentHarnessModelCaller {
     conversationInput: ReturnType<typeof itemsToInput>;
     round: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+    spans: CallSpanCollector;
+    modelSpan: Span;
   }): Promise<void> {
-    const { functionCalls, request, allItems, conversationInput } = params;
+    const { functionCalls, request, allItems, conversationInput, spans, modelSpan } = params;
     params.emitIfAllowed('tool_round_started', {
       round: params.round,
       toolCount: functionCalls.length,
@@ -711,6 +819,10 @@ export class AgentHarnessModelCaller {
       if (request.signal?.aborted) {
         break;
       }
+      const toolForCall = request.tools?.find(
+        (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
+      );
+      spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false);
       await this.executeFunctionCall({
         fc,
         request,

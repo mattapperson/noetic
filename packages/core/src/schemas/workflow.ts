@@ -484,6 +484,44 @@ export function* walkWorkflow(node: WorkflowNode): Iterable<WorkflowNode> {
   }
 }
 
+/** A flattened, JSON-safe view of a workflow tree: its nodes and parent→child edges. */
+export interface WorkflowGraph {
+  nodes: Array<{
+    id: string;
+    kind: WorkflowNode['kind'];
+  }>;
+  edges: Array<{
+    from: string;
+    to: string;
+  }>;
+}
+
+/**
+ * Flattens a workflow tree into a node + edge list — the static "potential
+ * paths" of the DAG, suitable for attaching to a trace span so observers can
+ * reconstruct the declared graph independent of which branches actually ran.
+ */
+export function workflowGraph(root: WorkflowNode): WorkflowGraph {
+  const nodes: WorkflowGraph['nodes'] = [];
+  const edges: WorkflowGraph['edges'] = [];
+  for (const node of walkWorkflow(root)) {
+    nodes.push({
+      id: node.id,
+      kind: node.kind,
+    });
+    for (const child of childNodes(node)) {
+      edges.push({
+        from: node.id,
+        to: child.id,
+      });
+    }
+  }
+  return {
+    nodes,
+    edges,
+  };
+}
+
 /**
  * Returns the maximum depth of a workflow tree.
  * Leaf nodes (`llm`, `tool`) have depth 0. Structural nodes add +1.

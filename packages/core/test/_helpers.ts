@@ -496,6 +496,9 @@ export function makeMockHarness(): AgentHarnessContract {
     checkpoint: async () => {},
     restore: async () => null,
     cancel: async () => {},
+    traceExporter: {
+      export: async () => {},
+    },
     createSpan: (name) => ({
       traceId: 't',
       spanId: name,

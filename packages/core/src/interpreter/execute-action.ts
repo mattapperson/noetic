@@ -435,6 +435,7 @@ export async function executeLLM<TMemory, I, O>(
           ctx: baseCtx,
           layers,
           allowedToolNames,
+          parentSpan: baseCtx.span,
         }
       : {
           model: resolvedModel,
@@ -443,6 +444,7 @@ export async function executeLLM<TMemory, I, O>(
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,
+          parentSpan: baseCtx.span,
         };
     const response = await baseCtx.harness.callModel(request);
 
