@@ -1,3 +1,7 @@
+## @noetic-tools/core-v1.2.2 (2026-06-23)
+
+* fix(core): wire traceExporter into model-call and workflow run path ([7af5890](https://github.com/mattapperson/noetic/commit/7af5890)), closes [#50](https://github.com/mattapperson/noetic/issues/50)
+
 ## @noetic-tools/core-v1.2.1 (2026-06-23)
 
 * fix(core): init/recall/persist memory on harness.run() path (#49) ([3075d47](https://github.com/mattapperson/noetic/commit/3075d47)), closes [#49](https://github.com/mattapperson/noetic/issues/49) [#48](https://github.com/mattapperson/noetic/issues/48) [#48](https://github.com/mattapperson/noetic/issues/48)
