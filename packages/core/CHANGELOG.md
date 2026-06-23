@@ -1,3 +1,7 @@
+## @noetic-tools/core-v1.2.1 (2026-06-23)
+
+* fix(core): init/recall/persist memory on harness.run() path (#49) ([3075d47](https://github.com/mattapperson/noetic/commit/3075d47)), closes [#49](https://github.com/mattapperson/noetic/issues/49) [#48](https://github.com/mattapperson/noetic/issues/48) [#48](https://github.com/mattapperson/noetic/issues/48)
+
 ## @noetic-tools/core-v1.2.0 (2026-06-15)
 
 * feat(core): drive codeAgentWorkflow headlessly; SlopCodeBench uses it ([b959b8b](https://github.com/mattapperson/noetic/commit/b959b8b))
