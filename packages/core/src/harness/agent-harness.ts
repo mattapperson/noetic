@@ -277,6 +277,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
+  /**
+   * Execution ids whose layer `init` hooks have already run, so repeated/nested
+   * `run()` calls and the session turn path never re-init (which would clobber
+   * accumulated in-memory state by re-hydrating from storage). Keyed by
+   * `ctx.id` (the layer-state store's executionId).
+   */
+  private readonly initializedExecutions = new Set<string>();
   readonly traceExporter: TraceExporter;
   /**
    * Long-lived shared cwd state. The same reference is seeded into every
@@ -558,18 +565,38 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         ...this.harnessTools,
       ]);
     }
+    // Hydrate/recall/persist memory on the bare `run()` path too (issue #48):
+    // configuring `memory` + `storage` must "just work" without going through
+    // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
+    await this.ensureLayersInit(ctx);
     return execute(s, input, ctx);
   }
 
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
    *  init MUST complete before any recall fires so layer state is populated. */
   private async initAndRun<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+    await this.ensureLayersInit(ctx);
+    return execute(s, input, ctx);
+  }
+
+  /**
+   * Idempotently run layer `init` hooks for `ctx` (keyed by `ctx.id`). Init
+   * MUST complete before any recall/store fires so init-bearing layers are not
+   * treated as disabled. Guarded so nested/repeated `run()` calls and the
+   * session turn path never re-init — re-init would re-hydrate from storage and
+   * clobber accumulated in-memory state.
+   */
+  private async ensureLayersInit(ctx: Context): Promise<void> {
     const layers = ctx.layers;
     const storage = this.config.storage;
-    if (layers && layers.length > 0 && storage) {
-      await this.initLayers(layers, ctx, storage);
+    if (!layers || layers.length === 0 || !storage) {
+      return;
     }
-    return execute(s, input, ctx);
+    if (this.initializedExecutions.has(ctx.id)) {
+      return;
+    }
+    this.initializedExecutions.add(ctx.id);
+    await this.initLayers(layers, ctx, storage);
   }
 
   detachedSpawn<I, O>(
@@ -800,6 +827,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void> {
+    // Drop the init guard so a deliberate dispose→run cycle re-hydrates from
+    // storage (disposeLayers also clears the layer-state store for this id).
+    this.initializedExecutions.delete(ctx.id);
     await disposeLayers({
       layers,
       ctx: this.toExecCtx(ctx),
