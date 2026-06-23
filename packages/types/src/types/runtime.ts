@@ -72,6 +72,13 @@ interface CallModelRequestBase {
    * so model/tool spans nest under the root `workflow.run` span.
    */
   parentSpan?: Span;
+  /**
+   * @internal Id of the workflow node driving this call. Set by
+   * `parseAndRunWorkflow` (from the executing step's id) so the `llm.call` and
+   * `tool.call` spans this request produces carry `NoeticAttr.NODE_ID`, linking
+   * each span back to its node in the declared DAG.
+   */
+  nodeId?: string;
 }
 
 /** @public Request shape when tools are provided — ctx is required for tool execution callbacks. */
