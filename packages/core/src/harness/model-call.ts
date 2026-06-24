@@ -25,7 +25,7 @@ import {
   sanitizeToolNameForWire,
 } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
-import { GenAI, ToolAttr } from '../observability/genai-attributes';
+import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
@@ -347,13 +347,22 @@ class CallSpanCollector {
     private readonly harness: AgentHarnessContract,
     private readonly exporter: TraceExporter,
     private readonly parent: Span | null,
+    private readonly nodeId: string | undefined,
   ) {}
+
+  /** Link a span back to its declared workflow node, when the call carries one. */
+  private stampNode(span: Span): void {
+    if (this.nodeId !== undefined) {
+      span.setAttribute(NoeticAttr.NODE_ID, this.nodeId);
+    }
+  }
 
   /** Open a model-call span stamped with GenAI semantic-convention attributes. */
   startModelSpan(model: string): Span {
     const span = this.harness.createSpan('llm.call', this.parent);
     span.setAttribute(GenAI.SYSTEM, 'openrouter');
     span.setAttribute(GenAI.REQUEST_MODEL, model);
+    this.stampNode(span);
     this.spans.push(span);
     return span;
   }
@@ -380,6 +389,7 @@ class CallSpanCollector {
     const span = this.harness.createSpan('tool.call', parent);
     span.setAttribute(ToolAttr.NAME, toolName);
     span.setAttribute(ToolAttr.NEEDS_APPROVAL, needsApproval);
+    this.stampNode(span);
     span.end();
     this.spans.push(span);
   }
@@ -401,6 +411,7 @@ export class AgentHarnessModelCaller {
       this.opts.harness,
       this.opts.traceExporter,
       request.parentSpan ?? request.ctx?.span ?? null,
+      request.nodeId,
     );
   }
 

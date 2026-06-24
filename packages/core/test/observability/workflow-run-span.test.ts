@@ -79,5 +79,11 @@ describe('workflow run span (issue #50 follow-up)', () => {
       expect(span.traceId).toBe(runSpan?.traceId ?? 'missing');
       expect(span.parentSpanId).toBe(runSpan?.spanId ?? 'missing');
     }
+
+    // Each model span links back to the llm node that drove it (NoeticAttr.NODE_ID),
+    // using the same id space as the declared DAG nodes above.
+    const nodeIds = modelSpans.map((s) => s.attributes.get(NoeticAttr.NODE_ID));
+    expect(nodeIds).toContain('first');
+    expect(nodeIds).toContain('second');
   });
 });

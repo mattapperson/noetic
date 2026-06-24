@@ -25,4 +25,6 @@ export const NoeticAttr = {
   WORKFLOW_NODES: 'noetic.workflow.nodes',
   /** JSON array of `{ from, to }` parent→child edges between declared nodes. */
   WORKFLOW_EDGES: 'noetic.workflow.edges',
+  /** Id of the declared workflow node an `llm.call`/`tool.call` span belongs to. */
+  NODE_ID: 'noetic.node.id',
 } as const;
