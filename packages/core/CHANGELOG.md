@@ -1,3 +1,7 @@
+## @noetic-tools/core-v1.2.3 (2026-06-24)
+
+* fix(core): link llm.call/tool.call spans to their workflow node (NoeticAttr.NODE_ID) (#51) ([a8bcfd2](https://github.com/mattapperson/noetic/commit/a8bcfd2)), closes [#51](https://github.com/mattapperson/noetic/issues/51)
+
 ## @noetic-tools/core-v1.2.2 (2026-06-23)
 
 * fix(core): wire traceExporter into model-call and workflow run path ([7af5890](https://github.com/mattapperson/noetic/commit/7af5890)), closes [#50](https://github.com/mattapperson/noetic/issues/50)
