@@ -1,3 +1,7 @@
+## @noetic-tools/core-v1.3.0 (2026-06-24)
+
+* feat(core): stamp session + resource id on the workflow.run span (#52) ([bdb9a59](https://github.com/mattapperson/noetic/commit/bdb9a59)), closes [#52](https://github.com/mattapperson/noetic/issues/52)
+
 ## @noetic-tools/core-v1.2.3 (2026-06-24)
 
 * fix(core): link llm.call/tool.call spans to their workflow node (NoeticAttr.NODE_ID) (#51) ([a8bcfd2](https://github.com/mattapperson/noetic/commit/a8bcfd2)), closes [#51](https://github.com/mattapperson/noetic/issues/51)
