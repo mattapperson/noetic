@@ -211,9 +211,12 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
 
 /**
  * Open the root `workflow.run` span and stamp the static DAG onto it (document,
- * version, node/edge graph). The span is installed on `ctx.span` so the LLM
- * step's model/tool spans nest under it — the trace tree then mirrors the
- * declared workflow graph, with the executed path overlaid (issue #50 follow-up).
+ * version, node/edge graph) plus the session/resource the run belongs to. The
+ * span is installed on `ctx.span` so the LLM step's model/tool spans nest under
+ * it — the trace tree then mirrors the declared workflow graph, with the
+ * executed path overlaid (issue #50 follow-up). The session id (`ctx.threadId`)
+ * is shared by every turn of a conversation, so consumers can group the per-run
+ * traces of one session back together.
  */
 function beginWorkflowRunSpan(
   harness: AgentHarnessContract,
@@ -227,6 +230,10 @@ function beginWorkflowRunSpan(
   span.setAttribute(NoeticAttr.WORKFLOW_NODE_COUNT, graph.nodes.length);
   span.setAttribute(NoeticAttr.WORKFLOW_NODES, JSON.stringify(graph.nodes));
   span.setAttribute(NoeticAttr.WORKFLOW_EDGES, JSON.stringify(graph.edges));
+  span.setAttribute(NoeticAttr.SESSION_ID, ctx.threadId);
+  if (ctx.resourceId !== undefined) {
+    span.setAttribute(NoeticAttr.RESOURCE_ID, ctx.resourceId);
+  }
   installRunSpan(ctx, span);
   return span;
 }

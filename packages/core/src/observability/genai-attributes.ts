@@ -27,4 +27,12 @@ export const NoeticAttr = {
   WORKFLOW_EDGES: 'noetic.workflow.edges',
   /** Id of the declared workflow node an `llm.call`/`tool.call` span belongs to. */
   NODE_ID: 'noetic.node.id',
+  /**
+   * Conversation/session this run belongs to (the run's `ctx.threadId`). Stamped
+   * on the root `workflow.run` span so every turn of a multi-turn session shares
+   * one id, letting a consumer group per-run traces back into their session.
+   */
+  SESSION_ID: 'noetic.session.id',
+  /** Resource the session is scoped to (the run's `ctx.resourceId`), when set. */
+  RESOURCE_ID: 'noetic.resource.id',
 } as const;

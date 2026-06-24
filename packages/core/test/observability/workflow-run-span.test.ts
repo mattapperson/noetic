@@ -86,4 +86,64 @@ describe('workflow run span (issue #50 follow-up)', () => {
     expect(nodeIds).toContain('first');
     expect(nodeIds).toContain('second');
   });
+
+  it('stamps the session (threadId) and resource onto the run span', async () => {
+    const exporter = new InMemoryExporter();
+    const harness = new AgentHarness({
+      name: 'repro',
+      params: {},
+      traceExporter: exporter,
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('hi'),
+        makeLLMResponse('bye'),
+      ]),
+    });
+    // The platform pins one DO per session, passing the session id as threadId so
+    // every turn of the conversation shares it; resourceId scopes the agent.
+    const ctx = harness.createContext({
+      threadId: 'session_abc',
+      resourceId: 'acct_1:agent_7',
+    });
+
+    await parseAndRunWorkflow({
+      json: WORKFLOW,
+      harness,
+      ctx,
+      tools: [],
+      input: 'hello',
+    });
+
+    const runSpan = exporter.getSpansByName('workflow.run')[0];
+    expect(runSpan?.attributes.get(NoeticAttr.SESSION_ID)).toBe('session_abc');
+    expect(runSpan?.attributes.get(NoeticAttr.RESOURCE_ID)).toBe('acct_1:agent_7');
+  });
+
+  it('stamps a session id even when no resource is set', async () => {
+    const exporter = new InMemoryExporter();
+    const harness = new AgentHarness({
+      name: 'repro',
+      params: {},
+      traceExporter: exporter,
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('hi'),
+        makeLLMResponse('bye'),
+      ]),
+    });
+    const ctx = harness.createContext({
+      threadId: 'session_only',
+    });
+
+    await parseAndRunWorkflow({
+      json: WORKFLOW,
+      harness,
+      ctx,
+      tools: [],
+      input: 'hello',
+    });
+
+    const runSpan = exporter.getSpansByName('workflow.run')[0];
+    expect(runSpan?.attributes.get(NoeticAttr.SESSION_ID)).toBe('session_only');
+    // No resourceId ⇒ the attribute is omitted entirely (not stamped empty).
+    expect(runSpan?.attributes.has(NoeticAttr.RESOURCE_ID)).toBe(false);
+  });
 });
