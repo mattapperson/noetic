@@ -63,12 +63,23 @@ export interface LLMResponse {
 
 /** @public Configuration for the LLM provider used by the agent harness. */
 export interface LlmProviderConfig {
-  provider: 'openrouter';
+  /**
+   * Inference backend. Defaults to `'noetic'` — the Noetic platform
+   * (platform.noetic.tools), which provides managed, metered inference
+   * authenticated with a Noetic credential. Use `'openrouter'` to call OpenRouter
+   * directly (BYOK).
+   */
+  provider?: 'noetic' | 'openrouter';
   apiKey?: string;
   /**
+   * Override the API base URL (advanced / self-host). Defaults to the Noetic
+   * platform for the `'noetic'` provider, and the SDK default for `'openrouter'`.
+   */
+  baseUrl?: string;
+  /**
    * When true, sends the `X-OpenRouter-Cache: true` request header on every
-   * model call. OpenRouter then serves identical requests from cache without
-   * re-billing — useful for deterministic re-runs (evals, regression suites).
+   * model call so identical requests are served from cache without re-billing —
+   * useful for deterministic re-runs (evals, regression suites).
    */
   cache?: boolean;
 }
