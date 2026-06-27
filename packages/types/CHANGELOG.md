@@ -1,3 +1,7 @@
+## @noetic-tools/types-v1.1.0 (2026-06-27)
+
+* feat(types): add 'noetic' LLM provider option and baseUrl override ([75e8c97](https://github.com/mattapperson/noetic/commit/75e8c97))
+
 ## @noetic-tools/types-v1.0.3 (2026-06-24)
 
 * fix(core): link llm.call/tool.call spans to their workflow node (NoeticAttr.NODE_ID) (#51) ([a8bcfd2](https://github.com/mattapperson/noetic/commit/a8bcfd2)), closes [#51](https://github.com/mattapperson/noetic/issues/51)
