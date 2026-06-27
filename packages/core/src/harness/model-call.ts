@@ -445,7 +445,7 @@ export class AgentHarnessModelCaller {
     throw new NoeticConfigError({
       code: 'NO_LLM_PROVIDER',
       message: 'No LLM provider configured on this harness.',
-      hint: 'Pass `llm: { provider: "openrouter", apiKey: "..." }` in constructor options or set OPENROUTER_API_KEY.',
+      hint: 'Pass `llm: { apiKey: "..." }` (defaults to the Noetic platform) or set NOETIC_API_KEY. For direct OpenRouter, use `llm: { provider: "openrouter", apiKey: "..." }` or set OPENROUTER_API_KEY.',
     });
   }
 

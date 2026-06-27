@@ -196,26 +196,91 @@ function resolveContextCwdState(
   return rootCwdState;
 }
 
-function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
+/** The Noetic platform's OpenAI-Responses-compatible inference base URL. */
+const NOETIC_DEFAULT_BASE_URL = 'https://platform.noetic.tools/v1';
+
+/** Env vars consulted when resolving the LLM client (read defensively so the
+ *  harness also works in runtimes without a `process` global, e.g. the browser). */
+interface LlmEnv {
+  noeticApiKey?: string;
+  noeticBaseUrl?: string;
+  openrouterApiKey?: string;
+}
+
+function readLlmEnv(): LlmEnv {
   const processValue = 'process' in globalThis ? globalThis.process : undefined;
-  const envValue =
+  const env =
     typeof processValue === 'object' && processValue !== null && 'env' in processValue
       ? processValue.env
       : undefined;
-  const openRouterApiKey =
-    typeof envValue === 'object' && envValue !== null && 'OPENROUTER_API_KEY' in envValue
-      ? envValue.OPENROUTER_API_KEY
-      : undefined;
+  if (typeof env !== 'object' || env === null) {
+    return {};
+  }
+  const str = (value: unknown): string | undefined =>
+    typeof value === 'string' ? value : undefined;
+  return {
+    noeticApiKey: 'NOETIC_API_KEY' in env ? str(env.NOETIC_API_KEY) : undefined,
+    noeticBaseUrl: 'NOETIC_BASE_URL' in env ? str(env.NOETIC_BASE_URL) : undefined,
+    openrouterApiKey: 'OPENROUTER_API_KEY' in env ? str(env.OPENROUTER_API_KEY) : undefined,
+  };
+}
+
+/** @public Effective client options resolved from config + environment. */
+export interface ResolvedLlmClient {
+  apiKey: string;
+  /** Undefined means "use the SDK's default OpenRouter base URL". */
+  serverURL?: string;
+  cache: boolean;
+}
+
+/**
+ * Resolve the effective LLM client options from the provider config + environment.
+ * Defaults to the Noetic platform (`provider: 'noetic'`): the `'noetic'` provider
+ * authenticates with `NOETIC_API_KEY` and targets the Noetic platform base URL,
+ * while `'openrouter'` authenticates with `OPENROUTER_API_KEY` and uses the SDK's
+ * default OpenRouter endpoint. Returns undefined when no API key is available.
+ * Exported for testing.
+ */
+export function resolveLlmClient(
+  config: LlmProviderConfig | undefined,
+  env: LlmEnv,
+): ResolvedLlmClient | undefined {
+  const provider = config?.provider ?? 'noetic';
   const apiKey =
-    config?.apiKey ?? (typeof openRouterApiKey === 'string' ? openRouterApiKey : undefined);
+    config?.apiKey ?? (provider === 'noetic' ? env.noeticApiKey : env.openrouterApiKey);
   if (!apiKey) {
     return undefined;
   }
-  if (config?.cache) {
-    // Inject `X-OpenRouter-Cache: true` on every request so OpenRouter serves
+  const serverURL =
+    provider === 'noetic'
+      ? (config?.baseUrl ?? env.noeticBaseUrl ?? NOETIC_DEFAULT_BASE_URL)
+      : config?.baseUrl;
+  return {
+    apiKey,
+    serverURL,
+    cache: config?.cache ?? false,
+  };
+}
+
+function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
+  const resolved = resolveLlmClient(config, readLlmEnv());
+  if (!resolved) {
+    return undefined;
+  }
+  const options: {
+    apiKey: string;
+    serverURL?: string;
+  } = {
+    apiKey: resolved.apiKey,
+  };
+  if (resolved.serverURL) {
+    options.serverURL = resolved.serverURL;
+  }
+  if (resolved.cache) {
+    // Inject `X-OpenRouter-Cache: true` on every request so the upstream serves
     // identical model calls from cache without re-billing (deterministic re-runs).
     return new OpenRouter({
-      apiKey,
+      ...options,
       hooks: {
         beforeRequest: (_ctx, request) => {
           request.headers.set('X-OpenRouter-Cache', 'true');
@@ -224,9 +289,7 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
       },
     });
   }
-  return new OpenRouter({
-    apiKey,
-  });
+  return new OpenRouter(options);
 }
 
 //#region AgentHarness
