@@ -1,3 +1,15 @@
+## @noetic-tools/core-v2.0.0 (2026-06-28)
+
+* style(core): satisfy biome objectWrap formatting in llm-client-resolve test ([7098e1f](https://github.com/mattapperson/noetic/commit/7098e1f))
+* feat(core)!: default the LLM provider to the Noetic platform ([d079a6b](https://github.com/mattapperson/noetic/commit/d079a6b))
+
+### BREAKING CHANGE
+
+* callers relying on the implicit OpenRouter default (only
+OPENROUTER_API_KEY set, no provider specified) must now pass
+llm: { provider: 'openrouter' } or set NOETIC_API_KEY. The default inference
+endpoint changed from openrouter.ai to platform.noetic.tools.
+
 ## @noetic-tools/core-v1.3.0 (2026-06-24)
 
 * feat(core): stamp session + resource id on the workflow.run span (#52) ([bdb9a59](https://github.com/mattapperson/noetic/commit/bdb9a59)), closes [#52](https://github.com/mattapperson/noetic/issues/52)
