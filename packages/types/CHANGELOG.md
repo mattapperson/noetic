@@ -1,3 +1,7 @@
+## @noetic-tools/types-v1.2.0 (2026-06-30)
+
+* feat(core): run node, dynamic fork, and server tools in the JSON workflow runtime (#53) ([50416d1](https://github.com/mattapperson/noetic/commit/50416d1)), closes [#53](https://github.com/mattapperson/noetic/issues/53)
+
 ## @noetic-tools/types-v1.1.0 (2026-06-27)
 
 * feat(types): add 'noetic' LLM provider option and baseUrl override ([75e8c97](https://github.com/mattapperson/noetic/commit/75e8c97))
