@@ -44,6 +44,7 @@ import type {
   ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
+  ServerToolSpec,
   StepLLM,
   StepMeta,
   StepProvide,
@@ -52,7 +53,7 @@ import type {
   StepTool,
   Tool,
 } from './action-types';
-import { SteeringAction } from './action-types';
+import { isServerToolSpec, SteeringAction } from './action-types';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import { trackUsage } from './message-helpers';
@@ -287,6 +288,26 @@ export async function executeLLM<TMemory, I, O>(
   const resolvedInstructions = await resolveLazy(step.instructions, ctx);
   const resolvedStepTools = await resolveLazy(step.tools, ctx);
 
+  // `step.tools` is heterogeneous: client `Tool`s plus inline OpenRouter
+  // server-tool specs (web search/fetch). Partition them — client tools flow
+  // through the unified-tool / allowedToolNames / steering machinery as before;
+  // server-tool specs bypass it entirely and are stamped onto the model request
+  // (`_serverTools`) for the model caller to wrap via the SDK's `serverTool()`.
+  // `undefined` (unrestricted) is preserved as-is; only a present array is
+  // partitioned so the `[] = opt-out` semantics of step.tools stay intact.
+  let clientStepTools: Tool[] | undefined;
+  const serverToolSpecs: ServerToolSpec[] = [];
+  if (resolvedStepTools !== undefined) {
+    clientStepTools = [];
+    for (const entry of resolvedStepTools) {
+      if (isServerToolSpec(entry)) {
+        serverToolSpecs.push(entry);
+      } else {
+        clientStepTools.push(entry);
+      }
+    }
+  }
+
   // Append user input — through layer pipeline if layers exist, otherwise direct.
   // The append pipeline may request a context re-render (e.g. a layer that
   // expanded an input reference into new content); applied after recall below.
@@ -304,7 +325,7 @@ export async function executeLLM<TMemory, I, O>(
   }
 
   const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(
-    resolvedStepTools,
+    clientStepTools,
     layers,
     baseCtx,
   );
@@ -423,6 +444,7 @@ export async function executeLLM<TMemory, I, O>(
             ];
     }
 
+    const _serverTools = serverToolSpecs.length > 0 ? serverToolSpecs : undefined;
     const request = resolvedTools
       ? {
           model: resolvedModel,
@@ -432,6 +454,7 @@ export async function executeLLM<TMemory, I, O>(
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,
+          _serverTools,
           ctx: baseCtx,
           layers,
           allowedToolNames,
@@ -445,6 +468,7 @@ export async function executeLLM<TMemory, I, O>(
           params: step.params,
           outputSchema: step.output,
           emit: step.emit,
+          _serverTools,
           nodeId: step.id,
           parentSpan: baseCtx.span,
         };

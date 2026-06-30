@@ -4,6 +4,7 @@ import type {
   Lazy,
   ModelParams,
   RetryPolicy,
+  ServerToolSpec,
   StepLLM,
   StepRun,
   StepSubHarness,
@@ -39,8 +40,12 @@ interface StepLLMOpts<TMemory, O> {
   model: Lazy<string, TMemory>;
   /** Optional instructions; eager string or `(ctx) => string | undefined` getter. */
   instructions?: Lazy<string | undefined, TMemory>;
-  /** Optional tools; eager array or `(ctx) => Tool[] | undefined` getter. */
-  tools?: Lazy<Tool[] | undefined, TMemory>;
+  /**
+   * Optional tools; eager array or `(ctx) => (...)[] | undefined` getter. Each
+   * entry is either a client `Tool` or an inline `ServerToolSpec` (an OpenRouter
+   * server tool the provider executes, e.g. web search/fetch).
+   */
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TMemory>;
   output?: ZodType<O>;
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);

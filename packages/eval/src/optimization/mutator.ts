@@ -1,11 +1,20 @@
-import type { Step, Tool } from '@noetic-tools/core';
+import type { ServerToolSpec, Step, Tool } from '@noetic-tools/core';
+import { isServerToolSpec } from '@noetic-tools/core';
 
 import type { Candidate } from '../types/optimizer';
 
 //#region Helper Functions
 
-function replaceToolListFields(tools: Tool[], candidate: Candidate, path: string): Tool[] {
+function replaceToolListFields(
+  tools: (Tool | ServerToolSpec)[],
+  candidate: Candidate,
+  path: string,
+): (Tool | ServerToolSpec)[] {
   return tools.map((t) => {
+    // Server tools (web_search/web_fetch) have no optimizable fields — pass through.
+    if (isServerToolSpec(t)) {
+      return t;
+    }
     const name = candidate[`${path}.tools.${t.name}.name`] ?? t.name;
     const description = candidate[`${path}.tools.${t.name}.description`] ?? t.description;
     return {
