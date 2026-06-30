@@ -1,4 +1,5 @@
 import type { Step } from '@noetic-tools/core';
+import { isServerToolSpec } from '@noetic-tools/core';
 
 import { OptimizeScope } from '../types/eval';
 import type { OptimizableField } from '../types/optimizer';
@@ -55,6 +56,10 @@ function extractLlmFields(
     return;
   }
   for (const t of step.tools) {
+    // Server tools (web_search/web_fetch) carry no optimizable name/description.
+    if (isServerToolSpec(t)) {
+      continue;
+    }
     fields.push({
       path: `${path}.tools.${t.name}.description`,
       value: t.description,

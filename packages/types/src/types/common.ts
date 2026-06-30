@@ -16,6 +16,42 @@ export interface RetryPolicy {
 }
 
 /**
+ * Declares an OpenRouter server-executed tool on an LLM step. OpenRouter runs
+ * the tool (web search, web fetch) provider-side and returns the result item in
+ * the response — no client-side execute function is involved.
+ *
+ * `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`); the
+ * SDK re-serialises them to the wire format and silently drops unknown keys.
+ * @public
+ */
+export interface ServerToolSpec {
+  /** Server tool discriminator. */
+  type: 'openrouter:web_search' | 'openrouter:web_fetch';
+  /** Optional provider config forwarded to the tool (camelCase keys). */
+  parameters?: Record<string, unknown>;
+}
+
+/**
+ * Distinguishes an inline `ServerToolSpec` from a client `Tool` in a
+ * heterogeneous `tools` list. A server-tool spec carries a server-tool `type`
+ * discriminator and, unlike a `Tool`, has no `execute` method.
+ * @public
+ */
+export function isServerToolSpec(value: unknown): value is ServerToolSpec {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  if ('execute' in value) {
+    return false;
+  }
+  if (!('type' in value)) {
+    return false;
+  }
+  const { type } = value;
+  return type === 'openrouter:web_search' || type === 'openrouter:web_fetch';
+}
+
+/**
  * Optional parameters forwarded to the model provider during an LLM step.
  * @public
  */

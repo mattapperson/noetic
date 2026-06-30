@@ -14,6 +14,7 @@ export type {
   ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
+  ServerToolSpec,
   StepLLM,
   StepMeta,
   StepProvide,
@@ -22,4 +23,4 @@ export type {
   StepTool,
   Tool,
 } from '@noetic-tools/types';
-export { SteeringAction } from '@noetic-tools/types';
+export { isServerToolSpec, SteeringAction } from '@noetic-tools/types';

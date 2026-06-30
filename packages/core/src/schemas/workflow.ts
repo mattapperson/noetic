@@ -2,9 +2,11 @@
  * Zod schemas for JSON-serialisable workflow definitions.
  *
  * A `WorkflowDocument` is a portable, JSON-safe representation of a noetic
- * step tree. It covers every step kind except `run` (which carries arbitrary
- * closures). The hydrator in `builders/workflow-hydrator.ts` converts a
- * validated document back into live `Step` objects via the existing builders.
+ * step tree. It covers every step kind. The `run` node carries its body as a
+ * code STRING (not an in-process closure) dispatched through a subprocess
+ * adapter, keeping the document JSON-safe. The hydrator in
+ * `builders/workflow-hydrator.ts` converts a validated document back into live
+ * `Step` objects via the existing builders.
  */
 
 import type { SubHarnessKind } from '@noetic-tools/types';
@@ -156,6 +158,45 @@ const ModelParamsSchema = z.object({
 
 //#endregion
 
+//#region Tool Entries
+
+/**
+ * A uniform tool entry on an `llm` node. Every entry is an object keyed by
+ * `type`:
+ *   - A CLIENT tool is `{ type: "<registered-tool-name>" }`. The hydrator
+ *     resolves `type` against the tool registry; `parameters` (if present) is
+ *     ignored — client tools receive their call args from the model at runtime.
+ *   - A SERVER tool is `{ type: "openrouter:web_search" | "openrouter:web_fetch",
+ *     parameters?: {...} }`. The provider executes it; `parameters` keys are
+ *     camelCase (e.g. `maxResults`, `searchContextSize`) — the SDK re-serialises
+ *     them and silently drops unknown keys.
+ *
+ * Server vs client is decided by the `type` value (a reserved `openrouter:*`
+ * server-tool literal vs an arbitrary tool name), not by the entry's shape.
+ */
+const LlmToolEntrySchema = z.object({
+  type: z.string().min(1),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+});
+
+//#endregion
+
+//#region Retry Policy
+
+/** Retry policy for a `run` node, mirroring `RetryPolicy` in `@noetic-tools/types`. */
+const RetryPolicySchema = z.object({
+  maxAttempts: z.number().int().positive(),
+  backoff: z.enum([
+    'fixed',
+    'linear',
+    'exponential',
+  ]),
+  initialDelay: z.number().nonnegative(),
+  maxDelay: z.number().nonnegative().optional(),
+});
+
+//#endregion
+
 //#region SubHarness Settings
 
 const HarnessSettingsSchema = z.object({
@@ -196,7 +237,14 @@ export interface LlmWorkflowNode extends WorkflowNodeBase {
   kind: 'llm';
   model?: string;
   instructions: string;
-  tools?: string[];
+  /**
+   * Tool entries. Every entry is an object `{ type, parameters? }`. A CLIENT
+   * tool is `{ type: "<registered-tool-name>" }` (resolved from the registry);
+   * a SERVER tool is `{ type: "openrouter:web_search" | "openrouter:web_fetch",
+   * parameters?: {...} }` (executed by the provider). Client vs server is
+   * decided by the `type` value.
+   */
+  tools?: z.infer<typeof LlmToolEntrySchema>[];
   params?: z.infer<typeof ModelParamsSchema>;
 }
 
@@ -204,6 +252,24 @@ export interface ToolWorkflowNode extends WorkflowNodeBase {
   kind: 'tool';
   toolName: string;
   args?: Record<string, unknown>;
+}
+
+/**
+ * A node that runs a serialised code body. Unlike the programmatic `step.run`
+ * (which carries a closure), the JSON form carries `execute` as a code STRING.
+ * The code is never eval'd in-process (Cloudflare Workers forbid eval); it is
+ * dispatched through a subprocess adapter (`ctx.subprocess`, or a named adapter
+ * resolved by ref). Execution therefore requires a subprocess adapter capable
+ * of running the code and returning its stdout.
+ */
+export interface RunWorkflowNode extends WorkflowNodeBase {
+  kind: 'run';
+  /** Source code executed in the subprocess. Receives the step input on stdin. */
+  execute: string;
+  /** Optional retry policy applied to the step. */
+  retry?: z.infer<typeof RetryPolicySchema>;
+  /** Named subprocess adapter ref; defaults to `ctx.subprocess` when omitted. */
+  subprocess?: string;
 }
 
 export interface BranchRoute {
@@ -220,7 +286,22 @@ export interface BranchWorkflowNode extends WorkflowNodeBase {
 export interface ForkWorkflowNode extends WorkflowNodeBase {
   kind: 'fork';
   mode: 'race' | 'all' | 'settle';
-  paths: WorkflowNode[];
+  /**
+   * Static fan-out: one child per entry. Mutually exclusive with `each` —
+   * supply exactly one.
+   */
+  paths?: WorkflowNode[];
+  /**
+   * Dynamic fan-out: instantiate this body template once per item of a
+   * runtime-produced array (data-dependent N). Mutually exclusive with `paths`.
+   */
+  each?: WorkflowNode;
+  /**
+   * Selector key into the fork input (parsed as JSON) locating the array to
+   * fan out over. When omitted, the input string itself is parsed as a JSON
+   * array. Only meaningful with `each`.
+   */
+  over?: string;
   merge?: MergeStrategy;
   concurrency?: number;
 }
@@ -273,6 +354,7 @@ export interface SubHarnessWorkflowNode extends WorkflowNodeBase {
 export type WorkflowNode =
   | LlmWorkflowNode
   | ToolWorkflowNode
+  | RunWorkflowNode
   | BranchWorkflowNode
   | ForkWorkflowNode
   | SpawnWorkflowNode
@@ -297,7 +379,7 @@ const LlmNodeSchema = z.object({
   ...SHARED_FIELDS,
   model: z.string().optional(),
   instructions: z.string(),
-  tools: z.array(z.string()).optional(),
+  tools: z.array(LlmToolEntrySchema).optional(),
   params: ModelParamsSchema.optional(),
 });
 
@@ -306,6 +388,14 @@ const ToolNodeSchema = z.object({
   ...SHARED_FIELDS,
   toolName: z.string().min(1),
   args: z.record(z.string(), z.unknown()).optional(),
+});
+
+const RunNodeSchema = z.object({
+  kind: z.literal('run'),
+  ...SHARED_FIELDS,
+  execute: z.string().min(1),
+  retry: RetryPolicySchema.optional(),
+  subprocess: z.string().min(1).optional(),
 });
 
 const BranchRouteSchema = z.object({
@@ -320,18 +410,24 @@ const BranchNodeSchema = z.object({
   default: WorkflowNodeRef.optional(),
 });
 
-const ForkNodeSchema = z.object({
-  kind: z.literal('fork'),
-  ...SHARED_FIELDS,
-  mode: z.enum([
-    'race',
-    'all',
-    'settle',
-  ]),
-  paths: z.array(WorkflowNodeRef).min(1),
-  merge: MergeStrategySchema.optional(),
-  concurrency: z.number().int().positive().optional(),
-});
+const ForkNodeSchema = z
+  .object({
+    kind: z.literal('fork'),
+    ...SHARED_FIELDS,
+    mode: z.enum([
+      'race',
+      'all',
+      'settle',
+    ]),
+    paths: z.array(WorkflowNodeRef).min(1).optional(),
+    each: WorkflowNodeRef.optional(),
+    over: z.string().min(1).optional(),
+    merge: MergeStrategySchema.optional(),
+    concurrency: z.number().int().positive().optional(),
+  })
+  .refine((node) => (node.paths === undefined) !== (node.each === undefined), {
+    message: "fork node requires exactly one of 'paths' (static) or 'each' (dynamic).",
+  });
 
 const SpawnNodeSchema = z.object({
   kind: z.literal('spawn'),
@@ -396,6 +492,7 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
   .discriminatedUnion('kind', [
     LlmNodeSchema,
     ToolNodeSchema,
+    RunNodeSchema,
     BranchNodeSchema,
     ForkNodeSchema,
     SpawnNodeSchema,
@@ -445,7 +542,12 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
     case 'sequence':
       return node.steps;
     case 'fork':
-      return node.paths;
+      if (node.each) {
+        return [
+          node.each,
+        ];
+      }
+      return node.paths ?? [];
     case 'spawn':
     case 'provide':
       return [

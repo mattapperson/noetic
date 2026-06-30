@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
 import type { Channel } from './channel';
-import type { ModelParams, RetryPolicy, StepMeta } from './common';
+import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { ContextMemory, MemoryConfig, MemoryLayer, ProjectionPolicy } from './memory';
@@ -117,8 +117,14 @@ export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
   model: Lazy<string, TMemory>;
   /** System instructions. Eager string or `(ctx) => string | undefined` getter. */
   instructions?: Lazy<string | undefined, TMemory>;
-  /** Tools exposed to the LLM. Eager array or `(ctx) => Tool[] | undefined` getter. Function-form tools do not contribute to the pre-computed `ctx.unifiedTools`; they are resolved per execution. */
-  tools?: Lazy<Tool[] | undefined, TMemory>;
+  /**
+   * Tools exposed to the LLM. Eager array or `(ctx) => (...)[] | undefined` getter.
+   * Entries are either a client `Tool` or an inline `ServerToolSpec` (an
+   * OpenRouter server tool the provider executes, e.g. web search/fetch).
+   * Function-form tools do not contribute to the pre-computed `ctx.unifiedTools`;
+   * they are resolved per execution.
+   */
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TMemory>;
   output?: ZodType<O>;
   params?: ModelParams;
   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */

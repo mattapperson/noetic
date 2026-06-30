@@ -1,12 +1,67 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { MemoryLayer } from '@noetic-tools/memory';
-import type { SubHarness, SubHarnessKind, Tool } from '@noetic-tools/types';
-import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
+import type {
+  ProcessSubprocessRequest,
+  SubHarness,
+  SubHarnessKind,
+  SubprocessAdapter,
+  SubprocessHandle,
+  Tool,
+} from '@noetic-tools/types';
+import { frameworkCast, isNoeticConfigError, isServerToolSpec } from '@noetic-tools/types';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
 import { makeMockContext, makeTestTool } from '../_helpers';
+
+/**
+ * Mock subprocess adapter for `run` node tests. Records every process request
+ * and completes each handle with stdout captured into `metadata.result` (or
+ * `metadata.error` when `fail` is set), mirroring the contract
+ * `runCodeViaSubprocess` relies on — without spawning a real process.
+ */
+function makeMockSubprocess(opts?: { fail?: boolean }): {
+  adapter: SubprocessAdapter;
+  calls: ProcessSubprocessRequest[];
+} {
+  const calls: ProcessSubprocessRequest[] = [];
+  const handles = new Map<string, SubprocessHandle>();
+  const adapter = frameworkCast<SubprocessAdapter>({
+    async spawn(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
+      calls.push(request);
+      const id = `mock-${calls.length}`;
+      const code = String(request.metadata?.code ?? '');
+      const stdin = request.stdin ?? '';
+      handles.set(id, {
+        id,
+        status: opts?.fail ? 'failed' : 'completed',
+        startedAt: 'now',
+        metadata: opts?.fail
+          ? {
+              error: {
+                message: 'subprocess exited non-zero',
+              },
+            }
+          : {
+              result: `OUT:${code}|${stdin}`,
+            },
+      });
+      return {
+        id,
+        status: 'running',
+        startedAt: 'now',
+      };
+    },
+    async get(id: string): Promise<SubprocessHandle | null> {
+      return handles.get(id) ?? null;
+    },
+  });
+  return {
+    adapter,
+    calls,
+  };
+}
 
 function makeHydrationContext(tools: Tool[] = []): HydrationContext {
   const toolMap = new Map(
@@ -42,7 +97,9 @@ describe('hydrateNode — llm', () => {
       id: 'llm-tools',
       instructions: 'Use tools',
       tools: [
-        'test-tool',
+        {
+          type: 'test-tool',
+        },
       ],
     };
     const ctx = makeHydrationContext([
@@ -61,7 +118,9 @@ describe('hydrateNode — llm', () => {
       id: 'llm-bad-tool',
       instructions: 'Use tools',
       tools: [
-        'nonexistent',
+        {
+          type: 'nonexistent',
+        },
       ],
     };
     const ctx = makeHydrationContext();
@@ -537,7 +596,9 @@ describe('hydrateNode — error cases', () => {
       id: 'llm-bad-tool',
       instructions: 'test',
       tools: [
-        'nonexistent',
+        {
+          type: 'nonexistent',
+        },
       ],
     };
     const ctx = makeHydrationContext();
@@ -712,5 +773,269 @@ describe('hydrateNode — harness', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_SUB_HARNESS_REFERENCE');
     }
+  });
+});
+
+describe('hydrateNode — llm server tools (via tools array)', () => {
+  test('carries an inline server-tool spec through tools alongside a client tool', () => {
+    const testTool = makeTestTool();
+    const node: WorkflowNode = {
+      kind: 'llm',
+      id: 'search',
+      instructions: 'Search the web',
+      tools: [
+        {
+          type: 'test-tool',
+        },
+        {
+          type: 'openrouter:web_search',
+          parameters: {
+            maxResults: 6,
+            searchContextSize: 'medium',
+          },
+        },
+      ],
+    };
+    const result = hydrateNode(
+      node,
+      makeHydrationContext([
+        testTool,
+      ]),
+    );
+    assert(result.kind === 'llm');
+    const tools = typeof result.tools === 'function' ? [] : (result.tools ?? []);
+    // Client tool resolved from the registry + inline server-tool spec, in order.
+    expect(tools).toHaveLength(2);
+    expect(isServerToolSpec(tools[0])).toBe(false);
+    expect(tools[1]).toEqual({
+      type: 'openrouter:web_search',
+      parameters: {
+        maxResults: 6,
+        searchContextSize: 'medium',
+      },
+    });
+  });
+
+  test('a tools array of only server specs hydrates with no client tools', () => {
+    const node: WorkflowNode = {
+      kind: 'llm',
+      id: 'fetch',
+      instructions: 'Fetch a URL',
+      tools: [
+        {
+          type: 'openrouter:web_fetch',
+        },
+      ],
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'llm');
+    const tools = typeof result.tools === 'function' ? [] : (result.tools ?? []);
+    expect(tools).toHaveLength(1);
+    expect(isServerToolSpec(tools[0])).toBe(true);
+  });
+});
+
+describe('hydrateNode — dynamic fork (each / over)', () => {
+  test('fan-out width follows the input array length (no over)', () => {
+    const node: WorkflowNode = {
+      kind: 'fork',
+      id: 'fan',
+      mode: 'all',
+      each: {
+        kind: 'llm',
+        id: 'worker',
+        instructions: 'process item',
+      },
+      merge: 'concat',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'fork');
+    assert(result.mode === 'all');
+    const ctx = makeMockContext();
+    const three = result.paths(
+      JSON.stringify([
+        'a',
+        'b',
+        'c',
+      ]),
+      ctx,
+    );
+    expect(three).toHaveLength(3);
+    const five = result.paths(
+      JSON.stringify(
+        Array.from(
+          {
+            length: 5,
+          },
+          (_v, i) => i,
+        ),
+      ),
+      ctx,
+    );
+    expect(five).toHaveLength(5);
+    // Each instantiated path carries a unique, item-suffixed id.
+    const ids = three.map((s) => s.id);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  test('selects the array via `over` from a JSON object input', () => {
+    const node: WorkflowNode = {
+      kind: 'fork',
+      id: 'fan2',
+      mode: 'settle',
+      over: 'items',
+      each: {
+        kind: 'llm',
+        id: 'worker',
+        instructions: 'process item',
+      },
+      merge: 'last',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'fork');
+    const paths = result.paths(
+      JSON.stringify({
+        items: [
+          'x',
+          'y',
+        ],
+      }),
+      makeMockContext(),
+    );
+    expect(paths).toHaveLength(2);
+  });
+
+  test('throws INVALID_FORK_INPUT when the input is not an array', () => {
+    const node: WorkflowNode = {
+      kind: 'fork',
+      id: 'fan3',
+      mode: 'all',
+      each: {
+        kind: 'llm',
+        id: 'worker',
+        instructions: 'process item',
+      },
+      merge: 'concat',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'fork');
+    try {
+      result.paths(
+        JSON.stringify({
+          not: 'an array',
+        }),
+        makeMockContext(),
+      );
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('INVALID_FORK_INPUT');
+    }
+  });
+
+  test('static paths fork is unchanged', () => {
+    const node: WorkflowNode = {
+      kind: 'fork',
+      id: 'static',
+      mode: 'all',
+      paths: [
+        {
+          kind: 'llm',
+          id: 'p1',
+          instructions: 'a',
+        },
+        {
+          kind: 'llm',
+          id: 'p2',
+          instructions: 'b',
+        },
+      ],
+      merge: 'concat',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'fork');
+    expect(result.paths(frameworkCast('ignored'), makeMockContext())).toHaveLength(2);
+  });
+});
+
+describe('hydrateNode — run', () => {
+  test('dispatches the code string + input through the subprocess and returns stdout', async () => {
+    const { adapter, calls } = makeMockSubprocess();
+    const node: WorkflowNode = {
+      kind: 'run',
+      id: 'compute',
+      execute: 'process.stdout.write("hi")',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    expect(result.kind).toBe('run');
+    assert(result.kind === 'run');
+    const ctx = makeMockContext({
+      subprocess: adapter,
+    });
+    const out = await result.execute('the-input', ctx);
+    // The mock echoes back the dispatched code + stdin, proving both arrived.
+    expect(out).toBe('OUT:process.stdout.write("hi")|the-input');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].kind).toBe('process');
+    expect(calls[0].stdin).toBe('the-input');
+    expect(calls[0].metadata?.code).toBe('process.stdout.write("hi")');
+  });
+
+  test('resolves a named subprocess ref via HydrationContext.resolveSubprocess', async () => {
+    const { adapter, calls } = makeMockSubprocess();
+    const node: WorkflowNode = {
+      kind: 'run',
+      id: 'compute-ref',
+      execute: 'code-body',
+      subprocess: 'sandbox',
+    };
+    const ctx: HydrationContext = {
+      ...makeHydrationContext(),
+      resolveSubprocess: (ref) => (ref === 'sandbox' ? adapter : undefined),
+    };
+    const result = hydrateNode(node, ctx);
+    assert(result.kind === 'run');
+    const out = await result.execute('in', makeMockContext());
+    expect(out).toBe('OUT:code-body|in');
+    expect(calls).toHaveLength(1);
+  });
+
+  test('throws UNKNOWN_SUBPROCESS_REFERENCE when the named ref cannot be resolved', async () => {
+    const node: WorkflowNode = {
+      kind: 'run',
+      id: 'compute-bad',
+      execute: 'code',
+      subprocess: 'missing',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'run');
+    try {
+      await result.execute('in', makeMockContext());
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_SUBPROCESS_REFERENCE');
+    }
+  });
+
+  test('surfaces a non-zero exit / failed handle as a thrown error', async () => {
+    const { adapter } = makeMockSubprocess({
+      fail: true,
+    });
+    const node: WorkflowNode = {
+      kind: 'run',
+      id: 'compute-fail',
+      execute: 'boom',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'run');
+    await expect(
+      result.execute(
+        'in',
+        makeMockContext({
+          subprocess: adapter,
+        }),
+      ),
+    ).rejects.toThrow('subprocess exited non-zero');
   });
 });

@@ -14,6 +14,7 @@ import { validateWorkflow } from '../../src/schemas/workflow';
 const NODE_KINDS = [
   'llm',
   'tool',
+  'run',
   'branch',
   'fork',
   'spawn',

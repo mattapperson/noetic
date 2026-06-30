@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
-import type { LLMResponse, ModelParams } from './common';
+import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState } from './context';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
@@ -64,6 +64,16 @@ interface CallModelRequestBase {
   outputSchema?: ZodType;
   /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  /**
+   * @internal
+   * Framework-internal carrier for OpenRouter server tools (web search/fetch).
+   * Server tools are an authoring concept inside `StepLLM.tools` — the
+   * interpreter partitions those entries out of the client `tools` list and
+   * stamps the specs here so the model caller can wrap them via the SDK's
+   * `serverTool()` and append them to the SDK tools array. NOT an authored
+   * field: public callers declare server tools as `tools` entries, never here.
+   */
+  _serverTools?: ServerToolSpec[];
   /** Optional signal for cancelling the in-flight call (used by session abort). */
   signal?: AbortSignal;
   /**

@@ -81,11 +81,11 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 ## Node Kinds
 
-Nine node kinds are available. Leaf nodes (`llm`, `tool`) perform work; structural nodes (`sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`) compose them into trees.
+Ten node kinds are available. Leaf nodes (`llm`, `tool`, `run`) perform work; structural nodes (`sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`) compose them into trees.
 
 ### llm
 
-Call an LLM with instructions and optional tools.
+Call an LLM with instructions and optional tools. Every `tools` entry is a uniform object `{ type, parameters? }`. The `type` value decides the entry: a **registered tool name** (a client tool resolved from the tool registry) or a reserved **server-tool** type the provider executes itself (web search, web fetch).
 
 ```json
 {
@@ -93,7 +93,10 @@ Call an LLM with instructions and optional tools.
   "id": "summarize",
   "model": "openai/gpt-4o",
   "instructions": "Summarize the input text in three bullet points",
-  "tools": ["webSearch"],
+  "tools": [
+    { "type": "myClientTool" },
+    { "type": "openrouter:web_search", "parameters": { "maxResults": 6, "searchContextSize": "medium" } }
+  ],
   "params": { "temperature": 0.3, "maxTokens": 1024 }
 }
 ```
@@ -103,8 +106,31 @@ Call an LLM with instructions and optional tools.
 | `id` | `string` | required | Unique step identifier. |
 | `model` | `string` | `'openai/gpt-4o'` | Model identifier (OpenRouter format). |
 | `instructions` | `string` | required | System/user prompt for the LLM. |
-| `tools` | `string[]` | `undefined` | Tool names resolved from the tool registry. |
+| `tools` | `{ type: string, parameters?: object }[]` | `undefined` | Uniform tool entries. **Client tool**: `{ "type": "<registered-tool-name>" }` — `type` is resolved against the registry; any `parameters` is ignored (the model supplies call args at runtime). **Server tool**: `{ "type": "openrouter:web_search" \| "openrouter:web_fetch", "parameters"?: {...} }` — run by the provider; `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`), unknown keys dropped. Client vs server is decided by the `type` value. |
 | `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `stopSequences`. |
+
+### run
+
+Run a serialised code body. Unlike the programmatic `step.run` (which carries a closure), the JSON form carries `execute` as a code **string**. The code is never `eval`'d in-process (Cloudflare Workers forbid `eval`); it is dispatched through a [subprocess adapter](/docs/framework/runtime) which runs the code and returns its stdout as the step output. The step input is passed to the subprocess on stdin.
+
+```json
+{
+  "kind": "run",
+  "id": "transform",
+  "execute": "const input = require('fs').readFileSync(0, 'utf8'); process.stdout.write(input.toUpperCase());",
+  "retry": { "maxAttempts": 3, "backoff": "exponential", "initialDelay": 100 },
+  "subprocess": "sandbox"
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `execute` | `string` | required | Source code dispatched to the subprocess. Receives the step input on stdin; its stdout becomes the step output. |
+| `retry` | `object` | `undefined` | Retry policy: `{ maxAttempts, backoff: 'fixed' \| 'linear' \| 'exponential', initialDelay, maxDelay? }`. |
+| `subprocess` | `string` | `undefined` | Named subprocess adapter ref, resolved via `HydrationContext.resolveSubprocess`. When omitted, the harness default (`ctx.subprocess`) is used. |
+
+> **Execution requires a subprocess adapter.** The `run` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. A non-zero exit (or failed handle) surfaces as a thrown error.
 
 ### tool
 
@@ -147,7 +173,7 @@ Run steps sequentially, threading each output as the next step's input.
 
 ### fork
 
-Run multiple paths concurrently with configurable merge strategy.
+Run multiple paths concurrently with configurable merge strategy. A fork is either **static** (a fixed `paths` array) or **dynamic** (`each`: one child per item of a runtime-produced array). Supply exactly one of `paths` or `each`.
 
 ```json
 {
@@ -163,11 +189,26 @@ Run multiple paths concurrently with configurable merge strategy.
 }
 ```
 
+Dynamic fan-out — one child per array item (data-dependent N):
+
+```json
+{
+  "kind": "fork",
+  "id": "per-item",
+  "mode": "all",
+  "over": "items",
+  "each": { "kind": "llm", "id": "worker", "instructions": "Process this item" },
+  "merge": "concat"
+}
+```
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
 | `mode` | `'all' \| 'race' \| 'settle'` | required | `all` waits for every path; `race` returns the first; `settle` waits for all but tolerates failures. |
-| `paths` | `WorkflowNode[]` | required | Child nodes to execute concurrently. |
+| `paths` | `WorkflowNode[]` | — | Static child nodes to execute concurrently. Mutually exclusive with `each`. |
+| `each` | `WorkflowNode` | — | Dynamic body template instantiated once per input array item. Each item is injected as that child's input; template node ids are suffixed `-<i>` for uniqueness. Mutually exclusive with `paths`. |
+| `over` | `string` | `undefined` | With `each`: selector key into the input JSON object locating the array. When omitted, the input string is parsed as a JSON array directly. |
 | `merge` | `'last' \| 'first' \| 'concat'` | `'last'` | How to combine results. Ignored in `race` mode. |
 | `concurrency` | `number` | `undefined` | Maximum concurrent paths. |
 
@@ -461,6 +502,7 @@ const result = await harness.run(rootStep, 'input text', ctx);
 |---|---|---|
 | `tools` | `ReadonlyMap<string, Tool>` | Tool registry mapping tool names to `Tool` instances. |
 | `executeStep` | `ExecuteStepFn` | Step executor function (typically `harness.run.bind(harness)`). |
+| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves a `run` node's named `subprocess` ref to an adapter. When a `run` node omits the ref, the harness default (`ctx.subprocess`) is used at execution time. |
 
 `hydrateWorkflow(doc, ctx)` converts a validated `WorkflowDocument` into its root `Step`. `hydrateNode(node, ctx)` converts a single `WorkflowNode`. Both return `Step<ContextMemory, string, string>` -- indistinguishable from programmatically built steps.
 
@@ -468,7 +510,7 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 
 ## Limitations
 
-- **No `step.run` node** -- `run` steps carry arbitrary closures, which are not JSON-serialisable. Use `tool` nodes to invoke registered tools instead.
+- **`run` nodes need a subprocess adapter** -- the JSON `run` node carries its body as a code string and dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses `run` nodes must supply an adapter capable of running the code and capturing its stdout.
 - **Tools resolved by name** -- every tool referenced in the workflow must be passed in the `tools` array. The hydrator looks them up by `tool.name`.
 - **Provide layers not resolved from registry** -- `provide` nodes reference layers by name, but the hydrator does not currently resolve them from a layer registry. The harness's default memory layers are inherited instead.
 - **Branch routing is substring-based** -- branch routes use case-insensitive substring matching on the input string. Complex routing logic requires programmatic `branch()` steps.

@@ -13,6 +13,7 @@ import type {
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
+import { serverTool } from '@openrouter/agent';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
 import {
@@ -289,16 +290,34 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
       .join('\n\n') || undefined;
   const broadcaster = getBroadcaster(request.ctx);
   const filteredTools = filterAllowedTools(request);
+  // Client (function) tools convert to SDK tool definitions; OpenRouter server
+  // tools (web_search/web_fetch) are wrapped via the SDK's `serverTool()` so
+  // its convertToolsToAPIFormat accepts them — a raw `{type}` entry crashes it.
+  // `parameters` keys stay camelCase: the SDK's outbound zod schema strips
+  // unknown keys, so snake_case would be silently dropped.
+  const clientSdkTools =
+    filteredTools && filteredTools.length > 0
+      ? convertTools({
+          tools: filteredTools,
+        })
+      : [];
+  const serverSdkTools = (request._serverTools ?? []).map((s) =>
+    serverTool(
+      frameworkCast<Parameters<typeof serverTool>[0]>({
+        type: s.type,
+        parameters: s.parameters,
+      }),
+    ),
+  );
+  const sdkTools = [
+    ...clientSdkTools,
+    ...frameworkCast<typeof clientSdkTools>(serverSdkTools),
+  ];
   return {
     instructions,
     remaining,
     broadcaster,
-    sdkTools:
-      filteredTools && filteredTools.length > 0
-        ? convertTools({
-            tools: filteredTools,
-          })
-        : undefined,
+    sdkTools: sdkTools.length > 0 ? sdkTools : undefined,
     emitIfAllowed(eventType, data) {
       if (!shouldEmit(request.emit, eventType, data)) {
         return;

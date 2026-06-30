@@ -41,7 +41,24 @@
             "tools": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": false
               }
             },
             "params": {
@@ -105,6 +122,65 @@
             "kind",
             "id",
             "toolName"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "execute": {
+              "type": "string",
+              "minLength": 1
+            },
+            "retry": {
+              "type": "object",
+              "properties": {
+                "maxAttempts": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "backoff": {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "linear",
+                    "exponential"
+                  ]
+                },
+                "initialDelay": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "maxDelay": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "maxAttempts",
+                "backoff",
+                "initialDelay"
+              ],
+              "additionalProperties": false
+            },
+            "subprocess": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "execute"
           ],
           "additionalProperties": false
         },
@@ -177,6 +253,13 @@
                 "$ref": "#/$defs/WorkflowNode"
               }
             },
+            "each": {
+              "$ref": "#/$defs/WorkflowNode"
+            },
+            "over": {
+              "type": "string",
+              "minLength": 1
+            },
             "merge": {
               "type": "string",
               "enum": [
@@ -194,8 +277,7 @@
           "required": [
             "kind",
             "id",
-            "mode",
-            "paths"
+            "mode"
           ],
           "additionalProperties": false
         },

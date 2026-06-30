@@ -70,8 +70,15 @@ describe('WorkflowNodeSchema — llm', () => {
       model: 'openai/gpt-4o',
       instructions: 'do stuff',
       tools: [
-        'search',
-        'calc',
+        {
+          type: 'search',
+        },
+        {
+          type: 'openrouter:web_search',
+          parameters: {
+            maxResults: 5,
+          },
+        },
       ],
       params: {
         temperature: 0.5,

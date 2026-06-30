@@ -295,11 +295,14 @@ export type {
   LlmProviderConfig,
   ModelParams,
   RetryPolicy,
+  ServerToolSpec,
   StepMeta,
   TokenUsage,
   Tool,
   ToolMemoryDeclaration,
 } from '@noetic-tools/types';
+/** @public */
+export { isServerToolSpec } from '@noetic-tools/types';
 
 //#endregion
 

@@ -10,15 +10,19 @@ import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
 import type {
   Context,
   ExecuteStepFn,
+  ProcessSubprocessRequest,
+  ServerToolSpec,
   Step,
   SubHarness,
   SubHarnessKind,
   SubHarnessSessionPolicy,
   SubHarnessSettings,
+  SubprocessAdapter,
   Tool,
   Until,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type { UntilPredicate, WorkflowDocument, WorkflowNode } from '../schemas/workflow';
 import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
@@ -39,6 +43,12 @@ export interface HydrationContext {
   layers?: ReadonlyMap<string, MemoryLayer>;
   /** SubHarness adapters keyed by harness id, resolving `claude-code`/`codex`/… nodes. */
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  /**
+   * Resolves a named subprocess adapter ref declared on a `run` node's
+   * `subprocess` field. When a node omits the ref, the step falls back to
+   * `ctx.subprocess` at execution time.
+   */
+  resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
 }
 
 interface SubHarnessBuilderOpts {
@@ -104,13 +114,34 @@ function hydrateLlmNode(
     return frameworkCast(undefined);
   }
 
-  const resolvedTools = resolveTools(node.tools, ctx.tools);
+  // Every `tools` entry is an object `{ type, parameters? }`. Partition by the
+  // `type` value: a reserved `openrouter:*` server-tool literal is a SERVER
+  // tool (flows through unchanged); any other `type` is a CLIENT tool whose
+  // `type` is the registered tool NAME (resolved from the registry; a client
+  // entry's `parameters` is ignored). Both kinds are combined back into one
+  // `tools` array; the interpreter partitions them again at execution (server
+  // specs bypass the client-tool machinery and reach the model call's
+  // server-tool channel).
+  const toolNames: string[] = [];
+  const serverSpecs: ServerToolSpec[] = [];
+  for (const entry of node.tools ?? []) {
+    if (isServerToolSpec(entry)) {
+      serverSpecs.push(entry);
+    } else {
+      toolNames.push(entry.type);
+    }
+  }
+  const resolvedTools = resolveTools(toolNames, ctx.tools);
+  const combined: (Tool | ServerToolSpec)[] = [
+    ...resolvedTools,
+    ...serverSpecs,
+  ];
 
   return step.llm({
     id: node.id,
     model: node.model ?? 'openai/gpt-4o',
     instructions: node.instructions,
-    tools: resolvedTools.length > 0 ? resolvedTools : undefined,
+    tools: combined.length > 0 ? combined : undefined,
     params: node.params,
   });
 }
@@ -170,6 +201,37 @@ function hydrateToolNode(
   );
 }
 
+function hydrateRunNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextMemory, string, string> {
+  if (node.kind !== 'run') {
+    return frameworkCast(undefined);
+  }
+  const code = node.execute;
+  const subprocessRef = node.subprocess;
+  return frameworkCast(
+    step.run({
+      id: node.id,
+      retry: node.retry,
+      execute: async (input: string, execCtx: Context) => {
+        const adapter = resolveSubprocessAdapter({
+          ref: subprocessRef,
+          hydrationCtx: ctx,
+          execCtx,
+          nodeId: node.id,
+        });
+        return runCodeViaSubprocess({
+          adapter,
+          nodeId: node.id,
+          code,
+          input: stringifyResult(input),
+        });
+      },
+    }),
+  );
+}
+
 function hydrateBranchNode(
   node: WorkflowNode,
   ctx: HydrationContext,
@@ -212,15 +274,37 @@ function hydrateForkNode(
     return frameworkCast(undefined);
   }
 
-  const hydratedPaths = node.paths.map((p) => hydrateNode(p, ctx));
+  // Static fork: paths are known at hydration time and feed the optimizer.
+  // Dynamic fork (`each`): paths are produced per fork-input at runtime, one
+  // child per array item, so they cannot be pre-computed or optimized.
+  const dynamic = node.each !== undefined;
+  const eachTemplate = node.each;
+  const staticPaths = dynamic ? [] : (node.paths ?? []).map((p) => hydrateNode(p, ctx));
+
+  const pathsFactory = (input: string): Step<ContextMemory, string, string>[] => {
+    if (!dynamic || !eachTemplate) {
+      return staticPaths;
+    }
+    const items = selectArray(input, node.over, node.id);
+    return items.map((item, i) =>
+      buildPerItemStep({
+        forkId: node.id,
+        eachTemplate,
+        item,
+        index: i,
+        ctx,
+      }),
+    );
+  };
+  const optimizable = dynamic ? undefined : frameworkCast<Step<ContextMemory>[]>(staticPaths);
 
   if (node.mode === 'race') {
     return fork({
       id: node.id,
       mode: 'race',
-      paths: () => hydratedPaths,
+      paths: pathsFactory,
       concurrency: node.concurrency,
-      _optimizable: frameworkCast(hydratedPaths),
+      _optimizable: optimizable,
     });
   }
 
@@ -230,23 +314,23 @@ function hydrateForkNode(
     return fork({
       id: node.id,
       mode: 'settle',
-      paths: () => hydratedPaths,
+      paths: pathsFactory,
       merge: (results) => {
         const values = results.filter((r) => r.status === 'fulfilled').map((r) => r.value ?? '');
         return mergeFn(values);
       },
       concurrency: node.concurrency,
-      _optimizable: frameworkCast(hydratedPaths),
+      _optimizable: optimizable,
     });
   }
 
   return fork({
     id: node.id,
     mode: 'all',
-    paths: () => hydratedPaths,
+    paths: pathsFactory,
     merge: mergeFn,
     concurrency: node.concurrency,
-    _optimizable: frameworkCast(hydratedPaths),
+    _optimizable: optimizable,
   });
 }
 
@@ -396,6 +480,7 @@ function hydrateSubHarnessNode(
 const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   llm: hydrateLlmNode,
   tool: hydrateToolNode,
+  run: hydrateRunNode,
   branch: hydrateBranchNode,
   fork: hydrateForkNode,
   spawn: hydrateSpawnNode,
@@ -455,6 +540,178 @@ function stringifyResult(value: unknown): string {
     return '';
   }
   return JSON.stringify(value);
+}
+
+//#endregion
+
+//#region Dynamic Fork Helpers
+
+/**
+ * Parses the fork input (a JSON string) and locates the array to fan out over.
+ * When `over` is set, reads that property off the parsed object; otherwise the
+ * parsed value itself must be an array.
+ */
+function selectArray(input: string, over: string | undefined, nodeId: string): unknown[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    throw new NoeticConfigError({
+      code: 'INVALID_FORK_INPUT',
+      message: `Dynamic fork '${nodeId}' could not parse its input as JSON.`,
+      hint: 'A dynamic fork (with `each`) expects its input to be a JSON array (or a JSON object when `over` is set).',
+    });
+  }
+  const candidate =
+    over === undefined ? parsed : frameworkCast<Record<string, unknown> | null>(parsed)?.[over];
+  if (!Array.isArray(candidate)) {
+    throw new NoeticConfigError({
+      code: 'INVALID_FORK_INPUT',
+      message: `Dynamic fork '${nodeId}' did not resolve an array${
+        over ? ` at key '${over}'` : ''
+      }.`,
+      hint: over
+        ? `Ensure the input JSON object has an array at '${over}'.`
+        : 'Ensure the input is a JSON array, or set `over` to select an array property.',
+    });
+  }
+  return candidate;
+}
+
+/**
+ * Builds one fork path for a single dynamic-fork item. The item is injected as
+ * the body's input (forks pass the same fork-input to every path), and the
+ * template's node ids are suffixed with `-${i}` so each instantiation has
+ * unique ids for tracing and step-registry uniqueness.
+ */
+function buildPerItemStep(opts: {
+  forkId: string;
+  eachTemplate: WorkflowNode;
+  item: unknown;
+  index: number;
+  ctx: HydrationContext;
+}): Step<ContextMemory, string, string> {
+  const { forkId, eachTemplate, item, index, ctx } = opts;
+  const hydratedEach = hydrateNode(suffixNodeIds(eachTemplate, `-${index}`), ctx);
+  return frameworkCast(
+    step.run({
+      id: `${forkId}-item-${index}`,
+      execute: async (_input: string, execCtx: Context) => {
+        const itemInput = JSON.stringify(item);
+        return stringifyResult(await ctx.executeStep(hydratedEach, itemInput, execCtx));
+      },
+    }),
+  );
+}
+
+/** Keys whose values are opaque data bags, never child workflow nodes. */
+const NON_NODE_KEYS = new Set([
+  'args',
+  'params',
+  'parameters',
+]);
+
+/**
+ * Deep-clones a workflow node template, appending `suffix` to the `id` of every
+ * nested node so a per-item instantiation has globally-unique step ids.
+ */
+function suffixNodeIds(node: WorkflowNode, suffix: string): WorkflowNode {
+  const clone = structuredClone(node);
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        walk(entry);
+      }
+      return;
+    }
+    const record = frameworkCast<Record<string, unknown>>(value);
+    if (typeof record.kind === 'string' && typeof record.id === 'string') {
+      record.id = `${record.id}${suffix}`;
+    }
+    for (const [key, child] of Object.entries(record)) {
+      if (NON_NODE_KEYS.has(key)) {
+        continue;
+      }
+      walk(child);
+    }
+  };
+  walk(clone);
+  return clone;
+}
+
+//#endregion
+
+//#region Run Node Helpers
+
+/**
+ * Resolves the subprocess adapter for a `run` node. When the node names an
+ * adapter ref, the host must supply a `resolveSubprocess` resolver; otherwise
+ * the step falls back to the harness adapter on the execution context.
+ */
+function resolveSubprocessAdapter(opts: {
+  ref: string | undefined;
+  hydrationCtx: HydrationContext;
+  execCtx: Context;
+  nodeId: string;
+}): SubprocessAdapter {
+  const { ref, hydrationCtx, execCtx, nodeId } = opts;
+  if (ref === undefined) {
+    return execCtx.subprocess;
+  }
+  const resolved = hydrationCtx.resolveSubprocess?.(ref);
+  if (!resolved) {
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_SUBPROCESS_REFERENCE',
+      message: `Subprocess adapter '${ref}' referenced in run node '${nodeId}' could not be resolved.`,
+      hint: 'Pass a `resolveSubprocess(ref)` mapping in the HydrationContext, or omit `subprocess` to use the harness default (ctx.subprocess).',
+    });
+  }
+  return resolved;
+}
+
+/**
+ * Dispatches a `run` node's code string through a subprocess adapter: ships the
+ * code plus the JSON-stringified input as a process request (input on stdin),
+ * waits for the handle to settle, and returns the captured stdout as the step
+ * output. A non-zero exit / failed handle surfaces as a thrown error.
+ *
+ * The code is never eval'd in-process (Cloudflare Workers forbid eval). The
+ * adapter owns running the code and capturing stdout into `handle.metadata.result`.
+ */
+async function runCodeViaSubprocess(opts: {
+  adapter: SubprocessAdapter;
+  nodeId: string;
+  code: string;
+  input: string;
+}): Promise<string> {
+  const { adapter, nodeId, code, input } = opts;
+  const request: ProcessSubprocessRequest = {
+    kind: 'process',
+    command: 'node',
+    args: [
+      '-e',
+      code,
+    ],
+    stdin: input,
+    metadata: {
+      noeticRun: true,
+      stepId: nodeId,
+      code,
+      input,
+    },
+  };
+  const spawnPromise = adapter.spawn(request);
+  const handle = new DetachedHandleImpl<string>({
+    id: `run-${nodeId}`,
+    stepId: nodeId,
+    adapter,
+    spawnPromise,
+  });
+  const result = await handle.await();
+  return stringifyResult(result);
 }
 
 //#endregion
