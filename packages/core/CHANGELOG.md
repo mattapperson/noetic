@@ -1,3 +1,7 @@
+## @noetic-tools/core-v2.1.0 (2026-06-30)
+
+* feat(core): run node, dynamic fork, and server tools in the JSON workflow runtime (#53) ([50416d1](https://github.com/mattapperson/noetic/commit/50416d1)), closes [#53](https://github.com/mattapperson/noetic/issues/53)
+
 ## @noetic-tools/core-v2.0.0 (2026-06-28)
 
 * style(core): satisfy biome objectWrap formatting in llm-client-resolve test ([7098e1f](https://github.com/mattapperson/noetic/commit/7098e1f))
