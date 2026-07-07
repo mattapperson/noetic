@@ -1,3 +1,8 @@
+## @noetic-tools/core-v2.2.0 (2026-07-07)
+
+* feat(core): expose OpenUI output codec to the JSON workflow runtime ([9bb9203](https://github.com/mattapperson/noetic/commit/9bb9203))
+* feat(core): generative UI via OpenUI (codec, surface layer, tool UI, transport) ([3a922d8](https://github.com/mattapperson/noetic/commit/3a922d8))
+
 ## @noetic-tools/core-v2.1.0 (2026-06-30)
 
 * feat(core): run node, dynamic fork, and server tools in the JSON workflow runtime (#53) ([50416d1](https://github.com/mattapperson/noetic/commit/50416d1)), closes [#53](https://github.com/mattapperson/noetic/issues/53)
