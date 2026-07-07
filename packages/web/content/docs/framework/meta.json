@@ -8,6 +8,7 @@
     "---Primitives---",
     "steps",
     "sub-harnesses",
+    "generative-ui",
     "operators",
     "---Infrastructure---",
     "context",

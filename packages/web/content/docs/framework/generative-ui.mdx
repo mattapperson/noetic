@@ -1,0 +1,191 @@
+---
+title: Generative UI
+description: Agents that respond with your UI — via OpenUI — through a streaming output codec, a server-authoritative memory layer, tool-authored fragments, and a transport.
+---
+
+## Quick Example
+
+Register a component library, hand it to `step.llm` as a streaming output codec, and the model renders your UI instead of returning plain text:
+
+```ts
+import { AgentHarness, type ContextMemory, step } from '@noetic-tools/core';
+import { createLibrary, defineComponent, openUi } from '@noetic-tools/openui';
+import { z } from 'zod';
+
+const library = createLibrary([
+  defineComponent({ name: 'Card', description: 'A titled container', props: z.object({ title: z.string(), children: z.array(z.unknown()).optional() }) }),
+  defineComponent({ name: 'Text', props: z.object({ value: z.string() }) }),
+  defineComponent({ name: 'Stack', props: z.object({ children: z.array(z.unknown()) }) }),
+]);
+
+const dashboard = step.llm<ContextMemory, string, unknown>({
+  id: 'dashboard',
+  model: 'claude-sonnet-5',
+  output: openUi(library), // ← the model emits OpenUI Lang; the step returns a UiDocument
+});
+
+const harness = new AgentHarness({ name: 'ui-agent', initialStep: dashboard, params: {} });
+const ctx = harness.createContext();
+const doc = await harness.run(dashboard, 'Show a welcome card', ctx);
+```
+
+`openUi(library)` generates a system prompt from the component signatures, streams the model's [OpenUI Lang](#openui-lang) output as `openui.*` framework events, and returns the materialized document. Nothing about `step.llm` changes — generative UI composes inside `loop`, `fork`, `spawn`, and the [JSON runtime](#json-workflow-runtime) like any other step.
+
+## What is generative UI?
+
+Generative UI lets an agent answer with a *user interface* built from components you registered, rather than a text blob. Noetic implements the [OpenUI](https://www.openui.com) standard through the `@noetic-tools/openui` package, which depends only on [`@noetic-tools/memory`](/docs/framework/memory) and `@noetic-tools/types` — never on core. Core sees two dialect-agnostic contracts (`OutputCodec` and `UiFragment`) and resolves everything else from the package, exactly the way [sub-harnesses](/docs/framework/sub-harnesses) are decoupled.
+
+There are three surfaces, adopted independently:
+
+1. **A model-authored codec** — `openUi(library)` on `step.llm.output`.
+2. **A server-authoritative memory layer** — `openUiSurface()` owns the UI state so it is durable, resumable, visible to the model, and conditionable by the step graph.
+3. **Tool-authored fragments** — a tool declares `ui` render functions and its calls carry their own UI.
+
+A **transport** (`@noetic-tools/openui/server`) wires OpenUI's own React client to a Noetic harness.
+
+The design center is **server-authoritative UI state**: the memory layer is the single owner of the mounted document, the reactive variables, and the interaction record. The client renderer is a projection of that state — never the other way around.
+
+## OpenUI Lang
+
+OpenUI Lang is a token-efficient, line-oriented format: one assignment statement per line.
+
+```
+$tab = "overview"
+sales = Query("sales_tool", { region: $tab })
+chart = Card("Sales", [Text("hi")])
+root = Stack([chart])
+```
+
+- **Components** — `ref = Component(arg1, arg2, …)`; positional args map to props in signature order. The statement assigned to `root` is the rendered root.
+- **Reactive state** — `$name = value`; passing `$name` to an input two-way binds it.
+- **Data** — `Query("tool", { args })` fetches on load and re-fetches when a referenced `$var` changes; `Mutation("tool", { args })` runs only when an action triggers it. Both resolve against the step's own `tools` array, so data fetches run as ordinary tool calls with full cost/observability coverage.
+- **Actions** — `Action([@Run(ref), @Set($var, value), @ToAssistant("message")])`; steps run in order. `@ToAssistant` sends the agent a message — the path a UI interaction takes back into the conversation.
+
+The parser is tolerant: prose, code fences, and unparseable lines become diagnostics rather than throwing.
+
+## The surface layer
+
+Install `openUiSurface()` as a memory layer to make the server the owner of UI state. It is modeled on [`durableTaskState`](/docs/framework/memory) (thread-scoped, durable, rendered into the view) and the [steering layer](/docs/framework/memory) (enforcement hooks).
+
+```ts
+import { AgentHarness, memory } from '@noetic-tools/core';
+import { openUi, openUiSurface } from '@noetic-tools/openui';
+
+const surface = openUiSurface({ library });
+
+const harness = new AgentHarness({
+  name: 'ui-agent',
+  initialStep: dashboard, // output: openUi(library)
+  params: {},
+  memory: memory([surface]),
+});
+```
+
+What each hook buys you:
+
+- **Durable, resumable state** (`init` + `store`, thread scope) — the surface is loaded from and written through to `ScopedStorage`, so a resumed run or a reconnecting client reconstructs the exact UI the user was looking at.
+- **Client events flow back in** (`onItemAppend`) — a transport appends each client interaction as a `ui-event` item; the layer reduces it into `vars`/`interactions`, **drops keystroke noise** from the item log, and requests an immediate re-render so the next turn already reflects it.
+- **The model sees the UI** (`recall`) — a budget-trimmed `<ui_surface>` block renders the mounted components, current `vars`, and fresh query results.
+- **Cheap history** (`projectHistory`) — superseded OpenUI Lang renders in history collapse to a one-line placeholder; the current surface is already in the recall block.
+- **Server-side validation** (`afterModelCall`) — each render is validated against the library (unknown component, prop mismatch) and repaired or guided before the client renderer ever sees it.
+
+### Waiting for a submit
+
+`ctx.getLayerState` exposes the surface to loop predicates, so the interaction loop is plain composition — no new primitive:
+
+```ts
+import { loop } from '@noetic-tools/core';
+import { openUi, ui } from '@noetic-tools/openui';
+
+const checkout = loop({
+  body: step.llm({ id: 'render', model: 'claude-sonnet-5', tools: [quoteShipping], output: openUi(library) }),
+  until: ui.submitted(surface, 'checkout-form'),
+});
+```
+
+The package ships `ui.submitted(surface, ref?)`, `ui.interacted(surface, kind?)`, and `ui.toAssistant(surface)`.
+
+## Tool-authored UI
+
+A tool can define programmatic render functions so its calls and results carry their own UI — the way each Claude Code tool renders its own output. Fragments are built with a typed `fragment(library)` builder compiled from the library's Zod schemas, so a typo'd component or bad prop fails at typecheck:
+
+```ts
+import { tool } from '@noetic-tools/core';
+import { fragment } from '@noetic-tools/openui';
+
+const f = fragment(library);
+
+const quoteShipping = tool({
+  name: 'quote_shipping',
+  input: QuoteIn,
+  output: QuoteOut,
+  event: QuoteProgress,
+  ui: {
+    call: (args) => f.Card('Quoting…', [f.Text(args.carrier ?? '…')]),
+    progress: (events) => f.Progress(events.at(-1)?.pct ?? 0),
+    result: (out) => f.Table(out.quotes),
+  },
+  async *execute(args, ctx) {
+    yield { pct: 40 };
+    /* … */
+    return quotes;
+  },
+});
+```
+
+The runtime runs `call` when the call streams in, `progress` on each yielded event, and `result`/`error` on completion, forwarding each fragment as an `openui.fragment` framework event. This works for **both** model-requested tool calls and direct `step.tool` steps — and it works even without the generative-UI codec installed, so an agent whose model emits plain text still gets rich tool cards. Core never interprets the fragment source.
+
+## The transport
+
+Point OpenUI's React client (`@openuidev/react-ui`) at a Noetic agent with `serveOpenUi`. It is runtime-neutral (built on `Request`/`Response`/`ReadableStream`, no `node:*` imports), so it runs on Node, Bun, and the edge.
+
+```ts
+import { serveOpenUi } from '@noetic-tools/openui/server';
+
+const handler = serveOpenUi(harness, { surface });
+// POST { prompt } → runs a turn, streams the surface as SSE
+// POST { event }  → ingests a client UI event (202)
+// GET             → returns the current surface snapshot (reconnect rehydration)
+```
+
+`serveOpenUi` translates the harness's `response.*` and `openui.*` events into the wire protocol, ingests client interactions as `ui-event` items (carrying the document version they were rendered against, so stale interactions are flagged), and answers a reconnect with a single snapshot instead of replaying the stream. The matching client descriptor is `noeticStreamAdapter()`.
+
+## JSON workflow runtime
+
+An `llm` node in a [JSON workflow](/docs/framework/json-runtime) opts into the codec by reference. Because a codec is a runtime object, the node names a `library` ref and the caller supplies the live codec through `HydrationContext.uiLibraries` — the same registry-resolution pattern [sub-harness nodes](/docs/framework/sub-harnesses#json-workflow-node) use for adapters:
+
+```json
+{
+  "kind": "llm",
+  "id": "dashboard",
+  "model": "claude-sonnet-5",
+  "instructions": "Render a sales dashboard",
+  "output": { "codec": "openui", "library": "dashboard-lib" }
+}
+```
+
+```ts
+import { hydrateWorkflow } from '@noetic-tools/core';
+import { openUi } from '@noetic-tools/openui';
+
+const steps = hydrateWorkflow(doc, {
+  tools,
+  executeStep,
+  uiLibraries: new Map([['dashboard-lib', openUi(dashboardLibrary)]]),
+});
+```
+
+A node referencing an unregistered library fails hydration with `UNKNOWN_UI_LIBRARY_REFERENCE`.
+
+## Package layout
+
+```
+openui ──→ memory ──→ types
+core ──→ types            (core never imports openui)
+```
+
+- **`@noetic-tools/types`** — the dialect-agnostic contracts: `OutputCodec` (widening `StepLLM.output`) and `UiFragment` / `ToolUiDeclaration` (on `Tool`).
+- **`@noetic-tools/openui`** — the OpenUI implementation: `openUi()`, `openUiSurface()`, `fragment()`, `createLibrary`/`defineComponent`, and the `ui.*` predicates.
+- **`@noetic-tools/openui/server`** — `serveOpenUi` and the client adapter.
+
+Core resolves the codec from the step (`output`) or the JSON hydration registry and never imports the package, so the OpenUI Lang parser, surface layer, and transport stay out of core's dependency graph.
