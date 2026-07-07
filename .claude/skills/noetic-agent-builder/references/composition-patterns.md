@@ -978,3 +978,46 @@ Key points:
 - Harness nodes carry `prompt`, `instructions?`, `settings?` (`SubHarnessSettings`), and `session?` (`SubHarnessSessionPolicy`) — the JSON mirror of the `step.claudeCode` options.
 - `createSubHarnessRegistry(claudeCode(), codex(), …)` (from `@noetic-tools/sub-harness`) builds the `Map<SubHarnessKind, SubHarness>` the hydrator resolves nodes against. A node whose `kind` has no registered adapter fails hydration with `UNKNOWN_SUB_HARNESS_REFERENCE`.
 - `parseAndRunWorkflow` does **not** take a sub-harness registry, so use `hydrateWorkflow` + `harness.run` (as above) when a document contains harness nodes.
+
+## Pattern: Generative UI Interaction Loop
+
+An agent renders a UI, the user interacts, and the loop continues until they submit. The `openUiSurface()` layer owns the state on the server; a loop predicate reads it. Requires `@noetic-tools/openui` (depends only on memory + types; core never imports it).
+
+```typescript
+import { AgentHarness, loop, memory, step, type ContextMemory } from '@noetic-tools/core';
+import { createLibrary, defineComponent, openUi, openUiSurface, ui } from '@noetic-tools/openui';
+import { z } from 'zod';
+
+const library = createLibrary([
+  defineComponent({ name: 'Form', props: z.object({ id: z.string(), children: z.array(z.unknown()) }) }),
+  defineComponent({ name: 'Field', props: z.object({ label: z.string(), bind: z.string() }) }),
+  defineComponent({ name: 'Submit', props: z.object({ label: z.string() }) }),
+]);
+
+const surface = openUiSurface({ library });
+
+const checkout = loop({
+  id: 'checkout',
+  body: step.llm<ContextMemory, string, unknown>({
+    id: 'render',
+    model: 'claude-sonnet-5',
+    tools: [validateAddress], // Query/Mutation bindings resolve against these tools
+    output: openUi(library),
+  }),
+  until: ui.submitted(surface, 'checkout-form'),
+});
+
+const harness = new AgentHarness({
+  name: 'checkout-agent',
+  initialStep: checkout,
+  params: {},
+  memory: memory([surface]),
+});
+```
+
+Key points:
+
+- **The model emits a UI, not text.** `output: openUi(library)` folds the generated component prompt into the step and returns a `UiDocument`. Each statement streams as an `openui.node`/`openui.state`/`openui.query` framework event.
+- **State lives on the server.** `openUiSurface()` reduces client interactions into `vars`/`interactions`, renders a budget-trimmed `<ui_surface>` block into the model's view each turn, and persists (thread scope) so a resumed run or reconnecting client reconstructs the exact UI.
+- **The loop waits for a submit.** `ui.submitted(surface, ref)` reads the live surface via the layer instance — no new primitive. Also `ui.interacted(surface, kind?)` and `ui.toAssistant(surface)`.
+- **Serve it** with `serveOpenUi(harness, { surface })` from `@noetic-tools/openui/server`, pointed at OpenUI's React client. Tool-authored UI (`ui: { call, progress, result }` on a tool, built with `fragment(library)`) works alongside — or without — the codec.

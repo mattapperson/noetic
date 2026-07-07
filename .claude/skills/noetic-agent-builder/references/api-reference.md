@@ -31,7 +31,7 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   model: Lazy<string, TMemory>;                    // eager string or (ctx) => string
   instructions?: Lazy<string | undefined, TMemory>;
   tools?: Lazy<Tool[] | undefined, TMemory>;       // allowed tool subset (undefined = all, [] = none)
-  output?: ZodType<O>;
+  output?: ZodType<O> | OutputCodec<O>;            // Zod schema OR a streaming codec (see Generative UI)
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepLLM<TMemory, I, O>
@@ -55,6 +55,8 @@ step.llm({
 **Lazy params disable eval-optimizer rewrites.** `@noetic/eval`'s optimizer walks the step tree and swaps candidate strings into `instructions` / tool `name` / tool `description`. It skips fields whose value is a function because there is no way to substitute a string for a getter without dropping the getter's runtime logic. Use eager values for any field you want the optimizer to tune; reserve function-form only for fields that genuinely need per-execution context.
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
+
+`output` accepts a Zod schema (assistant text is JSON-parsed and validated) OR an `OutputCodec<O>` — a streaming output dialect. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
@@ -1715,10 +1717,15 @@ import type { HydrationContext } from '@noetic-tools/core';
 const ctx: HydrationContext = {
   tools: new Map([['search', searchTool]]),
   executeStep: harness.run.bind(harness),
+  // Optional: resolve sub-harness nodes and generative-UI output codecs.
+  // subHarnesses: new Map([['claude-code', claudeCode({ model })]]),
+  // uiLibraries: new Map([['dashboard-lib', openUi(dashboardLibrary)]]),
 };
 
 const step = hydrateWorkflow(doc, ctx);
 ```
+
+An `llm` node opts into a generative-UI codec with `output: { codec: 'openui', library: '<ref>' }`; the hydrator resolves `<ref>` from `ctx.uiLibraries` to a live `OutputCodec` and throws `UNKNOWN_UI_LIBRARY_REFERENCE` if it is unregistered. See [Generative UI](#generative-ui-openui).
 
 ### dynamicWorkflow
 
@@ -1755,3 +1762,83 @@ Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORK
 ### UntilPredicateSchema
 
 Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `outputContains`, `outputEquals`, `converged`. Combinators: `any`, `all`.
+
+## Generative UI (OpenUI)
+
+`@noetic-tools/openui` makes an agent respond with a UI built from components you register, following the [OpenUI](https://www.openui.com) standard. It depends only on `@noetic-tools/memory` + `@noetic-tools/types`; core sees two dialect-agnostic contracts (`OutputCodec`, `UiFragment`) and never imports the package. Three surfaces, adopted independently.
+
+### Output codec on step.llm
+
+```typescript
+import { createLibrary, defineComponent, openUi } from '@noetic-tools/openui';
+import { z } from 'zod';
+
+const library = createLibrary([
+  defineComponent({ name: 'Card', description: 'Titled container', props: z.object({ title: z.string(), children: z.array(z.unknown()).optional() }) }),
+  defineComponent({ name: 'Text', props: z.object({ value: z.string() }) }),
+  defineComponent({ name: 'Stack', props: z.object({ children: z.array(z.unknown()) }) }),
+]);
+
+const dashboard = step.llm({ id: 'dashboard', model: 'claude-sonnet-5', output: openUi(library) });
+// output resolves to a UiDocument; the model emits OpenUI Lang, streamed as openui.* events.
+```
+
+`openUi(library): OutputCodec<UiDocument>` generates the system prompt from the component signatures, folds it into the step's instructions, keeps itself off the JSON-schema output format, and drives an incremental parser that emits `openui.node` / `openui.state` / `openui.query` framework events. `Query`/`Mutation` data bindings resolve against the step's own `tools` array.
+
+### openUiSurface() — server-authoritative UI state
+
+Install as a memory layer so the SERVER owns the mounted document, reactive `$vars`, and interaction record — the client renderer is a projection of this state.
+
+```typescript
+import { openUiSurface, ui } from '@noetic-tools/openui';
+
+const surface = openUiSurface({ library });   // MemoryLayer<OpenUiSurfaceState>, slot 120, scope 'thread'
+
+const harness = new AgentHarness({ name: 'ui', initialStep: dashboard, params: {}, memory: memory([surface]) });
+```
+
+| Hook | Behavior |
+|------|----------|
+| `init` / `store` | load from + write through to `ScopedStorage` (thread scope → survives resume + reconnect) |
+| `onItemAppend` | reduce client `ui-event` items into `vars`/`interactions`; drop keystroke noise; request immediate re-render |
+| `recall` | render a budget-trimmed `<ui_surface>` block so the model sees the current UI |
+| `projectHistory` | collapse superseded renders in history to a one-line placeholder |
+| `afterModelCall` | validate each render against the library; guide/repair before the client sees it |
+
+**Waiting for a submit** — predicates read the live surface, so the interaction loop is plain composition:
+
+```typescript
+const checkout = loop({
+  body: step.llm({ id: 'render', model, tools: [quoteShipping], output: openUi(library) }),
+  until: ui.submitted(surface, 'checkout-form'),   // also: ui.interacted(surface, kind?), ui.toAssistant(surface)
+});
+```
+
+### Tool-authored UI
+
+A tool declares `ui` render functions so its calls/results carry their own fragments (like Claude Code tools rendering their own output). `fragment(library)` compiles typed constructors from the library's Zod schemas — a typo'd component or bad prop fails at typecheck.
+
+```typescript
+import { fragment } from '@noetic-tools/openui';
+const f = fragment(library);
+
+const quoteShipping = tool({
+  name: 'quote_shipping', input: QuoteIn, output: QuoteOut, event: QuoteProgress,
+  ui: {
+    call: (args) => f.Card('Quoting…', [f.Text(args.carrier ?? '…')]),
+    progress: (events) => f.Progress(events.at(-1)?.pct ?? 0),
+    result: (out) => f.Table(out.quotes),
+  },
+  async *execute(args, ctx) { yield { pct: 40 }; return quotes; },
+});
+```
+
+`ToolUiDeclaration` methods (`call`/`progress`/`result`/`error`) each return a `UiFragment | null`. The runtime emits them as `openui.fragment` framework events from BOTH model-requested tool calls and direct `step.tool` steps — and works even without the codec installed (deterministic tool cards, zero prompt cost).
+
+### Transport (`@noetic-tools/openui/server`)
+
+`serveOpenUi(harness, { surface }): (request) => Promise<Response>` — a runtime-neutral (no `node:*`) fetch handler speaking the OpenUI wire protocol. `POST { prompt }` runs a turn and streams the surface as SSE; `POST { event }` ingests a client interaction; `GET` returns the current snapshot for reconnect rehydration. Pair with the client descriptor `noeticStreamAdapter()`.
+
+### JSON workflow
+
+An `llm` node references a codec: `"output": { "codec": "openui", "library": "<ref>" }`, resolved from `HydrationContext.uiLibraries` (see [hydrateWorkflow](#hydrateworkflow--hydratenode)).

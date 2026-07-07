@@ -1,6 +1,6 @@
 ---
 name: noetic-agent-builder
-description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, memory layers, tools, sub-harness (coding-agent) steps, and agent harness. Triggers include mentions of "agent", "react pattern", "memory layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", or any Noetic-specific API usage in the packages/core directory.
+description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, memory layers, tools, sub-harness (coding-agent) steps, generative UI (OpenUI), and agent harness. Triggers include mentions of "agent", "react pattern", "memory layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", or any Noetic-specific API usage in the packages/core directory.
 ---
 
 # Building Agents with Noetic
@@ -69,6 +69,8 @@ const myTool = tool({
 });
 ```
 
+A tool may also declare `memory` (auto-generated memory layer) and `ui` (generative-UI render functions — see [Generative UI](#generative-ui-openui)). A generator `execute` (`async *execute`) yields progress events validated against the optional `event` schema.
+
 ### Memory Layers
 
 Memory layers inject context into the LLM view (via `recall`) and persist state from responses (via `store`). Built-in layers:
@@ -78,10 +80,21 @@ Memory layers inject context into the LLM view (via `recall`) and persist state 
 - **`durableTaskState()`** -- file checkpoints across fresh context boundaries
 - **`staticContent()`** -- immutable instruction injection from loaded content
 - **`toolMemoryLayer()`** -- auto-generated layers from tool `memory` declarations
+- **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
 
 The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
 
 Recall can return a `RecallResult` object or a plain `string` (shorthand -- the agent harness wraps it in a developer message).
+
+### Generative UI (OpenUI)
+
+An agent can respond with a *UI* built from components you register, instead of text. This is opt-in via `@noetic-tools/openui` (depends only on memory + types; core never imports it). Three composable surfaces:
+
+- **`step.llm({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Zod schema OR an `OutputCodec`.
+- **`openUiSurface({ library })`** -- a memory layer that makes the server the authoritative owner of UI state (durable, resumable, visible to the model). Loop with `until: ui.submitted(surface, ref)` to wait for a form submit.
+- **Tool `ui` declarations** -- a tool defines `call`/`progress`/`result`/`error` render functions (built with `fragment(library)`) so its calls carry their own UI; works even without the codec installed.
+
+`serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, an `llm` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
 
 ## How to Build an Agent
 
@@ -96,6 +109,7 @@ Recall can return a `RecallResult` object or a plain `string` (shorthand -- the 
 | Sequential pipeline | Phase Router | `branch` + `loop` + `prepareNext` |
 | Multi-agent task tree | Plan Execution | `compilePlan()` / `adaptivePlan()` |
 | Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
+| Agent responds with a UI (not text) | Generative UI | `step.llm({ output: openUi(library) })` + `openUiSurface()` |
 
 For pattern-specific code examples, read `references/composition-patterns.md`.
 
@@ -204,6 +218,7 @@ For complete builder signatures, memory layer APIs, agent harness methods, and s
 | Memory types | `packages/types/src/types/memory.ts` |
 | Patterns | `packages/core/src/patterns/` |
 | Memory layers | `packages/memory/src/memory/layers/` |
+| Generative UI (OpenUI) | `packages/openui/src/` (codec, `openUiSurface`, `fragment`, `/server`) |
 | AgentHarness | `packages/core/src/runtime/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
 | Specs | `specs/` (numbered 00-16) |
