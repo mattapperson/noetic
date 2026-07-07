@@ -34,6 +34,7 @@ They are mandatory, not optional.
 | `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
 | `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `patterns/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
 | `27-sub-harness-steps.md` | `packages/types/src/types/sub-harness.ts`, `interpreter/execute-sub-harness`, `builders/step-builders` (harness builders), `packages/sub-harness/src/`, `packages/sub-harness-*/src/` | `framework/sub-harnesses.mdx` |
+| `28-generative-ui.md` | `packages/types/src/types/output-codec.ts`, `packages/types/src/types/tool.ts` (`UiFragment`, `ToolUiDeclaration`), `packages/openui/src/` | `framework/generative-ui.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 

@@ -43,6 +43,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — Per-tool sub-harness adapters. Each implements the `SubHarness` contract via `defineSubHarness` (vendor SDK behind an injectable runner) and exports a factory (`claudeCode()`, `codex()`, …). Depends on `@noetic-tools/sub-harness` + `@noetic-tools/types` — never on `@noetic-tools/core`.
 
+- **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` memory layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/memory` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
+
 - **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
 
 ## Architecture
@@ -78,6 +80,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
 | `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
 | `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
+| `28-generative-ui` | `OutputCodec`, `ToolUiDeclaration`, `openUiSurface()` layer, OpenUI transport | Generative UI (OpenUI) |
 
 ## Dependency Graph
 
