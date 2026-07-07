@@ -233,6 +233,20 @@ interface WorkflowNodeBase {
   id: string;
 }
 
+/**
+ * A reference to a streaming `OutputCodec` for an `llm` node's structured
+ * output. The hydrator resolves `library` from `HydrationContext.uiLibraries`
+ * to a live codec (e.g. `openUi(myLibrary)` from `@noetic-tools/openui`), the
+ * same registry-resolution pattern sub-harness nodes use for adapters. Kept a
+ * *reference* because a codec is a runtime object, not JSON-expressible.
+ */
+export interface OutputCodecRef {
+  /** The codec dialect. Only `'openui'` is defined today. */
+  codec: 'openui';
+  /** Registry key resolved from `HydrationContext.uiLibraries`. */
+  library: string;
+}
+
 export interface LlmWorkflowNode extends WorkflowNodeBase {
   kind: 'llm';
   model?: string;
@@ -246,6 +260,8 @@ export interface LlmWorkflowNode extends WorkflowNodeBase {
    */
   tools?: z.infer<typeof LlmToolEntrySchema>[];
   params?: z.infer<typeof ModelParamsSchema>;
+  /** Streaming output-codec reference, resolved from `HydrationContext.uiLibraries`. */
+  output?: OutputCodecRef;
 }
 
 export interface ToolWorkflowNode extends WorkflowNodeBase {
@@ -374,6 +390,11 @@ const SHARED_FIELDS = {
   id: z.string().min(1),
 } as const;
 
+const OutputCodecRefSchema = z.object({
+  codec: z.literal('openui'),
+  library: z.string().min(1),
+});
+
 const LlmNodeSchema = z.object({
   kind: z.literal('llm'),
   ...SHARED_FIELDS,
@@ -381,6 +402,7 @@ const LlmNodeSchema = z.object({
   instructions: z.string(),
   tools: z.array(LlmToolEntrySchema).optional(),
   params: ModelParamsSchema.optional(),
+  output: OutputCodecRefSchema.optional(),
 });
 
 const ToolNodeSchema = z.object({

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { MemoryLayer } from '@noetic-tools/memory';
 import type {
+  OutputCodec,
   ProcessSubprocessRequest,
   SubHarness,
   SubHarnessKind,
@@ -125,6 +126,69 @@ describe('hydrateNode — llm', () => {
     };
     const ctx = makeHydrationContext();
     expect(() => hydrateNode(node, ctx)).toThrow('nonexistent');
+  });
+
+  test('resolves an output codec ref from the uiLibraries registry', () => {
+    const codec: OutputCodec<string> = {
+      kind: 'codec',
+      start: () => ({
+        push: () => {},
+        finish: (text: string) => text,
+      }),
+    };
+    const node: WorkflowNode = {
+      kind: 'llm',
+      id: 'llm-ui',
+      instructions: 'Render a dashboard',
+      output: {
+        codec: 'openui',
+        library: 'dashboard-lib',
+      },
+    };
+    const ctx: HydrationContext = {
+      ...makeHydrationContext(),
+      uiLibraries: new Map([
+        [
+          'dashboard-lib',
+          codec,
+        ],
+      ]),
+    };
+    const result = hydrateNode(node, ctx);
+    assert(result.kind === 'llm');
+    expect(result.output).toBe(codec);
+  });
+
+  test('throws UNKNOWN_UI_LIBRARY_REFERENCE for an unregistered library', () => {
+    const node: WorkflowNode = {
+      kind: 'llm',
+      id: 'llm-bad-ui',
+      instructions: 'Render',
+      output: {
+        codec: 'openui',
+        library: 'missing-lib',
+      },
+    };
+    const ctx = makeHydrationContext();
+    try {
+      hydrateNode(node, ctx);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_UI_LIBRARY_REFERENCE');
+      expect(e.message).toContain('missing-lib');
+    }
+  });
+
+  test('llm node without an output ref leaves output undefined', () => {
+    const node: WorkflowNode = {
+      kind: 'llm',
+      id: 'llm-plain',
+      instructions: 'Say hello',
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'llm');
+    expect(result.output).toBeUndefined();
   });
 });
 

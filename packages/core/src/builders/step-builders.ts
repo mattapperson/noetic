@@ -3,6 +3,7 @@ import type {
   Context,
   Lazy,
   ModelParams,
+  OutputCodec,
   RetryPolicy,
   ServerToolSpec,
   StepLLM,
@@ -46,7 +47,8 @@ interface StepLLMOpts<TMemory, O> {
    * server tool the provider executes, e.g. web search/fetch).
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TMemory>;
-  output?: ZodType<O>;
+  /** Structured output: a Zod schema or a streaming `OutputCodec` (e.g. OpenUI Lang). */
+  output?: ZodType<O> | OutputCodec<O>;
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }

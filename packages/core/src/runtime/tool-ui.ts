@@ -13,7 +13,7 @@
 
 import type { Context, Tool, UiFragment } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
+import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
 
 const OPENUI_FRAGMENT_EVENT = 'openui.fragment';
 

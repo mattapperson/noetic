@@ -3,8 +3,8 @@ import type { ContextMemory } from '@noetic-tools/memory';
 import type { Context, StepTool, StreamEvent, Tool } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
-import { emitToolUi } from '../../src/harness/tool-ui';
 import { executeTool } from '../../src/interpreter/execute-action';
+import { emitToolUi } from '../../src/runtime/tool-ui';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 /** A recording broadcaster satisfying the `_broadcaster` structural check. */

@@ -15,8 +15,8 @@ import {
 } from '@noetic-tools/types';
 import type { ZodType } from 'zod';
 import { ZodError } from 'zod';
-import { emitToolUi } from '../harness/tool-ui';
 import type { EmitOption } from '../runtime/broadcaster-utils';
+import { emitToolUi } from '../runtime/tool-ui';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import {
   allocateBudgets,

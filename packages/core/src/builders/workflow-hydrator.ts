@@ -10,6 +10,7 @@ import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
 import type {
   Context,
   ExecuteStepFn,
+  OutputCodec,
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
@@ -23,7 +24,13 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import { DetachedHandleImpl } from '../runtime/detached-handle';
-import type { UntilPredicate, WorkflowDocument, WorkflowNode } from '../schemas/workflow';
+import type {
+  LlmWorkflowNode,
+  OutputCodecRef,
+  UntilPredicate,
+  WorkflowDocument,
+  WorkflowNode,
+} from '../schemas/workflow';
 import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
 
@@ -43,6 +50,13 @@ export interface HydrationContext {
   layers?: ReadonlyMap<string, MemoryLayer>;
   /** SubHarness adapters keyed by harness id, resolving `claude-code`/`codex`/… nodes. */
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  /**
+   * Output codecs keyed by the `library` ref an `llm` node's `output` codec
+   * reference names — the live codec built from a component library, e.g.
+   * `new Map([['dashboard-lib', openUi(dashboardLibrary)]])` from
+   * `@noetic-tools/openui`. Resolved the same way sub-harness adapters are.
+   */
+  uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /**
    * Resolves a named subprocess adapter ref declared on a `run` node's
    * `subprocess` field. When a node omits the ref, the step falls back to
@@ -106,6 +120,34 @@ function hydrateUntilPredicate(pred: UntilPredicate): Until {
 
 //#region Node Hydrators
 
+/**
+ * Resolve an llm node's `tools` entries into a combined client+server list.
+ *
+ * Every entry is `{ type, parameters? }`. A reserved `openrouter:*` literal is
+ * a SERVER tool (flows through unchanged); any other `type` is a CLIENT tool
+ * whose `type` is the registered tool NAME (resolved from the registry). Both
+ * kinds combine into one `tools` array; the interpreter partitions them again
+ * at execution.
+ */
+function resolveLlmTools(
+  entries: LlmWorkflowNode['tools'],
+  registry: ReadonlyMap<string, Tool>,
+): (Tool | ServerToolSpec)[] {
+  const toolNames: string[] = [];
+  const serverSpecs: ServerToolSpec[] = [];
+  for (const entry of entries ?? []) {
+    if (isServerToolSpec(entry)) {
+      serverSpecs.push(entry);
+    } else {
+      toolNames.push(entry.type);
+    }
+  }
+  return [
+    ...resolveTools(toolNames, registry),
+    ...serverSpecs,
+  ];
+}
+
 function hydrateLlmNode(
   node: WorkflowNode,
   ctx: HydrationContext,
@@ -114,28 +156,7 @@ function hydrateLlmNode(
     return frameworkCast(undefined);
   }
 
-  // Every `tools` entry is an object `{ type, parameters? }`. Partition by the
-  // `type` value: a reserved `openrouter:*` server-tool literal is a SERVER
-  // tool (flows through unchanged); any other `type` is a CLIENT tool whose
-  // `type` is the registered tool NAME (resolved from the registry; a client
-  // entry's `parameters` is ignored). Both kinds are combined back into one
-  // `tools` array; the interpreter partitions them again at execution (server
-  // specs bypass the client-tool machinery and reach the model call's
-  // server-tool channel).
-  const toolNames: string[] = [];
-  const serverSpecs: ServerToolSpec[] = [];
-  for (const entry of node.tools ?? []) {
-    if (isServerToolSpec(entry)) {
-      serverSpecs.push(entry);
-    } else {
-      toolNames.push(entry.type);
-    }
-  }
-  const resolvedTools = resolveTools(toolNames, ctx.tools);
-  const combined: (Tool | ServerToolSpec)[] = [
-    ...resolvedTools,
-    ...serverSpecs,
-  ];
+  const combined = resolveLlmTools(node.tools, ctx.tools);
 
   return step.llm({
     id: node.id,
@@ -143,6 +164,43 @@ function hydrateLlmNode(
     instructions: node.instructions,
     tools: combined.length > 0 ? combined : undefined,
     params: node.params,
+    output: resolveOutputCodec(node.output, node.id, ctx),
+  });
+}
+
+/**
+ * Resolve an `llm` node's `output` codec reference to a live `OutputCodec`.
+ *
+ * Hydrated steps are typed `<string, string>` (the JSON boundary erases output
+ * types), so the resolved codec is cast to the step's erased output type — the
+ * runtime still returns the codec's real value. This is the same erasure the
+ * rest of the hydrator applies via `frameworkCast`.
+ */
+function availableLibraries(ctx: HydrationContext): string {
+  if (!ctx.uiLibraries || ctx.uiLibraries.size === 0) {
+    return '(none)';
+  }
+  return [
+    ...ctx.uiLibraries.keys(),
+  ].join(', ');
+}
+
+function resolveOutputCodec(
+  ref: OutputCodecRef | undefined,
+  nodeId: string,
+  ctx: HydrationContext,
+): OutputCodec<string> | undefined {
+  if (!ref) {
+    return undefined;
+  }
+  const codec = ctx.uiLibraries?.get(ref.library);
+  if (codec) {
+    return frameworkCast<OutputCodec<string>>(codec);
+  }
+  throw new NoeticConfigError({
+    code: 'UNKNOWN_UI_LIBRARY_REFERENCE',
+    message: `UI library '${ref.library}' referenced in workflow node '${nodeId}' is not registered.`,
+    hint: `Pass output codecs via HydrationContext.uiLibraries, e.g. new Map([['${ref.library}', openUi(myLibrary)]]) from @noetic-tools/openui. Available: ${availableLibraries(ctx)}`,
   });
 }
 

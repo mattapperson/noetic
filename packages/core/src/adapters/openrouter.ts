@@ -20,8 +20,8 @@ import {
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
-import { emitToolUi } from '../harness/tool-ui';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
+import { emitToolUi } from '../runtime/tool-ui';
 import type { EmbedFn } from '../types/embed';
 
 //#region Provider Types
