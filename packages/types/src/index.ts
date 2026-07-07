@@ -18,6 +18,7 @@ export * from './types/items';
 export * from './types/memory';
 export * from './types/memory-context';
 export * from './types/observability';
+export * from './types/output-codec';
 export * from './types/runtime';
 export * from './types/shell-adapter';
 export * from './types/steering';

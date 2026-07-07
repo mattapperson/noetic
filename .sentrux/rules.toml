@@ -383,6 +383,27 @@ name = "sub-harness"
 paths = ["packages/sub-harness/src/**"]
 order = 87
 
+# @noetic-tools/openui builds on @noetic-tools/memory + @noetic-tools/types (the
+# openUiSurface memory layer + the OutputCodec/UiFragment contracts) and is a
+# consumer package like the sub-harness base — it sits above memory/types and
+# below every core layer. core sees only the dialect-agnostic contracts in
+# types; it must never import openui or pull the OpenUI parser/transport into
+# its dependency graph (see specs/28-generative-ui.md).
+[[layers]]
+name = "openui"
+paths = ["packages/openui/src/**"]
+order = 87
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/openui/src/**"
+reason = "core resolves generative-UI output via the @noetic-tools/types OutputCodec/UiFragment contracts; it must never import @noetic-tools/openui or pull the OpenUI Lang parser/surface/transport into its dependency graph"
+
+[[boundaries]]
+from = "packages/memory/src/**"
+to = "packages/openui/src/**"
+reason = "@noetic-tools/openui depends on @noetic-tools/memory (the openUiSurface layer builds on it); memory must never import back into openui (acyclic + tree-shakable)"
+
 [[boundaries]]
 from = "packages/core/src/**"
 to = "packages/sub-harness/src/**"

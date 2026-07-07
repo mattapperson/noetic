@@ -30,6 +30,43 @@ export interface ToolMemoryDeclaration<TState = unknown> {
 }
 
 /**
+ * A renderable UI fragment in a named dialect (e.g. `'openui-lang/0.5'`).
+ * The framework never interprets `source` — it forwards fragments as
+ * `openui.fragment` framework events and attaches them to items; a UI
+ * surface (memory layer + transport) composes and renders them.
+ * @public
+ */
+export interface UiFragment {
+  /** Dialect identifier, e.g. `'openui-lang/0.5'`. */
+  dialect: string;
+  /** Fragment source in that dialect, e.g. `'root = Card([Spinner()])'`. */
+  source: string;
+}
+
+/**
+ * Declares tool-owned UI: programmatic render functions invoked at tool
+ * lifecycle points. All methods are optional — an omitted point renders
+ * nothing (mirrors `ToolMemoryDeclaration`). Declared as methods (bivariant
+ * params) so a concretely-typed declaration assigns to the erased form the
+ * `tool()` builder and runtime consume.
+ * @public
+ */
+export interface ToolUiDeclaration<
+  I extends ZodTypeAny = ZodTypeAny,
+  O extends ZodTypeAny = ZodTypeAny,
+  E = unknown,
+> {
+  /** Rendered as soon as the call streams in — args may be partial. */
+  call?(args: Partial<z.infer<I>>): UiFragment | null;
+  /** Re-rendered on each event an AsyncGenerator `execute` yields. Receives all events so far. */
+  progress?(events: E[]): UiFragment | null;
+  /** Replaces the tool's region on successful completion. */
+  result?(output: z.infer<O>, args: z.infer<I>): UiFragment | null;
+  /** Replaces the tool's region when execution throws. */
+  error?(err: unknown, args: z.infer<I>): UiFragment | null;
+}
+
+/**
  * A tool definition that an LLM can invoke during execution.
  *
  * The runtime passes a `ToolExecutionContext` (from `./tool-context`) as
@@ -71,4 +108,6 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   needsApproval?: boolean;
   /** Optional memory declaration — the runtime generates a MemoryLayer from this. */
   memory?: ToolMemoryDeclaration;
+  /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
+  ui?: ToolUiDeclaration<I, O>;
 }

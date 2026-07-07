@@ -4,6 +4,7 @@ import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './commo
 import type { Context } from './context';
 import type { NoeticError } from './error';
 import type { ContextMemory, MemoryConfig, MemoryLayer, ProjectionPolicy } from './memory';
+import type { OutputCodec } from './output-codec';
 import type {
   SubHarness,
   SubHarnessKind,
@@ -125,7 +126,12 @@ export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
    * they are resolved per execution.
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TMemory>;
-  output?: ZodType<O>;
+  /**
+   * Structured output: a Zod schema (assistant text is JSON-parsed and
+   * validated) or a streaming `OutputCodec` (fed each text delta, produces
+   * the typed value at turn end).
+   */
+  output?: ZodType<O> | OutputCodec<O>;
   params?: ModelParams;
   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);

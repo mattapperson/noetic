@@ -334,27 +334,18 @@ client event: <AgentInterface> ──▶ transport ──▶ ui-event item ─�
 reconnect:    client ──▶ transport ──▶ {document, vars, version} snapshot ──▶ rehydrate
 ```
 
-## JSON workflow runtime
-
-An `llm` node opts into the codec by reference; the hydrator resolves the
-library from the workflow's `HydrationContext.uiLibraries` registry (the same
-shape as `subHarnesses`):
-
-```json
-{
-  "kind": "llm",
-  "id": "dashboard",
-  "model": "claude-sonnet-5",
-  "output": { "codec": "openui", "library": "dashboard-lib" }
-}
-```
-
-A node referencing an unregistered library fails hydration with
-`UNKNOWN_UI_LIBRARY_REFERENCE`. The published JSON Schema is regenerated from
-the Zod source (`bun run gen:schema`) whenever the workflow schema changes.
-
 ## Future Considerations
 
+- **JSON workflow runtime.** The programmatic surface (the `openUi()` codec,
+  the `openUiSurface()` layer, tool `ui` declarations, and the transport) is the
+  shipped API. Exposing the codec to the JSON runtime is a follow-up: an `llm`
+  node would opt in by reference — `"output": { "codec": "openui", "library":
+  "dashboard-lib" }` — with the hydrator resolving the library from a
+  `HydrationContext.uiLibraries` registry (the same shape as `subHarnesses`),
+  failing with `UNKNOWN_UI_LIBRARY_REFERENCE` on an unregistered name. This
+  requires extending `WorkflowDocumentSchema` (an `output` codec variant) plus a
+  `bun run gen:schema` regeneration under the drift gate, so it is staged
+  separately from the core contract + package work.
 - **`step.ui` promotion.** If wizard-style flows make turn-granularity parking
   insufficient, a first-class `step.ui` primitive can hold a checkpointable
   "parked mid-form" position in the graph behind a `UiSurface` contract in

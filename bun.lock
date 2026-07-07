@@ -19,7 +19,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "1.1.2",
+      "version": "2.1.0",
       "dependencies": {
         "@noetic-tools/memory": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -66,6 +66,21 @@
       "name": "@noetic-tools/memory",
       "version": "1.0.1",
       "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/openui": {
+      "name": "@noetic-tools/openui",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/memory": "workspace:*",
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
       },
@@ -186,7 +201,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "1.0.1",
+      "version": "1.2.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -405,6 +420,8 @@
     "@noetic-tools/core": ["@noetic-tools/core@workspace:packages/core"],
 
     "@noetic-tools/memory": ["@noetic-tools/memory@workspace:packages/memory"],
+
+    "@noetic-tools/openui": ["@noetic-tools/openui@workspace:packages/openui"],
 
     "@noetic-tools/platform-node": ["@noetic-tools/platform-node@workspace:packages/platform-node"],
 

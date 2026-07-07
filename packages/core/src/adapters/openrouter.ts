@@ -20,6 +20,7 @@ import {
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
+import { emitToolUi } from '../harness/tool-ui';
 import { buildToolExecutionContext } from '../runtime/tool-memory';
 import type { EmbedFn } from '../types/embed';
 
@@ -307,6 +308,8 @@ export interface ExecuteToolCallParams {
   context: Context;
   harness: AgentHarnessContract;
   layers?: MemoryLayer[];
+  /** The model's `function_call` id — keys this call's tool-UI region. */
+  callId?: string;
 }
 
 function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unknown> {
@@ -314,18 +317,6 @@ function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unkn
     return false;
   }
   return Symbol.asyncIterator in value;
-}
-
-async function consumeGenerator(generator: AsyncGenerator<unknown, unknown>): Promise<unknown> {
-  let result: unknown;
-  while (true) {
-    const next = await generator.next();
-    if (next.done) {
-      result = next.value;
-      break;
-    }
-  }
-  return result;
 }
 
 /** @internal Execute a single tool call with steering checks. */
@@ -371,17 +362,66 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
   }
 
   const toolCtx = buildToolExecutionContext(params.context, params.harness);
+  const callId = params.callId;
+  const uiBase =
+    callId !== undefined
+      ? {
+          ctx: params.context,
+          tool: matchedTool,
+          callId,
+          args: params.args,
+        }
+      : undefined;
+  if (uiBase) {
+    emitToolUi({
+      ...uiBase,
+      phase: 'call',
+    });
+  }
   try {
     const executionResult = matchedTool.execute(params.args, toolCtx);
-    // Handle generator-based tools (like Bash) that return AsyncGenerator
-    const result = isAsyncGenerator(executionResult)
-      ? await consumeGenerator(executionResult)
-      : await executionResult;
+    // Generator tools stream progress; drive them here so tool-UI `progress`
+    // fragments emit per yield (the non-UI case just consumes to the return).
+    let result: unknown;
+    if (isAsyncGenerator(executionResult)) {
+      const events: unknown[] = [];
+      for (;;) {
+        const next = await executionResult.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+        events.push(next.value);
+        if (uiBase) {
+          emitToolUi({
+            ...uiBase,
+            phase: 'progress',
+            events,
+          });
+        }
+      }
+    } else {
+      result = await executionResult;
+    }
+    if (uiBase) {
+      emitToolUi({
+        ...uiBase,
+        phase: 'result',
+        output: result,
+      });
+    }
     return {
       output: typeof result === 'string' ? result : JSON.stringify(result),
       result,
     };
   } catch (e) {
+    if (uiBase) {
+      emitToolUi({
+        ...uiBase,
+        phase: 'error',
+        error: e,
+      });
+    }
     return {
       output: `Error: ${e instanceof Error ? e.message : String(e)}`,
       error: true,
