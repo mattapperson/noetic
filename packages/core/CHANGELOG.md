@@ -1,3 +1,7 @@
+## @noetic-tools/core-v2.2.1 (2026-07-08)
+
+* fix(core): make serveOpenUi stream the rendered UI end-to-end ([c579315](https://github.com/mattapperson/noetic/commit/c579315))
+
 ## @noetic-tools/core-v2.2.0 (2026-07-07)
 
 * feat(core): expose OpenUI output codec to the JSON workflow runtime ([9bb9203](https://github.com/mattapperson/noetic/commit/9bb9203))
