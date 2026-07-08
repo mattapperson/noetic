@@ -66,10 +66,14 @@ describe('translateStreamEvent', () => {
     });
   });
 
-  test('maps completion and error; ignores unrelated events', () => {
-    expect(translateStreamEvent(sdk('response.completed'), AGENT)).toEqual({
+  test('maps turn completion and error; ignores per-model-call completions', () => {
+    // The turn boundary — not a single model call — terminates the stream.
+    expect(translateStreamEvent(framework('turn_completed'), AGENT)).toEqual({
       type: 'done',
     });
+    // A tool-using turn ends the tool round with its own response.completed
+    // *before* the render is emitted; that must NOT terminate the stream.
+    expect(translateStreamEvent(sdk('response.completed'), AGENT)).toBeNull();
     expect(
       translateStreamEvent(
         sdk('error', {
@@ -271,12 +275,15 @@ describe('serveOpenUi', () => {
   test('POST prompt runs a turn and streams a snapshot then translated events', async () => {
     const surface = await initSurface();
     const harness = makeFakeHarness([
+      // A tool-using turn: the tool round completes first (must NOT terminate),
+      // then the render statements stream, then the turn completes.
+      sdk('response.completed'),
       framework('openui.node', {
         ref: 'root',
         kind: 'component',
         source: 'root = Card("Hi")',
       }),
-      sdk('response.completed'),
+      framework('turn_completed'),
     ]);
     const handler = serveOpenUi(harness, {
       surface,

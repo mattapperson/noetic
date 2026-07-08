@@ -132,12 +132,18 @@ export function translateStreamEvent(
         source: stringField(event.data, 'source'),
       };
     }
+    // The whole turn — not an individual model call — is the SSE boundary. A
+    // tool-using turn makes several model calls (each ending in an SDK
+    // `response.completed`), and the rendered `openui.*` statements are emitted
+    // at finalization, AFTER the last model call, just before `turn_completed`.
+    // Terminating on `response.completed` would cut the stream off after the
+    // tool round, before any UI was rendered.
+    if (suffix === 'turn_completed') {
+      return {
+        type: 'done',
+      };
+    }
     return null;
-  }
-  if (event.type === 'response.completed') {
-    return {
-      type: 'done',
-    };
   }
   if (event.type === 'error') {
     return {

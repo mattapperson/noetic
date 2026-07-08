@@ -68,7 +68,7 @@ The parser is tolerant: prose, code fences, and unparseable lines become diagnos
 Install `openUiSurface()` as a memory layer to make the server the owner of UI state. It is modeled on [`durableTaskState`](/docs/framework/memory) (thread-scoped, durable, rendered into the view) and the [steering layer](/docs/framework/memory) (enforcement hooks).
 
 ```ts
-import { AgentHarness, memory } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
 import { openUi, openUiSurface } from '@noetic-tools/openui';
 
 const surface = openUiSurface({ library });
@@ -77,7 +77,7 @@ const harness = new AgentHarness({
   name: 'ui-agent',
   initialStep: dashboard, // output: openUi(library)
   params: {},
-  memory: memory([surface]),
+  memory: [surface], // AgentHarness takes a MemoryLayer[]
 });
 ```
 

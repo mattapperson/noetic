@@ -325,7 +325,12 @@ function finalizeCodecOutput<O>(
   const session = codec.start();
   const broadcaster = getBroadcaster(ctx);
   const agentName = ctx.harness.config.name;
-  session.push(lastText, (eventType, data) => {
+  // A streaming codec emits per completed (newline-terminated) statement, so the
+  // final line — usually `root` — would stay buffered and never be emitted.
+  // Push a newline-terminated copy so that last statement is flushed as an event
+  // too; `finish` still reparses the original text for the returned value.
+  const textForEmit = lastText.endsWith('\n') ? lastText : `${lastText}\n`;
+  session.push(textForEmit, (eventType, data) => {
     if (shouldEmit(emit, eventType, data)) {
       emitFrameworkEvent({
         broadcaster,
