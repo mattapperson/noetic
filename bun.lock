@@ -11,6 +11,7 @@
       "devDependencies": {
         "@biomejs/biome": "^2.3.11",
         "@noetic-tools/core": "workspace:*",
+        "@noetic-tools/openui": "workspace:*",
         "@noetic-tools/sub-harness": "workspace:*",
         "@noetic-tools/sub-harness-claude-code": "workspace:*",
         "@noetic-tools/sub-harness-codex": "workspace:*",
