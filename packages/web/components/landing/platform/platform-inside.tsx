@@ -2,6 +2,7 @@
 
 import { motion } from 'motion/react';
 import Link from 'next/link';
+import { PhoneShot } from '@/components/landing/phone-shot';
 import type { ReactNode } from 'react';
 
 interface FeatureTile {
@@ -164,6 +165,85 @@ export function PlatformInside(): ReactNode {
             </p>
           </motion.div>
         ))}
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          gap: '32px',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          border: '1px solid var(--color-tui-border)',
+          background: 'var(--color-tui-surface)',
+          padding: '32px 28px',
+          marginBottom: '32px',
+        }}
+      >
+        <div
+          style={{
+            flex: '1 1 320px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          <span
+            style={{
+              fontSize: '11px',
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              color: 'var(--color-tui-green)',
+              fontWeight: 700,
+            }}
+          >
+            native, not a webview
+          </span>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: '26px',
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: 'var(--color-tui-fg)',
+            }}
+          >
+            The whole platform, in your pocket.
+          </h3>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '14px',
+              color: 'var(--color-tui-secondary)',
+              lineHeight: 1.65,
+              maxWidth: '420px',
+            }}
+          >
+            Chat, projects, agents, automations, and secrets ship in native iOS and macOS apps —
+            the same live sessions as the web dashboard and the terminal. Describe an automation
+            in a sentence from your phone; the platform drafts the plan.
+          </p>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            gap: '20px',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+          }}
+        >
+          <PhoneShot
+            src="/screenshots/ios-drawer.png"
+            alt="Noetic iOS navigation — Chat, Projects, Apps, Agents, Automations, Secrets, and recent sessions"
+            caption="every surface"
+            width={230}
+          />
+          <PhoneShot
+            src="/screenshots/ios-automation.png"
+            alt="Creating an automation on iOS by describing it in plain language"
+            caption="describe-first automations"
+            width={230}
+          />
+        </div>
       </div>
 
       <p

@@ -3,6 +3,7 @@
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { LiveDot } from '@/components/landing/code/live-dot';
+import { PhoneShot } from '@/components/landing/phone-shot';
 
 interface SurfaceCard {
   number: string;
@@ -116,6 +117,15 @@ export function CodeEverywhere(): ReactNode {
         </p>
       </div>
 
+      <div
+        style={{
+          display: 'flex',
+          gap: '28px',
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          marginBottom: '32px',
+        }}
+      >
       <motion.div
         initial={{
           opacity: 0,
@@ -136,7 +146,8 @@ export function CodeEverywhere(): ReactNode {
           border: '1px solid var(--color-tui-border-bright)',
           borderRadius: '6px',
           overflow: 'hidden',
-          marginBottom: '32px',
+          flex: '1 1 480px',
+          minWidth: 0,
         }}
       >
         <div
@@ -255,6 +266,13 @@ export function CodeEverywhere(): ReactNode {
           ))}
         </div>
       </motion.div>
+
+        <PhoneShot
+          src="/screenshots/ios-new-chat.png"
+          alt="Noetic iOS app — starting a new chat with project and agent pickers"
+          caption="the ios app, same session"
+        />
+      </div>
 
       <div
         className="patterns-grid"
