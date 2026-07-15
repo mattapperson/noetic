@@ -51,6 +51,7 @@ interface HandoffStep {
   time: string;
   device: string;
   line: string;
+  color: string;
 }
 
 const HANDOFF: HandoffStep[] = [
@@ -58,26 +59,31 @@ const HANDOFF: HandoffStep[] = [
     time: '17:42',
     device: 'terminal',
     line: '"migrate the billing service off stripe v1" — agent starts in a cloud VM',
+    color: 'var(--color-tui-green)',
   },
   {
     time: '17:58',
     device: 'terminal',
     line: 'laptop closed. the turn keeps running server-side',
+    color: 'var(--color-tui-green)',
   },
   {
     time: '18:20',
     device: 'iphone',
     line: 'progress check on the train. queue a note: "keep the old webhooks"',
+    color: 'var(--color-tui-cyan)',
   },
   {
     time: '21:04',
     device: 'iphone',
     line: 'agent asks which retry policy — answer from the couch',
+    color: 'var(--color-tui-cyan)',
   },
   {
     time: '08:15',
     device: 'terminal',
     line: 'back at the desk. review the diff, run the tests, merge',
+    color: 'var(--color-tui-green)',
   },
 ];
 
@@ -161,7 +167,22 @@ export function CodeEverywhere(): ReactNode {
           </span>
         </div>
 
-        <div>
+        <div
+          style={{
+            position: 'relative',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: '21px',
+              top: '18px',
+              bottom: '18px',
+              width: '1px',
+              background: 'var(--color-tui-border-bright)',
+            }}
+          />
           {HANDOFF.map((step, i) => (
             <motion.div
               key={step.time}
@@ -182,12 +203,25 @@ export function CodeEverywhere(): ReactNode {
                 display: 'flex',
                 alignItems: 'baseline',
                 gap: '14px',
-                padding: '12px 16px',
+                padding: '12px 16px 12px 38px',
                 borderBottom:
                   i === HANDOFF.length - 1 ? 'none' : '1px solid var(--color-tui-border)',
                 fontSize: '13px',
+                position: 'relative',
               }}
             >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: '18px',
+                  top: '17px',
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: step.color,
+                }}
+              />
               <span
                 style={{
                   color: 'var(--color-tui-muted)',

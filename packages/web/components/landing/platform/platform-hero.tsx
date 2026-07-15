@@ -1,6 +1,6 @@
 'use client';
 
-import { motion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { LiveDot } from '@/components/landing/code/live-dot';
@@ -58,6 +58,7 @@ const LIFECYCLE_LINES = [
 ] as const;
 
 export function PlatformHero(): ReactNode {
+  const reducedMotion = useReducedMotion();
   return (
     <section className="code-hero-section">
       <div
@@ -349,9 +350,19 @@ export function PlatformHero(): ReactNode {
             />
             <TuiWindow title="lifecycle.log">
               <pre style={CODE_PRE_STYLE}>
-                {LIFECYCLE_LINES.map((line) => (
-                  <span
+                {LIFECYCLE_LINES.map((line, i) => (
+                  <motion.span
                     key={line.text}
+                    initial={{
+                      opacity: 0,
+                    }}
+                    animate={{
+                      opacity: 1,
+                    }}
+                    transition={{
+                      delay: reducedMotion ? 0 : 0.9 + i * 0.3,
+                      duration: 0.05,
+                    }}
                     style={{
                       display: 'block',
                       color: line.prompt ? 'var(--color-tui-fg)' : 'var(--color-tui-secondary)',
@@ -371,8 +382,25 @@ export function PlatformHero(): ReactNode {
                         {line.text.slice(1)}
                       </>
                     )}
-                  </span>
+                  </motion.span>
                 ))}
+                <motion.span
+                  className="tui-cursor"
+                  initial={{
+                    opacity: 0,
+                  }}
+                  animate={{
+                    opacity: 1,
+                  }}
+                  transition={{
+                    delay: reducedMotion ? 0 : 0.9 + LIFECYCLE_LINES.length * 0.3,
+                  }}
+                  style={{
+                    color: 'var(--color-tui-green)',
+                  }}
+                >
+                  ▋
+                </motion.span>
               </pre>
             </TuiWindow>
           </motion.div>
