@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react';
 import { CodeBackgroundAgents } from '@/components/landing/code/code-background-agents';
 import { CodeBenchmarks } from '@/components/landing/code/code-benchmarks';
+import { CodeEverywhere } from '@/components/landing/code/code-everywhere';
 import { CodeContextManager } from '@/components/landing/code/code-context-manager';
 import { CodeHero } from '@/components/landing/code/code-hero';
 import { CodeMultiModel } from '@/components/landing/code/code-multi-model';
 import { Footer } from '@/components/landing/footer';
 import { Nav } from '@/components/landing/nav';
 
-const CODE_TITLE = 'Noetic Code CLI';
+const CODE_TITLE = 'Noetic Code';
 const CODE_DESCRIPTION =
-  'An AI coding agent built on Noetic. Background agents, multi-model routing, durable execution, and nine memory layers. Coming soon.';
+  'An AI coding agent built on Noetic — in your terminal, on your Mac and iPhone, and in the cloud. Durable sessions, background agents, multi-model routing, and ten memory layers. Coming soon.';
 
 export const metadata = {
   title: CODE_TITLE,
@@ -29,7 +30,7 @@ export const metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'Noetic Code CLI — AI coding agent built on Noetic',
+        alt: 'Noetic Code — the AI coding agent for terminal, desktop, mobile, and cloud',
         type: 'image/png',
       },
     ],
@@ -58,6 +59,7 @@ export default function CodePage(): ReactNode {
           }}
         >
           <CodeBenchmarks />
+          <CodeEverywhere />
           <CodeContextManager />
           <CodeBackgroundAgents />
           <CodeMultiModel />

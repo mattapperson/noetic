@@ -1,83 +1,73 @@
 'use client';
 
-import { motion, useScroll, useTransform } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { LiveDot } from '@/components/landing/code/live-dot';
-import { NoeticTuiPreview } from '@/components/landing/code/noetic-tui-preview';
-import { CyclingCommand } from '@/components/landing/cycling-command';
-import { GITHUB_URL } from '@/lib/tui-theme';
-
-const INSTALL_COMMANDS = [
-  {
-    prefix: '$ npm i -g ',
-    package: '@noetic-tools/cli',
-  },
-  {
-    prefix: '$ bun add -g ',
-    package: '@noetic-tools/cli',
-  },
-  {
-    prefix: '$ pnpm add -g ',
-    package: '@noetic-tools/cli',
-  },
-] as const;
+import { TuiWindow } from '@/components/tui/tui-window';
+import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 
 const STATUS_PILLS = [
   {
     state: 'running',
-    label: '10 memory layers',
+    label: 'durable sessions',
   },
   {
     state: 'running',
-    label: '3 background agents',
+    label: 'gepa auto-improvement',
   },
   {
     state: 'idle',
-    label: 'multi-model routing',
+    label: '10 chat connectors',
   },
   {
-    state: 'running',
-    label: 'synced: terminal · mac · iphone',
+    state: 'idle',
+    label: 'billing — if you want it',
   },
 ] as const;
 
-export function CodeHero(): ReactNode {
-  const { scrollY } = useScroll();
-  const opacity = useTransform(
-    scrollY,
-    [
-      0,
-      800,
-    ],
-    [
-      1,
-      0,
-    ],
-  );
-  const pointerEvents = useTransform(
-    scrollY,
-    [
-      0,
-      400,
-    ],
-    [
-      'auto',
-      'none',
-    ],
-  );
+const LIFECYCLE_LINES = [
+  {
+    prompt: true,
+    text: '$ noetic agent create "support triage bot"',
+  },
+  {
+    prompt: false,
+    text: '✓ workflow compiled       llm → branch → tool',
+  },
+  {
+    prompt: false,
+    text: '✓ session started         microvm: warm (218ms)',
+  },
+  {
+    prompt: false,
+    text: '✓ traces captured         14 spans → node graph',
+  },
+  {
+    prompt: false,
+    text: '✓ eval suite passed       9/9 scorers',
+  },
+  {
+    prompt: false,
+    text: '✓ gepa iteration +6.2%    variant promoted',
+  },
+  {
+    prompt: false,
+    text: '✓ usage metered           plan: team',
+  },
+] as const;
 
+export function PlatformHero(): ReactNode {
+  const reducedMotion = useReducedMotion();
   return (
     <section className="code-hero-section">
-      <motion.div
+      <div
         style={{
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
           maxWidth: '1180px',
           margin: 'auto',
-          opacity,
-          pointerEvents,
         }}
       >
         <motion.div
@@ -109,7 +99,7 @@ export function CodeHero(): ReactNode {
               textTransform: 'uppercase',
             }}
           >
-            $ /noetic-code
+            $ /noetic-platform
           </span>
           <span
             style={{
@@ -124,7 +114,7 @@ export function CodeHero(): ReactNode {
               fontWeight: 600,
             }}
           >
-            Coming Soon
+            Early Access
           </span>
         </motion.div>
 
@@ -155,14 +145,14 @@ export function CodeHero(): ReactNode {
                 lineHeight: 1,
               }}
             >
-              the coding agent that
+              the whole agent lifecycle.
               <span
                 style={{
                   color: 'var(--color-tui-green)',
                   marginLeft: '8px',
                 }}
               >
-                keeps going.
+                one stack.
               </span>
             </motion.span>
 
@@ -191,7 +181,7 @@ export function CodeHero(): ReactNode {
             >
               NOETIC
               <br />
-              CODE
+              PLATFORM
             </motion.h1>
 
             <motion.p
@@ -212,9 +202,8 @@ export function CodeHero(): ReactNode {
                 lineHeight: 1.65,
               }}
             >
-              A coding agent with a real context manager and background teammates — in your
-              terminal, on your desktop, and in your pocket. Quality holds on long tasks. Never
-              hits a context limit.
+              The holistic agent platform. Build agents in TypeScript or plain language — then
+              run, observe, prove, improve, and operate them without ever leaving the stack.
             </motion.p>
 
             <motion.p
@@ -234,9 +223,9 @@ export function CodeHero(): ReactNode {
                 lineHeight: 1.7,
               }}
             >
-              Ten memory layers in concert. Detached agents in isolated worktrees. Per-phase model
-              routing — not married to any provider. Durable cloud sessions you can pick up from
-              any device.
+              Durable sessions in the cloud or on your own machines. Evals against real traces.
+              GEPA-based self-improvement. Connectors, permissions, metering — even billing your
+              own customers, if you want it.
             </motion.p>
 
             <motion.div
@@ -290,33 +279,13 @@ export function CodeHero(): ReactNode {
               }}
               style={{
                 display: 'flex',
-                flexWrap: 'wrap',
                 gap: '12px',
-                alignItems: 'center',
+                flexWrap: 'wrap',
                 marginTop: '12px',
               }}
             >
-              <CyclingCommand commands={INSTALL_COMMANDS} />
-            </motion.div>
-
-            <motion.div
-              initial={{
-                opacity: 0,
-              }}
-              animate={{
-                opacity: 1,
-              }}
-              transition={{
-                delay: 0.8,
-              }}
-              style={{
-                display: 'flex',
-                gap: '12px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <Link
-                href="/docs"
+              <a
+                href="https://app.noetic.tools"
                 style={{
                   padding: '11px 22px',
                   background: 'var(--color-tui-green)',
@@ -329,12 +298,10 @@ export function CodeHero(): ReactNode {
                   boxShadow: '0 0 24px rgba(57, 255, 20, 0.25)',
                 }}
               >
-                Read the docs →
-              </Link>
-              <a
-                href={GITHUB_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+                Open the dashboard →
+              </a>
+              <Link
+                href="/docs"
                 style={{
                   padding: '11px 22px',
                   border: '1px solid var(--color-tui-border-bright)',
@@ -347,8 +314,8 @@ export function CodeHero(): ReactNode {
                   background: 'transparent',
                 }}
               >
-                {'GitHub ★'}
-              </a>
+                Read the docs
+              </Link>
             </motion.div>
           </div>
 
@@ -381,10 +348,64 @@ export function CodeHero(): ReactNode {
                 opacity: 0.6,
               }}
             />
-            <NoeticTuiPreview />
+            <TuiWindow title="lifecycle.log">
+              <pre style={CODE_PRE_STYLE}>
+                {LIFECYCLE_LINES.map((line, i) => (
+                  <motion.span
+                    key={line.text}
+                    initial={{
+                      opacity: 0,
+                    }}
+                    animate={{
+                      opacity: 1,
+                    }}
+                    transition={{
+                      delay: reducedMotion ? 0 : 0.9 + i * 0.3,
+                      duration: 0.05,
+                    }}
+                    style={{
+                      display: 'block',
+                      color: line.prompt ? 'var(--color-tui-fg)' : 'var(--color-tui-secondary)',
+                    }}
+                  >
+                    {line.prompt ? (
+                      line.text
+                    ) : (
+                      <>
+                        <span
+                          style={{
+                            color: 'var(--color-tui-green)',
+                          }}
+                        >
+                          {line.text.slice(0, 1)}
+                        </span>
+                        {line.text.slice(1)}
+                      </>
+                    )}
+                  </motion.span>
+                ))}
+                <motion.span
+                  className="tui-cursor"
+                  initial={{
+                    opacity: 0,
+                  }}
+                  animate={{
+                    opacity: 1,
+                  }}
+                  transition={{
+                    delay: reducedMotion ? 0 : 0.9 + LIFECYCLE_LINES.length * 0.3,
+                  }}
+                  style={{
+                    color: 'var(--color-tui-green)',
+                  }}
+                >
+                  ▋
+                </motion.span>
+              </pre>
+            </TuiWindow>
           </motion.div>
         </div>
-      </motion.div>
+      </div>
     </section>
   );
 }

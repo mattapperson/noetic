@@ -8,10 +8,10 @@ export function Nav(): ReactNode {
   return (
     <>
       <div className="announcement-banner">
-        <span className="banner-title">Noetic Code CLI</span>
+        <span className="banner-title">Noetic Code</span>
         <span className="banner-separator"> — </span>
         <span className="banner-description">
-          AI coding agent with 9 memory layers. Coming soon.
+          One coding agent — terminal, desktop, mobile, and cloud. Coming soon.
         </span>
         <Link href="/code" className="banner-link">
           Learn more
@@ -24,6 +24,9 @@ export function Nav(): ReactNode {
         <div className="nav-links">
           <Link href="/code" className="nav-link">
             Code
+          </Link>
+          <Link href="/platform" className="nav-link">
+            Platform
           </Link>
           <Link href="/docs" className="nav-link">
             Docs
