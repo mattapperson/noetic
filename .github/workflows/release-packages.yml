@@ -22,6 +22,7 @@ on:
       - 'packages/sub-harness-codex/**'
       - 'packages/sub-harness-opencode/**'
       - 'packages/sub-harness-pi/**'
+      - 'packages/eval/**'
       - '.github/workflows/release-packages.yml'
       # Root build config that can affect the published output.
       - 'biome.json'
@@ -528,6 +529,71 @@ jobs:
 
       - name: Release
         working-directory: packages/openui
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  # eval depends on core (which depends on memory + types), so it releases last:
+  # by then core's new version is on npm and pin-workspace-deps can point at it.
+  # Nothing in the chain imports eval, so the reverse edge doesn't exist.
+  #
+  # NOTE: this is the only `@noetic/*`-scoped package in the repo (everything else
+  # is `@noetic-tools/*`). NPM_TOKEN must have publish rights on the `noetic` npm
+  # org, and that org must exist, or the publish step 404s.
+  eval:
+    name: Release @noetic/eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: openui
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/eval
+
+      - name: Typecheck
+        run: bun --cwd=packages/eval run typecheck
+
+      # @noetic/eval depends on @noetic-tools/core. Build the core chain's dists
+      # first so eval's own build (run by `prepublishOnly`) and the Node ESM smoke
+      # test can resolve them via node_modules — tsconfig.build.json drops the
+      # `bun` condition, so src/*.ts is not resolvable at build time.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory, @noetic-tools/core)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/memory run build
+          bun --cwd=packages/core run build
+
+      - name: Build
+        run: bun --cwd=packages/eval run build
+
+      # See the types job. eval's own `workspace:*` dep (@noetic-tools/core) is
+      # pinned to a concrete version at publish time by `prepublishOnly`
+      # (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/eval
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

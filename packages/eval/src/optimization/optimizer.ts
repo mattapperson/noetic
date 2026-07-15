@@ -11,7 +11,6 @@ import type {
 import type { SourceLocation } from '../types/source-location';
 import { discoverFields } from './field-discovery';
 import type { GepaConfig } from './gepa-bridge';
-import { optimizeWithGepa } from './gepa-bridge';
 import type { WriteBackEntry, WriteBackReport } from './source-writer';
 import { writeOptimizedValues } from './source-writer';
 
@@ -127,6 +126,10 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
     };
   }
 
+  /* Loaded on demand: gepa-bridge pulls in `@ax-llm/ax`, an OPTIONAL peer
+   * dependency. A static import would make every `@noetic/eval` consumer —
+   * including suites that only use describe/it/scorer — need it installed. */
+  const { optimizeWithGepa } = await import('./gepa-bridge');
   const result = await optimizeWithGepa({
     step: options.step,
     fields,
