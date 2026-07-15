@@ -124,8 +124,8 @@ describe('my agent', { target: myAgent }, () => {
 ```
 
 ```bash
-noetic test          # Run evaluations
-noetic test --optimize  # Run GEPA optimization
+noetic-eval          # Run evaluations
+noetic-eval -u       # Run GEPA optimization
 ```
 
 ## Tech Stack

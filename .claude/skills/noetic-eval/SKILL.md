@@ -1,6 +1,6 @@
 ---
 name: noetic-eval
-description: This skill provides guidance for writing evaluations, scored tests, and optimizations for Noetic agents using the @noetic/eval package. Use when creating .eval.ts files, defining scorers, running noetic test, or optimizing step compositions. Triggers include mentions of "eval", "scorer", "benchmark", "evaluate", "noetic test", "optimize prompts", "GEPA", "baseline", "regression", or any @noetic/eval API usage.
+description: This skill provides guidance for writing evaluations, scored tests, and optimizations for Noetic agents using the @noetic/eval package. Use when creating .eval.ts files, defining scorers, running noetic-eval, or optimizing step compositions. Triggers include mentions of "eval", "scorer", "benchmark", "evaluate", "noetic-eval", "noetic test", "optimize prompts", "GEPA", "baseline", "regression", or any @noetic/eval API usage.
 ---
 
 # Evaluating Agents with @noetic/eval
@@ -155,19 +155,19 @@ const qualityScorer = createScorer({
 ## CLI
 
 ```bash
-noetic test                        # Run all *.eval.ts files
-noetic test support-agent          # Run specific file
-noetic test --verbose              # Per-scorer breakdown
-noetic test --json > results.json  # Machine-readable output
-noetic test --watch                # Re-run on changes
+noetic-eval                        # Run all *.eval.ts files
+noetic-eval support-agent          # Run specific file
+noetic-eval --verbose              # Per-scorer breakdown
+noetic-eval --json > results.json  # Machine-readable output
+noetic-eval --watch                # Re-run on changes
 
-noetic test -u                     # Optimize (GEPA)
-noetic test -u --scope full        # Full program optimization
-noetic test -u --budget 10         # Cost cap
-noetic test -u --dry-run           # Preview without writing
+noetic-eval -u                     # Optimize (GEPA)
+noetic-eval -u --scope full        # Full program optimization
+noetic-eval -u --budget 10         # Cost cap
+noetic-eval -u --dry-run           # Preview without writing
 
-noetic test --save-baseline        # Save scores as regression baseline
-noetic test --check                # Fail if scores regress or baseline cases vanish
+noetic-eval --save-baseline        # Save scores as regression baseline
+noetic-eval --check                # Fail if scores regress or baseline cases vanish
 ```
 
 Exit codes: `0` all cases passed (clean `--check`; no-baseline `--check` prints a notice and passes), `1` any failed/errored case, regression, missing baseline case, or unresolvable explicit file pattern, `2` usage error (unknown flag, invalid `--scope`/`--budget` value — never silently dropped).
@@ -230,8 +230,8 @@ describe(step, {
 
 Save and check:
 ```bash
-noetic test --save-baseline   # Save current scores
-noetic test --check           # Exit 1 if a score drops > threshold OR a baseline case is missing
+noetic-eval --save-baseline   # Save current scores
+noetic-eval --check           # Exit 1 if a score drops > threshold OR a baseline case is missing
 ```
 
 `--check` also fails (exit 1) when a case present in the baseline is absent from the run — deleting or renaming cases cannot silently green the gate. Suites without a saved baseline print a notice and pass.
@@ -273,7 +273,7 @@ Each `it()` block calls `ctx.execute(input)` and scores the result. Choose score
 ### Step 4: Run
 
 ```bash
-noetic test
+noetic-eval
 ```
 
 ### Running Evals as Tests

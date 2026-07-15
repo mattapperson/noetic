@@ -187,7 +187,7 @@ Scripts:
 
 `@noetic/eval` includes a baseline regression system (`saveBaseline`, `loadBaseline`, `compareToBaseline`). CI must use it:
 
-- **On PRs**: Run `noetic test --regression` if `.noetic/baselines/` exists; emit warning if scores degrade but do not block merge
+- **On PRs**: Run `noetic-eval --regression` if `.noetic/baselines/` exists; emit warning if scores degrade but do not block merge
 - **On merge to main**: Block if any baseline score regresses by more than the configured threshold
 
 Policy: score degradation is information on PRs; it is a blocker on main.

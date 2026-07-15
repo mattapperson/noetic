@@ -603,14 +603,14 @@ function checkRegression(
 
 ### `--check` Flag
 
-When `noetic test --check` is used:
+When `noetic-eval --check` is used:
 
 1. Run all eval cases.
 2. Load the baseline for each suite. A suite without a baseline prints a notice and is skipped (not failed).
 3. Compare results against the baseline in both directions (score drops AND missing baseline cases).
 4. Exit with code `1` if any regression is detected or any baseline case is missing from the run; print `REGRESSION`/`MISSING` lines per offending case.
 
-This is designed for CI — the repo's `ci.yml` runs `noetic test --check` as a hard gate on `main` (PRs downgrade the failure to a `::warning`).
+This is designed for CI — the repo's `ci.yml` runs `noetic-eval --check` as a hard gate on `main` (PRs downgrade the failure to a `::warning`).
 
 **Rationale:** Baselines decouple "what is good enough" from "what is the current score." A team can lock baselines at a known-good state and flag any degradation, even if the absolute scores are not perfect.
 
@@ -618,13 +618,19 @@ This is designed for CI — the repo's `ci.yml` runs `noetic test --check` as a 
 
 ## CLI
 
-### `noetic test` Command
+### `noetic-eval` Command
 
 The CLI entry point for evaluation. Discovers `.eval.ts` files and runs them.
+Published by `@noetic/eval` as the `noetic-eval` binary — it is deliberately
+NOT named `noetic`, which belongs to the Noetic CLI.
 
 ```
-noetic test [files...] [flags]
+noetic-eval [files...] [flags]
 ```
+
+A leading `test` subcommand is still accepted and ignored (`noetic-eval test
+--check` ≡ `noetic-eval --check`), preserving the historical `noetic test`
+invocation from when the CLI and eval framework shared one binary.
 
 ### Flags
 
@@ -679,7 +685,7 @@ A case "fails" when any scorer returns a value below `0.5` (configurable via `Ev
 ### Optimization via CLI
 
 ```
-noetic test -u [--scope prompts-only|flow-structure|full] [--budget 5.00] [files...]
+noetic-eval -u [--scope prompts-only|flow-structure|full] [--budget 5.00] [files...]
 ```
 
 Runs the optimization pipeline after evaluation. The `--scope` flag controls the optimization level (L1 `prompts-only`, L2 `flow-structure`, L3 `full`). With `--dry-run`, nothing is written back to source.
