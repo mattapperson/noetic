@@ -52,7 +52,7 @@ step.llm({
 
 **Generic-param order.** The signature is `step.llm<TMemory, I, O>`, NOT `<I, O>`. Writing `step.llm<string, unknown>(...)` silently sets `TMemory = string`, which yields misleading errors when the step is composed into a harness whose context memory is anything else. Either pass all three (`step.llm<MyMemory, string, string>(...)`) or pass none and let inference drive from the object literal.
 
-**Lazy params disable eval-optimizer rewrites.** `@noetic/eval`'s optimizer walks the step tree and swaps candidate strings into `instructions` / tool `name` / tool `description`. It skips fields whose value is a function because there is no way to substitute a string for a getter without dropping the getter's runtime logic. Use eager values for any field you want the optimizer to tune; reserve function-form only for fields that genuinely need per-execution context.
+**Lazy params disable eval-optimizer rewrites.** `@noetic-tools/eval`'s optimizer walks the step tree and swaps candidate strings into `instructions` / tool `name` / tool `description`. It skips fields whose value is a function because there is no way to substitute a string for a getter without dropping the getter's runtime logic. Use eager values for any field you want the optimizer to tune; reserve function-form only for fields that genuinely need per-execution context.
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All scripts run from the repo root unless noted.
 
 - `bun install` — install workspace deps (postinstall patches `@openrouter/agent`)
-- `bun test` — runs `@noetic-tools/types`, `@noetic-tools/memory`, `@noetic-tools/core`, `@noetic-tools/code-agent`, `@noetic/eval` suites **sequentially** (does NOT include `@noetic-tools/cli`)
+- `bun test` — runs `@noetic-tools/types`, `@noetic-tools/memory`, `@noetic-tools/core`, `@noetic-tools/code-agent`, `@noetic-tools/eval` suites **sequentially** (does NOT include `@noetic-tools/cli`)
 - `bun test:ci` — same plus coverage enforcement (diff gate from baseline)
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun scripts/check-export-tags.ts` — validates `@public` JSDoc tags on core's entry points
@@ -45,7 +45,7 @@ web (standalone — no workspace deps)
 - **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — one adapter per coding agent; each exports a factory (`claudeCode()` etc.) returning a `SubHarness`, backed by the vendor SDK as an optional peer dependency. Used via `step.claudeCode(...)` or a `claude-code` JSON workflow node.
 - **`@noetic-tools/code-agent`** — tool implementations, plugin registry, skills, tasks, LSP, git worktree integration.
 - **`@noetic-tools/cli`** — Ink-based TUI harness. Six internal layers per `specs/22-cli-architecture.md`: `foundations → infra → domain → orchestration → presentation → entry`.
-- **`@noetic/eval`** — eval framework, scorers, GEPA optimization, regression.
+- **`@noetic-tools/eval`** — eval framework, scorers, GEPA optimization, regression.
 - **`@noetic/plugin-*`**, **`@noetic/web`** — peer/consumer packages.
 
 `specs/` is the source of architectural truth. `specs/00-overview.md` has the package graph and the numbered specs (`01-step-type` through `22-cli-architecture`) each map to a concrete source directory (see `.claude/rules/sync-spec-code-docs.md` for the table). Runtime code must stay consistent with its spec.

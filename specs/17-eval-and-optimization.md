@@ -7,7 +7,7 @@
 
 ## Overview
 
-`@noetic/eval` provides scored evaluation and optimization for step compositions. It answers two questions:
+`@noetic-tools/eval` provides scored evaluation and optimization for step compositions. It answers two questions:
 
 1. **"How good is this agent?"** — Run a step against labeled or unlabeled examples, score the outputs, report metrics.
 2. **"Can this agent be better?"** — Discover tunable fields in the step tree, mutate them, evaluate, and write back improvements.
@@ -545,7 +545,7 @@ describe('vercel-agent-eval', { adapter: vercelAdapter, scorers: [answerRelevanc
 
 **Invariant:** Adapters must return `metadata.duration` — it is the only required metadata field. All other metadata fields are optional and scorers that depend on them gracefully degrade (return `{ value: 0, reason: 'missing metadata' }`).
 
-**Rationale:** The adapter layer means `@noetic/eval` is useful beyond the noetic ecosystem. Teams can adopt scored evaluation for any LLM application, then optionally migrate to `@noetic-tools/core` for the optimization features.
+**Rationale:** The adapter layer means `@noetic-tools/eval` is useful beyond the noetic ecosystem. Teams can adopt scored evaluation for any LLM application, then optionally migrate to `@noetic-tools/core` for the optimization features.
 
 ---
 
@@ -621,7 +621,7 @@ This is designed for CI — the repo's `ci.yml` runs `noetic-eval --check` as a 
 ### `noetic-eval` Command
 
 The CLI entry point for evaluation. Discovers `.eval.ts` files and runs them.
-Published by `@noetic/eval` as the `noetic-eval` binary — it is deliberately
+Published by `@noetic-tools/eval` as the `noetic-eval` binary — it is deliberately
 NOT named `noetic`, which belongs to the Noetic CLI.
 
 ```

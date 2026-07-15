@@ -116,13 +116,13 @@ The existing `@noetic-tools/core/adapters/node` subpath export is removed. Consu
                                                                                                       ↑
 browser/edge consumer  ──→  @noetic/platform-browser  ─────────────────────────────────────────────────┘
                                                                                                       ↑
-@noetic/eval  ────────────────────────────────────────────────────────────────────────────────────────┘
+@noetic-tools/eval  ────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - `@noetic-tools/core` has no dependency on either platform package.
 - Platform packages depend only on `@noetic-tools/core` (plus their runtime's built-ins and any declared peers).
 - Node-only consumers (`@noetic-tools/cli`, `@noetic-tools/code-agent`, `@noetic/plugin-*`) depend on `@noetic-tools/platform-node`.
-- Runtime-agnostic consumers (`@noetic/eval`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
+- Runtime-agnostic consumers (`@noetic-tools/eval`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
 - Browser consumers depend on `@noetic/platform-browser`.
 
 ## Sentrux Rules
@@ -188,7 +188,7 @@ Mechanical migration:
 1. Replace `from '@noetic-tools/core/adapters/node'` with `from '@noetic-tools/platform-node'` in every import.
 2. Add `@noetic-tools/platform-node` (or `@noetic/platform-browser`) to the package's `dependencies`.
 
-`@noetic-tools/code-agent` and `@noetic-tools/cli` migrate in lockstep with the package creation because they consume the Node adapters directly. `@noetic/eval` does not import Node adapters today; its migration is a documentation update only.
+`@noetic-tools/code-agent` and `@noetic-tools/cli` migrate in lockstep with the package creation because they consume the Node adapters directly. `@noetic-tools/eval` does not import Node adapters today; its migration is a documentation update only.
 
 ## Tree-shakability Guarantees
 

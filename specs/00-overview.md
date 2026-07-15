@@ -21,7 +21,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ```
 @noetic-tools/memory  →  @noetic-tools/types  ←  @noetic-tools/sub-harness
         ↑                        ↑                          ↑
-@noetic-tools/core  ←  @noetic/eval        @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
+@noetic-tools/core  ←  @noetic-tools/eval        @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
       ↑
       ├── @noetic-tools/platform-node
       └── @noetic/platform-browser
@@ -45,7 +45,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` memory layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/memory` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
 
-- **`@noetic/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
+- **`@noetic-tools/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
 
 ## Architecture
 
@@ -108,7 +108,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
             FsAdapter/ShellAdapter/SubprocessAdapter,
             NoeticErrorImpl, MemoryLayer contract
 
-── @noetic/eval ────────────────────────────────────────────────
+── @noetic-tools/eval ────────────────────────────────────────────────
                 17-eval-and-optimization
 ```
 

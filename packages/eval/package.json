@@ -1,5 +1,5 @@
 {
-  "name": "@noetic/eval",
+  "name": "@noetic-tools/eval",
   "version": "0.1.0",
   "type": "module",
   "description": "Eval framework for Noetic agents: the describe/it/scorer suite runner, built-in and custom scorers, regression baselines, and GEPA-backed prompt optimization.",
@@ -28,6 +28,11 @@
       "bun": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./adapters/field-mappings/*": {
+      "bun": "./src/adapters/field-mappings/*.ts",
+      "types": "./dist/adapters/field-mappings/*.d.ts",
+      "default": "./dist/adapters/field-mappings/*.js"
     },
     "./package.json": "./package.json"
   },

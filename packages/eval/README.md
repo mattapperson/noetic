@@ -1,4 +1,4 @@
-# @noetic/eval
+# @noetic-tools/eval
 
 Eval framework for [Noetic](https://github.com/mattapperson/noetic) agents.
 
@@ -19,7 +19,7 @@ real agents (`react`, `step`, any `Step`), so what you measure is what ships.
 ## Install
 
 ```bash
-bun add -d @noetic/eval
+bun add -d @noetic-tools/eval
 ```
 
 `optimize()`'s GEPA backend needs the optional peer `@ax-llm/ax`; install it only
@@ -33,7 +33,7 @@ bun add -d @ax-llm/ax
 
 ```ts
 import { react } from '@noetic-tools/core';
-import { describe, it, scorer } from '@noetic/eval';
+import { describe, it, scorer } from '@noetic-tools/eval';
 
 const agent = react({
   model: 'anthropic/claude-sonnet-4',

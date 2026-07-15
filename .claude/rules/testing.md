@@ -21,7 +21,7 @@ All scripting should be done in TypeScript.
 
 - Run `bun test --coverage` to generate a coverage report
 - Coverage is enforced as a diff gate (fail if per-file drops > 2pp from baseline)
-- Initial floors: `@noetic-tools/core` 85% branches, 80% lines/functions; `@noetic/eval` 75% all
+- Initial floors: `@noetic-tools/core` 85% branches, 80% lines/functions; `@noetic-tools/eval` 75% all
 - Branches threshold is set HIGHER than lines — control flow and error paths are where runtime bugs hide
 - Coverage excludes: `_helpers.ts`, `**/index.ts`, `**/cli/cli.ts`
 - Adapter tests: unit mock tests always run (included in coverage); live tests use `test.skipIf(!HAS_API_KEY)`

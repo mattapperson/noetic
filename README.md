@@ -14,7 +14,7 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 | Package | Description |
 |---------|-------------|
 | [`@noetic-tools/core`](packages/core) | Core framework — step primitives, agent harness, memory layers, patterns |
-| [`@noetic/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
+| [`@noetic-tools/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
 | [`@noetic/web`](packages/web) | Documentation site (Next.js + Fumadocs) |
 
 ## The Eight Primitives
@@ -108,17 +108,15 @@ Memory layers participate in execution via lifecycle hooks (`init`, `recall`, `s
 
 ## Evaluation
 
-The `@noetic/eval` package provides a `describe`/`it` API for scored evaluations and GEPA-based prompt optimization:
+The `@noetic-tools/eval` package provides a `describe`/`it` API for scored evaluations and GEPA-based prompt optimization:
 
 ```typescript
-import { describe, it } from '@noetic/eval';
-import { answerRelevancy, completeness } from '@noetic/eval/scorers';
+import { describe, it, scorer } from '@noetic-tools/eval';
 
-describe('my agent', { target: myAgent }, () => {
-  it('answers factual questions', {
-    input: { query: 'What is the capital of France?' },
-    scorers: [answerRelevancy(), completeness()],
-    threshold: 0.8,
+describe(myAgent, { objective: 'Answers factual questions', passThreshold: 0.8 }, () => {
+  it('answers factual questions', async (ctx) => {
+    const exec = await ctx.execute('What is the capital of France?');
+    await exec.score([scorer.answerRelevancy(), scorer.completeness()]);
   });
 });
 ```

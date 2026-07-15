@@ -20,7 +20,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "2.1.0",
+      "version": "2.2.1",
       "dependencies": {
         "@noetic-tools/memory": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -40,10 +40,10 @@
       ],
     },
     "packages/eval": {
-      "name": "@noetic/eval",
+      "name": "@noetic-tools/eval",
       "version": "0.1.0",
       "bin": {
-        "noetic": "src/cli/cli.ts",
+        "noetic-eval": "./dist/cli/cli.js",
       },
       "dependencies": {
         "@noetic-tools/core": "workspace:*",
@@ -202,7 +202,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -250,7 +250,7 @@
 
     "@ampproject/remapping": ["@ampproject/remapping@2.3.0", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.5", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw=="],
 
-    "@ax-llm/ax": ["@ax-llm/ax@22.0.3", "", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "ax": "cli/index.mjs" } }, "sha512-zD1l7fsBHfViXAI3QMljs3VCkQrGWsCYfJxZz7NmaGdzz/UusflKomGlyQ9gfRMVAReIZNZ30iHBwIagE7X9dw=="],
+    "@ax-llm/ax": ["@ax-llm/ax@23.0.1", "", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "ax": "cli/index.mjs" } }, "sha512-9glLBupY1XthY/WQGaUa3fK5BYYKTqc07Dxf4ZQmt0PDvX+s0XGyiua1jNnJGUlUeROyKN8k5IuVM84VXgS6Hw=="],
 
     "@biomejs/biome": ["@biomejs/biome@2.4.13", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.13", "@biomejs/cli-darwin-x64": "2.4.13", "@biomejs/cli-linux-arm64": "2.4.13", "@biomejs/cli-linux-arm64-musl": "2.4.13", "@biomejs/cli-linux-x64": "2.4.13", "@biomejs/cli-linux-x64-musl": "2.4.13", "@biomejs/cli-win32-arm64": "2.4.13", "@biomejs/cli-win32-x64": "2.4.13" }, "bin": { "biome": "bin/biome" } }, "sha512-gLXOwkOBBg0tr7bDsqlkIh4uFeKuMjxvqsrb1Tukww1iDmHcfr4Uu8MoQxp0Rcte+69+osRNWXwHsu/zxT6XqA=="],
 
@@ -420,6 +420,8 @@
 
     "@noetic-tools/core": ["@noetic-tools/core@workspace:packages/core"],
 
+    "@noetic-tools/eval": ["@noetic-tools/eval@workspace:packages/eval"],
+
     "@noetic-tools/memory": ["@noetic-tools/memory@workspace:packages/memory"],
 
     "@noetic-tools/openui": ["@noetic-tools/openui@workspace:packages/openui"],
@@ -437,8 +439,6 @@
     "@noetic-tools/sub-harness-pi": ["@noetic-tools/sub-harness-pi@workspace:packages/sub-harness-pi"],
 
     "@noetic-tools/types": ["@noetic-tools/types@workspace:packages/types"],
-
-    "@noetic/eval": ["@noetic/eval@workspace:packages/eval"],
 
     "@noetic/platform-browser": ["@noetic/platform-browser@workspace:packages/platform-browser"],
 

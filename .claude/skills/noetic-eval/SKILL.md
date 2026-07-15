@@ -1,11 +1,11 @@
 ---
 name: noetic-eval
-description: This skill provides guidance for writing evaluations, scored tests, and optimizations for Noetic agents using the @noetic/eval package. Use when creating .eval.ts files, defining scorers, running noetic-eval, or optimizing step compositions. Triggers include mentions of "eval", "scorer", "benchmark", "evaluate", "noetic-eval", "noetic test", "optimize prompts", "GEPA", "baseline", "regression", or any @noetic/eval API usage.
+description: This skill provides guidance for writing evaluations, scored tests, and optimizations for Noetic agents using the @noetic-tools/eval package. Use when creating .eval.ts files, defining scorers, running noetic-eval, or optimizing step compositions. Triggers include mentions of "eval", "scorer", "benchmark", "evaluate", "noetic-eval", "noetic test", "optimize prompts", "GEPA", "baseline", "regression", or any @noetic-tools/eval API usage.
 ---
 
-# Evaluating Agents with @noetic/eval
+# Evaluating Agents with @noetic-tools/eval
 
-`@noetic/eval` provides scored evaluation and optimization for Noetic step compositions. It lets you define test suites that execute steps, score their outputs, and optionally optimize prompts via GEPA.
+`@noetic-tools/eval` provides scored evaluation and optimization for Noetic step compositions. It lets you define test suites that execute steps, score their outputs, and optionally optimize prompts via GEPA.
 
 ## Core Concepts
 
@@ -14,7 +14,7 @@ description: This skill provides guidance for writing evaluations, scored tests,
 Evals are organized into suites via `describe()`. Each suite wraps an `AgentHarness.run` call (step + harness config) and evaluates it against an objective:
 
 ```typescript
-import { describe, it, scorer } from '@noetic/eval';
+import { describe, it, scorer } from '@noetic-tools/eval';
 import { react } from '@noetic-tools/core';
 
 const agent = react({
@@ -125,7 +125,7 @@ All accept optional `{ model?, callModel? }` config:
 ### Custom Scorer Pipeline
 
 ```typescript
-import { createScorer } from '@noetic/eval';
+import { createScorer } from '@noetic-tools/eval';
 
 const myScorer = createScorer({ id: 'format-check' })
   .preprocess(({ execution }) => String(execution.output))
@@ -239,8 +239,8 @@ noetic-eval --check           # Exit 1 if a score drops > threshold OR a baselin
 ## Adapters (Third-Party SDKs)
 
 ```typescript
-import { createAdapter } from '@noetic/eval';
-import { VERCEL_AI_MAPPINGS } from '@noetic/eval/adapters/field-mappings/vercel-ai';
+import { createAdapter } from '@noetic-tools/eval';
+import { VERCEL_AI_MAPPINGS } from '@noetic-tools/eval/adapters/field-mappings/vercel-ai';
 
 const adapted = createAdapter({
   provider: 'vercel-ai',
@@ -253,7 +253,7 @@ const adapted = createAdapter({
 
 ### Step 1: Create the File
 
-Create `<name>.eval.ts` anywhere in your project. Import your agent step and `@noetic/eval`.
+Create `<name>.eval.ts` anywhere in your project. Import your agent step and `@noetic-tools/eval`.
 
 ### Step 2: Define the Suite
 
@@ -281,7 +281,7 @@ noetic-eval
 To run eval suites as part of `bun test`, import the `.eval.ts` file in a test and use `runAllSuites`:
 
 ```typescript
-import { clearSuites, getSuites, runAllSuites } from '@noetic/eval';
+import { clearSuites, getSuites, runAllSuites } from '@noetic-tools/eval';
 
 clearSuites();
 await import('./my-agent.eval');

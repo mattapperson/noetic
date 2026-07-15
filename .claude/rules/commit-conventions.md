@@ -37,7 +37,7 @@ Use the package name as scope when the change is package-specific:
 - `feat(core):` — triggers `@noetic-tools/core` npm release
 - `feat(cli):` — for `@noetic-tools/cli` changes
 - `feat(code-agent):` — for `@noetic-tools/code-agent` changes
-- `feat(eval):` — for `@noetic/eval` changes
+- `feat(eval):` — for `@noetic-tools/eval` changes
 - `chore(web):` — for website changes
 
 Omit scope for cross-cutting changes: `refactor: split Node adapters`

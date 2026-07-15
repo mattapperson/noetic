@@ -1,4 +1,4 @@
-# @noetic/eval API Reference
+# @noetic-tools/eval API Reference
 
 ## Runner API
 
@@ -328,7 +328,7 @@ interface AdapterConfig {
 ## Running Evals in bun test
 
 ```typescript
-import { clearSuites, getSuites, runAllSuites } from '@noetic/eval';
+import { clearSuites, getSuites, runAllSuites } from '@noetic-tools/eval';
 
 // Each test should clearSuites() first (global registry is shared)
 clearSuites();

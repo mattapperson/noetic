@@ -543,7 +543,7 @@ jobs:
   # is `@noetic-tools/*`). NPM_TOKEN must have publish rights on the `noetic` npm
   # org, and that org must exist, or the publish step 404s.
   eval:
-    name: Release @noetic/eval
+    name: Release @noetic-tools/eval
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: openui
@@ -573,7 +573,7 @@ jobs:
       - name: Typecheck
         run: bun --cwd=packages/eval run typecheck
 
-      # @noetic/eval depends on @noetic-tools/core. Build the core chain's dists
+      # @noetic-tools/eval depends on @noetic-tools/core. Build the core chain's dists
       # first so eval's own build (run by `prepublishOnly`) and the Node ESM smoke
       # test can resolve them via node_modules — tsconfig.build.json drops the
       # `bun` condition, so src/*.ts is not resolvable at build time.

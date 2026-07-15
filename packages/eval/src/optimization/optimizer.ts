@@ -127,7 +127,7 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
   }
 
   /* Loaded on demand: gepa-bridge pulls in `@ax-llm/ax`, an OPTIONAL peer
-   * dependency. A static import would make every `@noetic/eval` consumer —
+   * dependency. A static import would make every `@noetic-tools/eval` consumer —
    * including suites that only use describe/it/scorer — need it installed. */
   const { optimizeWithGepa } = await import('./gepa-bridge');
   const result = await optimizeWithGepa({

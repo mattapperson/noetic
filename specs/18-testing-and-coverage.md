@@ -7,7 +7,7 @@
 
 ## Overview
 
-This spec defines the testing strategy, coverage policy, and CI requirements for the Noetic monorepo. It covers `@noetic-tools/core`, `@noetic/eval`, and `@noetic/web`.
+This spec defines the testing strategy, coverage policy, and CI requirements for the Noetic monorepo. It covers `@noetic-tools/core`, `@noetic-tools/eval`, and `@noetic/web`.
 
 ---
 
@@ -22,7 +22,7 @@ Four tiers with explicit scope constraints:
 | Functional | Full public API in-process | No network; scripted model via `createScriptedCallModel` | core, eval |
 | E2E | Running application | HTTP/build only | web |
 
-`@noetic-tools/core` and `@noetic/eval` have no E2E tier.
+`@noetic-tools/core` and `@noetic-tools/eval` have no E2E tier.
 `@noetic/web` has no unit/integration tier.
 
 ### Functional Tier Requirements
@@ -64,7 +64,7 @@ branches: 85   // HIGHEST: runtime has complex control flow, error model has 10 
 lines: 80
 functions: 80
 
-// @noetic/eval — lower floor: CLI + some adapters require live LLM
+// @noetic-tools/eval — lower floor: CLI + some adapters require live LLM
 branches: 75
 lines: 75
 functions: 75
@@ -185,7 +185,7 @@ Scripts:
 
 ## Eval Regression CI Gate
 
-`@noetic/eval` includes a baseline regression system (`saveBaseline`, `loadBaseline`, `compareToBaseline`). CI must use it:
+`@noetic-tools/eval` includes a baseline regression system (`saveBaseline`, `loadBaseline`, `compareToBaseline`). CI must use it:
 
 - **On PRs**: Run `noetic-eval --regression` if `.noetic/baselines/` exists; emit warning if scores degrade but do not block merge
 - **On merge to main**: Block if any baseline score regresses by more than the configured threshold
