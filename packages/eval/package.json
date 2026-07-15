@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/eval",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Eval framework for Noetic agents: the describe/it/scorer suite runner, built-in and custom scorers, regression baselines, and GEPA-backed prompt optimization.",
   "license": "Apache-2.0",
