@@ -14,3 +14,8 @@ packages/web/next-env.d.ts
 *.tsbuildinfo
 examples/skippy/.env
 .noetic/tasks/
+
+# Worktrees and agent artifacts
+.worktrees/
+.agents/
+.claude/
