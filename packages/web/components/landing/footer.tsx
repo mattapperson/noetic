@@ -108,6 +108,12 @@ export function Footer(): ReactNode {
               gap: '24px',
             }}
           >
+            <Link href="/platform" style={NAV_LINK_STYLE}>
+              Platform
+            </Link>
+            <Link href="/code" style={NAV_LINK_STYLE}>
+              Code
+            </Link>
             <Link href="/docs" style={NAV_LINK_STYLE}>
               Docs
             </Link>
