@@ -12,6 +12,16 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
         url: '/',
         children: <MobileSectionTitle />,
       }}
+      links={[
+        {
+          text: 'Platform',
+          url: '/platform',
+        },
+        {
+          text: 'Code',
+          url: '/code',
+        },
+      ]}
       sidebar={{
         banner: <DocsIndexLink />,
       }}
