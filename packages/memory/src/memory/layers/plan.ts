@@ -313,13 +313,21 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         },
       }),
 
-      setPlanTree: layerFn<{ tree: FlowNode }, string, PlanState>({
+      setPlanTree: layerFn<
+        {
+          tree: FlowNode;
+        },
+        string,
+        PlanState
+      >({
         description:
           'Set the execution plan tree. Pass { "tree": <FlowNode> }, where FlowNode is a discriminated union with kind: "llm" | "subagent" | "fork" | "spawn" | "sequence" and every node has a unique "id". Structural nodes (sequence, fork, spawn) nest child FlowNodes; leaf nodes (llm, subagent) carry execution instructions.',
         // Wrapped in an object so the tool exposes a top-level object schema — a
         // bare discriminated union is not a valid tool-parameter shape for the
         // OpenAI/Anthropic tool APIs and is rejected over the wire.
-        input: z.object({ tree: FlowSchema }),
+        input: z.object({
+          tree: FlowSchema,
+        }),
         output: z.string(),
         execute: async (args, state) => {
           if (state.phase !== PlanPhase.Planning) {
