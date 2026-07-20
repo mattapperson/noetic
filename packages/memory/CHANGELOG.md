@@ -1,3 +1,7 @@
+## @noetic-tools/memory-v1.0.2 (2026-07-20)
+
+* fix(memory): wrap plan/setPlanTree input in an object ([8f6f0ba](https://github.com/mattapperson/noetic/commit/8f6f0ba))
+
 ## @noetic-tools/memory-v1.0.1 (2026-06-10)
 
 * fix: skip uninitialized layers, strip bun exports ([3c83c57](https://github.com/mattapperson/noetic/commit/3c83c57))
