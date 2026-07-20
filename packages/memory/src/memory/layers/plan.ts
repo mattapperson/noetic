@@ -135,7 +135,7 @@ function recallPlanning(state: PlanState, additionalInstructions?: string): stri
     '1. **Initial Understanding** — Read code and gather context. To parallelise exploration, use the `agent` tool to spawn bounded read-only sub-agents; up to 3 in parallel. Each sub-agent returns a focused report.',
     '2. **Design** — Synthesise findings. Optionally spawn planning sub-agents (1–3 in parallel) to draft alternative implementation approaches and surface trade-offs.',
     '3. **Review** — Read the critical files identified by your subagents directly so you understand them first-hand. If anything is ambiguous, ask the user a focused question.',
-    '4. **Final Plan** — Write the PRD via `plan/updatePrd`. Lead with a **Context** section (why this change), then your single recommended approach, the paths of files to modify, existing functions/utilities to reuse, and a **Verification** section. Then call `plan/setPlanTree` with a JSON noetic flow built from the existing step primitives (`step.llm`, `step.branch`, `step.fork`, `step.spawn`, `step.loop`) — tool refs by name string.',
+    '4. **Final Plan** — Write the PRD via `plan/updatePrd`. Lead with a **Context** section (why this change), then your single recommended approach, the paths of files to modify, existing functions/utilities to reuse, and a **Verification** section. Then call `plan/setPlanTree` with `{ "tree": <FlowNode> }` — a JSON noetic flow built from the step primitives (`step.llm`, `step.branch`, `step.fork`, `step.spawn`, `step.loop`); every node needs a unique `id`.',
     '5. **Exit** — Call `plan/exitPlanMode` with `{ action: "execute" }` to request approval. The user must accept before execution begins; if they reject, you stay in Plan Mode and may revise.',
     '',
     '## Available actions',
@@ -313,10 +313,21 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         },
       }),
 
-      setPlanTree: layerFn<FlowNode, string, PlanState>({
+      setPlanTree: layerFn<
+        {
+          tree: FlowNode;
+        },
+        string,
+        PlanState
+      >({
         description:
-          'Set the execution plan tree. Input must be a valid FlowNode — a discriminated union with kind: "llm" | "subagent" | "fork" | "spawn" | "sequence". Structural nodes (sequence, fork, spawn) nest child FlowNodes; leaf nodes (llm, subagent) carry execution instructions.',
-        input: FlowSchema,
+          'Set the execution plan tree. Pass { "tree": <FlowNode> }, where FlowNode is a discriminated union with kind: "llm" | "subagent" | "fork" | "spawn" | "sequence" and every node has a unique "id". Structural nodes (sequence, fork, spawn) nest child FlowNodes; leaf nodes (llm, subagent) carry execution instructions.',
+        // Wrapped in an object so the tool exposes a top-level object schema — a
+        // bare discriminated union is not a valid tool-parameter shape for the
+        // OpenAI/Anthropic tool APIs and is rejected over the wire.
+        input: z.object({
+          tree: FlowSchema,
+        }),
         output: z.string(),
         execute: async (args, state) => {
           if (state.phase !== PlanPhase.Planning) {
@@ -325,7 +336,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
               state,
             };
           }
-          if (!validateTreeDepth(args, maxTreeDepth)) {
+          if (!validateTreeDepth(args.tree, maxTreeDepth)) {
             return {
               result: `Plan tree exceeds maximum depth of ${maxTreeDepth}.`,
               state,
@@ -335,7 +346,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
             result: 'Plan tree set successfully. Call plan/exitPlanMode to begin execution.',
             state: {
               ...state,
-              planTree: args,
+              planTree: args.tree,
             },
           };
         },
