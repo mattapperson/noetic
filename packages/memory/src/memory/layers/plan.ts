@@ -99,6 +99,22 @@ function createDefaultState(): PlanState {
   };
 }
 
+/**
+ * LLM tool calls frequently stringify a nested-object argument. Accept the plan
+ * tree as either a native object or a JSON string, parsing the string so the
+ * FlowSchema validation sees an object.
+ */
+function coerceFlowTree(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 function validateTreeDepth(node: FlowNode, maxDepth: number): boolean {
   return flowDepth(node) <= maxDepth;
 }
@@ -326,7 +342,7 @@ export function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState> {
         // bare discriminated union is not a valid tool-parameter shape for the
         // OpenAI/Anthropic tool APIs and is rejected over the wire.
         input: z.object({
-          tree: FlowSchema,
+          tree: z.preprocess(coerceFlowTree, FlowSchema),
         }),
         output: z.string(),
         execute: async (args, state) => {
