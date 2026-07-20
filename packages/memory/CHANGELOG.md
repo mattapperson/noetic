@@ -1,3 +1,7 @@
+## @noetic-tools/memory-v1.0.3 (2026-07-20)
+
+* fix(memory): accept plan/setPlanTree tree as object or JSON string ([25a4a72](https://github.com/mattapperson/noetic/commit/25a4a72))
+
 ## @noetic-tools/memory-v1.0.2 (2026-07-20)
 
 * fix(memory): wrap plan/setPlanTree input in an object ([8f6f0ba](https://github.com/mattapperson/noetic/commit/8f6f0ba))
