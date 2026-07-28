@@ -1,0 +1,15 @@
+# Code owners for Noetic.
+#
+# Owners listed here are automatically requested for review when a matching path
+# changes. Combined with branch protection ("Require review from Code Owners"),
+# this makes owner review mandatory before merge. See CONTRIBUTING.md.
+#
+# Order matters: the last matching pattern for a given file wins.
+
+# Default owners for everything in the repo.
+*       @mattapperson @impressiver
+
+# Add per-area owners below as the contributor base grows, e.g.:
+# /packages/core/   @mattapperson @impressiver
+# /packages/eval/   @some-maintainer
+# /.github/         @mattapperson

@@ -2,6 +2,15 @@
   "name": "noetic",
   "private": true,
   "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
   "workspaces": [
     "packages/*"
   ],

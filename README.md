@@ -141,6 +141,15 @@ Detailed specifications live in [`specs/`](specs/), covering every primitive, th
 
 The specs are consumed by [SpecBuilt](https://github.com/mattapperson/spec-built), which automatically implements new features and modifies existing code to keep the implementation aligned with the specs.
 
+## Contributing
+
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup,
+the Developer Certificate of Origin (DCO) sign-off requirement, and the PR process.
+Please also read our [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). To report a security
+vulnerability, follow [`SECURITY.md`](SECURITY.md). Common questions are answered in the
+[FAQ](docs/FAQ.md).
+
 ## License
 
-MIT
+Licensed under the [Apache License, Version 2.0](LICENSE). See [`NOTICE`](NOTICE) for
+attribution.

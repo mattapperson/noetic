@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a defect in Noetic
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please search
+        [existing issues](https://github.com/mattapperson/noetic/issues) first to
+        avoid duplicates. For security vulnerabilities, do **not** open an issue —
+        follow [SECURITY.md](https://github.com/mattapperson/noetic/blob/main/SECURITY.md).
+  - type: dropdown
+    id: package
+    attributes:
+      label: Affected package
+      description: Which package does this affect?
+      options:
+        - "@noetic-tools/core"
+        - "@noetic-tools/types"
+        - "@noetic-tools/memory"
+        - "@noetic-tools/eval"
+        - "@noetic-tools/cli"
+        - "@noetic-tools/code-agent"
+        - "sub-harness / sub-harness-*"
+        - "@noetic-tools/openui"
+        - "@noetic/web (docs site)"
+        - "Other / not sure"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version (or git commit SHA if building from source).
+      placeholder: "e.g. @noetic-tools/core 3.2.0, or commit 4d2f2a3"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime / environment
+      description: Bun version and OS.
+      placeholder: "e.g. Bun 1.3.0, macOS 15.5"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal, self-contained reproduction. Code snippets welcome.
+      placeholder: |
+        1. Compose this step ...
+        2. Run the harness with ...
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened, including full error output/stack traces.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — logs, screenshots, related issues.
+    validations:
+      required: false

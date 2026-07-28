@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea or enhancement for Noetic
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement! Please search
+        [existing issues](https://github.com/mattapperson/noetic/issues) first.
+        For larger design changes, note that `specs/` is the source of
+        architectural truth — substantial features usually start with a spec.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this solve? What are you trying to do that's hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the API, behavior, or design you'd like. Sketch code if helpful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you've thought about and why you set them aside.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+    validations:
+      required: false
