@@ -103,53 +103,57 @@ async function gh(
   };
 }
 
-async function printCurrentChecks(): Promise<void> {
+function fail(message: string): never {
+  console.error(message);
+  process.exit(1);
+}
+
+async function fetchCheckNames(): Promise<string[]> {
   const res = await gh([
     'api',
     `repos/${OWNER}/${REPO}/commits/${BRANCH}/check-runs`,
     '--jq',
     '.check_runs[].name',
   ]);
-  const names = res.ok
-    ? [
-        ...new Set(res.out.split('\n').filter(Boolean)),
-      ]
-    : [];
-  console.log('\nStatus checks currently reported on the latest `main` commit:');
-  if (names.length === 0) {
-    console.log('  (none found — has CI run on main yet? names must match exactly)');
-    return;
+  if (!res.ok) {
+    return [];
   }
-  for (const name of names) {
-    const required = REQUIRED_STATUS_CHECKS.includes(name);
-    console.log(`  ${required ? '✔ (required)' : '  '} ${name}`);
-  }
+  return [
+    ...new Set(res.out.split('\n').filter(Boolean)),
+  ];
 }
 
-async function main(): Promise<void> {
-  const apply = process.argv.includes('--apply');
+function markChecks(names: string[]): string {
+  if (names.length === 0) {
+    return '  (none found — has CI run on main yet? names must match exactly)';
+  }
+  return names
+    .map((name) => `  ${REQUIRED_STATUS_CHECKS.includes(name) ? '✔ (required)' : '  '} ${name}`)
+    .join('\n');
+}
 
+async function printCurrentChecks(): Promise<void> {
+  const names = await fetchCheckNames();
+  console.log('\nStatus checks currently reported on the latest `main` commit:');
+  console.log(markChecks(names));
+}
+
+async function ensureAuthenticated(): Promise<void> {
   const auth = await gh([
     'auth',
     'status',
   ]);
   if (!auth.ok) {
-    console.error('gh is not authenticated. Run `gh auth login` first.');
-    process.exit(1);
+    fail('gh is not authenticated. Run `gh auth login` first.');
   }
+}
 
-  console.log(`Target: ${OWNER}/${REPO} @ ${BRANCH}`);
-  console.log('\nProtection payload:');
-  console.log(JSON.stringify(PAYLOAD, null, 2));
+function printDryRunNotice(): void {
+  console.log('\nDry run only. Re-run with `--apply` to write this protection rule.');
+  console.log('Before applying, confirm every required check above is a real, exact name.');
+}
 
-  await printCurrentChecks();
-
-  if (!apply) {
-    console.log('\nDry run only. Re-run with `--apply` to write this protection rule.');
-    console.log('Before applying, confirm every required check above is a real, exact name.');
-    return;
-  }
-
+async function applyProtection(): Promise<void> {
   console.log('\nApplying branch protection...');
   const res = await gh(
     [
@@ -162,13 +166,27 @@ async function main(): Promise<void> {
     ],
     JSON.stringify(PAYLOAD),
   );
-
   if (!res.ok) {
-    console.error('Failed to apply branch protection:\n' + res.out);
-    process.exit(1);
+    fail('Failed to apply branch protection:\n' + res.out);
   }
   console.log('Branch protection applied. ✔');
   console.log(`Verify: gh api repos/${OWNER}/${REPO}/branches/${BRANCH}/protection`);
+}
+
+async function main(): Promise<void> {
+  const apply = process.argv.includes('--apply');
+  await ensureAuthenticated();
+
+  console.log(`Target: ${OWNER}/${REPO} @ ${BRANCH}`);
+  console.log('\nProtection payload:');
+  console.log(JSON.stringify(PAYLOAD, null, 2));
+  await printCurrentChecks();
+
+  if (!apply) {
+    printDryRunNotice();
+    return;
+  }
+  await applyProtection();
 }
 
 await main();
