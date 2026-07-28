@@ -16,6 +16,9 @@ reporting:
 
 This creates a private channel visible only to you and the maintainers.
 
+If you are unable to use GitHub's private reporting, you can instead email
+**security@noetic.tools** with the same details.
+
 You should receive an acknowledgement within a few business days. We will work
 with you to understand and validate the issue, prepare a fix, and coordinate
 disclosure. Please give us a reasonable window to release a fix before any
