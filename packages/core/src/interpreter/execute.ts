@@ -11,6 +11,8 @@ import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import { DetachedHandleImpl } from '../runtime/detached-handle';
+import type { StepLedger } from '../runtime/durable/step-ledger';
+import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import {
   executeLLM,
   executeProvide,
@@ -173,6 +175,86 @@ export async function executeNoAdapter<TMemory, I, O>(
   }
 }
 
+/**
+ * Resume path: when a previous run recorded this exact step at `ledgerPath`,
+ * replay its output instead of re-running. Held as a helper (rather than inline
+ * in `execute`) so the resume branch stays flat: it pops the frontier itself —
+ * the caller returns before the normal `leaveStep` runs — and emits
+ * `step_replayed`. Returns `{ hit: false }` when there is nothing to replay so
+ * the caller dispatches the step normally.
+ */
+function replayFromLedger<TMemory, I, O>(opts: {
+  ledger: StepLedger | undefined;
+  ledgerPath: string | undefined;
+  impl: ContextImpl | null;
+  step: Step<TMemory, I, O>;
+  broadcaster: EventBroadcaster | undefined;
+  agentName: string;
+}):
+  | {
+      hit: true;
+      output: O;
+    }
+  | {
+      hit: false;
+    } {
+  const { ledger, ledgerPath, impl, step, broadcaster, agentName } = opts;
+  if (!ledger || ledgerPath === undefined || ledger.isEmpty) {
+    return {
+      hit: false,
+    };
+  }
+  const replayed = ledger.take(ledgerPath, {
+    id: step.id,
+    kind: step.kind,
+  });
+  if (!replayed) {
+    return {
+      hit: false,
+    };
+  }
+  if (impl && step.id.length > 0) {
+    impl.leaveStep(step.id);
+  }
+  emitFrameworkEvent({
+    broadcaster,
+    agentName,
+    eventType: 'step_replayed',
+    data: {
+      stepId: step.id,
+      kind: step.kind,
+    },
+  });
+  return {
+    hit: true,
+    output: frameworkCast<O>(replayed.output),
+  };
+}
+
+/**
+ * Record a completed step's output so a resumed run replays it rather than
+ * re-executing. A no-op without a ledger or ledger path. Only successes reach
+ * here — a step that threw skips this call in `execute` and runs again on resume.
+ */
+async function recordToLedger<TMemory, I, O>(opts: {
+  ledger: StepLedger | undefined;
+  ledgerPath: string | undefined;
+  step: Step<TMemory, I, O>;
+  output: O;
+}): Promise<void> {
+  const { ledger, ledgerPath, step, output } = opts;
+  if (!ledger || ledgerPath === undefined) {
+    return;
+  }
+  await ledger.record({
+    path: ledgerPath,
+    stepId: step.id,
+    kind: step.kind,
+    output,
+    completedAt: new Date().toISOString(),
+  });
+}
+
 //#endregion
 
 /**
@@ -244,30 +326,21 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   }
 
   /* Resume: a previous run that completed this exact step replays its recorded
-   * output instead of re-running it. Captured before dispatch and held for the
-   * record below, because `leaveStep` pops the path on the way out. */
+   * output instead of re-running it. `ledgerPath`/`ledger` are captured before
+   * dispatch and reused by the record below, because `leaveStep` pops the path
+   * on the way out. */
   const ledgerPath = impl && step.id.length > 0 ? impl.currentPath() : undefined;
   const ledger = impl?.ledger;
-  if (ledger && ledgerPath !== undefined && !ledger.isEmpty) {
-    const replayed = ledger.take(ledgerPath, {
-      id: step.id,
-      kind: step.kind,
-    });
-    if (replayed) {
-      if (impl && step.id.length > 0) {
-        impl.leaveStep(step.id);
-      }
-      emitFrameworkEvent({
-        broadcaster,
-        agentName,
-        eventType: 'step_replayed',
-        data: {
-          stepId: step.id,
-          kind: step.kind,
-        },
-      });
-      return frameworkCast<O>(replayed.output);
-    }
+  const replay = replayFromLedger({
+    ledger,
+    ledgerPath,
+    impl,
+    step,
+    broadcaster,
+    agentName,
+  });
+  if (replay.hit) {
+    return replay.output;
   }
 
   let result: O;
@@ -347,15 +420,12 @@ export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>
   /* Record the completed step so a resumed run replays this output rather than
    * re-running the step. Only successes are recorded: a step that threw must run
    * again. */
-  if (ledger && ledgerPath !== undefined) {
-    await ledger.record({
-      path: ledgerPath,
-      stepId: step.id,
-      kind: step.kind,
-      output: result,
-      completedAt: new Date().toISOString(),
-    });
-  }
+  await recordToLedger({
+    ledger,
+    ledgerPath,
+    step,
+    output: result,
+  });
 
   /* Durability boundary (spec 23): snapshot after each completed step, so a crash
    * lands on a checkpoint that includes the item-log and layer-state mutations this
