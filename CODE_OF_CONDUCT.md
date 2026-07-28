@@ -59,12 +59,11 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-**[INSERT CONTACT METHOD]**.
+reported to the community leaders responsible for enforcement by
+[opening a new issue](https://github.com/mattapperson/noetic/issues/new/choose).
 
-> Maintainers: replace the placeholder above with a monitored contact (for
-> example a dedicated `conduct@` address or a private reporting channel) before
-> the first public release.
+> Note: GitHub issues are public. For sensitive matters, please email
+> **security@noetic.tools** instead — it reaches the maintainers privately.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
