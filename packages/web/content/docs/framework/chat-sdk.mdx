@@ -1,0 +1,95 @@
+---
+title: Chat SDK Integration
+description: Run a Noetic agent as the brain of a multi-platform chat bot with @noetic-tools/chat-sdk.
+---
+
+`@noetic-tools/chat-sdk` binds an agent harness to [Chat SDK](https://chat-sdk.dev) (npm package `chat`), the multi-platform bot library for Slack, Teams, Google Chat, Discord, Telegram, Linear, and more. One handler wires the loop:
+
+```ts validate=none
+import { Chat } from "chat";
+import { noeticAgent } from "@noetic-tools/chat-sdk";
+
+const chat = new Chat({ adapters: [...], state: redis() });
+
+chat.onSubscribedMessage(noeticAgent({ harness, historyLimit: 20 }));
+```
+
+Per message, `noeticAgent`:
+
+1. **Seeds history on first contact** — platform messages convert to Noetic items (`toItems`) and land in the harness session via `seedSessionHistory`. The bot's own messages become assistant items; everyone else becomes user items with `userName:` attribution and attachment parts.
+2. **Executes a turn** — the triggering message is enqueued with a `messageId` that correlates the turn.
+3. **Streams the reply** — `streamToChatChunks` translates the harness event stream into Chat SDK chunks: text deltas stream as markdown, tool calls render as native task cards (`task_update`) on platforms that support them, and the stream terminates at the turn boundary so `thread.post()` resolves.
+
+`chat` is an optional peer dependency: the core loop uses structural mirrors of the few shapes it touches (pinned by a compile-time test), and `chatTools()` imports `chat/ai` lazily.
+
+## Options
+
+```ts validate=none
+noeticAgent({
+  harness,                       // ChatHarness — any AgentHarness satisfies it
+  historyLimit: 20,              // messages fetched to seed a thread; 0 disables
+  history: store,                // durable history store (see Persistence)
+  deliveryMode: "between-rounds", // how mid-generation messages land
+  threadId: (t) => `slack:${t.id}`,
+  seed: { formatMessage, isAssistant }, // conversion overrides
+  taskTitle: (tool) => `Running ${tool}`,
+  onError: (err, thread) => log(err),
+});
+```
+
+## Chat tools
+
+`chatTools()` wraps Chat SDK's AI tools (post, DM, react, edit, delete, subscriptions) as Noetic tools. It needs the `chat` and `ai` peers installed:
+
+```ts validate=none
+import { chatTools } from "@noetic-tools/chat-sdk";
+
+const tools = await chatTools({
+  chat,
+  requireApproval: { postMessage: false }, // per-tool override
+});
+```
+
+Approval defaults follow the vendor: Chat SDK ships its write tools gated, and the wrapper keeps them gated unless `requireApproval` explicitly says otherwise. `fromAiSdkTool(name, aiTool)` is the general wrapper behind it — it adapts any AI SDK tool, preserving its zod input schema.
+
+## Approval gates
+
+Gated tools park on the external-channel approval flow instead of running. Subscribe **once per harness** under the never-closed `APPROVAL_SCOPE` — queue delivery is competing-consumer, so a second subscriber would steal requests — and route each card by the request's `threadId`:
+
+```ts validate=none
+import { APPROVAL_SCOPE, approvalRequests, resolveApproval } from "@noetic-tools/chat-sdk";
+
+// One observer per harness, alive across turns; `break` ends it.
+for await (const request of harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)) {
+  const thread = await chat.getThread(request.threadId);
+  await thread.post(approvalCard(request)); // carries request.requestId in the action
+}
+
+// The button click routes the decision back in. Returns false (never throws)
+// for stale clicks after the tool already timed out.
+resolveApproval({
+  harness,
+  decision: { requestId: action.value, approved: true },
+});
+```
+
+A rejection or the 5-minute timeout surfaces to the model as a tool error with the reason; each waiting tool filters the decision broadcast by its own `requestId`, so concurrent gated calls never cross wires.
+
+## Persistence
+
+`createChatHistoryStore(state)` adapts any key-value store — including the same Redis/Postgres backing a Chat SDK state adapter — into a durable history store:
+
+```ts validate=none
+import { createChatHistoryStore } from "@noetic-tools/chat-sdk";
+
+const history = createChatHistoryStore({
+  get: (k) => redis.get(k),
+  set: (k, v) => redis.set(k, v),
+});
+
+chat.onSubscribedMessage(noeticAgent({ harness, history }));
+```
+
+With a store configured, threads seed from persisted items after a restart (no platform refetch), input items persist on execute, and completed model items pump from `getItemStream` into the store. Without one, first-contact detection is per-process.
+
+See [`specs/29-chat-platform-integration.md`](https://github.com/mattapperson/noetic/blob/main/specs/29-chat-platform-integration.md) for the full specification.

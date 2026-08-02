@@ -281,6 +281,26 @@ channel<T>(name: string, {
 
 `ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity.
 
+External channels (`external: true`) are reachable from outside the execution in both directions: `harness.getChannelHandle(ch, executionId)` writes in, `harness.getChannelStream(ch, executionId)` subscribes out as an `AsyncIterable<T>` (queue = competing consumer — subscribe once per harness; topic = per-subscriber buffered tap; value = current-then-conflated-updates). Delivery is CHANNEL-scoped (state keyed by name per harness); `executionId` bounds only the stream's lifetime, and an id no execution runs under gives a harness-lifetime stream ended with `iterator.return()`. The stream ends normally when the root execution completes (queue values at close drain first; later sends stay in the channel). Root completion also flips `ChannelHandle.closed` and makes post-run `handle.send` throw `channel_closed`; a sequential re-run or checkpoint-restore on the same root context reopens its id. The iterable owns a single iterator — subscribe again for a second consumer.
+
+### @noetic-tools/chat-sdk (chat platform integration)
+
+Binds a harness to chat-sdk.dev (npm `chat`, optional peer) as a multi-platform bot brain. Depends only on `@noetic-tools/types`.
+
+```typescript
+import { noeticAgent, chatTools, createChatHistoryStore,
+         approvalRequests, resolveApproval } from '@noetic-tools/chat-sdk';
+
+chat.onSubscribedMessage(noeticAgent({
+  harness,            // any AgentHarness (structural ChatHarness subset)
+  historyLimit: 20,   // platform messages seeded on first contact; 0 disables
+  history?,           // createChatHistoryStore({get, set}) — durable seeding + item persistence
+  deliveryMode?, threadId?, seed?, taskTitle?, onError?,
+}));
+```
+
+`toItems(messages)` maps platform messages to items (bot's own → assistant `MessageItem` with attachments kept as markdown links, others → user `InputMessageItem` with `userName:` attribution + attachment parts). `streamToChatChunks(events, {messageId})` translates `getFullStream` into Chat SDK chunks (text deltas, `task_update` tool cards flushed at turn end, generic abort notice) — it claims coalesced turns by first-messageId and terminates at the turn boundary; `noeticAgent` attaches the stream BEFORE `execute()` because the broadcaster discards events with no live consumer. `chatTools({chat, requireApproval?})` wraps Chat SDK's AI tools via `fromAiSdkTool`, inheriting the vendor's write-tool gating by default — gated tools send routed requests (`threadId` included) on `approvalRequests`; observe with ONE subscriber per harness via `harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)` and answer with `resolveApproval({harness, decision: {requestId, approved, reason?}})` (returns `false` on stale clicks, never throws). Spec: `specs/29-chat-platform-integration.md`.
+
 ## Termination Predicates
 
 ```typescript

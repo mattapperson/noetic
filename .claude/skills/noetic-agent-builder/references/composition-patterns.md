@@ -1021,3 +1021,36 @@ Key points:
 - **State lives on the server.** `openUiSurface()` reduces client interactions into `vars`/`interactions`, renders a budget-trimmed `<ui_surface>` block into the model's view each turn, and persists (thread scope) so a resumed run or reconnecting client reconstructs the exact UI.
 - **The loop waits for a submit.** `ui.submitted(surface, ref)` reads the live surface via the layer instance — no new primitive. Also `ui.interacted(surface, kind?)` and `ui.toAssistant(surface)`.
 - **Serve it** with `serveOpenUi(harness, { surface })` from `@noetic-tools/openui/server`, pointed at OpenUI's React client. Tool-authored UI (`ui: { call, progress, result }` on a tool, built with `fragment(library)`) works alongside — or without — the codec.
+
+## Pattern: Multi-Platform Chat Bot (chat-sdk.dev)
+
+Run a harness as the brain of a Slack/Teams/Discord/Telegram bot with `@noetic-tools/chat-sdk`. One handler wires seeding, execution, and streaming; chat tools with approval gates ride external channels.
+
+```typescript
+import { Chat } from 'chat';
+import { AgentHarness } from '@noetic-tools/core';
+import {
+  noeticAgent, chatTools, createChatHistoryStore,
+  approvalRequests, resolveApproval,
+} from '@noetic-tools/chat-sdk';
+
+const chat = new Chat({ adapters: [slack()], state: redis() });
+
+const harness = new AgentHarness({
+  name: 'support-bot',
+  initialStep: agentLoop,
+  params: {},
+  tools: await chatTools({ chat }), // write tools keep the vendor's approval gate
+});
+
+chat.onSubscribedMessage(noeticAgent({
+  harness,
+  historyLimit: 20,
+  history: createChatHistoryStore({ get: (k) => redis.get(k), set: (k, v) => redis.set(k, v) }),
+  deliveryMode: 'between-rounds',
+}));
+```
+
+- **Streaming is turn-scoped.** Each incoming message becomes one harness turn; the translated stream terminates at `turn_completed`, which is what resolves `thread.post()`. Tool calls render as `task_update` cards on Slack/Linear and degrade elsewhere.
+- **History survives restarts** with a store: threads seed from persisted items instead of refetching the platform, and completed model items pump from `getItemStream` into the store.
+- **Approvals flow through external channels.** A gated tool parks; ONE integration observer per harness watches `harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)` (a never-closed lifetime scope — no execution id needed), routes the card by `request.threadId`, and the click calls `resolveApproval({harness, decision})`. Rejections surface to the model as tool errors; Chat SDK's write tools stay gated by default.

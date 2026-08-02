@@ -517,6 +517,59 @@ to = "packages/sub-harness-opencode/src/**"
 reason = "sub-harness-pi and sub-harness-opencode are sibling sub-harness adapters; neither may import the other"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Chat platform integration. @noetic-tools/chat-sdk binds a harness to
+# chat-sdk.dev (npm `chat`) via the AgentHarnessContract in @noetic-tools/types
+# — the same isolation shape as sub-harness adapters: the vendor SDK is an
+# optional peer dependency, the harness instance is injected by the consumer,
+# and core never imports the integration.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "chat-sdk"
+paths = ["packages/chat-sdk/src/**"]
+order = 50
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/chat-sdk/src/**"
+reason = "core must never depend on a chat platform integration; the integration receives the harness by contract, never the reverse"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/chat-sdk depends only on @noetic-tools/types; it drives any harness through AgentHarnessContract, so core must stay out of its dependency graph"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/memory/src/**"
+reason = "@noetic-tools/chat-sdk depends only on @noetic-tools/types; it must not reach into the memory package"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/sub-harness/src/**"
+reason = "chat-sdk is a peer of the sub-harness stack; both depend only on @noetic-tools/types"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/sub-harness-*/src/**"
+reason = "chat-sdk is a peer of the sub-harness adapters; neither side may import the other"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/platform-node/src/**"
+reason = "chat-sdk is runtime-agnostic (it runs wherever chat-sdk.dev runs, including serverless); it must not pin itself to a platform package"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/platform-browser/src/**"
+reason = "chat-sdk is runtime-agnostic; it must not pin itself to a platform package"
+
+[[boundaries]]
+from = "packages/chat-sdk/src/**"
+to = "packages/cli/src/**"
+reason = "chat-sdk must not depend on cli"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Sub-harness packages. The SubHarness contract lives in @noetic-tools/types;
 # the base @noetic-tools/sub-harness package adds the registry / turn
 # accumulator / item builders and depends only on types. Each per-tool adapter
